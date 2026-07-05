@@ -18,8 +18,12 @@ jobs:
         include:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
+          # Intel macOS: cross-compiled from the Apple Silicon runner (Intel `macos-13` runners are
+          # scarce/deprecated). Same lane as linux-arm64 below — a secondary arch built on the primary
+          # runner; smoke test is skipped for cross targets.
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-latest
+            cross: "true"
           - target: aarch64-apple-darwin
             os: macos-latest
           - target: x86_64-unknown-linux-gnu
@@ -35,7 +39,9 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Install cross-compile linker (linux-arm64)
-        if: matrix.cross == 'true'
+        # linux-arm64 alone needs a cross-linker; the darwin-x64 cross target builds with the universal
+        # Apple SDK on the arm64 runner and needs no extra linker.
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
