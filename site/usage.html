@@ -48,20 +48,20 @@
   <main class="docs-content">
     <div class="docs-content-header">
       <h1>Using zzop</h1>
-      <p>Most people run zzop as a CLI: write a <code>zzop.config.jsonc</code>, run <code>npx zzop</code> — no code, ESLint-style. The <code>zzop</code> package is the config-driven front end; the engine ships as <code>@zzop/native</code>, the SDK layer for embedders. This page covers the CLI first, then the library.</p>
+      <p>Most people run zzop as a CLI: write a <code>zzop.config.jsonc</code>, run <code>npx zzop</code> — no code, ESLint-style. The <code>@zzop/cli</code> package is the config-driven front end; the engine ships as <code>@zzop/native</code>, the SDK layer for embedders. This page covers the CLI first, then the library.</p>
     </div>
 
     <section id="install">
       <span class="eyebrow eyebrow--sm">Command line</span>
       <h2>Install &amp; run the CLI</h2>
-      <p>Add zzop as a dev dependency and let it scaffold a config. <code>zzop</code> depends on <code>@zzop/native</code>, which auto-installs the right prebuilt platform binary — nothing to compile. Requires Node.js &ge; 18.</p>
+      <p>Add <code>@zzop/cli</code> as a dev dependency and let it scaffold a config. <code>@zzop/cli</code> depends on <code>@zzop/native</code>, which auto-installs the right prebuilt platform binary — nothing to compile. Requires Node.js &ge; 18.</p>
       <div class="code-panel">
         <div class="code-panel__tab">Install, scaffold, analyze</div>
-        <pre class="code-block"><code>npm i -D zzop     # add to your project (or run one-off with npx)
+        <pre class="code-block"><code>npm i -D @zzop/cli     # add to your project (or one-off: npx @zzop/cli)
 npx zzop init     # writes an annotated zzop.config.jsonc
 npx zzop          # analyzes using that config and prints a report</code></pre>
       </div>
-      <p><code>zzop init</code> refuses to overwrite an existing config; pass <code>--force</code> to replace it. The <code>zzop</code> and <code>@zzop/native</code> packages land with the first tagged release (v0.1.0).</p>
+      <p><code>zzop init</code> refuses to overwrite an existing config; pass <code>--force</code> to replace it. The <code>@zzop/cli</code> and <code>@zzop/native</code> packages land with the first tagged release (v0.1.0).</p>
     </section>
 
     <section id="cli-config">

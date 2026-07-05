@@ -11,17 +11,17 @@ one JSON document.
 
 ## Quick start
 
-Run zzop as a CLI — write a `zzop.config.jsonc`, run `npx zzop`, ESLint-style. The `zzop` package
+Run zzop as a CLI — write a `zzop.config.jsonc`, run `npx zzop`, ESLint-style. The `@zzop/cli` package
 depends on `@zzop/native`, which auto-installs the right prebuilt platform binary (nothing to
 compile). Requires Node.js >= 18.
 
 ```sh
-npm i -D zzop     # add to your project (or run one-off with npx)
+npm i -D @zzop/cli     # add to your project (or one-off: npx @zzop/cli)
 npx zzop init     # writes an annotated zzop.config.jsonc
 npx zzop          # analyzes using that config and prints a report
 ```
 
-`zzop` and `@zzop/native` publish as `v0.1.0` and land with the first tagged release. See
+`@zzop/cli` and `@zzop/native` publish as `v0.1.0` and land with the first tagged release. See
 [`packages/cli/README.md`](packages/cli/README.md) for the full CLI and config reference.
 
 To embed the engine instead of running the CLI, depend on `@zzop/native` directly and call it

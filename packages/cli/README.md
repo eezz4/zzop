@@ -1,21 +1,21 @@
-# zzop
+# @zzop/cli
 
-Zero-config CLI for the **zzop** multi-language SAST/architecture analysis engine. Write a
+Config-driven CLI for the **zzop** multi-language SAST/architecture analysis engine. Write a
 `zzop.config.jsonc`, run `npx zzop` — no code, ESLint-style.
 
 The analysis engine ships as [`@zzop/native`](https://www.npmjs.com/package/@zzop/native) and is
-installed automatically as a dependency of this package. `zzop` is the thin config-driven front end;
+installed automatically as a dependency of this package. `@zzop/cli` is the thin config-driven front end;
 `@zzop/native` is the engine/SDK layer for embedders.
 
 ## Install
 
 ```sh
-# one-off
-npx zzop init
-npx zzop
+# one-off (no install)
+npx @zzop/cli init
+npx @zzop/cli
 
-# or as a dev dependency
-npm i -D zzop
+# or as a dev dependency (then the command is `zzop`)
+npm i -D @zzop/cli
 ```
 
 Requires Node.js >= 18.
