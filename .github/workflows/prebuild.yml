@@ -1,6 +1,8 @@
 # Prebuild matrix for the N-API addon (napi-rs optionalDependencies pattern — DESIGN.md decision #6).
-# DRAFT: authored before the npm sub-package structure exists; artifacts are uploaded per-target only.
-# The publish pipeline (napi prepublish, optionalDependencies version sync) lands with the npm packaging phase.
+# On a `v*` tag push, also publishes each platform sub-package and the main @zpz/native package to npm
+# via OIDC "trusted publishing" (no NPM_TOKEN secret) — requires each of the 6 packages to have a
+# trusted publisher configured on npmjs.com for this repo + this workflow file. See
+# packages/napi/README.md's "Publishing" section for the one-time npmjs.com setup.
 name: prebuild
 
 on:
@@ -60,3 +62,47 @@ jobs:
         with:
           name: zpz-napi-${{ matrix.target }}
           path: dist/*.node
+
+  # Only runs on a `v*` tag push (job-level `if`, since the build matrix above must also run for
+  # workflow_dispatch without publishing). The git tag is the single source of truth for the
+  # published version: this job overwrites every package.json's committed version with the tag's,
+  # so there is no separate "bump packages/napi/package.json before tagging" step to forget.
+  #
+  # Publishes via npm OIDC "trusted publishing" — no NPM_TOKEN secret. Each of the 6 package names
+  # (@zpz/native + the 5 platform sub-packages) must have a trusted publisher configured on
+  # npmjs.com pointing at this repo and this workflow file (packages/napi/README.md "Publishing").
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Update npm (OIDC trusted publishing needs a recent npm CLI)
+        run: npm install -g npm@latest
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: zpz-napi-*
+          path: artifacts
+          merge-multiple: true
+      - name: Set version from tag (overwrites committed version everywhere)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          (cd packages/napi && npm version --no-git-tag-version "$VERSION")
+          node packages/napi/scripts/sync-versions.mjs
+      - name: Place prebuilt binaries into platform packages
+        run: node packages/napi/scripts/place-artifacts.mjs artifacts
+      - name: Publish platform packages
+        run: |
+          for dir in packages/napi/npm/*/; do
+            (cd "$dir" && npm publish --provenance)
+          done
+      - name: Publish main package
+        run: (cd packages/napi && npm publish --provenance)

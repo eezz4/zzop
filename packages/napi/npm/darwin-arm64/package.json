@@ -1,9 +1,11 @@
 {
   "name": "@zpz/native-darwin-arm64",
   "version": "0.0.0",
-  "private": true,
   "description": "Prebuilt zpz-napi native addon for darwin/arm64.",
   "main": "zpz-napi.node",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "zpz-napi.node"
   ],

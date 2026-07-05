@@ -1,9 +1,11 @@
 {
   "name": "@zpz/native-linux-arm64-gnu",
   "version": "0.0.0",
-  "private": true,
   "description": "Prebuilt zpz-napi native addon for linux/arm64 (glibc).",
   "main": "zpz-napi.node",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "zpz-napi.node"
   ],

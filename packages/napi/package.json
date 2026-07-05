@@ -2,10 +2,13 @@
   "name": "@zpz/native",
   "version": "0.0.0",
   "license": "MIT",
-  "private": true,
   "description": "zpz N-API binding (single Node<->Rust boundary) — see src/lib.rs for the addon-feature build.",
+  "repository": "github:eezz4/zpz",
   "main": "index.js",
   "types": "index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "index.js",
     "index.d.ts",
