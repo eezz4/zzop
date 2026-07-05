@@ -1,0 +1,221 @@
+{
+  "id": "be-reliability",
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "async-route-no-catch",
+      "severity": "warning",
+      "message": "Async Express/router handler registered without a surrounding try/catch, a `next(err)` call, or a `.catch()` — Express does not catch a rejected promise returned from an async handler, so an unhandled rejection can crash the process or hang the request. Wrap the handler body in try/catch and call `next(err)`, or attach `.catch(next)` to the handler. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// route-catch-ok`. Precision limit: this only fires when the route is registered inside a function body (e.g. a `registerRoutes`/setup function) — a module-top-level `app.get(...)` registration sits outside any parsed symbol span and is not scanned.",
+      "suppress_marker": "route-catch-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\b(app|router)\\.(get|post|put|patch|delete|all|use)\\s*\\(.*\\basync\\b", "label": "async-route" }
+        ],
+        "trigger": "async-route",
+        "absent": [
+          { "pattern": "\\btry\\s*\\{", "label": "try-guard" },
+          { "pattern": "\\bnext\\s*\\(", "label": "next-err" },
+          { "pattern": "\\.catch\\s*\\(", "label": "catch-call" }
+        ]
+      }
+    },
+    {
+      "id": "sync-fs-in-handler",
+      "severity": "warning",
+      "message": "Synchronous fs/child_process call (`readFileSync`, `execSync`, etc.) found alongside request-handler context (`req`/`res`/`ctx`/...) — a blocking call on the request path stalls Node's single event loop for every concurrent request while it runs. Use the async `fs.promises`/`child_process` APIs instead (or move CPU-heavy work to a worker thread). Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// sync-io-ok`. Precision limit: presence of a `req`/`res`/`ctx`/`request`/`reply` identifier anywhere in the same enclosing function is a proxy for \"this is a request handler\" — it does not verify the sync call is actually reachable from the request path within that function.",
+      "suppress_marker": "sync-io-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\b(readFileSync|writeFileSync|appendFileSync|execSync|spawnSync|readdirSync|statSync)\\s*\\(", "label": "sync-call" },
+          { "pattern": "\\b(req|res|ctx|request|reply)\\b", "label": "handler-context" }
+        ],
+        "trigger": "sync-call"
+      }
+    },
+    {
+      "id": "await-in-map",
+      "severity": "warning",
+      "message": "`.map(async ...)` used without wrapping the result in `Promise.all`/`Promise.allSettled` — `.map` returns an array of pending Promises, not a resolved array, so a rejection from any one of them becomes an unhandled promise rejection and any ordering/completion guarantee the caller assumes is silently lost. Wrap the `.map(async ...)` call in `Promise.all(...)` (or `Promise.allSettled(...)` if partial failures are expected). Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// map-async-ok`.",
+      "suppress_marker": "map-async-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\.map\\s*\\(\\s*async\\b", "label": "map-async" }
+        ],
+        "trigger": "map-async",
+        "absent": [
+          { "pattern": "Promise\\.(all|allSettled)\\s*\\(", "label": "promise-all" }
+        ]
+      }
+    },
+    {
+      "id": "env-nonnull-assert",
+      "severity": "warning",
+      "message": "`process.env.X!` non-null assertion — bypasses TypeScript's null check for this env var and defers the crash from \"missing config detected at startup\" to \"first use, wherever that happens to be\". Validate required env vars once at startup (e.g. a config module that throws if any are missing) and reference the validated value everywhere else instead of asserting at each use site. Test/e2e/fixture paths are excluded outright (deployed-surface rule — test setup legitimately asserts test-only env vars). Suppress a vetted case with `// env-assert-ok`. Precision-limit note: the pattern requires a non-`=` character (or end of line) right after the `!` specifically so `!==`/`!=` equality comparisons are not misread as assertions; a `!` immediately followed by a line break is still caught via the end-of-line alternative.",
+      "suppress_marker": "env-assert-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.tsx?$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "line_pattern": "process\\.env\\.[A-Za-z0-9_]+!([^=]|$)"
+      }
+    },
+    {
+      "id": "debug-true-committed",
+      "severity": "warning",
+      "message": "Debug flag or disabled TLS verification (`debug: true`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, or `rejectUnauthorized: false`) committed to source — ships a dev-only backdoor, verbose-logging leak, or a TLS bypass to production if this file is deployed unchanged. Remove the flag or gate it behind an explicit environment check (e.g. `NODE_ENV !== 'production'`); for genuinely dev-only config files, exclude that path via the host's exclude config rather than committing the flag as always-on. Test/e2e/fixture paths (`e2e/`, `tests?/`, `__tests?__/`, `spec/`, `fixtures?/`, or a `*.test.*`/`*.spec.*` file) are excluded outright, as are test-runner/dev-tool config files anywhere in the tree by basename (`playwright.config.*`, `vitest.config.*`, `jest.config.*`, `cypress.config.*`) — same exclusion as this pack's `localhost-egress-committed`, since disabling TLS verification for a local self-signed cert in a Playwright/e2e helper is the intended target there, not a leaked dev backdoor. Suppress a single vetted line with `// debug-ok`.",
+      "suppress_marker": "debug-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "\\bdebug\\s*:\\s*true\\b", "label": "debug-flag" },
+          { "pattern": "NODE_TLS_REJECT_UNAUTHORIZED\\s*[=:]\\s*['\"]?0", "label": "tls-verify-off" },
+          { "pattern": "rejectUnauthorized\\s*:\\s*false", "label": "reject-unauthorized" }
+        ]
+      }
+    },
+    {
+      "id": "promise-all-writes",
+      "severity": "warning",
+      "message": "`Promise.all(...)` used alongside DB write calls on a DB-client-shaped receiver (`prisma`/`db`/`tx`/`client`/`repo`/`repos`/`repository`/`repositories`, optionally through one model property like `prisma.user.create(...)`; same receiver allow-list as this pack's `unawaited-write` in `rules/dsl/be-db/be-db.json`) — partial-failure non-atomicity: some writes land and others don't when one promise rejects, and there is no rollback for the ones that already committed. Wrap the writes in a transaction, or use `Promise.allSettled(...)` with explicit compensation logic for the entries that fail. If your DB client uses a different receiver name, this rule won't see it — suppress with the marker instead, or rename to match. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// promise-all-ok`. Precision limits: the trigger pattern `Promise\\.all\\s*\\(` does not match `Promise.allSettled(` (the literal text right after `all` is `Settled`, not whitespace/`(`), so a call already using `allSettled` does not fire this rule; and this fires on ANY qualifying write call co-occurring in the same function, including a `Promise.all([read(), write()])` with only ONE write (no real multi-write race) — the DSL matcher has no way to count occurrences, so that shape still fires and needs the marker.",
+      "suppress_marker": "promise-all-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "Promise\\.all\\s*\\(", "label": "pall" },
+          { "pattern": "\\b(?:prisma|db|tx|client|repo(?:sitory|sitories)?s?)\\.(?:\\w+\\.)?(?:create|update|delete|upsert)(?:Many)?\\s*\\(", "label": "write" }
+        ],
+        "trigger": "pall"
+      }
+    },
+    {
+      "id": "json-parse-no-try",
+      "severity": "warning",
+      "message": "`JSON.parse(...)` called directly on apparent external input — the parse call's own argument starts with `req`/`request`/`body`/`params`/`query`/`payload`/`message`/`event` (e.g. `JSON.parse(req.body)`, `JSON.parse(body)`, `JSON.parse(event.body)`) — without a surrounding `try`; malformed input throws a `SyntaxError` that propagates as an unhandled exception instead of a handled error response, turning a bad request into a 500 or a process crash. Wrap the parse in try/catch and return a proper 4xx on failure. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// json-parse-ok`. Precision-limit note: the external-input check is now anchored to the parse call's own argument (not \"this identifier appears anywhere in the function\"), which fixes the previous false-positive class of parsing back the app's own previously-`JSON.stringify`'d cache (e.g. `JSON.parse(cached)`/`JSON.parse(cached.body)`) just because an unrelated `payload`/`body` identifier happened to exist elsewhere in the same function — but a wrapper that renames the external input to something outside this vocabulary (e.g. `JSON.parse(rawInput)`) is still invisible to this check.",
+      "suppress_marker": "json-parse-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "JSON\\.parse\\s*\\(\\s*(?:await\\s+)?(?:req|request|body|params|query|payload|message|event)\\s*(?:[.,)]|\\?\\.)", "label": "parse" }
+        ],
+        "trigger": "parse",
+        "absent": [
+          { "pattern": "\\btry\\s*\\{", "label": "try-guard" }
+        ]
+      }
+    },
+    {
+      "id": "fetch-no-timeout",
+      "severity": "warning",
+      "message": "Outbound HTTP call (`fetch`/`axios`/`got`) with no timeout or `AbortController`/`AbortSignal` visible in the same function — `fetch` has no default timeout, so a hung upstream hangs the request indefinitely and can exhaust the connection pool. Scoped to files showing a server-side signal — a server-framework import (`express`/`fastify`/`koa`/`hono`/`@nestjs`, ESM or CJS `require`), `createServer(...)`/`.listen(<port>)`, or a server/worker runtime API (`itty-router`, Cloudflare Workers bindings `D1Database`/`KVNamespace`/`ExecutionContext`, a D1/SQL prepared-statement call (`.prepare(`) — covers a Workers cron/`scheduled`-handler helper that only imports the `Env` type and never spells out `D1Database`/`export default {` in that same file, e.g. a `refreshRates(env: Env)` helper that does `env.DB.prepare(...)` — or the Workers module-worker shape `export default { ... }`) — rather than a path heuristic, so a standalone backend repo with no `be`/`api`/`server`-ish directory segment (e.g. a Workers project rooted at `src/`) is no longer silently out of scope. A bare frontend `fetch` with none of these signals (e.g. inside a browser/React component, or a `chrome.runtime.getURL` local-resource call in an extension) stays out of scope; use a browser-specific reliability rule for that surface instead. Pass an explicit timeout (e.g. `AbortSignal.timeout(...)`) or wire up an `AbortController`. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// fetch-timeout-ok`. Precision limits: this is a content-signal proxy, not proof the file is actually a server/worker entrypoint — a file that merely imports one of these frameworks for its types, or coincidentally contains a bare `export default {` object unrelated to Workers, can still be in-scope; conversely a real backend file built on a framework not in this list stays out of scope. Known false positive: an `axios`/`got` instance configured with a timeout globally elsewhere (e.g. `axios.create({ timeout: ... })` in another file) won't show a `timeout`/abort token at this call site — use the marker there.",
+      "suppress_marker": "fetch-timeout-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "require_file": "(?i)(from\\s+['\"](express|fastify|koa|hono|@nestjs)|require\\(\\s*['\"](express|fastify|koa|hono)|createServer\\s*\\(|\\.listen\\s*\\(\\s*[0-9]|itty-router|\\bD1Database\\b|\\bKVNamespace\\b|\\bExecutionContext\\b|\\.prepare\\s*\\(|export\\s+default\\s*\\{)",
+        "patterns": [
+          { "pattern": "\\b(fetch|axios|got)\\s*[.(]", "label": "egress" }
+        ],
+        "trigger": "egress",
+        "absent": [
+          { "pattern": "(?i)timeout", "label": "timeout" },
+          { "pattern": "Abort(Controller|Signal)|signal\\s*:", "label": "abort" }
+        ]
+      }
+    },
+    {
+      "id": "process-exit-in-lib",
+      "severity": "warning",
+      "message": "`process.exit(...)` called inside a function — skips pending I/O flushes and cleanup handlers and kills the entire server process, not just the current request/operation. Throw (or reject) instead and let a single top-level handler decide whether to exit; `process.exit` is legitimate only in a CLI entrypoint's top-level flow, or a dedicated signal-handling module that intentionally exits from a `SIGINT`/`SIGTERM`/etc. handler. Files under a `scripts/`, `tools/`, or `bin/` directory are excluded — those are conventionally CLI entrypoints, not library/server code, so a `process.exit` there is expected rather than a bug. A file that registers any `process.on('SIG...` signal handler anywhere is also excluded outright (`require_file_absent`) — a canonical graceful-shutdown module calling `process.exit` from inside its `SIGINT`/`SIGTERM` handler is the intended, idiomatic pattern, not a bug. Comment lines are skipped via `skip_comment_lines`. This rule's `file_exclude_pattern` is a CLI-entrypoint-directory allow-list, a different purpose than the pack's shared test-path exclude — left as-is rather than merged, since a `scripts/`/`tools/`/`bin/` file is already out of scope for a different reason. Suppress a vetted case elsewhere (e.g. another actual CLI entrypoint) with `// process-exit-ok`.",
+      "suppress_marker": "process-exit-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)(^|/)(scripts?|tools|bin)/",
+        "skip_comment_lines": true,
+        "require_file_absent": ["process\\.on\\s*\\(\\s*['\"]SIG"],
+        "patterns": [
+          { "pattern": "process\\.exit\\s*\\(", "label": "exit" }
+        ],
+        "trigger": "exit"
+      }
+    },
+    {
+      "id": "body-limit-missing",
+      "severity": "warning",
+      "message": "Body parser (`express.json`/`express.urlencoded`/`bodyParser.json`/`bodyParser.urlencoded`) configured without an explicit `limit` on the same line — the default (100kb) may be wrong in either direction, and an unbounded custom parser accepts arbitrarily large payloads, enabling a payload-size DoS. Set an explicit `limit` (e.g. `{ limit: '1mb' }`) sized to the endpoint's real needs. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// body-limit-ok`.",
+      "suppress_marker": "body-limit-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "line_pattern": "(express|bodyParser)\\.(json|urlencoded)\\s*\\(",
+        "exclude_pattern": "limit\\s*:"
+      }
+    },
+    {
+      "id": "console-in-be",
+      "severity": "info",
+      "message": "`console.*` call in backend-path source (a file under `api/`, `server/`, `backend/`, `be/`, `routes/`, `controllers/`, or `services/`) — console writes are synchronous and unstructured. Use the project's structured logger instead so output is queryable, non-blocking, and carries request context. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// console-ok`. Path-heuristic rule (file location is a proxy for \"this runs on the server\", not proof) — starts at `info` severity accordingly.",
+      "suppress_marker": "console-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)(^|/)(api|server|backend|be|routes|controllers|services)/.*\\.(ts|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "line_pattern": "console\\.(log|error|warn|info)\\s*\\("
+      }
+    },
+    {
+      "id": "interval-no-clear",
+      "severity": "warning",
+      "message": "`setInterval(...)` with no matching `clearInterval(...)` anywhere in this file — a leaked timer keeps the process (or the page, in a browser bundle) alive and re-fires forever, since nothing ever cancels it. Store the return value in a handle and call `clearInterval(handle)` during teardown/cleanup. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// interval-ok`. Precision limit: this is a file-scoped absence check — a `clearInterval` living in a different file (e.g. a shared cleanup/lifecycle module) is invisible to this rule and it will still fire; suppress with the marker in that case.",
+      "suppress_marker": "interval-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "line_pattern": "\\bsetInterval\\s*\\(",
+        "require_file_absent": ["\\bclearInterval\\s*\\("]
+      }
+    },
+    {
+      "id": "env-outside-config",
+      "severity": "info",
+      "message": "`process.env.X` accessed outside a config module — scatters env parsing and validation across the codebase instead of centralizing it, making it hard to know what env vars the app depends on or to validate them once at startup. Centralize env reads in one config module and import the validated value everywhere else. Suppress a vetted case with `// env-access-ok`. Severity is info: this is a convention rule, not a correctness bug, and volume is expected in a codebase without a config module yet. Files named `config*`/`env*`/`constants*` (any of the listed extensions), files under a `config/`/`settings/` directory, `*.config.*`/`*.conf.*` suffix files (e.g. `next.config.mjs`, `playwright.config.ts`, `vite.config.ts`), and dotfile `rc` tool configs (e.g. `.eslintrc.js`, `.prettierrc.cjs`) are exempt — these are build/tool-config entrypoints where a bare `process.env` read is the convention, not scattering. `constants*` is included because `packages/lib/constants.ts`-style modules (and per-package `*/lib/constants.ts` files) are a common JS-monorepo convention for a package's actual config module — a first-class instance of the same convention this rule already exempts for `config*`/`env*`, not a new exception to it. This rule also excludes test/e2e/fixture paths and `scripts/`, unlike this pack's other rules' shared deployed-surface exclude: `env-outside-config` is a code-organization convention rule, not a security rule, so a one-off seed/migration script or a test fixture reading `process.env` directly isn't the scattering this rule is about — its `file_exclude_pattern` therefore intentionally combines the config-file-basename allow-list with the canonical test-path exclude rather than keeping them separate. Note: `env-nonnull-assert` may also fire on some of the same lines — that rule flags the deferred-crash risk of `!`, this one flags the scattering; both firing on the same line is intended, not a duplicate.",
+      "suppress_marker": "env-access-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)(^|/)(config|env|constants?)[^/]*\\.(ts|js|mjs|cjs)$|(^|/)(config|settings)/|\\.config\\.(ts|tsx|js|mjs|cjs)$|\\.conf\\.(ts|tsx|js|mjs|cjs)$|(^|/)\\.[A-Za-z0-9_-]*rc\\.(ts|tsx|js|mjs|cjs)$|(^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)scripts?/",
+        "skip_comment_lines": true,
+        "line_pattern": "\\bprocess\\.env\\.[A-Za-z0-9_]+"
+      }
+    }
+  ]
+}

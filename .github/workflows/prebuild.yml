@@ -1,0 +1,62 @@
+# Prebuild matrix for the N-API addon (napi-rs optionalDependencies pattern — DESIGN.md decision #6).
+# DRAFT: authored before the npm sub-package structure exists; artifacts are uploaded per-target only.
+# The publish pipeline (napi prepublish, optionalDependencies version sync) lands with the npm packaging phase.
+name: prebuild
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: x86_64-apple-darwin
+            os: macos-13
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: "true"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cross-compile linker (linux-arm64)
+        if: matrix.cross == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc' >> "$GITHUB_ENV"
+      - name: Build addon
+        run: cargo build -p zpz-napi --release --features addon --target ${{ matrix.target }}
+      - name: Collect artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          case "${{ matrix.target }}" in
+            *windows*) cp "target/${{ matrix.target }}/release/zpz_napi.dll" "dist/zpz-napi.${{ matrix.target }}.node" ;;
+            *apple*)   cp "target/${{ matrix.target }}/release/libzpz_napi.dylib" "dist/zpz-napi.${{ matrix.target }}.node" ;;
+            *)         cp "target/${{ matrix.target }}/release/libzpz_napi.so" "dist/zpz-napi.${{ matrix.target }}.node" ;;
+          esac
+          ls -la dist
+      - name: Smoke test (native targets only)
+        if: matrix.cross != 'true'
+        shell: bash
+        run: |
+          cp "dist/zpz-napi.${{ matrix.target }}.node" packages/napi/zpz-napi.node
+          node packages/napi/smoke.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zpz-napi-${{ matrix.target }}
+          path: dist/*.node

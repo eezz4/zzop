@@ -1,0 +1,20 @@
+{
+  "name": "@zpz/native-linux-x64-gnu",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Prebuilt zpz-napi native addon for linux/x64 (glibc).",
+  "main": "zpz-napi.node",
+  "files": [
+    "zpz-napi.node"
+  ],
+  "license": "MIT",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "libc": [
+    "glibc"
+  ]
+}

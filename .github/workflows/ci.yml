@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  english-source-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: English-only source guard
+        run: bash scripts/check-english-source.sh
+
+  swc-isolation-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: swc isolation guard
+        run: bash scripts/check-swc-isolation.sh
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  napi-addon-build:
+    # Proves the napi addon path (the `addon` feature, default OFF — see packages/napi/Cargo.toml
+    # and src/lib.rs's "Feature gating" module doc) actually compiles, since `test` above only
+    # builds the workspace with default features. Mirrors prebuild.yml's non-cross
+    # x86_64-unknown-linux-gnu matrix entry: ubuntu-latest's host target already *is*
+    # x86_64-unknown-linux-gnu, so no --target/cross-linker setup is needed, and (per that
+    # workflow's own "Smoke test" step, which also calls `node` with no actions/setup-node step)
+    # Node is preinstalled on the runner image. Unlike the Windows (MSVC-only addon) and macOS/
+    # cross-linux matrix entries, a full build + smoke run needs no artifacts this runner can't
+    # produce, so this job does the real thing instead of falling back to `cargo check`.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build napi addon
+        run: cargo build -p zpz-napi --features addon
+      - name: Smoke test built addon
+        run: |
+          cp target/debug/libzpz_napi.so packages/napi/zpz-napi.node
+          node packages/napi/smoke.mjs

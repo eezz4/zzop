@@ -1,0 +1,228 @@
+# `zpz-napi`
+
+The Node.js binding surface over `zpz-engine`. Four functions, all JSON-string-in / JSON-string-out
+(except `version`), defined in `src/addon.rs` and re-exported from `src/api.rs`. `api.rs` itself is
+plain napi-free Rust (compiles/tests under the workspace's default `gnu` toolchain); `addon.rs` is the
+`#[napi]`-annotated layer, gated behind the `addon` feature.
+
+## Functions
+
+| JS name | Rust signature | Request → Response |
+|---|---|---|
+| `analyze` | `(configJson: string) -> string` | `AnalyzeRequest` → `AnalyzeOutputView` |
+| `analyzeTrees` | `(configJson: string) -> string` | `AnalyzeTreesRequest{trees: [AnalyzeRequest]}` → `MultiAnalyzeOutputView` |
+| `analyzeEnvelope` | `(envelopeJson: string, configJson: string) -> string` | `NormalizedEnvelope` + `EnvelopeAnalyzeRequest` → `AnalyzeOutputView` |
+| `version` | `() -> string` | none (cannot fail, no `Result`) |
+
+`AnalyzeRequest` (`#[serde(rename_all="camelCase", default)]`, unknown fields ignored):
+
+| Field | Type | Notes |
+|---|---|---|
+| `root` | `String` (required — empty → `Err`) | Tree root to walk. |
+| `sourceId` | `String` (default `""`) | Free-form label carried through into cross-tree output. |
+| `packsDir` | `Option<String \| String[]>` | Directory (or directories) of `*.json` DSL rule packs to load — see [rules/authoring-guide.md](../rules/authoring-guide.md). Multiple directories are loaded and MERGED (see [Defaults](#defaults-zero-config--full-analysis) below for the collision rule). A bad/missing directory is a non-fatal `warnings` entry, not a failure — other directories in the list still load. |
+| `cacheDir` | `Option<String>` | See [Caching](../ARCHITECTURE.md#caching). Omit to run uncached. |
+| `git` | `Option<{ since: Option<String>, recentDays: Option<u32> }>` | Enables git-derived scores/health/recommendations/criticality/seams. `recentDays` default is 30. |
+| `sizeCap` | `Option<usize>` | Default 1,500,000 bytes (~1.5MB) — see [degraded files](../ARCHITECTURE.md#degraded-files). |
+| `disabledRules` | `Vec<String>` | Rule/analysis ids to turn off — see [rules/catalog.md](../rules/catalog.md) for the id list. |
+
+### Defaults (zero-config = full analysis)
+
+The JS wrapper (`index.js`, before the config JSON crosses into Rust) injects two defaults into every
+`analyze` config and every `analyzeTrees` tree entry, so a bare `{ root }` request runs the full
+analysis instead of silently degrading to native-analyses-only:
+
+- `packsDir` — when the key is absent, defaults to the bundled rule packs: `<repo root>/rules/dsl`
+  when running from a source checkout (the live truth, so a rule edit is never shadowed by a stale
+  copy), else the `rules/` directory inside the installed package (populated at publish time by the
+  `prepack` script). When the caller supplies their own `packsDir` (a single
+  directory string, or an array of directories), the JS wrapper (`index.js`) PREPENDS the bundled
+  default directory rather than replacing it — the effective load order sent to Rust is
+  `[bundled, ...yourDirs]`. All listed directories are loaded and merged: a pack id that appears in
+  more than one directory is taken WHOLE from the LATER directory in that order — not a rule-level
+  merge inside that pack id — so a caller's pack always wins a collision against a shipped pack with
+  the same id, while every distinctly-id'd pack from every directory stays loaded. A bad/unreadable
+  directory anywhere in the list is a non-fatal `warnings` entry; every other directory still loads.
+  An explicit `packsDir: null` disables pack loading entirely (bundled included) — this is the one
+  case the wrapper leaves untouched, since `null` means "no DSL packs at all", not "no defaults".
+- `git` — when the key is absent, defaults to `git: {}` (the engine applies its own `recentDays: 30`
+  default). An explicit value wins; `git: null` disables git collection. If `root` is not a git
+  repository, the engine degrades gracefully with a "git collection skipped" warning.
+
+`analyzeEnvelope`'s config gets only the `packsDir` default — envelope mode has no `root`/git. To turn
+off individual rules rather than a whole channel, use `disabledRules`
+(see [rules/catalog.md](../rules/catalog.md)).
+
+When the engine itself runs with a narrowed scope anyway (explicit opt-out, or a non-JS consumer
+calling the Rust engine directly), it self-reports on `warnings` instead of staying silent:
+
+- `git history not requested (git option omitted): scores, health, recommendations, criticality, seams and layerCoChurn are null. Pass git: {} to enable them.`
+- `no DSL rule packs loaded: only the N built-in native analyses ran. Set packsDir to a directory of *.json rule packs to enable the shipped DSL rules.` (N = the engine's actual native-analysis count.)
+
+These are capability notes, not errors — the analysis still completes normally. The zero-packs note
+also applies to `analyzeEnvelope`; the git note never does (envelope mode has no git by design).
+
+`EnvelopeAnalyzeRequest { sourceId: String, packsDir: Option<String | Vec<String>>, disabledRules: Vec<String> }` —
+deliberately no `root`/`cacheDir`/`git`/`sizeCap` (envelope mode has no filesystem root or git repo).
+`NormalizedEnvelope` shape: see `../NORMALIZED_AST.md`.
+
+`AnalyzeOutputView` (`camelCase`, a zero-copy borrowing view) is the shape every successful `analyze`/
+`analyzeEnvelope` call returns:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `ir` | `CommonIr` | The language-neutral IR — see [Output data shapes](#output-data-shapes) below. |
+| `findings` | `Finding[]` (merged, sorted) | See [Output data shapes](#output-data-shapes) for the `Finding` shape and sort order. |
+| `degraded` | `string[]` (sorted) | Paths that hit the size cap or failed to parse — see [ARCHITECTURE.md](../ARCHITECTURE.md#degraded-files). |
+| `fileCount` | `number` | Files walked. |
+| `nodes` | `FileNode[]` | Per-file git/graph metrics (churn, fan-in/out, risk score, ...) — populated fully only when `git` is set. `riskScore`/`hotspotScore` are always `0` for non-source files (data/config/assets — anything outside the "Language support" table in [ARCHITECTURE.md](../ARCHITECTURE.md#language-support)); `churn`/`loc`/`changeCount` stay real for them, so a large data file's edit history is still visible without it dominating a risk-sorted view. |
+| `scores` | `object \| null` | 17 structural health sub-scores, 0–100; `null` unless `git` is set. |
+| `health` | `object \| null` | One composite index rolled up from `scores`. |
+| `recommendations` | `object[]` | ROI-ranked improvement suggestions. An item whose file carries a rule-confirmed critical finding is moved (never copied) into a synthetic `urgent-bug-risk` group that sorts first, and gains a `bugEvidence: string[]` explaining why — this never changes the item's `roi` number, which always stays a pure reduction/cost estimate. |
+| `critical` | `object[]` | Files ranked by blast-radius (transitive dependents). |
+| `seams` | `object[]` | Folders that are good first-extraction candidates (low boundary-crossing coupling). |
+| `folders` | `object \| null` | Folder-granularity rollup of `nodes`/the dep graph. Not git-gated — `nodes`/dep graph are built unconditionally, so this is always non-null (an empty tree still gets an object with empty arrays, never `null`). |
+| `layerCoChurn` | `object[] \| null` | Cross-layer commit co-churn pairs (files in different architectural layers that change together). `null` unless `git` is set and collection succeeded — same git-gating as `scores`/`health`; `[]` (not `null`) when git is active but no pair meets the co-change threshold. |
+| `warnings` | `string[]` | Non-fatal issues (e.g. a bad `packsDir`) plus the capability self-report notes — see [Defaults](#defaults-zero-config--full-analysis). |
+| `cache` | `{ hits, misses } \| null` | Set only when `cacheDir` was given. |
+| `ruleTimings` | `object[] \| null` | Per-rule id + elapsed time + finding count; set only when the caller requests profiling. |
+
+The whole JSON tree is camelCase — every nested type (`Finding`, `FileNode`, `Scores` and its ~30
+sub-structs, `HealthIndex`, `Recommendation`, `CriticalFile`, `SeamCandidate`, `FolderAggregates`,
+`CrossLayerCoChurn`, `CrossLayerResult`, `RuleTiming`, `IoFacts`/`IoProvide`/`IoConsume`, and now also
+`SourceSymbol`, `ir.symbols[]`'s entry type) carries its own `#[serde(rename_all = "camelCase")]`, not
+just this top-level view — so e.g. a `Finding`'s rule id key is `ruleId`, not `rule_id`, and a
+`SourceSymbol`'s are `isDefault`/`bodyStart`/`bodyEnd`, not `is_default`/`body_start`/`body_end`. One
+deliberate exception remains:
+- `Finding.data` is opaque, rule-authored JSON with no uniform casing rule — see the "Every finding..."
+  table below.
+
+`SourceSymbol` still *accepts* the old snake_case names (`is_default`, `body_start`, `body_end`) on the
+way IN, via `#[serde(alias = ...)]` — it doubles as the deserialize target for
+`docs/NORMALIZED_AST.md`'s frozen v1 external-parser envelope input contract
+(`FileProjection.symbols`), and zpz only ever receives an envelope, never emits one, so widening the
+accepted input names costs nothing. See [Output data shapes](#output-data-shapes) below.
+
+`MultiAnalyzeOutputView` (from `analyzeTrees`) wraps `{ trees: [{ root, sourceId, output }],
+crossLayer: CrossLayerResult, crossLayerFindings: Finding[] }`, where `crossLayer` carries the cross-tree IO
+join result across six buckets (camelCase like everything else), plus a per-edge confidence flag:
+- `edges` — a consume matched to a provide across sources.
+- `unconsumedProvides` — a provide no analyzed source consumes.
+- `unprovidedConsumes` — a consume no analyzed source provides.
+- `unresolvedConsumes` — a consume whose URL/key could not be statically determined.
+- `externalConsumes` — a consume targeting an absolute external host URL (e.g.
+  `GET https://vendor.com/api/users`): third-party egress, not joined, not treated as drift.
+- `ambiguousConsumes` — a consume matching provides in 2+ distinct source trees: not
+  auto-linked (no edge emitted), every candidate provider listed so the ambiguity can be resolved by hand.
+- `edges[].lowConfidenceReason` (string, omitted when not set) — the edge's key matched a generic-path
+  pattern (health checks, `/login`, etc.) that many unrelated services could share, so the match is lower
+  confidence than a distinctively-named route; the edge is still emitted.
+
+`crossLayerFindings` is the output of the 20 `cross-layer/*` native rules run over `crossLayer` (see the
+"Native analyses" table in [docs/rules/catalog.md](../rules/catalog.md) for the full id list) — sorted the
+same `(severity, file, line, ruleId)` way as every per-tree `findings` array, and gated by the UNION of
+every tree's `disabledRules` (any one tree disabling a cross-layer rule id drops it from this array
+entirely, since it is a joint-analysis output no single tree fully owns).
+
+`version()` returns
+`"zpz-napi/{CARGO_PKG_VERSION} zpz-parser-typescript={PARSER_FINGERPRINT} zpz-parser-prisma={PARSER_FINGERPRINT}"`
+(Java's fingerprint is not currently surfaced here).
+
+## Output data shapes
+
+The `ir` field is the Common IR every file gets projected into — language-neutral, and the same shape
+an external parser adapter must produce (see [NORMALIZED_AST.md](../NORMALIZED_AST.md)):
+
+| Type | Fields | Notes |
+|---|---|---|
+| `CommonIr` | `source`, `parser: string`, plus the fields below (flattened) | `parser` = producing adapter id (`"typescript"`, `"prisma"`, ...). |
+| — `dep` | `{ [path]: string[] }` | Import graph: path → imported paths. |
+| — `symbols` | `SourceSymbol[]` | See below. |
+| — `loc` | `{ [path]: number }` | Physical line count per file. |
+| — `io` | `IoFacts \| null` | `provides`/`consumes` HTTP/DB/tRPC facts, joined cross-tree by `analyzeTrees`. |
+| `SourceSymbol` | `id, file, name, kind, line, exported, isDefault, bodyStart?, bodyEnd?` | `kind` is one of `function\|class\|const\|type\|interface`; `bodyStart`/`bodyEnd` (1-based, inclusive) are set only for functions/classes with a recoverable body span. camelCase on output like every other type here. On the way IN, `SourceSymbol` is also reused verbatim as the deserialize target for [NORMALIZED_AST.md](../NORMALIZED_AST.md)'s frozen v1 external-parser envelope input contract (`FileProjection.symbols`), so it additionally *accepts* that contract's snake_case names (`is_default`, `body_start`, `body_end`) via `#[serde(alias = ...)]` — a conforming envelope producer's JSON keeps working unchanged. |
+
+Every finding — from a DSL rule pack or a native analysis alike — has this shape:
+
+| Field | Value |
+|---|---|
+| `ruleId` | `"{pack}/{rule}"` for a DSL rule (e.g. `"sql/nplus1"`), or a plain id for a native analysis (e.g. `"circular"`) — see [rules/catalog.md](../rules/catalog.md) for the full id list. |
+| `severity` | `"critical" \| "warning" \| "info"` — the rule's default severity (see [rules/catalog.md](../rules/catalog.md)). |
+| `file` | The finding's file, relative to `root`. |
+| `line` | 1-based line number. |
+| `message` | Human-facing cause/fix-hint, copied verbatim from the rule definition. |
+| `data` | Matcher-specific JSON payload (e.g. `{snippet, label}` for a line-scan hit) — opaque, rule-specific; DSL packs author their own keys ad hoc (mostly camelCase already, e.g. `handlerSymbol`), so no uniform casing rule applies inside `data` itself. |
+
+`findings` is sorted by `(severity, file, line, ruleId)` ascending (critical first). A finding
+suppressed by an inline `// <marker>-ok` comment (see [rules/dsl-reference.md](../rules/dsl-reference.md#suppress-marker-semantics))
+is dropped before sorting — it never appears in the output at all, with no suppressed flag.
+
+## Error/panic discipline
+
+Two layers. `api.rs` never panics by contract — every fallible path (bad JSON, missing `root`, invalid
+envelope) returns `Result<String, String>`. `addon.rs` wraps each of the three fallible calls in:
+
+```rust
+fn catch<F: FnOnce() -> Result<String, String> + UnwindSafe>(f: F) -> napi::Result<String> {
+    match std::panic::catch_unwind(f) {
+        Ok(Ok(json)) => Ok(json),
+        Ok(Err(message)) => Err(Error::from_reason(message)),
+        Err(_) => Err(Error::from_reason("zpz-napi: internal panic (this is a bug — please report it)")),
+    }
+}
+```
+
+This is a second, outer `catch_unwind` — the engine already isolates a single bad file's parse/rule
+failure internally (see [degraded files](../ARCHITECTURE.md#degraded-files)); this outer one exists
+because unwinding across a `#[napi]`-exported `extern "C"` boundary is undefined behavior and must
+never happen. In practice: a JS caller sees either a resolved value or a rejected/thrown `Error`, never
+a process crash. `version` has no `Result`/`catch` wrapper (cannot fail).
+
+## Building the addon from source
+
+The real `.node` addon requires the MSVC toolchain on Windows (Node-API's delay-load linking has no
+MinGW/`ld` equivalent):
+
+```
+cargo +stable-x86_64-pc-windows-msvc build -p zpz-napi --release --features addon
+```
+
+## Packaging layout
+
+Main package `@zpz/native` (`private: true` — no publishing pipeline yet): `main: index.js`,
+`types: index.d.ts`, `optionalDependencies` on 5 platform packages under `npm/`:
+
+| Directory | Package | os/cpu/libc |
+|---|---|---|
+| `npm/win32-x64-msvc` | `@zpz/native-win32-x64-msvc` | win32/x64 |
+| `npm/darwin-x64` | `@zpz/native-darwin-x64` | darwin/x64 |
+| `npm/darwin-arm64` | `@zpz/native-darwin-arm64` | darwin/arm64 |
+| `npm/linux-x64-gnu` | `@zpz/native-linux-x64-gnu` | linux/x64/glibc |
+| `npm/linux-arm64-gnu` | `@zpz/native-linux-arm64-gnu` | linux/arm64/glibc |
+
+Each ships only a gitignored `zpz-napi.node` placed by CI (`scripts/place-artifacts.mjs`, mapping
+Rust target triples to these 5 platform dirs). `scripts/sync-versions.mjs` propagates the root
+version into every sub-package and the root's `optionalDependencies` pins.
+
+**Loader cascade** (`index.js`): build `${platform}-${arch}`, look up the matching platform package →
+`require()` it; on failure/absence, fall back to `require('./zpz-napi.node')` (local dev build); if
+both fail, throw with the attempted paths, supported-platform table, and the correct build command for
+the current platform. musl/Alpine and WASM have no table entry (fall to the local-build/throw path).
+`smoke.mjs` (package-root, not `cargo test`) exercises the loader end-to-end against a real built
+addon: `version()`, `analyze()` (2-file cycle fixture), `analyzeTrees()`.
+
+## Calling from ESM
+
+This is a CommonJS package. A bare specifier import (`import native from '@zpz/native'`) works from an
+ES module, but a dynamic `import()` of a raw Windows file path (e.g. `import('C:\\...\\index.js')`)
+fails with `ERR_UNSUPPORTED_ESM_URL_SCHEME` — Node requires a `file://` URL or `createRequire`:
+
+```js
+import { createRequire } from 'node:module';
+const native = createRequire(import.meta.url)('/abs/path/to/packages/napi/index.js');
+// or: import { pathToFileURL } from 'node:url';
+//     const native = (await import(pathToFileURL('/abs/path/to/index.js').href)).default;
+```
+
+See also: [../ARCHITECTURE.md](../ARCHITECTURE.md) (how a tree is processed, degrade/cache behavior),
+[../rules/catalog.md](../rules/catalog.md) (every rule/analysis id `disabledRules` can reference).

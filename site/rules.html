@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>zpz — Rules</title>
+<meta name="description" content="zpz rule catalog — DSL packs, matcher reference, native analyses, and extending with custom parsers.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a href="index.html" class="brand">
+      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#1e222b"></rect><path d="M9 16.5 13.5 21 23 10.5" fill="none" stroke="#34d399" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      <span class="brand__wordmark">zpz</span>
+    </a>
+    <nav class="site-nav">
+      <a href="index.html" class="site-nav__link">Overview</a>
+      <a href="architecture.html" class="site-nav__link">Architecture</a>
+      <a href="usage.html" class="site-nav__link">Usage</a>
+      <a href="rules.html" class="site-nav__link is-active">Rules</a>
+    </nav>
+    <div class="site-header__actions">
+      <a href="https://github.com/eezz4/zpz" target="_blank" rel="noreferrer" aria-label="GitHub" class="icon-btn">
+        <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"></path></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<div class="docs-layout">
+
+  <button type="button" class="docs-nav-toggle" aria-expanded="false" aria-controls="docs-nav">
+    Docs menu
+  </button>
+
+  <aside class="docs-nav" id="docs-nav">
+    <div class="docs-nav__group">
+      <div class="docs-nav__group-label">Docs</div>
+      <a href="index.html" class="docs-nav__link">Overview</a>
+      <a href="architecture.html" class="docs-nav__link">Architecture</a>
+      <a href="usage.html" class="docs-nav__link">Usage</a>
+      <a href="rules.html" class="docs-nav__link is-active">Rules</a>
+    </div>
+  </aside>
+
+  <main class="docs-content">
+    <div class="docs-content-header">
+      <h1>Rule catalog</h1>
+      <p>This catalog is read directly from the shipped rule packs and the native analysis registry, and a
+      meta-test (<code>packages/engine/tests/rule_contracts.rs</code>) machine-checks that every id listed
+      below matches what the engine actually loads at runtime, so the catalog cannot silently drift out of
+      sync with the code. Every rule below carries its own inline suppress marker, and every rule and
+      native analysis id can also be turned off per-run via <code>disabledRules</code>.</p>
+    </div>
+
+    <section id="pack-be-db">
+      <h2><code>be-db</code></h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Rule id</th><th>Severity</th><th>Matcher</th><th>Suppress marker</th><th>Detects</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>update-delete-no-where</code></td><td><code>critical</code></td><td><code>method-scan</code></td><td><code>no-where-ok</code></td><td><code>updateMany</code>/<code>deleteMany</code> called with no <code>where:</code> clause anywhere in the enclosing function — a whole-table write.</td></tr>
+            <tr><td><code>pagination-no-orderby</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>pagination-ok</code></td><td><code>skip</code>/<code>take</code> pagination used with no <code>orderBy</code> anywhere in the enclosing function — page boundaries can shift between requests without a stable sort.</td></tr>
+            <tr><td><code>client-per-request</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>prisma-client-ok</code></td><td><code>new PrismaClient()</code> constructed inside a function that also looks like a request handler — exhausts the DB connection pool under load.</td></tr>
+            <tr><td><code>external-call-in-tx</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>tx-egress-ok</code></td><td>A network call (<code>fetch</code>/<code>axios</code>/<code>got</code>) in the same function as a <code>$transaction(</code> — extends transaction lock hold time across a network round-trip.</td></tr>
+            <tr><td><code>unawaited-write</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>unawaited-ok</code></td><td>A DB write (<code>create</code>/<code>update</code>/<code>delete</code>/<code>upsert</code>) on a DB-client-shaped receiver (<code>prisma</code>/<code>db</code>/<code>tx</code>/<code>client</code>/<code>repo</code>/...) whose promise is neither awaited, returned, nor chained — fire-and-forget; a failed write looks identical to a successful one.</td></tr>
+            <tr><td><code>unbounded-user-limit</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>limit-ok</code></td><td>A <code>take</code>/<code>limit</code> pagination size read directly from user input (<code>req.query</code>/<code>req.params</code>/<code>req.body</code>) with no upper-bound clamp — unbounded page size, a cheap memory/CPU exhaustion vector.</td></tr>
+            <tr><td><code>find-then-create-no-unique</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>find-create-ok</code></td><td>A <code>findFirst</code>/<code>findOne</code>/<code>findUnique</code> read followed by <code>.create(</code> in the same function with no <code>connectOrCreate</code>/<code>upsert</code>/<code>$transaction</code> anywhere — check-then-act race, concurrent requests can create duplicate rows.</td></tr>
+            <tr><td><code>float-money-compare</code></td><td><code>info</code></td><td><code>line-scan</code></td><td><code>money-ok</code></td><td>A money-named identifier (<code>price</code>/<code>amount</code>/<code>balance</code>/<code>fee</code>/<code>cost</code>) compared with <code>==</code>/<code>===</code> against a float literal — IEEE754 rounding makes strict equality on monetary values unreliable.</td></tr>
+            <tr><td><code>empty-catch-on-write</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>empty-catch-ok</code></td><td>A DB write (<code>create</code>/<code>update</code>/<code>delete</code>/<code>upsert</code>/<code>updateMany</code>/<code>deleteMany</code>) in the same function as an empty <code>catch {}</code> — write failure is silently discarded.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="pack-be-reliability">
+      <h2><code>be-reliability</code></h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Rule id</th><th>Severity</th><th>Matcher</th><th>Suppress marker</th><th>Detects</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>async-route-no-catch</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>route-catch-ok</code></td><td>Async Express/router handler registered with no try/catch, <code>next(err)</code>, or <code>.catch()</code> — an unhandled rejection can crash the process or hang the request.</td></tr>
+            <tr><td><code>sync-fs-in-handler</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>sync-io-ok</code></td><td>Synchronous fs/child_process call alongside request-handler context (<code>req</code>/<code>res</code>/<code>ctx</code>/...) — blocks Node's single event loop for every concurrent request.</td></tr>
+            <tr><td><code>await-in-map</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>map-async-ok</code></td><td><code>.map(async ...)</code> used without <code>Promise.all</code>/<code>Promise.allSettled</code> — rejections become unhandled, ordering/completion guarantees are lost.</td></tr>
+            <tr><td><code>env-nonnull-assert</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>env-assert-ok</code></td><td><code>process.env.X!</code> non-null assertion — defers a missing-config crash from startup to first use.</td></tr>
+            <tr><td><code>debug-true-committed</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>debug-ok</code></td><td>Debug flag or disabled TLS verification (<code>debug: true</code>, <code>NODE_TLS_REJECT_UNAUTHORIZED=0</code>, <code>rejectUnauthorized: false</code>) committed to source.</td></tr>
+            <tr><td><code>promise-all-writes</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>promise-all-ok</code></td><td><code>Promise.all(...)</code> used alongside DB write calls (<code>create</code>/<code>update</code>/<code>delete</code>/<code>upsert</code>) — partial-failure non-atomicity, no rollback for writes that already committed.</td></tr>
+            <tr><td><code>json-parse-no-try</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>json-parse-ok</code></td><td><code>JSON.parse(...)</code> called on apparent external input (<code>req</code>/<code>body</code>/<code>params</code>/<code>query</code>/...) with no surrounding <code>try</code> — malformed input throws instead of producing a handled 4xx.</td></tr>
+            <tr><td><code>fetch-no-timeout</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>fetch-timeout-ok</code></td><td>Outbound HTTP call (<code>fetch</code>/<code>axios</code>/<code>got</code>) on a backend-looking path with no timeout/<code>AbortController</code> visible in the same function — a hung upstream hangs the request indefinitely.</td></tr>
+            <tr><td><code>process-exit-in-lib</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>process-exit-ok</code></td><td><code>process.exit(...)</code> called inside a function outside <code>scripts/</code>/<code>tools/</code>/<code>bin/</code> — skips cleanup and kills the whole server process, not just the current request.</td></tr>
+            <tr><td><code>body-limit-missing</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>body-limit-ok</code></td><td>Body parser (<code>express.json</code>/<code>urlencoded</code>/<code>bodyParser.*</code>) configured with no explicit <code>limit</code> — unbounded payload size, a payload-size DoS vector.</td></tr>
+            <tr><td><code>console-in-be</code></td><td><code>info</code></td><td><code>line-scan</code></td><td><code>console-ok</code></td><td><code>console.*</code> call in backend-path source (<code>api/</code>/<code>server/</code>/<code>backend/</code>/<code>be/</code>/<code>routes/</code>/<code>controllers/</code>/<code>services/</code>) — unstructured, synchronous, not queryable.</td></tr>
+            <tr><td><code>interval-no-clear</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>interval-ok</code></td><td><code>setInterval(...)</code> with no matching <code>clearInterval(...)</code> anywhere in the file — a leaked timer keeps the process/page alive and re-fires forever.</td></tr>
+            <tr><td><code>env-outside-config</code></td><td><code>info</code></td><td><code>line-scan</code></td><td><code>env-access-ok</code></td><td><code>process.env.X</code> accessed outside a config module (files/dirs named <code>config</code>/<code>env</code>/<code>settings</code> exempt) — scatters env parsing/validation instead of centralizing it.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="pack-be-security">
+      <h2><code>be-security</code></h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Rule id</th><th>Severity</th><th>Matcher</th><th>Suppress marker</th><th>Detects</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>hardcoded-secret</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>secret-ok</code></td><td>Hardcoded secret-shaped literal (API key/password/token assignment, or a known cloud-key prefix).</td></tr>
+            <tr><td><code>mass-assignment</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>mass-assignment-ok</code></td><td><code>req.body</code> (or a spread of it) passed directly into a database write in the same function — lets a caller set fields the handler never intended to expose.</td></tr>
+            <tr><td><code>raw-query-interpolation</code></td><td><code>critical</code></td><td><code>line-scan</code></td><td><code>raw-sql-ok</code></td><td><code>$queryRawUnsafe</code>/<code>$executeRawUnsafe</code> called — no parameterization, so any interpolated request-derived string is a SQL injection.</td></tr>
+            <tr><td><code>insecure-cookie</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>cookie-ok</code></td><td>A cookie is set (<code>res.cookie</code>/<code>setCookie</code>/<code>cookies.set</code>) with no <code>httpOnly</code> anywhere in the same function body.</td></tr>
+            <tr><td><code>cors-wildcard</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>cors-ok</code></td><td>CORS origin set to <code>*</code> — defeats the same-origin protection CORS exists to provide.</td></tr>
+            <tr><td><code>weak-password-hash</code></td><td><code>critical</code></td><td><code>line-scan</code></td><td><code>weak-hash-ok</code></td><td>Password hashed/compared with MD5/SHA-1, or bcrypt configured at a single-digit cost factor.</td></tr>
+            <tr><td><code>api-key-in-url</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>url-key-ok</code></td><td>A secret-shaped query parameter (<code>api_key</code>/<code>access_token</code>/<code>token</code>/<code>secret</code>) appears in a URL — leaks via proxy/browser/<code>Referer</code> logs.</td></tr>
+            <tr><td><code>annotation-sql-concat</code></td><td><code>critical</code></td><td><code>line-scan</code></td><td><code>query-concat-ok</code></td><td>JPA <code>@Query</code> annotation built via string concatenation — attacker-controlled input spliced into SQL/JPQL.</td></tr>
+            <tr><td><code>open-redirect</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>redirect-ok</code></td><td><code>redirect(...)</code> called in a function that also reads <code>req.query</code>/<code>req.params</code>/<code>req.body</code> — unchecked request-derived redirect target, a phishing/OAuth-callback token-theft vector.</td></tr>
+            <tr><td><code>ssrf-user-url</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>ssrf-ok</code></td><td>An outbound HTTP call (<code>fetch</code>/<code>axios</code>/<code>got</code>) made in a function that also reads <code>req.query</code>/<code>req.params</code>/<code>req.body</code> — a request-derived value can steer the server to attacker-chosen hosts (SSRF).</td></tr>
+            <tr><td><code>path-traversal</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>traversal-ok</code></td><td>A filesystem call (<code>fs</code>/<code>fsp.*</code>/<code>readFile</code>/<code>writeFile</code>/<code>createReadStream</code>) reads a <code>path.join(...)</code>-built path in a function that also reads <code>req.params</code>/<code>req.query</code>/<code>req.body</code> — unvalidated <code>..</code> segments escape the intended directory.</td></tr>
+            <tr><td><code>cors-credentials-wildcard</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>cors-cred-ok</code></td><td><code>credentials: true</code> in a file that also configures <code>origin: '*'</code> — the wildcard origin removes the check credentialed CORS relies on, exposing cookies/auth headers cross-origin.</td></tr>
+            <tr><td><code>jwt-no-expiry</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>jwt-expiry-ok</code></td><td><code>jwt.sign(...)</code> called in a function where <code>expiresIn</code> never appears — a token with no expiry, valid forever if it leaks.</td></tr>
+            <tr><td><code>weak-token-random</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>weak-random-ok</code></td><td><code>Math.random()</code> used on the same line as a token/otp/nonce/session-id/secret-shaped identifier — a predictable, non-cryptographic PRNG for a security-sensitive value.</td></tr>
+            <tr><td><code>timing-unsafe-compare</code></td><td><code>info</code></td><td><code>line-scan</code></td><td><code>timing-ok</code></td><td>A secret/token/signature/hmac/api-key-shaped identifier compared with <code>===</code>/<code>!==</code> — short-circuiting equality leaks a timing side-channel.</td></tr>
+            <tr><td><code>error-leak-to-client</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>error-leak-ok</code></td><td>A raw error object sent directly to the client (<code>res.status(5xx).send/json(err)</code>, Hono <code>c.json(err)</code>) — stack traces/paths/SQL fragments help an attacker map internals.</td></tr>
+            <tr><td><code>secret-env-in-fe</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>fe-env-ok</code></td><td>A server-only-shaped env var (<code>SECRET</code>/<code>PRIVATE</code>/<code>SERVICE_ROLE</code>/<code>SERVICE_KEY</code>) referenced from frontend code — inlined into the shipped JS bundle, readable via devtools.</td></tr>
+            <tr><td><code>localstorage-jwt</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>ls-token-ok</code></td><td>A token/JWT-shaped value written to <code>localStorage</code> — readable by any script on the page, so one XSS bug anywhere on the origin exfiltrates it.</td></tr>
+            <tr><td><code>java-hardcoded-password</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>java-pwd-ok</code></td><td>A password-shaped literal hardcoded (direct assignment, or a JDBC <code>getConnection(url, user, password)</code> call) — a credential committed to source, can't be rotated without a code change.</td></tr>
+            <tr><td><code>xxe-no-guard</code></td><td><code>critical</code></td><td><code>method-scan</code></td><td><code>xxe-ok</code></td><td><code>DocumentBuilderFactory</code>/<code>SAXParserFactory.newInstance()</code> with no XXE guard (<code>disallow-doctype-decl</code>/<code>FEATURE_SECURE_PROCESSING</code>) — default XML parsing resolves external entities (file read/SSRF/billion laughs).</td></tr>
+            <tr><td><code>unsafe-deserialization</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>deser-ok</code></td><td><code>ObjectInputStream.readObject()</code> called — native Java deserialization of an attacker-controlled byte stream can trigger remote code execution via gadget chains.</td></tr>
+            <tr><td><code>java-path-traversal</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>java-traversal-ok</code></td><td><code>new File(...)</code> constructed in a function that also reads <code>request.getParameter(...)</code> — unvalidated <code>..</code> segments escape the intended directory.</td></tr>
+            <tr><td><code>java-weak-random</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>java-random-ok</code></td><td><code>new Random()</code> used on the same line as a token/session/otp/nonce-shaped identifier — a predictable, non-cryptographic PRNG for a security-sensitive value.</td></tr>
+            <tr><td><code>stacktrace-to-response</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>stacktrace-ok</code></td><td>An exception's stack trace/message (<code>printStackTrace()</code>/<code>.getMessage()</code>) produced in a method that also touches the HTTP response — internal class names/paths/SQL fragments can reach the client.</td></tr>
+            <tr><td><code>trust-all-tls</code></td><td><code>critical</code></td><td><code>line-scan</code></td><td><code>trust-all-ok</code></td><td>TLS certificate/hostname verification disabled (trust-all <code>X509TrustManager</code>, <code>ALLOW_ALL_HOSTNAME_VERIFIER</code>, or an always-<code>true</code> hostname-verifier lambda) — accepts any certificate for any host, opening a MITM path.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="pack-browser">
+      <h2><code>browser</code></h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Rule id</th><th>Severity</th><th>Matcher</th><th>Suppress marker</th><th>Detects</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>no-system-dialogs</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>browser-ok</code></td><td>Blocking system dialog (<code>alert</code>/<code>confirm</code>/<code>prompt</code>) — blocks the main thread, can't be styled/tested.</td></tr>
+            <tr><td><code>no-document-write</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>document-write-ok</code></td><td><code>document.write</code>/<code>writeln</code> — breaks HTML parsing post-load, blocked under many CSP/PWA setups.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="pack-fullstack">
+      <h2><code>fullstack</code></h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Rule id</th><th>Severity</th><th>Matcher</th><th>Suppress marker</th><th>Detects</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>mixed-content-egress</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>mixed-content-ok</code></td><td>Plain-<code>http://</code> URL literal — mixed content/MITM risk; excludes localhost/private-IP/XML-namespace lookalikes.</td></tr>
+            <tr><td><code>localhost-egress-committed</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>localhost-ok</code></td><td>Committed localhost/private-IP endpoint — breaks outside the dev machine.</td></tr>
+            <tr><td><code>get-with-body</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>get-body-ok</code></td><td>A GET request carrying a body (<code>method: 'get'</code> alongside a <code>body:</code> property in the same function) — servers/proxies may silently drop the body on a GET.</td></tr>
+            <tr><td><code>ws-no-auth</code></td><td><code>info</code></td><td><code>method-scan</code></td><td><code>ws-auth-ok</code></td><td>WebSocket opened/upgraded (<code>new WebSocket(...)</code>/<code>.upgrade(...)</code>) with no auth material (<code>token</code>/<code>auth</code>/<code>session</code>/<code>cookie</code>/<code>jwt</code>) visible in the same function — unauthenticated realtime channel.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="pack-http">
+      <h2><code>http</code></h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Rule id</th><th>Severity</th><th>Matcher</th><th>Suppress marker</th><th>Detects</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>read-model-path</code></td><td><code>info</code></td><td><code>line-scan</code></td><td><code>read-model-ok</code></td><td><code>apiRoutes.get(...)</code> with no cache-strategy marker (<code>// cache:</code>, <code>// no-cache:</code>, <code>// read-model-ok:</code>) on the same line.</td></tr>
+            <tr><td><code>auth-gates</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>auth-gate-ok</code></td><td>Route under a protected path segment (<code>/admin/</code>, <code>/internal/</code>, <code>/dev/</code>) whose handler identifier carries no admin/role/guard/protect keyword.</td></tr>
+            <tr><td><code>route-exposure</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>route-exposure-ok</code></td><td>Route under a dev/debug/internal/test/playground path segment whose handler identifier carries no guard-hint keyword.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="pack-java-security">
+      <h2><code>java-security</code></h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Rule id</th><th>Severity</th><th>Matcher</th><th>Suppress marker</th><th>Detects</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>sql-taint</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>sql-taint-ok</code></td><td>SQL built by string concatenation — injection risk.</td></tr>
+            <tr><td><code>weak-crypto</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>weak-crypto-ok</code></td><td>Weak/deprecated cryptography — MD5/SHA-1/DES/RC4/ECB.</td></tr>
+            <tr><td><code>cmd-injection</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>cmd-injection-ok</code></td><td><code>Runtime.exec</code>/<code>ProcessBuilder</code> co-occurring with string concatenation in the same method — command-injection risk.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="pack-perf">
+      <h2><code>perf</code></h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Rule id</th><th>Severity</th><th>Matcher</th><th>Suppress marker</th><th>Detects</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>api-in-loop</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>api-in-loop-ok</code></td><td>Network call made inside a loop or array-iteration callback — the HTTP analogue of N+1.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="pack-security">
+      <h2><code>security</code></h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Rule id</th><th>Severity</th><th>Matcher</th><th>Suppress marker</th><th>Detects</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>taint-flow</code></td><td><code>critical</code></td><td><code>method-scan</code></td><td><code>taint-ok</code></td><td>A tainted-source access and a dangerous sink call in the same function body (coarse v1 co-occurrence, not real dataflow — see the rule's own <code>message</code> for the three documented precision limits).</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="pack-sql">
+      <h2><code>sql</code></h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Rule id</th><th>Severity</th><th>Matcher</th><th>Suppress marker</th><th>Detects</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>query-logic-density</code></td><td><code>info</code></td><td><code>line-scan</code></td><td><code>query-logic-ok</code></td><td>SQL literal embeds 2+ conditional-logic constructs (<code>CASE WHEN</code> branches / <code>IF</code>·<code>IIF</code> calls).</td></tr>
+            <tr><td><code>nplus1</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>n+1-ok</code></td><td><code>await</code> on a store/ORM call inside a loop or array-iteration callback — N+1 query pattern.</td></tr>
+            <tr><td><code>count-in-loop</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>count-in-loop-ok</code></td><td><code>store.count()</code>/<code>prisma.&lt;model&gt;.count()</code> called inside a loop or array-iteration callback.</td></tr>
+            <tr><td><code>app-side-aggregation-reduce</code></td><td><code>info</code></td><td><code>method-scan</code></td><td><code>app-agg-ok</code></td><td>A <code>findMany()</code>/<code>prepare(...).all()</code> result is reduced in application code (<code>.reduce(...)</code>).</td></tr>
+            <tr><td><code>app-side-aggregation-filter-length</code></td><td><code>info</code></td><td><code>method-scan</code></td><td><code>app-agg-filter-ok</code></td><td>A <code>findMany()</code>/<code>prepare(...).all()</code> result is counted via <code>.filter(...).length</code>.</td></tr>
+            <tr><td><code>race-condition-toctou</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>toctou-ok</code></td><td>A read (<code>findOne</code>/<code>findById</code>/<code>findUnique</code>) feeds a branch that calls <code>create</code>/<code>upsert</code>/<code>insert</code> — TOCTOU race under concurrent requests.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="pack-typescript">
+      <h2><code>typescript</code></h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Rule id</th><th>Severity</th><th>Matcher</th><th>Suppress marker</th><th>Detects</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>no-explicit-any</code></td><td><code>info</code></td><td><code>line-scan</code></td><td><code>any-ok</code></td><td><code>any</code> type used.</td></tr>
+            <tr><td><code>as-cast</code></td><td><code>info</code></td><td><code>line-scan</code></td><td><code>as-ok</code></td><td><code>as</code> type cast used (import-alias <code>as</code> excluded via <code>exclude_pattern</code>).</td></tr>
+            <tr><td><code>unhandled-promise-use-effect</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>unhandled-promise-ok</code></td><td><code>useEffect</code> callback declared <code>async</code> — React drops the returned Promise, no cleanup possible.</td></tr>
+            <tr><td><code>async-handler-no-try</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>async-handler-ok</code></td><td>An <code>on&lt;Event&gt;={async ...}</code> JSX handler has an <code>await</code> but no <code>try</code>/<code>catch</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="stub-packs">
+      <h2>Stub packs (roadmap)</h2>
+      <p><code>conventions</code>, <code>jsp-security</code>, <code>react</code>, <code>redis</code>, and
+      <code>routes</code> load successfully today — each is a valid pack with an empty <code>rules: []</code>
+      — but ship no detections yet. Each needs either declaration→use tracking, cross-repo/cross-file joins,
+      or JSX/AST structure the DSL can't express; see
+      <a href="#custom-packs">writing your own pack</a> below for what does and doesn't fit the DSL.</p>
+    </section>
+
+    <section id="native-analyses">
+      <h2>Native analyses (40 ids)</h2>
+      <p>Whole-graph/whole-repo analyses, registered under <code>RuleKind::Native</code> so they share one
+      enable/severity/suppression gating surface with DSL rules (<code>RuleConfig</code>). Each id is
+      registered by its owning crate's own <code>register_native_analyses</code> — the kernel
+      (<code>packages/core</code>) itself registers none, staying rule-vocabulary-free.
+      <code>rules/native/rules-graph</code> owns <code>circular</code>, <code>unreachable</code>,
+      <code>dead-candidates</code>, <code>dead-exports</code>, <code>duplicate-route</code>,
+      <code>unsafe-read-endpoint</code>/<code>non-idempotent-write</code>, <code>route-shadowing</code>,
+      <code>mutating-route-no-auth</code>, <code>unprovided-consume</code>, and the 20
+      <code>cross-layer/*</code> ids. <code>rules/native/rules-schema</code> owns
+      <code>schema-structural</code>, <code>schema-usage</code>, <code>soft-delete-bypass</code>,
+      <code>orderby-unindexed</code>, <code>enum-string-drift</code>. <code>packages/metrics</code> owns
+      <code>seams</code>, <code>criticality</code>, <code>scores</code>, <code>health</code>,
+      <code>recommendations</code> — score computations, not findings-producing rules, that ride the same
+      toggle/gating surface. <code>zpz_engine::register_all_native</code> composes all three.</p>
+      <p>The 20 <code>cross-layer/*</code> ids are the multi-tree exception: they run over
+      <code>zpz_engine::analyze_trees</code>'s joined <code>CrossLayerResult</code> (every other row here
+      runs per-tree), exposed as <code>crossLayerFindings</code> alongside <code>crossLayer</code> in
+      <code>analyzeTrees</code>'s output. None of the 20 honor an inline suppression marker — they are
+      disable-only, via <code>disabledRules</code>.</p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Id</th><th>Default severity</th><th>Detects</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>circular</code></td><td><code>warning</code></td><td>Import cycles in the dependency graph (Tarjan SCC, <code>graph.rs</code>).</td></tr>
+            <tr><td><code>unreachable</code></td><td><code>info</code></td><td>Closed "dead islands" — files imported in-repo (fan-in &gt; 0) yet unreachable from any entrypoint (<code>reachability.rs</code>).</td></tr>
+            <tr><td><code>dead-candidates</code></td><td><code>info</code></td><td>File-level dead-code candidates: fan-in == 0 and not an entry-point pattern (tests/Storybook/dev-tool config/<code>.d.ts</code> excluded) (<code>dead.rs</code>).</td></tr>
+            <tr><td><code>dead-exports</code></td><td><code>info</code></td><td>Symbol-level dead-export detection — exported symbols never imported anywhere, with unused-vs-in-file-only reasons (dev-tool config files excluded) (<code>dead_exports.rs</code>).</td></tr>
+            <tr><td><code>seams</code></td><td><code>info</code></td><td>Strangler-seam scoring — folders that are self-contained (few boundary-crossing import edges), i.e. good first-extraction candidates (<code>seams.rs</code>).</td></tr>
+            <tr><td><code>criticality</code></td><td><code>warning</code></td><td>Transitive blast-radius scoring — surfaces stable-but-critical files a churn-weighted risk score underweights (<code>criticality.rs</code>).</td></tr>
+            <tr><td><code>scores</code></td><td><code>info</code></td><td>Structural health scores, 0–100 (<code>scores/compute.rs</code>).</td></tr>
+            <tr><td><code>health</code></td><td><code>info</code></td><td>Composite structural-health index rolling the per-metric scores up into one number (<code>health.rs</code>).</td></tr>
+            <tr><td><code>recommendations</code></td><td><code>info</code></td><td>ROI-ranked improvement recommendations derived from <code>FileNode</code>s, coupling, and circular deps (<code>recommendations.rs</code>).</td></tr>
+            <tr><td><code>schema-structural</code></td><td><code>warning</code></td><td>Prisma schema structural rules — god-model, missing timestamps, FK with no index, nullable FK, implicit FK, float-as-money, temporal-as-string, redundant index, stale <code>updatedAt</code> (<code>rules/native/rules-schema/src/structural.rs</code>).</td></tr>
+            <tr><td><code>schema-usage</code></td><td><code>warning</code></td><td>Prisma schema usage-aware cross-check — dead model/field, migration churn, store-binding map, layered on the structural rules (<code>rules/native/rules-schema/src/usage.rs</code>).</td></tr>
+            <tr><td><code>unsafe-read-endpoint</code></td><td><code>warning</code></td><td>A GET/HEAD ("safe") endpoint whose handler reaches a database/store write via call-graph BFS — violates the safe-method contract.</td></tr>
+            <tr><td><code>non-idempotent-write</code></td><td><code>warning</code></td><td>A write endpoint (PUT/DELETE always; POST/PATCH for accumulation only) that reaches a non-idempotent create, atomic-accumulate, or counter-bump operation via call-graph BFS — a retry duplicates or doubles the effect.</td></tr>
+            <tr><td><code>duplicate-route</code></td><td><code>warning</code></td><td>The same <code>(METHOD, path)</code> HTTP route provided 2+ times across the tree.</td></tr>
+            <tr><td><code>soft-delete-bypass</code></td><td><code>warning</code></td><td>A <code>findMany</code>/<code>findFirst</code>/<code>findUnique</code>/<code>count</code> call site on a model with a <code>deletedAt</code>/<code>deleted_at</code> marker field whose argument span never mentions that field — a soft-deleted row can leak back into a "live" read (<code>rules/native/rules-schema/src/join.rs</code>).</td></tr>
+            <tr><td><code>orderby-unindexed</code></td><td><code>warning</code></td><td>A single-field literal <code>orderBy: { field: 'asc' }</code> naming a field with no <code>@id</code>/<code>@unique</code>/leading-<code>@@index</code> coverage on the target model — an unindexed sort that gets slower as the table grows (<code>rules/native/rules-schema/src/join.rs</code>).</td></tr>
+            <tr><td><code>enum-string-drift</code></td><td><code>warning</code></td><td>A literal-object <code>field: 'Literal'</code> at a query call site whose field resolves to exactly one declared schema enum, where <code>'Literal'</code> is not one of that enum's members — a string that drifted out of sync with the enum (<code>rules/native/rules-schema/src/join.rs</code>).</td></tr>
+            <tr><td><code>route-shadowing</code></td><td><code>warning</code></td><td>Within one file, a param-segment route (<code>/x/{}</code>) registered earlier than a same-shape literal-segment route of the same method makes the later literal route unreachable in a first-match router (Express/Koa/Fastify-style) (<code>rules/native/rules-graph/src/route_shadowing.rs</code>).</td></tr>
+            <tr><td><code>mutating-route-no-auth</code></td><td><code>info</code></td><td>A POST/PUT/PATCH/DELETE route whose handler's call-graph BFS never reaches a callee named like an auth guard (<code>auth</code>/<code>guard</code>/<code>verify</code>/<code>session</code>/<code>token</code>/<code>permission</code>/<code>acl</code>) — misses route-level middleware, so a middleware-guarded route can false-positive (<code>rules/native/rules-graph/src/mutating_route_no_auth.rs</code>).</td></tr>
+            <tr><td><code>unprovided-consume</code></td><td><code>info</code></td><td>An HTTP <code>IoConsume</code> whose key matches no <code>IoProvide</code> anywhere in the analysis, gated to trees that provide at least one HTTP route themselves — a typo'd path, a renamed/removed backend route, or a route this analysis failed to parse (<code>rules/native/rules-graph/src/unprovided_consume.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/unconsumed-endpoint</code></td><td><code>info</code></td><td>A <code>crossLayer.unconsumedProvides</code> <code>http</code> entry — an endpoint no tree in this <code>analyzeTrees</code> run calls. Caveats: consumers outside the analysis (another repo, a mobile client, an unresolved dynamic URL) may still exist (<code>rules/native/rules-graph/src/cross_layer/unconsumed_endpoint.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/method-mismatch</code></td><td><code>warning</code></td><td>A <code>crossLayer.unprovidedConsumes</code> <code>http</code> consume whose path exactly matches a provide somewhere in the analysis, but the method differs (e.g. FE calls <code>POST /api/users</code>, only <code>GET /api/users</code> is provided) (<code>rules/native/rules-graph/src/cross_layer/method_mismatch.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/version-skew</code></td><td><code>warning</code></td><td>A <code>crossLayer.unprovidedConsumes</code> <code>http</code> consume whose key differs from a provide only in one version-shaped path segment (<code>/v1/</code> vs <code>/v2/</code>) (<code>rules/native/rules-graph/src/cross_layer/version_skew.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/path-near-miss</code></td><td><code>info</code></td><td>A <code>crossLayer.unprovidedConsumes</code> <code>http</code> consume whose key matches a provide once <code>{}</code> parameter positions are allowed to differ, but is otherwise segment-identical — strict elsewhere (a plural/typo literal difference does not count) (<code>rules/native/rules-graph/src/cross_layer/path_near_miss.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/shared-db-table</code></td><td><code>warning</code></td><td>The same <code>db-table</code> key CONSUMED (not provided) by 2+ distinct source trees — evidence of a naming collision or a genuinely shared database; message says to verify which (<code>rules/native/rules-graph/src/cross_layer/shared_db_table.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/duplicate-route</code></td><td><code>warning</code></td><td>The same <code>http</code> <code>(method, path)</code> key PROVIDED by 2+ DISTINCT source trees — the cross-tree counterpart to <code>duplicate-route</code> above (<code>rules/native/rules-graph/src/cross_layer/duplicate_route.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/external-shadow-internal</code></td><td><code>warning</code></td><td>A <code>crossLayer.externalConsumes</code> consume (absolute URL) whose normalized method+path matches a route an analyzed tree provides — the caller hardcodes one environment's host instead of the relative/proxied path (<code>rules/native/rules-graph/src/cross_layer/external_shadow_internal.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/external-secret-in-url</code></td><td><code>warning</code></td><td>A <code>crossLayer.externalConsumes</code> consume whose URL query string carries a secret-named parameter (<code>token</code>/<code>key</code>/<code>apikey</code>/<code>secret</code>/...) — credentials in URLs leak through logs, referrers, and history, whether the value is a literal or interpolated (<code>rules/native/rules-graph/src/cross_layer/external_secret_in_url.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/external-duplicated-integration</code></td><td><code>warning</code></td><td>The same external host called directly from 2+ distinct source trees — a duplicated third-party integration; centralize behind one client or a backend proxy (<code>rules/native/rules-graph/src/cross_layer/external_duplicated_integration.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/external-host-fanout</code></td><td><code>info</code></td><td>The same external host called directly from 3+ distinct files — vendor calls scattered across the codebase instead of centralized in one client module (<code>rules/native/rules-graph/src/cross_layer/external_host_fanout.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/external-base-url-drift</code></td><td><code>info</code></td><td>The same external path consumed against 2+ different hosts (port included) — base-URL/config drift for what looks like one logical service (<code>rules/native/rules-graph/src/cross_layer/external_base_url_drift.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/external-version-inconsistent</code></td><td><code>info</code></td><td>One external host consumed through both version-shaped (<code>/v1/...</code>) and versionless paths — inconsistent API version pinning against the same vendor (<code>rules/native/rules-graph/src/cross_layer/external_version_inconsistent.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/external-ip-literal</code></td><td><code>warning</code></td><td>A <code>crossLayer.externalConsumes</code> consume whose host is a raw IP literal (loopback excluded — committed localhost URLs are the DSL <code>localhost-egress-committed</code> rule's turf) — environment-specific addressing committed into code (<code>rules/native/rules-graph/src/cross_layer/external_ip_literal.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/ambiguous-consume</code></td><td><code>warning</code></td><td>A consume whose key is provided by 2+ distinct trees (<code>crossLayer.ambiguousConsumes</code>) — which provider actually serves the call depends on deploy-time routing the analysis cannot see (<code>rules/native/rules-graph/src/cross_layer/ambiguous_consume.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/unconsumed-mutation-endpoint</code></td><td><code>warning</code></td><td>A <code>crossLayer.unconsumedProvides</code> <code>http</code> entry with a write method (POST/PUT/PATCH/DELETE) — an unconsumed mutation endpoint is standing attack surface, not just dead code; intentionally co-fires with <code>cross-layer/unconsumed-endpoint</code> (<code>rules/native/rules-graph/src/cross_layer/unconsumed_mutation_endpoint.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/unprovided-mutation-call</code></td><td><code>warning</code></td><td>A <code>crossLayer.unprovidedConsumes</code> <code>http</code> consume with a write method — a state-changing call whose target no analyzed tree provides; intentionally co-fires with the unprovided-diagnosis rules above (<code>rules/native/rules-graph/src/cross_layer/unprovided_mutation_call.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/route-shadowing</code></td><td><code>warning</code></td><td>A <code>{}</code>-parameter route pattern provided by one tree that would shadow a same-method, same-shape literal route provided by a DIFFERENT tree if both are served behind one first-match gateway — the cross-tree counterpart to <code>route-shadowing</code> above (<code>rules/native/rules-graph/src/cross_layer/cross_tree_route_shadowing.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/unresolved-consume-ratio</code></td><td><code>info</code></td><td>A tree whose <code>http</code> consumes are majority-unresolved (dynamic URLs, generated SDK clients, wrapper functions) — self-reports that the cross-layer join is mostly blind for that tree instead of staying silent (<code>rules/native/rules-graph/src/cross_layer/unresolved_consume_ratio.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/sdk-import-no-visible-consume</code></td><td><code>info</code></td><td>A tree importing an SDK-shaped package (<code>@scope/sdk</code>, <code>*-sdk</code>, <code>openapi*</code>, <code>*api-client*</code>) from 3+ files while having fewer visible <code>http</code> consumes than <code>unresolved-consume-ratio</code>'s floor — consumption flows through a generated/vendor client the egress extractor cannot see; the not-even-visible half of the blind-spot partition (<code>rules/native/rules-graph/src/cross_layer/sdk_import_no_visible_consume.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/unconsumed-procedure</code></td><td><code>info</code></td><td>A tRPC procedure (kind <code>trpc</code>, key <code>"VERB dotted.path"</code>, composed at assembly from cross-file router fragments) that no analyzed tree calls — TypeScript's compiler catches calls to nonexistent procedures but not unused definitions. Caveats server-side <code>createCaller</code>/SSR consumers this analysis cannot see (<code>rules/native/rules-graph/src/cross_layer/unconsumed_procedure.rs</code>).</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Not yet implemented: architecture rules (layer-violations, feature-envy — no crate is scaffolded for
+      them yet), cognitive/nested-loop complexity scoring, precise <code>taint-flow</code> dataflow (today's
+      <code>security/taint-flow</code> is a documented coarse v1 co-occurrence check), an auth-state-machine
+      analysis, additional cross-file HTTP graph checks (API churn, frontend/backend spec drift), a
+      JSX/React structural rule pack, env/i18n sync checks, and worker-route extraction — each needs either
+      a whole-graph join the DSL can't express or real AST/JSX shape.</p>
+    </section>
+
+    <section id="matchers">
+      <h2>Matchers</h2>
+      <p>Every DSL rule declares one of four matcher shapes. Full field-by-field semantics are in the
+      DSL reference; this is the short version.</p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Matcher</th><th>Operates over</th><th>Use it for</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>line-scan</code></td><td>Per-line regex over a file's raw text.</td><td>Lexical patterns — a keyword, a call, a literal shape on one line.</td></tr>
+            <tr><td><code>method-scan</code></td><td>Multi-pattern co-occurrence within one symbol's body span (innermost span wins on overlap; files without spans are skipped).</td><td>"These patterns appear together in one function" — e.g. a network call and a <code>$transaction(</code> in the same method.</td></tr>
+            <tr><td><code>symbol-scan</code></td><td>A file's declared symbols (functions/classes/consts/types/interfaces).</td><td>Naming-convention or banned-export rules line-scan can't express reliably.</td></tr>
+            <tr><td><code>io-scan</code></td><td>A file's <code>IoFacts</code> — the cross-layer IO (HTTP routes, DB tables, ...) the parser projects alongside symbols.</td><td>Boundary-convention rules, e.g. "every HTTP endpoint must be versioned under <code>/api/v[0-9]+/</code>".</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>All four operate on one file's <code>SourceFile</code> slice in isolation — none can see a second
+      file's content. A rule's <code>suppress_marker</code> applies to <code>line-scan</code> and
+      <code>method-scan</code> findings only: a <code>// &lt;marker&gt;</code> comment on the finding's own
+      line, or the single line directly above it, suppresses it. <code>symbol-scan</code>/<code>io-scan</code>
+      findings have no source-line concept to anchor a suppress comment against, so they carry no inline
+      marker. See <a href="https://github.com/eezz4/zpz/blob/main/docs/rules/dsl-reference.md">dsl-reference.md</a>
+      in the repo for the full matcher field tables.</p>
+    </section>
+
+    <section id="custom-packs">
+      <h2>Write your own pack</h2>
+      <p>A pack is one <code>&lt;id&gt;.json</code> file loaded from a configured packs directory (the
+      <code>packsDir</code> option) — no first-party/third-party distinction exists at the interpreter
+      level. Here's a small <code>line-scan</code> rule with a suppress marker, flagging a hardcoded debug
+      header value that should come from config/env instead:</p>
+      <div class="code-panel">
+        <div class="code-panel__tab">debug-headers.json</div>
+        <pre class="code-block"><code>{
+  "id": "debug-headers",
+  "framework": "any",
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "hardcoded-debug-token",
+      "severity": "warning",
+      "message": "X-Debug-Token header set to a string literal — this bypasses per-environment config and risks shipping a real token. Read it from env/config instead.",
+      "suppress_marker": "debug-token-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx)$",
+        "require_file": "X-Debug-Token",
+        "skip_comment_lines": true,
+        "line_pattern": "[\"']X-Debug-Token[\"']\\s*:\\s*[\"'][^\"'`]+[\"']",
+        "snippet_max": 160
+      }
+    }
+  ]
+}</code></pre>
+      </div>
+      <p><code>packsDir</code> accepts either one directory or an array of directories. Each is loaded
+      independently and then merged by pack <code>id</code>: if the same <code>id</code> shows up in more
+      than one directory, the pack from the later directory in the list replaces the earlier one whole (not
+      a per-rule merge) — this is how a caller adds packs alongside the bundled ones, or overrides a bundled
+      pack outright, without forking the engine.</p>
+      <p>Not every detection fits the four matchers above. Reach for a native rule instead when the check
+      needs declaration→use tracking (an identifier declared but never read), a cross-file join (resolving a
+      constant or route handler defined in another file), call-graph BFS ("handler X, or something it calls
+      transitively, does Y"), or real AST/JSX shape rather than text co-occurrence — cyclomatic/cognitive
+      complexity and JSX-structural checks have no honest regex-over-lines encoding.</p>
+    </section>
+
+  </main>
+
+  <aside class="docs-toc">
+    <div class="docs-toc__label">On this page</div>
+    <a href="#pack-be-db" class="docs-toc__link">be-db</a>
+    <a href="#pack-be-reliability" class="docs-toc__link">be-reliability</a>
+    <a href="#pack-be-security" class="docs-toc__link">be-security</a>
+    <a href="#pack-browser" class="docs-toc__link">browser</a>
+    <a href="#pack-fullstack" class="docs-toc__link">fullstack</a>
+    <a href="#pack-http" class="docs-toc__link">http</a>
+    <a href="#pack-java-security" class="docs-toc__link">java-security</a>
+    <a href="#pack-perf" class="docs-toc__link">perf</a>
+    <a href="#pack-security" class="docs-toc__link">security</a>
+    <a href="#pack-sql" class="docs-toc__link">sql</a>
+    <a href="#pack-typescript" class="docs-toc__link">typescript</a>
+    <a href="#stub-packs" class="docs-toc__link">Stub packs</a>
+    <a href="#native-analyses" class="docs-toc__link">Native analyses</a>
+    <a href="#matchers" class="docs-toc__link">Matchers</a>
+    <a href="#custom-packs" class="docs-toc__link">Write your own pack</a>
+  </aside>
+
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <span class="site-footer__brand">zpz</span>
+    <span>— Zero Pain Zone · MIT License · © 2026</span>
+    <a href="https://github.com/eezz4/zpz" target="_blank" rel="noreferrer" class="site-footer__gh">GitHub</a>
+  </div>
+</footer>
+
+<script src="assets/docs.js"></script>
+</body>
+</html>

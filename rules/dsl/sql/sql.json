@@ -1,0 +1,164 @@
+{
+  "id": "sql",
+  "framework": "any",
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "query-logic-density",
+      "severity": "info",
+      "message": "SQL embeds 2+ conditional-logic constructs (CASE WHEN branches / IF·IIF calls) — filtering/aggregation in SQL is fine, but conditional business rules here are hard to test and easy to duplicate; consider whether the policy belongs in app code. (Gated on two WHEN occurrences plus a SQL anchor keyword anywhere in the file, then flags the CASE line. The CASE line must be SQL-shaped — `CASE WHEN ...` or a bare `CASE` ending the line — so a TypeScript `case 'label':` switch clause never matches.) Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// query-logic-ok`.",
+      "suppress_marker": "query-logic-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "line_pattern": "(?i)\\bcase\\s+when\\b|(?i)\\bcase\\b\\s*$",
+        "snippet_max": 160,
+        "require_file_all": [
+          "(?i)\\bwhen\\b[\\s\\S]*\\bwhen\\b",
+          "(?i)\\b(?:select|from|where|update|set|join|insert|values|with)\\b"
+        ]
+      }
+    },
+    {
+      "id": "nplus1",
+      "severity": "warning",
+      "message": "await on a store/ORM call (receiver matching Repository$/Store$/prisma/db/orm/tx/trx) inside a loop or array-iteration callback (for/for-of/for-in/forEach/map/filter/reduce) — N+1 query pattern. Batch the fetch (e.g. findMany with an `in` filter) instead of one call per item. Restricted to BE handler paths (domains/*/routes/**, api/**). Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// n+1-ok`.",
+      "suppress_marker": "n+1-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "^(?:domains/[^/]+/routes/.+|api/.+)\\.ts$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "\\bawait\\b",
+        "skip_comment_lines": true,
+        "patterns": [
+          {
+            "pattern": "\\bfor\\s*\\(|\\.(?:forEach|map|filter|reduce)\\s*\\(",
+            "label": "loop"
+          },
+          {
+            "pattern": "\\bawait\\s+(?:[\\w$]+\\.)*(?:[\\w$]*(?:Store|Repository)[\\w$]*|prisma|db|orm|tx|trx)(?:\\.[\\w$]+)*\\s*\\(",
+            "label": "store-call"
+          }
+        ],
+        "trigger": "store-call",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "count-in-loop",
+      "severity": "warning",
+      "message": "store.count()/prisma.<model>.count() called inside a loop or array-iteration callback — count() per entity (N calls). Use a single GROUP BY query or a denormalized counter column. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// count-in-loop-ok`.",
+      "suppress_marker": "count-in-loop-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.tsx?$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "\\.count\\s*\\(",
+        "skip_comment_lines": true,
+        "patterns": [
+          {
+            "pattern": "\\bfor\\s*\\(|\\bwhile\\s*\\(|\\bdo\\s*\\{|\\.(?:forEach|map|filter|reduce)\\s*\\(",
+            "label": "loop"
+          },
+          {
+            "pattern": "\\b(?:[\\w$]*(?:Store|Repository)[\\w$]*|prisma)(?:\\.[\\w$]+)*\\.count\\s*\\(",
+            "label": "count-call"
+          }
+        ],
+        "trigger": "count-call",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "app-side-aggregation-reduce",
+      "severity": "info",
+      "message": "A findMany()/raw prepare(...).all() result is reduced in application code (.reduce(...)) — if the row set is large, a SQL aggregate (SUM/COUNT/GROUP BY) avoids transferring it; if small and reused, app-side is fine. Decide by data volume. (Approximation: co-occurrence of a fetch-many call and .reduce( within the same function — does not verify the SAME variable is both the fetch result and the reduce receiver.) Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// app-agg-ok`.",
+      "suppress_marker": "app-agg-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.tsx?$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "\\.reduce\\s*\\(",
+        "skip_comment_lines": true,
+        "patterns": [
+          {
+            "pattern": "\\.findMany\\s*\\(|\\bprepare\\s*\\(",
+            "label": "fetch-many"
+          },
+          {
+            "pattern": "\\.reduce\\s*\\(",
+            "label": "reduce"
+          }
+        ],
+        "trigger": "reduce",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "app-side-aggregation-filter-length",
+      "severity": "info",
+      "message": "A findMany()/raw prepare(...).all() result is counted in application code via .filter(...).length — if the row set is large, a SQL aggregate (SUM/COUNT/GROUP BY) avoids transferring it; if small and reused, app-side is fine. Decide by data volume. (Approximation: co-occurrence of a fetch-many call, .filter(, and .length within the same function — does not verify the SAME variable is both the fetch result and the filter receiver.) Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// app-agg-filter-ok`.",
+      "suppress_marker": "app-agg-filter-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.tsx?$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "\\.filter\\s*\\(",
+        "skip_comment_lines": true,
+        "patterns": [
+          {
+            "pattern": "\\.findMany\\s*\\(|\\bprepare\\s*\\(",
+            "label": "fetch-many"
+          },
+          {
+            "pattern": "\\.filter\\s*\\(",
+            "label": "filter"
+          },
+          {
+            "pattern": "\\.length\\b",
+            "label": "length"
+          }
+        ],
+        "trigger": "length",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "race-condition-toctou",
+      "severity": "warning",
+      "message": "A read (findOne/findById/findUnique) feeds a branch that then calls create/upsert/insert (get-or-create / toggle pattern) — TOCTOU race: under concurrent requests two callers can both pass the check and both write (duplicate row / unique-constraint violation). Make it atomic: wrap the read+write in a transaction ($transaction), or replace check-then-write with an upsert / a unique constraint guarded by try-catch. Vetoed when a try/catch or a `$transaction(`/`transaction(` wrapper appears anywhere in the same function body — a guard anywhere in the function counts, not specifically around the write call. Co-occurrence within the same function only (no per-variable receiver correlation), like every other method-scan rule in this pack. The finding is reported at the read call's line, not the write's. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// toctou-ok`.",
+      "suppress_marker": "toctou-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)(?:(?:^|/)api/.*\\.tsx?$|.*/routes/.*\\.tsx?$|.*/controllers/.*\\.tsx?$|.*handler\\.tsx?$|.*controller\\.tsx?$)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "\\.(?:findOne|findById|findUnique)\\s*\\(",
+        "skip_comment_lines": true,
+        "patterns": [
+          {
+            "pattern": "\\bawait\\s+(?:[\\w$]+\\.)*(?:findOne|findById|findUnique)\\s*\\(",
+            "label": "read"
+          },
+          {
+            "pattern": "\\b(?:create|upsert|insert)\\s*\\(",
+            "label": "write"
+          }
+        ],
+        "trigger": "read",
+        "absent": [
+          {
+            "pattern": "\\btry\\s*\\{",
+            "label": "try-guard"
+          },
+          {
+            "pattern": "\\$transaction\\s*\\(|\\btransaction\\s*\\(",
+            "label": "tx-guard"
+          }
+        ],
+        "snippet_max": 160
+      }
+    }
+  ]
+}

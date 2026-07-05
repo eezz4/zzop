@@ -1,0 +1,6 @@
+{
+  "id": "redis",
+  "framework": "any",
+  "schema_version": 1,
+  "rules": []
+}

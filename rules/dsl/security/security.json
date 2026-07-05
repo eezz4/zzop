@@ -1,0 +1,29 @@
+{
+  "id": "security",
+  "framework": "any",
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "taint-flow",
+      "severity": "critical",
+      "message": "A tainted-source access (Hono c.req.json/query/param/header/formData/text; Next/Express/web-standard req|request|_req.json/text/formData/arrayBuffer or .body/.query/.params/.cookies; searchParams.get/getAll; process.argv) and a dangerous sink call (eval, new Function, exec/execSync/execFile/execFileSync/spawn/spawnSync, prisma.$queryRawUnsafe/$executeRawUnsafe, dangerouslySetInnerHTML, document.write, or an .innerHTML/.outerHTML assignment) both appear in the same function/method body — sanitize the value (schema.parse/escape*/sanitize*/validate*) before it reaches the sink, or restructure so the source never flows there. THIS IS A COARSE APPROXIMATION, not real dataflow: (1) co-occurrence, not tracking — `source` and `sink` only need to appear ANYWHERE in the same function/method body, with no check that the tainted value is actually the sink's argument (a source and an unrelated sink call in the same function both flag); this can both under- and over-report relative to real per-variable taint propagation. (2) the sanitizer check (schema.parse(...)/escape*(.../sanitize*(.../validate*() clears the WHOLE function body, not just downstream of the sanitizer call — a sanitizer that runs AFTER the sink, or that cleans an unrelated variable, still suppresses the finding. (3) the source/sink vocabulary is a fixed set of regex alternatives, not a runtime-configurable one — a project-specific source or sink outside this list is not detected. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// taint-ok`.",
+      "suppress_marker": "taint-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "\\b(?:eval|exec|spawn|new\\s+Function|dangerouslySetInnerHTML|innerHTML|document\\.write)\\b|\\$(?:query|execute)RawUnsafe\\b",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "c\\.req\\.(?:json|query|param|header|formData|text)\\s*\\(|\\b(?:req|request|_req)\\.(?:json|text|formData|arrayBuffer)\\s*\\(|searchParams\\.(?:get|getAll)\\s*\\(|\\b(?:req|request|_req)\\.(?:body|query|params|cookies)\\b|\\bprocess\\.argv\\b", "label": "source" },
+          { "pattern": "\\b(?:eval|exec|execSync|execFile|execFileSync|spawn|spawnSync)\\s*\\(|\\bnew\\s+Function\\s*\\(|\\$(?:query|execute)RawUnsafe\\b|\\bdangerouslySetInnerHTML\\b|\\bdocument\\.write\\s*\\(|\\.(?:innerHTML|outerHTML)\\s*=", "label": "sink" }
+        ],
+        "trigger": "sink",
+        "absent": [
+          { "pattern": "\\.parse\\s*\\(|\\b(?:escape|sanitize|validate)\\w*\\s*\\(", "label": "sanitizer" }
+        ],
+        "snippet_max": 160
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+# zpz documentation map
+
+| Page                                                 | Answers                                                                                                                                                      |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [ARCHITECTURE.md](ARCHITECTURE.md)                   | How does a call to `analyze`/`analyzeTrees` process my tree — what's in the `ir` output, what does `degraded` mean, how does caching behave, what languages does the engine understand natively?  |
+| [NORMALIZED_AST.md](NORMALIZED_AST.md)               | I'm writing an external/custom parser adapter (Java, Python, JSP, ...) — what JSON envelope must it emit to join the analysis as a first-class source?      |
+| [examples/](examples/jsp-envelope.example.json)      | What does a real Normalized AST envelope look like end-to-end?                                                                                              |
+| [modules/napi.md](modules/napi.md)                   | How do I call the engine — the four functions (`analyze`/`analyzeTrees`/`analyzeEnvelope`/`version`), request/response JSON shapes, error handling, npm packaging. |
+| [rules/dsl-reference.md](rules/dsl-reference.md)     | What is the exact JSON schema for a `rules/dsl/*.json` pack — every matcher field, suppress-marker semantics, schema-version policy, finding shape?         |
+| [rules/authoring-guide.md](rules/authoring-guide.md) | How do I write and ship a new DSL rule pack — placement, a worked example, performance pitfalls, the testing/fidelity bar, and when to write a native rule instead? |
+| [rules/catalog.md](rules/catalog.md)                 | What rules ship today — every DSL pack's rules and every native analysis id, with what each one detects?                                                    |

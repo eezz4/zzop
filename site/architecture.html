@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>zpz — Architecture</title>
+<meta name="description" content="zpz architecture — pipeline flow, the Common IR, language support, crate structure, and cross-layer joins.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a href="index.html" class="brand">
+      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#1e222b"></rect><path d="M9 16.5 13.5 21 23 10.5" fill="none" stroke="#34d399" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      <span class="brand__wordmark">zpz</span>
+    </a>
+    <nav class="site-nav">
+      <a href="index.html" class="site-nav__link">Overview</a>
+      <a href="architecture.html" class="site-nav__link is-active">Architecture</a>
+      <a href="usage.html" class="site-nav__link">Usage</a>
+      <a href="rules.html" class="site-nav__link">Rules</a>
+    </nav>
+    <div class="site-header__actions">
+      <a href="https://github.com/eezz4/zpz" target="_blank" rel="noreferrer" aria-label="GitHub" class="icon-btn">
+        <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"></path></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<div class="docs-layout">
+
+  <button type="button" class="docs-nav-toggle" aria-expanded="false" aria-controls="docs-nav">
+    Docs menu
+  </button>
+
+  <aside class="docs-nav" id="docs-nav">
+    <div class="docs-nav__group">
+      <div class="docs-nav__group-label">Docs</div>
+      <a href="index.html" class="docs-nav__link">Overview</a>
+      <a href="architecture.html" class="docs-nav__link is-active">Architecture</a>
+      <a href="usage.html" class="docs-nav__link">Usage</a>
+      <a href="rules.html" class="docs-nav__link">Rules</a>
+    </div>
+  </aside>
+
+  <main class="docs-content">
+    <div class="docs-content-header">
+      <h1>How the engine processes a tree</h1>
+      <p>A short orientation for making sense of an <code>analyze</code>/<code>analyzeTrees</code> report — what each stage does, what languages are understood natively, and how the engine handles what it can't fully parse. For the field-by-field output shape, see the <a href="usage.html">usage guide</a>.</p>
+    </div>
+
+    <section id="pipeline">
+      <span class="eyebrow eyebrow--sm">PIPELINE</span>
+      <h2>From a tree to a report</h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Stage</th><th>What happens</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Walk</td><td>A single-threaded, gitignore-aware walk collects every file under <code>root</code>, honoring committed <code>.gitignore</code> files, and sorts the list — the input order to everything downstream is deterministic.</td></tr>
+            <tr><td>Parse → Common IR → DSL rules (fused, per file)</td><td>Each file is parsed, projected into the language-neutral <code>CommonIr</code>, and every applicable DSL rule pack is evaluated against that file's slice — in one fused pass, in parallel across files. A file's raw parser AST never leaves this step; only IR data and findings cross back out.</td></tr>
+            <tr><td>Whole-tree assembly</td><td>Per-file artifacts are merged into one tree-wide dependency graph and IR. Native whole-graph analyses run here: circular dependencies, dead code, structural scores, health index, and (when multiple trees are analyzed together) the cross-layer join.</td></tr>
+            <tr><td>Envelope</td><td>Findings from both stages are merged and serialized into one deterministic JSON envelope — same input, byte-identical output.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Common IR</h3>
+      <p>Every file — regardless of language — is projected into <code>CommonIr</code> before anything else touches it. This IR, never a raw language AST, is what the output's <code>ir</code> field actually contains:</p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Field</th><th>Holds</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>dep</code></td><td>The import graph — each path to the paths it imports.</td></tr>
+            <tr><td><code>symbols</code></td><td>Function, class, const, type, and interface declarations.</td></tr>
+            <tr><td><code>loc</code></td><td>Physical line count, per file.</td></tr>
+            <tr><td><code>io</code></td><td>HTTP/DB/tRPC provide and consume facts (<code>IoFacts</code>) — the input to the cross-layer join.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>A custom or external parser can feed the exact same shape into the pipeline through the Normalized AST adapter protocol, described in the language support section below — it joins the same fused pass, the same whole-tree assembly, and the same envelope, unchanged.</p>
+    </section>
+
+    <section id="languages">
+      <span class="eyebrow eyebrow--sm">LANGUAGE SUPPORT</span>
+      <h2>Participation doesn't require a native parser</h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Extension(s)</th><th>Structural support</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>.ts .tsx .js .jsx .mjs .cjs .mts .cts</code></td><td>Full: symbols, imports, calls, HTTP routes and egress (via swc).</td></tr>
+            <tr><td><code>.prisma</code></td><td>Schema models and fields — structural, plus usage-aware schema rules.</td></tr>
+            <tr><td><code>.java</code></td><td>Method and class body spans only (lexical, not a full grammar) — enough for <code>method-scan</code> rules.</td></tr>
+            <tr><td>Everything else</td><td>Lexical fallback: line count and <code>line-scan</code> rules only — no symbols, imports, or IO.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Unsupported doesn't mean silently ignored. A lexically-handled file still gets a line count and still runs every <code>line-scan</code> DSL rule against its raw text — it's just missing the symbol/import/IO extraction that a native parser provides, and that gap is a known, self-reported shape (see "Degraded vs. minified" below), not a silent hole.</p>
+      <p>For anything that needs full structural support without an in-tree parser — JSP, Python, or any other language — a hand-written external parser adapter can produce the same Common IR shape directly, via the Normalized AST protocol: a JSON envelope of per-file symbols, imports, and IO facts, validated against the engine's own Rust types and fed through <code>analyzeEnvelope</code>. The engine runs its language-neutral analyses over the projection: the dependency graph, the circular/unreachable/dead-code passes, and the <code>symbol-scan</code>/<code>io-scan</code> DSL rules. Analyses an envelope cannot support are reported honestly rather than stubbed — <code>scores</code>/<code>health</code> need git history and stay <code>null</code> in envelope mode, and the cross-layer join runs only in multi-tree <code>analyzeTrees</code>. A parser is first-class as soon as its projection is accurate, regardless of how crude it is.</p>
+    </section>
+
+    <section id="crates">
+      <span class="eyebrow eyebrow--sm">CRATE STRUCTURE</span>
+      <h2>The kernel owns no rule vocabulary</h2>
+      <p>The workspace splits the engine kernel from every source of rule vocabulary. <code>core</code>/<code>engine</code> know about IR types and a registry — never about what a rule actually checks for. Rules register themselves from their own crates; the kernel only aggregates.</p>
+      <div class="card-grid">
+        <div class="card">
+          <h3><code>packages/core</code>, <code>packages/engine</code></h3>
+          <p>The kernel. IR types and registry only — no rule-vocabulary knowledge. <code>engine</code> orchestrates the pipeline and aggregates registrations from every rule crate.</p>
+        </div>
+        <div class="card">
+          <h3><code>parser/*</code></h3>
+          <p><code>parser-typescript</code> (native, via swc), <code>parser-prisma</code> (schema language), <code>parser-java</code> (lexical) — each projects its language into the Common IR.</p>
+        </div>
+        <div class="card">
+          <h3><code>rules/native/*</code></h3>
+          <p><code>rules-graph</code> (circular dependencies, dead code, cross-layer analyses) and <code>rules-schema</code> (Prisma structure and usage) — whole-graph analyses, statically linked into the engine, registering their own ids.</p>
+        </div>
+        <div class="card">
+          <h3><code>rules/dsl/*</code></h3>
+          <p>One folder per pack, each pairing its JSON rule definitions with co-located tests. Adding a rule means touching a pack folder — never the kernel.</p>
+        </div>
+        <div class="card">
+          <h3><code>packages/napi</code></h3>
+          <p>The Node.js binding. Exposes exactly four functions: <code>analyze</code>, <code>analyzeTrees</code>, <code>analyzeEnvelope</code>, <code>version</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="cross-layer">
+      <span class="eyebrow eyebrow--sm">CROSS-LAYER JOIN</span>
+      <h2>Joining a frontend's fetch to a backend's route</h2>
+      <p>When multiple trees are analyzed together (<code>analyzeTrees</code>), each parser's declared <code>IoFacts.provides</code>/<code>consumes</code> entries are joined across trees on an exact <code>(kind, key)</code> match — for example, a frontend's <code>fetch("/users/:id")</code> joins a backend's registered <code>GET /users/:id</code> route. The join is a plain string match on a normalized key, never AST matching, which is why even a crude external parser adapter can participate as long as its key normalization is correct.</p>
+      <p>Rather than overclaiming a match it can't be sure of, the join result carries six buckets plus a per-edge confidence flag:</p>
+      <div class="card-grid">
+        <div class="card">
+          <h3><code>edges</code></h3>
+          <p>A consume matched to a provide across sources.</p>
+        </div>
+        <div class="card">
+          <h3><code>unconsumedProvides</code></h3>
+          <p>A provide no analyzed source consumes.</p>
+        </div>
+        <div class="card">
+          <h3><code>unprovidedConsumes</code></h3>
+          <p>A consume no analyzed source provides.</p>
+        </div>
+        <div class="card">
+          <h3><code>unresolvedConsumes</code></h3>
+          <p>A consume whose URL/key could not be statically determined.</p>
+        </div>
+        <div class="card">
+          <h3><code>externalConsumes</code></h3>
+          <p>A consume targeting an absolute external host URL — e.g. <code>GET https://vendor.com/api/users</code>. Classified as third-party egress, not joined, and not treated as drift.</p>
+        </div>
+        <div class="card">
+          <h3><code>ambiguousConsumes</code></h3>
+          <p>A consume matching provides in two or more distinct source trees. Not auto-linked — no edge is emitted; every candidate provider is listed so the ambiguity can be resolved by hand.</p>
+        </div>
+        <div class="card">
+          <h3><code>lowConfidenceReason</code></h3>
+          <p>Set on an edge whose key matched a generic path pattern (health checks, <code>/login</code>, and the like) that many unrelated services could share. The edge is still emitted — just flagged as lower confidence than a distinctively-named route.</p>
+        </div>
+      </div>
+      <p>20 <code>cross-layer/*</code> native analyses run on top of this join — matched-edge diagnostics (unconsumed endpoints, method mismatches, version skew, path near-misses, shared database tables, duplicate routes), external-egress checks (shadowed internal routes, secrets in URLs, IP literals, host fan-out, base-URL drift, and more), and a tRPC procedure-coverage check (an unconsumed procedure joined from cross-file router fragments) — cataloged in the <a href="rules.html">rule reference</a>.</p>
+    </section>
+
+    <section id="degraded">
+      <span class="eyebrow eyebrow--sm">DEGRADED VS. MINIFIED</span>
+      <h2>Two different kinds of partial analysis</h2>
+      <p>A file the engine can't fully process falls into one of two distinct, self-reported categories — never a silent skip.</p>
+      <div class="card-grid">
+        <div class="card">
+          <h3>degraded</h3>
+          <p>A file that's too large (over the default 1,500,000-byte / ~1.5MB size cap) or fails to parse. It's still analyzed on a best-effort basis: line count and <code>line-scan</code> DSL rules still run against the raw text, but symbol/import/IO extraction is skipped, so <code>method-scan</code>/<code>symbol-scan</code>/<code>io-scan</code> rules silently find nothing for that file rather than erroring. Listed in the output's <code>degraded</code> array.</p>
+        </div>
+        <div class="card">
+          <h3>minified / generated</h3>
+          <p>A file is classified this way when either holds: any single line is 5,000+ bytes long, or it has a 500+ byte line and lines that long make up at least half the file's bytes — the signature of bundler output and other generated code. Every DSL matcher type is skipped entirely for this file, since a giant physical line offers no reliable scoped context for any of them. Native structural extraction — symbols, imports, IO, the dependency graph, circular/dead-code analyses — is unaffected and proceeds exactly as normal.</p>
+        </div>
+      </div>
+      <p>A hand-written file that happens to contain one long string or comment line among otherwise ordinary lines is not classified as minified — that shape is common enough in real source that it has to keep its rule coverage. When one or more files are classified this way, the output's <code>warnings</code> array gets a single aggregate entry naming the count and a sample of affected paths, never one entry per file.</p>
+    </section>
+
+  </main>
+
+  <aside class="docs-toc">
+    <div class="docs-toc__label">On this page</div>
+    <a href="#pipeline" class="docs-toc__link">Pipeline &amp; Common IR</a>
+    <a href="#languages" class="docs-toc__link">Language support</a>
+    <a href="#crates" class="docs-toc__link">Crate structure</a>
+    <a href="#cross-layer" class="docs-toc__link">Cross-layer join</a>
+    <a href="#degraded" class="docs-toc__link">Degraded vs. minified</a>
+  </aside>
+
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <span class="site-footer__brand">zpz</span>
+    <span>— Zero Pain Zone · MIT License · © 2026</span>
+    <a href="https://github.com/eezz4/zpz" target="_blank" rel="noreferrer" class="site-footer__gh">GitHub</a>
+  </div>
+</footer>
+
+<script src="assets/docs.js"></script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+{
+  "id": "http",
+  "framework": "any",
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "read-model-path",
+      "severity": "info",
+      "message": "GET route registered via apiRoutes.get(...) with no cache-strategy marker (// cache: <strategy>, // no-cache: <reason>, or // read-model-ok: <reason>) on the same line — make the caching decision explicit for read-heavy endpoints. Hono-specific: assumes the default router identifier \"apiRoutes\", and only scans files that look like route/handler/controller files. `// read-model-ok:` is recognized on the same line or up to 3 lines above; `// cache:`/`// no-cache:` are only recognized on the same line. Cross-file handler-body inspection is out of scope (this check is per-file). Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule).",
+      "suppress_marker": "read-model-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?:^|/)api/|/routes/|/controllers/|[Hh]andler\\.ts$|[Cc]ontroller\\.ts$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "apiRoutes\\.get\\(",
+        "skip_comment_lines": true,
+        "line_pattern": "apiRoutes\\.get\\(",
+        "exclude_pattern": "//\\s*(?:cache:|no-cache:|read-model-ok:)",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "auth-gates",
+      "severity": "warning",
+      "message": "Route registered under a protected path segment (/admin/, /internal/, /dev/) whose handler identifier carries none of the admin/role/guard/protect/env-gate keywords — possible missing auth gate; add a role/admin check in the handler (or rename it so the guard is visible in a grep). Checked on the apiRoutes.<method>(\"<path>\", <handler>) registration line: the path segment must appear before the call's first comma, and the handler-keyword check only looks at text after that comma. Name-based heuristic, not proof of an actual guard: `isLocal`/`isDev`/`isProduction`/`NODE_ENV` count as a recognized environment gate even though this rule never verifies the named check actually runs before the handler. Cross-file handler-body inspection (reading the handler's defining file for a role-check pattern) is out of scope — this check is per-line. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// auth-gate-ok`.",
+      "suppress_marker": "auth-gate-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?:^|/)api/|/routes/|/controllers/|[Hh]andler\\.ts$|[Cc]ontroller\\.ts$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "apiRoutes\\.(?:get|post|put|patch|delete)\\(",
+        "skip_comment_lines": true,
+        "line_pattern": "apiRoutes\\.(?:get|post|put|patch|delete)\\(\\s*[\"'`][^\"'`]*/(?:admin|internal|dev)(?:/|[\"'`])",
+        "exclude_pattern": "(?i),[^,]*(?:admin|role|guard|protect|isLocal|isDev|isProduction|NODE_ENV)",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "route-exposure",
+      "severity": "warning",
+      "message": "Route registered under a dev/debug/internal/test/playground path segment whose handler identifier carries none of the guard-hint keywords (dev/debug/internal/env/guard/isProduction/isLocal/NODE_ENV) — dev/debug tooling risks leaking to production; gate it behind an env check or rename the handler so the guard is visible. Uses the same comma-anchored per-line check as auth-gates in this pack: the path segment must appear before the call's first comma, and the guard-hint check only looks at text after that comma. A wider env-guard check spanning several lines around the route call (e.g. an `if (process.env.APP_ENV !== \"production\")` wrapping the call, or a `requireDev` middleware registered nearby) is out of scope — this check only looks at the registration line itself. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// route-exposure-ok`.",
+      "suppress_marker": "route-exposure-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?:^|/)api/|/routes/|/controllers/|[Hh]andler\\.ts$|[Cc]ontroller\\.ts$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "apiRoutes\\.(?:get|post|put|patch|delete)\\(",
+        "skip_comment_lines": true,
+        "line_pattern": "apiRoutes\\.(?:get|post|put|patch|delete)\\(\\s*[\"'`][^\"'`]*/(?:dev|debug|internal|__test__|playground)(?:/|[\"'`])",
+        "exclude_pattern": "(?i),[^,]*(?:dev|debug|internal|env|guard|isProduction|isLocal|NODE_ENV)",
+        "snippet_max": 160
+      }
+    }
+  ]
+}

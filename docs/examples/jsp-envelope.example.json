@@ -1,0 +1,54 @@
+{
+  "format": "zpz-normalized-ast",
+  "version": 1,
+  "parser": "jsp-lexical/1",
+  "source": "legacy-webapp",
+  "files": [
+    {
+      "path": "webapp/legacy/user.jsp",
+      "loc": 86,
+      "symbols": [
+        {
+          "id": "webapp/legacy/user.jsp#getUser",
+          "file": "webapp/legacy/user.jsp",
+          "name": "getUser",
+          "kind": "function",
+          "line": 12,
+          "exported": true
+        },
+        {
+          "id": "webapp/legacy/user.jsp#renderProfile",
+          "file": "webapp/legacy/user.jsp",
+          "name": "renderProfile",
+          "kind": "function",
+          "line": 34,
+          "exported": false
+        }
+      ],
+      "imports": {},
+      "re_exports": [],
+      "used_names": ["getUser", "renderProfile", "session", "request"],
+      "io": {
+        "provides": [
+          {
+            "kind": "http",
+            "key": "GET /legacy/user.jsp",
+            "file": "webapp/legacy/user.jsp",
+            "line": 12,
+            "symbol": "getUser"
+          }
+        ],
+        "consumes": [
+          {
+            "kind": "db-table",
+            "key": "table:users",
+            "file": "webapp/legacy/user.jsp",
+            "line": 18,
+            "raw": null
+          }
+        ]
+      },
+      "degraded": false
+    }
+  ]
+}

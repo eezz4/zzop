@@ -1,0 +1,27 @@
+{
+  "name": "@zpz/native",
+  "version": "0.0.0",
+  "license": "MIT",
+  "private": true,
+  "description": "zpz N-API binding (single Node<->Rust boundary) — see src/lib.rs for the addon-feature build.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "*.node",
+    "rules/"
+  ],
+  "scripts": {
+    "smoke": "node smoke.mjs",
+    "sync-versions": "node scripts/sync-versions.mjs",
+    "prepack": "node scripts/copy-rules.mjs"
+  },
+  "optionalDependencies": {
+    "@zpz/native-win32-x64-msvc": "0.0.0",
+    "@zpz/native-darwin-x64": "0.0.0",
+    "@zpz/native-darwin-arm64": "0.0.0",
+    "@zpz/native-linux-x64-gnu": "0.0.0",
+    "@zpz/native-linux-arm64-gnu": "0.0.0"
+  }
+}

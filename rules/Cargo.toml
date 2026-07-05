@@ -1,0 +1,66 @@
+[package]
+name = "zpz-rule-packs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# This crate has no library code of its own (see src/lib.rs) — it exists to give each DSL rule pack's
+# co-located `dsl/<pack>/<pack>.rs` a `[[test]]` target, so `cargo test --workspace` exercises every pack
+# end-to-end from right next to the pack's own JSON. One `[[test]]` entry per pack folder that ships rules
+# (stub packs with 0 rules — see rules/README.md's "Stub packs" — have no <pack>.rs yet and no entry here).
+#
+# `rule_contracts.rs` (packages/engine/tests/rule_contracts.rs) machine-checks that this list stays in
+# sync with rules/dsl/*/<pack>.rs on disk — a pack that ships rules but has no [[test]] entry here (or vice
+# versa) fails that contract test.
+
+[dependencies]
+
+[dev-dependencies]
+zpz-core = { path = "../packages/core" }
+zpz-engine = { path = "../packages/engine" }
+serde_json = { workspace = true }
+
+[[test]]
+name = "pack_be_db"
+path = "dsl/be-db/be-db.rs"
+
+[[test]]
+name = "pack_be_reliability"
+path = "dsl/be-reliability/be-reliability.rs"
+
+[[test]]
+name = "pack_be_security"
+path = "dsl/be-security/be-security.rs"
+
+[[test]]
+name = "pack_browser"
+path = "dsl/browser/browser.rs"
+
+[[test]]
+name = "pack_fullstack"
+path = "dsl/fullstack/fullstack.rs"
+
+[[test]]
+name = "pack_http"
+path = "dsl/http/http.rs"
+
+[[test]]
+name = "pack_java_security"
+path = "dsl/java-security/java-security.rs"
+
+[[test]]
+name = "pack_perf"
+path = "dsl/perf/perf.rs"
+
+[[test]]
+name = "pack_security"
+path = "dsl/security/security.rs"
+
+[[test]]
+name = "pack_sql"
+path = "dsl/sql/sql.rs"
+
+[[test]]
+name = "pack_typescript"
+path = "dsl/typescript/typescript.rs"

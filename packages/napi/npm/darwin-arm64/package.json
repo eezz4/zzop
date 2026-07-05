@@ -1,0 +1,17 @@
+{
+  "name": "@zpz/native-darwin-arm64",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Prebuilt zpz-napi native addon for darwin/arm64.",
+  "main": "zpz-napi.node",
+  "files": [
+    "zpz-napi.node"
+  ],
+  "license": "MIT",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ]
+}

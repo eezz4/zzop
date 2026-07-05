@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>zpz — Overview</title>
+<meta name="description" content="zpz — a multi-language SAST and architecture analysis engine, written in Rust.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a href="index.html" class="brand">
+      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#1e222b"></rect><path d="M9 16.5 13.5 21 23 10.5" fill="none" stroke="#34d399" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      <span class="brand__wordmark">zpz</span>
+    </a>
+    <nav class="site-nav">
+      <a href="index.html" class="site-nav__link is-active">Overview</a>
+      <a href="architecture.html" class="site-nav__link">Architecture</a>
+      <a href="usage.html" class="site-nav__link">Usage</a>
+      <a href="rules.html" class="site-nav__link">Rules</a>
+    </nav>
+    <div class="site-header__actions">
+      <a href="https://github.com/eezz4/zpz" target="_blank" rel="noreferrer" aria-label="GitHub" class="icon-btn">
+        <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"></path></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <section class="hero">
+    <div class="hero__text">
+      <span class="eyebrow">ZERO PAIN ZONE</span>
+      <h1 class="hero__title">zpz</h1>
+      <p class="hero__lead">Built for the AI-agent era: a context window can't hold your codebase, so zpz condenses it — or several codebases at once — into one deterministic JSON map of security findings, structural debt, and cross-layer drift. A multi-language SAST and architecture analysis engine, written in Rust.</p>
+      <div class="btn-row">
+        <a href="usage.html" class="btn btn--primary">Get started</a>
+        <a href="rules.html" class="btn btn--outline-accent">Rule catalog</a>
+      </div>
+    </div>
+    <div class="hero__code">
+      <div class="code-panel">
+        <div class="code-panel__tab">Zero-config example</div>
+        <pre class="code-block"><code>import zpz from '@zpz/native';
+
+const report = JSON.parse(
+  zpz.analyze(JSON.stringify({ root: '.' }))  // zero config = full analysis
+);</code></pre>
+      </div>
+      <div class="code-panel">
+        <div class="code-panel__tab">Result (abridged)</div>
+        <pre class="code-block"><code>{
+  "findings":           [ /* DSL rules + native analyses */ ],
+  "crossLayerFindings": [ /* frontend fetch &lt;-&gt; backend route joins */ ],
+  "scores":             { /* structural subscores, 0-100 */ },
+  "health":             { "index": 78 },
+  "recommendations":    [ /* refactor-first candidates, ROI-ordered */ ],
+  "warnings":           [ /* anything this run could not provide */ ]
+}</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--alt">
+    <div class="section__inner">
+      <span class="eyebrow">WHY ZPZ</span>
+      <h2 class="section-title">Why zpz</h2>
+      <p class="prose-block">An agent working in a large repository cannot read every file — the context window is its scarcest resource. zpz condenses the whole codebase into one compact, machine-readable report: what is risky, what is dead, what drifted between frontend and backend, and where to refactor first. Agents and humans alike start from the map, not the territory.</p>
+      <p class="prose-block">That is also where it parts ways with traditional static analyzers. A classic linter or SAST tool hands you a flat list of findings and stops; zpz is built to give direction — every finding carries its fix and its exclude config, structural results are ranked by refactor ROI, and cross-repo joins turn "two codebases quietly disagree" into a first-class, actionable finding.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section__inner section__inner--wide">
+      <span class="eyebrow">WHAT IT DOES</span>
+      <h2 class="section-title">One engine, three lenses</h2>
+      <div class="card-grid">
+        <div class="card">
+          <h3>Security (SAST)</h3>
+          <p>SQL injection, weak hashing, SSRF, hardcoded secrets — DSL rules plus native analyses catch vulnerable patterns across languages.</p>
+        </div>
+        <div class="card">
+          <h3>Structure</h3>
+          <p>Circular dependencies, dead code, risk scores, extraction seams — structural debt, quantified per file and per repository.</p>
+        </div>
+        <div class="card">
+          <h3>Cross-layer</h3>
+          <p>Frontend calls joined to backend routes: unconsumed endpoints, method mismatches, version skew, path drift — even across repositories.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--alt">
+    <div class="section__inner section__inner--wide">
+      <span class="eyebrow">WHAT MAKES IT DIFFERENT</span>
+      <h2 class="section-title">What makes it different</h2>
+      <div class="card-grid">
+        <div class="card">
+          <h3>Cross-layer, cross-repo</h3>
+          <p><code>analyzeTrees</code> accepts multiple roots and joins them: one repo's frontend fetches against another repo's backend routes. Drift between layers becomes a finding, not a production incident.</p>
+        </div>
+        <div class="card">
+          <h3>Customizable in any environment</h3>
+          <p>Rules are data, not engine code. Write your own packs in a JSON DSL, extend or override the bundled ones with <code>packsDir</code>, and feed languages the engine does not parse natively through the Normalized AST adapter protocol.</p>
+        </div>
+        <div class="card">
+          <h3>Deterministic, honest output</h3>
+          <p>Same input, byte-identical output — no timestamps, no unstable ordering. A capability a run cannot provide is absent and self-reported in <code>warnings</code>, never stubbed. An empty array always means analyzed, found nothing.</p>
+        </div>
+        <div class="card">
+          <h3>Zero config, actionable findings</h3>
+          <p><code>{ root: "." }</code> is the entire required configuration. Every finding reports three things: the problem, the fix, and the exact exclude config to suppress it deliberately.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="cta-band">
+    <div class="cta-band__inner">
+      <div>
+        <p class="cta-band__title">Ready to run it?</p>
+        <p class="cta-band__lead">Zero config to start, full config reference when you need it.</p>
+      </div>
+      <div class="btn-row">
+        <a href="usage.html" class="btn btn--primary">Read the usage guide</a>
+        <a href="https://github.com/eezz4/zpz" target="_blank" rel="noreferrer" class="btn btn--outline">GitHub</a>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <span class="site-footer__brand">zpz</span>
+    <span>— Zero Pain Zone · MIT License · © 2026</span>
+    <a href="https://github.com/eezz4/zpz" target="_blank" rel="noreferrer" class="site-footer__gh">GitHub</a>
+  </div>
+</footer>
+
+<script src="assets/docs.js"></script>
+</body>
+</html>

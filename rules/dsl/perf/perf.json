@@ -1,0 +1,38 @@
+{
+  "id": "perf",
+  "framework": "any",
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "api-in-loop",
+      "severity": "warning",
+      "message": "Network call made inside a loop (for/for-of/for-in/while/do, or an Array forEach/map/filter/reduce callback) — fires one request per iteration, the HTTP analogue of N+1 (rate-limit / serial-latency risk). Batch via a bulk endpoint, or gather inputs and issue one request (or a bounded Promise.all). Comment lines are skipped via `skip_comment_lines`, so a JSDoc comment merely documenting a network-call regex/example does not fire. The loop-token pattern is anchored to actual loop/iteration syntax (`for (`, `for await`, `while (`, `do {`, `.forEach(`/`.map(`/`.filter(`/`.reduce(`), not a bare `\\bfor\\b`/`\\bdo\\b` word match — an earlier version matched loop keywords inside ordinary prose string literals (e.g. `\"logged in to do this\"` matched `\\bdo\\b`) and inside template-literal text like `` `waiting for ${x}` ``. A loop body that also contains `retry`/`retries`/`backoff`/`attempt` is vetoed outright (a bounded retry loop around one call is the recommended remedy already applied, not the N+1 this rule targets). Test/e2e/fixture paths are excluded outright (deployed-surface rule — a test harness deliberately hitting a mock endpoint in a loop is not a production rate-limit risk). Precision limit: method-scan only proves a loop-shaped construct and a network call both occur somewhere in the same function body, not that the call is nested inside the loop's own block — an unrelated `.map()` transform elsewhere in the same function, before or after the loop, still co-occurs and counts. Suppress with `// api-in-loop-ok:` on the call's own line or the line directly above — the marker must sit immediately above the call.",
+      "suppress_marker": "api-in-loop-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "(?i)\\b(?:fetch|axios|got|ky|superagent|undici|wretch|ofetch|httpclient|httpservice|apiclient|fetcher|xhr|http|https|client|api|conn|session|agent|http2|net)\\b",
+        "skip_comment_lines": true,
+        "patterns": [
+          {
+            "pattern": "(?i)\\bfor\\s*(?:\\(|await\\b)|\\bwhile\\s*\\(|\\bdo\\s*\\{|\\.(?:forEach|map|filter|reduce)\\s*\\(",
+            "label": "loop"
+          },
+          {
+            "pattern": "(?i)\\b(?:fetch|\\$fetch|ofetch|got|ky|superagent|undici|wretch|axios)\\s*\\(|\\b(?:axios|http|https|httpClient|httpService|apiClient|api|client|fetcher|xhr|conn|session|agent|http2|net)\\.(?:get|post|put|patch|delete|head|options|request|fetch|send|query)\\s*\\(",
+            "label": "network"
+          }
+        ],
+        "trigger": "network",
+        "absent": [
+          {
+            "pattern": "(?i)\\bretr(?:y|ies)\\b|\\bbackoff\\b|\\battempts?\\b",
+            "label": "retry-guard"
+          }
+        ],
+        "snippet_max": 160
+      }
+    }
+  ]
+}

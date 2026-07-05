@@ -1,0 +1,10 @@
+[package]
+name = "zpz-parser-typescript"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+swc_core = { version = "71.0.5", features = ["ecma_parser", "ecma_ast", "ecma_visit", "common"] }
+zpz-core = { version = "0.0.0", path = "../../packages/core" }
+regex = { workspace = true }

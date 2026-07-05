@@ -1,0 +1,35 @@
+[package]
+name = "zpz-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+zpz-core = { path = "../core" }
+zpz-metrics = { path = "../metrics" }
+zpz-git = { path = "../git" }
+zpz-cache = { path = "../cache" }
+zpz-parser-typescript = { path = "../../parser/parser-typescript" }
+zpz-parser-prisma = { path = "../../parser/parser-prisma" }
+zpz-parser-java = { path = "../../parser/parser-java" }
+zpz-rules-graph = { path = "../../rules/native/rules-graph" }
+zpz-rules-schema = { path = "../../rules/native/rules-schema" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+regex = { workspace = true }
+rayon = { workspace = true }
+# Pinned exact version (not a caret range): the walker's determinism contract (see `pipeline.rs::walk_files`)
+# requires byte-identical output across machines/clones, so an unpinned transitive gitignore-matching-semantics
+# change must never silently reach this crate via a routine `cargo update`.
+ignore = "=0.4.27"
+
+# `ignore`'s Windows-only transitive dep (winapi-util) is unpinned by `ignore` itself (accepts any 0.1.x),
+# and its newest 0.1.x releases in turn accept `windows-sys` up to 0.61 — which links via a raw-dylib import
+# stub built by an external `dlltool`, a real GNU-binutils tool this toolchain's `stable-x86_64-pc-windows-gnu`
+# does not ship (only a partial "linker-only" self-contained subset with no `dlltool`/`as`). Pinning
+# `winapi-util` to the last release whose OWN Cargo.toml caps `windows-sys` at "^0.52.0" (a version that
+# ships a prebuilt `windows_x86_64_gnu` import-lib crate — no `dlltool` involved) sidesteps the missing-tool
+# gap entirely, with no functional difference (`ignore` only uses winapi-util's small stat/hardlink helpers).
+[target.'cfg(windows)'.dependencies]
+winapi-util = "=0.1.7"

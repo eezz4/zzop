@@ -1,0 +1,38 @@
+{
+  "id": "browser",
+  "framework": "any",
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "no-system-dialogs",
+      "severity": "warning",
+      "message": "Blocking system dialog (alert/confirm/prompt) — blocks the main thread, can't be styled/tested, and is a poor UX. Use a non-blocking in-app modal/toast/confirm component instead. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// browser-ok:`. Interface/type-literal method signatures (`prompt(input: string): Promise<...>;`) are excluded — those aren't calls and would otherwise false-positive.",
+      "suppress_marker": "browser-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "\\b(?:alert|confirm|prompt)\\s*\\(",
+        "skip_comment_lines": true,
+        "line_pattern": "(?:^|[^.\\w])(?:alert|confirm|prompt)\\s*\\(|\\b(?:window|globalThis|self)\\.(?:alert|confirm|prompt)\\s*\\(",
+        "exclude_pattern": "^\\s*(?:readonly\\s+)?[\\w$]+\\s*\\([^)]*\\)\\s*:[^{]*$",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "no-document-write",
+      "severity": "warning",
+      "message": "document.write/writeln breaks HTML parsing once the document has loaded (and is blocked under many CSP/PWA setups) and can clobber the page — build DOM nodes (or set textContent) instead. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// document-write-ok:`. Receiver-aware: only the bare global `document` fires — `win.document.write(...)` on a popup handle is deliberately skipped.",
+      "suppress_marker": "document-write-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "\\bdocument\\.(?:write|writeln)\\s*\\(",
+        "skip_comment_lines": true,
+        "line_pattern": "(?:^|[^.\\w$])document\\.(?:write|writeln)\\s*\\(",
+        "snippet_max": 160
+      }
+    }
+  ]
+}

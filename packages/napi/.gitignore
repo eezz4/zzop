@@ -1,0 +1,10 @@
+# Built Node addon (napi convention: `.node` extension). Built per-platform by
+# `cargo +stable-x86_64-pc-windows-msvc build -p zpz-napi --release --features addon` (see src/lib.rs);
+# prebuild packaging (optionalDependencies matrix) is a later phase — see docs/modules/napi.md's
+# "Packaging layout" section.
+*.node
+
+# DSL rule packs copied from <repo root>/rules/dsl/ by the `prepack` script
+# (scripts/copy-rules.mjs) so they ship in the published npm package. Build artifact — not
+# checked in.
+rules/
