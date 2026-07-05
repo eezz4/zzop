@@ -554,9 +554,10 @@ fn parse_typescript(
         let symbols = zzop_parser_typescript::parse_symbols(rel, text);
         let imports = zzop_parser_typescript::parse_imports(rel, text);
         let loc = zzop_parser_typescript::count_loc(text);
-        let used_names: Vec<String> = zzop_parser_typescript::parse_local_identifier_refs(rel, text)
-            .into_iter()
-            .collect();
+        let used_names: Vec<String> =
+            zzop_parser_typescript::parse_local_identifier_refs(rel, text)
+                .into_iter()
+                .collect();
         (symbols, imports, loc, used_names)
     });
     match result {
@@ -696,7 +697,10 @@ fn schema_findings(
 /// Scope asymmetry (intentional): `prisma_rels` honors the engine's dispatch/skip config, but the
 /// three usage collectors walk `root/src` themselves with only their own skips — an engine-excluded
 /// source file still contributes identifier counts and store bindings.
-pub(crate) fn schema_usage_findings(root: &Path, prisma_rels: &[String]) -> Vec<zzop_core::Finding> {
+pub(crate) fn schema_usage_findings(
+    root: &Path,
+    prisma_rels: &[String],
+) -> Vec<zzop_core::Finding> {
     if prisma_rels.is_empty() {
         return Vec::new();
     }
