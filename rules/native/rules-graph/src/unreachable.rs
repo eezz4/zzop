@@ -112,6 +112,24 @@ pub(crate) fn is_tool_entry_file(path: &str) -> bool {
     tool_entry_patterns().iter().any(|re| re.is_match(path))
 }
 
+/// Next.js App Router convention files — `app/**/{page,layout,route,error,not-found,…}.tsx` plus the
+/// metadata routes (`sitemap`/`robots`/`manifest`/`opengraph-image`/…). The framework loads these by
+/// filename, never through an import, so zero in-repo importers is expected — not a dead signal. Shared
+/// here so `dead_candidates` and `dead_exports` reference ONE convention set and cannot drift (they did:
+/// `dead_exports` carried this set while `dead_candidates` was missing it entirely).
+pub(crate) fn framework_route_patterns() -> &'static [Regex] {
+    static R: OnceLock<Vec<Regex>> = OnceLock::new();
+    R.get_or_init(|| {
+        [
+            r"(^|/)(page|layout|loading|error|global-error|not-found|template|default|route)\.(ts|tsx)$",
+            r"(^|/)(sitemap|robots|manifest|opengraph-image|twitter-image|icon|apple-icon)\.(ts|tsx)$",
+        ]
+        .iter()
+        .map(|p| Regex::new(p).unwrap())
+        .collect()
+    })
+}
+
 fn tool_entry_patterns() -> &'static [Regex] {
     static R: OnceLock<Vec<Regex>> = OnceLock::new();
     R.get_or_init(|| {

@@ -43,8 +43,9 @@ zzop           # analyzes using that config and prints a report
 | `--config <path>` | Config file to load (default `./zzop.config.jsonc`). |
 | `--format <pretty\|json>` | Output format, overriding the config's `format`. |
 | `--json` | Alias for `--format json`. |
+| `-a, --all` | Expand info-level findings. By default they are folded to a per-rule count so warnings/errors stay visible. |
 | `-h, --help` | Show help. |
-| `-v, --version` | Show the CLI and engine versions. |
+| `--version` | Show the CLI and engine versions. |
 
 ### Exit codes
 
@@ -84,9 +85,12 @@ annotated copy; the reference below summarizes each option.
     "no-explicit-any": "off",
     // "info" | "warn" | "critical" -> override severity
     "n-plus-one": "warn",
-    // object form -> override severity AND drop findings whose file path
-    // contains any listed substring
-    "toctou": { "severity": "warn", "exclude": ["legacy/"] }
+    // object form -> override severity AND drop findings by file path.
+    // Each `exclude` entry is a plain substring, OR a glob if it contains
+    // `*`/`?`/`{}` (full-path: `*`/`?` stay within a segment, `**` spans `/`,
+    // `{a,b}` alternates). `[...]` stays literal so raw `app/[id]/` paths work.
+    "toctou": { "severity": "warn", "exclude": ["legacy/"] },
+    "dead-candidates": { "exclude": ["**/app/**/{page,layout,route}.tsx"] }
   },
 
   // Enables git-history-derived signals. Omit to use engine defaults.

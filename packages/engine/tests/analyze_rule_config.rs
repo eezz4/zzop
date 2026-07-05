@@ -117,6 +117,7 @@ fn suppressions_drop_a_finding_through_analyze_tree() {
             suppressions: vec![Suppression {
                 rule: "circular".to_string(),
                 path: None,
+                glob: None,
             }],
             ..RuleConfig::default()
         },

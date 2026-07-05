@@ -10,8 +10,10 @@
 //! intentionally NOT implemented here: this crate has no such notion yet (that lives with whatever loads
 //! user config into `RuleConfig` — out of this module's scope).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Mutex, OnceLock};
 
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::{finding::Finding, ir::CommonIr, Severity};
@@ -92,17 +94,24 @@ impl RuleRegistry {
 // Config-driven gating
 // ---------------------------------------------------------------------------------------------
 
-/// One accepted-finding entry. `path` is a plain substring, not a glob — see `is_suppressed`.
+/// One accepted-finding entry. Two mutually-exclusive path filters: `path` (plain substring) and `glob`
+/// (a shell-style glob) — see `is_suppressed` for precedence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Suppression {
     /// The finding's stable rule id (a DSL pack rule id `"<pack>/<rule>"`, a native analysis id, or a JS
     /// quick-rule id) — matched for exact equality.
     pub rule: String,
     /// Optional path filter. Absent = suppress `rule` everywhere; present = suppress only findings whose
-    /// file contains this string (case-sensitive substring containment, no glob engine — the plain-substring
-    /// match is intentional/deterministic, not a shortcut).
+    /// file contains this string (case-sensitive substring containment). Kept alongside `glob` because a
+    /// bare fragment like `legacy/` is the common case and needs no glob semantics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    /// Optional glob filter (e.g. `**/app/**/{page,layout}.tsx`). Present = suppress only findings whose
+    /// file matches the glob (full-path anchored: `*`/`?` stay within a path segment, `**` spans `/`,
+    /// `{a,b}` alternates). Takes precedence over `path` when both are set. An unparseable glob matches
+    /// nothing (fails safe — the finding is NOT suppressed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glob: Option<String>,
 }
 
 /// The one user-facing config shape every rule layer (native / DSL / JS) and every native analysis is
@@ -124,18 +133,96 @@ pub struct RuleConfig {
 }
 
 /// True if a finding for `rule` (optionally in `file`) is suppressed by `config.suppressions`: an entry
-/// matches when its `rule` equals `rule` AND (the entry has no `path`, OR `file` is present and contains
-/// the entry's `path`). Multiple entries for the same rule are OR-ed.
+/// matches when its `rule` equals `rule` AND its path filter matches. Filter precedence: `glob` (if set)
+/// is matched against the full `file` path; else `path` (if set) is a substring check; else the entry has
+/// no path filter and matches every file. A path/glob-qualified entry never matches a fileless finding.
+/// Multiple entries for the same rule are OR-ed.
 pub fn is_suppressed(config: &RuleConfig, rule: &str, file: Option<&str>) -> bool {
     config.suppressions.iter().any(|entry| {
         if entry.rule != rule {
             return false;
+        }
+        if let Some(glob) = &entry.glob {
+            return file.is_some_and(|f| glob_matches(glob, f));
         }
         match &entry.path {
             None => true,
             Some(path) => file.is_some_and(|f| f.contains(path.as_str())),
         }
     })
+}
+
+/// Whether `file` matches shell-style `glob` (full-path anchored). Compiled globs are memoized — a config
+/// has a handful of distinct patterns but `is_suppressed` runs per finding, so recompiling per call would
+/// be wasteful. An unparseable pattern is cached as `None` and matches nothing.
+///
+/// The cache is process-lifetime and never evicted. That's bounded for a one-shot CLI/`analyze` call (a
+/// config carries only a few globs); a long-lived addon host that analyzes many distinct configs over its
+/// lifetime would accumulate distinct glob keys without bound — swap in an LRU/per-call cache if that ever
+/// becomes a real embedding.
+fn glob_matches(glob: &str, file: &str) -> bool {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<Regex>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
+    let compiled = map
+        .entry(glob.to_string())
+        .or_insert_with(|| Regex::new(&glob_to_regex(glob)).ok());
+    compiled.as_ref().is_some_and(|re| re.is_match(file))
+}
+
+/// Translate a shell-style path glob to an anchored regex source. `**` spans `/` (a `**/` or `/**`
+/// boundary also matches zero directories); `*` and `?` stay within a single path segment; `{a,b}`
+/// alternates (nesting not supported); every other character is matched literally.
+fn glob_to_regex(glob: &str) -> String {
+    let bytes = glob.as_bytes();
+    let mut re = String::from("^");
+    let mut brace_depth: u32 = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'*' => {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                    // `**` — spans path separators.
+                    i += 1;
+                    if bytes.get(i + 1) == Some(&b'/') {
+                        // `**/` — also match zero leading directories.
+                        re.push_str("(?:.*/)?");
+                        i += 1;
+                    } else if re.ends_with('/') {
+                        // `/**` at end — also match zero trailing directories.
+                        re.truncate(re.len() - 1);
+                        re.push_str("(?:/.*)?");
+                    } else {
+                        re.push_str(".*");
+                    }
+                } else {
+                    // `*` — within a single segment.
+                    re.push_str("[^/]*");
+                }
+            }
+            b'?' => re.push_str("[^/]"),
+            b'{' => {
+                brace_depth += 1;
+                re.push_str("(?:");
+            }
+            b'}' => {
+                brace_depth = brace_depth.saturating_sub(1);
+                re.push(')');
+            }
+            b',' if brace_depth > 0 => re.push('|'),
+            // Escape every regex metacharacter so the remaining glob text is matched literally.
+            c => {
+                let ch = c as char;
+                if "\\.+()|[]^$".contains(ch) {
+                    re.push('\\');
+                }
+                re.push(ch);
+            }
+        }
+        i += 1;
+    }
+    re.push('$');
+    re
 }
 
 /// True if `rule_id` is NOT in `config.disabled_rules` — exact string match, no prefix/glob semantics (see
@@ -265,6 +352,15 @@ mod tests {
         Suppression {
             rule: rule.to_string(),
             path: path.map(str::to_string),
+            glob: None,
+        }
+    }
+
+    fn suppress_glob(rule: &str, glob: &str) -> Suppression {
+        Suppression {
+            rule: rule.to_string(),
+            path: None,
+            glob: Some(glob.to_string()),
         }
     }
 
@@ -303,6 +399,74 @@ mod tests {
         assert!(!is_suppressed(&config, "nplus1", Some("src/fresh/new.ts")));
         // path-qualified entry cannot match a fileless finding
         assert!(!is_suppressed(&config, "nplus1", None));
+    }
+
+    #[test]
+    fn glob_suppression_matches_full_path_with_brace_and_double_star() {
+        // The review's motivating case: exempt Next.js app-router convention files anywhere under `app/`.
+        let config = RuleConfig {
+            suppressions: vec![suppress_glob(
+                "dead-candidates",
+                "**/app/**/{page,layout}.tsx",
+            )],
+            ..Default::default()
+        };
+        assert!(is_suppressed(
+            &config,
+            "dead-candidates",
+            Some("web/app/(lang)/[lang]/page.tsx")
+        ));
+        assert!(is_suppressed(
+            &config,
+            "dead-candidates",
+            Some("app/dashboard/layout.tsx")
+        ));
+        // A real dead file that is NOT an app-router convention file still fires.
+        assert!(!is_suppressed(
+            &config,
+            "dead-candidates",
+            Some("app/dashboard/helper.tsx")
+        ));
+        // `**` spans separators, so a nested app-router file still matches.
+        assert!(is_suppressed(
+            &config,
+            "dead-candidates",
+            Some("app/x/page.tsx")
+        ));
+        // `*` does NOT cross a path segment: a bare filename glob must not match a nested path.
+        let single = RuleConfig {
+            suppressions: vec![suppress_glob("dead-candidates", "*.tsx")],
+            ..Default::default()
+        };
+        assert!(is_suppressed(&single, "dead-candidates", Some("page.tsx")));
+        assert!(!is_suppressed(
+            &single,
+            "dead-candidates",
+            Some("app/page.tsx")
+        ));
+    }
+
+    #[test]
+    fn invalid_glob_suppresses_nothing() {
+        // An unbalanced brace produces an invalid regex; it must fail safe (match nothing), not panic.
+        let config = RuleConfig {
+            suppressions: vec![suppress_glob("dead-candidates", "**/app/{page")],
+            ..Default::default()
+        };
+        assert!(!is_suppressed(
+            &config,
+            "dead-candidates",
+            Some("app/page.tsx")
+        ));
+    }
+
+    #[test]
+    fn glob_takes_precedence_over_path_and_never_matches_a_fileless_finding() {
+        let config = RuleConfig {
+            suppressions: vec![suppress_glob("circular", "**/*.tsx")],
+            ..Default::default()
+        };
+        assert!(!is_suppressed(&config, "circular", None));
     }
 
     #[test]

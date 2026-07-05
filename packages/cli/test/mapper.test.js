@@ -110,6 +110,25 @@ test('rule object severity + exclude -> severityOverrides + suppressions', () =>
   ]);
 });
 
+test('exclude routes glob patterns to `glob` and plain fragments to `path`', () => {
+  const { request } = configToRequest({
+    roots: ['.'],
+    rules: {
+      'dead-candidates': {
+        exclude: ['legacy/', '**/app/**/{page,layout}.tsx', 'src/app/[locale]/'],
+      },
+    },
+  });
+  assert.deepEqual(request.suppressions, [
+    // plain fragment -> substring path
+    { rule: 'dead-candidates', path: 'legacy/' },
+    // glob metachars -> full-path glob
+    { rule: 'dead-candidates', glob: '**/app/**/{page,layout}.tsx' },
+    // `[...]` is NOT a glob metachar here, so a raw dynamic-segment path stays a substring
+    { rule: 'dead-candidates', path: 'src/app/[locale]/' },
+  ]);
+});
+
 test('rule object severity "off" -> disabledRules, not severityOverrides', () => {
   const { request } = configToRequest({ roots: ['.'], rules: { toctou: { severity: 'off' } } });
   assert.deepEqual(request.disabledRules, ['toctou']);

@@ -26,9 +26,11 @@ export interface AnalyzeConfig {
   disabledRules?: string[];
   /** Per-rule severity remap: rule id -> `"critical"` | `"warning"` | `"info"`. Default: no remaps. */
   severityOverrides?: Record<string, "critical" | "warning" | "info">;
-  /** Finding-level accept-list: each `{rule, path?}` drops findings for that rule (globally, or only in
-   * files whose path contains `path` as a plain substring). Default: nothing suppressed. */
-  suppressions?: { rule: string; path?: string }[];
+  /** Finding-level accept-list: each entry drops findings for `rule` — globally (no filter), in files whose
+   * path contains `path` (plain substring), or in files matching `glob` (full-path glob: `*`/`?` stay
+   * within a segment, `**` spans `/`, `{a,b}` alternates). `glob` takes precedence over `path`. Default:
+   * nothing suppressed. */
+  suppressions?: { rule: string; path?: string; glob?: string }[];
 }
 
 /** `analyzeTrees()`'s input: one `AnalyzeConfig` per tree, joined by IoFacts. */
@@ -51,9 +53,11 @@ export interface EnvelopeAnalyzeConfig {
   disabledRules?: string[];
   /** Per-rule severity remap: rule id -> `"critical"` | `"warning"` | `"info"`. Default: no remaps. */
   severityOverrides?: Record<string, "critical" | "warning" | "info">;
-  /** Finding-level accept-list: each `{rule, path?}` drops findings for that rule (globally, or only in
-   * files whose path contains `path` as a plain substring). Default: nothing suppressed. */
-  suppressions?: { rule: string; path?: string }[];
+  /** Finding-level accept-list: each entry drops findings for `rule` — globally (no filter), in files whose
+   * path contains `path` (plain substring), or in files matching `glob` (full-path glob: `*`/`?` stay
+   * within a segment, `**` spans `/`, `{a,b}` alternates). `glob` takes precedence over `path`. Default:
+   * nothing suppressed. */
+  suppressions?: { rule: string; path?: string; glob?: string }[];
 }
 
 /**

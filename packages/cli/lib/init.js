@@ -38,8 +38,9 @@ const CONFIG_TEMPLATE = `{
   //   "off"                        -> disable the rule
   //   "info" | "warn" | "critical" -> override its severity
   //   { "severity": "warn",
-  //     "exclude": ["legacy/"] }   -> override severity AND drop findings whose
-  //                                   file path contains any listed substring
+  //     "exclude": ["legacy/"] }   -> override severity AND drop findings by file
+  //                                   path. Each entry is a substring, or a glob if
+  //                                   it has *, ?, or {} (e.g. **/app/**/page.tsx).
   "rules": {
     // "no-explicit-any": "off",
     // "n-plus-one": "warn",

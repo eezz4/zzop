@@ -20,14 +20,14 @@
     {
       "id": "as-cast",
       "severity": "info",
-      "message": "`as` type cast used — bypasses TypeScript's structural checking for this expression. Prefer a type guard, a properly-typed API, or `unknown` plus a narrowing check. Import-alias `as` (e.g. `import { useState as useLocalState } from \"react\"`) does not count, nor does `as const` (a type-SAFETY idiom that narrows a literal instead of widening/escaping it, the opposite of a cast escape). `as unknown as X` still counts — it is a genuine (double) cast escape. Comment lines are skipped via `skip_comment_lines`, so prose containing the word \"as\" in a full-line comment does not count; an inline trailing comment on a real code line is not covered by that skip. Flags one finding per matching line, not per occurrence — a line with two `as` casts still counts as a single finding. Test/e2e/fixture paths are excluded outright (deployed-surface rule — same reasoning as this pack's `no-explicit-any`). Suppress a vetted case with `// as-ok`.",
+      "message": "`as` type cast used — bypasses TypeScript's structural checking for this expression. Prefer a type guard, a properly-typed API, or `unknown` plus a narrowing check. Import-alias `as` (e.g. `import { useState as useLocalState } from \"react\"`) does not count, nor does `as const` (a type-SAFETY idiom that narrows a literal instead of widening/escaping it, the opposite of a cast escape). A JSX `as` prop (e.g. `<Box as=\"span\">`, common in polymorphic-component libraries like Mantine/styled-components) is also excluded via the `as=` attribute form; because the exclusion is line-level, ANY line containing an `as=` token (a JSX prop, but also an `as=` inside a string literal or a trailing inline comment) is skipped — so a genuine cast sharing such a line is missed. An accepted trade-off of the line-scan matcher. `as unknown as X` still counts — it is a genuine (double) cast escape. Comment lines are skipped via `skip_comment_lines`, so prose containing the word \"as\" in a full-line comment does not count; an inline trailing comment on a real code line is not covered by that skip. Flags one finding per matching line, not per occurrence — a line with two `as` casts still counts as a single finding. Test/e2e/fixture paths are excluded outright (deployed-surface rule — same reasoning as this pack's `no-explicit-any`). Suppress a vetted case with `// as-ok`.",
       "suppress_marker": "as-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
         "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "line_pattern": "\\bas\\b",
-        "exclude_pattern": "^\\s*import\\b|\\bas\\s+const\\b",
+        "exclude_pattern": "^\\s*import\\b|\\bas\\s+const\\b|\\bas\\s*=",
         "skip_comment_lines": true,
         "snippet_max": 160
       }

@@ -1,5 +1,7 @@
 //! Dead-file candidates — files likely unused (fan_in == 0 and not an entry-point pattern). Entry patterns:
-//! index/Main/App/Page/Route/main.tsx/routes.ts/apiRoutes etc. Test/Storybook files are excluded (they run
+//! index/Main/App/Page/Route/main.tsx/routes.ts/apiRoutes plus the Next.js App Router convention set
+//! (page/layout/route/error/not-found/… and metadata routes like sitemap/robots — shared via
+//! `unreachable::framework_route_patterns`). Test/Storybook files are excluded (they run
 //! independently), as are tool-entry files (dev-tool config, ambient `.d.ts` — see `is_tool_entry_file`) and
 //! `package.json`-referenced files (`main`/`module`/`bin`/`exports` entries, plus paths found in `scripts`
 //! commands): all are loaded by a tool/runtime rather than imported, so `fan_in == 0` on them is expected,
@@ -25,7 +27,7 @@ use regex::Regex;
 
 use zzop_core::{DepGraph, FileNode, Finding, Severity};
 
-use crate::unreachable::is_tool_entry_file;
+use crate::unreachable::{framework_route_patterns, is_tool_entry_file};
 
 /// Default `max_changes` — a file changed more often than this is probably alive.
 pub const DEAD_MAX_CHANGES: u32 = 3;
@@ -121,7 +123,7 @@ fn is_ts_dispatch_extension(path: &str) -> bool {
 fn entry_patterns() -> &'static [Regex] {
     static R: OnceLock<Vec<Regex>> = OnceLock::new();
     R.get_or_init(|| {
-        [
+        let mut v: Vec<Regex> = [
             r"(^|/)index\.(ts|tsx|js|jsx)$",
             r"(^|/)main\.(ts|tsx)$",
             r"(^|/)App\.(ts|tsx)$",
@@ -132,7 +134,12 @@ fn entry_patterns() -> &'static [Regex] {
         ]
         .iter()
         .map(|p| Regex::new(p).unwrap())
-        .collect()
+        .collect();
+        // Next.js App Router convention files (`app/**/{page,layout,route,…}.tsx`, metadata routes) are
+        // loaded by the framework via filename, so their fan_in == 0 is expected, not a dead signal.
+        // Shared with `dead_exports` via one source so the exemption set can't drift between the rules.
+        v.extend(framework_route_patterns().iter().cloned());
+        v
     })
 }
 
@@ -222,6 +229,28 @@ mod tests {
             &no_extra_entries(),
         );
         assert!(r.is_empty());
+    }
+
+    #[test]
+    fn nextjs_app_router_convention_files_are_not_dead_candidates() {
+        // Framework-loaded by filename (never imported) so fan_in == 0 is expected — must not be flagged.
+        // A genuinely orphaned sibling in the same set still fires.
+        let r = find_dead_candidates(
+            &[
+                n("app/(lang)/[lang]/about/page.tsx", 0, 1),
+                n("app/dashboard/layout.tsx", 0, 1),
+                n("app/api/users/route.ts", 0, 1),
+                n("app/not-found.tsx", 0, 1),
+                n("app/sitemap.ts", 0, 1),
+                n("app/robots.ts", 0, 1),
+                n("features/x/old-helper.ts", 0, 1),
+            ],
+            &empty_dep(),
+            DEAD_MAX_CHANGES,
+            &no_extra_entries(),
+        );
+        let paths: Vec<&str> = r.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["features/x/old-helper.ts"], "{r:?}");
     }
 
     #[test]

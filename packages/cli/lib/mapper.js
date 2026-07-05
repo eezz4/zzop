@@ -104,6 +104,13 @@ function isPlainObject(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+// A `rules[].exclude` entry is treated as a glob (full-path, anchored, engine-side) when it carries a
+// glob metacharacter; otherwise it is a plain substring filter. `[`/`]` are excluded on purpose so raw
+// Next.js dynamic-segment paths like `app/[locale]/` are matched as substrings, not char classes.
+function isGlobPattern(value) {
+  return /[*?{}]/.test(value);
+}
+
 /**
  * Build the per-tree option bundle shared by every tree/root — the rule/pack/git/cache knobs that are
  * global to the config (not per-tree). Returns an object with only the fields that are actually set, so
@@ -164,13 +171,20 @@ function buildSharedOptions(config) {
       }
       if (entry.exclude !== undefined) {
         if (!Array.isArray(entry.exclude)) {
-          throw new ConfigError(`rules.${ruleId}.exclude must be an array of path substrings.`);
+          throw new ConfigError(`rules.${ruleId}.exclude must be an array of path substrings or globs.`);
         }
         for (const path of entry.exclude) {
           if (typeof path !== 'string') {
             throw new ConfigError(`rules.${ruleId}.exclude entries must be strings.`);
           }
-          suppressions.push({ rule: ruleId, path });
+          // A pattern with glob metacharacters (`*`, `?`, `{}`) matches the full path via the engine's
+          // glob filter; a plain fragment stays a substring match. `[`/`]` are deliberately NOT treated
+          // as glob chars so raw Next.js dynamic-segment paths (e.g. `app/[locale]/`) work as substrings.
+          if (isGlobPattern(path)) {
+            suppressions.push({ rule: ruleId, glob: path });
+          } else {
+            suppressions.push({ rule: ruleId, path });
+          }
         }
       }
       continue;

@@ -85,6 +85,47 @@ test('formatPretty (no color) groups by file and prints a footer', () => {
   assert.doesNotMatch(out, /\[/);
 });
 
+test('formatPretty folds info findings to a per-rule count block by default', () => {
+  const output = {
+    fileCount: 2,
+    findings: [
+      { ruleId: 'b-rule', severity: 'warning', file: 'src/z.ts', line: 10, message: 'zzz' },
+      { ruleId: 'dead-candidates', severity: 'info', file: 'src/a.ts', line: 1, message: 'x' },
+      { ruleId: 'dead-candidates', severity: 'info', file: 'src/b.ts', line: 1, message: 'y' },
+      { ruleId: 'as-cast', severity: 'info', file: 'src/c.ts', line: 1, message: 'z' },
+    ],
+  };
+  const out = formatPretty(output, { color: false });
+  // warning is shown inline; info is folded, not listed per-file
+  assert.match(out, /src\/z\.ts/);
+  assert.doesNotMatch(out, /src\/a\.ts/);
+  // folded summary shows per-rule counts + the expand hint
+  assert.match(out, /3 findings folded/);
+  assert.match(out, /2 {2}dead-candidates/);
+  assert.match(out, /1 {2}as-cast/);
+  assert.match(out, /pass --all to show/);
+});
+
+test('formatPretty showAllInfo expands info findings inline', () => {
+  const output = {
+    fileCount: 1,
+    findings: [{ ruleId: 'dead-candidates', severity: 'info', file: 'src/a.ts', line: 1, message: 'x' }],
+  };
+  const out = formatPretty(output, { color: false, showAllInfo: true });
+  assert.match(out, /src\/a\.ts/);
+  assert.doesNotMatch(out, /folded/);
+});
+
+test('formatPretty with only info findings says no warnings/errors, then folds', () => {
+  const output = {
+    fileCount: 1,
+    findings: [{ ruleId: 'as-cast', severity: 'info', file: 'src/a.ts', line: 1, message: 'x' }],
+  };
+  const out = formatPretty(output, { color: false });
+  assert.match(out, /No warnings or errors/);
+  assert.match(out, /1 finding folded/);
+});
+
 test('formatPretty color mode emits ANSI', () => {
   const out = formatPretty(singleOutput, { color: true });
   assert.match(out, /\[/);

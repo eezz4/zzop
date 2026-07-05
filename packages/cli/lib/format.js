@@ -102,13 +102,18 @@ function groupByFile(findings) {
 }
 
 /**
- * Pretty terminal report: findings grouped by file, plus a summary footer.
+ * Pretty terminal report: critical/warning findings grouped by file, then a summary footer. Info-level
+ * findings are FOLDED into a per-rule count block by default so a flood of hygiene-tier signals can't bury
+ * actionable warnings; pass `showAllInfo` (the CLI's `--all`) to expand them inline like everything else.
+ * The footer always tallies every finding, folded or not.
+ *
  * @param {object} output  parsed native output
- * @param {{ color?: boolean }} [opts]
+ * @param {{ color?: boolean, showAllInfo?: boolean }} [opts]
  * @returns {string}
  */
 function formatPretty(output, opts = {}) {
   const color = Boolean(opts.color);
+  const showAllInfo = Boolean(opts.showAllInfo);
   const { findings, fileCount } = collectFindings(output);
 
   if (findings.length === 0) {
@@ -116,21 +121,69 @@ function formatPretty(output, opts = {}) {
     return `${ok}\n\n${summaryFooter(findings, fileCount, color)}`;
   }
 
-  const groups = groupByFile(findings);
+  // Split info (foldable, hygiene-tier) from elevated (warning/critical/other — always shown inline).
+  const info = [];
+  const elevated = [];
+  for (const f of findings) {
+    (String(f.severity) === 'info' ? info : elevated).push(f);
+  }
+
+  const visible = showAllInfo ? findings : elevated;
   const lines = [];
-  for (const [file, list] of groups) {
-    lines.push(paint(file, ANSI.bold, color));
-    for (const f of list) {
-      const sevRaw = String(f.severity || 'info');
-      const sev = paint(sevRaw.padEnd(8), SEVERITY_COLOR[sevRaw] || '', color);
-      const loc = paint(`${f.line != null ? f.line : '?'}`, ANSI.dim, color);
-      const rule = paint(String(f.ruleId || ''), ANSI.dim, color);
-      lines.push(`  ${sev} ${loc}  ${f.message || ''}  ${rule}`);
+
+  if (visible.length === 0) {
+    lines.push(paint('No warnings or errors.', ANSI.dim, color));
+    lines.push('');
+  } else {
+    for (const [file, list] of groupByFile(visible)) {
+      lines.push(paint(file, ANSI.bold, color));
+      for (const f of list) {
+        const sevRaw = String(f.severity || 'info');
+        const sev = paint(sevRaw.padEnd(8), SEVERITY_COLOR[sevRaw] || '', color);
+        const loc = paint(`${f.line != null ? f.line : '?'}`, ANSI.dim, color);
+        const rule = paint(String(f.ruleId || ''), ANSI.dim, color);
+        lines.push(`  ${sev} ${loc}  ${f.message || ''}  ${rule}`);
+      }
+      lines.push('');
+    }
+  }
+
+  if (!showAllInfo && info.length > 0) {
+    for (const line of foldedInfoBlock(info, color)) {
+      lines.push(line);
     }
     lines.push('');
   }
+
   lines.push(summaryFooter(findings, fileCount, color));
   return lines.join('\n');
+}
+
+/**
+ * Render folded info findings as a per-rule count block, highest count first. Returns an array of lines
+ * (no trailing blank). Only called when there is at least one info finding.
+ * @param {object[]} info
+ * @param {boolean} color
+ * @returns {string[]}
+ */
+function foldedInfoBlock(info, color) {
+  const byRule = new Map();
+  for (const f of info) {
+    const key = String(f.ruleId || '(unknown rule)');
+    byRule.set(key, (byRule.get(key) || 0) + 1);
+  }
+  const rows = [...byRule.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const width = String(rows[0][1]).length;
+  const header = paint(
+    `info — ${info.length} finding${info.length === 1 ? '' : 's'} folded (pass --all to show):`,
+    ANSI.dim,
+    color
+  );
+  const body = rows.map(([rule, n]) => {
+    const count = paint(String(n).padStart(width), ANSI.cyan, color);
+    return `  ${count}  ${paint(rule, ANSI.dim, color)}`;
+  });
+  return [header, ...body];
 }
 
 function summaryFooter(findings, fileCount, color) {

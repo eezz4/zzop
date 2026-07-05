@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use zzop_core::{Finding, ImportMap, ReExport, Severity, SourceSymbolKind};
 
-use crate::unreachable::is_tool_entry_file;
+use crate::unreachable::{framework_route_patterns, is_tool_entry_file};
 
 /// One exported symbol a file offers as a dead-export candidate.
 #[derive(Debug, Clone)]
@@ -222,19 +222,19 @@ fn is_entry_or_test(path: &str) -> bool {
 fn entry_patterns() -> &'static [Regex] {
     static R: OnceLock<Vec<Regex>> = OnceLock::new();
     R.get_or_init(|| {
-        [
+        let mut v: Vec<Regex> = [
             r"(^|/)index\.(ts|tsx|js|jsx)$",
             r"(^|/)main\.(ts|tsx)$",
             r"(^|/)App\.(ts|tsx)$",
             r"Page\.(ts|tsx)$",
             r"(^|/)apiRoutes\.(ts|tsx)$",
-            // Next.js App Router convention files — called by the framework rather than imported.
-            r"(^|/)(page|layout|loading|error|global-error|not-found|template|default|route)\.(ts|tsx)$",
-            r"(^|/)(sitemap|robots|manifest|opengraph-image|twitter-image|icon|apple-icon)\.(ts|tsx)$",
         ]
         .iter()
         .map(|p| Regex::new(p).unwrap())
-        .collect()
+        .collect();
+        // Next.js App Router convention files — shared with `dead_candidates` so the two can't drift.
+        v.extend(framework_route_patterns().iter().cloned());
+        v
     })
 }
 
