@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>zzop — Usage</title>
-<meta name="description" content="zzop usage — the native API functions, config reference, multi-repo analysis, and output schema.">
+<meta name="description" content="zzop usage — install and run the CLI, write a zzop.config.jsonc, and the @zzop/native library for embedding.">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="assets/site.css">
 </head>
@@ -47,26 +47,96 @@
 
   <main class="docs-content">
     <div class="docs-content-header">
-      <h1>Calling the engine</h1>
-      <p><code>@zzop/native</code> is the single Node&harr;Rust boundary for zzop — one addon covers everything from a single-repo analysis to multi-repo cross-layer analysis.</p>
+      <h1>Using zzop</h1>
+      <p>Most people run zzop as a CLI: write a <code>zzop.config.jsonc</code>, run <code>npx zzop</code> — no code, ESLint-style. The <code>zzop</code> package is the config-driven front end; the engine ships as <code>@zzop/native</code>, the SDK layer for embedders. This page covers the CLI first, then the library.</p>
     </div>
 
     <section id="install">
-      <span class="eyebrow eyebrow--sm">Getting the addon</span>
-      <h2>Installing @zzop/native</h2>
-      <p><code>@zzop/native</code> is <strong>not yet published to npm</strong> — the package is marked <code>private: true</code> while the prebuild/publishing pipeline is still being finished. There is no working <code>npm install @zzop/native</code> today.</p>
-      <p>Until it ships, build the N-API addon from source. The eventual install command, once a release goes out, will simply be:</p>
+      <span class="eyebrow eyebrow--sm">Command line</span>
+      <h2>Install &amp; run the CLI</h2>
+      <p>Add zzop as a dev dependency and let it scaffold a config. <code>zzop</code> depends on <code>@zzop/native</code>, which auto-installs the right prebuilt platform binary — nothing to compile. Requires Node.js &ge; 18.</p>
       <div class="code-panel">
-        <div class="code-panel__tab">Once published (not available yet)</div>
-        <pre class="code-block"><code>npm install @zzop/native</code></pre>
+        <div class="code-panel__tab">Install, scaffold, analyze</div>
+        <pre class="code-block"><code>npm i -D zzop     # add to your project (or run one-off with npx)
+npx zzop init     # writes an annotated zzop.config.jsonc
+npx zzop          # analyzes using that config and prints a report</code></pre>
       </div>
-      <p>For now, clone the repo and build the addon directly — see the root <a href="https://github.com/eezz4/zzop/blob/main/README.md" target="_blank" rel="noreferrer">README.md</a> and <a href="https://github.com/eezz4/zzop/blob/main/packages/napi/README.md" target="_blank" rel="noreferrer">packages/napi/README.md</a> for the full walkthrough. On Windows the real <code>.node</code> addon requires the MSVC toolchain (Node-API's delay-load linking has no MinGW/<code>ld</code> equivalent):</p>
+      <p><code>zzop init</code> refuses to overwrite an existing config; pass <code>--force</code> to replace it. The <code>zzop</code> and <code>@zzop/native</code> packages land with the first tagged release (v0.1.0).</p>
+    </section>
+
+    <section id="cli-config">
+      <span class="eyebrow eyebrow--sm">CLI config</span>
+      <h2>zzop.config.jsonc</h2>
+      <p><code>zzop.config.jsonc</code> is JSON with comments and trailing commas allowed. <code>zzop init</code> generates a fully annotated copy; the reference below summarizes each option.</p>
       <div class="code-panel">
-        <div class="code-panel__tab">Build from source (Windows)</div>
-        <pre class="code-block"><code>cargo +stable-x86_64-pc-windows-msvc build -p zzop-napi --release --features addon
-node packages/napi/smoke.mjs</code></pre>
+        <div class="code-panel__tab">zzop.config.jsonc</div>
+        <pre class="code-block"><code>{
+  // What to analyze: one or more directory roots. Multiple roots run a
+  // cross-layer (multi-tree) analysis.
+  "roots": ["."],
+
+  // Or name each tree explicitly (takes precedence over "roots"):
+  // "trees": [
+  //   { "root": "./api", "sourceId": "api" },
+  //   { "root": "./web", "sourceId": "web" }
+  // ],
+
+  "packs": {
+    // Extra directories of custom DSL rule packs. These MERGE with the
+    // bundled packs; a custom pack whose id matches a bundled one wins.
+    "extraDirs": ["./zzop-packs"],
+    // Whole packs to disable, by pack id.
+    "disabled": ["browser"]
+  },
+
+  "rules": {
+    // "off"                        -> disable the rule
+    "no-explicit-any": "off",
+    // "info" | "warn" | "critical" -> override severity
+    "n-plus-one": "warn",
+    // object form -> override severity AND drop findings whose file path
+    // contains any listed substring
+    "toctou": { "severity": "warn", "exclude": ["legacy/"] }
+  },
+
+  // Enables git-history-derived signals. Omit to use engine defaults.
+  "git": { "recentDays": 30 },
+
+  // Analysis cache directory (omit to disable caching).
+  "cacheDir": ".zzop-cache",
+
+  // Files larger than this many bytes skip structural parsing.
+  "sizeCap": 500000,
+
+  // "pretty" or "json"; overridden by --format / --json.
+  "format": "pretty",
+
+  // Exit non-zero when any finding is at or above this severity, or "off".
+  "failOn": "warn"
+}</code></pre>
       </div>
-      <p>On macOS/Linux drop the toolchain override: <code>cargo build -p zzop-napi --release --features addon</code>.</p>
+      <p>Config severities normalize to the engine's three levels — <code>off</code>/<code>none</code>/<code>disabled</code> disable a rule; <code>info</code>/<code>note</code>/<code>low</code> &rarr; <code>info</code>; <code>warn</code>/<code>warning</code>/<code>medium</code> &rarr; <code>warning</code>; <code>error</code>/<code>critical</code>/<code>high</code> &rarr; <code>critical</code>. <code>failOn</code> uses the same names (plus <code>off</code> to never fail); ordering is <code>info</code> &lt; <code>warning</code> &lt; <code>critical</code>.</p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Command / option</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>zzop init [--force]</code></td><td>Write an annotated <code>zzop.config.jsonc</code> to the current directory.</td></tr>
+            <tr><td><code>zzop [run]</code></td><td>Load the config, analyze, and print. The default command.</td></tr>
+            <tr><td><code>--config &lt;path&gt;</code></td><td>Config file to load (default <code>./zzop.config.jsonc</code>).</td></tr>
+            <tr><td><code>--format &lt;pretty|json&gt;</code>, <code>--json</code></td><td>Output format, overriding the config's <code>format</code>.</td></tr>
+            <tr><td><code>-h, --help</code> / <code>-v, --version</code></td><td>Show help / the CLI and engine versions.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Exit codes: <code>0</code> = ran, no finding at or above <code>failOn</code>; <code>1</code> = at least one finding at or above <code>failOn</code> (CI gate); <code>2</code> = config or usage error.</p>
+    </section>
+
+    <section id="embedding">
+      <span class="eyebrow eyebrow--sm">Programmatic / embedding</span>
+      <h2>Embedding the engine directly</h2>
+      <p>If you're building a tool on top of zzop rather than running it as a CLI, depend on <code>@zzop/native</code> directly and call it JSON-in / JSON-out — the same engine the CLI drives. Install it the same way; <code>npm install @zzop/native</code> pulls the matching prebuilt binary. The rest of this page documents that library layer.</p>
     </section>
 
     <section id="functions">
@@ -227,7 +297,9 @@ const result = JSON.parse(
 
   <aside class="docs-toc">
     <div class="docs-toc__label">On this page</div>
-    <a href="#install" class="docs-toc__link">Installing the addon</a>
+    <a href="#install" class="docs-toc__link">Install &amp; run the CLI</a>
+    <a href="#cli-config" class="docs-toc__link">CLI config</a>
+    <a href="#embedding" class="docs-toc__link">Programmatic / embedding</a>
     <a href="#functions" class="docs-toc__link">API functions</a>
     <a href="#zero-config" class="docs-toc__link">Zero-config defaults</a>
     <a href="#config-reference" class="docs-toc__link">Config reference</a>

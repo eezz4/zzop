@@ -3,11 +3,15 @@
 //! `gnu` toolchain with the `addon` feature off — see `lib.rs`'s module doc for why that split exists.
 //! `addon.rs` (feature `addon` only) is a thin `#[napi]` pass-through to these three functions.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use zzop_core::{load_dsl_packs, CommonIr, FileNode, Finding, NormalizedEnvelope, RulePackDef};
+use zzop_core::{
+    load_dsl_packs, CommonIr, FileNode, Finding, NormalizedEnvelope, RulePackDef, Severity,
+    Suppression,
+};
 use zzop_engine::{AnalyzeOutput, CacheStats, EngineConfig, GitOptions, DEFAULT_SIZE_CAP};
 use zzop_metrics::{
     CriticalFile, CrossLayerCoChurn, FolderAggregates, HealthIndex, Recommendation, Scores,
@@ -51,6 +55,12 @@ pub struct AnalyzeRequest {
     pub git: Option<GitOptionsRequest>,
     pub size_cap: Option<usize>,
     pub disabled_rules: Vec<String>,
+    /// Per-rule severity remap (rule id -> `"critical"`/`"warning"`/`"info"`). Reuses `zzop_core::Severity`
+    /// (lowercase serde) and `RuleConfig::severity_overrides` directly. Default: empty (no remaps).
+    pub severity_overrides: BTreeMap<String, Severity>,
+    /// Finding-level accept-list — `{rule, path?}` entries dropping matching findings. Reuses
+    /// `zzop_core::Suppression`/`RuleConfig::suppressions` directly. Default: empty (nothing suppressed).
+    pub suppressions: Vec<Suppression>,
 }
 
 /// `AnalyzeRequest::git`'s payload — mirrors `zzop_engine::GitOptions` field-for-field, as JSON input.
@@ -79,6 +89,10 @@ pub struct EnvelopeAnalyzeRequest {
     pub source_id: String,
     pub packs_dir: Option<PacksDir>,
     pub disabled_rules: Vec<String>,
+    /// Per-rule severity remap (rule id -> `"critical"`/`"warning"`/`"info"`). See `AnalyzeRequest`.
+    pub severity_overrides: BTreeMap<String, Severity>,
+    /// Finding-level accept-list — `{rule, path?}` entries. See `AnalyzeRequest`.
+    pub suppressions: Vec<Suppression>,
 }
 
 /// The shared "load `packs_dir`, build the DSL-pack list + `RuleConfig`" step both `build_engine_config`
@@ -98,6 +112,8 @@ fn base_engine_config(
     source_id: &str,
     packs_dirs: &[&str],
     disabled_rules: &[String],
+    severity_overrides: &BTreeMap<String, Severity>,
+    suppressions: &[Suppression],
     warnings: &mut Vec<String>,
 ) -> EngineConfig {
     let mut packs: Vec<RulePackDef> = Vec::new();
@@ -124,7 +140,8 @@ fn base_engine_config(
         packs,
         rule_config: zzop_core::RuleConfig {
             disabled_rules: disabled_rules.to_vec(),
-            ..Default::default()
+            severity_overrides: severity_overrides.clone(),
+            suppressions: suppressions.to_vec(),
         },
         ..EngineConfig::default()
     }
@@ -138,7 +155,14 @@ fn build_engine_config(req: &AnalyzeRequest, warnings: &mut Vec<String>) -> Engi
         .as_ref()
         .map(PacksDir::as_dirs)
         .unwrap_or_default();
-    let mut config = base_engine_config(&req.source_id, &packs_dirs, &req.disabled_rules, warnings);
+    let mut config = base_engine_config(
+        &req.source_id,
+        &packs_dirs,
+        &req.disabled_rules,
+        &req.severity_overrides,
+        &req.suppressions,
+        warnings,
+    );
 
     config.size_cap = req.size_cap.unwrap_or(DEFAULT_SIZE_CAP);
     config.cache_dir = req.cache_dir.as_ref().map(PathBuf::from);
@@ -359,6 +383,8 @@ pub fn analyze_envelope_json(envelope_json: &str, config_json: &str) -> Result<S
         &req.source_id,
         &packs_dirs,
         &req.disabled_rules,
+        &req.severity_overrides,
+        &req.suppressions,
         &mut warnings,
     );
     let mut output = zzop_engine::analyze_envelope(&envelope, &config);
@@ -560,6 +586,89 @@ mod tests {
             "expected a circular finding, got: {value}"
         );
         assert_eq!(value["fileCount"], 2);
+    }
+
+    #[test]
+    fn analyze_json_severity_overrides_remap_a_finding_severity() {
+        // `circular` defaults to `warning` (rules-graph). A `severityOverrides` request entry must
+        // promote it to `critical` on the way through `base_engine_config` -> `RuleConfig` ->
+        // `merge_findings`'s `apply_severity_override`.
+        let dir = cycle_fixture();
+        let config = format!(
+            r#"{{"root": {:?}, "severityOverrides": {{"circular": "critical"}}}}"#,
+            dir.path().display()
+        );
+        let out = analyze_json(&config).expect("analyze_json should succeed");
+        let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        let findings = value["findings"].as_array().expect("findings array");
+        let circular = findings
+            .iter()
+            .find(|f| f["ruleId"] == "circular")
+            .expect("expected a circular finding");
+        assert_eq!(
+            circular["severity"], "critical",
+            "severityOverrides must remap circular warning -> critical, got: {value}"
+        );
+    }
+
+    #[test]
+    fn analyze_json_suppressions_drop_a_finding() {
+        // A `suppressions` request entry for `circular` (no path) must drop the finding entirely via
+        // `merge_findings`'s `is_suppressed` filter — the same fixture would otherwise emit one.
+        let dir = cycle_fixture();
+        let config = format!(
+            r#"{{"root": {:?}, "suppressions": [{{"rule": "circular"}}]}}"#,
+            dir.path().display()
+        );
+        let out = analyze_json(&config).expect("analyze_json should succeed");
+        let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        let findings = value["findings"].as_array().expect("findings array");
+        assert!(
+            !findings.iter().any(|f| f["ruleId"] == "circular"),
+            "suppressions must drop the circular finding, got: {value}"
+        );
+    }
+
+    #[test]
+    fn analyze_envelope_json_suppressions_drop_a_finding() {
+        // Same suppression path, exercised through the envelope entry point (`analyze_envelope_json` ->
+        // `base_engine_config`). Two files importing each other form a cycle -> a `circular` finding.
+        let envelope = r#"{
+            "format": "zzop-normalized-ast",
+            "version": 1,
+            "parser": "test/1",
+            "source": "legacy",
+            "files": [
+                {"path": "a.ts", "loc": 2, "imports": {"b": {"specifier": "b.ts", "original": "default"}}},
+                {"path": "b.ts", "loc": 2, "imports": {"a": {"specifier": "a.ts", "original": "default"}}}
+            ]
+        }"#;
+        let baseline = analyze_envelope_json(envelope, r#"{"sourceId": "legacy"}"#)
+            .expect("analyze_envelope_json should succeed");
+        let baseline_value: serde_json::Value = serde_json::from_str(&baseline).unwrap();
+        assert!(
+            baseline_value["findings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|f| f["ruleId"] == "circular"),
+            "fixture must produce a circular finding without suppression, got: {baseline_value}"
+        );
+
+        let suppressed = analyze_envelope_json(
+            envelope,
+            r#"{"sourceId": "legacy", "suppressions": [{"rule": "circular"}]}"#,
+        )
+        .expect("analyze_envelope_json should succeed");
+        let value: serde_json::Value = serde_json::from_str(&suppressed).unwrap();
+        assert!(
+            !value["findings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|f| f["ruleId"] == "circular"),
+            "suppressions must drop the circular finding in envelope mode, got: {value}"
+        );
     }
 
     #[test]

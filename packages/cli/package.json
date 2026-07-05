@@ -1,0 +1,25 @@
+{
+  "name": "zzop",
+  "version": "0.0.0",
+  "description": "Zero-config CLI for the zzop multi-language SAST/architecture engine — write a zzop.config.jsonc, run `npx zzop`.",
+  "license": "MIT",
+  "repository": "github:eezz4/zzop",
+  "bin": {
+    "zzop": "bin/zzop.js"
+  },
+  "main": "lib/index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@zzop/native": "0.0.0"
+  }
+}

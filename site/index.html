@@ -43,12 +43,13 @@
     </div>
     <div class="hero__code">
       <div class="code-panel">
-        <div class="code-panel__tab">Zero-config example</div>
-        <pre class="code-block"><code>import zzop from '@zzop/native';
+        <div class="code-panel__tab">Run it (CLI)</div>
+        <pre class="code-block"><code>npm i -D zzop     # add to your project
+npx zzop init     # writes an annotated zzop.config.jsonc
+npx zzop          # analyze and print a report
 
-const report = JSON.parse(
-  zzop.analyze(JSON.stringify({ root: '.' }))  // zero config = full analysis
-);</code></pre>
+# Embedding instead? Depend on @zzop/native:
+#   JSON.parse(zzop.analyze(JSON.stringify({ root: '.' })))</code></pre>
       </div>
       <div class="code-panel">
         <div class="code-panel__tab">Result (abridged)</div>

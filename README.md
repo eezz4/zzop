@@ -5,8 +5,33 @@ language-neutral IR, runs a layered rule system (native whole-graph analyses + d
 packs) over it, and returns structural findings, dependency/dead-code analysis, and health scores as
 one JSON document.
 
-- Documentation: [`docs/README.md`](docs/README.md)
+- Documentation site: <https://eezz4.github.io/zzop/> (source in [`site/`](site/))
+- Documentation (in-repo): [`docs/README.md`](docs/README.md)
 - External parser protocol: [`docs/NORMALIZED_AST.md`](docs/NORMALIZED_AST.md)
+
+## Quick start
+
+Run zzop as a CLI — write a `zzop.config.jsonc`, run `npx zzop`, ESLint-style. The `zzop` package
+depends on `@zzop/native`, which auto-installs the right prebuilt platform binary (nothing to
+compile). Requires Node.js >= 18.
+
+```sh
+npm i -D zzop     # add to your project (or run one-off with npx)
+npx zzop init     # writes an annotated zzop.config.jsonc
+npx zzop          # analyzes using that config and prints a report
+```
+
+`zzop` and `@zzop/native` publish as `v0.1.0` and land with the first tagged release. See
+[`packages/cli/README.md`](packages/cli/README.md) for the full CLI and config reference.
+
+To embed the engine instead of running the CLI, depend on `@zzop/native` directly and call it
+JSON-in / JSON-out:
+
+```js
+import zzop from '@zzop/native';
+
+const report = JSON.parse(zzop.analyze(JSON.stringify({ root: '.' })));
+```
 
 ## Layout
 

@@ -25,6 +25,8 @@ plain napi-free Rust (compiles/tests under the workspace's default `gnu` toolcha
 | `git` | `Option<{ since: Option<String>, recentDays: Option<u32> }>` | Enables git-derived scores/health/recommendations/criticality/seams. `recentDays` default is 30. |
 | `sizeCap` | `Option<usize>` | Default 1,500,000 bytes (~1.5MB) — see [degraded files](../ARCHITECTURE.md#degraded-files). |
 | `disabledRules` | `Vec<String>` | Rule/analysis ids to turn off — see [rules/catalog.md](../rules/catalog.md) for the id list. |
+| `severityOverrides` | `BTreeMap<String, "critical" \| "warning" \| "info">` (default `{}`) | Per-rule severity remap, keyed by rule id (same id space as `disabledRules`). Promotes/demotes a rule's findings without editing the pack — applied post-merge, so it also re-sorts the finding into its new severity band. |
+| `suppressions` | `Vec<{ rule: String, path?: String }>` (default `[]`) | Finding-level accept-list. Each entry drops findings for `rule` either everywhere (no `path`) or only in files whose path CONTAINS `path` as a plain substring (case-sensitive, no glob). Multiple entries for one rule are OR-ed. |
 
 ### Defaults (zero-config = full analysis)
 
@@ -62,8 +64,9 @@ calling the Rust engine directly), it self-reports on `warnings` instead of stay
 These are capability notes, not errors — the analysis still completes normally. The zero-packs note
 also applies to `analyzeEnvelope`; the git note never does (envelope mode has no git by design).
 
-`EnvelopeAnalyzeRequest { sourceId: String, packsDir: Option<String | Vec<String>>, disabledRules: Vec<String> }` —
+`EnvelopeAnalyzeRequest { sourceId: String, packsDir: Option<String | Vec<String>>, disabledRules: Vec<String>, severityOverrides: BTreeMap<String, Severity>, suppressions: Vec<{ rule, path? }> }` —
 deliberately no `root`/`cacheDir`/`git`/`sizeCap` (envelope mode has no filesystem root or git repo).
+`severityOverrides`/`suppressions` behave identically to their `AnalyzeConfig` counterparts above.
 `NormalizedEnvelope` shape: see `../NORMALIZED_AST.md`.
 
 `AnalyzeOutputView` (`camelCase`, a zero-copy borrowing view) is the shape every successful `analyze`/
@@ -189,7 +192,7 @@ cargo +stable-x86_64-pc-windows-msvc build -p zzop-napi --release --features add
 
 ## Packaging layout
 
-Main package `@zzop/native` (`private: true` — no publishing pipeline yet): `main: index.js`,
+Main package `@zzop/native` (publishes to npm on a `v*` git tag): `main: index.js`,
 `types: index.d.ts`, `optionalDependencies` on 5 platform packages under `npm/`:
 
 | Directory | Package | os/cpu/libc |

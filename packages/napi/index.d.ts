@@ -24,6 +24,11 @@ export interface AnalyzeConfig {
   sizeCap?: number;
   /** Rule/pack/native-analysis ids to disable entirely (exact match). */
   disabledRules?: string[];
+  /** Per-rule severity remap: rule id -> `"critical"` | `"warning"` | `"info"`. Default: no remaps. */
+  severityOverrides?: Record<string, "critical" | "warning" | "info">;
+  /** Finding-level accept-list: each `{rule, path?}` drops findings for that rule (globally, or only in
+   * files whose path contains `path` as a plain substring). Default: nothing suppressed. */
+  suppressions?: { rule: string; path?: string }[];
 }
 
 /** `analyzeTrees()`'s input: one `AnalyzeConfig` per tree, joined by IoFacts. */
@@ -44,6 +49,11 @@ export interface EnvelopeAnalyzeConfig {
   packsDir?: string;
   /** Rule/pack/native-analysis ids to disable entirely (exact match). */
   disabledRules?: string[];
+  /** Per-rule severity remap: rule id -> `"critical"` | `"warning"` | `"info"`. Default: no remaps. */
+  severityOverrides?: Record<string, "critical" | "warning" | "info">;
+  /** Finding-level accept-list: each `{rule, path?}` drops findings for that rule (globally, or only in
+   * files whose path contains `path` as a plain substring). Default: nothing suppressed. */
+  suppressions?: { rule: string; path?: string }[];
 }
 
 /**

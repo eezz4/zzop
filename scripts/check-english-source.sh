@@ -14,7 +14,8 @@ FOREIGN='[\x{AC00}-\x{D7A3}\x{1100}-\x{11FF}\x{3130}-\x{318F}\x{3040}-\x{30FF}\x
 
 files=$(grep -rlP "$FOREIGN" . \
   --include='*.rs' --include='*.md' --include='*.toml' --include='*.json' \
-  2>/dev/null | grep -v '/\.claude/' | grep -v '/target/' || true)
+  --include='*.js' --include='*.mjs' --include='*.cjs' --include='*.ts' \
+  2>/dev/null | grep -v '/\.claude/' | grep -v '/target/' | grep -v '/node_modules/' || true)
 
 if [ -n "$files" ]; then
   echo "English-only source guard: non-Latin letters found in OSS files:"
@@ -32,7 +33,8 @@ echo "English-only source guard: clean."
 # repo's working tree. Rationale belongs inline (summarized) or in docs/, not linked by internal path.
 claude_ref_files=$(grep -rlP '\.claude' . \
   --include='*.rs' --include='*.md' --include='*.toml' --include='*.json' \
-  2>/dev/null | grep -v '/\.claude/' | grep -v '/target/' || true)
+  --include='*.js' --include='*.mjs' --include='*.cjs' --include='*.ts' \
+  2>/dev/null | grep -v '/\.claude/' | grep -v '/target/' | grep -v '/node_modules/' || true)
 
 if [ -n "$claude_ref_files" ]; then
   echo "English-only source guard: .claude/ path references found in OSS files:"
