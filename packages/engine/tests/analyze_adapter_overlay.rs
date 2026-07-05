@@ -14,7 +14,7 @@
 //!   `(kind, key, file, line)` of a provide the native pass already produced — proves
 //!   `apply_adapter_overlays`'s dedup guard collapses it to one entry, not two.
 //! - `invalid_overlay_produces_a_warning_and_never_crashes_the_native_run`: an overlay with a bad
-//!   `format` string fails `zpz_core::validate_envelope` — proves it is skipped with one `warnings`
+//!   `format` string fails `zzop_core::validate_envelope` — proves it is skipped with one `warnings`
 //!   entry naming the overlay's `parser` id, never a panic, and the native tree's own output is
 //!   otherwise unaffected.
 //! - `projection_for_an_unknown_rel_still_contributes_its_provide`: an overlay carries a
@@ -26,11 +26,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_core::{
+use zzop_core::{
     FileProjection, IoFacts, IoProvide, NormalizedEnvelope, RouterMountEntry, RouterMountFragment,
     NORMALIZED_AST_FORMAT,
 };
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_engine::{analyze_tree, EngineConfig};
 
 /// A self-cleaning temp directory (std-only mkdtemp equivalent — same pattern as `analyze_routes_hono.rs`/
 /// `analyze_io.rs`; this crate's test files do not share a common test-utils module).
@@ -82,7 +82,7 @@ fn projection(path: &str, loc: u32) -> FileProjection {
         path: path.to_string(),
         loc,
         symbols: Vec::new(),
-        imports: zpz_core::ImportMap::new(),
+        imports: zzop_core::ImportMap::new(),
         re_exports: Vec::new(),
         used_names: Vec::new(),
         const_map_fragment: HashMap::new(),
@@ -107,7 +107,7 @@ fn overlay(parser: &str, files: Vec<FileProjection>) -> NormalizedEnvelope {
 fn composed_provide_is_joinable_with_a_native_consume() {
     const JOIN_KEY: &str = "POST /api/auth/two-factor/setup";
 
-    let dir = TempDir::new("zpz-adapter-overlay");
+    let dir = TempDir::new("zzop-adapter-overlay");
     // Native FE-ish file: a literal-path `axios.post(...)` egress call resolves immediately (no
     // ControlKey indirection needed) to a `key: Some("POST /api/auth/two-factor/setup")` consume.
     dir.write(
@@ -166,7 +166,7 @@ fn composed_provide_is_joinable_with_a_native_consume() {
 
 #[test]
 fn duplicate_provide_from_overlay_does_not_double_count() {
-    let dir = TempDir::new("zpz-adapter-overlay");
+    let dir = TempDir::new("zzop-adapter-overlay");
     dir.write(
         "routes/apiRoutes.ts",
         "@Controller('authen')\nclass AuthenController {\n  @Get('getUserInfo')\n  getUserInfo() {}\n}\n",
@@ -208,7 +208,7 @@ fn duplicate_provide_from_overlay_does_not_double_count() {
 
 #[test]
 fn invalid_overlay_produces_a_warning_and_never_crashes_the_native_run() {
-    let dir = TempDir::new("zpz-adapter-overlay");
+    let dir = TempDir::new("zzop-adapter-overlay");
     dir.write("src/app.ts", "export function noop() { return 1; }\n");
 
     let bad = NormalizedEnvelope {
@@ -238,7 +238,7 @@ fn invalid_overlay_produces_a_warning_and_never_crashes_the_native_run() {
 
 #[test]
 fn projection_for_an_unknown_rel_still_contributes_its_provide() {
-    let dir = TempDir::new("zpz-adapter-overlay");
+    let dir = TempDir::new("zzop-adapter-overlay");
     dir.write("src/app.ts", "export function noop() { return 1; }\n");
 
     let mut proj = projection("external/legacy.jsp", 5);

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::ir::ImportMap;
 
 /// A single call site inside one file, attributed to its enclosing top-level symbol. Produced per-file by
-/// a parser (`zpz_parser_typescript::calls::parse_calls`); cross-file resolution into a `SymbolEdge` is
+/// a parser (`zzop_parser_typescript::calls::parse_calls`); cross-file resolution into a `SymbolEdge` is
 /// this module's job (`resolve_calls_for_file`), not the parser's — a deliberate per-file (name-only) /
 /// cross-file (ImportMap-aware) split.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

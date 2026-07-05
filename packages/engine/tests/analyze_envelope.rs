@@ -1,4 +1,4 @@
-//! End-to-end tests for the external-parser protocol receiver (`zpz_engine::analyze_envelope`,
+//! End-to-end tests for the external-parser protocol receiver (`zzop_engine::analyze_envelope`,
 //! `docs/NORMALIZED_AST.md`).
 //!
 //! - `envelope_produces_ir_dep_and_native_analyses_deterministically`: a two-file envelope with a dep
@@ -8,7 +8,7 @@
 //! - `envelope_be_joins_cross_layer_with_a_ts_parsed_fe`: proves the cross-layer join promise
 //!   (`docs/NORMALIZED_AST.md`'s "a parser is first class regardless of how crude it is, as long as its
 //!   projection is accurate") by hand-joining an envelope-projected BE tree's `IoFacts` against a real,
-//!   natively-parsed (TypeScript) FE tree's `IoFacts` via `zpz_core::link_cross_layer_io` — the same
+//!   natively-parsed (TypeScript) FE tree's `IoFacts` via `zzop_core::link_cross_layer_io` — the same
 //!   linker `analyze_trees` itself calls, exercised manually here since `analyze_envelope` takes one
 //!   envelope at a time (by design — `analyze_trees` stays untouched by the envelope path).
 
@@ -16,12 +16,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_core::{
+use zzop_core::{
     link_cross_layer_io, FileProjection, ImportBinding, ImportMap, IoFacts, IoProvide,
     NormalizedEnvelope, RouterMountEntry, RouterMountFragment, RulePackDef, SourceIo, SourceSymbol,
     SourceSymbolKind, NORMALIZED_AST_FORMAT,
 };
-use zpz_engine::{analyze_envelope, analyze_tree, EngineConfig};
+use zzop_engine::{analyze_envelope, analyze_tree, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -189,7 +189,7 @@ fn envelope_be_joins_cross_layer_with_a_ts_parsed_fe() {
     let be_out = analyze_envelope(&be_envelope, &be_config);
 
     // FE side: a real, natively-parsed TypeScript tree consuming that same normalized HTTP key.
-    let fe_dir = TempDir::new("zpz-engine-envelope-fe");
+    let fe_dir = TempDir::new("zzop-engine-envelope-fe");
     fe_dir.write(
         "src/Ctx.tsx",
         "export function load() { return fetch(\"/legacy/user.jsp\"); }\n",
@@ -212,7 +212,7 @@ fn envelope_be_joins_cross_layer_with_a_ts_parsed_fe() {
             io: fe_out.ir.ir.io.clone().unwrap_or_default(),
         },
     ];
-    let cross_layer = link_cross_layer_io(&trees, &zpz_core::LinkOptions::default());
+    let cross_layer = link_cross_layer_io(&trees, &zzop_core::LinkOptions::default());
 
     let http_edges: Vec<_> = cross_layer
         .edges

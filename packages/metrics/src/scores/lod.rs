@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use crate::scores::config::ScoresConfig;
 use crate::scores::types::{LodFileSummary, LodScore};
-use zpz_core::FileNode;
+use zzop_core::FileNode;
 
 /// Max detail rows returned.
 const MAX_DETAIL_ITEMS: usize = 50;

@@ -1,15 +1,15 @@
 //! End-to-end test for the cross-layer multi-tree API with a NestJS-style TS backend: a TS/FE tree with a
 //! `fetch` call and a TS/BE tree with a matching `@Controller`/`@Get` decorated route, analyzed via
-//! `zpz_engine::analyze_trees`, joined by `zpz_core::link_cross_layer_io` into a `cross_source: true` edge.
+//! `zzop_engine::analyze_trees`, joined by `zzop_core::link_cross_layer_io` into a `cross_source: true` edge.
 //! Mirrors `analyze_multi_tree_java.rs`'s Spring-BE shape, but on the NestJS side — this is the FE↔NestJS-BE
-//! join `zpz_parser_typescript::nest::extract_nest_provides` exists to unblock (before it, a NestJS BE tree
+//! join `zzop_parser_typescript::nest::extract_nest_provides` exists to unblock (before it, a NestJS BE tree
 //! extracted zero `IoProvide`s for any decorator-routed controller).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_engine::{analyze_trees, EngineConfig};
+use zzop_engine::{analyze_trees, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -46,7 +46,7 @@ impl Drop for TempDir {
 }
 
 fn fe_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-multi-fe-nest");
+    let dir = TempDir::new("zzop-engine-multi-fe-nest");
     dir.write(
         "src/api.ts",
         "export function loadUser(id: string) { return fetch(`/api/users/${id}`); }\n",
@@ -55,7 +55,7 @@ fn fe_tree() -> TempDir {
 }
 
 fn nest_be_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-multi-be-nest");
+    let dir = TempDir::new("zzop-engine-multi-be-nest");
     dir.write(
         "src/users/users.controller.ts",
         concat!(

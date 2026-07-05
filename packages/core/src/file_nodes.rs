@@ -9,9 +9,9 @@ use crate::node::{
 
 /// A file changed fewer than this many times is not "frequently changed" -> not a hotspot.
 ///
-/// Lives here (rather than with `zpz_metrics::roi`'s other ROI scoring, its pre-R3 home) because
-/// `build_file_nodes` below — a core mechanism `zpz_engine::analyze::assemble` always calls, git-backed
-/// or not — is `hotspot_score`'s only caller; core must not gain an upward dependency on `zpz_metrics` to
+/// Lives here (rather than with `zzop_metrics::roi`'s other ROI scoring, its pre-R3 home) because
+/// `build_file_nodes` below — a core mechanism `zzop_engine::analyze::assemble` always calls, git-backed
+/// or not — is `hotspot_score`'s only caller; core must not gain an upward dependency on `zzop_metrics` to
 /// reach it — a crate-boundary decision: mechanisms a core computation depends on stay in core even when
 /// related scoring logic lives in a dedicated metrics crate.
 pub const HOTSPOT_MIN_CHANGES: u32 = 2;
@@ -74,12 +74,12 @@ pub struct GitStats {
 // ---------------------------------------------------------------------------------------------
 
 /// `is_source(id)` — true when `id` is a language this engine has a parser frontend for (the same
-/// classification `zpz_engine::dispatch::dispatch` makes; threaded in as a closure, not a hardcoded
-/// extension list here, since `core` must not gain an upward dependency on `zpz_engine` — same crate-
-/// boundary rule as the `zpz_metrics` note above). Files it says "no" to (data/config/assets — json,
+/// classification `zzop_engine::dispatch::dispatch` makes; threaded in as a closure, not a hardcoded
+/// extension list here, since `core` must not gain an upward dependency on `zzop_engine` — same crate-
+/// boundary rule as the `zzop_metrics` note above). Files it says "no" to (data/config/assets — json,
 /// md, lockfiles, images, ... — see `build_one`'s doc) still get real `churn`/`loc`/`change_count`;
 /// only `risk_score`/`hotspot_score` are zeroed for them, so they never misleadingly dominate a
-/// risk-sorted list or a folder's `totalRisk` rollup (`zpz_metrics::aggregate_by_folder`) — a large
+/// risk-sorted list or a folder's `totalRisk` rollup (`zzop_metrics::aggregate_by_folder`) — a large
 /// generated JSON dump is honest churn/size data but is not "risk" (misleading diagnostics are treated
 /// as product defects; see docs/modules/napi.md's `nodes` field note).
 pub fn build_file_nodes<F>(

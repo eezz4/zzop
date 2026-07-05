@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashSet};
 use super::config::ScoresConfig;
 use super::shared::{classify_path, is_external, round};
 use super::types::{CohesionScore, SliceCohesion};
-use zpz_core::DepGraph;
+use zzop_core::DepGraph;
 
 #[derive(Default)]
 struct Acc {

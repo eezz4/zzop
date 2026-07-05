@@ -1,13 +1,13 @@
 {
-  "name": "@zpz/native-darwin-x64",
+  "name": "@zzop/native-darwin-x64",
   "version": "0.0.0",
-  "description": "Prebuilt zpz-napi native addon for darwin/x64.",
-  "main": "zpz-napi.node",
+  "description": "Prebuilt zzop-napi native addon for darwin/x64.",
+  "main": "zzop-napi.node",
   "publishConfig": {
     "access": "public"
   },
   "files": [
-    "zpz-napi.node"
+    "zzop-napi.node"
   ],
   "license": "MIT",
   "os": [

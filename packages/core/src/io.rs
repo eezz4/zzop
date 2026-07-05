@@ -11,7 +11,7 @@
 //! - **Low confidence**: an edge whose key matches an injected pattern (generic paths like `/health` that many
 //!   unrelated services legitimately share) is still emitted, but tagged with
 //!   [`CrossLayerEdge::low_confidence_reason`] so a consumer can discount it. The pattern table itself is
-//!   injected via [`LinkOptions`] — core carries no default vocabulary (see `zpz_metrics::
+//!   injected via [`LinkOptions`] — core carries no default vocabulary (see `zzop_metrics::
 //!   default_generic_interface_key_patterns` for the shipped table).
 //!
 //! Each adapter projects its IO to a normalized key with full local context; the linker is then a dumb exact
@@ -176,10 +176,10 @@ pub struct AmbiguousConsume {
     pub candidates: Vec<TaggedProvide>,
 }
 
-/// Injectable options for [`link_cross_layer_io`]. Mirrors `zpz_git::CollectOptions::commit_type_patterns`'s
+/// Injectable options for [`link_cross_layer_io`]. Mirrors `zzop_git::CollectOptions::commit_type_patterns`'s
 /// mechanism/vocabulary split: this crate owns the injectable mechanism (matching a compiled pattern against
 /// an edge's key), never the default pattern table itself — that vocabulary (which paths count as "generic")
-/// lives in `zpz_metrics::default_generic_interface_key_patterns`, injected by the engine call site.
+/// lives in `zzop_metrics::default_generic_interface_key_patterns`, injected by the engine call site.
 #[derive(Debug, Clone, Default)]
 pub struct LinkOptions {
     /// `(pattern, reason)` pairs, checked in order; the first pattern whose regex matches an edge's key

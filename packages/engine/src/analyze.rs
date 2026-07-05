@@ -1,11 +1,11 @@
 //! Assembly + whole-graph pass — runs after the fused per-file pass (`pipeline::run_file_pass`) has
-//! already dropped every parser's AST. Operates on plain `zpz_core` data: `FileArtifact`s -> one
+//! already dropped every parser's AST. Operates on plain `zzop_core` data: `FileArtifact`s -> one
 //! tree-wide `CommonIr` -> whole-graph native analyses (circular / unreachable / dead-candidates) ->
 //! `merge_findings` with the per-file DSL findings collected during the fused pass.
 //!
 //! Also runs the optional git-history-dependent analyses: when `EngineConfig::git` is `Some` and `root`
-//! is a git repository, `zpz_git::collect` feeds real `FileNode`s (via `zpz_core::build_file_nodes`),
-//! from which `zpz_metrics`' `scores`/`health`/`recommendations`/`critical`/`seams` are computed.
+//! is a git repository, `zzop_git::collect` feeds real `FileNode`s (via `zzop_core::build_file_nodes`),
+//! from which `zzop_metrics`' `scores`/`health`/`recommendations`/`critical`/`seams` are computed.
 //!
 //! Two per-file "fragment now, compose later" passes run here over data the fused pass already
 //! collected — no second parse: [`late_resolve_cross_file_consumes`] re-resolves a cross-file-indirected
@@ -15,18 +15,18 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
 
-use zpz_core::{
+use zzop_core::{
     build_file_nodes, circular_from_dep, dsl::RuleTiming, http_interface_key, is_enabled,
     merge_findings, CommonIr, DepGraph, DepStats, FileNode, Finding, GitStats, ImportMap,
     IoConsume, IoFacts, IoProvide, MinimalIr, DEFAULT_WEIGHTS,
 };
-use zpz_metrics::{
+use zzop_metrics::{
     build_coupling, build_cross_layer_co_churn, build_diagnostics, build_folder_aggregates,
     build_recommendations, compute_criticality, compute_health_index, compute_scores,
     compute_seams, layer_of, scores::types::FileKinds, BuildRecInput, CrossLayerCoChurnOptions,
     DiagnosticsInput, GitDiagnosticsInput, RecommendationGates, ScoresInput, DEFAULT_FOLDER_DEPTH,
 };
-use zpz_metrics::{
+use zzop_metrics::{
     COUPLING_TOP_PER_FILE, CRITICALITY_LIMIT, CRITICALITY_MIN_BLAST_RADIUS,
     CRITICALITY_SILENT_CHANGE_MAX, SEAMS_LIMIT, SEAMS_MIN_FILES,
 };
@@ -83,18 +83,18 @@ pub(crate) fn assemble(
     // tRPC PROVIDE composition's substrate (`compose_trpc_provides`): each TS file's own tRPC
     // router-fragment shape, paired with its `rel`. Composed directly into `IoProvide`s rather than
     // re-keying an `IoConsume` (see `crate::io`'s module doc).
-    let mut trpc_fragment_pairs: Vec<(String, Vec<zpz_core::TrpcRouterFragment>)> = Vec::new();
+    let mut trpc_fragment_pairs: Vec<(String, Vec<zzop_core::TrpcRouterFragment>)> = Vec::new();
     // Code-registered router-mount composition's substrate (`compose_router_mount_provides`): the
     // provide-side sibling of `trpc_fragment_pairs`, for Hono-style chained builders and cross-file
     // sub-router mounts.
-    let mut router_mount_pairs: Vec<(String, Vec<zpz_core::RouterMountFragment>)> = Vec::new();
+    let mut router_mount_pairs: Vec<(String, Vec<zzop_core::RouterMountFragment>)> = Vec::new();
     // Wrapper-consume join's substrate (`resolve_wrapper_consumes`): per-file wrapper DEFINITION
     // fragments (exported fns whose signature carries method/path params and whose body reaches an
     // HTTP sink) and wrapper CALL fragments (call sites with captured literal args). The join
     // re-anchors HTTP consumes from wrapper internals (where egress sees only a non-literal
     // `axios.request(opts)`) to the real FE call sites.
-    let mut wrapper_def_pairs: Vec<(String, Vec<zpz_core::WrapperDefFragment>)> = Vec::new();
-    let mut wrapper_call_pairs: Vec<(String, Vec<zpz_core::WrapperCallFragment>)> = Vec::new();
+    let mut wrapper_def_pairs: Vec<(String, Vec<zzop_core::WrapperDefFragment>)> = Vec::new();
+    let mut wrapper_call_pairs: Vec<(String, Vec<zzop_core::WrapperCallFragment>)> = Vec::new();
 
     for artifact in artifacts {
         loc_by_path.insert(artifact.rel.clone(), artifact.loc);
@@ -182,7 +182,7 @@ pub(crate) fn assemble(
             if loc_by_path.contains_key(specifier) {
                 return Some(specifier.to_string());
             }
-            zpz_parser_typescript::resolve_file_with_workspace(
+            zzop_parser_typescript::resolve_file_with_workspace(
                 specifier,
                 from_file,
                 &ts_paths,
@@ -203,7 +203,7 @@ pub(crate) fn assemble(
             if loc_by_path.contains_key(specifier) {
                 return Some(specifier.to_string());
             }
-            zpz_parser_typescript::resolve_file_with_workspace(
+            zzop_parser_typescript::resolve_file_with_workspace(
                 specifier,
                 from_file,
                 &ts_paths,
@@ -222,7 +222,7 @@ pub(crate) fn assemble(
             wrapper_def_pairs,
             wrapper_call_pairs,
             |specifier, from_file| {
-                zpz_parser_typescript::resolve_file_with_workspace(
+                zzop_parser_typescript::resolve_file_with_workspace(
                     specifier,
                     from_file,
                     &ts_paths,
@@ -248,7 +248,7 @@ pub(crate) fn assemble(
         io_provides.extend(composed);
     }
 
-    let dep: DepGraph = zpz_parser_typescript::build_dep_with_workspace(
+    let dep: DepGraph = zzop_parser_typescript::build_dep_with_workspace(
         &ts_import_pairs,
         &ts_paths,
         &pkg_scan.workspace_pkgs,
@@ -346,26 +346,26 @@ pub(crate) fn assemble(
     // whole-tree pass over `io_provides` already collected above.
     if is_enabled(&config.rule_config, "duplicate-route") {
         let t0 = profile.then(Instant::now);
-        let found = zpz_rules_graph::duplicate_route_findings(&io_provides);
+        let found = zzop_rules_graph::duplicate_route_findings(&io_provides);
         record_native_timing(&mut rule_time, t0, "duplicate-route", found.len());
         global_findings.extend(found);
     }
 
     // Native fullstack rule: within one file, an earlier param route shadows a later literal route of
-    // the same shape (see `zpz_rules_graph::route_shadowing`'s module doc for the decidable subset).
+    // the same shape (see `zzop_rules_graph::route_shadowing`'s module doc for the decidable subset).
     if is_enabled(&config.rule_config, "route-shadowing") {
         let t0 = profile.then(Instant::now);
-        let found = zpz_rules_graph::route_shadowing_findings(&io_provides);
+        let found = zzop_rules_graph::route_shadowing_findings(&io_provides);
         record_native_timing(&mut rule_time, t0, "route-shadowing", found.len());
         global_findings.extend(found);
     }
 
     // Native fullstack rule: a resolved `http` consume with no matching provide anywhere in this tree,
     // gated on this tree itself having at least one `http` provide (see
-    // `zpz_rules_graph::unprovided_consume`'s module doc for the zero-provides veto).
+    // `zzop_rules_graph::unprovided_consume`'s module doc for the zero-provides veto).
     if is_enabled(&config.rule_config, "unprovided-consume") {
         let t0 = profile.then(Instant::now);
-        let found = zpz_rules_graph::unprovided_consume_findings(&io_provides, &io_consumes);
+        let found = zzop_rules_graph::unprovided_consume_findings(&io_provides, &io_consumes);
         record_native_timing(&mut rule_time, t0, "unprovided-consume", found.len());
         global_findings.extend(found);
     }
@@ -517,7 +517,7 @@ pub(crate) fn assemble(
         source: config.source_id.clone(),
         // Multiple parser frontends (TypeScript + Prisma, v1 scope) are fused into one tree-wide IR here —
         // no single `parser` id is accurate the way it is for a single-frontend `build_common_ir` call, so
-        // this is a zpz-only tag naming the fused engine itself rather than one frontend.
+        // this is a zzop-only tag naming the fused engine itself rather than one frontend.
         parser: "engine".to_string(),
         ir: MinimalIr {
             dep,
@@ -570,7 +570,7 @@ pub(crate) fn assemble(
 /// independent of `HashMap`/rayon iteration order.
 ///
 /// **Re-resolution**: every consume with `key: None` whose `raw`/`method` are both `Some` is looked up
-/// via `zpz_parser_typescript::resolve_raw_path`; a hit sets `key` to the normalized join key and
+/// via `zzop_parser_typescript::resolve_raw_path`; a hit sets `key` to the normalized join key and
 /// deliberately keeps `raw` as provenance (this consume was only resolvable via the project-wide
 /// constant merge, not from its own file alone). A miss leaves the consume exactly as unresolved as
 /// before — this function only ever turns an unresolved consume INTO a resolved one, never the reverse.
@@ -598,13 +598,13 @@ pub(crate) fn late_resolve_cross_file_consumes(
         let (Some(raw), Some(method)) = (consume.raw.as_deref(), consume.method.as_deref()) else {
             continue;
         };
-        if let Some(path) = zpz_parser_typescript::resolve_raw_path(raw, &consts) {
+        if let Some(path) = zzop_parser_typescript::resolve_raw_path(raw, &consts) {
             // A leading `/` is an internal route (normalized key); an absolute `http(s)://` URL keeps
             // the verbatim host-carrying key so `link_cross_layer_io`'s `"://"` gate still routes it
             // to the `external` bucket; anything else — a bare fragment — stays unresolved.
             if path.starts_with('/') {
                 consume.key = Some(http_interface_key(method, &path));
-            } else if zpz_parser_typescript::is_external_url(&path) {
+            } else if zzop_parser_typescript::is_external_url(&path) {
                 consume.key = Some(format!("{method} {path}"));
             }
         }
@@ -617,7 +617,7 @@ pub(crate) fn late_resolve_cross_file_consumes(
 /// full dotted route path is often only knowable once every file's fragment is assembled together.
 ///
 /// `resolve` is `(specifier, from_file) -> Option<target_rel>` — the caller passes a closure over
-/// `zpz_parser_typescript::resolve_file_with_workspace` (the same resolver `assemble` uses for TS
+/// `zzop_parser_typescript::resolve_file_with_workspace` (the same resolver `assemble` uses for TS
 /// dep-graph edges) so this function itself stays a pure, filesystem-free composition — easy to unit
 /// test with a hand-built resolver map.
 ///
@@ -640,10 +640,10 @@ pub(crate) fn late_resolve_cross_file_consumes(
 /// Deduped on `(kind, key, file, line)` and sorted to match the ordering `assemble` applies to every
 /// other `IoProvide` before freezing `MinimalIr::io`.
 pub(crate) fn compose_trpc_provides(
-    fragments: Vec<(String, Vec<zpz_core::TrpcRouterFragment>)>,
+    fragments: Vec<(String, Vec<zzop_core::TrpcRouterFragment>)>,
     resolve: impl Fn(&str, &str) -> Option<String>,
 ) -> Vec<IoProvide> {
-    use zpz_core::{TrpcRouterEntry, TrpcRouterFragment};
+    use zzop_core::{TrpcRouterEntry, TrpcRouterFragment};
 
     let mut by_key: HashMap<(String, String), &TrpcRouterFragment> = HashMap::new();
     for (rel, frags) in &fragments {
@@ -850,7 +850,7 @@ fn sort_rule_timings(rule_time: HashMap<String, (u128, usize)>) -> Vec<RuleTimin
     out
 }
 
-/// Runs `zpz_git::collect` when `config.git` is `Some`, pushing a warning (never panicking, never
+/// Runs `zzop_git::collect` when `config.git` is `Some`, pushing a warning (never panicking, never
 /// failing the analysis) when `root` is not a git repository / `git` is unavailable / collection
 /// otherwise fails. Returns `(GitStats::default(), vec![], false)` for every "not active" case so the
 /// caller's git-dependent computations can gate on the returned `bool` alone.
@@ -858,19 +858,19 @@ fn collect_git(
     root: &std::path::Path,
     config: &EngineConfig,
     warnings: &mut Vec<String>,
-) -> (GitStats, Vec<zpz_core::CommitFileSet>, bool) {
+) -> (GitStats, Vec<zzop_core::CommitFileSet>, bool) {
     let Some(git_opts) = &config.git else {
         return (GitStats::default(), Vec::new(), false);
     };
-    let opts = zpz_git::CollectOptions {
+    let opts = zzop_git::CollectOptions {
         since: git_opts.since.clone(),
         recent_days: git_opts.recent_days,
         // The default FIX/FEAT/... keyword vocabulary is analysis-domain, not collection-mechanism, so
-        // it lives in `zpz-metrics` rather than `zpz-git` — collector crates own the mechanism, not the
+        // it lives in `zzop-metrics` rather than `zzop-git` — collector crates own the mechanism, not the
         // domain vocabulary.
-        commit_type_patterns: zpz_metrics::default_commit_type_patterns(),
+        commit_type_patterns: zzop_metrics::default_commit_type_patterns(),
     };
-    match zpz_git::collect(root, &opts) {
+    match zzop_git::collect(root, &opts) {
         Ok(collection) => (collection.stats, collection.commits, true),
         Err(e) => {
             warnings.push(format!(
@@ -882,7 +882,7 @@ fn collect_git(
     }
 }
 
-/// Builds `zpz_metrics::diagnostics`' coverage-gap self-report from data `assemble` already has in
+/// Builds `zzop_metrics::diagnostics`' coverage-gap self-report from data `assemble` already has in
 /// scope — no extra pass. `symbols` filters on `SourceSymbol::exported` since `all_symbols` also
 /// carries unexported top-level declarations. `concrete_modules`/`total_modules` are always `0` — no
 /// real module classification is wired at this call site yet, and `0`/`0` is the honest "not measured"
@@ -895,8 +895,8 @@ fn collect_git(
 fn run_diagnostics(
     file_count: usize,
     dep: &DepGraph,
-    symbols: &[zpz_core::SourceSymbol],
-    commits: &[zpz_core::CommitFileSet],
+    symbols: &[zzop_core::SourceSymbol],
+    commits: &[zzop_core::CommitFileSet],
     config: &EngineConfig,
     git_active: bool,
 ) -> Vec<String> {
@@ -963,7 +963,7 @@ pub(crate) fn zero_packs_warning(config: &EngineConfig) -> Option<String> {
     if !config.packs.is_empty() {
         return None;
     }
-    let mut registry = zpz_core::RuleRegistry::new();
+    let mut registry = zzop_core::RuleRegistry::new();
     crate::register_all_native(&mut registry);
     let native_count = registry.metas().len();
     Some(format!(
@@ -1001,7 +1001,7 @@ fn minified_files_warning(sorted_rels: &[String]) -> Option<String> {
 /// pack id, and every `"<pack>/<rule>"` id within those packs.
 fn unknown_disabled_rule_ids(config: &EngineConfig) -> Vec<String> {
     let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut registry = zpz_core::RuleRegistry::new();
+    let mut registry = zzop_core::RuleRegistry::new();
     crate::register_all_native(&mut registry);
     known.extend(registry.metas().iter().map(|m| m.id.clone()));
     for pack in &config.packs {
@@ -1020,7 +1020,7 @@ fn unknown_disabled_rule_ids(config: &EngineConfig) -> Vec<String> {
 }
 
 /// Fan-in/fan-out/all-paths derived from a resolved dep graph — the minimal `DepStats`-shaped input
-/// `build_file_nodes` needs. A local build since `zpz_core::file_nodes` has no standalone "DepStats
+/// `build_file_nodes` needs. A local build since `zzop_core::file_nodes` has no standalone "DepStats
 /// from a DepGraph" helper.
 pub(crate) fn dep_stats_from_dep(dep: &DepGraph) -> DepStats {
     let mut fan_in = std::collections::BTreeMap::new();
@@ -1041,21 +1041,21 @@ pub(crate) fn dep_stats_from_dep(dep: &DepGraph) -> DepStats {
     }
 }
 
-/// Thin delegate to `zpz_rules_graph::circular_findings`. Kept as a `crate::analyze` function (rather
+/// Thin delegate to `zzop_rules_graph::circular_findings`. Kept as a `crate::analyze` function (rather
 /// than inlining the call at every call site) since `envelope::analyze_envelope` also imports it by
 /// this name/path. `cycles` is passed in (rather than re-derived from `dep`) so this and the
 /// scores/recommendations computations above share one `circular_from_dep` call.
 pub(crate) fn circular_findings(cycles: &[Vec<String>]) -> Vec<Finding> {
-    zpz_rules_graph::circular_findings(cycles)
+    zzop_rules_graph::circular_findings(cycles)
 }
 
-/// Thin delegate to `zpz_rules_graph::unreachable_findings` — see `circular_findings`'s doc for why this
+/// Thin delegate to `zzop_rules_graph::unreachable_findings` — see `circular_findings`'s doc for why this
 /// wrapper stays here rather than being inlined at its call sites.
 pub(crate) fn unreachable_findings(nodes: &[FileNode], dep: &DepGraph) -> Vec<Finding> {
-    zpz_rules_graph::unreachable_findings(nodes, dep)
+    zzop_rules_graph::unreachable_findings(nodes, dep)
 }
 
-/// Runs the three call-graph-BFS native rules — `zpz-rules-graph`'s `scan_unsafe_read_endpoint` /
+/// Runs the three call-graph-BFS native rules — `zzop-rules-graph`'s `scan_unsafe_read_endpoint` /
 /// `scan_non_idempotent_write` / `scan_mutating_route_no_auth` — and extends `global_findings` in place.
 /// Gated behind `is_enabled` per rule id and behind having at least one reconstructed `ApiEndpoint`, so
 /// a tree with no HTTP routes never pays the cost below.
@@ -1064,8 +1064,8 @@ pub(crate) fn unreachable_findings(nodes: &[FileNode], dep: &DepGraph) -> Vec<Fi
 /// `FileArtifact` carries no `RawCall`s — the fused pass's contract is "parse once, project, drop the
 /// AST", and `SourceSymbol`/`ImportMap` alone do not encode call sites. Rather than widen that contract,
 /// this function runs a **second, uncached pass**: it re-reads every already-dispatched TypeScript
-/// file's text off disk (`ts_paths`) and re-parses it with `zpz_parser_typescript::parse_calls`. This
-/// never consults `zpz_cache::AnalysisCache` — a full per-file cache hit still re-reads and re-parses
+/// file's text off disk (`ts_paths`) and re-parses it with `zzop_parser_typescript::parse_calls`. This
+/// never consults `zzop_cache::AnalysisCache` — a full per-file cache hit still re-reads and re-parses
 /// every TS file here whenever either rule is enabled and at least one HTTP endpoint exists.
 ///
 /// `api_endpoints` is reconstructed from the per-file `IoProvide` facts already collected (`kind ==
@@ -1077,20 +1077,20 @@ pub(crate) fn unreachable_findings(nodes: &[FileNode], dep: &DepGraph) -> Vec<Fi
 fn run_callgraph_rules(
     root: &std::path::Path,
     config: &EngineConfig,
-    io_provides: &[zpz_core::IoProvide],
+    io_provides: &[zzop_core::IoProvide],
     ts_paths: &HashSet<String>,
     ts_import_pairs: &[(String, ImportMap)],
-    all_symbols: &[zpz_core::SourceSymbol],
+    all_symbols: &[zzop_core::SourceSymbol],
     profile: bool,
     rule_time: &mut HashMap<String, (u128, usize)>,
     global_findings: &mut Vec<Finding>,
 ) {
-    let api_endpoints: Vec<zpz_core::ApiEndpoint> = io_provides
+    let api_endpoints: Vec<zzop_core::ApiEndpoint> = io_provides
         .iter()
         .filter(|p| p.kind == "http")
         .filter_map(|p| {
             let (method, path) = p.key.split_once(' ')?;
-            Some(zpz_core::ApiEndpoint {
+            Some(zzop_core::ApiEndpoint {
                 method: method.to_string(),
                 path: path.to_string(),
                 handler: p.symbol.clone().unwrap_or_default(),
@@ -1114,7 +1114,7 @@ fn run_callgraph_rules(
     for rel in ts_paths {
         if let Ok(bytes) = std::fs::read(root.join(rel)) {
             let text = String::from_utf8_lossy(&bytes).into_owned();
-            raw_calls.extend(zpz_parser_typescript::parse_calls(rel, &text));
+            raw_calls.extend(zzop_parser_typescript::parse_calls(rel, &text));
             file_texts.insert(rel.clone(), text);
         }
     }
@@ -1127,29 +1127,29 @@ fn run_callgraph_rules(
             .insert(s.name.clone());
     }
     let resolve_file_fn = |specifier: &str, from_file: &str| {
-        zpz_parser_typescript::resolve_file(specifier, from_file, ts_paths)
+        zzop_parser_typescript::resolve_file(specifier, from_file, ts_paths)
     };
-    let symbol_graph = zpz_core::callgraph::build_symbol_graph(
+    let symbol_graph = zzop_core::callgraph::build_symbol_graph(
         &raw_calls,
         &imports_by_file,
         &local_symbols_by_file,
         &resolve_file_fn,
     );
-    let write_methods: Vec<String> = zpz_rules_graph::DEFAULT_WRITE_METHODS
+    let write_methods: Vec<String> = zzop_rules_graph::DEFAULT_WRITE_METHODS
         .iter()
         .map(|s| s.to_string())
         .collect();
 
     if run_unsafe_read {
         let t0 = profile.then(Instant::now);
-        let found = zpz_rules_graph::scan_unsafe_read_endpoint(
-            &zpz_rules_graph::ScanUnsafeReadEndpointInput {
+        let found = zzop_rules_graph::scan_unsafe_read_endpoint(
+            &zzop_rules_graph::ScanUnsafeReadEndpointInput {
                 api_endpoints: &api_endpoints,
                 symbols: all_symbols,
                 symbol_graph: &symbol_graph,
                 files: &file_texts,
                 write_methods: &write_methods,
-                orm_receiver_pattern: zpz_rules_graph::DEFAULT_ORM_RECEIVER_PATTERN,
+                orm_receiver_pattern: zzop_rules_graph::DEFAULT_ORM_RECEIVER_PATTERN,
             },
         );
         record_native_timing(rule_time, t0, "unsafe-read-endpoint", found.len());
@@ -1157,13 +1157,13 @@ fn run_callgraph_rules(
     }
     if run_non_idempotent {
         let t0 = profile.then(Instant::now);
-        let found = zpz_rules_graph::scan_non_idempotent_write(
-            &zpz_rules_graph::ScanNonIdempotentWriteInput {
+        let found = zzop_rules_graph::scan_non_idempotent_write(
+            &zzop_rules_graph::ScanNonIdempotentWriteInput {
                 api_endpoints: &api_endpoints,
                 symbols: all_symbols,
                 symbol_graph: &symbol_graph,
                 files: &file_texts,
-                orm_receiver_pattern: zpz_rules_graph::DEFAULT_ORM_RECEIVER_PATTERN,
+                orm_receiver_pattern: zzop_rules_graph::DEFAULT_ORM_RECEIVER_PATTERN,
             },
         );
         record_native_timing(rule_time, t0, "non-idempotent-write", found.len());
@@ -1181,18 +1181,18 @@ fn run_callgraph_rules(
         let nest_guarded: std::collections::HashSet<(String, u32)> = file_texts
             .iter()
             .flat_map(|(rel, text)| {
-                zpz_parser_typescript::extract_controller_guarded_lines(rel, text)
+                zzop_parser_typescript::extract_controller_guarded_lines(rel, text)
                     .into_iter()
                     .map(move |line| (rel.clone(), line))
             })
             .collect();
         let t0 = profile.then(Instant::now);
-        let found = zpz_rules_graph::scan_mutating_route_no_auth(
-            &zpz_rules_graph::ScanMutatingRouteNoAuthInput {
+        let found = zzop_rules_graph::scan_mutating_route_no_auth(
+            &zzop_rules_graph::ScanMutatingRouteNoAuthInput {
                 io_provides,
                 symbols: all_symbols,
                 symbol_graph: &symbol_graph,
-                auth_guard_pattern: zpz_rules_graph::DEFAULT_AUTH_GUARD_PATTERN,
+                auth_guard_pattern: zzop_rules_graph::DEFAULT_AUTH_GUARD_PATTERN,
                 nest_guarded: &nest_guarded,
             },
         );
@@ -1201,7 +1201,7 @@ fn run_callgraph_rules(
     }
 }
 
-/// Whole-corpus Java Spring HTTP-provides pass — wires `zpz_parser_java::extract_http_provides_project`
+/// Whole-corpus Java Spring HTTP-provides pass — wires `zzop_parser_java::extract_http_provides_project`
 /// (see that module's doc for the two per-file-invisible facts it resolves: CE-split `extends`-chain
 /// gating, and constant/constant-concatenation class-level `@RequestMapping` prefixes) into `assemble`.
 /// Runs once per `analyze_tree` call, over EVERY non-degraded java-dispatched file (`java_rels`),
@@ -1209,7 +1209,7 @@ fn run_callgraph_rules(
 /// projecting its own slice, and folding a whole-corpus-dependent result into the per-file cache would
 /// let an edit to one file (e.g. a prefix-constants-only file with no routes of its own) leave every
 /// OTHER already-cached java file's provides silently stale. Recomputed in full on every call — never
-/// consults `zpz_cache::AnalysisCache`.
+/// consults `zzop_cache::AnalysisCache`.
 ///
 /// **Merge semantics**: `io_provides` already carries the fused per-file pass's own java `http` provides
 /// — same-file controllers with a literal (or absent) class-level `@RequestMapping`. The project pass
@@ -1238,18 +1238,18 @@ fn run_java_provides_project_pass(
     if files.is_empty() {
         return;
     }
-    let report = zpz_parser_java::extract_http_provides_project(&files);
+    let report = zzop_parser_java::extract_http_provides_project(&files);
     io_provides.retain(|p| !(p.kind == "http" && java_set.contains(p.file.as_str())));
     io_provides.extend(report.provides);
 }
 
 /// Runs the three schema x usage JOIN native rules (`soft-delete-bypass` / `orderby-unindexed` /
-/// `enum-string-drift` — `zpz_rules_schema::join`'s module doc) — a whole-tree pass over every
+/// `enum-string-drift` — `zzop_rules_schema::join`'s module doc) — a whole-tree pass over every
 /// non-degraded Prisma file (`prisma_rels`, same eligibility as `schema-usage`) plus a fresh
 /// `scan_query_call_sites` walk of the BE source tree, gated per-id via `is_enabled` and timed via
 /// `record_native_timing`, the same shape every other whole-tree native analysis in `assemble` uses.
 ///
-/// `enum-string-drift` also collects `SchemaEnum`s (via `zpz_parser_prisma::parse_schema_enums`,
+/// `enum-string-drift` also collects `SchemaEnum`s (via `zzop_parser_prisma::parse_schema_enums`,
 /// alongside the per-file `parse_schema` call for models) over the same `prisma_rels`, so
 /// `enum_string_drift_issues` has both model and enum substrate to join call-site literals against.
 ///
@@ -1274,22 +1274,22 @@ fn run_schema_join_rules(
         return;
     }
 
-    let mut models: Vec<zpz_core::SchemaModel> = Vec::new();
-    let mut enums: Vec<zpz_core::SchemaEnum> = Vec::new();
+    let mut models: Vec<zzop_core::SchemaModel> = Vec::new();
+    let mut enums: Vec<zzop_core::SchemaEnum> = Vec::new();
     for rel in prisma_rels {
         let Ok(text) = std::fs::read_to_string(root.join(rel)) else {
             continue;
         };
-        models.extend(zpz_parser_prisma::parse_schema(&text, Some(rel), None));
-        enums.extend(zpz_parser_prisma::parse_schema_enums(&text));
+        models.extend(zzop_parser_prisma::parse_schema(&text, Some(rel), None));
+        enums.extend(zzop_parser_prisma::parse_schema_enums(&text));
     }
     if models.is_empty() {
         return;
     }
 
-    let sites = zpz_rules_schema::scan_query_call_sites(
+    let sites = zzop_rules_schema::scan_query_call_sites(
         root,
-        zpz_parser_prisma::DEFAULT_PRISMA_CLIENT_GETTER_FN,
+        zzop_parser_prisma::DEFAULT_PRISMA_CLIENT_GETTER_FN,
     );
 
     run_join_rule(
@@ -1298,7 +1298,7 @@ fn run_schema_join_rules(
         profile,
         &models,
         &sites,
-        zpz_rules_schema::soft_delete_bypass_issues,
+        zzop_rules_schema::soft_delete_bypass_issues,
         rule_time,
         global_findings,
     );
@@ -1308,7 +1308,7 @@ fn run_schema_join_rules(
         profile,
         &models,
         &sites,
-        zpz_rules_schema::orderby_unindexed_issues,
+        zzop_rules_schema::orderby_unindexed_issues,
         rule_time,
         global_findings,
     );
@@ -1318,7 +1318,7 @@ fn run_schema_join_rules(
         profile,
         &models,
         &sites,
-        |m, s| zpz_rules_schema::enum_string_drift_issues(m, &enums, s),
+        |m, s| zzop_rules_schema::enum_string_drift_issues(m, &enums, s),
         rule_time,
         global_findings,
     );
@@ -1331,18 +1331,18 @@ fn run_schema_join_rules(
 #[allow(clippy::too_many_arguments)]
 fn run_join_rule<F>(
     id: &str,
-    rule_config: &zpz_core::RuleConfig,
+    rule_config: &zzop_core::RuleConfig,
     profile: bool,
-    models: &[zpz_core::SchemaModel],
-    sites: &[zpz_rules_schema::QueryCallSite],
+    models: &[zzop_core::SchemaModel],
+    sites: &[zzop_rules_schema::QueryCallSite],
     rule_fn: F,
     rule_time: &mut HashMap<String, (u128, usize)>,
     global_findings: &mut Vec<Finding>,
 ) where
     F: Fn(
-        &[zpz_core::SchemaModel],
-        &[zpz_rules_schema::QueryCallSite],
-    ) -> Vec<zpz_rules_schema::JoinIssue>,
+        &[zzop_core::SchemaModel],
+        &[zzop_rules_schema::QueryCallSite],
+    ) -> Vec<zzop_rules_schema::JoinIssue>,
 {
     if !is_enabled(rule_config, id) {
         return;
@@ -1355,29 +1355,29 @@ fn run_join_rule<F>(
 }
 
 /// One `JoinIssue` -> one `Finding`. Unlike `schema_issue_to_finding` (`pipeline.rs`), no
-/// `zpz_parser_prisma::model_decl_line` lookup is needed: `JoinIssue` already carries the exact BE
+/// `zzop_parser_prisma::model_decl_line` lookup is needed: `JoinIssue` already carries the exact BE
 /// call-site `file`/`line` it fired at. `rule_id` is the bare id, not `"schema/{id}"` — each of these
 /// three is a whole individually-gated toggle unit, matching `duplicate-route`'s convention rather than
 /// `schema-usage`'s pack-namespace-prefixed sub-rule ids.
-fn join_issue_to_finding(issue: &zpz_rules_schema::JoinIssue) -> Finding {
+fn join_issue_to_finding(issue: &zzop_rules_schema::JoinIssue) -> Finding {
     Finding {
         rule_id: issue.rule.clone(),
         severity: issue.severity,
         file: issue.file.clone(),
         line: issue.line,
-        message: zpz_rules_schema::join_issue_message(issue),
+        message: zzop_rules_schema::join_issue_message(issue),
         data: serde_json::to_value(issue).ok(),
     }
 }
 
-/// Thin delegate to `zpz_rules_graph::dead_candidate_findings` — see `circular_findings`'s doc. `extra_entries`
+/// Thin delegate to `zzop_rules_graph::dead_candidate_findings` — see `circular_findings`'s doc. `extra_entries`
 /// forwards straight through (package.json-referenced entry files).
 pub(crate) fn dead_candidate_findings(
     nodes: &[FileNode],
     dep: &DepGraph,
     extra_entries: &HashSet<String>,
 ) -> Vec<Finding> {
-    zpz_rules_graph::dead_candidate_findings(nodes, dep, extra_entries)
+    zzop_rules_graph::dead_candidate_findings(nodes, dep, extra_entries)
 }
 
 /// Join per-file wrapper CALL fragments against wrapper DEFINITION fragments and emit an `http`
@@ -1393,14 +1393,14 @@ pub(crate) fn dead_candidate_findings(
 /// the call, never guesses); path = the `path_param`-indexed arg (must start with `/`). Emitted
 /// consumes are fully keyed (no late resolution) and deduped/sorted deterministically.
 pub(crate) fn resolve_wrapper_consumes(
-    def_pairs: Vec<(String, Vec<zpz_core::WrapperDefFragment>)>,
-    call_pairs: Vec<(String, Vec<zpz_core::WrapperCallFragment>)>,
+    def_pairs: Vec<(String, Vec<zzop_core::WrapperDefFragment>)>,
+    call_pairs: Vec<(String, Vec<zzop_core::WrapperCallFragment>)>,
     resolve: impl Fn(&str, &str) -> Option<String>,
     io_consumes: &mut Vec<IoConsume>,
 ) {
     const VERBS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
-    let mut defs: HashMap<(String, String), &zpz_core::WrapperDefFragment> = HashMap::new();
+    let mut defs: HashMap<(String, String), &zzop_core::WrapperDefFragment> = HashMap::new();
     for (file, frags) in &def_pairs {
         for def in frags {
             defs.insert((file.clone(), def.name.clone()), def);
@@ -1440,7 +1440,7 @@ pub(crate) fn resolve_wrapper_consumes(
             let Some(path) = path else { continue };
             out.push(IoConsume {
                 kind: "http".to_string(),
-                key: Some(zpz_core::http_interface_key(&method, &path)),
+                key: Some(zzop_core::http_interface_key(&method, &path)),
                 file: file.clone(),
                 line: call.line,
                 raw: None,
@@ -1460,7 +1460,7 @@ pub(crate) fn resolve_wrapper_consumes(
 }
 
 /// Compose whole-tree `http` PROVIDEs from per-file router-mount fragments
-/// (`zpz_parser_typescript::router_mounts` — Hono-style chained builders and cross-file
+/// (`zzop_parser_typescript::router_mounts` — Hono-style chained builders and cross-file
 /// `.route(prefix, subRouter)` mounts). The provide-side twin of [`compose_trpc_provides`]: same
 /// root-exclusion conservatism, same import-resolver closure, same dedup/sort discipline; composition
 /// joins URL path prefixes instead of dotted procedure paths.
@@ -1479,10 +1479,10 @@ pub(crate) fn resolve_wrapper_consumes(
 /// Provide anchors: `file`/`line` of the VERB registration (the leaf file, not the mount site),
 /// `symbol` = handler name — the place a reader would edit the route.
 pub(crate) fn compose_router_mount_provides(
-    fragments: Vec<(String, Vec<zpz_core::RouterMountFragment>)>,
+    fragments: Vec<(String, Vec<zzop_core::RouterMountFragment>)>,
     resolve: impl Fn(&str, &str) -> Option<String>,
 ) -> Vec<IoProvide> {
-    use zpz_core::{RouterMountEntry, RouterMountFragment};
+    use zzop_core::{RouterMountEntry, RouterMountFragment};
 
     let mut fragments = fragments;
     fragments.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1553,7 +1553,7 @@ pub(crate) fn compose_router_mount_provides(
     fn walk(
         idx: usize,
         prefix: &str,
-        nodes: &[(&str, &zpz_core::RouterMountFragment)],
+        nodes: &[(&str, &zzop_core::RouterMountFragment)],
         find_child: &FindChild,
         ancestry: &mut Vec<usize>,
         out: &mut Vec<IoProvide>,
@@ -1565,7 +1565,7 @@ pub(crate) fn compose_router_mount_provides(
         let (file, frag) = nodes[idx];
         for entry in &frag.entries {
             match entry {
-                zpz_core::RouterMountEntry::Verb {
+                zzop_core::RouterMountEntry::Verb {
                     method,
                     path,
                     handler,
@@ -1574,13 +1574,13 @@ pub(crate) fn compose_router_mount_provides(
                     let full = join_prefix(prefix, path);
                     out.push(IoProvide {
                         kind: "http".to_string(),
-                        key: zpz_core::http_interface_key(method, &full),
+                        key: zzop_core::http_interface_key(method, &full),
                         file: file.to_string(),
                         line: *line,
                         symbol: handler.clone(),
                     });
                 }
-                zpz_core::RouterMountEntry::Mount {
+                zzop_core::RouterMountEntry::Mount {
                     prefix: mount_prefix,
                     ident,
                     specifier,
@@ -1682,7 +1682,7 @@ mod wrapper_consume_tests {
     //! wrapper, fixed-method wrappers, the never-guess skips (non-verb method arg, non-`/` path,
     //! unresolvable specifier), and determinism.
     use super::*;
-    use zpz_core::{WrapperCallFragment, WrapperDefFragment};
+    use zzop_core::{WrapperCallFragment, WrapperDefFragment};
 
     fn def(
         name: &str,
@@ -1866,7 +1866,7 @@ mod router_mount_compose_tests {
     //! unresolvable-but-named child skipped wholesale), sole-fragment fallback for default-import
     //! aliases, cycle guard, determinism.
     use super::*;
-    use zpz_core::{RouterMountEntry, RouterMountFragment};
+    use zzop_core::{RouterMountEntry, RouterMountFragment};
 
     fn verb(method: &str, path: &str, handler: &str, line: u32) -> RouterMountEntry {
         RouterMountEntry::Verb {
@@ -2101,7 +2101,7 @@ mod trpc_compose_tests {
     //! (sibling entries survive), a self-referencing cycle guarded against infinite recursion, and
     //! determinism under input-order reshuffling.
     use super::*;
-    use zpz_core::{TrpcRouterEntry, TrpcRouterFragment};
+    use zzop_core::{TrpcRouterEntry, TrpcRouterFragment};
 
     /// A resolver that only ever answers the exact `(specifier, from_file)` pairs listed — anything else is
     /// `None`, mirroring how a real unresolvable/external specifier behaves.

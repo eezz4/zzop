@@ -1,6 +1,6 @@
 //! Fused per-file pass: for each file, parse -> project this file's slice of Common IR
 //! (symbols/loc) -> run every applicable DSL pack against that slice -> return plain data. The
-//! parser's AST never leaves the function that calls the parser — only `zpz_core` types
+//! parser's AST never leaves the function that calls the parser — only `zzop_core` types
 //! (`SourceSymbol`, `ImportMap`, `Finding`, `u32` loc) cross back into this module.
 //!
 //! Files are processed via `rayon::par_iter` over a single-threaded, pre-sorted walk
@@ -16,8 +16,8 @@ use ignore::WalkBuilder;
 use rayon::prelude::*;
 use regex::Regex;
 
-use zpz_cache::{AnalysisCache, CacheKey, FileIrSlice};
-use zpz_core::{
+use zzop_cache::{AnalysisCache, CacheKey, FileIrSlice};
+use zzop_core::{
     dsl::{eval_pack, eval_pack_profiled, RuleContext, RuleTiming, SourceFile},
     ir::SourceSymbol,
     pack_loader, registry, ImportMap, IoFacts, RulePackDef,
@@ -38,7 +38,7 @@ pub(crate) struct FileArtifact {
     pub symbols: Vec<SourceSymbol>,
     pub imports: Option<ImportMap>,
     pub loc: u32,
-    pub findings: Vec<zpz_core::Finding>,
+    pub findings: Vec<zzop_core::Finding>,
     pub degraded: bool,
     /// Minified/generated classification — distinct from `degraded`: a degraded file still runs
     /// line-scan DSL rules against raw text, but this flag skips ALL DSL rule-pack evaluation.
@@ -56,14 +56,14 @@ pub(crate) struct FileArtifact {
     /// fragment into one project-wide map to re-resolve consumes left unresolved.
     pub const_map_fragment: std::collections::HashMap<String, String>,
     /// tRPC router shape fragment — `analyze::compose_trpc_provides`'s substrate.
-    pub trpc_router_fragments: Vec<zpz_core::TrpcRouterFragment>,
+    pub trpc_router_fragments: Vec<zzop_core::TrpcRouterFragment>,
     /// Code-registered router-mount fragment (Hono chained builders / cross-file sub-router mounts) —
     /// provide-side sibling of `trpc_router_fragments`.
-    pub router_mount_fragments: Vec<zpz_core::RouterMountFragment>,
+    pub router_mount_fragments: Vec<zzop_core::RouterMountFragment>,
     /// Wrapper-DEFINITION fragment — substrate for `analyze`'s assemble-time wrapper-consume join.
-    pub wrapper_def_fragments: Vec<zpz_core::WrapperDefFragment>,
+    pub wrapper_def_fragments: Vec<zzop_core::WrapperDefFragment>,
     /// Wrapper-CALL fragment — each call is resolved via its import specifier back to a def.
-    pub wrapper_call_fragments: Vec<zpz_core::WrapperCallFragment>,
+    pub wrapper_call_fragments: Vec<zzop_core::WrapperCallFragment>,
 }
 
 /// Runs the fused per-file pass over every file under `root` (skipping `config.dispatch.skip_dirs`) and
@@ -112,7 +112,7 @@ pub(crate) fn run_file_pass(
 /// `"{pack.id}/{rule.id}"` id is disabled removed from `rules`. Called once per call (not per file),
 /// shared by both `analyze_tree` and `analyze_envelope`. A pack left with zero rules behaves like an
 /// empty pack downstream (`pack_loader::applies_to` returns `false`).
-pub(crate) fn gate_pack_rules(pack: &RulePackDef, config: &zpz_core::RuleConfig) -> RulePackDef {
+pub(crate) fn gate_pack_rules(pack: &RulePackDef, config: &zzop_core::RuleConfig) -> RulePackDef {
     let mut gated = pack.clone();
     gated
         .rules
@@ -376,7 +376,7 @@ fn process_file(
 fn artifact_from_ir(
     rel: &str,
     ir: FileIrSlice,
-    findings: Vec<zpz_core::Finding>,
+    findings: Vec<zzop_core::Finding>,
     rule_timings: Vec<RuleTiming>,
 ) -> FileArtifact {
     FileArtifact {
@@ -464,13 +464,13 @@ fn compute_fresh_artifact(
     // assemble-time wrapper-consume join, defs indexed by `(file, name)`).
     let const_map_fragment = match language {
         Some(Language::TypeScript) if !degraded => {
-            zpz_parser_typescript::const_map_fragment(rel, text)
+            zzop_parser_typescript::const_map_fragment(rel, text)
         }
         _ => std::collections::HashMap::new(),
     };
     let trpc_router_fragments = match language {
         Some(Language::TypeScript) if !degraded => {
-            zpz_parser_typescript::extract_trpc_router_fragments(rel, text)
+            zzop_parser_typescript::extract_trpc_router_fragments(rel, text)
         }
         _ => Vec::new(),
     };
@@ -478,13 +478,13 @@ fn compute_fresh_artifact(
         Some(Language::TypeScript) if !degraded => {
             let router_names: Vec<&str> =
                 config.io.router_names.iter().map(String::as_str).collect();
-            zpz_parser_typescript::extract_router_mount_fragments(rel, text, &router_names)
+            zzop_parser_typescript::extract_router_mount_fragments(rel, text, &router_names)
         }
         _ => Vec::new(),
     };
     let (wrapper_def_fragments, wrapper_call_fragments) = match language {
         Some(Language::TypeScript) if !degraded => {
-            zpz_parser_typescript::extract_wrapper_fragments(rel, text)
+            zzop_parser_typescript::extract_wrapper_fragments(rel, text)
         }
         _ => (Vec::new(), Vec::new()),
     };
@@ -522,26 +522,26 @@ fn ts_slot(language: Option<Language>) -> Option<ImportMap> {
 /// files, lexical-only files, and the fallback when a parse panics. Approximate for Prisma text
 /// (also uses `//` comments), acceptable for a fallback-only path.
 fn lexical_loc(text: &str) -> u32 {
-    zpz_parser_typescript::count_loc(text)
+    zzop_parser_typescript::count_loc(text)
 }
 
 /// TypeScript parse: symbols + imports + loc, or a degraded lexical fallback.
 ///
 /// `parse_symbols`/`parse_imports` fold "swc couldn't parse this" and "legitimately empty file" into
 /// the same empty result, so the broken/empty distinction instead comes from
-/// `zpz_parser_typescript::parse_ok`: `false` means swc produced no `Module` at all — route straight to
+/// `zzop_parser_typescript::parse_ok`: `false` means swc produced no `Module` at all — route straight to
 /// the lexical fallback; `true` proceeds to `parse_symbols`/`parse_imports`, still `catch_unwind`-wrapped
 /// as defense in depth.
 ///
 /// Also computes `used_names` (`parse_local_identifier_refs`) for `dead-exports`. Known cost: each of
 /// the three extraction calls parses independently, so a well-formed file is parsed by swc three times
-/// per pass (four counting `parse_ok`'s probe) — `zpz_cache::FileIrSlice::used_names` caches the result
+/// per pass (four counting `parse_ok`'s probe) — `zzop_cache::FileIrSlice::used_names` caches the result
 /// so a warm run pays this only once per distinct file content.
 fn parse_typescript(
     rel: &str,
     text: &str,
 ) -> (Vec<SourceSymbol>, Option<ImportMap>, u32, bool, Vec<String>) {
-    if !zpz_parser_typescript::parse_ok(rel, text) {
+    if !zzop_parser_typescript::parse_ok(rel, text) {
         return (
             Vec::new(),
             Some(ImportMap::new()),
@@ -551,10 +551,10 @@ fn parse_typescript(
         );
     }
     let result = std::panic::catch_unwind(|| {
-        let symbols = zpz_parser_typescript::parse_symbols(rel, text);
-        let imports = zpz_parser_typescript::parse_imports(rel, text);
-        let loc = zpz_parser_typescript::count_loc(text);
-        let used_names: Vec<String> = zpz_parser_typescript::parse_local_identifier_refs(rel, text)
+        let symbols = zzop_parser_typescript::parse_symbols(rel, text);
+        let imports = zzop_parser_typescript::parse_imports(rel, text);
+        let loc = zzop_parser_typescript::count_loc(text);
+        let used_names: Vec<String> = zzop_parser_typescript::parse_local_identifier_refs(rel, text)
             .into_iter()
             .collect();
         (symbols, imports, loc, used_names)
@@ -571,7 +571,7 @@ fn parse_typescript(
     }
 }
 
-/// Prisma parse: reuses `zpz_parser_prisma::build_common_ir` with a single-file slice. Its parser is a
+/// Prisma parse: reuses `zzop_parser_prisma::build_common_ir` with a single-file slice. Its parser is a
 /// line-based regex scanner with no AST step, so a malformed schema degrades to "zero models found"
 /// rather than panicking; `catch_unwind` is still applied as defense in depth. Prisma files never
 /// participate in the TS dep graph (`imports: None`, always).
@@ -582,7 +582,7 @@ fn parse_prisma(
 ) -> (Vec<SourceSymbol>, Option<ImportMap>, u32, bool) {
     let owned = (rel.to_string(), text.to_string());
     let result = std::panic::catch_unwind(|| {
-        zpz_parser_prisma::build_common_ir(source_id, std::slice::from_ref(&owned))
+        zzop_parser_prisma::build_common_ir(source_id, std::slice::from_ref(&owned))
     });
     match result {
         Ok(ir) => {
@@ -598,14 +598,14 @@ fn parse_prisma(
     }
 }
 
-/// Java parse: the lexical brace-matcher `zpz_parser_java::parse_method_spans`, `catch_unwind`-wrapped
+/// Java parse: the lexical brace-matcher `zzop_parser_java::parse_method_spans`, `catch_unwind`-wrapped
 /// as defense in depth. Normally never `degraded` — a malformed `.java` file just yields fewer/odd
 /// spans, not a parse failure (the `Err` arm only fires on an actual panic). Never participates in the
 /// TS dep graph (`imports: None`, always).
 fn parse_java_lexical(rel: &str, text: &str) -> (Vec<SourceSymbol>, Option<ImportMap>, u32, bool) {
     let owned = (rel.to_string(), text.to_string());
     let result =
-        std::panic::catch_unwind(|| zpz_parser_java::parse_method_spans(&owned.0, &owned.1));
+        std::panic::catch_unwind(|| zzop_parser_java::parse_method_spans(&owned.0, &owned.1));
     match result {
         Ok(symbols) => (symbols, None, lexical_loc(text), false),
         Err(_) => (Vec::new(), None, lexical_loc(text), true),
@@ -628,8 +628,8 @@ fn eval_packs(
     symbols: &[SourceSymbol],
     io: Option<IoFacts>,
     profile: bool,
-) -> (Vec<zpz_core::Finding>, Vec<RuleTiming>, bool) {
-    if zpz_core::dsl::is_minified_or_generated(text) {
+) -> (Vec<zzop_core::Finding>, Vec<RuleTiming>, bool) {
+    if zzop_core::dsl::is_minified_or_generated(text) {
         return (Vec::new(), Vec::new(), true);
     }
     let file = SourceFile {
@@ -663,69 +663,69 @@ fn schema_findings_eligible(language: Option<Language>, degraded: bool) -> bool 
     matches!(language, Some(Language::Prisma)) && !degraded
 }
 
-/// Wires `zpz_rules_schema::apply_schema_rules` into the fused per-file pass for Prisma files:
+/// Wires `zzop_rules_schema::apply_schema_rules` into the fused per-file pass for Prisma files:
 /// re-parses this file's `SchemaModel`s (cheap — same scan `parse_prisma` already ran) and converts
-/// each `SchemaIssue` into a `zpz_core::Finding`, gated behind native id `"schema-structural"`.
+/// each `SchemaIssue` into a `zzop_core::Finding`, gated behind native id `"schema-structural"`.
 /// `rule_id` is `"schema/{issue.rule}"`, a fresh namespace since this is native logic, not a DSL pack.
 fn schema_findings(
-    rule_config: &zpz_core::RuleConfig,
+    rule_config: &zzop_core::RuleConfig,
     rel: &str,
     text: &str,
-) -> Vec<zpz_core::Finding> {
+) -> Vec<zzop_core::Finding> {
     if !registry::is_enabled(rule_config, "schema-structural") {
         return Vec::new();
     }
-    let models = zpz_parser_prisma::parse_schema(text, Some(rel), None);
-    zpz_rules_schema::apply_schema_rules(&models)
+    let models = zzop_parser_prisma::parse_schema(text, Some(rel), None);
+    zzop_rules_schema::apply_schema_rules(&models)
         .iter()
         .map(|issue| schema_issue_to_finding(rel, text, issue))
         .collect()
 }
 
 /// The usage counterpart of `schema_findings`: wires the usage cross-check (dead-model / dead-field /
-/// schema-churn) via `zpz_rules_schema::cross_check_schema`/`apply_churn_rule`. Unlike
+/// schema-churn) via `zzop_rules_schema::cross_check_schema`/`apply_churn_rule`. Unlike
 /// `schema_findings` this is a whole-tree pass — usage evidence (store bindings, identifier counts,
 /// migration churn) spans every source file, so it runs from `analyze::assemble`'s global stage and is
 /// recomputed each run, never entering the per-file findings cache. `analyze_schema_with_usage` is
 /// deliberately not used here since it re-runs the structural rules the per-file pass already emitted.
 ///
 /// `scan_store_map` needs store-factory/client-getter vocabulary; this engine has no general vocabulary
-/// config, so `zpz_parser_prisma`'s defaults apply. Degraded `.prisma` files are excluded by the
+/// config, so `zzop_parser_prisma`'s defaults apply. Degraded `.prisma` files are excluded by the
 /// caller; unreadable files are skipped.
 ///
 /// Scope asymmetry (intentional): `prisma_rels` honors the engine's dispatch/skip config, but the
 /// three usage collectors walk `root/src` themselves with only their own skips — an engine-excluded
 /// source file still contributes identifier counts and store bindings.
-pub(crate) fn schema_usage_findings(root: &Path, prisma_rels: &[String]) -> Vec<zpz_core::Finding> {
+pub(crate) fn schema_usage_findings(root: &Path, prisma_rels: &[String]) -> Vec<zzop_core::Finding> {
     if prisma_rels.is_empty() {
         return Vec::new();
     }
     let mut texts: Vec<(String, String)> = Vec::new();
-    let mut models: Vec<zpz_core::SchemaModel> = Vec::new();
+    let mut models: Vec<zzop_core::SchemaModel> = Vec::new();
     for rel in prisma_rels {
         let Ok(text) = fs::read_to_string(root.join(rel)) else {
             continue;
         };
-        models.extend(zpz_parser_prisma::parse_schema(&text, Some(rel), None));
+        models.extend(zzop_parser_prisma::parse_schema(&text, Some(rel), None));
         texts.push((rel.clone(), text));
     }
     if models.is_empty() {
         return Vec::new();
     }
-    let churn = zpz_rules_schema::scan_migration_churn(root, &models);
-    let usage = zpz_core::SchemaUsage {
-        bound_models: zpz_rules_schema::scan_store_map(
+    let churn = zzop_rules_schema::scan_migration_churn(root, &models);
+    let usage = zzop_core::SchemaUsage {
+        bound_models: zzop_rules_schema::scan_store_map(
             root,
-            zpz_parser_prisma::DEFAULT_STORE_FACTORY_FN,
-            zpz_parser_prisma::DEFAULT_PRISMA_CLIENT_GETTER_FN,
+            zzop_parser_prisma::DEFAULT_STORE_FACTORY_FN,
+            zzop_parser_prisma::DEFAULT_PRISMA_CLIENT_GETTER_FN,
         )
         .into_values()
         .collect(),
-        identifier_counts: zpz_rules_schema::scan_field_usage(root),
+        identifier_counts: zzop_rules_schema::scan_field_usage(root),
         model_churn: None, // `apply_churn_rule` is called explicitly below instead
     };
-    let mut issues = zpz_rules_schema::cross_check_schema(&models, &usage);
-    issues.extend(zpz_rules_schema::apply_churn_rule(&models, &churn));
+    let mut issues = zzop_rules_schema::cross_check_schema(&models, &usage);
+    issues.extend(zzop_rules_schema::apply_churn_rule(&models, &churn));
     issues
         .iter()
         .map(|issue| {
@@ -747,25 +747,25 @@ pub(crate) fn schema_usage_findings(root: &Path, prisma_rels: &[String]) -> Vec<
         .collect()
 }
 
-/// One `SchemaIssue` -> one `Finding`. `line` uses `zpz_parser_prisma::model_decl_line` since
+/// One `SchemaIssue` -> one `Finding`. `line` uses `zzop_parser_prisma::model_decl_line` since
 /// `SchemaIssue` carries no line number of its own (only `model`/`field` names). `data` embeds the
 /// full `SchemaIssue` so a structured consumer can recover `field`/`params` without re-parsing
 /// `message`.
 ///
-/// This glue stays in this engine rather than `zpz-rules-schema`: it needs
-/// `zpz_parser_prisma::model_decl_line`, and `zpz-rules-schema` deliberately does not depend on
-/// `zpz-parser-prisma` (the dependency runs the other way) — this engine depends on both.
+/// This glue stays in this engine rather than `zzop-rules-schema`: it needs
+/// `zzop_parser_prisma::model_decl_line`, and `zzop-rules-schema` deliberately does not depend on
+/// `zzop-parser-prisma` (the dependency runs the other way) — this engine depends on both.
 fn schema_issue_to_finding(
     rel: &str,
     text: &str,
-    issue: &zpz_rules_schema::SchemaIssue,
-) -> zpz_core::Finding {
-    zpz_core::Finding {
+    issue: &zzop_rules_schema::SchemaIssue,
+) -> zzop_core::Finding {
+    zzop_core::Finding {
         rule_id: format!("schema/{}", issue.rule),
         severity: issue.severity,
         file: rel.to_string(),
-        line: zpz_parser_prisma::model_decl_line(text, &issue.model),
-        message: zpz_rules_schema::schema_issue_message(issue),
+        line: zzop_parser_prisma::model_decl_line(text, &issue.model),
+        message: zzop_rules_schema::schema_issue_message(issue),
         data: serde_json::to_value(issue).ok(),
     }
 }
@@ -802,7 +802,7 @@ fn package_json_dir(rel: &str) -> &str {
 }
 
 /// POSIX join + `.`/`..`-segment normalize — a small local reimplementation of
-/// `zpz_parser_typescript::resolve`'s private `normalize`/dirname-join logic, sized to exactly what
+/// `zzop_parser_typescript::resolve`'s private `normalize`/dirname-join logic, sized to exactly what
 /// `package_json_entries` needs (that module's helpers are private, not importable from here).
 fn join_and_normalize(dir: &str, candidate: &str) -> String {
     let joined = if dir.is_empty() {
@@ -852,7 +852,7 @@ fn collect_export_path_strings(v: &serde_json::Value, out: &mut Vec<String>) {
 /// `<name>/subpath` specifiers and a resolved entry file to resolve a bare `<name>` specifier.
 pub(crate) struct PackageJsonScan {
     pub extra_entries: std::collections::HashSet<String>,
-    pub workspace_pkgs: std::collections::HashMap<String, zpz_parser_typescript::WorkspacePkg>,
+    pub workspace_pkgs: std::collections::HashMap<String, zzop_parser_typescript::WorkspacePkg>,
 }
 
 /// The `exports` field's own `"."` (package-root) entry — unlike `collect_export_path_strings` (which
@@ -875,7 +875,7 @@ fn collect_exports_dot_entry(v: &serde_json::Value, out: &mut Vec<String>) {
 /// entry-like regardless of `fan_in` (`find_dead_candidates`'s `extra_entries`): manifest entry fields
 /// (`main`/`module`/`bin`/`exports`) and lexically-scanned `scripts` path tokens. `all_paths` is the
 /// TS-dispatched universe used to resolve an extensionless/compiled manifest value via
-/// `zpz_parser_typescript::try_ext`.
+/// `zzop_parser_typescript::try_ext`.
 ///
 /// Also collects each manifest's `name` into `PackageJsonScan::workspace_pkgs` (own directory, plus a
 /// resolved bare-specifier entry tried in Node's own order: `main`, `module`, `exports["."]`, then a
@@ -930,7 +930,7 @@ pub(crate) fn package_json_entries(
         }
         for candidate in &candidates {
             let normalized = join_and_normalize(dir, candidate);
-            if let Some(resolved) = zpz_parser_typescript::try_ext(&normalized, all_paths) {
+            if let Some(resolved) = zzop_parser_typescript::try_ext(&normalized, all_paths) {
                 result.insert(resolved);
             }
         }
@@ -950,11 +950,11 @@ pub(crate) fn package_json_entries(
             }
             let entry = entry_candidates.iter().find_map(|candidate| {
                 let normalized = join_and_normalize(dir, candidate);
-                zpz_parser_typescript::try_ext(&normalized, all_paths)
+                zzop_parser_typescript::try_ext(&normalized, all_paths)
             });
             workspace_pkgs.insert(
                 name.to_string(),
-                zpz_parser_typescript::WorkspacePkg {
+                zzop_parser_typescript::WorkspacePkg {
                     dir: dir.to_string(),
                     entry,
                 },
@@ -970,7 +970,7 @@ pub(crate) fn package_json_entries(
 // --- tsconfig `paths`/`baseUrl` alias collection ---
 //
 // `tsconfig_scan` is this engine's filesystem-touching collection pass; the pure resolver logic it
-// feeds lives in `zpz_parser_typescript::resolve` instead (no I/O there).
+// feeds lives in `zzop_parser_typescript::resolve` instead (no I/O there).
 
 /// Filename pattern matching a `tsconfig.json` at any depth — only this literal name is auto-discovered
 /// (mirrors real `tsc` project discovery); an `extends` target is read only when referenced.
@@ -1083,7 +1083,7 @@ fn parse_raw_tsconfig(text: &str) -> Option<RawTsconfig> {
 
 /// Collects `compilerOptions.baseUrl`/`paths` from every `tsconfig.json` found during the same manifest
 /// walk `package_json_entries` uses, keyed by the tsconfig's own directory (the directory a TypeScript
-/// file's nearest ancestor tsconfig governs, per `zpz_parser_typescript::resolve::governing_tsconfig`).
+/// file's nearest ancestor tsconfig governs, per `zzop_parser_typescript::resolve::governing_tsconfig`).
 ///
 /// `extends` handling is minimal: only a local relative target is followed, exactly one level, merged
 /// parent-fills-gaps (child's `paths` keys win; `baseUrl` is the child's if set, else the parent's). A
@@ -1095,7 +1095,7 @@ fn parse_raw_tsconfig(text: &str) -> Option<RawTsconfig> {
 pub(crate) fn tsconfig_scan(
     root: &Path,
     node_paths: impl Iterator<Item = String>,
-) -> std::collections::BTreeMap<String, zpz_parser_typescript::TsconfigPaths> {
+) -> std::collections::BTreeMap<String, zzop_parser_typescript::TsconfigPaths> {
     let mut result = std::collections::BTreeMap::new();
     for rel in node_paths.filter(|p| is_tsconfig_json_path(p)) {
         let Ok(text) = fs::read_to_string(root.join(&rel)) else {
@@ -1138,7 +1138,7 @@ pub(crate) fn tsconfig_scan(
         };
         result.insert(
             dir.to_string(),
-            zpz_parser_typescript::TsconfigPaths { base_url, paths },
+            zzop_parser_typescript::TsconfigPaths { base_url, paths },
         );
     }
     result
@@ -1148,7 +1148,7 @@ pub(crate) fn tsconfig_scan(
 mod tests {
     use super::*;
 
-    // --- parse_typescript's real parse-failure signal (zpz_parser_typescript::parse_ok) ---
+    // --- parse_typescript's real parse-failure signal (zzop_parser_typescript::parse_ok) ---
 
     #[test]
     fn parse_typescript_does_not_degrade_balanced_well_formed_file() {
@@ -1227,8 +1227,8 @@ mod tests {
         // Calls the parser functions directly (the real pipeline would already have degraded this file
         // via `parse_ok` before reaching these calls).
         let garbage = "@#$%^&*( ) => => => 123abc <<< >>> \u{0}\u{1}";
-        let symbols = zpz_parser_typescript::parse_symbols("g.ts", garbage);
-        let imports = zpz_parser_typescript::parse_imports("g.ts", garbage);
+        let symbols = zzop_parser_typescript::parse_symbols("g.ts", garbage);
+        let imports = zzop_parser_typescript::parse_imports("g.ts", garbage);
         assert!(symbols.is_empty());
         assert!(imports.is_empty());
     }
@@ -1298,7 +1298,7 @@ mod tests {
 
     #[test]
     fn package_json_entries_resolves_extensionless_or_js_main_via_try_ext() {
-        let dir = TempDir::new("zpz-pkg-entries-main");
+        let dir = TempDir::new("zzop-pkg-entries-main");
         dir.write("package.json", r#"{"main": "dist/index.js"}"#);
         let all_paths: HashSet<String> = ["dist/index.ts".to_string()].into_iter().collect();
         let scan = package_json_entries(
@@ -1311,7 +1311,7 @@ mod tests {
 
     #[test]
     fn package_json_entries_resolves_bin_object_with_multiple_entries() {
-        let dir = TempDir::new("zpz-pkg-entries-bin");
+        let dir = TempDir::new("zzop-pkg-entries-bin");
         dir.write(
             "package.json",
             r#"{"bin": {"foo-cli": "./bin/foo.ts", "bar-cli": "./bin/bar.ts"}}"#,
@@ -1329,7 +1329,7 @@ mod tests {
 
     #[test]
     fn package_json_entries_resolves_nested_exports_and_ignores_condition_keys() {
-        let dir = TempDir::new("zpz-pkg-entries-exports");
+        let dir = TempDir::new("zzop-pkg-entries-exports");
         dir.write(
             "package.json",
             r#"{
@@ -1356,7 +1356,7 @@ mod tests {
 
     #[test]
     fn package_json_entries_lexically_scans_scripts_for_path_tokens() {
-        let dir = TempDir::new("zpz-pkg-entries-scripts");
+        let dir = TempDir::new("zzop-pkg-entries-scripts");
         dir.write(
             "package.json",
             r#"{
@@ -1378,7 +1378,7 @@ mod tests {
 
     #[test]
     fn package_json_entries_resolves_relative_to_own_directory_not_root() {
-        let dir = TempDir::new("zpz-pkg-entries-nested");
+        let dir = TempDir::new("zzop-pkg-entries-nested");
         dir.write("packages/foo/package.json", r#"{"main": "./index.ts"}"#);
         let all_paths: HashSet<String> =
             ["packages/foo/index.ts".to_string()].into_iter().collect();
@@ -1394,7 +1394,7 @@ mod tests {
 
     #[test]
     fn package_json_entries_collects_workspace_pkg_name_to_main_entry() {
-        let dir = TempDir::new("zpz-pkg-entries-ws-main");
+        let dir = TempDir::new("zzop-pkg-entries-ws-main");
         dir.write(
             "packages/prisma/package.json",
             r#"{"name": "@acme/prisma", "main": "index.ts"}"#,
@@ -1414,7 +1414,7 @@ mod tests {
 
     #[test]
     fn package_json_entries_falls_back_to_index_ts_when_no_main_module_exports() {
-        let dir = TempDir::new("zpz-pkg-entries-ws-index-fallback");
+        let dir = TempDir::new("zzop-pkg-entries-ws-index-fallback");
         dir.write("packages/lib/package.json", r#"{"name": "@acme/lib"}"#);
         dir.write("packages/lib/index.ts", "export {};\n");
         let all_paths: HashSet<String> =
@@ -1433,7 +1433,7 @@ mod tests {
         // A pure sub-path-only package with no entry point: no `main`/`module`/`exports`, no root
         // `index.ts` — every import of it names a sub-path. `entry` staying `None` (rather than some
         // guessed path) is the honest signal.
-        let dir = TempDir::new("zpz-pkg-entries-ws-no-entry");
+        let dir = TempDir::new("zzop-pkg-entries-ws-no-entry");
         dir.write("packages/lib/package.json", r#"{"name": "@acme/lib"}"#);
         dir.write("packages/lib/tracking.ts", "export {};\n");
         let all_paths: HashSet<String> = ["packages/lib/tracking.ts".to_string()]
@@ -1453,7 +1453,7 @@ mod tests {
 
     #[test]
     fn tsconfig_scan_collects_star_pattern_and_base_url() {
-        let dir = TempDir::new("zpz-tsconfig-star");
+        let dir = TempDir::new("zzop-tsconfig-star");
         dir.write(
             "tsconfig.json",
             r#"{"compilerOptions": {"baseUrl": ".", "paths": {"@/*": ["./src/*"]}}}"#,
@@ -1466,7 +1466,7 @@ mod tests {
 
     #[test]
     fn tsconfig_scan_registers_under_own_directory_not_root() {
-        let dir = TempDir::new("zpz-tsconfig-nested-dir");
+        let dir = TempDir::new("zzop-tsconfig-nested-dir");
         dir.write(
             "packages/app/tsconfig.json",
             r#"{"compilerOptions": {"baseUrl": "src"}}"#,
@@ -1484,7 +1484,7 @@ mod tests {
 
     #[test]
     fn tsconfig_scan_follows_one_level_of_local_extends_and_merges() {
-        let dir = TempDir::new("zpz-tsconfig-extends");
+        let dir = TempDir::new("zzop-tsconfig-extends");
         dir.write(
             "tsconfig.base.json",
             r#"{"compilerOptions": {"baseUrl": ".", "paths": {"@shared/*": ["./shared/*"], "@app/*": ["./old-app/*"]}}}"#,
@@ -1517,7 +1517,7 @@ mod tests {
 
     #[test]
     fn tsconfig_scan_ignores_non_local_extends() {
-        let dir = TempDir::new("zpz-tsconfig-extends-pkg");
+        let dir = TempDir::new("zzop-tsconfig-extends-pkg");
         dir.write(
             "tsconfig.json",
             r#"{"extends": "@tsconfig/node18/tsconfig.json", "compilerOptions": {"paths": {"@/*": ["./src/*"]}}}"#,
@@ -1531,7 +1531,7 @@ mod tests {
 
     #[test]
     fn tsconfig_scan_tolerates_jsonc_comments_and_trailing_commas() {
-        let dir = TempDir::new("zpz-tsconfig-jsonc");
+        let dir = TempDir::new("zzop-tsconfig-jsonc");
         dir.write(
             "tsconfig.json",
             r#"{
@@ -1552,7 +1552,7 @@ mod tests {
 
     #[test]
     fn tsconfig_scan_skips_directory_with_neither_base_url_nor_paths() {
-        let dir = TempDir::new("zpz-tsconfig-empty");
+        let dir = TempDir::new("zzop-tsconfig-empty");
         dir.write("tsconfig.json", r#"{"compilerOptions": {"strict": true}}"#);
         let scan = tsconfig_scan(dir.path(), std::iter::once("tsconfig.json".to_string()));
         assert!(scan.is_empty());
@@ -1560,7 +1560,7 @@ mod tests {
 
     #[test]
     fn tsconfig_scan_degrades_on_invalid_json() {
-        let dir = TempDir::new("zpz-tsconfig-invalid");
+        let dir = TempDir::new("zzop-tsconfig-invalid");
         dir.write("tsconfig.json", "{ this is not json");
         let scan = tsconfig_scan(dir.path(), std::iter::once("tsconfig.json".to_string()));
         assert!(scan.is_empty());

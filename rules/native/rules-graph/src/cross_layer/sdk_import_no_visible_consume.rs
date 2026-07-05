@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use zpz_core::{Finding, Severity};
+use zzop_core::{Finding, Severity};
 
 use super::{PackageImportSite, MIN_TOTAL_CONSUMES};
 

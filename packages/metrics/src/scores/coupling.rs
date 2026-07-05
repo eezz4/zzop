@@ -5,7 +5,7 @@
 
 use super::config::ScoresConfig;
 use super::types::CouplingScore;
-use zpz_core::FileNode;
+use zzop_core::FileNode;
 
 pub fn compute_coupling(
     nodes: &[FileNode],

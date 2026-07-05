@@ -7,7 +7,7 @@
 //! `egress.rs` only recognizes direct sink calls) or anchor back to the wrapper's own definition site,
 //! not the call site. This module only projects one file's local facts; the actual re-anchoring
 //! (resolving a call's callee to a def fragment, possibly cross-file via `specifier`) is the engine's
-//! assemble-time join — see `zpz_core::fragments`'s `WrapperDefFragment`/`WrapperCallFragment` doc.
+//! assemble-time join — see `zzop_core::fragments`'s `WrapperDefFragment`/`WrapperCallFragment` doc.
 //!
 //! ## Def recognizer (`WrapperDefFragment`)
 //! An EXPORTED top-level function/const-arrow qualifies as a wrapper def when ALL of:
@@ -47,7 +47,7 @@ use swc_core::ecma::ast::{
     Pat, Stmt, Tpl, TsEntityName, TsType, TsTypeAnn, VarDecl,
 };
 use swc_core::ecma::visit::{Visit, VisitWith};
-use zpz_core::{ImportMap, WrapperCallFragment, WrapperDefFragment};
+use zzop_core::{ImportMap, WrapperCallFragment, WrapperDefFragment};
 
 /// Extract one file's wrapper-def and wrapper-call fragments — see module doc for the recognizer spec.
 pub fn extract_wrapper_fragments(

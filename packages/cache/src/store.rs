@@ -41,7 +41,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
-use zpz_core::Finding;
+use zzop_core::Finding;
 
 use crate::hash::digest128;
 use crate::ir_slice::FileIrSlice;
@@ -253,10 +253,10 @@ fn temp_sibling(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zpz_core::Severity;
+    use zzop_core::Severity;
 
     /// A fresh, unique scratch directory under the OS temp dir — no `tempfile` crate dependency (this
-    /// crate's dependency budget is `zpz-core` + `serde` + `serde_json` only), so tests roll their own via
+    /// crate's dependency budget is `zzop-core` + `serde` + `serde_json` only), so tests roll their own via
     /// the same pid+counter+nanos uniqueness scheme as `temp_sibling`.
     fn scratch_dir(tag: &str) -> PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -266,7 +266,7 @@ mod tests {
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         let dir = std::env::temp_dir().join(format!(
-            "zpz-cache-test-{tag}-{}-{nanos}-{n}",
+            "zzop-cache-test-{tag}-{}-{nanos}-{n}",
             std::process::id()
         ));
         fs::create_dir_all(&dir).unwrap();
@@ -288,18 +288,18 @@ mod tests {
 
     fn sample_ir(loc: u32) -> FileIrSlice {
         FileIrSlice {
-            symbols: vec![zpz_core::SourceSymbol {
+            symbols: vec![zzop_core::SourceSymbol {
                 id: "a.ts#foo".to_string(),
                 file: "a.ts".to_string(),
                 name: "foo".to_string(),
-                kind: zpz_core::SourceSymbolKind::Function,
+                kind: zzop_core::SourceSymbolKind::Function,
                 line: 1,
                 exported: true,
                 is_default: false,
                 body_start: Some(1),
                 body_end: Some(3),
             }],
-            imports: Some(zpz_core::ImportMap::new()),
+            imports: Some(zzop_core::ImportMap::new()),
             loc,
             degraded: false,
             io: None,
@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn roundtrip_preserves_the_minified_flag() {
-        // `FileIrSlice::minified_or_generated` (added alongside `zpz-cache-v6`) must survive a put/get round
+        // `FileIrSlice::minified_or_generated` (added alongside `zzop-cache-v6`) must survive a put/get round
         // trip exactly like every other field `roundtrip_ir_put_get` already covers in aggregate — this test
         // isolates just that one field so a future regression that quietly serializes/deserializes it wrong
         // (e.g. an errant `#[serde(skip)]`) fails here specifically, not just as an unexplained diff in the

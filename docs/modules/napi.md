@@ -1,6 +1,6 @@
-# `zpz-napi`
+# `zzop-napi`
 
-The Node.js binding surface over `zpz-engine`. Four functions, all JSON-string-in / JSON-string-out
+The Node.js binding surface over `zzop-engine`. Four functions, all JSON-string-in / JSON-string-out
 (except `version`), defined in `src/addon.rs` and re-exported from `src/api.rs`. `api.rs` itself is
 plain napi-free Rust (compiles/tests under the workspace's default `gnu` toolchain); `addon.rs` is the
 `#[napi]`-annotated layer, gated behind the `addon` feature.
@@ -100,7 +100,7 @@ deliberate exception remains:
 `SourceSymbol` still *accepts* the old snake_case names (`is_default`, `body_start`, `body_end`) on the
 way IN, via `#[serde(alias = ...)]` — it doubles as the deserialize target for
 `docs/NORMALIZED_AST.md`'s frozen v1 external-parser envelope input contract
-(`FileProjection.symbols`), and zpz only ever receives an envelope, never emits one, so widening the
+(`FileProjection.symbols`), and zzop only ever receives an envelope, never emits one, so widening the
 accepted input names costs nothing. See [Output data shapes](#output-data-shapes) below.
 
 `MultiAnalyzeOutputView` (from `analyzeTrees`) wraps `{ trees: [{ root, sourceId, output }],
@@ -125,7 +125,7 @@ every tree's `disabledRules` (any one tree disabling a cross-layer rule id drops
 entirely, since it is a joint-analysis output no single tree fully owns).
 
 `version()` returns
-`"zpz-napi/{CARGO_PKG_VERSION} zpz-parser-typescript={PARSER_FINGERPRINT} zpz-parser-prisma={PARSER_FINGERPRINT}"`
+`"zzop-napi/{CARGO_PKG_VERSION} zzop-parser-typescript={PARSER_FINGERPRINT} zzop-parser-prisma={PARSER_FINGERPRINT}"`
 (Java's fingerprint is not currently surfaced here).
 
 ## Output data shapes
@@ -167,7 +167,7 @@ fn catch<F: FnOnce() -> Result<String, String> + UnwindSafe>(f: F) -> napi::Resu
     match std::panic::catch_unwind(f) {
         Ok(Ok(json)) => Ok(json),
         Ok(Err(message)) => Err(Error::from_reason(message)),
-        Err(_) => Err(Error::from_reason("zpz-napi: internal panic (this is a bug — please report it)")),
+        Err(_) => Err(Error::from_reason("zzop-napi: internal panic (this is a bug — please report it)")),
     }
 }
 ```
@@ -184,28 +184,28 @@ The real `.node` addon requires the MSVC toolchain on Windows (Node-API's delay-
 MinGW/`ld` equivalent):
 
 ```
-cargo +stable-x86_64-pc-windows-msvc build -p zpz-napi --release --features addon
+cargo +stable-x86_64-pc-windows-msvc build -p zzop-napi --release --features addon
 ```
 
 ## Packaging layout
 
-Main package `@zpz/native` (`private: true` — no publishing pipeline yet): `main: index.js`,
+Main package `@zzop/native` (`private: true` — no publishing pipeline yet): `main: index.js`,
 `types: index.d.ts`, `optionalDependencies` on 5 platform packages under `npm/`:
 
 | Directory | Package | os/cpu/libc |
 |---|---|---|
-| `npm/win32-x64-msvc` | `@zpz/native-win32-x64-msvc` | win32/x64 |
-| `npm/darwin-x64` | `@zpz/native-darwin-x64` | darwin/x64 |
-| `npm/darwin-arm64` | `@zpz/native-darwin-arm64` | darwin/arm64 |
-| `npm/linux-x64-gnu` | `@zpz/native-linux-x64-gnu` | linux/x64/glibc |
-| `npm/linux-arm64-gnu` | `@zpz/native-linux-arm64-gnu` | linux/arm64/glibc |
+| `npm/win32-x64-msvc` | `@zzop/native-win32-x64-msvc` | win32/x64 |
+| `npm/darwin-x64` | `@zzop/native-darwin-x64` | darwin/x64 |
+| `npm/darwin-arm64` | `@zzop/native-darwin-arm64` | darwin/arm64 |
+| `npm/linux-x64-gnu` | `@zzop/native-linux-x64-gnu` | linux/x64/glibc |
+| `npm/linux-arm64-gnu` | `@zzop/native-linux-arm64-gnu` | linux/arm64/glibc |
 
-Each ships only a gitignored `zpz-napi.node` placed by CI (`scripts/place-artifacts.mjs`, mapping
+Each ships only a gitignored `zzop-napi.node` placed by CI (`scripts/place-artifacts.mjs`, mapping
 Rust target triples to these 5 platform dirs). `scripts/sync-versions.mjs` propagates the root
 version into every sub-package and the root's `optionalDependencies` pins.
 
 **Loader cascade** (`index.js`): build `${platform}-${arch}`, look up the matching platform package →
-`require()` it; on failure/absence, fall back to `require('./zpz-napi.node')` (local dev build); if
+`require()` it; on failure/absence, fall back to `require('./zzop-napi.node')` (local dev build); if
 both fail, throw with the attempted paths, supported-platform table, and the correct build command for
 the current platform. musl/Alpine and WASM have no table entry (fall to the local-build/throw path).
 `smoke.mjs` (package-root, not `cargo test`) exercises the loader end-to-end against a real built
@@ -213,7 +213,7 @@ addon: `version()`, `analyze()` (2-file cycle fixture), `analyzeTrees()`.
 
 ## Calling from ESM
 
-This is a CommonJS package. A bare specifier import (`import native from '@zpz/native'`) works from an
+This is a CommonJS package. A bare specifier import (`import native from '@zzop/native'`) works from an
 ES module, but a dynamic `import()` of a raw Windows file path (e.g. `import('C:\\...\\index.js')`)
 fails with `ERR_UNSUPPORTED_ESM_URL_SCHEME` — Node requires a `file://` URL or `createRequire`:
 

@@ -4,7 +4,7 @@
 
 use crate::scores::config::ScoresConfig;
 use crate::scores::types::{BusFactorFile, BusFactorScore};
-use zpz_core::FileNode;
+use zzop_core::FileNode;
 
 /// Max detail rows returned.
 const MAX_DETAIL_ITEMS: usize = 50;

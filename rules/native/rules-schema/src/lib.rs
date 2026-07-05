@@ -1,6 +1,6 @@
-//! zpz-rules-schema — native Prisma schema rules: structural anti-patterns plus usage-aware cross-checks.
-//! Schema IR types (`SchemaModel`, `SchemaField`, `FieldAttr`, `SchemaUsage`) live in `zpz-core`, shared
-//! between `zpz-parser-prisma` (which builds them) and `zpz-engine`/this crate (which consume them);
+//! zzop-rules-schema — native Prisma schema rules: structural anti-patterns plus usage-aware cross-checks.
+//! Schema IR types (`SchemaModel`, `SchemaField`, `FieldAttr`, `SchemaUsage`) live in `zzop-core`, shared
+//! between `zzop-parser-prisma` (which builds them) and `zzop-engine`/this crate (which consume them);
 //! everything that operates on that IR — rule bodies, usage-evidence collectors, message vocabulary —
 //! lives here instead.
 //!
@@ -13,20 +13,20 @@
 //!   anchored at the query call site instead of the model declaration.
 //! - [`message`]: the human-facing prose for every rule id above.
 //!
-//! This crate depends only on `zpz-core`, never on `zpz-parser-prisma`, even though `zpz-parser-prisma`
+//! This crate depends only on `zzop-core`, never on `zzop-parser-prisma`, even though `zzop-parser-prisma`
 //! depends on this crate to expose its own bundled schema-analysis capability — a raw-source line-number
-//! lookup some findings need stays in `zpz-engine` instead, to avoid the resulting dependency cycle.
+//! lookup some findings need stays in `zzop-engine` instead, to avoid the resulting dependency cycle.
 
 pub mod join;
 pub mod message;
 pub mod structural;
 pub mod usage;
 
-use zpz_core::{register_native_analysis_stub, RuleRegistry, Severity};
+use zzop_core::{register_native_analysis_stub, RuleRegistry, Severity};
 
 /// Registers every native analysis id implemented in this crate — the schema half of the extensibility
-/// contract's per-crate registration (see `zpz_engine::register_all_native`, which composes this with
-/// `zpz_rules_graph`'s and `zpz_metrics`'s own `register_native_analyses`).
+/// contract's per-crate registration (see `zzop_engine::register_all_native`, which composes this with
+/// `zzop_rules_graph`'s and `zzop_metrics`'s own `register_native_analyses`).
 pub fn register_native_analyses(registry: &mut RuleRegistry) {
     let analyses: &[(&str, Severity)] = &[
         ("schema-structural", Severity::Warning),

@@ -1,4 +1,4 @@
-//! zpz-core — native engine: Common IR contracts + cross-layer linker + rule registry.
+//! zzop-core — native engine: Common IR contracts + cross-layer linker + rule registry.
 //!
 //! Common IR type contracts as plain Rust structs. swc / external-parser types never leak in
 //! here — parser-specific ASTs stay behind the parser crates' own boundaries. Rules and parsers

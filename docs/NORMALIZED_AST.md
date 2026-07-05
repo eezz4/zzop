@@ -13,7 +13,7 @@ the linker is an exact join on normalized keys, never AST matching).
 
 ```json
 {
-  "format": "zpz-normalized-ast",
+  "format": "zzop-normalized-ast",
   "version": 1,
   "parser": "<parser id>/<impl version>",
   "source": "<tree/source id>",
@@ -44,7 +44,7 @@ the linker is an exact join on normalized keys, never AST matching).
 }
 ```
 
-Field semantics (all mirror the Rust `zpz-core` serde types — those are the normative schema):
+Field semantics (all mirror the Rust `zzop-core` serde types — those are the normative schema):
 
 - `loc` — raw physical line count (`text.split('\n').length` semantics, trailing newline adds one).
 - `symbols` — declarations. `body_start`/`body_end` (1-based, inclusive) power method-scan DSL rules;
@@ -106,20 +106,20 @@ IR.
 
 ## Validation
 
-A conforming producer can be checked against the Rust types by round-tripping through `zpz-core`
+A conforming producer can be checked against the Rust types by round-tripping through `zzop-core`
 serde (`CommonIr`/`SourceSymbol`/`ImportBinding`/`ReExport`/`IoFacts` all derive `Deserialize`).
 
-`zpz_core::validate_envelope(json: &str) -> Result<NormalizedEnvelope, Vec<String>>` is that validator:
+`zzop_core::validate_envelope(json: &str) -> Result<NormalizedEnvelope, Vec<String>>` is that validator:
 beyond plain deserialization, it rejects an unknown `format` string, a `version` greater than
-`zpz_core::SUPPORTED_NORMALIZED_AST_VERSION`, an empty or duplicate file `path`, and a symbol whose
+`zzop_core::SUPPORTED_NORMALIZED_AST_VERSION`, an empty or duplicate file `path`, and a symbol whose
 `body_end` is less than its `body_start` — collecting every issue found rather than stopping at the
-first. The engine-side receiver, `zpz_engine::analyze_envelope(envelope, config) -> AnalyzeOutput`,
+first. The engine-side receiver, `zzop_engine::analyze_envelope(envelope, config) -> AnalyzeOutput`,
 projects an already-validated envelope into the same per-file artifact shape a native parser produces
 and runs every language-neutral whole-graph analysis over it (see that function's own module doc for
 exactly which per-file DSL rules and analyses run in envelope mode, and why line-scan/method-scan rules
 and git-history-dependent analyses do not). `docs/examples/jsp-envelope.example.json` is a hand-written,
 crude-parser-shaped fixture (symbols with no body spans, one `http` provide, one `db-table` consume, no
-imports) that validates cleanly against this contract — see `zpz-core`'s `normalized::tests::
+imports) that validates cleanly against this contract — see `zzop-core`'s `normalized::tests::
 jsp_contract_example_validates` for the fixture-based check. A JSON Schema export ships with a future
 external adapter.
 
@@ -132,7 +132,7 @@ knowledge layered onto TypeScript). There are two ways an envelope reaches the e
 callers can refer to either unambiguously.
 
 - **Mode A — full envelope** (already documented above). One `NormalizedEnvelope` stands in for an
-  ENTIRE source tree; `zpz_engine::analyze_envelope(envelope, config)` runs the whole language-neutral
+  ENTIRE source tree; `zzop_engine::analyze_envelope(envelope, config)` runs the whole language-neutral
   analysis over it alone — no native parsing involved at all.
 - **Mode B — adapter overlay.** A PARTIAL envelope — typically only `io` plus the three fragment
   channels (`const_map_fragment`/`trpc_router_fragments`/`router_mount_fragments`) populated, with
@@ -167,7 +167,7 @@ resolution rule documented above for fragment specifiers.
 
 ```json
 {
-  "format": "zpz-normalized-ast",
+  "format": "zzop-normalized-ast",
   "version": 1,
   "parser": "hono-router-overlay/1",
   "source": "api",

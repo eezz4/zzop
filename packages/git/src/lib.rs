@@ -1,5 +1,5 @@
-//! zpz-git — git history collection: ONE `git log --numstat` pass produces both per-file `GitStats`
-//! (zpz_core::file_nodes) and per-commit `CommitFileSet`s (zpz_core::coupling) together, in the same
+//! zzop-git — git history collection: ONE `git log --numstat` pass produces both per-file `GitStats`
+//! (zzop_core::file_nodes) and per-commit `CommitFileSet`s (zzop_core::coupling) together, in the same
 //! streaming parse. No consumer re-runs git per file or per commit. The design is single-pass by
 //! construction: one numstat traversal yields rename tracking (`alias_to_canonical`), the HEAD-hash
 //! cache key, and the recent-activity window, so collection cost is independent of file count.
@@ -19,7 +19,7 @@ use std::path::Path;
 pub use error::GitError;
 pub use parse::parse_git_log;
 
-use zpz_core::{CommitFileSet, GitStats};
+use zzop_core::{CommitFileSet, GitStats};
 
 /// One `git log --numstat` pass's output: per-file stats + per-commit file sets + the covered window.
 #[derive(Debug, Clone, Default)]
@@ -50,7 +50,7 @@ pub struct CollectOptions {
     /// `git log --since=<since>`; `None` = full history.
     pub since: Option<String>,
     /// Window, in days, for the `recent_*` fields on each `GitStats` entry. Default 30 — shared with
-    /// `zpz_core::DEFAULT_RECENT_THRESHOLD_DAYS` (the lifecycle classifier's own recency window), so a
+    /// `zzop_core::DEFAULT_RECENT_THRESHOLD_DAYS` (the lifecycle classifier's own recency window), so a
     /// file's "recent" churn numbers line up with the same window the lifecycle classifier uses to call
     /// it recently active.
     pub recent_days: u32,
@@ -58,7 +58,7 @@ pub struct CollectOptions {
     /// explicit `[TAG]` bracket. Default: empty — bracket tags (`[FIX]`, `[FEAT]`, ...) still classify,
     /// but no keyword vocabulary is assumed. This crate collects; it does not decide what a "FIX" commit
     /// looks like (see `tags`'s module doc) — a caller wanting the default FIX/FEAT/... keyword table
-    /// supplies `zpz_metrics::default_commit_type_patterns()` here (as `zpz_engine::analyze::collect_git`
+    /// supplies `zzop_metrics::default_commit_type_patterns()` here (as `zzop_engine::analyze::collect_git`
     /// does), or its own project-specific vocabulary.
     pub commit_type_patterns: Vec<(String, String)>,
 }
@@ -267,7 +267,7 @@ mod tests {
         // The second commit's subject has no `[TAG]` bracket, so classifying it REVERT (rather than
         // FIX, from the quoted text) exercises the keyword table, not just bracket extraction —
         // `opts()`'s empty default table would never classify it, so this test needs a real table (see
-        // `tags::test_commit_type_patterns`'s doc for why it's a local copy, not `zpz-metrics`'s).
+        // `tags::test_commit_type_patterns`'s doc for why it's a local copy, not `zzop-metrics`'s).
         let mut o = opts();
         o.commit_type_patterns = tags::test_commit_type_patterns();
         let result = parse_git_log(&log, &o, FAR_FUTURE_NOW_MS);
@@ -360,7 +360,7 @@ mod tests {
         }
 
         let dir =
-            std::env::temp_dir().join(format!("zpz-git-test-{}-{}", std::process::id(), now_ms()));
+            std::env::temp_dir().join(format!("zzop-git-test-{}-{}", std::process::id(), now_ms()));
         std::fs::create_dir_all(&dir).expect("create temp repo dir");
 
         let run = |args: &[&str]| {
@@ -446,7 +446,7 @@ mod tests {
         }
 
         let dir = std::env::temp_dir().join(format!(
-            "zpz-git-korean-test-{}-{}",
+            "zzop-git-korean-test-{}-{}",
             std::process::id(),
             now_ms()
         ));
@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn collect_on_a_non_git_directory_returns_a_typed_error() {
-        let dir = std::env::temp_dir().join(format!("zpz-git-not-a-repo-{}", now_ms()));
+        let dir = std::env::temp_dir().join(format!("zzop-git-not-a-repo-{}", now_ms()));
         std::fs::create_dir_all(&dir).expect("create plain temp dir");
         let result = collect(&dir, &CollectOptions::default());
         assert!(matches!(result, Err(GitError::NotAGitRepository { .. })));
@@ -524,7 +524,7 @@ mod tests {
 
     #[test]
     fn collect_on_a_missing_path_returns_a_typed_error_without_panicking() {
-        let dir = std::env::temp_dir().join(format!("zpz-git-missing-{}", now_ms()));
+        let dir = std::env::temp_dir().join(format!("zzop-git-missing-{}", now_ms()));
         let result = collect(&dir, &CollectOptions::default());
         assert!(matches!(result, Err(GitError::NotAGitRepository { .. })));
     }

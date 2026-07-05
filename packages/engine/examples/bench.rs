@@ -1,6 +1,6 @@
 //! Cold/warm benchmark harness over a real source tree.
 //!
-//! Usage: `cargo run --release -p zpz-engine --example bench -- <root> [--packs <dir>] [--cache <dir>] [--git]`
+//! Usage: `cargo run --release -p zzop-engine --example bench -- <root> [--packs <dir>] [--cache <dir>] [--git]`
 //! Runs analyze_tree twice (cold, then warm when a cache dir is given) and prints wall times,
 //! file/finding counts, cache stats, and the top-10 slowest rules. Timings are wall-clock; compare
 //! orders of magnitude across runs, not exact values.
@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use zpz_engine::{analyze_tree, EngineConfig, GitOptions};
+use zzop_engine::{analyze_tree, EngineConfig, GitOptions};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -48,7 +48,7 @@ fn main() {
         ..EngineConfig::default()
     };
     if let Some(dir) = &packs_dir {
-        let loaded = zpz_core::load_dsl_packs(dir);
+        let loaded = zzop_core::load_dsl_packs(dir);
         eprintln!(
             "packs: {} loaded, {} errors",
             loaded.packs.len(),

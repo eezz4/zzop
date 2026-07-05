@@ -15,7 +15,7 @@
 //! are all populated once, in bulk, then serialized — sorting only at the serialize boundary is strictly
 //! cheaper than paying `BTreeMap`'s O(log n) insert cost on every build-time write, and avoids widening the
 //! diff to touch `DepGraph`'s public type alias (`HashMap<String, Vec<String>>`, used pervasively as a
-//! build-time accumulator across `zpz-core`/`zpz-engine`/`zpz-metrics`) or `FileNode`'s public field types.
+//! build-time accumulator across `zzop-core`/`zzop-engine`/`zzop-metrics`) or `FileNode`'s public field types.
 
 use std::collections::HashMap;
 
@@ -24,7 +24,7 @@ use serde::{Serialize, Serializer};
 
 /// Serializes a `HashMap<String, V>` as a JSON object with keys in ascending sorted order, making the
 /// output byte-deterministic across runs regardless of the map's actual (hasher-randomized) iteration
-/// order. Use via `#[serde(serialize_with = "zpz_core::serde_util::sorted_map")]`.
+/// order. Use via `#[serde(serialize_with = "zzop_core::serde_util::sorted_map")]`.
 pub fn sorted_map<S, V>(map: &HashMap<String, V>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,

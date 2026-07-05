@@ -3,13 +3,13 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-// Standard napi-rs `optionalDependencies` loader cascade — main `@zpz/native` loader + one
-// `@zpz/native-<platform>` sub-package per prebuild target, npm/<platform>/ (see
+// Standard napi-rs `optionalDependencies` loader cascade — main `@zzop/native` loader + one
+// `@zzop/native-<platform>` sub-package per prebuild target, npm/<platform>/ (see
 // docs/modules/napi.md's "Packaging layout" section). For each platform/arch this process is
 // running on:
 //
-//   1. Try `require("@zpz/native-<platform>")` — the prebuilt binary, installed as an optional dependency.
-//   2. Fall back to `./zpz-napi.node` next to this file — a local dev build (see the error message below
+//   1. Try `require("@zzop/native-<platform>")` — the prebuilt binary, installed as an optional dependency.
+//   2. Fall back to `./zzop-napi.node` next to this file — a local dev build (see the error message below
 //      for the build command). This is what `smoke.mjs` exercises before any sub-package is published.
 //   3. If neither resolves, throw with the full list of supported platforms and the local-build command.
 //
@@ -17,11 +17,11 @@ const path = require('node:path');
 // "Unsupported platform" section.
 
 const PLATFORM_PACKAGES = {
-  'win32-x64': '@zpz/native-win32-x64-msvc',
-  'darwin-x64': '@zpz/native-darwin-x64',
-  'darwin-arm64': '@zpz/native-darwin-arm64',
-  'linux-x64': '@zpz/native-linux-x64-gnu',
-  'linux-arm64': '@zpz/native-linux-arm64-gnu',
+  'win32-x64': '@zzop/native-win32-x64-msvc',
+  'darwin-x64': '@zzop/native-darwin-x64',
+  'darwin-arm64': '@zzop/native-darwin-arm64',
+  'linux-x64': '@zzop/native-linux-x64-gnu',
+  'linux-arm64': '@zzop/native-linux-arm64-gnu',
 };
 
 const platformKey = `${process.platform}-${process.arch}`;
@@ -42,9 +42,9 @@ if (platformPackage) {
 
 if (!native) {
   try {
-    native = require('./zpz-napi.node');
+    native = require('./zzop-napi.node');
   } catch (err) {
-    attempts.push(`  - ./zpz-napi.node (local build): ${err && err.message}`);
+    attempts.push(`  - ./zzop-napi.node (local build): ${err && err.message}`);
 
     const supported = Object.keys(PLATFORM_PACKAGES)
       .map((key) => `${key} (${PLATFORM_PACKAGES[key]})`)
@@ -52,15 +52,15 @@ if (!native) {
 
     const buildCommand =
       process.platform === 'win32'
-        ? 'cargo +stable-x86_64-pc-windows-msvc build -p zpz-napi --release --features addon'
-        : 'cargo build -p zpz-napi --release --features addon';
+        ? 'cargo +stable-x86_64-pc-windows-msvc build -p zzop-napi --release --features addon'
+        : 'cargo build -p zzop-napi --release --features addon';
 
     throw new Error(
-      `zpz-napi: failed to load the native addon for "${platformKey}".\n` +
+      `zzop-napi: failed to load the native addon for "${platformKey}".\n` +
         `Tried:\n${attempts.join('\n')}\n` +
         `Supported prebuilt platforms: ${supported}.\n` +
         `For unsupported platforms (or local development), build from source: \`${buildCommand}\`, ` +
-        'then copy the produced binary (.dll/.dylib/.so) to packages/napi/zpz-napi.node. ' +
+        'then copy the produced binary (.dll/.dylib/.so) to packages/napi/zzop-napi.node. ' +
         'See packages/napi/README.md for details.'
     );
   }

@@ -1,5 +1,5 @@
 //! Exercises `rules/dsl/perf/perf.json`'s `api-in-loop` method-scan rule end-to-end through
-//! `zpz_engine::analyze_tree` against real swc-parsed TypeScript fixtures. A `// api-in-loop-ok` marker on
+//! `zzop_engine::analyze_tree` against real swc-parsed TypeScript fixtures. A `// api-in-loop-ok` marker on
 //! the finding's own line, or the line directly above, suppresses it via `RuleDef::suppress_marker`. Most
 //! fixtures use a top-level function rather than a class method to avoid double-counting from overlapping
 //! class/method spans; see `overlapping_class_and_method_spans_do_not_double_count` below for that case.
@@ -8,8 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_core::{load_dsl_packs, Finding, RulePackDef};
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_core::{load_dsl_packs, Finding, RulePackDef};
+use zzop_engine::{analyze_tree, EngineConfig};
 
 /// A self-cleaning temp directory (std-only mkdtemp equivalent, no `tempfile` dependency).
 struct TempDir(PathBuf);
@@ -65,7 +65,7 @@ fn perf_pack() -> RulePackDef {
 
 /// Runs the fused engine over a single-file fixture tree, returning just this rule's findings.
 fn scan(rel: &str, content: &str) -> Vec<Finding> {
-    let dir = TempDir::new("zpz-perf-apiloop");
+    let dir = TempDir::new("zzop-perf-apiloop");
     dir.write(rel, content);
     let cfg = EngineConfig {
         source_id: "fixture".to_string(),

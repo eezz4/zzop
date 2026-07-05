@@ -1,13 +1,13 @@
 //! End-to-end test for the cross-layer multi-tree API: an FE tree with a `fetch` call and a BE tree with a
-//! matching Hono route, analyzed via `zpz_engine::analyze_trees`, joined by `zpz_core::link_cross_layer_io`
-//! into a `cross_source: true` edge. Mirrors the FE/BE fixture shapes used by `zpz_core::io`'s own
-//! `link_cross_layer_io` unit tests and `zpz_parser_typescript::egress`/`routes`'s end-to-end tests.
+//! matching Hono route, analyzed via `zzop_engine::analyze_trees`, joined by `zzop_core::link_cross_layer_io`
+//! into a `cross_source: true` edge. Mirrors the FE/BE fixture shapes used by `zzop_core::io`'s own
+//! `link_cross_layer_io` unit tests and `zzop_parser_typescript::egress`/`routes`'s end-to-end tests.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_engine::{analyze_trees, EngineConfig};
+use zzop_engine::{analyze_trees, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -44,7 +44,7 @@ impl Drop for TempDir {
 }
 
 fn fe_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-multi-fe");
+    let dir = TempDir::new("zzop-engine-multi-fe");
     dir.write(
         "src/Ctx.tsx",
         "export function load() { return fetch(\"/authen/getUserInfo\"); }\n",
@@ -53,7 +53,7 @@ fn fe_tree() -> TempDir {
 }
 
 fn be_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-multi-be");
+    let dir = TempDir::new("zzop-engine-multi-be");
     dir.write(
         "routes/apiRoutes.ts",
         "const apiRoutes = new Hono();\napiRoutes.get(\"/authen/getUserInfo\", api.getUserInfo);\n",
@@ -127,7 +127,7 @@ fn per_tree_outputs_are_still_returned_alongside_the_join() {
 
 #[test]
 fn a_tree_with_no_io_projection_contributes_nothing_but_does_not_panic() {
-    let empty = TempDir::new("zpz-engine-multi-empty");
+    let empty = TempDir::new("zzop-engine-multi-empty");
     empty.write("plain.ts", "export const x = 1;\n");
     let trees = vec![(empty.path().to_path_buf(), config("empty"))];
     let out = analyze_trees(&trees);
@@ -137,28 +137,28 @@ fn a_tree_with_no_io_projection_contributes_nothing_but_does_not_panic() {
 
 /// End-to-end for the three join-integrity gates (the cross-layer join-integrity task), all through the
 /// real `analyze_trees` pipeline (real TS parsing, real `link_cross_layer_io` call
-/// site with the engine's injected `zpz_metrics::default_generic_interface_key_patterns()` table):
+/// site with the engine's injected `zzop_metrics::default_generic_interface_key_patterns()` table):
 /// - `/health` is provided by TWO backend trees -> ambiguous, no edge.
 /// - `/ping` is provided by ONE backend tree AND matches the default low-confidence table -> edge with
 ///   `lowConfidenceReason` set.
 /// - an absolute-URL fetch -> `external`, never joined even though nothing internal provides it either.
 #[test]
 fn analyze_trees_surfaces_ambiguous_external_and_low_confidence_buckets() {
-    let fe = TempDir::new("zpz-engine-multi-fe-gates");
+    let fe = TempDir::new("zzop-engine-multi-fe-gates");
     fe.write(
         "src/Ctx.tsx",
         "export function a() { return fetch(\"/health\"); }\n\
          export function b() { return fetch(\"/ping\"); }\n\
          export function c() { return fetch(\"https://vendor.com/api/users\"); }\n",
     );
-    let be1 = TempDir::new("zpz-engine-multi-be1-gates");
+    let be1 = TempDir::new("zzop-engine-multi-be1-gates");
     be1.write(
         "routes/apiRoutes.ts",
         "const apiRoutes = new Hono();\n\
          apiRoutes.get(\"/health\", api.health);\n\
          apiRoutes.get(\"/ping\", api.ping);\n",
     );
-    let be2 = TempDir::new("zpz-engine-multi-be2-gates");
+    let be2 = TempDir::new("zzop-engine-multi-be2-gates");
     be2.write(
         "routes/apiRoutes.ts",
         "const apiRoutes = new Hono();\napiRoutes.get(\"/health\", api.health2);\n",

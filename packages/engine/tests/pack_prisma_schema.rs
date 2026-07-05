@@ -1,6 +1,6 @@
 //! End-to-end proof that `.prisma` schema structural rules are actually wired into the engine: before this
-//! wiring, `zpz_rules_schema::analyze_schema`/`apply_schema_rules` had unit-level tests
-//! (`rules/native/rules-schema/src/structural.rs`) but `zpz_engine` never called either — a `.prisma` file's structural
+//! wiring, `zzop_rules_schema::analyze_schema`/`apply_schema_rules` had unit-level tests
+//! (`rules/native/rules-schema/src/structural.rs`) but `zzop_engine` never called either — a `.prisma` file's structural
 //! anti-patterns (fk-no-index, float-money, stale-updated-at, ...) never became `Finding`s. `pipeline.rs`'s
 //! `schema_findings` now runs `apply_schema_rules` in the same fused per-file pass that already parses the
 //! schema for symbols, gated behind the pre-existing native id `"schema-structural"`
@@ -16,8 +16,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_core::RuleConfig;
-use zpz_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
+use zzop_core::RuleConfig;
+use zzop_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -56,12 +56,12 @@ impl Drop for TempDir {
 const INVOICE_SCHEMA: &str = "model Invoice {\n  id String @id\n  customerId String\n  totalAmount Float\n  note String\n  updatedAt DateTime\n}\n";
 
 fn invoice_fixture() -> TempDir {
-    let dir = TempDir::new("zpz-schema");
+    let dir = TempDir::new("zzop-schema");
     dir.write("prisma/schema.prisma", INVOICE_SCHEMA);
     dir
 }
 
-fn schema_hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zpz_core::Finding> {
+fn schema_hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {
     out.findings
         .iter()
         .filter(|f| f.rule_id == format!("schema/{rule}"))
@@ -163,7 +163,7 @@ fn structural_toggle_leaves_usage_findings_and_vice_versa() {
 #[test]
 fn warm_cached_run_still_reports_schema_findings() {
     let dir = invoice_fixture();
-    let cache_dir = TempDir::new("zpz-schema-cache");
+    let cache_dir = TempDir::new("zzop-schema-cache");
     let config = EngineConfig {
         cache_dir: Some(cache_dir.path().to_path_buf()),
         ..EngineConfig::default()
@@ -205,7 +205,7 @@ fn ruleset_only_change_still_reflects_schema_structural_toggle_on_a_warm_cache()
     // fresh-parse path — or a warm run re-enabling `schema-structural` after a run that disabled it would
     // silently keep serving zero schema findings from the disabled run's cached findings entry.
     let dir = invoice_fixture();
-    let cache_dir = TempDir::new("zpz-schema-cache-toggle");
+    let cache_dir = TempDir::new("zzop-schema-cache-toggle");
 
     let disabled_config = EngineConfig {
         cache_dir: Some(cache_dir.path().to_path_buf()),
@@ -243,7 +243,7 @@ fn ruleset_only_change_still_reflects_schema_structural_toggle_on_a_warm_cache()
     assert!(second.cache.unwrap().misses > 0);
 }
 
-// --- schema-usage wiring (`zpz_core` implements the schema usage cross-checks —
+// --- schema-usage wiring (`zzop_core` implements the schema usage cross-checks —
 // dead-model/dead-field/schema-churn — but the engine has to wire them in explicitly:
 // `pipeline::schema_usage_findings` runs `cross_check_schema`/`apply_churn_rule` as a whole-tree
 // global pass whenever code access exists, gated behind the pre-registered native id
@@ -254,7 +254,7 @@ fn ruleset_only_change_still_reflects_schema_structural_toggle_on_a_warm_cache()
 /// despite zero identifier usage.
 #[test]
 fn unbound_models_fire_dead_model_per_model() {
-    let dir = TempDir::new("zpz-schema-usage");
+    let dir = TempDir::new("zzop-schema-usage");
     dir.write(
         "prisma/schema.prisma",
         "model Invoice {\n  id String @id\n  customerId String\n}\n\nmodel Customer {\n  id String @id\n}\n",
@@ -277,7 +277,7 @@ fn unbound_models_fire_dead_model_per_model() {
 /// identifier while `email` does, so exactly one dead-field fires.
 #[test]
 fn bound_model_skips_dead_model_but_flags_unused_field() {
-    let dir = TempDir::new("zpz-schema-usage");
+    let dir = TempDir::new("zzop-schema-usage");
     dir.write(
         "prisma/schema.prisma",
         "model User {\n  id String @id\n  email String\n  nickname String\n}\n",

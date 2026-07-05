@@ -24,14 +24,14 @@ whether the rule is common or environment-specific).
 - **Form**: `<id>.json` — interpreted **natively** by the `core::dsl` interpreter. The JSON pack itself is
   data, not a crate. Each first-party pack lives in its own folder, `rules/dsl/<pack>/<pack>.json`, with
   the pack's end-to-end tests co-located right next to it as `rules/dsl/<pack>/<pack>.rs` (packs shipping at
-  least one rule only — stub packs have no tests yet). `zpz_core::pack_loader::load_dsl_packs`
+  least one rule only — stub packs have no tests yet). `zzop_core::pack_loader::load_dsl_packs`
   (`packages/core/src/pack_loader.rs`) scans BOTH this depth-1 "pack folder" layout and a flat
   `<dir>/<id>.json` layout in the same call — a caller-supplied `packsDir` (third-party packs) is free to
   stay flat; nesting is purely organizational, never required.
-- **`zpz-rule-packs` crate** (`rules/Cargo.toml`, sibling to this README): a thin, code-free crate that
+- **`zzop-rule-packs` crate** (`rules/Cargo.toml`, sibling to this README): a thin, code-free crate that
   exists ONLY to give each pack folder's `<pack>.rs` a `cargo test` target (one `[[test]]` entry per pack,
   `path = "dsl/<pack>/<pack>.rs"`). It carries no rule data and no interpreter logic — that stays in
-  `zpz-core` (loading/schema) and `zpz-engine` (evaluation), both of which it depends on as
+  `zzop-core` (loading/schema) and `zzop-engine` (evaluation), both of which it depends on as
   dev-dependencies. `packages/engine/tests/rule_contracts.rs` machine-checks that this crate's `[[test]]`
   list stays in sync with the pack folders on disk.
 - **Distribution**: published/versioned **independently** via npm/registry, loaded on demand by language
@@ -70,12 +70,12 @@ orchestration logic:
 
 - **A native rule**: implement the body in its owning crate (`rules/native/rules-graph` or
   `rules/native/rules-schema` — or a new sibling crate for a new rule family), add its id/severity to that
-  crate's own `register_native_analyses` function, and add tests in the same crate. `zpz_engine::register_all_native`
+  crate's own `register_native_analyses` function, and add tests in the same crate. `zzop_engine::register_all_native`
   (`packages/engine/src/lib.rs`) composes every owning crate's `register_native_analyses` — it already
   depends on all of them, so a new crate only needs one line added there. `docs/rules/catalog.md`'s totals
   and per-id table need updating too (machine-checked by `rule_contracts.rs`'s catalog-sync tests).
 - **A DSL rule**: add a rule entry to a pack's `<pack>.json` (or a new pack folder) under `rules/dsl/`, plus
-  a co-located `<pack>.rs` end-to-end test. No Rust code changes anywhere — `zpz_core::load_dsl_packs`
+  a co-located `<pack>.rs` end-to-end test. No Rust code changes anywhere — `zzop_core::load_dsl_packs`
   discovers packs from disk.
 
 In both cases `packages/core`/`packages/engine`'s own source is untouched — only `rules/` (and

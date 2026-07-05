@@ -23,7 +23,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use zpz_core::{DepGraph, FileNode, Finding, Severity};
+use zzop_core::{DepGraph, FileNode, Finding, Severity};
 
 use crate::unreachable::is_tool_entry_file;
 
@@ -32,7 +32,7 @@ pub const DEAD_MAX_CHANGES: u32 = 3;
 
 /// fan_in == 0, change_count <= max_changes, not an entry/test/storybook/tool-entry/package.json-referenced
 /// file, and eligible per the scope above (see module doc). `extra_entries` is a set of concrete file paths
-/// — package.json manifest entries resolved at runtime (`zpz_engine::pipeline::package_json_entries`), not
+/// — package.json manifest entries resolved at runtime (`zzop_engine::pipeline::package_json_entries`), not
 /// a naming-convention regex like `entry_patterns`. Ranked by change_count asc, then path.
 pub fn find_dead_candidates(
     nodes: &[FileNode],
@@ -111,7 +111,7 @@ fn is_dead_candidate_eligible(path: &str, participants: &HashSet<&str>) -> bool 
 }
 
 /// True for the extensions `dispatch_by_extension` routes to `Language::TypeScript` (case-insensitive).
-/// Duplicated here rather than imported: this crate is deliberately `zpz-core`-only.
+/// Duplicated here rather than imported: this crate is deliberately `zzop-core`-only.
 fn is_ts_dispatch_extension(path: &str) -> bool {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| Regex::new(r"(?i)\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$").unwrap())

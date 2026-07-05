@@ -1,5 +1,5 @@
 //! Symbol-level dead-export detection — exported symbols that are never imported anywhere.
-//! Language-neutral: only sees `zpz_core` IR types (`ImportMap`, `ReExport`, `SourceSymbolKind`); a parser
+//! Language-neutral: only sees `zzop_core` IR types (`ImportMap`, `ReExport`, `SourceSymbolKind`); a parser
 //! crate supplies each file's exports, imports, re-exports, dynamic imports, and used-identifier names.
 //!
 //! ## What counts as a "use"
@@ -28,7 +28,7 @@ use std::sync::OnceLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use zpz_core::{Finding, ImportMap, ReExport, Severity, SourceSymbolKind};
+use zzop_core::{Finding, ImportMap, ReExport, Severity, SourceSymbolKind};
 
 use crate::unreachable::is_tool_entry_file;
 
@@ -317,7 +317,7 @@ mod tests {
     //! Exercises `find_dead_exports` against hand-built fixtures — imports, barrel/aliased re-export
     //! chains, entry-file live roots, default-export matching, and the `Unused` vs `InFileOnly` split.
     use super::*;
-    use zpz_core::ImportBinding;
+    use zzop_core::ImportBinding;
 
     fn resolve(spec: &str, _from: &str) -> Option<String> {
         Some(spec.strip_prefix("./").unwrap_or(spec).to_string())

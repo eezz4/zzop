@@ -1,4 +1,4 @@
-# zpz docs site
+# zzop docs site
 
 Plain static HTML — no build step, no dependencies, no external requests.
 

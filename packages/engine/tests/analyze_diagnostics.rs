@@ -1,4 +1,4 @@
-//! End-to-end coverage for `zpz_metrics::diagnostics` wired into `analyze::assemble` — the self-report
+//! End-to-end coverage for `zzop_metrics::diagnostics` wired into `analyze::assemble` — the self-report
 //! half of the "silent degenerate data must self-report" principle. Uses the same hand-rolled `TempDir`
 //! pattern as `packages/engine/tests/pack_sql.rs`.
 //!
@@ -9,7 +9,7 @@
 //! - A git-disabled run (the default `EngineConfig::git = None`) must never emit git-window diagnostics
 //!   (0 commits / 0 changes / untagged commits) even when the underlying counts are honestly zero,
 //!   since git was never attempted for this run — `analyze::run_diagnostics` passes
-//!   `DiagnosticsInput::git = None` in that case, and `zpz_metrics::diagnostics::build_diagnostics`
+//!   `DiagnosticsInput::git = None` in that case, and `zzop_metrics::diagnostics::build_diagnostics`
 //!   itself gates every git-window warning behind `git.is_some()`.
 //! - A healthy tree whose top-level functions are simply never exported (no public API, not a parser
 //!   failure) must still surface the 0-exported-symbols warning, but with wording that presents both
@@ -19,8 +19,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_core::RuleConfig;
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_core::RuleConfig;
+use zzop_engine::{analyze_tree, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -67,7 +67,7 @@ fn config() -> EngineConfig {
 /// is genuinely empty, not a fluke of a single tiny file (the module's "single-file package" exception
 /// only suppresses the 0-edges warning for `files <= 1`).
 fn disconnected_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-diag-disconnected");
+    let dir = TempDir::new("zzop-engine-diag-disconnected");
     dir.write(
         "a.ts",
         "const x = 1;\nfunction helper() { return x + 1; }\n",
@@ -100,7 +100,7 @@ fn disconnected_tree_reports_zero_edges_and_zero_symbols() {
 
 #[test]
 fn healthy_small_fixture_produces_no_diagnostics_warnings() {
-    let dir = TempDir::new("zpz-engine-diag-healthy");
+    let dir = TempDir::new("zzop-engine-diag-healthy");
     dir.write(
         "a.ts",
         "import { b } from './b';\nexport function a() { return b(); }\n",
@@ -133,7 +133,7 @@ fn all_internal_tree_gets_the_dual_possibility_zero_symbols_warning() {
     // a legitimately all-internal tree, not a parser failure. The warning must still fire (coverage
     // self-report is wanted either way) but must present both possible causes rather than asserting
     // detection failed.
-    let dir = TempDir::new("zpz-engine-diag-all-internal");
+    let dir = TempDir::new("zzop-engine-diag-all-internal");
     dir.write(
         "a.ts",
         "import { b } from './b';\nfunction a() { return b(); }\n",
@@ -185,8 +185,8 @@ fn typo_d_disabled_rules_entry_surfaces_a_self_report_warning() {
     // A `disabled_rules` entry that matches no known native-analysis id / pack id / "<pack>/<rule>" id
     // silently does nothing at the gating layer (`registry::is_enabled`'s exact-string-match contract) —
     // this proves the honest-output side: the diagnostics self-report must still tell the user their
-    // typo'd entry had no effect (see `zpz_engine::analyze::unknown_disabled_rule_ids`).
-    let dir = TempDir::new("zpz-engine-diag-unknown-disabled-rule");
+    // typo'd entry had no effect (see `zzop_engine::analyze::unknown_disabled_rule_ids`).
+    let dir = TempDir::new("zzop-engine-diag-unknown-disabled-rule");
     dir.write(
         "a.ts",
         "import { b } from './b';\nexport function a() { return b(); }\n",
@@ -217,7 +217,7 @@ fn a_real_disabled_rules_entry_does_not_trigger_the_unknown_id_warning() {
     // Sanity check for the other direction: a real, known id (a native analysis id here) must never be
     // reported as unknown — the check is a set-membership diff, not a "any disabled_rules entry present"
     // trigger.
-    let dir = TempDir::new("zpz-engine-diag-known-disabled-rule");
+    let dir = TempDir::new("zzop-engine-diag-known-disabled-rule");
     dir.write(
         "a.ts",
         "import { b } from './b';\nexport function a() { return b(); }\n",

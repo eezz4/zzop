@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_core::RulePackDef;
-use zpz_engine::{analyze_tree, EngineConfig, GitOptions};
-use zpz_metrics::RecId;
+use zzop_core::RulePackDef;
+use zzop_engine::{analyze_tree, EngineConfig, GitOptions};
+use zzop_metrics::RecId;
 
 struct TempDir(PathBuf);
 
@@ -60,7 +60,7 @@ fn run_git(dir: &Path, args: &[&str]) {
 /// Builds a real git repo with a small TS tree and enough history (multiple commits, a rename, a
 /// `[FIX]`-tagged commit) that `nodes`/`scores`/`recommendations` all have something to report on.
 fn git_fixture_repo() -> TempDir {
-    let dir = TempDir::new("zpz-engine-git-fixture");
+    let dir = TempDir::new("zzop-engine-git-fixture");
     run_git(dir.path(), &["init", "-q"]);
     run_git(dir.path(), &["config", "user.email", "test@example.com"]);
     run_git(dir.path(), &["config", "user.name", "Test User"]);
@@ -195,7 +195,7 @@ fn two_runs_over_the_same_git_repo_are_deterministic() {
 
 #[test]
 fn git_disabled_by_default_keeps_scores_and_friends_empty() {
-    let dir = TempDir::new("zpz-engine-no-git-fixture");
+    let dir = TempDir::new("zzop-engine-no-git-fixture");
     fs::write(
         dir.path().join("a.ts"),
         "export function a() { return 1; }\n",
@@ -267,7 +267,7 @@ fn critical_marker_pack() -> RulePackDef {
 /// flags as a `Severity::Critical` finding — the coexistence `urgent_bug_risk_escalation`'s e2e assertion
 /// needs (a recommendation target file that also carries a rule-confirmed critical finding).
 fn git_fixture_repo_with_critical_bug_prone_file() -> TempDir {
-    let dir = TempDir::new("zpz-engine-urgent-bug-risk-fixture");
+    let dir = TempDir::new("zzop-engine-urgent-bug-risk-fixture");
     run_git(dir.path(), &["init", "-q"]);
     run_git(dir.path(), &["config", "user.email", "test@example.com"]);
     run_git(dir.path(), &["config", "user.name", "Test User"]);
@@ -350,7 +350,7 @@ fn urgent_bug_risk_escalation_shows_up_first_with_evidence_in_a_single_tree_anal
 fn minimal_config_reports_both_capability_notes() {
     // A plain default config (no git, no packs) over a one-file tree self-reports BOTH silently-narrowed
     // scopes: git never requested, and no DSL packs loaded.
-    let dir = TempDir::new("zpz-engine-minimal-config");
+    let dir = TempDir::new("zzop-engine-minimal-config");
     fs::write(
         dir.path().join("a.ts"),
         "export function a() { return 1; }\n",
@@ -409,7 +409,7 @@ fn git_and_packs_both_set_produces_no_capability_notes() {
 
 #[test]
 fn git_enabled_on_a_non_git_root_degrades_to_a_warning_without_panicking() {
-    let dir = TempDir::new("zpz-engine-not-a-repo-fixture");
+    let dir = TempDir::new("zzop-engine-not-a-repo-fixture");
     fs::write(
         dir.path().join("a.ts"),
         "export function a() { return 1; }\n",

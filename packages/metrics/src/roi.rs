@@ -1,12 +1,12 @@
 //! ROI scoring. Pure scalar functions: the caller extracts risk/loc/fanIn from a FileNode (or passes 0
 //! when absent). (`hotspot_score` — the other half of the original roi/hotspot module — moved to
-//! `zpz_core::file_nodes` in the R3 crate-boundary batch: `build_file_nodes` is a core mechanism and
+//! `zzop_core::file_nodes` in the R3 crate-boundary batch: `build_file_nodes` is a core mechanism and
 //! must stay reachable from core without an upward dependency on this crate — per the crate-boundary
 //! split.)
 
 use serde::{Deserialize, Serialize};
 
-use zpz_core::Severity;
+use zzop_core::Severity;
 
 const MIN_COST: f64 = 10.0;
 const FANIN_COST_WEIGHT: f64 = 3.0;

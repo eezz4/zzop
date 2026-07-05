@@ -1,4 +1,4 @@
-//! End-to-end coverage for the BE-framework coverage self-report (`zpz_engine::coverage`,
+//! End-to-end coverage for the BE-framework coverage self-report (`zzop_engine::coverage`,
 //! `controller_silence_warning`): a tree whose files carry controller-decorator-shaped lines in 3+ distinct
 //! files, yet extract ZERO `http` provides tree-wide, gets an `AnalyzeOutput::warnings` entry naming the
 //! gap. Guards against an unrecognized controller-decorator convention (e.g. a framework using
@@ -10,7 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_engine::{analyze_tree, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -57,11 +57,11 @@ const WARNING_SUBSTRING: &str = "route decorators/annotations but no http routes
 
 /// 3 files carrying an invented `@FastController`/`@FastGet` decorator shape — structurally identical
 /// (class-level gate + method-level verb) to Nest's own idiom, but under decorator NAMES that
-/// `zpz_parser_typescript::nest`'s `CONTROLLER_CLASS_GATES` (`["Controller", "RestController"]`, exact-name
+/// `zzop_parser_typescript::nest`'s `CONTROLLER_CLASS_GATES` (`["Controller", "RestController"]`, exact-name
 /// matched) does not recognize, and that don't match the Spring extractor's regex either. No Nest/Spring/
 /// Hono shape appears anywhere in this tree, so this tree's real http-provides count is genuinely zero.
 fn unrecognized_framework_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-coverage-unrecognized");
+    let dir = TempDir::new("zzop-engine-coverage-unrecognized");
     dir.write(
         "src/users.controller.ts",
         "@FastController('/users')\nexport class UsersController {\n  @FastGet('/')\n  findAll() { return []; }\n}\n",
@@ -77,13 +77,13 @@ fn unrecognized_framework_tree() -> TempDir {
     dir
 }
 
-/// A real NestJS-shaped BE tree (`@Controller`/`@Get`) — `zpz_parser_typescript::nest::extract_nest_provides`
+/// A real NestJS-shaped BE tree (`@Controller`/`@Get`) — `zzop_parser_typescript::nest::extract_nest_provides`
 /// recognizes this shape and extracts a real `http` provide, so the tree's http-provides count is > 0 and
 /// `controller_silence_warning` short-circuits before ever reading a file. Mirrors
 /// `analyze_multi_tree_nestjs.rs`'s `nest_be_tree()` helper (adapted to a single-tree `analyze_tree` call
 /// rather than the cross-layer `analyze_trees` API that test exercises).
 fn real_nest_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-coverage-real-nest");
+    let dir = TempDir::new("zzop-engine-coverage-real-nest");
     dir.write(
         "src/users/users.controller.ts",
         concat!(
@@ -100,11 +100,11 @@ fn real_nest_tree() -> TempDir {
 
 /// A pure-FE Angular-style fixture (`@Component`/`@Input`/`@Output`/`@HostListener`) — none of Angular's own
 /// decorator vocabulary lexically matches `Controller`/`Mapping`/`Get`/`Post`/`Put`/`Delete`/`Patch`, so the
-/// regex never matches at all (verified in `zpz_engine::coverage`'s own unit tests too); this proves the
+/// regex never matches at all (verified in `zzop_engine::coverage`'s own unit tests too); this proves the
 /// engine-level wiring inherits that same no-false-positive property, not just the bare function in
 /// isolation.
 fn angular_fe_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-coverage-angular");
+    let dir = TempDir::new("zzop-engine-coverage-angular");
     dir.write(
         "src/a.component.ts",
         "@Component({ selector: 'app-a' })\nexport class AComponent {\n  @Input() x: string;\n  @Output() y = new EventEmitter();\n  @HostListener('click')\n  onClick() {}\n}\n",

@@ -1,8 +1,8 @@
 //! Finding-shaping for the `"circular"` native analysis. The cycle-detection algorithm (`circular_from_dep`)
-//! lives in `zpz_core::graph` as a shared graph primitive (also used by `compute_scores`/
+//! lives in `zzop_core::graph` as a shared graph primitive (also used by `compute_scores`/
 //! `build_recommendations`) — this module only turns an already-computed cycle list into `Finding`s.
 
-use zpz_core::{Finding, Severity};
+use zzop_core::{Finding, Severity};
 
 /// One `Finding` per cycle (native analysis id `"circular"`, matching `register_native_analyses`).
 /// `file`/message use the cycle's *sorted* member list rather than raw Tarjan discovery order, so the

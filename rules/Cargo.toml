@@ -1,5 +1,5 @@
 [package]
-name = "zpz-rule-packs"
+name = "zzop-rule-packs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -17,8 +17,8 @@ publish = false
 [dependencies]
 
 [dev-dependencies]
-zpz-core = { path = "../packages/core" }
-zpz-engine = { path = "../packages/engine" }
+zzop-core = { path = "../packages/core" }
+zzop-engine = { path = "../packages/engine" }
 serde_json = { workspace = true }
 
 [[test]]

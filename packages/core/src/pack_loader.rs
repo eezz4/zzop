@@ -240,7 +240,7 @@ mod tests {
 
     #[test]
     fn pack_missing_schema_version_defaults_to_1_and_loads() {
-        let dir = TempDir::new("zpz-pack-loader");
+        let dir = TempDir::new("zzop-pack-loader");
         dir.write("p.json", &valid_pack("p")); // no schema_version field at all
         let result = load_dsl_packs(dir.path());
         assert!(result.errors.is_empty());
@@ -250,7 +250,7 @@ mod tests {
 
     #[test]
     fn pack_with_explicit_schema_version_1_loads() {
-        let dir = TempDir::new("zpz-pack-loader");
+        let dir = TempDir::new("zzop-pack-loader");
         dir.write("p.json", &pack_with_schema_version("p", 1));
         let result = load_dsl_packs(dir.path());
         assert!(result.errors.is_empty());
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn pack_requiring_a_newer_schema_is_rejected_as_a_load_error_not_a_panic() {
-        let dir = TempDir::new("zpz-pack-loader");
+        let dir = TempDir::new("zzop-pack-loader");
         dir.write("good.json", &valid_pack("good"));
         dir.write("too-new.json", &pack_with_schema_version("too-new", 999));
         let result = load_dsl_packs(dir.path());
@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn loads_every_json_file_sorted_by_name() {
-        let dir = TempDir::new("zpz-pack-loader");
+        let dir = TempDir::new("zzop-pack-loader");
         dir.write("b-pack.json", &valid_pack("b-pack"));
         dir.write("a-pack.json", &valid_pack("a-pack"));
         let result = load_dsl_packs(dir.path());
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn discovers_packs_in_depth_one_subdirectories() {
-        let dir = TempDir::new("zpz-pack-loader");
+        let dir = TempDir::new("zzop-pack-loader");
         dir.write("flat.json", &valid_pack("flat"));
         dir.write("nested/nested.json", &valid_pack("nested"));
         let result = load_dsl_packs(dir.path());
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn does_not_recurse_past_one_level_of_subdirectory() {
-        let dir = TempDir::new("zpz-pack-loader");
+        let dir = TempDir::new("zzop-pack-loader");
         dir.write("nested/deeper/too-deep.json", &valid_pack("too-deep"));
         let result = load_dsl_packs(dir.path());
         assert!(result.errors.is_empty());
@@ -306,7 +306,7 @@ mod tests {
 
     #[test]
     fn load_order_is_deterministic_across_mixed_flat_and_nested_layout() {
-        let dir = TempDir::new("zpz-pack-loader");
+        let dir = TempDir::new("zzop-pack-loader");
         dir.write("z-flat.json", &valid_pack("z-flat"));
         dir.write("a-nested/a-nested.json", &valid_pack("a-nested"));
         let first = load_dsl_packs(dir.path());
@@ -319,7 +319,7 @@ mod tests {
 
     #[test]
     fn ignores_non_json_files() {
-        let dir = TempDir::new("zpz-pack-loader");
+        let dir = TempDir::new("zzop-pack-loader");
         dir.write("pack.json", &valid_pack("p"));
         dir.write("readme.md", "not a pack");
         let result = load_dsl_packs(dir.path());
@@ -328,7 +328,7 @@ mod tests {
 
     #[test]
     fn malformed_file_is_a_per_file_error_not_a_panic() {
-        let dir = TempDir::new("zpz-pack-loader");
+        let dir = TempDir::new("zzop-pack-loader");
         dir.write("good.json", &valid_pack("good"));
         dir.write("bad.json", "{ not json");
         let result = load_dsl_packs(dir.path());
@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn missing_directory_is_reported_as_an_error_not_a_panic() {
-        let result = load_dsl_packs(Path::new("/no/such/dir/zpz-nope"));
+        let result = load_dsl_packs(Path::new("/no/such/dir/zzop-nope"));
         assert!(result.packs.is_empty());
         assert_eq!(result.errors.len(), 1);
     }

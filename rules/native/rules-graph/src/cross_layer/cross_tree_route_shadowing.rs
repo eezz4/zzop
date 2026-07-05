@@ -35,7 +35,7 @@ use crate::unreachable::is_test_file;
 
 pub fn cross_tree_route_shadowing_findings(
     all_provides: &[HttpProvideSite],
-) -> Vec<zpz_core::Finding> {
+) -> Vec<zzop_core::Finding> {
     struct Literal<'a> {
         site: &'a HttpProvideSite,
         segs: Vec<&'a str>,
@@ -144,9 +144,9 @@ pub fn cross_tree_route_shadowing_findings(
             example.line,
         );
 
-        out.push(zpz_core::Finding {
+        out.push(zzop_core::Finding {
             rule_id: "cross-layer/route-shadowing".to_string(),
-            severity: zpz_core::Severity::Warning,
+            severity: zzop_core::Severity::Warning,
             file: pattern.file.clone(),
             line: pattern.line,
             message,
@@ -185,7 +185,7 @@ mod tests {
         let out = cross_tree_route_shadowing_findings(&provides);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].rule_id, "cross-layer/route-shadowing");
-        assert_eq!(out[0].severity, zpz_core::Severity::Warning);
+        assert_eq!(out[0].severity, zzop_core::Severity::Warning);
         assert_eq!(out[0].file, "be/routes.rs");
         assert_eq!(out[0].line, 10);
         assert!(out[0].message.contains("shared first-match gateway"));

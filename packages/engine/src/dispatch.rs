@@ -7,7 +7,7 @@
 //! means "no structural parser", not "ignore this file".
 //!
 //! `.java` gets the same "no real parser, still worth spans" treatment via `Language::JavaLexical`,
-//! routed to `zpz_parser_java::parse_method_spans` — a comment/string-aware brace matcher, not a real
+//! routed to `zzop_parser_java::parse_method_spans` — a comment/string-aware brace matcher, not a real
 //! grammar — so `Matcher::MethodScan` rules still get class/method spans. `.jsp`/`.jspx`/`.tag` stay on
 //! the `None` path: JSP embeds Java inside HTML-like markup, a shape the brace matcher isn't built to
 //! disentangle.
@@ -15,7 +15,7 @@
 use std::path::Path;
 
 /// A source language this engine has a parser frontend for. `TypeScript`/`Prisma` are real structural
-/// parsers; `JavaLexical` is the lexical brace-matcher (`zpz_parser_java`, see module doc). JSP/Python
+/// parsers; `JavaLexical` is the lexical brace-matcher (`zzop_parser_java`, see module doc). JSP/Python
 /// parser crates exist in the workspace but are out of scope: files routed to them by extension get no
 /// `Language` match.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -1,4 +1,4 @@
-//! zpz-parser-prisma — Prisma Schema Language (PSL) frontend. Line-based parser turning schema.prisma
+//! zzop-parser-prisma — Prisma Schema Language (PSL) frontend. Line-based parser turning schema.prisma
 //! into the core schema IR (`SchemaModel[]`) — a grammar the TypeScript parser does not handle. Extracts
 //! model blocks, field declarations, field attributes, and @@map/@@unique/@@index. `parse_schema_enums` is
 //! a separate top-level pass extracting `enum` blocks into `SchemaEnum[]`, kept out of `parse_schema`'s
@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-/// Cache key ingredient for `zpz-cache` (see `zpz_parser_typescript::PARSER_FINGERPRINT`'s doc for the
+/// Cache key ingredient for `zzop-cache` (see `zzop_parser_typescript::PARSER_FINGERPRINT`'s doc for the
 /// scheme this mirrors). This crate has no external version pin to track (the parser is a local regex/line
 /// scanner, not a wrapped third-party crate) — bump the trailing `/vN` counter whenever `parse_schema`'s
 /// projection logic changes in a way that changes `SchemaModel`/`SourceSymbol` output for the same schema
@@ -17,8 +17,8 @@ use std::sync::OnceLock;
 pub const PARSER_FINGERPRINT: &str = "prisma/v1";
 
 use regex::Regex;
-use zpz_core::{FieldAttr, SchemaEnum, SchemaField, SchemaModel, SchemaUsage};
-use zpz_rules_schema::{
+use zzop_core::{FieldAttr, SchemaEnum, SchemaField, SchemaModel, SchemaUsage};
+use zzop_rules_schema::{
     analyze_schema, analyze_schema_with_usage, scan_field_usage, scan_migration_churn,
     scan_store_map, SchemaAnalysis,
 };
@@ -301,14 +301,14 @@ fn relative_slash_path(base: &Path, file: &Path) -> String {
 // ---------------------------------------------------------------------------------------------
 
 /// Public Prisma schema analysis — the bundled provider's `schemaAnalysis` capability. Discovers schema.prisma
-/// files, parses them to the schema-IR, and runs `zpz_rules_schema::analyze_schema` for the STRUCTURAL +
+/// files, parses them to the schema-IR, and runs `zzop_rules_schema::analyze_schema` for the STRUCTURAL +
 /// DB-anti-pattern rules (god-model, fk-no-index, float-money, ...). No code-usage scan, so usage-based rules
 /// (dead-model / dead-field / schema-churn) do NOT run here — that requires the richer
 /// `prisma_schema_analysis_with_usage`.
 /// Honest by omission: returns `None` when not a BE target or no schema is found.
 ///
 /// Design note: a `phase(name, fn)` tracing callback wrapping each step was considered and dropped —
-/// pure instrumentation with no effect on output (see `zpz_rules_schema::usage`'s module doc).
+/// pure instrumentation with no effect on output (see `zzop_rules_schema::usage`'s module doc).
 pub fn prisma_schema_analysis(app_dir: &Path, target: &str) -> Option<SchemaAnalysis> {
     if target != "be" && target != "all" {
         return None;
@@ -332,13 +332,13 @@ pub const DEFAULT_PRISMA_CLIENT_GETTER_FN: &str = "getPrisma";
 /// Usage-aware Prisma schema analysis — the full `schemaAnalysis` capability. Discovers schema.prisma files
 /// via `find_prisma_schemas` (layout-agnostic), then enriches the schema-IR with source-code usage evidence
 /// (store bindings, identifier counts, migration churn) before handing it to
-/// `zpz_rules_schema::analyze_schema_with_usage`, enabling the usage-gated rules (dead-model / dead-field /
+/// `zzop_rules_schema::analyze_schema_with_usage`, enabling the usage-gated rules (dead-model / dead-field /
 /// schema-churn). Differs from `prisma_schema_analysis` in also scanning `.ts` source and
 /// prisma/migrations SQL — richer signal at the cost of reading the host source tree.
 /// `store_factory_fn`/`prisma_client_getter_fn` are the store-binding vocabulary terms `scan_store_map`
 /// looks for; pass `DEFAULT_STORE_FACTORY_FN`/`DEFAULT_PRISMA_CLIENT_GETTER_FN` for the standard convention.
 ///
-/// NOTE: `zpz-engine` does NOT call this orchestrator — its global pass calls
+/// NOTE: `zzop-engine` does NOT call this orchestrator — its global pass calls
 /// `cross_check_schema`/`apply_churn_rule` directly, since the engine's per-file pass already emitted the
 /// structural findings this function would re-run. This entry point is the standalone (non-engine) host
 /// API; keep both call paths in sync when usage-rule semantics change.
@@ -374,17 +374,17 @@ pub fn prisma_schema_analysis_with_usage(
 /// imports, so `dep` stays empty; `loc` counts non-blank/non-comment lines per schema file. This
 /// bridge is a deliberate addition beyond schema analysis alone, so schema entities can
 /// participate in cross-layer joins that key off Common IR symbols.
-pub fn build_common_ir(source_id: &str, files: &[(String, String)]) -> zpz_core::CommonIr {
+pub fn build_common_ir(source_id: &str, files: &[(String, String)]) -> zzop_core::CommonIr {
     let mut symbols = Vec::new();
     let mut loc = std::collections::HashMap::new();
     for (rel, text) in files {
         let models = parse_schema(text, Some(rel), None);
         for m in &models {
-            symbols.push(zpz_core::SourceSymbol {
+            symbols.push(zzop_core::SourceSymbol {
                 id: format!("{rel}#{}", m.name),
                 file: rel.clone(),
                 name: m.name.clone(),
-                kind: zpz_core::SourceSymbolKind::Class,
+                kind: zzop_core::SourceSymbolKind::Class,
                 line: model_decl_line(text, &m.name),
                 exported: true,
                 is_default: false,
@@ -394,10 +394,10 @@ pub fn build_common_ir(source_id: &str, files: &[(String, String)]) -> zpz_core:
         }
         loc.insert(rel.clone(), count_schema_loc(text));
     }
-    zpz_core::CommonIr {
+    zzop_core::CommonIr {
         source: source_id.to_string(),
         parser: "prisma".to_string(),
-        ir: zpz_core::MinimalIr {
+        ir: zzop_core::MinimalIr {
             dep: std::collections::HashMap::new(),
             symbols,
             loc,
@@ -407,7 +407,7 @@ pub fn build_common_ir(source_id: &str, files: &[(String, String)]) -> zpz_core:
 }
 
 /// 1-based line of `model <name> {` in the schema text (lexical; parse_schema does not record lines).
-/// `pub`: `zpz_engine`'s per-file Prisma pass (`schema_issue_to_finding`) reuses this to place a
+/// `pub`: `zzop_engine`'s per-file Prisma pass (`schema_issue_to_finding`) reuses this to place a
 /// `SchemaIssue`-derived `Finding` at the issue's model's declaration line, rather than duplicating the
 /// same lexical lookup.
 pub fn model_decl_line(text: &str, name: &str) -> u32 {
@@ -523,7 +523,7 @@ model Item {
     #[test]
     fn parse_then_analyze_vertical_slice() {
         // Vertical slice: schema.prisma -> parse_schema -> analyze_schema -> issues.
-        use zpz_rules_schema::analyze_schema;
+        use zzop_rules_schema::analyze_schema;
         let analysis = analyze_schema(parse(SAMPLE));
         // Item.ownerId is an implicit FK (no @relation).
         assert!(analysis
@@ -679,7 +679,7 @@ mod orchestrator_tests {
     }
 
     fn invoice_fixture() -> TempDir {
-        let dir = TempDir::new("zpz-parser-prisma");
+        let dir = TempDir::new("zzop-parser-prisma");
         dir.write(
             "prisma/schema.prisma",
             "model Invoice {\n  id String @id\n  customerId String\n  totalAmount Float\n  note String\n  updatedAt DateTime\n}",
@@ -713,14 +713,14 @@ mod orchestrator_tests {
 
     #[test]
     fn prisma_schema_analysis_returns_none_for_non_be_targets() {
-        let dir = TempDir::new("zpz-parser-prisma");
+        let dir = TempDir::new("zzop-parser-prisma");
         dir.write("prisma/schema.prisma", "model X {\n  id String @id\n}");
         assert!(prisma_schema_analysis(dir.path(), "fe").is_none());
     }
 
     #[test]
     fn prisma_schema_analysis_returns_none_when_no_schema_prisma_exists() {
-        let dir = TempDir::new("zpz-parser-prisma");
+        let dir = TempDir::new("zzop-parser-prisma");
         assert!(prisma_schema_analysis(dir.path(), "be").is_none());
     }
 
@@ -728,7 +728,7 @@ mod orchestrator_tests {
 
     #[test]
     fn with_usage_parses_and_returns_issues_plus_model_risk() {
-        let dir = TempDir::new("zpz-parser-prisma-usage");
+        let dir = TempDir::new("zzop-parser-prisma-usage");
         dir.write(
             "src/domains/billing/prisma/schema.prisma",
             "model Invoice {\n  id String @id\n  customerId String\n  totalAmount Float\n  note String\n  updatedAt DateTime\n}",
@@ -773,7 +773,7 @@ mod orchestrator_tests {
 
     #[test]
     fn with_usage_returns_none_when_no_schema_prisma_present() {
-        let dir = TempDir::new("zpz-parser-prisma-usage");
+        let dir = TempDir::new("zzop-parser-prisma-usage");
         dir.write("src/.gitkeep", "");
         assert!(prisma_schema_analysis_with_usage(
             dir.path(),
@@ -786,7 +786,7 @@ mod orchestrator_tests {
 
     #[test]
     fn with_usage_skips_analysis_for_non_be_targets() {
-        let dir = TempDir::new("zpz-parser-prisma-usage");
+        let dir = TempDir::new("zzop-parser-prisma-usage");
         dir.write(
             "src/domains/billing/prisma/schema.prisma",
             "model X {\n  id String @id\n  name String\n}",
@@ -802,7 +802,7 @@ mod orchestrator_tests {
 
     #[test]
     fn with_usage_finds_schema_via_layout_agnostic_prisma_dir_directly_under_app_dir() {
-        let dir = TempDir::new("zpz-parser-prisma-usage");
+        let dir = TempDir::new("zzop-parser-prisma-usage");
         dir.write(
             "prisma/schema.prisma",
             "model Order {\n  id String @id\n  amount Float\n}",

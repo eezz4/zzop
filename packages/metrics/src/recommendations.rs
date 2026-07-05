@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::coupling::CouplingMap;
 use crate::roi::{compute_roi, RecId};
-use zpz_core::{DepGraph, FileNode, Finding, Lifecycle, Severity};
+use zzop_core::{DepGraph, FileNode, Finding, Lifecycle, Severity};
 
 /// `changeCount` floor below which a FIX-tag ratio is too small a sample to be meaningful evidence.
 const FIX_RATIO_MIN_CHANGE_COUNT: u32 = 5;

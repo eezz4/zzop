@@ -1,7 +1,7 @@
 //! Producer FRAGMENT shapes — per-file projections the engine composes into whole-tree `IoProvide`s
-//! (`zpz_engine::analyze`'s `compose_trpc_provides` / `compose_router_mount_provides`). These types
-//! live in `zpz-core`, not the parser crate that produces them: a parser crate produces one file's
-//! fragment, the engine composes fragments tree-wide, and `zpz-cache` round-trips a fragment
+//! (`zzop_engine::analyze`'s `compose_trpc_provides` / `compose_router_mount_provides`). These types
+//! live in `zzop-core`, not the parser crate that produces them: a parser crate produces one file's
+//! fragment, the engine composes fragments tree-wide, and `zzop-cache` round-trips a fragment
 //! verbatim through its on-disk `FileIrSlice` — three crates need one concrete type.
 //!
 //! tRPC routers (`TrpcRouterEntry`/`TrpcRouterFragment`) compose across files: a router typically
@@ -11,7 +11,7 @@
 //! across files (verb registrations on sub-routers, sub-routers mounted with a prefix, the app
 //! mounted again). Each file reports only what its own text says; the engine's assembly pass
 //! resolves across files and emits `IoProvide`s. The fragment shape is framework-agnostic — only the
-//! producer's recognizer varies; see `zpz_parser_typescript::adapters::router_mounts` for the
+//! producer's recognizer varies; see `zzop_parser_typescript::adapters::router_mounts` for the
 //! current one.
 
 use serde::{Deserialize, Serialize};
@@ -88,7 +88,7 @@ pub struct RouterMountFragment {
 /// plausible call site's literal arguments. The engine's assemble-time join resolves each call back
 /// to a def fragment and emits the `http` consume at the real call site — precision comes from the
 /// def side's signature gate; the call side is deliberately permissive since the join filters real
-/// invocations out of it. See `zpz_parser_typescript::adapters::wrapper_calls` for the recognizer.
+/// invocations out of it. See `zzop_parser_typescript::adapters::wrapper_calls` for the recognizer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WrapperDefFragment {
     /// The exported function name.

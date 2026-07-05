@@ -7,7 +7,7 @@
 //! already holds (`all_symbols`, the rel list), so nothing new is cached. One exception: Next.js
 //! `pages/api` handlers are `export default <expr>`, invisible to `parse_symbols`, so those
 //! candidate files are re-read from disk and lexically scanned
-//! (`zpz_parser_typescript::scan_pages_api_handler`).
+//! (`zzop_parser_typescript::scan_pages_api_handler`).
 //!
 //! v1 scope decisions (deliberate; revisit with field data):
 //! - Emitted kind is plain `"http"` with `http_interface_key` keys, so these provides join the
@@ -31,7 +31,7 @@ mod remix;
 
 use std::collections::BTreeMap;
 
-use zpz_core::{http_interface_key, IoProvide, SourceSymbol};
+use zzop_core::{http_interface_key, IoProvide, SourceSymbol};
 
 /// Verb exports recognized by the verb-export conventions (mirrors the engine-wide 5-verb
 /// vocabulary). HEAD/OPTIONS are omitted — real but never fetch targets, so emitting them would
@@ -185,7 +185,7 @@ pub(crate) fn compose_file_convention_provides<'a>(
             continue;
         };
         let Some(text) = read_text(rel) else { continue };
-        let scan = zpz_parser_typescript::scan_pages_api_handler(&text);
+        let scan = zzop_parser_typescript::scan_pages_api_handler(&text);
         let Some(line) = scan.default_export_line else {
             continue;
         };
@@ -224,7 +224,7 @@ mod tests {
     //! Orchestration coverage: verb-export wiring, pages/api lexical-scan wiring, the Remix
     //! resource-route gate, and the test/fixture skip. Path→URL transforms are tested per-submodule.
     use super::*;
-    use zpz_core::SourceSymbolKind;
+    use zzop_core::SourceSymbolKind;
 
     fn sym(file: &str, name: &str, line: u32, is_default: bool) -> SourceSymbol {
         SourceSymbol {

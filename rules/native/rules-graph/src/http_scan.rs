@@ -3,7 +3,7 @@
 //! type drift) are out of scope: both need capabilities beyond a single-repo call graph.
 //!
 //! Both scanners resolve a method-gated `ApiEndpoint`'s handler to a symbol id, then BFS downstream over
-//! the whole-repo `SymbolGraph` (`zpz_core::callgraph::bfs_reachable`) until a symbol whose body contains a
+//! the whole-repo `SymbolGraph` (`zzop_core::callgraph::bfs_reachable`) until a symbol whose body contains a
 //! flaggable write pattern is found (lowest depth wins; ties break by symbol id ascending). This crate has
 //! no parser dependency, so write-site detection is a regex scan over the reached symbol's raw text span
 //! rather than an AST walk: it matches a bare identifier receiver, or exactly one `base.member` level
@@ -17,8 +17,8 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use regex::{Match, Regex};
-use zpz_core::callgraph::{bfs_reachable, SymbolGraph};
-use zpz_core::{ApiEndpoint, Finding, Severity, SourceSymbol};
+use zzop_core::callgraph::{bfs_reachable, SymbolGraph};
+use zzop_core::{ApiEndpoint, Finding, Severity, SourceSymbol};
 
 /// Default ORM-receiver pattern: a Repository/Store suffix, or a bare prisma/db/orm/tx/trx identifier.
 pub const DEFAULT_ORM_RECEIVER_PATTERN: &str = r"Repository$|Store$|^prisma$|^db$|^orm$|^tx$|^trx$";
@@ -578,8 +578,8 @@ mod tests {
     //! Tests for `scan_unsafe_read_endpoint` and `scan_non_idempotent_write`, using hand-built fixtures (no
     //! parser). Every fixture body is single-line, so `body_start == body_end == <declaration line>`.
     use super::*;
-    use zpz_core::callgraph::SymbolEdge;
-    use zpz_core::SourceSymbolKind;
+    use zzop_core::callgraph::SymbolEdge;
+    use zzop_core::SourceSymbolKind;
 
     fn files(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs

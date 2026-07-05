@@ -1,13 +1,13 @@
 {
-  "name": "@zpz/native-linux-x64-gnu",
+  "name": "@zzop/native-linux-x64-gnu",
   "version": "0.0.0",
-  "description": "Prebuilt zpz-napi native addon for linux/x64 (glibc).",
-  "main": "zpz-napi.node",
+  "description": "Prebuilt zzop-napi native addon for linux/x64 (glibc).",
+  "main": "zzop-napi.node",
   "publishConfig": {
     "access": "public"
   },
   "files": [
-    "zpz-napi.node"
+    "zzop-napi.node"
   ],
   "license": "MIT",
   "os": [

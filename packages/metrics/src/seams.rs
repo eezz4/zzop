@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::coupling::CouplingMap;
-use zpz_core::DepGraph;
+use zzop_core::DepGraph;
 
 /// Minimum files in a folder to be a meaningful seam.
 pub const SEAMS_MIN_FILES: usize = 3;

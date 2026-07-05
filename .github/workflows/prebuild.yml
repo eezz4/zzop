@@ -1,5 +1,5 @@
 # Prebuild matrix for the N-API addon (napi-rs optionalDependencies pattern — DESIGN.md decision #6).
-# On a `v*` tag push, also publishes each platform sub-package and the main @zpz/native package to npm
+# On a `v*` tag push, also publishes each platform sub-package and the main @zzop/native package to npm
 # via OIDC "trusted publishing" (no NPM_TOKEN secret) — requires each of the 6 packages to have a
 # trusted publisher configured on npmjs.com for this repo + this workflow file. See
 # packages/napi/README.md's "Publishing" section for the one-time npmjs.com setup.
@@ -41,26 +41,26 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu
           echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc' >> "$GITHUB_ENV"
       - name: Build addon
-        run: cargo build -p zpz-napi --release --features addon --target ${{ matrix.target }}
+        run: cargo build -p zzop-napi --release --features addon --target ${{ matrix.target }}
       - name: Collect artifact
         shell: bash
         run: |
           mkdir -p dist
           case "${{ matrix.target }}" in
-            *windows*) cp "target/${{ matrix.target }}/release/zpz_napi.dll" "dist/zpz-napi.${{ matrix.target }}.node" ;;
-            *apple*)   cp "target/${{ matrix.target }}/release/libzpz_napi.dylib" "dist/zpz-napi.${{ matrix.target }}.node" ;;
-            *)         cp "target/${{ matrix.target }}/release/libzpz_napi.so" "dist/zpz-napi.${{ matrix.target }}.node" ;;
+            *windows*) cp "target/${{ matrix.target }}/release/zzop_napi.dll" "dist/zzop-napi.${{ matrix.target }}.node" ;;
+            *apple*)   cp "target/${{ matrix.target }}/release/libzzop_napi.dylib" "dist/zzop-napi.${{ matrix.target }}.node" ;;
+            *)         cp "target/${{ matrix.target }}/release/libzzop_napi.so" "dist/zzop-napi.${{ matrix.target }}.node" ;;
           esac
           ls -la dist
       - name: Smoke test (native targets only)
         if: matrix.cross != 'true'
         shell: bash
         run: |
-          cp "dist/zpz-napi.${{ matrix.target }}.node" packages/napi/zpz-napi.node
+          cp "dist/zzop-napi.${{ matrix.target }}.node" packages/napi/zzop-napi.node
           node packages/napi/smoke.mjs
       - uses: actions/upload-artifact@v4
         with:
-          name: zpz-napi-${{ matrix.target }}
+          name: zzop-napi-${{ matrix.target }}
           path: dist/*.node
 
   # Only runs on a `v*` tag push (job-level `if`, since the build matrix above must also run for
@@ -69,7 +69,7 @@ jobs:
   # so there is no separate "bump packages/napi/package.json before tagging" step to forget.
   #
   # Publishes via npm OIDC "trusted publishing" — no NPM_TOKEN secret. Each of the 6 package names
-  # (@zpz/native + the 5 platform sub-packages) must have a trusted publisher configured on
+  # (@zzop/native + the 5 platform sub-packages) must have a trusted publisher configured on
   # npmjs.com pointing at this repo and this workflow file (packages/napi/README.md "Publishing").
   publish:
     needs: build
@@ -89,7 +89,7 @@ jobs:
       - name: Download all platform artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: zpz-napi-*
+          pattern: zzop-napi-*
           path: artifacts
           merge-multiple: true
       - name: Set version from tag (overwrites committed version everywhere)

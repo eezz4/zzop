@@ -1,12 +1,12 @@
 [package]
-name = "zpz-git"
+name = "zzop-git"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
 
 [dependencies]
-zpz-core = { path = "../core" }
+zzop-core = { path = "../core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 regex = { workspace = true }

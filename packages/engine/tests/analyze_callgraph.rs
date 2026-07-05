@@ -1,6 +1,6 @@
 //! End-to-end test for the call-graph-BFS native rules (`rule-pack-porting.md`'s "http GRAPH-classified" backlog):
-//! `zpz-rules-graph`'s `scan_unsafe_read_endpoint` / `scan_non_idempotent_write`, wired into
-//! `zpz_engine::analyze::assemble` via the documented v1 "second pass" (`analyze.rs::run_callgraph_rules`'s
+//! `zzop-rules-graph`'s `scan_unsafe_read_endpoint` / `scan_non_idempotent_write`, wired into
+//! `zzop_engine::analyze::assemble` via the documented v1 "second pass" (`analyze.rs::run_callgraph_rules`'s
 //! doc — re-reads TS file text off disk to extract `RawCall`s, since `FileArtifact` does not carry them).
 //! Exercises the whole path: a Hono-style route file's per-file `IoProvide` -> reconstructed `ApiEndpoint` ->
 //! handler-symbol resolution -> BFS over the whole-repo `SymbolGraph` -> a reachable write site -> a
@@ -10,7 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_engine::{analyze_tree, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -51,7 +51,7 @@ impl Drop for TempDir {
 /// - `routes/handlers.ts`: `getRates` -> `refresh` (same-file call edge) -> `prisma.rate.update(...)`;
 ///   `putThing` -> `prisma.thing.create(...)` directly.
 fn fixture_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-callgraph-fixture");
+    let dir = TempDir::new("zzop-engine-callgraph-fixture");
     dir.write(
         "routes/apiRoutes.ts",
         "const apiRoutes = new Hono();\napiRoutes.get(\"/rates\", getRates);\napiRoutes.put(\"/things/:id\", putThing);\n",
@@ -127,7 +127,7 @@ fn disabling_unsafe_read_endpoint_removes_only_that_finding() {
 
 #[test]
 fn a_tree_with_no_api_endpoints_produces_neither_finding() {
-    let dir = TempDir::new("zpz-engine-callgraph-no-routes");
+    let dir = TempDir::new("zzop-engine-callgraph-no-routes");
     dir.write(
         "lib/util.ts",
         "export function helper() { return prisma.user.create({ data: {} }); }\n",

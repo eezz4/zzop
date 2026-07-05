@@ -1,5 +1,5 @@
 //! Per-file IO projection fused into the parse pass: HTTP egress (`consumes`, frontend side) and
-//! Hono-style route provides (`provides`, backend side), via `zpz-parser-typescript`'s `egress`/`routes`
+//! Hono-style route provides (`provides`, backend side), via `zzop-parser-typescript`'s `egress`/`routes`
 //! adapters, run against a single-file slice (`pipeline::process_file` calls [`extract_file_io`] once
 //! per file, before that file's parse scratch state is dropped).
 //!
@@ -27,7 +27,7 @@
 //!   (`FileArtifact::router_mount_fragments`) and `analyze::compose_router_mount_provides` joins them —
 //!   chained builders, cross-file mounts, mount prefixes — into whole-tree `http` provides.
 
-use zpz_core::{IoConsume, IoFacts, IoProvide};
+use zzop_core::{IoConsume, IoFacts, IoProvide};
 
 /// Config for the fused per-file pass's BE route adapter. Route file *paths* aren't a separate config
 /// concern: under per-file fusion every file is its own sole candidate (see [`extract_file_io`]).
@@ -48,11 +48,11 @@ impl Default for IoOptions {
 
 /// Projects one Java file's `IoFacts` — Spring MVC HTTP route provides only (`consumes` is always empty;
 /// this engine has no Java-side HTTP-egress extractor yet). Delegates to
-/// `zpz_parser_java::extract_http_provides` — see that function's module doc for the annotation shapes
+/// `zzop_parser_java::extract_http_provides` — see that function's module doc for the annotation shapes
 /// recognized and the `@RestController`/`@Controller` class-gating rule. `None` when the file yields no
 /// provides at all. Called only for `.java` files (`Language::JavaLexical`).
 pub(crate) fn extract_java_file_io(rel: &str, text: &str) -> Option<IoFacts> {
-    let provides = zpz_parser_java::extract_http_provides(rel, text);
+    let provides = zzop_parser_java::extract_http_provides(rel, text);
     if provides.is_empty() {
         None
     } else {
@@ -69,27 +69,27 @@ pub(crate) fn extract_java_file_io(rel: &str, text: &str) -> Option<IoFacts> {
 /// projected here — they travel as `FileArtifact::router_mount_fragments` and compose whole-tree in
 /// `analyze` (module doc).
 ///
-/// The controller-decorator adapter (`zpz_parser_typescript::extract_controller_provides`) stays
+/// The controller-decorator adapter (`zzop_parser_typescript::extract_controller_provides`) stays
 /// per-file because a NestJS- or `@n8n/decorators`-style route decorator is entirely self-contained
 /// within one file's own class/method AST — there is no cross-file indirection to resolve.
 pub(crate) fn extract_file_io(rel: &str, text: &str, opts: &IoOptions) -> Option<IoFacts> {
     let files = [(rel.to_string(), text.to_string())];
 
-    let mut consumes: Vec<IoConsume> = zpz_parser_typescript::extract_http_egress(&files);
+    let mut consumes: Vec<IoConsume> = zzop_parser_typescript::extract_http_egress(&files);
     // tRPC client-call consumes (kind "trpc"): already fully keyed at extraction time, so no
     // late-resolution pass is needed for this kind.
-    consumes.extend(zpz_parser_typescript::extract_trpc_consumes(rel, text));
+    consumes.extend(zzop_parser_typescript::extract_trpc_consumes(rel, text));
     // Hono client typed-RPC consumes (kind "http"): keyed when the client's base path is statically
     // resolvable; an unresolvable base falls back to the same unresolved shape as egress's dynamic-URL
     // case.
-    consumes.extend(zpz_parser_typescript::extract_hono_client_consumes(
+    consumes.extend(zzop_parser_typescript::extract_hono_client_consumes(
         rel, text,
     ));
 
     // Code-registered router provides (Hono-style) come from `FileArtifact::router_mount_fragments`
     // instead (module doc). `opts.router_names` is consumed by that fragment projection, not here.
     let _ = opts;
-    let provides: Vec<IoProvide> = zpz_parser_typescript::extract_controller_provides(rel, text);
+    let provides: Vec<IoProvide> = zzop_parser_typescript::extract_controller_provides(rel, text);
 
     if provides.is_empty() && consumes.is_empty() {
         None

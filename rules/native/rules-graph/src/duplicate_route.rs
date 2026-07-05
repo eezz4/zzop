@@ -9,8 +9,8 @@
 //! Provider sites in test-path files (`crate::unreachable::is_test_file`) are skipped — an isolated test
 //! fixture's route never coexists with the "duplicate" at runtime.
 
-pub fn duplicate_route_findings(io_provides: &[zpz_core::IoProvide]) -> Vec<zpz_core::Finding> {
-    let mut by_key: std::collections::BTreeMap<&str, Vec<&zpz_core::IoProvide>> =
+pub fn duplicate_route_findings(io_provides: &[zzop_core::IoProvide]) -> Vec<zzop_core::Finding> {
+    let mut by_key: std::collections::BTreeMap<&str, Vec<&zzop_core::IoProvide>> =
         std::collections::BTreeMap::new();
     for p in io_provides {
         if p.kind == "http" && !crate::unreachable::is_test_file(&p.file) {
@@ -26,9 +26,9 @@ pub fn duplicate_route_findings(io_provides: &[zpz_core::IoProvide]) -> Vec<zpz_
         sites.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
         let first = sites[0];
         for dup in &sites[1..] {
-            findings.push(zpz_core::Finding {
+            findings.push(zzop_core::Finding {
                 rule_id: "duplicate-route".to_string(),
-                severity: zpz_core::Severity::Warning,
+                severity: zzop_core::Severity::Warning,
                 file: dup.file.clone(),
                 line: dup.line,
                 message: format!(
@@ -51,8 +51,8 @@ mod tests {
     //! Unit tests for `duplicate_route_findings`'s grouping logic (e2e coverage: `packages/engine/tests/pack_fullstack.rs`).
     use super::*;
 
-    fn provide(key: &str, file: &str, line: u32) -> zpz_core::IoProvide {
-        zpz_core::IoProvide {
+    fn provide(key: &str, file: &str, line: u32) -> zzop_core::IoProvide {
+        zzop_core::IoProvide {
             kind: "http".to_string(),
             key: key.to_string(),
             file: file.to_string(),
@@ -87,7 +87,7 @@ mod tests {
         assert_eq!(found[0].file, "b.ts");
         assert_eq!(found[0].line, 10);
         assert_eq!(found[0].rule_id, "duplicate-route");
-        assert_eq!(found[0].severity, zpz_core::Severity::Warning);
+        assert_eq!(found[0].severity, zzop_core::Severity::Warning);
         assert!(found[0].message.contains("a.ts:3"));
     }
 
@@ -145,14 +145,14 @@ mod tests {
     #[test]
     fn non_http_provides_are_ignored() {
         let provides = vec![
-            zpz_core::IoProvide {
+            zzop_core::IoProvide {
                 kind: "queue".to_string(),
                 key: "topic".to_string(),
                 file: "a.ts".to_string(),
                 line: 1,
                 symbol: None,
             },
-            zpz_core::IoProvide {
+            zzop_core::IoProvide {
                 kind: "queue".to_string(),
                 key: "topic".to_string(),
                 file: "b.ts".to_string(),

@@ -1,11 +1,11 @@
-//! Prisma schema structural rules — source-agnostic checks over the schema IR (`zpz_core::schema`).
-//! IR types (`SchemaModel` etc.) live in `zpz-core`; the rule bodies that operate on them live here.
+//! Prisma schema structural rules — source-agnostic checks over the schema IR (`zzop_core::schema`).
+//! IR types (`SchemaModel` etc.) live in `zzop-core`; the rule bodies that operate on them live here.
 
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use zpz_core::{SchemaField, SchemaModel, Severity};
+use zzop_core::{SchemaField, SchemaModel, Severity};
 
 /// Version token for `apply_schema_rules`'s output shape, folded into the ruleset cache fingerprint so
 /// a stale cache doesn't keep serving old `schema/*` findings. Bump when the output shape changes.
@@ -389,7 +389,7 @@ fn index_coverage(field_name: &str, uniques: &[Vec<String>], indexes: &[Vec<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zpz_core::FieldAttr;
+    use zzop_core::FieldAttr;
 
     fn field(
         name: &str,

@@ -1,15 +1,15 @@
 [package]
-name = "zpz-parser-prisma"
+name = "zzop-parser-prisma"
 version = "0.0.0"
 edition = "2021"
 publish = false
 
 [dependencies]
-zpz-core = { version = "0.0.0", path = "../../packages/core" }
+zzop-core = { version = "0.0.0", path = "../../packages/core" }
 # Deliberate exception to the usual "rules depend on parser" direction — see
-# `zpz_rules_schema`'s crate doc ("Dependency direction") for why: this crate's own
+# `zzop_rules_schema`'s crate doc ("Dependency direction") for why: this crate's own
 # `prisma_schema_analysis`/`prisma_schema_analysis_with_usage` capability calls
-# `analyze_schema`/`analyze_schema_with_usage` directly, and `zpz-rules-schema` depends on `zpz-core`
+# `analyze_schema`/`analyze_schema_with_usage` directly, and `zzop-rules-schema` depends on `zzop-core`
 # only (never on this crate), so the reverse edge here does not create a cycle.
-zpz-rules-schema = { path = "../../rules/native/rules-schema" }
+zzop-rules-schema = { path = "../../rules/native/rules-schema" }
 regex = { workspace = true }

@@ -1,8 +1,8 @@
-//! zpz-metrics — the score channel: roi/health/criticality/seams/recommendations and related
-//! whole-tree aggregate computations that produce SCORES (not findings) from `zpz-core`'s IR types
-//! (`FileNode`/`DepGraph`/`CommitFileSet`/`Severity`). Depends only on `zpz-core` by design: metrics
+//! zzop-metrics — the score channel: roi/health/criticality/seams/recommendations and related
+//! whole-tree aggregate computations that produce SCORES (not findings) from `zzop-core`'s IR types
+//! (`FileNode`/`DepGraph`/`CommitFileSet`/`Severity`). Depends only on `zzop-core` by design: metrics
 //! computes scores from core's IR, never the other way around.
-//! `zpz-engine` is the sole caller, assembling this crate's outputs into `AnalyzeOutput`'s score
+//! `zzop-engine` is the sole caller, assembling this crate's outputs into `AnalyzeOutput`'s score
 //! fields; rule crates never depend on this one (metrics scores are not findings).
 
 pub mod aggregates;
@@ -19,16 +19,16 @@ pub mod scores;
 pub mod seams;
 pub mod trend;
 
-use zpz_core::{register_native_analysis_stub, RuleRegistry, Severity};
+use zzop_core::{register_native_analysis_stub, RuleRegistry, Severity};
 
 /// Registers every native analysis id whose implementation lives in THIS crate — the metrics half of the
 /// extensibility contract's per-crate registration (see `rules/README.md`'s "Adding a rule" section and
-/// `zpz_engine::register_all_native`, which composes this with `zpz_rules_graph`'s and `zpz_rules_schema`'s
+/// `zzop_engine::register_all_native`, which composes this with `zzop_rules_graph`'s and `zzop_rules_schema`'s
 /// own `register_native_analyses`). These 5 ids are not findings-producing rules — they gate SCORE
 /// computations (`compute_seams`/`compute_criticality`/`compute_scores`/`compute_health_index`/
 /// `build_recommendations`) that only ride the same enabled/severity/suppression toggle surface as native
 /// rules do (see this crate's module doc). Ids/severities moved verbatim from the old
-/// `zpz_core::register_native_analyses` table.
+/// `zzop_core::register_native_analyses` table.
 pub fn register_native_analyses(registry: &mut RuleRegistry) {
     let analyses: &[(&str, Severity)] = &[
         ("seams", Severity::Info),

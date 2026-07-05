@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::coupling::{MAX_FILES_PER_COMMIT, MIN_FILES_PER_COMMIT};
-use zpz_core::CommitFileSet;
+use zzop_core::CommitFileSet;
 
 /// `AnalyzeOutput::layer_co_churn`'s `layer_of` classifier: the top-level path segment is the layer (e.g.
 /// `api/routes/x.ts` -> `"api"`), except a segment in `shared_dirs` — the FSD hierarchy shared/
@@ -21,7 +21,7 @@ use zpz_core::CommitFileSet;
 /// with no folder (no `/`) folds into `"(root)"`, per `build_cross_layer_co_churn`'s own doc on unlayered
 /// files forming their own excluded-from-crossing sentinel layer.
 ///
-/// zpz has no dedicated layer/architecture vocabulary beyond this FSD set, so this is the minimal
+/// zzop has no dedicated layer/architecture vocabulary beyond this FSD set, so this is the minimal
 /// defensible classifier — a future, denser layer taxonomy (explicit layer config, framework-specific
 /// convention detection, ...) can replace this function without changing `build_cross_layer_co_churn`'s
 /// own signature (it accepts any `Fn(&str) -> String`).

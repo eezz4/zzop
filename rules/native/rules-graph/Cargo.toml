@@ -1,11 +1,11 @@
 [package]
-name = "zpz-rules-graph"
+name = "zzop-rules-graph"
 version = "0.0.0"
 edition = "2021"
 publish = false
 
 [dependencies]
-zpz-core = { path = "../../../packages/core" }
+zzop-core = { path = "../../../packages/core" }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

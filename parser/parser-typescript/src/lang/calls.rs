@@ -3,7 +3,7 @@
 //!
 //! Same-file only: no `importedNames`-style parameter for cross-file disambiguation, which belongs
 //! to a whole-tree orchestrator. Cross-file resolution (RawCall -> SymbolEdge via ImportMap) is
-//! `zpz_core::callgraph::resolve_calls_for_file`'s job, not this module's.
+//! `zzop_core::callgraph::resolve_calls_for_file`'s job, not this module's.
 
 use std::collections::HashMap;
 
@@ -14,8 +14,8 @@ use swc_core::ecma::ast::{
 };
 use swc_core::ecma::visit::{Visit, VisitWith};
 
-use zpz_core::callgraph::RawCall;
-use zpz_core::SourceSymbol;
+use zzop_core::callgraph::RawCall;
+use zzop_core::SourceSymbol;
 
 /// Parses `source` and returns same-file call attributions plus class heritage edges.
 pub fn parse_calls(file: &str, source: &str) -> Vec<RawCall> {

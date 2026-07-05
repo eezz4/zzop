@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use super::config::ScoresConfig;
 use super::shared::{is_external, module_of};
 use super::types::ModularityScore;
-use zpz_core::DepGraph;
+use zzop_core::DepGraph;
 
 /// Edges are counted twice in the degree sum (Newman's convention): once per endpoint.
 const TOTAL_DEGREE_FACTOR: f64 = 2.0;

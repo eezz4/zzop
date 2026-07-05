@@ -147,7 +147,7 @@ pub fn join_issue_message(issue: &JoinIssue) -> String {
              not-deleted convention) to the `where` clause. Note: a Prisma middleware (`$use`) or `$extends` \
              client extension that injects this filter globally is invisible to this static check — if your \
              app relies on one, this rule will false-positive on every call site for the model; disable it \
-             with `disabled_rules: [\"soft-delete-bypass\"]` in your zpz config (native rules have no inline \
+             with `disabled_rules: [\"soft-delete-bypass\"]` in your zzop config (native rules have no inline \
              suppression marker).",
             issue.model
         ),
@@ -157,7 +157,7 @@ pub fn join_issue_message(issue: &JoinIssue) -> String {
              table scan or filesort as the table grows. Add `@@index([{field}])` to the schema (or make \
              {field} the leading column of an existing composite index). If this is intentional (e.g. a \
              small, bounded table), disable this finding with `disabled_rules: [\"orderby-unindexed\"]` in \
-             your zpz config (native rules have no inline suppression marker).",
+             your zzop config (native rules have no inline suppression marker).",
             issue.model
         ),
         "enum-string-drift" => {
@@ -181,7 +181,7 @@ pub fn join_issue_message(issue: &JoinIssue) -> String {
                  but a raw string literal — or a plain-JS caller — bypasses that check). Precision note: only \
                  a direct `{field}: '...'` literal-object site is checked; a literal inside an `in: [...]` \
                  array, a variable, or a computed expression is not. If this literal is intentional, disable \
-                 this finding with `disabled_rules: [\"enum-string-drift\"]` in your zpz config (native rules \
+                 this finding with `disabled_rules: [\"enum-string-drift\"]` in your zzop config (native rules \
                  have no inline suppression marker).",
                 issue.model
             )
@@ -198,7 +198,7 @@ mod tests {
     //! Regression coverage for the fk-no-index composite-coverage wording and the missing-timestamps
     //! append-only-model wording, using hand-built `SchemaIssue`s directly.
     use super::*;
-    use zpz_core::Severity;
+    use zzop_core::Severity;
 
     fn issue(rule: &str, field: Option<&str>, params: Option<serde_json::Value>) -> SchemaIssue {
         SchemaIssue {

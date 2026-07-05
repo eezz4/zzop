@@ -5,7 +5,7 @@
 //! (workspace-name collection) and `parser/parser-typescript/src/resolve.rs`'s
 //! `resolve_file_with_workspace`/`build_dep_with_workspace` (the actual resolution/dep-graph wiring).
 //!
-//! Before this fix, `analyze::assemble` called the plain `zpz_parser_typescript::build_dep` (no workspace
+//! Before this fix, `analyze::assemble` called the plain `zzop_parser_typescript::build_dep` (no workspace
 //! awareness) and `dead_exports`' resolver closure called the plain `resolve_file` — both treat ANY
 //! non-`.`/non-`@/` specifier as external, so a cross-package import produced no dep-graph edge at all.
 //! That made the imported package's file look unreferenced from outside: `dead-candidates` (file-level,
@@ -16,7 +16,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_engine::{analyze_tree, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -83,7 +83,7 @@ fn write_two_package_fixture(dir: &TempDir) {
 
 #[test]
 fn cross_package_workspace_import_clears_dead_candidates_on_the_target_file() {
-    let dir = TempDir::new("zpz-engine-ws-alias-dead-candidates");
+    let dir = TempDir::new("zzop-engine-ws-alias-dead-candidates");
     write_two_package_fixture(&dir);
     let out = analyze_tree(dir.path(), &config());
 
@@ -112,7 +112,7 @@ fn cross_package_workspace_import_clears_dead_candidates_on_the_target_file() {
 
 #[test]
 fn cross_package_workspace_import_clears_dead_exports_on_the_consumed_symbol() {
-    let dir = TempDir::new("zpz-engine-ws-alias-dead-exports");
+    let dir = TempDir::new("zzop-engine-ws-alias-dead-exports");
     write_two_package_fixture(&dir);
     let out = analyze_tree(dir.path(), &config());
 
@@ -145,7 +145,7 @@ fn bare_workspace_specifier_resolves_to_the_named_packages_main_entry() {
     // file is deliberately named `root.ts`, not `index.ts`/`main.ts` — both match dead-exports' own
     // `entry_patterns` (exempt unconditionally, real importer or not), which would make this test pass
     // even without the workspace-alias fix and prove nothing.
-    let dir = TempDir::new("zpz-engine-ws-alias-bare-entry");
+    let dir = TempDir::new("zzop-engine-ws-alias-bare-entry");
     dir.write(
         "packages/pkg-c/package.json",
         r#"{"name": "@scope/pkg-c", "main": "root.ts"}"#,

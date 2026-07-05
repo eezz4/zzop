@@ -6,13 +6,13 @@
 //! `.css`, a huge generated `.json`) are excluded from BOTH the `violations` list AND the
 //! `total`/`compliant` denominator, not merely never-flagged: their size is not a single-responsibility
 //! signal, so counting them as compliant "live" files would silently inflate the compliant ratio too.
-//! Source-ness is injected as an `is_source` closure (mirroring `zpz_core::build_file_nodes`) — this
+//! Source-ness is injected as an `is_source` closure (mirroring `zzop_core::build_file_nodes`) — this
 //! module never hardcodes language/extension knowledge; the engine's dispatch table is the single source
 //! of truth, passed in.
 
 use super::config::ScoresConfig;
 use super::types::{SfcScore, SfcViolation};
-use zpz_core::FileNode;
+use zzop_core::FileNode;
 
 /// Detail list cap.
 const MAX_DETAIL_ITEMS: usize = 50;

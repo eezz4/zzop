@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
-use zpz_core::{DepGraph, FileNode};
+use zzop_core::{DepGraph, FileNode};
 
 /// Minimum blast radius to qualify as a hub.
 pub const CRITICALITY_MIN_BLAST_RADIUS: usize = 3;

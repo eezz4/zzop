@@ -199,7 +199,7 @@ optimized and unoptimized paths produce byte-for-byte identical findings. `metho
 
 ## Finding shape
 
-Every matcher emits `zpz_core::finding::Finding`:
+Every matcher emits `zzop_core::finding::Finding`:
 
 | Field | Value |
 |---|---|

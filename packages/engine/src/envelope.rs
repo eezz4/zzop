@@ -1,5 +1,5 @@
 //! Envelope ingestion — the engine-side receiver for the external-parser Normalized AST protocol
-//! (`docs/NORMALIZED_AST.md`). Projects a `zpz_core::NormalizedEnvelope`'s `FileProjection`s into the
+//! (`docs/NORMALIZED_AST.md`). Projects a `zzop_core::NormalizedEnvelope`'s `FileProjection`s into the
 //! same per-file shape `analyze::assemble` consumes, then runs the same whole-graph analyses
 //! (dep-graph resolution, `circular`/`unreachable`/`dead-candidates`, `merge_findings`). An external
 //! parser (Java/Python/JSP/anything this engine cannot parse natively) is therefore a first-class
@@ -32,7 +32,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use zpz_core::{
+use zzop_core::{
     circular_from_dep, eval_pack, is_enabled, merge_findings, pack_loader, registry, CommonIr,
     DepGraph, Finding, GitStats, IoConsume, IoFacts, IoProvide, Matcher, MinimalIr,
     NormalizedEnvelope, RuleContext, RulePackDef, SourceFile, DEFAULT_WEIGHTS,
@@ -43,13 +43,13 @@ use crate::analyze::{
 };
 use crate::{AnalyzeOutput, EngineConfig};
 
-/// Ingests one `NormalizedEnvelope` (already validated — see `zpz_core::validate_envelope`) and
+/// Ingests one `NormalizedEnvelope` (already validated — see `zzop_core::validate_envelope`) and
 /// produces the same `AnalyzeOutput` shape `analyze_tree` does, per this module's doc for which
 /// analyses run and which are skipped in envelope mode. Files are processed in `path`-sorted order
 /// (mirroring `pipeline::run_file_pass`) so output is deterministic regardless of the envelope's own
 /// file order.
 pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) -> AnalyzeOutput {
-    let mut files: Vec<&zpz_core::FileProjection> = envelope.files.iter().collect();
+    let mut files: Vec<&zzop_core::FileProjection> = envelope.files.iter().collect();
     files.sort_by(|a, b| a.path.cmp(&b.path));
     let file_count = files.len();
 
@@ -78,8 +78,8 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     // Fragment-composition substrate — the envelope-mode counterpart of `analyze::assemble`'s own
     // `trpc_fragment_pairs`/`router_mount_pairs`/`fragment_pairs`: collected during the per-file loop,
     // composed once after (path-paired so composition can sort for deterministic first-writer-wins).
-    let mut trpc_fragment_pairs: Vec<(String, Vec<zpz_core::TrpcRouterFragment>)> = Vec::new();
-    let mut router_mount_pairs: Vec<(String, Vec<zpz_core::RouterMountFragment>)> = Vec::new();
+    let mut trpc_fragment_pairs: Vec<(String, Vec<zzop_core::TrpcRouterFragment>)> = Vec::new();
+    let mut router_mount_pairs: Vec<(String, Vec<zzop_core::RouterMountFragment>)> = Vec::new();
     let mut const_fragment_pairs: Vec<(String, HashMap<String, String>)> = Vec::new();
     // Same summary `analyze::assemble` builds natively — see `AnalyzeOutput::package_imports`.
     let mut package_import_files: std::collections::BTreeMap<
@@ -176,7 +176,7 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     // Every `FileProjection` is, by construction, a parsed-source file (an external parser only ever
     // projects source it understood) — so `is_source` is unconditionally true here, unlike
     // `analyze::assemble`'s dispatch-backed classifier.
-    let nodes = zpz_core::build_file_nodes(
+    let nodes = zzop_core::build_file_nodes(
         &dep_stats,
         &GitStats::default(),
         &loc_by_path,
@@ -186,10 +186,10 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
 
     // `AnalyzeOutput::folders` is not git-gated, so envelope mode gets a real rollup too.
     // `layer_co_churn` stays `None`: envelope mode never has real commit history.
-    let folders = Some(zpz_metrics::build_folder_aggregates(
+    let folders = Some(zzop_metrics::build_folder_aggregates(
         &nodes,
         &dep,
-        zpz_metrics::DEFAULT_FOLDER_DEPTH,
+        zzop_metrics::DEFAULT_FOLDER_DEPTH,
     ));
 
     let mut warnings = Vec::new();
@@ -293,7 +293,7 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
 /// pre-overlay path, byte-for-byte).
 ///
 /// Overlays are processed in `parser`-sorted order (deterministic regardless of assembly order) and
-/// each is re-validated via `zpz_core::validate_envelope` first — a malformed overlay degrades to one
+/// each is re-validated via `zzop_core::validate_envelope` first — a malformed overlay degrades to one
 /// `warnings` entry naming its `parser` id and first few issues, then is skipped entirely.
 ///
 /// Per `FileProjection`: if `path` matches an existing artifact's `rel`, it's merged in place — `io`
@@ -324,7 +324,7 @@ pub(crate) fn apply_adapter_overlays(
                 continue;
             }
         };
-        if let Err(issues) = zpz_core::validate_envelope(&json) {
+        if let Err(issues) = zzop_core::validate_envelope(&json) {
             let detail = issues
                 .iter()
                 .take(3)
@@ -366,7 +366,7 @@ fn normalize_io_file_field(io: &mut IoFacts, path: &str) {
 /// for the dedup/native-first semantics per channel).
 fn merge_projection_onto_artifact(
     artifact: &mut crate::pipeline::FileArtifact,
-    projection: &zpz_core::FileProjection,
+    projection: &zzop_core::FileProjection,
 ) {
     let mut incoming_io = projection.io.clone();
     normalize_io_file_field(&mut incoming_io, &projection.path);
@@ -412,7 +412,7 @@ fn merge_projection_onto_artifact(
 /// The "not found" branch of `apply_adapter_overlays`'s per-`FileProjection` merge — builds a brand-new
 /// `FileArtifact` for a `path` the native pass never dispatched at all.
 fn synthetic_artifact_from_projection(
-    projection: &zpz_core::FileProjection,
+    projection: &zzop_core::FileProjection,
 ) -> crate::pipeline::FileArtifact {
     let mut io = projection.io.clone();
     normalize_io_file_field(&mut io, &projection.path);
@@ -501,7 +501,7 @@ fn envelope_rule_pack(pack: &RulePackDef) -> RulePackDef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zpz_core::{
+    use zzop_core::{
         FileProjection, ImportBinding, ImportMap, SourceSymbol, SourceSymbolKind,
         NORMALIZED_AST_FORMAT,
     };
@@ -746,7 +746,7 @@ mod tests {
 
     #[test]
     fn router_mount_fragments_split_across_two_files_compose_into_one_http_provide() {
-        use zpz_core::{RouterMountEntry, RouterMountFragment};
+        use zzop_core::{RouterMountEntry, RouterMountFragment};
 
         // Mount file: an "app" router mounting "sub" at "/api", by exact-path specifier.
         let mut mount_file = projection("app.jsp", 4);

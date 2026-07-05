@@ -5,7 +5,7 @@
 use super::config::ScoresConfig;
 use super::shared::{is_external, module_of, round, top_subdir};
 use super::types::{SiblingCross, SiblingCrossScore};
-use zpz_core::DepGraph;
+use zzop_core::DepGraph;
 
 /// Caps the returned violation list (not the score).
 const MAX_VIOLATIONS_LISTED: usize = 100;

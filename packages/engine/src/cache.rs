@@ -1,5 +1,5 @@
-//! Wiring between `zpz_cache::AnalysisCache` and the fused per-file pass (`pipeline.rs`) — implements
-//! the cache key/fingerprint design `zpz_cache` defines (see `docs/ARCHITECTURE.md`'s "Caching" for the
+//! Wiring between `zzop_cache::AnalysisCache` and the fused per-file pass (`pipeline.rs`) — implements
+//! the cache key/fingerprint design `zzop_cache` defines (see `docs/ARCHITECTURE.md`'s "Caching" for the
 //! user-facing contract). This module owns what that design leaves to "the caller": opening the on-disk
 //! cache once per `analyze_tree` call (degrade, never panic, on failure), composing the ruleset
 //! fingerprint, and the deterministic-under-rayon hit/miss counters behind `AnalyzeOutput::cache`.
@@ -38,7 +38,7 @@
 //! ## Ruleset fingerprint composition
 //!
 //! Conceptually this hashes each active per-file rule pack's (id, schema_version, content).
-//! `zpz_core::dsl::RulePackDef` derives `Deserialize` only — no `Serialize`, no `schema_version` field
+//! `zzop_core::dsl::RulePackDef` derives `Deserialize` only — no `Serialize`, no `schema_version` field
 //! (packs are versioned as whole files) — so [`ruleset_fingerprint`] hashes each enabled pack's derived
 //! `Debug` output instead: deterministic across runs for a plain struct/enum with fixed field order and
 //! no hashmap iteration anywhere in the AST. Packs are sorted by id before hashing so load order cannot
@@ -52,8 +52,8 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use zpz_cache::AnalysisCache;
-use zpz_core::RulePackDef;
+use zzop_cache::AnalysisCache;
+use zzop_core::RulePackDef;
 
 use crate::dispatch::Language;
 use crate::{CacheStats, EngineConfig};
@@ -66,7 +66,7 @@ use crate::{CacheStats, EngineConfig};
 /// directory serve a wrong answer instead of a fresh recompute — the schema bump forces a clean cache
 /// instead. Bump whenever `FileIrSlice` (or the cached findings shape) gains, renames, or removes a
 /// field.
-pub const CACHE_SCHEMA_VERSION: &str = "zpz-cache-v11";
+pub const CACHE_SCHEMA_VERSION: &str = "zzop-cache-v11";
 
 /// Fingerprint for files that never reach a structural parser crate in the fused pass: no `Language` match
 /// (`dispatch::dispatch` returned `None` — unrecognized extension), or the size-cap lexical fallback
@@ -77,18 +77,18 @@ pub const CACHE_SCHEMA_VERSION: &str = "zpz-cache-v11";
 const LEXICAL_FALLBACK_FINGERPRINT: &str = "lexical/engine-v1";
 
 /// `ruleset_fingerprint`'s native-rule-logic-version token for `pipeline::schema_findings`
-/// (`zpz_rules_schema::apply_schema_rules`, wired into the fused per-file pass for Prisma files). Unlike
+/// (`zzop_rules_schema::apply_schema_rules`, wired into the fused per-file pass for Prisma files). Unlike
 /// a DSL pack (whose content already changes the fingerprint via `pack:?`), this is Rust logic with no
-/// pack content to hash, so the version counter (`zpz_rules_schema::STRUCTURAL_RULES_VERSION`) lives
+/// pack content to hash, so the version counter (`zzop_rules_schema::STRUCTURAL_RULES_VERSION`) lives
 /// beside the rule itself and is bumped whenever its output shape changes.
 fn schema_structural_fingerprint() -> String {
     format!(
         "schema-structural-{}",
-        zpz_rules_schema::STRUCTURAL_RULES_VERSION
+        zzop_rules_schema::STRUCTURAL_RULES_VERSION
     )
 }
 
-/// Logic-version token for the DSL *interpreter* (`zpz_core::dsl`) itself — the same stale-cache gap
+/// Logic-version token for the DSL *interpreter* (`zzop_core::dsl`) itself — the same stale-cache gap
 /// `schema_structural_fingerprint` closes for native rule logic. Pack JSON already self-invalidates via
 /// `{pack:?}` above, but a pure-Rust interpreter semantics change (matcher evaluation, suppress-marker
 /// window, ...) alters findings for byte-identical source AND identical pack content — invisible to the
@@ -134,14 +134,14 @@ pub(crate) fn parser_fingerprint(language: Option<Language>, config: &EngineConf
         Some(Language::TypeScript) => {
             format!(
                 "{}+degrade-v2+io={:?}",
-                zpz_parser_typescript::PARSER_FINGERPRINT,
+                zzop_parser_typescript::PARSER_FINGERPRINT,
                 config.io
             )
         }
-        Some(Language::Prisma) => zpz_parser_prisma::PARSER_FINGERPRINT.to_string(),
+        Some(Language::Prisma) => zzop_parser_prisma::PARSER_FINGERPRINT.to_string(),
         // Own fingerprint, distinct from `LEXICAL_FALLBACK_FINGERPRINT`: `.java` goes through the real
-        // (if lexical) `zpz_parser_java` projector crate, not this engine's own text-only heuristics.
-        Some(Language::JavaLexical) => zpz_parser_java::PARSER_FINGERPRINT.to_string(),
+        // (if lexical) `zzop_parser_java` projector crate, not this engine's own text-only heuristics.
+        Some(Language::JavaLexical) => zzop_parser_java::PARSER_FINGERPRINT.to_string(),
         None => LEXICAL_FALLBACK_FINGERPRINT.to_string(),
     };
     format!("{base}+size_cap={}", config.size_cap)
@@ -208,7 +208,7 @@ impl CacheCounters {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zpz_core::RuleConfig;
+    use zzop_core::RuleConfig;
 
     fn pack(id: &str) -> RulePackDef {
         let json = format!(r#"{{"id": "{id}", "framework": "any", "rules": []}}"#);

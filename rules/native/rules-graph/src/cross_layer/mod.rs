@@ -1,5 +1,5 @@
-//! `cross-layer/*` — 20 native rules that run over `zpz_core::CrossLayerResult`, the multi-tree join result
-//! `zpz_engine::analyze_trees` produces (see `packages/core/src/io.rs`'s module doc for the join itself:
+//! `cross-layer/*` — 20 native rules that run over `zzop_core::CrossLayerResult`, the multi-tree join result
+//! `zzop_engine::analyze_trees` produces (see `packages/core/src/io.rs`'s module doc for the join itself:
 //! exact `(kind, key)` join with an ambiguity gate for keys provided by 2+ distinct source trees, an
 //! external-egress gate for host-carrying consume keys, and a low-confidence tag for generic paths).
 //! Every rule here is a pure function over `&CrossLayerResult` (+ the provide-key universe some of them
@@ -68,7 +68,7 @@
 //! existing native rules in this crate do it: `duplicate_route`/`route_shadowing`/`unprovided_consume`
 //! carry no marker support either, and `mutating_route_no_auth`'s own message says so explicitly ("native
 //! rules have no inline suppression marker") — inline markers are a DSL-only mechanism
-//! (`zpz_core::dsl::RuleDef::suppress_marker`), never wired into any native rule's `Finding` construction.
+//! (`zzop_core::dsl::RuleDef::suppress_marker`), never wired into any native rule's `Finding` construction.
 //! Every rule here is disable-only via `RuleConfig::disabled_rules` (message text says so).
 //!
 //! ## The provide-key universe
@@ -76,9 +76,9 @@
 //! need to compare against every `http` provide across every tree, not just the ones `CrossLayerResult`
 //! happens to expose (`unconsumed_provides` excludes ambiguous-candidate provides; `edges`/`ambiguous_consumes` only cover
 //! provides some consume already matched). That full universe is deliberately NOT threaded through
-//! `zpz_core::io::link_cross_layer_io`'s return type (`packages/core` stays rule-vocabulary-free by design —
+//! `zzop_core::io::link_cross_layer_io`'s return type (`packages/core` stays rule-vocabulary-free by design —
 //! the kernel carries mechanisms, never rule data); instead the engine call site
-//! (`zpz_engine::analyze_trees`) derives a flat `Vec<HttpProvideSite>` straight from the same `SourceIo`
+//! (`zzop_engine::analyze_trees`) derives a flat `Vec<HttpProvideSite>` straight from the same `SourceIo`
 //! inputs it already built for the join, and passes it into these rule functions directly. See
 //! [`HttpProvideSite`]'s own doc. The same reasoning covers `unresolved_consume_ratio`'s per-tree http
 //! consume totals (`Vec<(String, usize)>`, engine-derived).
@@ -133,13 +133,13 @@ pub use version_skew::version_skew_findings;
 
 /// One `http` provide site, tagged with its source tree — the flat "provide-key universe" `method_mismatch`/
 /// `version_skew`/`path_near_miss` need (see module doc). Deliberately a plain local struct, not a reuse of
-/// `zpz_core::io::TaggedProvide`: the caller (`zpz_engine::analyze_trees`) already has exactly this shape in
-/// hand from its own `SourceIo` list and this crate depends on `zpz-core` only for its actual IR/Finding
+/// `zzop_core::io::TaggedProvide`: the caller (`zzop_engine::analyze_trees`) already has exactly this shape in
+/// hand from its own `SourceIo` list and this crate depends on `zzop-core` only for its actual IR/Finding
 /// contracts, not as a place to borrow one more struct shape from for a purely-local aggregation.
 #[derive(Debug, Clone)]
 pub struct HttpProvideSite {
     pub source: String,
-    /// The full normalized `"METHOD /path"` key (`zpz_core::http_interface_key`'s output shape).
+    /// The full normalized `"METHOD /path"` key (`zzop_core::http_interface_key`'s output shape).
     pub key: String,
     pub file: String,
     pub line: u32,

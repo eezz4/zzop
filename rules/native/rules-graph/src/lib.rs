@@ -1,8 +1,8 @@
-//! zpz-rules-graph — native whole-graph rules that operate over a repo's dependency/call graph, git-free.
+//! zzop-rules-graph — native whole-graph rules that operate over a repo's dependency/call graph, git-free.
 //!
 //! ## Module map
 //! - [`http_scan`]: call-graph-BFS HTTP scanners (`scan_unsafe_read_endpoint`, `scan_non_idempotent_write`).
-//! - [`circular`]: Finding-shaping for `"circular"` (the algorithm itself lives in `zpz_core::graph`).
+//! - [`circular`]: Finding-shaping for `"circular"` (the algorithm itself lives in `zzop_core::graph`).
 //! - [`unreachable`]: closed "dead island" file detection.
 //! - [`dead_candidates`]: fanIn == 0 candidate dead files.
 //! - [`dead_exports`]: symbol-level dead-export detection.
@@ -13,7 +13,7 @@
 //! - [`cross_layer`]: rules over the MULTI-TREE `CrossLayerResult` join — the whole-analysis counterpart to
 //!   every module above (see its own doc for the full list).
 //!
-//! Every rule body here depends on `zpz-core` only.
+//! Every rule body here depends on `zzop-core` only.
 
 pub mod circular;
 pub mod cross_layer;
@@ -26,10 +26,10 @@ pub mod route_shadowing;
 pub mod unprovided_consume;
 pub mod unreachable;
 
-use zpz_core::{register_native_analysis_stub, RuleRegistry, Severity};
+use zzop_core::{register_native_analysis_stub, RuleRegistry, Severity};
 
 /// Registers every native analysis id whose implementation lives in this crate (see `rules/README.md`'s
-/// "Adding a rule" section); `zpz_engine::register_all_native` composes this with the other crates' own.
+/// "Adding a rule" section); `zzop_engine::register_all_native` composes this with the other crates' own.
 pub fn register_native_analyses(registry: &mut RuleRegistry) {
     let analyses: &[(&str, Severity)] = &[
         ("circular", Severity::Warning),

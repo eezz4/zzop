@@ -48,8 +48,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build napi addon
-        run: cargo build -p zpz-napi --features addon
+        run: cargo build -p zzop-napi --features addon
       - name: Smoke test built addon
         run: |
-          cp target/debug/libzpz_napi.so packages/napi/zpz-napi.node
+          cp target/debug/libzzop_napi.so packages/napi/zzop-napi.node
           node packages/napi/smoke.mjs

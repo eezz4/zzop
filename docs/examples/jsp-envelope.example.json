@@ -1,5 +1,5 @@
 {
-  "format": "zpz-normalized-ast",
+  "format": "zzop-normalized-ast",
   "version": 1,
   "parser": "jsp-lexical/1",
   "source": "legacy-webapp",

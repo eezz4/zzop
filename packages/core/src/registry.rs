@@ -142,7 +142,7 @@ pub fn is_suppressed(config: &RuleConfig, rule: &str, file: Option<&str>) -> boo
 /// `disabled_rules`'s own doc). Applies uniformly to a bare native-analysis/JS-quick-rule id, a whole DSL
 /// pack id, or a full `"<pack>/<rule>"` id — the registry does not distinguish kinds here, it only compares
 /// strings. All three id shapes are honored end to end: pack ids and `"<pack>/<rule>"` ids are both enforced
-/// by `zpz_engine::pipeline::run_file_pass` before a pack ever reaches per-file evaluation (a disabled pack
+/// by `zzop_engine::pipeline::run_file_pass` before a pack ever reaches per-file evaluation (a disabled pack
 /// id drops the whole pack; a disabled `"<pack>/<rule>"` id drops just that rule, via `gate_pack_rules`),
 /// while bare native/JS ids are enforced at their own call sites (e.g. `register_native_analyses`'s ids
 /// checked directly against `is_enabled` before the corresponding analysis runs).
@@ -201,9 +201,9 @@ pub fn merge_findings(sources: Vec<Vec<Finding>>, config: &RuleConfig) -> Vec<Fi
 // ---------------------------------------------------------------------------------------------
 // This crate (the kernel) carries ZERO rule vocabulary: no native analysis id, pack id, or rule id string
 // literal lives here. What stays here is only the MECHANISM every owning rules crate uses to plug its own
-// ids into the one shared registry. Each owning crate (`zpz_rules_graph`, `zpz_rules_schema`,
-// `zpz_metrics`) exposes its own `register_native_analyses(&mut RuleRegistry)` that calls
-// `register_native_analysis_stub` once per id it owns; `zpz_engine::register_all_native` composes all
+// ids into the one shared registry. Each owning crate (`zzop_rules_graph`, `zzop_rules_schema`,
+// `zzop_metrics`) exposes its own `register_native_analyses(&mut RuleRegistry)` that calls
+// `register_native_analysis_stub` once per id it owns; `zzop_engine::register_all_native` composes all
 // three. See `rules/README.md`'s "Adding a rule" section and `packages/engine/tests/rule_contracts.rs`'s
 // "kernel is rule-vocabulary-free" contract test.
 
@@ -341,7 +341,7 @@ mod tests {
     fn disabled_rules_skips_by_full_pack_slash_rule_id_without_affecting_sibling_rules() {
         // A `"<pack>/<rule>"` entry disables only that one rule, leaving the bare pack id and every
         // other rule in the same pack enabled. The per-rule pack filtering that makes this id shape
-        // take effect against real `RulePackDef`s lives in `zpz_engine::pipeline::gate_pack_rules`,
+        // take effect against real `RulePackDef`s lives in `zzop_engine::pipeline::gate_pack_rules`,
         // downstream of this crate — this test only covers `is_enabled`'s own string-matching contract.
         let config = RuleConfig {
             disabled_rules: vec!["typescript/as-cast".to_string()],

@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>zpz — Usage</title>
-<meta name="description" content="zpz usage — the native API functions, config reference, multi-repo analysis, and output schema.">
+<title>zzop — Usage</title>
+<meta name="description" content="zzop usage — the native API functions, config reference, multi-repo analysis, and output schema.">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="assets/site.css">
 </head>
@@ -13,7 +13,7 @@
   <div class="site-header__inner">
     <a href="index.html" class="brand">
       <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#1e222b"></rect><path d="M9 16.5 13.5 21 23 10.5" fill="none" stroke="#34d399" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path></svg>
-      <span class="brand__wordmark">zpz</span>
+      <span class="brand__wordmark">zzop</span>
     </a>
     <nav class="site-nav">
       <a href="index.html" class="site-nav__link">Overview</a>
@@ -22,7 +22,7 @@
       <a href="rules.html" class="site-nav__link">Rules</a>
     </nav>
     <div class="site-header__actions">
-      <a href="https://github.com/eezz4/zpz" target="_blank" rel="noreferrer" aria-label="GitHub" class="icon-btn">
+      <a href="https://github.com/eezz4/zzop" target="_blank" rel="noreferrer" aria-label="GitHub" class="icon-btn">
         <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"></path></svg>
       </a>
     </div>
@@ -48,29 +48,29 @@
   <main class="docs-content">
     <div class="docs-content-header">
       <h1>Calling the engine</h1>
-      <p><code>@zpz/native</code> is the single Node&harr;Rust boundary for zpz — one addon covers everything from a single-repo analysis to multi-repo cross-layer analysis.</p>
+      <p><code>@zzop/native</code> is the single Node&harr;Rust boundary for zzop — one addon covers everything from a single-repo analysis to multi-repo cross-layer analysis.</p>
     </div>
 
     <section id="install">
       <span class="eyebrow eyebrow--sm">Getting the addon</span>
-      <h2>Installing @zpz/native</h2>
-      <p><code>@zpz/native</code> is <strong>not yet published to npm</strong> — the package is marked <code>private: true</code> while the prebuild/publishing pipeline is still being finished. There is no working <code>npm install @zpz/native</code> today.</p>
+      <h2>Installing @zzop/native</h2>
+      <p><code>@zzop/native</code> is <strong>not yet published to npm</strong> — the package is marked <code>private: true</code> while the prebuild/publishing pipeline is still being finished. There is no working <code>npm install @zzop/native</code> today.</p>
       <p>Until it ships, build the N-API addon from source. The eventual install command, once a release goes out, will simply be:</p>
       <div class="code-panel">
         <div class="code-panel__tab">Once published (not available yet)</div>
-        <pre class="code-block"><code>npm install @zpz/native</code></pre>
+        <pre class="code-block"><code>npm install @zzop/native</code></pre>
       </div>
-      <p>For now, clone the repo and build the addon directly — see the root <a href="https://github.com/eezz4/zpz/blob/main/README.md" target="_blank" rel="noreferrer">README.md</a> and <a href="https://github.com/eezz4/zpz/blob/main/packages/napi/README.md" target="_blank" rel="noreferrer">packages/napi/README.md</a> for the full walkthrough. On Windows the real <code>.node</code> addon requires the MSVC toolchain (Node-API's delay-load linking has no MinGW/<code>ld</code> equivalent):</p>
+      <p>For now, clone the repo and build the addon directly — see the root <a href="https://github.com/eezz4/zzop/blob/main/README.md" target="_blank" rel="noreferrer">README.md</a> and <a href="https://github.com/eezz4/zzop/blob/main/packages/napi/README.md" target="_blank" rel="noreferrer">packages/napi/README.md</a> for the full walkthrough. On Windows the real <code>.node</code> addon requires the MSVC toolchain (Node-API's delay-load linking has no MinGW/<code>ld</code> equivalent):</p>
       <div class="code-panel">
         <div class="code-panel__tab">Build from source (Windows)</div>
-        <pre class="code-block"><code>cargo +stable-x86_64-pc-windows-msvc build -p zpz-napi --release --features addon
+        <pre class="code-block"><code>cargo +stable-x86_64-pc-windows-msvc build -p zzop-napi --release --features addon
 node packages/napi/smoke.mjs</code></pre>
       </div>
-      <p>On macOS/Linux drop the toolchain override: <code>cargo build -p zpz-napi --release --features addon</code>.</p>
+      <p>On macOS/Linux drop the toolchain override: <code>cargo build -p zzop-napi --release --features addon</code>.</p>
     </section>
 
     <section id="functions">
-      <span class="eyebrow eyebrow--sm">@zpz/native</span>
+      <span class="eyebrow eyebrow--sm">@zzop/native</span>
       <h2>Four functions, JSON in / JSON out</h2>
       <p>All four are JSON-string-in / JSON-string-out, except <code>version</code>. Core logic lives in <code>packages/napi/src/api.rs</code> as plain Rust with no napi dependency at all (so it compiles and unit-tests under the workspace's default toolchain); <code>packages/napi/src/addon.rs</code> is a thin <code>#[napi]</code>-annotated wrapper over those same functions, gated behind the <code>addon</code> Cargo feature.</p>
       <div class="table-scroll">
@@ -94,13 +94,13 @@ node packages/napi/smoke.mjs</code></pre>
       <p>A bare <code>{ root: "." }</code> request is the entire required configuration:</p>
       <div class="code-panel">
         <div class="code-panel__tab">analyze() call</div>
-        <pre class="code-block"><code>import zpz from '@zpz/native';
+        <pre class="code-block"><code>import zzop from '@zzop/native';
 
 const result = JSON.parse(
-  zpz.analyze(JSON.stringify({ root: '.' }))
+  zzop.analyze(JSON.stringify({ root: '.' }))
 );</code></pre>
       </div>
-      <p>The package is CommonJS, so both module systems work: <code>import zpz from '@zpz/native'</code> in ESM, <code>const zpz = require('@zpz/native')</code> in CommonJS.</p>
+      <p>The package is CommonJS, so both module systems work: <code>import zzop from '@zzop/native'</code> in ESM, <code>const zzop = require('@zzop/native')</code> in CommonJS.</p>
       <p>Before the config crosses into Rust, the JS wrapper (<code>index.js</code>) injects two defaults — so a bare <code>{ root }</code> request runs the full analysis instead of quietly degrading to native analyses only:</p>
       <ul>
         <li><strong>packsDir omitted</strong> — defaults to the bundled DSL rule packs: <code>&lt;repo root&gt;/rules/dsl</code> in a source checkout (always the live copy), or the <code>rules/</code> directory copied into the installed package at publish time by the <code>prepack</code> script.</li>
@@ -139,7 +139,7 @@ const result = JSON.parse(
       <p><code>analyzeTrees({ trees: [...] })</code> runs <code>analyze</code> once per tree, then joins every tree's declared IoFacts (HTTP/DB/tRPC provides and consumes) across all of them. A frontend checkout and a backend checkout can be two entirely separate git repositories that share nothing on disk and still get joined.</p>
       <div class="code-panel">
         <div class="code-panel__tab">Frontend + backend</div>
-        <pre class="code-block"><code>const result = JSON.parse(zpz.analyzeTrees(JSON.stringify({
+        <pre class="code-block"><code>const result = JSON.parse(zzop.analyzeTrees(JSON.stringify({
   trees: [
     { root: '../frontend', sourceId: 'web' },
     { root: '../backend', sourceId: 'api' },
@@ -216,7 +216,7 @@ const result = JSON.parse(
     match std::panic::catch_unwind(f) {
         Ok(Ok(json)) =&gt; Ok(json),
         Ok(Err(message)) =&gt; Err(Error::from_reason(message)),
-        Err(_) =&gt; Err(Error::from_reason("zpz-napi: internal panic (this is a bug — please report it)")),
+        Err(_) =&gt; Err(Error::from_reason("zzop-napi: internal panic (this is a bug — please report it)")),
     }
 }</code></pre>
       </div>
@@ -241,9 +241,9 @@ const result = JSON.parse(
 
 <footer class="site-footer">
   <div class="site-footer__inner">
-    <span class="site-footer__brand">zpz</span>
-    <span>— Zero Pain Zone · MIT License · © 2026</span>
-    <a href="https://github.com/eezz4/zpz" target="_blank" rel="noreferrer" class="site-footer__gh">GitHub</a>
+    <span class="site-footer__brand">zzop</span>
+    <span>— Zero Zone Of Pain · MIT License · © 2026</span>
+    <a href="https://github.com/eezz4/zzop" target="_blank" rel="noreferrer" class="site-footer__gh">GitHub</a>
   </div>
 </footer>
 

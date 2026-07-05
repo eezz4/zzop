@@ -1,20 +1,20 @@
 [package]
-name = "zpz-engine"
+name = "zzop-engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
 
 [dependencies]
-zpz-core = { path = "../core" }
-zpz-metrics = { path = "../metrics" }
-zpz-git = { path = "../git" }
-zpz-cache = { path = "../cache" }
-zpz-parser-typescript = { path = "../../parser/parser-typescript" }
-zpz-parser-prisma = { path = "../../parser/parser-prisma" }
-zpz-parser-java = { path = "../../parser/parser-java" }
-zpz-rules-graph = { path = "../../rules/native/rules-graph" }
-zpz-rules-schema = { path = "../../rules/native/rules-schema" }
+zzop-core = { path = "../core" }
+zzop-metrics = { path = "../metrics" }
+zzop-git = { path = "../git" }
+zzop-cache = { path = "../cache" }
+zzop-parser-typescript = { path = "../../parser/parser-typescript" }
+zzop-parser-prisma = { path = "../../parser/parser-prisma" }
+zzop-parser-java = { path = "../../parser/parser-java" }
+zzop-rules-graph = { path = "../../rules/native/rules-graph" }
+zzop-rules-schema = { path = "../../rules/native/rules-schema" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 regex = { workspace = true }

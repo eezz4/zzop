@@ -1,4 +1,4 @@
-//! zpz-parser-java — Java parser — lexical method/class span projector (fusion contract: "spans can come
+//! zzop-parser-java — Java parser — lexical method/class span projector (fusion contract: "spans can come
 //! from ANY parser, even a lexical one" — see `docs/ARCHITECTURE.md`'s "Fused execution" section). No real
 //! Java grammar here, just a comment/string-aware brace matcher that recovers class/method *body spans*
 //! from raw text: good enough for `Matcher::MethodScan` (co-occurrence within a span), not a substitute for
@@ -24,7 +24,7 @@
 //!   array-literal `{...}`, a lambda body ending in `->` not `)`) classifies as neither — the frame is
 //!   still pushed/popped for correct brace nesting, just emits no symbol.
 //!
-//! ## Line conventions (mirrors `zpz_parser_typescript::fn_symbol`/`class_symbol`)
+//! ## Line conventions (mirrors `zzop_parser_typescript::fn_symbol`/`class_symbol`)
 //! A method/constructor's `line` is its declaration-start line (including any leading annotations) and
 //! `body_start` is where its own opening `{` sits (may differ for a multi-line signature). A
 //! class/interface/enum/record's `line` AND `body_start` are both the declaration-start line, not the
@@ -40,7 +40,7 @@
 //!   to keep a `{`/`}` inside one from being read as structural, but the triple-quote sequence itself is
 //!   not specially recognized.
 
-use zpz_core::{SourceSymbol, SourceSymbolKind};
+use zzop_core::{SourceSymbol, SourceSymbolKind};
 
 pub mod project;
 pub mod provides;
@@ -48,7 +48,7 @@ pub mod provides;
 pub use project::{extract_http_provides_project, ProjectProvidesReport};
 pub use provides::extract_http_provides;
 
-/// Cache key ingredient for `zpz-cache`, mirroring `zpz_parser_prisma::PARSER_FINGERPRINT`'s scheme — bump
+/// Cache key ingredient for `zzop-cache`, mirroring `zzop_parser_prisma::PARSER_FINGERPRINT`'s scheme — bump
 /// the trailing `/vN` counter whenever `parse_method_spans`'s projection logic changes its `SourceSymbol`
 /// output for the same source text, or the per-file projection grows a new fact type (v2: added
 /// `provides::extract_http_provides`), so a pre-existing cache entry from before that fact type existed is

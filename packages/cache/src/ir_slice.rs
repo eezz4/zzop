@@ -1,16 +1,16 @@
 //! `FileIrSlice` — the cacheable half of the engine's fused per-file pass output.
 //!
-//! Shape-equivalent to `zpz_engine::pipeline::FileArtifact` minus `rel` (the lookup key's business)
-//! and `findings` (a separate cache entry — see `CacheKey`). Defined here, not in `zpz-engine`, so
-//! this crate stays a leaf dependent of `zpz-core` only.
+//! Shape-equivalent to `zzop_engine::pipeline::FileArtifact` minus `rel` (the lookup key's business)
+//! and `findings` (a separate cache entry — see `CacheKey`). Defined here, not in `zzop-engine`, so
+//! this crate stays a leaf dependent of `zzop-core` only.
 //!
 //! `trpc_router_fragments` / `router_mount_fragments` / `wrapper_def_fragments` /
-//! `wrapper_call_fragments` round-trip the matching `zpz_core` types verbatim; those types live in
-//! `zpz-core` (not the TypeScript parser crate that produces them) so this crate never needs
-//! `zpz-parser-typescript` as a dependency.
+//! `wrapper_call_fragments` round-trip the matching `zzop_core` types verbatim; those types live in
+//! `zzop-core` (not the TypeScript parser crate that produces them) so this crate never needs
+//! `zzop-parser-typescript` as a dependency.
 
 use serde::{Deserialize, Serialize};
-use zpz_core::{
+use zzop_core::{
     ImportMap, IoFacts, RouterMountFragment, SourceSymbol, TrpcRouterFragment, WrapperCallFragment,
     WrapperDefFragment,
 };

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use super::config::ScoresConfig;
 use super::shared::{is_external, module_of, round};
 use super::types::{SdpScore, SdpViolation};
-use zpz_core::DepGraph;
+use zzop_core::DepGraph;
 
 #[derive(Default, Clone, Copy)]
 struct Degree {

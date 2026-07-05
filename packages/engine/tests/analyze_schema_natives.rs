@@ -1,6 +1,6 @@
 //! End-to-end proof that the three schema x usage JOIN native rules — `soft-delete-bypass`,
-//! `orderby-unindexed`, and `enum-string-drift` (`zpz_rules_schema::join`, rule-pack catalog rows
-//! #27/#28/#29) — are wired into `zpz_engine::analyze_tree`
+//! `orderby-unindexed`, and `enum-string-drift` (`zzop_rules_schema::join`, rule-pack catalog rows
+//! #27/#28/#29) — are wired into `zzop_engine::analyze_tree`
 //! end to end: `.prisma` schema on disk + `.ts` BE source on disk -> real `Finding`s, gated per-id via
 //! `RuleConfig::disabled_rules` (`packages/engine/src/analyze.rs`'s `run_schema_join_rules`).
 //!
@@ -12,7 +12,7 @@
 //! - `User { id, role: Role }` plus `enum Role { USER ADMIN }` — enum-string-drift fixture.
 //!
 //! and one `src/repo.ts` with `getPrisma().<model>.<method>(...)` call sites (the same
-//! `getPrisma()`-accessor vocabulary `zpz_parser_prisma::DEFAULT_PRISMA_CLIENT_GETTER_FN`/`scan_store_map`
+//! `getPrisma()`-accessor vocabulary `zzop_parser_prisma::DEFAULT_PRISMA_CLIENT_GETTER_FN`/`scan_store_map`
 //! already use elsewhere in this crate's tests) — one positive + one negative per rule, so a single fixture
 //! tree proves both the hit and the no-hit path for each rule without needing six separate directories.
 
@@ -20,8 +20,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_core::RuleConfig;
-use zpz_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
+use zzop_core::RuleConfig;
+use zzop_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -95,13 +95,13 @@ export function listUsersByValidRole() {
 ";
 
 fn fixture() -> TempDir {
-    let dir = TempDir::new("zpz-schema-join");
+    let dir = TempDir::new("zzop-schema-join");
     dir.write("prisma/schema.prisma", SCHEMA);
     dir.write("src/repo.ts", REPO_TS);
     dir
 }
 
-fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zpz_core::Finding> {
+fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {
     out.findings.iter().filter(|f| f.rule_id == rule).collect()
 }
 
@@ -116,7 +116,7 @@ fn soft_delete_bypass_fires_on_unfiltered_call_and_not_on_filtered_call() {
     assert_eq!(found.len(), 1, "{:?}", out.findings);
     assert_eq!(found[0].file, "src/repo.ts");
     assert_eq!(found[0].line, SOFT_DELETE_POSITIVE_LINE);
-    assert_eq!(found[0].severity, zpz_core::Severity::Warning);
+    assert_eq!(found[0].severity, zzop_core::Severity::Warning);
     assert_eq!(
         found[0].data.as_ref().unwrap()["model"].as_str(),
         Some("Item")
@@ -167,7 +167,7 @@ fn orderby_unindexed_fires_on_uncovered_field_and_not_on_indexed_leading_column(
     assert_eq!(found.len(), 1, "{:?}", out.findings);
     assert_eq!(found[0].file, "src/repo.ts");
     assert_eq!(found[0].line, ORDERBY_POSITIVE_LINE);
-    assert_eq!(found[0].severity, zpz_core::Severity::Warning);
+    assert_eq!(found[0].severity, zzop_core::Severity::Warning);
     assert_eq!(
         found[0].data.as_ref().unwrap()["model"].as_str(),
         Some("Order")
@@ -217,7 +217,7 @@ fn enum_string_drift_fires_on_non_member_literal_and_not_on_valid_member() {
     assert_eq!(found.len(), 1, "{:?}", out.findings);
     assert_eq!(found[0].file, "src/repo.ts");
     assert_eq!(found[0].line, ENUM_DRIFT_POSITIVE_LINE);
-    assert_eq!(found[0].severity, zpz_core::Severity::Warning);
+    assert_eq!(found[0].severity, zzop_core::Severity::Warning);
     assert_eq!(
         found[0].data.as_ref().unwrap()["model"].as_str(),
         Some("User")
@@ -277,7 +277,7 @@ fn enum_string_drift_disabled_via_config_removes_the_finding_but_leaves_siblings
 
 #[test]
 fn all_three_rules_absent_when_no_prisma_schema_present() {
-    let dir = TempDir::new("zpz-schema-join-none");
+    let dir = TempDir::new("zzop-schema-join-none");
     dir.write("src/repo.ts", REPO_TS);
     let out = analyze_tree(dir.path(), &EngineConfig::default());
     assert!(
@@ -299,7 +299,7 @@ fn all_three_rules_absent_when_no_prisma_schema_present() {
 
 #[test]
 fn all_three_rules_absent_when_no_matching_call_sites_exist() {
-    let dir = TempDir::new("zpz-schema-join-nocalls");
+    let dir = TempDir::new("zzop-schema-join-nocalls");
     dir.write("prisma/schema.prisma", SCHEMA);
     dir.write("src/repo.ts", "export function noop() { return 1; }\n");
     let out = analyze_tree(dir.path(), &EngineConfig::default());

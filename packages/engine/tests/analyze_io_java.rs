@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_engine::{analyze_tree, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -60,7 +60,7 @@ const SESSION_CONTROLLER_JAVA: &str = concat!(
 );
 
 fn fixture_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-io-java-fixture");
+    let dir = TempDir::new("zzop-engine-io-java-fixture");
     dir.write(
         "src/main/java/com/example/apps/controllers/SessionController.java",
         SESSION_CONTROLLER_JAVA,

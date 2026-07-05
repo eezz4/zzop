@@ -3,7 +3,7 @@
 //! `parse_method_spans`'s class/method span data — `SourceSymbol::line` already lands on a symbol's own
 //! header including any directly-preceding annotation block — to locate each class's and method's
 //! annotation text, then classifies Spring's five method-level mapping annotations plus `@RequestMapping`
-//! into `zpz_core::IoProvide`s.
+//! into `zzop_core::IoProvide`s.
 //!
 //! ## Scope (v1)
 //! - Method-level: `@GetMapping`/`@PostMapping`/`@PutMapping`/`@DeleteMapping`/`@PatchMapping`, verb implied
@@ -37,7 +37,7 @@
 use std::sync::OnceLock;
 
 use regex::Regex;
-use zpz_core::{http_interface_key, IoProvide, SourceSymbol, SourceSymbolKind};
+use zzop_core::{http_interface_key, IoProvide, SourceSymbol, SourceSymbolKind};
 
 use crate::parse_method_spans;
 

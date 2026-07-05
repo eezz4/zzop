@@ -1,5 +1,5 @@
 //! End-to-end coverage for the engine-level minified/generated-file DSL skip
-//! (`zpz_core::dsl::is_minified_or_generated`, wired into `zpz_engine::pipeline::eval_packs`): a file
+//! (`zzop_core::dsl::is_minified_or_generated`, wired into `zzop_engine::pipeline::eval_packs`): a file
 //! classified minified/generated (a 5000+ char single line, OR 500+ char lines dominating >= 50% of the
 //! file's bytes — see that function's doc for the two-prong rule and its rationale) skips
 //! EVERY DSL rule-pack matcher type entirely, while native structural extraction (symbols/imports/loc) and
@@ -16,8 +16,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_core::{load_dsl_packs, RulePackDef};
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_core::{load_dsl_packs, RulePackDef};
+use zzop_engine::{analyze_tree, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -55,7 +55,7 @@ impl Drop for TempDir {
 
 /// Every real shipped pack under `rules/dsl/` — resolved from `CARGO_MANIFEST_DIR`
 /// (`packages/engine` -> up two -> repo root -> `rules/dsl`), same resolution shape
-/// `zpz_engine`'s own `lib.rs` test module (`java_security_pack`) and `analyze_cache.rs`'s
+/// `zzop_engine`'s own `lib.rs` test module (`java_security_pack`) and `analyze_cache.rs`'s
 /// `typescript_pack` already use.
 fn all_shipped_packs() -> Vec<RulePackDef> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/dsl");
@@ -121,7 +121,7 @@ fn long_prompt_lines() -> String {
 }
 
 fn fixture_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-minified-fixture");
+    let dir = TempDir::new("zzop-engine-minified-fixture");
     dir.write("src/bundle/minified.mjs", &minified_line());
     dir.write("src/normal.mjs", &normal_lines());
     dir.write("src/prompt-tool.mjs", &long_prompt_lines());
@@ -149,7 +149,7 @@ fn minified_file_produces_zero_dsl_findings_across_every_loaded_pack() {
     // expected to fire here (an unimported, single-file `run` export is a legitimate dead-candidate/
     // dead-export in this tiny fixture tree) — only the DSL rule-pack matchers are what the minified skip
     // silences.
-    let minified_dsl_findings: Vec<&zpz_core::Finding> = out
+    let minified_dsl_findings: Vec<&zzop_core::Finding> = out
         .findings
         .iter()
         .filter(|f| f.file == "src/bundle/minified.mjs")
@@ -272,11 +272,11 @@ fn two_runs_over_the_same_tree_produce_identical_warnings_and_findings() {
 
 #[test]
 fn warm_cache_rerun_still_reports_the_minified_warning() {
-    // Regression guard for the exact bug `CACHE_SCHEMA_VERSION` bumping to `zpz-cache-v6` exists to prevent:
+    // Regression guard for the exact bug `CACHE_SCHEMA_VERSION` bumping to `zzop-cache-v6` exists to prevent:
     // a stale/pre-`minified`-field cache entry silently defaulting `minified` to `false` on a warm rerun
     // would make this warning vanish nondeterministically. This test proves the warm path still carries it.
     let dir = fixture_tree();
-    let cache_dir = TempDir::new("zpz-engine-minified-cache-store");
+    let cache_dir = TempDir::new("zzop-engine-minified-cache-store");
     let cfg = EngineConfig {
         cache_dir: Some(cache_dir.path().to_path_buf()),
         ..config()

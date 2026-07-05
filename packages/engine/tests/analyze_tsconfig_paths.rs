@@ -17,7 +17,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_engine::{analyze_tree, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -67,7 +67,7 @@ fn config() -> EngineConfig {
 
 #[test]
 fn tsconfig_paths_alias_clears_dead_candidates_on_the_target_file() {
-    let dir = TempDir::new("zpz-engine-tsconfig-paths-dead-candidates");
+    let dir = TempDir::new("zzop-engine-tsconfig-paths-dead-candidates");
     dir.write(
         "tsconfig.json",
         r#"{"compilerOptions": {"baseUrl": ".", "paths": {"@/*": ["./app/*"]}}}"#,
@@ -107,7 +107,7 @@ fn tsconfig_paths_alias_clears_dead_candidates_on_the_target_file() {
 
 #[test]
 fn tsconfig_paths_alias_clears_dead_exports_on_the_consumed_symbol() {
-    let dir = TempDir::new("zpz-engine-tsconfig-paths-dead-exports");
+    let dir = TempDir::new("zzop-engine-tsconfig-paths-dead-exports");
     dir.write(
         "tsconfig.json",
         r#"{"compilerOptions": {"baseUrl": ".", "paths": {"@/*": ["./app/*"]}}}"#,
@@ -145,7 +145,7 @@ fn tsconfig_paths_alias_clears_dead_exports_on_the_consumed_symbol() {
 fn bare_specifier_resolves_via_base_url_without_a_paths_entry() {
     // No `paths` pattern matches `lib/helper` at all — it resolves purely via `baseUrl`, the
     // "absolute-from-src" import convention.
-    let dir = TempDir::new("zpz-engine-tsconfig-base-url-bare");
+    let dir = TempDir::new("zzop-engine-tsconfig-base-url-bare");
     dir.write(
         "tsconfig.json",
         r#"{"compilerOptions": {"baseUrl": "src"}}"#,
@@ -174,7 +174,7 @@ fn control_without_tsconfig_the_same_import_still_looks_orphaned() {
     // actually exercising the new tsconfig-`paths` resolver: without it, `@/lib/helper` only has the
     // hardcoded `@/` -> root-then-`src/` convention to fall back to, and `app/lib/helper.ts` matches
     // neither (it's under `app/`, not root `lib/` or `src/lib/`), so the file still looks orphaned.
-    let dir = TempDir::new("zpz-engine-tsconfig-paths-control");
+    let dir = TempDir::new("zzop-engine-tsconfig-paths-control");
     dir.write(
         "entry.ts",
         "import { helper } from '@/lib/helper';\nexport const x = helper();\n",
@@ -196,7 +196,7 @@ fn control_without_tsconfig_the_same_import_still_looks_orphaned() {
 
 #[test]
 fn tsconfig_extends_merges_paths_from_a_local_base_config() {
-    let dir = TempDir::new("zpz-engine-tsconfig-extends");
+    let dir = TempDir::new("zzop-engine-tsconfig-extends");
     dir.write(
         "tsconfig.base.json",
         r#"{"compilerOptions": {"baseUrl": ".", "paths": {"@shared/*": ["./shared/*"]}}}"#,

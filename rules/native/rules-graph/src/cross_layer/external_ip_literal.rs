@@ -6,8 +6,8 @@
 //! Private-range IPs (`10.x`, `192.168.x`, ...) are NOT excluded: a hardcoded internal IP is still the
 //! environment-drift signal this rule exists to surface. Anchored at the consume site.
 
-use zpz_core::io::TaggedConsume;
-use zpz_core::{Finding, Severity};
+use zzop_core::io::TaggedConsume;
+use zzop_core::{Finding, Severity};
 
 use super::split_external_key;
 
@@ -137,7 +137,7 @@ mod tests {
     ) -> TaggedConsume {
         TaggedConsume {
             source: source.to_string(),
-            consume: zpz_core::IoConsume {
+            consume: zzop_core::IoConsume {
                 kind: kind.to_string(),
                 key: key.map(str::to_string),
                 file: file.to_string(),

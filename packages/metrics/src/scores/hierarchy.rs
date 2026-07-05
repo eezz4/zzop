@@ -5,7 +5,7 @@
 use super::config::ScoresConfig;
 use super::shared::{is_external, is_upward_import, module_of, round};
 use super::types::{HierarchyScore, HierarchyViolation};
-use zpz_core::DepGraph;
+use zzop_core::DepGraph;
 
 /// Caps the returned violation list (not the score, which is computed over the full violation count before
 /// truncation).

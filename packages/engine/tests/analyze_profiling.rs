@@ -5,14 +5,14 @@
 //! ran this call, without changing `findings`/`ir` at all (a differential test against an unprofiled run
 //! over the identical fixture tree), sorted deterministically — verified structurally (nanos descending,
 //! `rule_id` ascending tie-break) rather than by asserting exact `nanos` values, since raw wall-clock time
-//! is not reproducible run-to-run (see `zpz_core::dsl::RuleTiming`'s own doc).
+//! is not reproducible run-to-run (see `zzop_core::dsl::RuleTiming`'s own doc).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_core::RulePackDef;
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_core::RulePackDef;
+use zzop_engine::{analyze_tree, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -50,8 +50,8 @@ impl Drop for TempDir {
 
 /// The real `rules/dsl/java-security/java-security.json` (3 rules: `sql-taint`/`weak-crypto`/`cmd-injection`
 /// — all three share a `.java`-ish `file_pattern`, so every one of them gets evaluated, and therefore
-/// timed, against any `.java` file the pack applies to — see `zpz_core::pack_loader::applies_to`'s "any
-/// rule matches" semantics), resolved from `CARGO_MANIFEST_DIR` the same way `zpz_engine`'s own crate
+/// timed, against any `.java` file the pack applies to — see `zzop_core::pack_loader::applies_to`'s "any
+/// rule matches" semantics), resolved from `CARGO_MANIFEST_DIR` the same way `zzop_engine`'s own crate
 /// tests do.
 fn java_security_pack() -> RulePackDef {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -71,7 +71,7 @@ fn java_security_pack() -> RulePackDef {
 /// routes at all, so `unsafe-read-endpoint`/`non-idempotent-write`/`mutating-route-no-auth` — every rule gated
 /// behind `run_callgraph_rules`'s `api_endpoints.is_empty()` early return — never run and never appear here.
 fn fixture_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-profiling-fixture");
+    let dir = TempDir::new("zzop-engine-profiling-fixture");
     dir.write(
         "a.ts",
         "import { b } from './b';\nexport function a() { return b(); }\n",

@@ -38,7 +38,7 @@ use swc_core::ecma::ast::{
     Prop, PropName, PropOrSpread, SimpleAssignTarget, Tpl, VarDeclarator,
 };
 use swc_core::ecma::visit::{Visit, VisitWith};
-use zpz_core::{http_interface_key, IoConsume};
+use zzop_core::{http_interface_key, IoConsume};
 
 /// Extract hono/client typed-RPC CONSUME entries from one file.
 pub fn extract_hono_client_consumes(rel: &str, text: &str) -> Vec<IoConsume> {

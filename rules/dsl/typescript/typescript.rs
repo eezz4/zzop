@@ -1,5 +1,5 @@
 //! Exercises `rules/dsl/typescript/typescript.json`'s type-safety and unhandled-promise rules end-to-end
-//! through `zpz_engine::analyze_tree` against real swc-parsed TypeScript fixtures. See the rule `message`
+//! through `zzop_engine::analyze_tree` against real swc-parsed TypeScript fixtures. See the rule `message`
 //! fields for full rationale: `as-cast` excludes import-alias `as` via `LineScan::exclude_pattern`;
 //! `async-handler-no-try` vetoes via `MethodScan::absent` when a `try {` appears anywhere in the enclosing
 //! symbol span (coarser than "wraps the specific async call"); `no-explicit-any` and `as-cast` both fire
@@ -9,8 +9,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_core::{load_dsl_packs, Finding, RulePackDef};
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_core::{load_dsl_packs, Finding, RulePackDef};
+use zzop_engine::{analyze_tree, EngineConfig};
 
 /// A self-cleaning temp directory (std-only mkdtemp equivalent, no `tempfile` dependency).
 struct TempDir(PathBuf);
@@ -65,7 +65,7 @@ fn typescript_pack() -> RulePackDef {
 }
 
 fn analyze(files: &[(&str, &str)]) -> Vec<Finding> {
-    let dir = TempDir::new("zpz-typescript-pack");
+    let dir = TempDir::new("zzop-typescript-pack");
     for (rel, content) in files {
         dir.write(rel, content);
     }

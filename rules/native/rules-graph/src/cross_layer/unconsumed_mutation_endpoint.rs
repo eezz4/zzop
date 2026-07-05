@@ -7,8 +7,8 @@
 //!
 //! Provider sites in test-path files (`crate::unreachable::is_test_file`) are skipped — not deployed surface.
 
-use zpz_core::io::TaggedProvide;
-use zpz_core::{Finding, Severity};
+use zzop_core::io::TaggedProvide;
+use zzop_core::{Finding, Severity};
 
 use super::{is_write_method, split_key};
 
@@ -60,7 +60,7 @@ pub fn unconsumed_mutation_endpoint_findings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zpz_core::io::IoProvide;
+    use zzop_core::io::IoProvide;
 
     fn unconsumed_provide(
         kind: &str,

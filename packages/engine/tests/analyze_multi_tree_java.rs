@@ -1,16 +1,16 @@
 //! End-to-end test for the cross-layer multi-tree API with a REAL Java backend: a TS/FE tree with an
 //! `axios.get` call and a Java/Spring BE tree with a matching `@GetMapping` route, analyzed via
-//! `zpz_engine::analyze_trees`, joined by `zpz_core::link_cross_layer_io` into a `cross_source: true` edge.
+//! `zzop_engine::analyze_trees`, joined by `zzop_core::link_cross_layer_io` into a `cross_source: true` edge.
 //! Mirrors `analyze_multi_tree.rs`'s Hono-BE shape exactly, but on the Java side — this is the FE↔Java-BE
 //! join the java-provides-extraction task exists to unblock (before it, every Java BE tree extracted zero
-//! `IoProvide`s, so this pair always joined 0). Matches `zpz_core::io`'s own `link_cross_layer_io` unit
+//! `IoProvide`s, so this pair always joined 0). Matches `zzop_core::io`'s own `link_cross_layer_io` unit
 //! test fixture's route/path shape.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_engine::{analyze_trees, EngineConfig};
+use zzop_engine::{analyze_trees, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -47,7 +47,7 @@ impl Drop for TempDir {
 }
 
 fn fe_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-multi-fe-java");
+    let dir = TempDir::new("zzop-engine-multi-fe-java");
     dir.write(
         "src/Ctx.tsx",
         "export function load() { return axios.get(\"/authen/getUserInfo\"); }\n",
@@ -56,7 +56,7 @@ fn fe_tree() -> TempDir {
 }
 
 fn java_be_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-multi-be-java");
+    let dir = TempDir::new("zzop-engine-multi-be-java");
     dir.write(
         "src/main/java/apps/controllers/SessionController.java",
         concat!(

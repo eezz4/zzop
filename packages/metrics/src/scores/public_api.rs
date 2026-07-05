@@ -5,7 +5,7 @@
 use super::config::ScoresConfig;
 use super::shared::{is_external, is_index_barrel, module_root, round};
 use super::types::{DeepImport, PublicApiScore};
-use zpz_core::DepGraph;
+use zzop_core::DepGraph;
 
 /// Caps the returned deep-import list (not the score).
 const MAX_VIOLATIONS_LISTED: usize = 100;

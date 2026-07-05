@@ -3,13 +3,13 @@
 //! without madge: the engine's resolver already handled tsconfig paths/aliases/NodeNext, so the
 //! edges are the engine's own truth, not a re-derivation.
 //!
-//! Usage: `cargo run --release -p zpz-engine --example dep_graph_export -- <root> [dot|mermaid]`
+//! Usage: `cargo run --release -p zzop-engine --example dep_graph_export -- <root> [dot|mermaid]`
 //! Output is deterministic; files with no edges in either direction are omitted for readability.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_engine::{analyze_tree, EngineConfig};
 
 fn main() {
     let mut args = std::env::args().skip(1);

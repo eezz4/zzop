@@ -1,5 +1,5 @@
 //! End-to-end tests for the cache wiring (see `docs/ARCHITECTURE.md`'s "Caching"; wired through
-//! `zpz_engine::EngineConfig::cache_dir`): a cold run against a fresh cache directory misses every file, a
+//! `zzop_engine::EngineConfig::cache_dir`): a cold run against a fresh cache directory misses every file, a
 //! warm rerun hits every file and produces byte-for-byte identical output (`cache` stats aside), editing one
 //! file invalidates exactly that file, changing the active rule-pack set re-runs findings while still
 //! reusing the cached IR (no reparse), a corrupted cache entry degrades to a miss rather than a panic, and
@@ -10,8 +10,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_core::{load_dsl_packs, RuleConfig, RulePackDef};
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_core::{load_dsl_packs, RuleConfig, RulePackDef};
+use zzop_engine::{analyze_tree, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -91,7 +91,7 @@ fn fixme_pack() -> RulePackDef {
 }
 
 fn fixture_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-cache-fixture");
+    let dir = TempDir::new("zzop-engine-cache-fixture");
     dir.write(
         "a.ts",
         "// TODO: refactor this\n// FIXME: audit this\nexport function a() { return 1; }\n",
@@ -124,11 +124,11 @@ fn routes_only_pack() -> RulePackDef {
 }
 
 /// Two files, `routes/x.ts` and `other/x.ts`, with BYTE-IDENTICAL content — the exact shape that used to
-/// alias one cache entry before `CacheKey` grew a `scope` field (see `zpz_engine::cache`'s module doc,
+/// alias one cache entry before `CacheKey` grew a `scope` field (see `zzop_engine::cache`'s module doc,
 /// "Scope: the path-identity gap `CacheKey::scope` closes"): same content hash, same dispatched language,
 /// same active ruleset, but different paths.
 fn duplicate_content_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-cache-scope-fixture");
+    let dir = TempDir::new("zzop-engine-cache-scope-fixture");
     let content = "// MARKER\nexport const x = 1;\n";
     dir.write("routes/x.ts", content);
     dir.write("other/x.ts", content);
@@ -164,7 +164,7 @@ fn typescript_pack() -> RulePackDef {
 }
 
 /// Every `*.json` file directly under `<cache_root>/ir` and `<cache_root>/findings` — the on-disk layout
-/// `zpz_cache::AnalysisCache`'s own module doc documents (this crate has no access to that crate's private
+/// `zzop_cache::AnalysisCache`'s own module doc documents (this crate has no access to that crate's private
 /// key/path derivation, nor does it need it: the layout itself is documented contract, not an internal
 /// detail this test reaches past).
 fn cache_entry_files(cache_root: &Path) -> Vec<PathBuf> {
@@ -201,7 +201,7 @@ fn ir_entry_files(cache_root: &Path) -> Vec<PathBuf> {
 #[test]
 fn cold_run_against_a_fresh_cache_dir_is_all_misses() {
     let dir = fixture_tree();
-    let cache_dir = TempDir::new("zpz-engine-cache-store");
+    let cache_dir = TempDir::new("zzop-engine-cache-store");
     let out = analyze_tree(dir.path(), &config(cache_dir.path(), vec![todo_pack()]));
 
     let stats = out.cache.expect("cache_dir was set, expected Some stats");
@@ -213,7 +213,7 @@ fn cold_run_against_a_fresh_cache_dir_is_all_misses() {
 #[test]
 fn warm_rerun_is_all_hits_and_output_is_otherwise_identical() {
     let dir = fixture_tree();
-    let cache_dir = TempDir::new("zpz-engine-cache-store");
+    let cache_dir = TempDir::new("zzop-engine-cache-store");
     let cfg = config(cache_dir.path(), vec![todo_pack()]);
 
     let out1 = analyze_tree(dir.path(), &cfg);
@@ -245,7 +245,7 @@ fn warm_rerun_is_all_hits_and_output_is_otherwise_identical() {
 #[test]
 fn editing_one_file_causes_exactly_one_miss_on_the_next_run() {
     let dir = fixture_tree();
-    let cache_dir = TempDir::new("zpz-engine-cache-store");
+    let cache_dir = TempDir::new("zzop-engine-cache-store");
     let cfg = config(cache_dir.path(), vec![todo_pack()]);
 
     let cold = analyze_tree(dir.path(), &cfg);
@@ -263,7 +263,7 @@ fn editing_one_file_causes_exactly_one_miss_on_the_next_run() {
 #[test]
 fn ruleset_change_reruns_findings_but_reuses_the_cached_ir() {
     let dir = fixture_tree();
-    let cache_dir = TempDir::new("zpz-engine-cache-store");
+    let cache_dir = TempDir::new("zzop-engine-cache-store");
 
     let cold = analyze_tree(dir.path(), &config(cache_dir.path(), vec![todo_pack()]));
     assert!(
@@ -322,7 +322,7 @@ fn ruleset_change_reruns_findings_but_reuses_the_cached_ir() {
 #[test]
 fn corrupted_cache_entry_degrades_to_a_miss_instead_of_panicking() {
     let dir = fixture_tree();
-    let cache_dir = TempDir::new("zpz-engine-cache-store");
+    let cache_dir = TempDir::new("zzop-engine-cache-store");
     let cfg = config(cache_dir.path(), vec![todo_pack()]);
 
     let baseline_uncached = analyze_tree(
@@ -384,7 +384,7 @@ fn cache_dir_none_leaves_cache_stats_none() {
 #[test]
 fn two_files_with_identical_content_do_not_alias_each_others_cache_entry() {
     let dir = duplicate_content_tree();
-    let cache_dir = TempDir::new("zpz-engine-cache-store");
+    let cache_dir = TempDir::new("zzop-engine-cache-store");
     let cfg = config(cache_dir.path(), vec![routes_only_pack()]);
 
     // Cold run populates the cache — which of the two byte-identical files "wins" the on-disk entry (a
@@ -392,7 +392,7 @@ fn two_files_with_identical_content_do_not_alias_each_others_cache_entry() {
     let cold = analyze_tree(dir.path(), &cfg);
     // Warm rerun: every lookup is now guaranteed to find SOME on-disk entry already written by the cold
     // run. This is the deterministic reproduction of the bug `CacheKey::scope` closes (see
-    // `zpz_engine::cache`'s module doc): without `scope`, both files' `get_ir`/`get_findings` calls would
+    // `zzop_engine::cache`'s module doc): without `scope`, both files' `get_ir`/`get_findings` calls would
     // target the exact same on-disk path (same content_hash + parser_fingerprint + ruleset_fingerprint)
     // and one of them would silently receive the OTHER file's cached payload.
     let warm = analyze_tree(dir.path(), &cfg);
@@ -445,9 +445,9 @@ fn two_files_with_identical_content_do_not_alias_each_others_cache_entry() {
 
 #[test]
 fn changing_io_router_names_on_a_warm_rerun_produces_the_new_routes_not_stale_cached_ones() {
-    let dir = TempDir::new("zpz-engine-cache-io-fixture");
+    let dir = TempDir::new("zzop-engine-cache-io-fixture");
     dir.write("routes.ts", "customRouter.get(\"/items\", api.list);\n");
-    let cache_dir = TempDir::new("zpz-engine-cache-store");
+    let cache_dir = TempDir::new("zzop-engine-cache-store");
 
     let mut cfg = config(cache_dir.path(), Vec::new());
     // Default `io.router_names` is `["apiRoutes"]` — `customRouter` is not a recognized router yet, so
@@ -484,7 +484,7 @@ fn changing_io_router_names_on_a_warm_rerun_produces_the_new_routes_not_stale_ca
 /// The field-verified bug this test guards: a `"<pack>/<rule>"` id (e.g. `"typescript/as-cast"`) in
 /// `disabled_rules` used to do nothing at all — `pipeline::run_file_pass` only ever filtered packs by
 /// bare pack id, so a full `pack/rule` id matched nothing and the rule kept firing (see
-/// `zpz_engine::pipeline::gate_pack_rules`, the fix). This proves the fix end to end AND proves the cache
+/// `zzop_engine::pipeline::gate_pack_rules`, the fix). This proves the fix end to end AND proves the cache
 /// does not serve a stale (pre-disable) finding on the next run: warm the cache with the real
 /// `typescript` pack fully enabled, then rerun against the SAME cache dir with `typescript/as-cast`
 /// disabled — the `as-cast` findings must be gone, `no-explicit-any` (a different rule in the same pack)
@@ -493,12 +493,12 @@ fn changing_io_router_names_on_a_warm_rerun_produces_the_new_routes_not_stale_ca
 #[test]
 fn per_rule_disable_of_a_real_pack_rule_removes_only_that_rules_findings_and_invalidates_the_cache()
 {
-    let dir = TempDir::new("zpz-engine-cache-per-rule-disable");
+    let dir = TempDir::new("zzop-engine-cache-per-rule-disable");
     dir.write(
         "a.ts",
         "export function f(x: any) {\n  return x as string;\n}\n",
     );
-    let cache_dir = TempDir::new("zpz-engine-cache-store");
+    let cache_dir = TempDir::new("zzop-engine-cache-store");
     let pack = typescript_pack();
 
     let cfg = |disabled_rules: Vec<String>| EngineConfig {
@@ -550,7 +550,7 @@ fn per_rule_disable_of_a_real_pack_rule_removes_only_that_rules_findings_and_inv
     );
 
     // Not a stale cache hit: the ruleset fingerprint folds `disabled_rules` in directly (see
-    // `zpz_engine::cache::ruleset_fingerprint`), so this run must miss and recompute, never silently
+    // `zzop_engine::cache::ruleset_fingerprint`), so this run must miss and recompute, never silently
     // reuse findings cached under the "everything enabled" ruleset.
     let stats = out.cache.expect("expected cache stats");
     assert_eq!(
@@ -565,12 +565,12 @@ fn per_rule_disable_of_a_real_pack_rule_removes_only_that_rules_findings_and_inv
 /// the pack-level `is_enabled` filter).
 #[test]
 fn disabling_a_whole_pack_id_still_disables_every_rule_in_it() {
-    let dir = TempDir::new("zpz-engine-cache-pack-level-disable");
+    let dir = TempDir::new("zzop-engine-cache-pack-level-disable");
     dir.write(
         "a.ts",
         "export function f(x: any) {\n  return x as string;\n}\n",
     );
-    let cache_dir = TempDir::new("zpz-engine-cache-store");
+    let cache_dir = TempDir::new("zzop-engine-cache-store");
     let cfg = EngineConfig {
         source_id: "fixture".to_string(),
         packs: vec![typescript_pack()],
@@ -596,12 +596,12 @@ fn disabling_a_whole_pack_id_still_disables_every_rule_in_it() {
 /// `registry::is_enabled`'s exact-string-match contract) and every real rule keeps running.
 #[test]
 fn unknown_garbage_id_in_disabled_rules_does_not_crash_and_other_rules_still_run() {
-    let dir = TempDir::new("zpz-engine-cache-garbage-disable");
+    let dir = TempDir::new("zzop-engine-cache-garbage-disable");
     dir.write(
         "a.ts",
         "export function f(x: any) {\n  return x as string;\n}\n",
     );
-    let cache_dir = TempDir::new("zpz-engine-cache-store");
+    let cache_dir = TempDir::new("zzop-engine-cache-store");
     let cfg = EngineConfig {
         source_id: "fixture".to_string(),
         packs: vec![typescript_pack()],

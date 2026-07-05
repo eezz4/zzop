@@ -1,6 +1,6 @@
 //! Coverage self-report: detects BE frameworks whose route-registration idiom isn't recognized by any
 //! provides extractor (Nest-, `@n8n/decorators`-, and Spring-style controller decorators are the shapes
-//! currently taught to `zpz_parser_typescript::adapters::controller_decorators`), so cross-layer joins
+//! currently taught to `zzop_parser_typescript::adapters::controller_decorators`), so cross-layer joins
 //! would otherwise silently go dark. This is a lexical, extractor-independent tripwire for the *next*
 //! unknown framework.
 
@@ -103,7 +103,7 @@ mod tests {
 
     #[test]
     fn three_or_more_matching_files_with_zero_http_provides_warns() {
-        let dir = TempDir::new("zpz-coverage-warn");
+        let dir = TempDir::new("zzop-coverage-warn");
         // `@FastController`/`@FastGet` — an invented decorator idiom matching the regex
         // (`@\w*(?:Controller|...)\b`): the suffix sits directly after `@` with only word chars between.
         dir.write(
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn below_threshold_file_count_does_not_warn() {
-        let dir = TempDir::new("zpz-coverage-below-threshold");
+        let dir = TempDir::new("zzop-coverage-below-threshold");
         dir.write(
             "a.ts",
             "@FastController('/a')\nclass A {\n  @FastGet('/x')\n  x() {}\n}\n",
@@ -163,7 +163,7 @@ mod tests {
     fn angular_style_decorators_never_match_the_controller_regex() {
         // None of Angular's own decorator vocabulary lexically matches
         // Controller/Mapping/Get/Post/Put/Delete/Patch.
-        let dir = TempDir::new("zpz-coverage-angular");
+        let dir = TempDir::new("zzop-coverage-angular");
         dir.write(
             "a.ts",
             "@Component({ selector: 'app-a' })\nclass A {\n  @Input() x: string;\n  @Output() y = new EventEmitter();\n  @HostListener('click')\n  onClick() {}\n}\n",

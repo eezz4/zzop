@@ -7,8 +7,8 @@
 //! Anchored at the consume site, not any candidate provider — the ambiguity is a property of the call site:
 //! the caller cannot know, from source alone, which candidate will actually answer.
 
-use zpz_core::io::AmbiguousConsume;
-use zpz_core::{Finding, Severity};
+use zzop_core::io::AmbiguousConsume;
+use zzop_core::{Finding, Severity};
 
 /// `candidates` in the emitted `data` are capped to this many entries — the finding cites the total via
 /// `candidateCount`/`candidateSourceCount` even when the list itself is truncated.
@@ -78,8 +78,8 @@ pub fn ambiguous_consume_findings(ambiguous_consumes: &[AmbiguousConsume]) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zpz_core::io::{IoConsume, TaggedProvide};
-    use zpz_core::IoProvide;
+    use zzop_core::io::{IoConsume, TaggedProvide};
+    use zzop_core::IoProvide;
 
     fn tagged_provide(source: &str, file: &str, line: u32) -> TaggedProvide {
         TaggedProvide {

@@ -1,5 +1,5 @@
 //! `cross-layer/duplicate-route` (warning) — the same `http` `(method, path)` key PROVIDED by 2+ DISTINCT
-//! sources. This is the multi-tree-provider condition `zpz_core::io::link_cross_layer_io` already computes
+//! sources. This is the multi-tree-provider condition `zzop_core::io::link_cross_layer_io` already computes
 //! internally (`ambiguous_keys`, io.rs), read back off its two observable traces: an unconsumed multi-source
 //! key lands in `unconsumed_provides` (grouped by key), and one some consume references lands in
 //! `ambiguous_consumes` with its full candidate list. A key provided by 2+ distinct sources can never
@@ -17,8 +17,8 @@
 
 use std::collections::BTreeSet;
 
-use zpz_core::io::CrossLayerResult;
-use zpz_core::{Finding, Severity};
+use zzop_core::io::CrossLayerResult;
+use zzop_core::{Finding, Severity};
 
 pub fn cross_layer_duplicate_route_findings(cross_layer: &CrossLayerResult) -> Vec<Finding> {
     let mut by_key: std::collections::BTreeMap<String, Vec<(String, String, u32)>> =
@@ -95,8 +95,8 @@ pub fn cross_layer_duplicate_route_findings(cross_layer: &CrossLayerResult) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zpz_core::io::{AmbiguousConsume, TaggedProvide};
-    use zpz_core::{IoConsume, IoProvide};
+    use zzop_core::io::{AmbiguousConsume, TaggedProvide};
+    use zzop_core::{IoConsume, IoProvide};
 
     fn dead(key: &str, source: &str, file: &str, line: u32) -> TaggedProvide {
         TaggedProvide {

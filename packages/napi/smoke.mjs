@@ -1,8 +1,8 @@
-// Smoke test for the built addon (`zpz-napi.node`) — NOT part of `cargo test` (needs Node; see src/lib.rs's
+// Smoke test for the built addon (`zzop-napi.node`) — NOT part of `cargo test` (needs Node; see src/lib.rs's
 // module doc). Run after the MSVC addon build:
 //
-//   cargo +stable-x86_64-pc-windows-msvc build -p zpz-napi --release --features addon
-//   (copy/rename the produced DLL to packages/napi/zpz-napi.node)
+//   cargo +stable-x86_64-pc-windows-msvc build -p zzop-napi --release --features addon
+//   (copy/rename the produced DLL to packages/napi/zzop-napi.node)
 //   node packages/napi/smoke.mjs
 //
 // Builds a tiny fixture tree with an import cycle, calls `analyze()`, and asserts the JSON parses and
@@ -16,7 +16,7 @@ import path from 'node:path';
 import native from './index.js';
 
 function makeFixtureTree() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zpz-napi-smoke-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zzop-napi-smoke-'));
   fs.writeFileSync(
     path.join(dir, 'a.ts'),
     "import { b } from './b';\nexport function a() { return b(); }\n"
@@ -31,7 +31,7 @@ function makeFixtureTree() {
 function main() {
   const v = native.version();
   assert.equal(typeof v, 'string');
-  assert.ok(v.includes('zpz-parser-typescript='), `version() missing TS fingerprint: ${v}`);
+  assert.ok(v.includes('zzop-parser-typescript='), `version() missing TS fingerprint: ${v}`);
   console.log(`version(): ${v}`);
 
   const dir = makeFixtureTree();
@@ -71,7 +71,7 @@ function main() {
   // analyzeEnvelope(): the docs/NORMALIZED_AST.md external-parser protocol receiver — a tiny
   // hand-built envelope (one JSP-shaped file with an http provide), no filesystem tree involved.
   const envelopeJson = JSON.stringify({
-    format: 'zpz-normalized-ast',
+    format: 'zzop-normalized-ast',
     version: 1,
     parser: 'jsp-lexical/1',
     source: 'legacy',
@@ -106,8 +106,8 @@ function main() {
   // packsDir MERGE semantics: an explicit packsDir must not silently replace the bundled default
   // packs — index.js prepends the bundled dir, so a caller-supplied custom pack and a shipped
   // bundled rule both fire in the same run (docs/modules/napi.md's "Defaults" section).
-  const mergeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zpz-napi-smoke-merge-'));
-  const customPacksDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zpz-napi-smoke-custom-packs-'));
+  const mergeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zzop-napi-smoke-merge-'));
+  const customPacksDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zzop-napi-smoke-custom-packs-'));
   try {
     // `typescript/no-explicit-any` (rules/dsl/typescript.json) is the bundled rule exercised here —
     // its matcher is just the bare word `any` in a `.ts`/`.tsx` file, the simplest reliably-firing

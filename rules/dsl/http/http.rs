@@ -1,4 +1,4 @@
-//! Exercises `rules/dsl/http/http.json`'s HTTP-route rules end-to-end via `zpz_engine::analyze_tree` against
+//! Exercises `rules/dsl/http/http.json`'s HTTP-route rules end-to-end via `zzop_engine::analyze_tree` against
 //! real swc-parsed TypeScript fixtures. See `http.json` for each rule's exact matcher shape and message.
 //!
 //! Ordering-aware and graph-shaped route checks (auth-state-machine transitions, API churn, unsafe-read-endpoint,
@@ -12,8 +12,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_core::{load_dsl_packs, RulePackDef};
-use zpz_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
+use zzop_core::{load_dsl_packs, RulePackDef};
+use zzop_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
 
 /// A self-cleaning temp directory (std-only mkdtemp equivalent — same pattern as `sql/sql.rs`/`typescript/typescript.rs`).
 struct TempDir(PathBuf);
@@ -79,7 +79,7 @@ fn scan(dir: &TempDir) -> AnalyzeOutput {
     analyze_tree(dir.path(), &config())
 }
 
-fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zpz_core::Finding> {
+fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {
     out.findings
         .iter()
         .filter(|f| f.rule_id == format!("http/{rule}"))
@@ -90,7 +90,7 @@ fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zpz_core::Finding> {
 
 #[test]
 fn get_endpoint_with_no_cache_marker_is_flagged() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "import { Hono } from \"hono\";\nconst apiRoutes = new Hono();\ndeclare const api: any;\napiRoutes.get(\"/api/items\", api.itemList);\nexport { apiRoutes };\n",
@@ -101,7 +101,7 @@ fn get_endpoint_with_no_cache_marker_is_flagged() {
 
 #[test]
 fn cache_marker_on_the_same_line_suppresses_the_finding() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "import { Hono } from \"hono\";\nconst apiRoutes = new Hono();\ndeclare const api: any;\napiRoutes.get(\"/api/items\", api.itemList); // cache: getCachedList (cache:list:items)\nexport { apiRoutes };\n",
@@ -116,7 +116,7 @@ fn cache_marker_on_the_same_line_suppresses_the_finding() {
 
 #[test]
 fn no_cache_marker_on_the_same_line_suppresses_the_finding() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "import { Hono } from \"hono\";\nconst apiRoutes = new Hono();\ndeclare const api: any;\napiRoutes.get(\"/api/items/:id\", api.itemDetail); // no-cache: per-user state\nexport { apiRoutes };\n",
@@ -131,7 +131,7 @@ fn no_cache_marker_on_the_same_line_suppresses_the_finding() {
 
 #[test]
 fn post_endpoint_is_not_inspected() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "import { Hono } from \"hono\";\nconst apiRoutes = new Hono();\ndeclare const api: any;\napiRoutes.post(\"/api/items\", api.itemCreate);\nexport { apiRoutes };\n",
@@ -146,7 +146,7 @@ fn post_endpoint_is_not_inspected() {
 
 #[test]
 fn read_model_ok_marker_on_the_same_line_suppresses_the_finding() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "import { Hono } from \"hono\";\nconst apiRoutes = new Hono();\ndeclare const api: any;\napiRoutes.get(\"/api/items\", api.itemList); // read-model-ok: legacy endpoint, cache handled at CDN layer\nexport { apiRoutes };\n",
@@ -161,7 +161,7 @@ fn read_model_ok_marker_on_the_same_line_suppresses_the_finding() {
 
 #[test]
 fn read_model_ok_marker_one_line_before_suppresses_the_finding() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "import { Hono } from \"hono\";\nconst apiRoutes = new Hono();\ndeclare const api: any;\n// read-model-ok: static data served at edge, no server cache needed\napiRoutes.get(\"/api/items/:id\", api.itemDetail);\nexport { apiRoutes };\n",
@@ -176,9 +176,9 @@ fn read_model_ok_marker_one_line_before_suppresses_the_finding() {
 
 #[test]
 fn read_model_ok_marker_two_lines_before_does_not_suppress() {
-    // `MARKER_LOOKBACK_LINES` = 1 (see the const's doc in `zpz_core::dsl`): a marker 2 lines above the
+    // `MARKER_LOOKBACK_LINES` = 1 (see the const's doc in `zzop_core::dsl`): a marker 2 lines above the
     // reported line is out of range and does not suppress the finding.
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "import { Hono } from \"hono\";\nconst apiRoutes = new Hono();\ndeclare const api: any;\n// read-model-ok: static data, no cache needed\n// line 2\napiRoutes.get(\"/api/feed\", api.feed);\nexport { apiRoutes };\n",
@@ -190,7 +190,7 @@ fn read_model_ok_marker_two_lines_before_does_not_suppress() {
 #[test]
 fn read_model_ok_marker_four_lines_before_does_not_suppress() {
     // Further out-of-range boundary check, same contract as the 2-lines-above case above.
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "import { Hono } from \"hono\";\nconst apiRoutes = new Hono();\ndeclare const api: any;\n// read-model-ok: this is too far above\n// line 2\n// line 3\n// line 4\napiRoutes.get(\"/api/feed\", api.feed);\nexport { apiRoutes };\n",
@@ -203,7 +203,7 @@ fn read_model_ok_marker_four_lines_before_does_not_suppress() {
 
 #[test]
 fn admin_path_with_no_role_check_handler_is_flagged() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/admin/users\", api.userList);\n",
@@ -214,7 +214,7 @@ fn admin_path_with_no_role_check_handler_is_flagged() {
 
 #[test]
 fn internal_path_with_no_role_check_handler_is_flagged() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.post(\"/api/internal/metrics\", api.metricsWrite);\n",
@@ -225,7 +225,7 @@ fn internal_path_with_no_role_check_handler_is_flagged() {
 
 #[test]
 fn dev_path_with_no_role_check_handler_is_flagged() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/dev/config\", api.devConfig);\n",
@@ -236,7 +236,7 @@ fn dev_path_with_no_role_check_handler_is_flagged() {
 
 #[test]
 fn multiple_protected_paths_all_missing_auth_are_all_flagged() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/admin/items\", api.itemList);\napiRoutes.delete(\"/api/internal/cache\", api.clearCache);\napiRoutes.get(\"/api/dev/flags\", api.featureFlags);\n",
@@ -247,7 +247,7 @@ fn multiple_protected_paths_all_missing_auth_are_all_flagged() {
 
 #[test]
 fn extra_path_segments_after_protected_segment_is_still_flagged() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/admin/users/:id/detail\", api.userDetail);\n",
@@ -258,7 +258,7 @@ fn extra_path_segments_after_protected_segment_is_still_flagged() {
 
 #[test]
 fn handler_identifier_containing_admin_keyword_passes() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const adminHandlers: any;\napiRoutes.get(\"/api/admin/users\", adminHandlers.userList);\n",
@@ -269,7 +269,7 @@ fn handler_identifier_containing_admin_keyword_passes() {
 
 #[test]
 fn handler_identifier_containing_role_keyword_passes() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const handlers: any;\napiRoutes.get(\"/api/internal/report\", handlers.roleBasedReport);\n",
@@ -280,7 +280,7 @@ fn handler_identifier_containing_role_keyword_passes() {
 
 #[test]
 fn handler_identifier_containing_require_admin_call_passes() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const handlers: any;\ndeclare function requireAdmin(h: any): any;\napiRoutes.get(\"/api/admin/settings\", requireAdmin(handlers.settings));\n",
@@ -291,7 +291,7 @@ fn handler_identifier_containing_require_admin_call_passes() {
 
 #[test]
 fn handler_identifier_containing_guard_keyword_passes() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const guardedHandlers: any;\napiRoutes.delete(\"/api/internal/flush\", guardedHandlers.flush);\n",
@@ -302,7 +302,7 @@ fn handler_identifier_containing_guard_keyword_passes() {
 
 #[test]
 fn ordinary_path_with_no_protected_segment_is_not_inspected() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/users\", api.userList);\napiRoutes.post(\"/api/items\", api.itemCreate);\n",
@@ -314,7 +314,7 @@ fn ordinary_path_with_no_protected_segment_is_not_inspected() {
 #[test]
 fn handler_identifier_containing_is_local_env_gate_hint_passes() {
     // An env-scoped gate like `if (!CONFIG.isLocal()) return 403;` must not be flagged as missing auth — an environment check does gate the route.
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const isLocalGuardedHandlers: any;\napiRoutes.get(\"/api/admin/users\", isLocalGuardedHandlers.userList);\n",
@@ -325,7 +325,7 @@ fn handler_identifier_containing_is_local_env_gate_hint_passes() {
 
 #[test]
 fn handler_identifier_containing_node_env_hint_passes() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare function nodeEnvGuard(h: any): any;\napiRoutes.post(\"/api/internal/metrics\", nodeEnvGuard(handlers));\n",
@@ -336,7 +336,7 @@ fn handler_identifier_containing_node_env_hint_passes() {
 
 #[test]
 fn auth_gate_ok_marker_on_the_same_line_suppresses_the_finding() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/admin/users\", api.userList); // auth-gate-ok: reviewed, gated at the API gateway layer\n",
@@ -349,7 +349,7 @@ fn auth_gate_ok_marker_on_the_same_line_suppresses_the_finding() {
 
 #[test]
 fn dev_path_with_no_env_guard_is_flagged() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/dev/config\", api.configHandler);\n",
@@ -360,7 +360,7 @@ fn dev_path_with_no_env_guard_is_flagged() {
 
 #[test]
 fn debug_path_with_no_env_guard_is_flagged() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/debug/state\", api.stateSnapshot);\n",
@@ -371,7 +371,7 @@ fn debug_path_with_no_env_guard_is_flagged() {
 
 #[test]
 fn internal_path_with_no_env_guard_is_flagged() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.post(\"/api/internal/flush\", api.cacheFlush);\n",
@@ -382,7 +382,7 @@ fn internal_path_with_no_env_guard_is_flagged() {
 
 #[test]
 fn dunder_test_path_with_no_env_guard_is_flagged() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.delete(\"/api/__test__/reset\", api.seedReset);\n",
@@ -393,7 +393,7 @@ fn dunder_test_path_with_no_env_guard_is_flagged() {
 
 #[test]
 fn playground_path_with_no_env_guard_is_flagged() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/playground/echo\", api.echoHandler);\n",
@@ -404,7 +404,7 @@ fn playground_path_with_no_env_guard_is_flagged() {
 
 #[test]
 fn multiple_dangerous_paths_without_guard_are_all_flagged() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/dev/flags\", api.flagList);\napiRoutes.get(\"/api/debug/heap\", api.heapSnapshot);\napiRoutes.post(\"/api/internal/rebuild\", api.rebuildIndex);\n",
@@ -415,7 +415,7 @@ fn multiple_dangerous_paths_without_guard_are_all_flagged() {
 
 #[test]
 fn handler_identifier_containing_dev_hint_passes() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const devOnlyHandlers: any;\napiRoutes.get(\"/api/dev/config\", devOnlyHandlers.config);\n",
@@ -430,7 +430,7 @@ fn handler_identifier_containing_dev_hint_passes() {
 
 #[test]
 fn handler_identifier_containing_guard_hint_passes() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const guardedMetrics: any;\napiRoutes.get(\"/api/internal/metrics\", guardedMetrics.handler);\n",
@@ -445,7 +445,7 @@ fn handler_identifier_containing_guard_hint_passes() {
 
 #[test]
 fn handler_identifier_containing_require_dev_hint_passes() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare function requireDevAccess(): any;\napiRoutes.get(\"/api/debug/state\", requireDevAccess);\n",
@@ -460,7 +460,7 @@ fn handler_identifier_containing_require_dev_hint_passes() {
 
 #[test]
 fn handler_identifier_containing_is_production_hint_passes() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const isProductionGuarded: any;\napiRoutes.get(\"/api/dev/tools\", isProductionGuarded.tools);\n",
@@ -475,7 +475,7 @@ fn handler_identifier_containing_is_production_hint_passes() {
 
 #[test]
 fn handler_identifier_containing_is_local_hint_passes() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare function isLocalOnlyEcho(): any;\napiRoutes.get(\"/api/playground/echo\", isLocalOnlyEcho);\n",
@@ -490,7 +490,7 @@ fn handler_identifier_containing_is_local_hint_passes() {
 
 #[test]
 fn ordinary_paths_are_not_inspected() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/users\", api.userList);\napiRoutes.post(\"/api/items\", api.itemCreate);\napiRoutes.get(\"/api/health\", api.health);\n",
@@ -505,7 +505,7 @@ fn ordinary_paths_are_not_inspected() {
 
 #[test]
 fn handler_identifier_containing_node_env_hint_passes_route_exposure() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare function nodeEnvGuard(h: any): any;\napiRoutes.get(\"/api/dev/tools\", nodeEnvGuard(handlers));\n",
@@ -520,7 +520,7 @@ fn handler_identifier_containing_node_env_hint_passes_route_exposure() {
 
 #[test]
 fn route_exposure_ok_marker_on_the_same_line_suppresses_the_finding() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/dev/config\", api.configHandler); // route-exposure-ok: reviewed, disabled outside CI\n",
@@ -539,7 +539,7 @@ fn route_exposure_ok_marker_on_the_same_line_suppresses_the_finding() {
 
 #[test]
 fn admin_route_shape_mentioned_only_in_a_comment_is_not_flagged() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\n// apiRoutes.get(\"/api/admin/users\", api.userList) -- moved below with a guard\n",
@@ -550,7 +550,7 @@ fn admin_route_shape_mentioned_only_in_a_comment_is_not_flagged() {
 
 #[test]
 fn dev_route_registered_in_a_routes_test_fixture_path_is_not_flagged() {
-    let dir = TempDir::new("zpz-http");
+    let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/__tests__/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/dev/config\", api.configHandler);\n",

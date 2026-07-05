@@ -1,13 +1,13 @@
 //! Ad hoc harness to check finding counts for a specific set of rule ids against a real tree — not
 //! a general-purpose tool.
 //!
-//! Usage: `cargo run --release -p zpz-engine --example corpus_rule_counts -- <root> <rule_id> [<rule_id> ...]`
+//! Usage: `cargo run --release -p zzop-engine --example corpus_rule_counts -- <root> <rule_id> [<rule_id> ...]`
 //! Loads `rules/dsl` from the repo root (relative to CWD), runs `analyze_tree` once, and prints the
 //! total finding count plus up to 5 sampled `(file:line)` snippets per requested rule id.
 
 use std::path::PathBuf;
 
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_engine::{analyze_tree, EngineConfig};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -18,7 +18,7 @@ fn main() {
     let root = PathBuf::from(&args[0]);
     let rule_ids = &args[1..];
 
-    let loaded = zpz_core::load_dsl_packs(std::path::Path::new("rules/dsl"));
+    let loaded = zzop_core::load_dsl_packs(std::path::Path::new("rules/dsl"));
     eprintln!(
         "packs: {} loaded, {} errors",
         loaded.packs.len(),

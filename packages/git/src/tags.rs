@@ -4,13 +4,13 @@
 //! miscounted as the change it reverts.
 //!
 //! This module owns the classification *mechanism* only ([`extract_tags`] / [`CommitClassifiers`]) —
-//! the default FIX/FEAT/... vocabulary itself lives in `zpz_metrics::default_commit_type_patterns`
+//! the default FIX/FEAT/... vocabulary itself lives in `zzop_metrics::default_commit_type_patterns`
 //! (a collection crate must not own analysis vocabulary). Callers pass their own table via
 //! `CollectOptions::commit_type_patterns`;
 //! [`CollectOptions::default`](crate::CollectOptions) ships an empty table (bracket tags only) since
 //! this crate has no vocabulary of its own to default to. This module's tests use a small local copy
 //! of that table (`test_commit_type_patterns`, `#[cfg(test)]`-only) rather than depending on
-//! `zpz-metrics` — this crate must stay a leaf collector with no upward dependency on an analysis
+//! `zzop-metrics` — this crate must stay a leaf collector with no upward dependency on an analysis
 //! crate.
 
 use regex::Regex;
@@ -99,8 +99,8 @@ pub(crate) fn extract_tags(subject: &str, classifiers: &CommitClassifiers) -> Ve
     classifiers.classify(&body).into_iter().collect()
 }
 
-/// Local test-only copy of `zpz_metrics::default_commit_type_patterns`'s table content (byte-identical
-/// regex/tag pairs) — this crate must not depend on `zpz-metrics` (see this module's doc), so its own
+/// Local test-only copy of `zzop_metrics::default_commit_type_patterns`'s table content (byte-identical
+/// regex/tag pairs) — this crate must not depend on `zzop-metrics` (see this module's doc), so its own
 /// tests exercise `extract_tags`'s keyword-classification path against a table it owns outright rather
 /// than importing the production one. `pub(crate)` so `crate::lib`'s test module can reuse it for the
 /// one test there that needs real (non-bracket) keyword classification, instead of a third copy.
@@ -131,7 +131,7 @@ pub(crate) fn test_commit_type_patterns() -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     //! Coverage for `extract_tags`'s bracket-tag and keyword-classifier grammar, against this module's
-    //! own local `test_commit_type_patterns` table (this crate does not depend on `zpz-metrics`, the
+    //! own local `test_commit_type_patterns` table (this crate does not depend on `zzop-metrics`, the
     //! production table's new home — see module doc).
     use super::*;
 

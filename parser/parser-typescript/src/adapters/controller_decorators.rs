@@ -1,5 +1,5 @@
 //! Controller-decorator-shape HTTP route PROVIDES extraction — swc-AST-based (mirrors
-//! `zpz_parser_java::provides`'s Spring extractor: class-level prefix + method-level verb/path,
+//! `zzop_parser_java::provides`'s Spring extractor: class-level prefix + method-level verb/path,
 //! class gated on a controller marker, ambiguous-verb decorators skipped rather than guess-emitted).
 //! Walks the real swc AST (`Class`/`Decorator`/`Function` nodes) instead of reconstructing an
 //! annotation block from text. Generic over any framework using this decorator SHAPE — recognizes
@@ -23,7 +23,7 @@
 //!   bare decorator (empty path), a string literal, or an array of string literals (one provide per
 //!   entry, mirroring Nest's own per-entry registration). A non-literal/mixed path skips the method.
 //! - `@All` is deliberately skipped rather than guess-emitting one of the five verbs — mirrors
-//!   `zpz_parser_java::provides`'s ambiguous bare `@RequestMapping` skip.
+//!   `zzop_parser_java::provides`'s ambiguous bare `@RequestMapping` skip.
 //! - Every decorator on a method is scanned for a route-verb name (or `@All`), not just the first,
 //!   so other decorators (`@UseGuards`, `@ApiTags`, ...) and decorator order never matter.
 //!
@@ -33,14 +33,14 @@
 //!   annotation extractor; the required double collision makes it vanishingly rare).
 //! - Method-level `@Version()` overrides are not read.
 //! - An array `path` prefix (`{ path: ['a','b'] }`) takes only the first literal entry, same
-//!   "first wins" simplification as `zpz_parser_java::provides`'s `first_quoted_string`.
+//!   "first wins" simplification as `zzop_parser_java::provides`'s `first_quoted_string`.
 //! - Nested/child controllers, nested classes, `applyDecorators`, and inherited/abstract controller
 //!   base classes are not detected — only a direct class-level decorator gates its own methods.
 //!
 //! ## NestJS `@UseGuards` decorator exemption (`extract_controller_guarded_lines`)
 //! Detects `@UseGuards(...)` auth-guard coverage at class level (every route in that controller) or
 //! method level (just that route). A decorator application is metadata, not a call edge, so it is
-//! invisible to a call-graph BFS — see `zpz_rules_graph::mutating_route_no_auth`'s module doc. A
+//! invisible to a call-graph BFS — see `zzop_rules_graph::mutating_route_no_auth`'s module doc. A
 //! returned line always matches a route `extract_controller_provides` would emit (same file/line).
 //! Guard presence is checked by decorator name only, not argument identities.
 //!
@@ -67,7 +67,7 @@ use swc_core::ecma::ast::{
     ObjectLit, Prop, PropName, PropOrSpread, Str,
 };
 use swc_core::ecma::visit::{Visit, VisitWith};
-use zpz_core::{http_interface_key, IoProvide};
+use zzop_core::{http_interface_key, IoProvide};
 
 /// Method-level route-decorator name -> the HTTP verb it implies. `All` is intentionally absent —
 /// see module doc.

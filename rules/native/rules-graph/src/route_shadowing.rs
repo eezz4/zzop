@@ -14,8 +14,8 @@
 //! the most-specific match regardless of order and are unaffected. This stays a Warning (never Critical)
 //! for that reason, stated explicitly in the message so a false positive is easy to recognize and disable.
 
-pub fn route_shadowing_findings(io_provides: &[zpz_core::IoProvide]) -> Vec<zpz_core::Finding> {
-    let mut by_file_method: std::collections::BTreeMap<(&str, &str), Vec<&zpz_core::IoProvide>> =
+pub fn route_shadowing_findings(io_provides: &[zzop_core::IoProvide]) -> Vec<zzop_core::Finding> {
+    let mut by_file_method: std::collections::BTreeMap<(&str, &str), Vec<&zzop_core::IoProvide>> =
         std::collections::BTreeMap::new();
     for p in io_provides {
         if p.kind != "http" {
@@ -38,7 +38,7 @@ pub fn route_shadowing_findings(io_provides: &[zpz_core::IoProvide]) -> Vec<zpz_
                 continue;
             };
             let literal_segs: Vec<&str> = literal_path.split('/').collect();
-            let mut earliest_shadow: Option<&zpz_core::IoProvide> = None;
+            let mut earliest_shadow: Option<&zzop_core::IoProvide> = None;
             for cand in &routes[..i] {
                 let Some((_, cand_path)) = cand.key.split_once(' ') else {
                     continue;
@@ -52,9 +52,9 @@ pub fn route_shadowing_findings(io_provides: &[zpz_core::IoProvide]) -> Vec<zpz_
                 }
             }
             if let Some(param) = earliest_shadow {
-                findings.push(zpz_core::Finding {
+                findings.push(zzop_core::Finding {
                     rule_id: "route-shadowing".to_string(),
-                    severity: zpz_core::Severity::Warning,
+                    severity: zzop_core::Severity::Warning,
                     file: literal.file.clone(),
                     line: literal.line,
                     message: format!(
@@ -113,8 +113,8 @@ mod tests {
     //! Unit tests for `route_shadowing_findings`'s grouping + shape logic (e2e coverage: `packages/engine/tests/analyze_io_natives.rs`).
     use super::*;
 
-    fn provide(key: &str, file: &str, line: u32) -> zpz_core::IoProvide {
-        zpz_core::IoProvide {
+    fn provide(key: &str, file: &str, line: u32) -> zzop_core::IoProvide {
+        zzop_core::IoProvide {
             kind: "http".to_string(),
             key: key.to_string(),
             file: file.to_string(),
@@ -134,7 +134,7 @@ mod tests {
         assert_eq!(found[0].file, "r.ts");
         assert_eq!(found[0].line, 5);
         assert_eq!(found[0].rule_id, "route-shadowing");
-        assert_eq!(found[0].severity, zpz_core::Severity::Warning);
+        assert_eq!(found[0].severity, zzop_core::Severity::Warning);
         assert!(found[0].message.contains("line 2"));
     }
 
@@ -211,14 +211,14 @@ mod tests {
     #[test]
     fn non_http_provides_are_ignored() {
         let provides = vec![
-            zpz_core::IoProvide {
+            zzop_core::IoProvide {
                 kind: "queue".to_string(),
                 key: "GET /items/{}".to_string(),
                 file: "r.ts".to_string(),
                 line: 2,
                 symbol: None,
             },
-            zpz_core::IoProvide {
+            zzop_core::IoProvide {
                 kind: "queue".to_string(),
                 key: "GET /items/active".to_string(),
                 file: "r.ts".to_string(),

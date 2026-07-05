@@ -1,5 +1,5 @@
 //! Prisma schema-usage analysis — usage-evidence collectors (source scan, migration churn, store bindings) plus the usage-aware cross-check layered on top of the structural analyzer in `structural.rs`.
-//! `SchemaUsage` (the usage-evidence IR a producer assembles) lives in `zpz-core`; every function that consumes or produces it lives here. `analyze_schema_with_usage` wraps `structural::analyze_schema`
+//! `SchemaUsage` (the usage-evidence IR a producer assembles) lives in `zzop-core`; every function that consumes or produces it lives here. `analyze_schema_with_usage` wraps `structural::analyze_schema`
 //! rather than modifying it, layering cross-check/churn issues and risk points on top. `structural::severity_points` is private to `structural.rs`, so it's duplicated here — keep the two in sync.
 //!
 //! The store/client-binding vocabulary (factory names like "createStore"/"getPrisma") isn't read from an ambient registry; `scan_store_map` takes `store_factory_fn` / `prisma_client_getter_fn` as explicit
@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use zpz_core::{SchemaModel, SchemaUsage, Severity};
+use zzop_core::{SchemaModel, SchemaUsage, Severity};
 
 use crate::structural::{analyze_schema, SchemaAnalysis, SchemaIssue};
 
@@ -398,7 +398,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use zpz_core::{FieldAttr, SchemaField};
+    use zzop_core::{FieldAttr, SchemaField};
 
     /// Self-cleaning temp directory (std-only, no `tempfile` dependency). Created fresh per test and removed
     /// on drop so tests don't leak directories between runs.
@@ -441,14 +441,14 @@ mod tests {
 
     #[test]
     fn field_usage_empty_map_when_src_dir_missing() {
-        let dir = TempDir::new("zpz-field-usage");
+        let dir = TempDir::new("zzop-field-usage");
         let result = scan_field_usage(dir.path());
         assert_eq!(result.len(), 0);
     }
 
     #[test]
     fn field_usage_collects_identifier_counts_from_ts_files_under_src() {
-        let dir = TempDir::new("zpz-field-usage");
+        let dir = TempDir::new("zzop-field-usage");
         dir.write(
             "src/domains/post/routes/createPostHandlers.ts",
             "export function getPostTitle(post: any) {\n  return post.title;\n}\n",
@@ -460,7 +460,7 @@ mod tests {
 
     #[test]
     fn field_usage_merges_multiple_files_same_identifier_counts_accumulate() {
-        let dir = TempDir::new("zpz-field-usage");
+        let dir = TempDir::new("zzop-field-usage");
         dir.write(
             "src/domains/post/routes/createPostHandlers.ts",
             "export function a(post: any) { return post.title; }\n",
@@ -475,7 +475,7 @@ mod tests {
 
     #[test]
     fn field_usage_dead_field_with_zero_usages_absent_or_zero() {
-        let dir = TempDir::new("zpz-field-usage");
+        let dir = TempDir::new("zzop-field-usage");
         dir.write(
             "src/domains/post/routes/createPostHandlers.ts",
             "export function f(post: any) { return post.title; }\n",
@@ -486,7 +486,7 @@ mod tests {
 
     #[test]
     fn field_usage_multiple_fields_appear_at_correct_relative_frequencies() {
-        let dir = TempDir::new("zpz-field-usage");
+        let dir = TempDir::new("zzop-field-usage");
         dir.write(
             "src/domains/order/routes/createOrderHandlers.ts",
             "export function f(o: any) {\n  const a = o.status;\n  const b = o.status;\n  const c = o.amount;\n  return { a, b, c };\n}\n",
@@ -501,7 +501,7 @@ mod tests {
 
     #[test]
     fn field_usage_excludes_node_modules_directory() {
-        let dir = TempDir::new("zpz-field-usage");
+        let dir = TempDir::new("zzop-field-usage");
         dir.write(
             "src/node_modules/some-lib/index.ts",
             "export const superRareFieldXYZ = 1;\n",
@@ -512,7 +512,7 @@ mod tests {
 
     #[test]
     fn field_usage_excludes_dist_directory() {
-        let dir = TempDir::new("zpz-field-usage");
+        let dir = TempDir::new("zzop-field-usage");
         dir.write(
             "src/dist/output.ts",
             "export const compiledOnlyFieldABC = 1;\n",
@@ -523,7 +523,7 @@ mod tests {
 
     #[test]
     fn field_usage_excludes_d_ts_files() {
-        let dir = TempDir::new("zpz-field-usage");
+        let dir = TempDir::new("zzop-field-usage");
         dir.write(
             "src/types/generated.d.ts",
             "export interface Generated { declarationOnlyFieldDEF: string; }\n",
@@ -537,7 +537,7 @@ mod tests {
 
     #[test]
     fn field_usage_excludes_js_files() {
-        let dir = TempDir::new("zpz-field-usage");
+        let dir = TempDir::new("zzop-field-usage");
         dir.write(
             "src/domains/post/routes/helper.js",
             "const jsOnlyFieldGHI = 1; module.exports = { jsOnlyFieldGHI };\n",
@@ -548,7 +548,7 @@ mod tests {
 
     #[test]
     fn field_usage_excludes_identifiers_inside_comments() {
-        let dir = TempDir::new("zpz-field-usage");
+        let dir = TempDir::new("zzop-field-usage");
         dir.write(
             "src/domains/post/routes/createPostHandlers.ts",
             "// commentOnlyFieldJKL: this is a comment\n/* also commentOnlyFieldJKL */\nexport function f() { return 1; }\n",
@@ -559,7 +559,7 @@ mod tests {
 
     #[test]
     fn field_usage_excludes_identifiers_inside_string_literals() {
-        let dir = TempDir::new("zpz-field-usage");
+        let dir = TempDir::new("zzop-field-usage");
         dir.write(
             "src/domains/post/routes/createPostHandlers.ts",
             "export function f() {\n  const s = \"stringOnlyFieldMNO\";\n  const t = 'stringOnlyFieldMNO';\n  return s + t;\n}\n",
@@ -587,7 +587,7 @@ mod tests {
 
     #[test]
     fn churn_single_domain_create_table_once_maps_with_count_1() {
-        let dir = TempDir::new("zpz-mig-churn");
+        let dir = TempDir::new("zzop-mig-churn");
         write_migration(
             &dir,
             "post",
@@ -601,7 +601,7 @@ mod tests {
 
     #[test]
     fn churn_multiple_alter_table_on_same_table_accumulates() {
-        let dir = TempDir::new("zpz-mig-churn");
+        let dir = TempDir::new("zzop-mig-churn");
         write_migration(
             &dir,
             "user",
@@ -627,7 +627,7 @@ mod tests {
 
     #[test]
     fn churn_model_without_map_infers_snake_case_table_name() {
-        let dir = TempDir::new("zpz-mig-churn");
+        let dir = TempDir::new("zzop-mig-churn");
         write_migration(
             &dir,
             "item",
@@ -641,7 +641,7 @@ mod tests {
 
     #[test]
     fn churn_drop_table_also_counted() {
-        let dir = TempDir::new("zpz-mig-churn");
+        let dir = TempDir::new("zzop-mig-churn");
         write_migration(
             &dir,
             "legacy",
@@ -661,7 +661,7 @@ mod tests {
 
     #[test]
     fn churn_multiple_domains_counted_independently() {
-        let dir = TempDir::new("zpz-mig-churn");
+        let dir = TempDir::new("zzop-mig-churn");
         write_migration(
             &dir,
             "post",
@@ -685,7 +685,7 @@ mod tests {
 
     #[test]
     fn churn_no_migrations_folder_empty_map() {
-        let dir = TempDir::new("zpz-mig-churn");
+        let dir = TempDir::new("zzop-mig-churn");
         let models = vec![churn_model("Post", Some("post"))];
         let result = scan_migration_churn(dir.path(), &models);
         assert_eq!(result.len(), 0);
@@ -693,7 +693,7 @@ mod tests {
 
     #[test]
     fn churn_sql_does_not_reference_table_model_absent() {
-        let dir = TempDir::new("zpz-mig-churn");
+        let dir = TempDir::new("zzop-mig-churn");
         write_migration(
             &dir,
             "post",
@@ -707,7 +707,7 @@ mod tests {
 
     #[test]
     fn churn_empty_model_list_empty_map() {
-        let dir = TempDir::new("zpz-mig-churn");
+        let dir = TempDir::new("zzop-mig-churn");
         write_migration(
             &dir,
             "post",
@@ -720,7 +720,7 @@ mod tests {
 
     #[test]
     fn churn_migration_folder_without_sql_skipped_without_error() {
-        let dir = TempDir::new("zpz-mig-churn");
+        let dir = TempDir::new("zzop-mig-churn");
         dir.write(
             "src/domains/post/prisma/migrations/20240101000000_init/.gitkeep",
             "",
@@ -732,7 +732,7 @@ mod tests {
 
     #[test]
     fn churn_create_table_if_not_exists_also_counted() {
-        let dir = TempDir::new("zpz-mig-churn");
+        let dir = TempDir::new("zzop-mig-churn");
         write_migration(
             &dir,
             "post",
@@ -751,7 +751,7 @@ mod tests {
 
     #[test]
     fn store_map_stores_ts_pattern() {
-        let dir = TempDir::new("zpz-store-map");
+        let dir = TempDir::new("zzop-store-map");
         dir.write(
             "src/domains/item/STORES.ts",
             "import { createStore } from \"@app/store\";\nimport { PrismaStore, getPrisma } from \"@app/prisma\";\nexport const STORES = {\n  itemStore: createStore(\n    (filters: any) => filters,\n    () => new PrismaStore(getPrisma().item),\n  ),\n};\n",
@@ -762,7 +762,7 @@ mod tests {
 
     #[test]
     fn store_map_compound_camel_case_client_to_pascal_case_model() {
-        let dir = TempDir::new("zpz-store-map");
+        let dir = TempDir::new("zzop-store-map");
         dir.write(
             "src/domains/item/STORES.ts",
             "import { createStore } from \"@app/store\";\nimport { PrismaStore, getPrisma } from \"@app/prisma\";\nexport const STORES = {\n  itemUserLimitStore: createStore(\n    (f: any) => f,\n    () => new PrismaStore(getPrisma().itemUserLimit),\n  ),\n};\n",
@@ -776,7 +776,7 @@ mod tests {
 
     #[test]
     fn store_map_standalone_const_pattern() {
-        let dir = TempDir::new("zpz-store-map");
+        let dir = TempDir::new("zzop-store-map");
         dir.write(
             "src/domains/user/store.ts",
             "import { PrismaStore, getPrisma } from \"@app/prisma\";\nexport const userStore = new PrismaStore(getPrisma().user);\n",
@@ -787,7 +787,7 @@ mod tests {
 
     #[test]
     fn store_map_multiple_domain_files_collected_independently() {
-        let dir = TempDir::new("zpz-store-map");
+        let dir = TempDir::new("zzop-store-map");
         dir.write(
             "src/domains/post/STORES.ts",
             "import { createStore } from \"@app/store\";\nimport { PrismaStore, getPrisma } from \"@app/prisma\";\nexport const STORES = {\n  postStore: createStore((f: any) => f, () => new PrismaStore(getPrisma().post)),\n  postLikeStore: createStore((f: any) => f, () => new PrismaStore(getPrisma().postLike)),\n};\n",
@@ -811,7 +811,7 @@ mod tests {
 
     #[test]
     fn store_map_store_ts_mixed_case_variant_is_scanned() {
-        let dir = TempDir::new("zpz-store-map");
+        let dir = TempDir::new("zzop-store-map");
         dir.write(
             "src/domains/session/Store.ts",
             "import { PrismaStore, getPrisma } from \"@app/prisma\";\nexport const sessionStore = new PrismaStore(getPrisma().session);\n",
@@ -825,7 +825,7 @@ mod tests {
 
     #[test]
     fn store_map_store_ts_singular_is_scanned() {
-        let dir = TempDir::new("zpz-store-map");
+        let dir = TempDir::new("zzop-store-map");
         dir.write(
             "src/domains/notification/STORE.ts",
             "import { createStore } from \"@app/store\";\nimport { PrismaStore, getPrisma } from \"@app/prisma\";\nexport const STORES = {\n  notificationStore: createStore((f: any) => f, () => new PrismaStore(getPrisma().notification)),\n};\n",
@@ -839,14 +839,14 @@ mod tests {
 
     #[test]
     fn store_map_no_domains_folder_empty_map() {
-        let dir = TempDir::new("zpz-store-map");
+        let dir = TempDir::new("zzop-store-map");
         let result = scan_store_map(dir.path(), FACTORY, GETTER);
         assert_eq!(result.len(), 0);
     }
 
     #[test]
     fn store_map_domain_without_stores_file_empty_map() {
-        let dir = TempDir::new("zpz-store-map");
+        let dir = TempDir::new("zzop-store-map");
         dir.write(
             "src/domains/post/routes/createPostHandlers.ts",
             "export function handler() { return null; }",
@@ -857,7 +857,7 @@ mod tests {
 
     #[test]
     fn store_map_file_without_get_prisma_pattern_not_mapped() {
-        let dir = TempDir::new("zpz-store-map");
+        let dir = TempDir::new("zzop-store-map");
         dir.write(
             "src/domains/post/STORES.ts",
             "import { JsonStore } from \"@app/json-store\";\nexport const STORES = {\n  postStore: new JsonStore(\"posts\"),\n};\n",
@@ -868,7 +868,7 @@ mod tests {
 
     #[test]
     fn store_map_same_store_name_twice_first_entry_wins() {
-        let dir = TempDir::new("zpz-store-map");
+        let dir = TempDir::new("zzop-store-map");
         dir.write(
             "src/domains/post/STORES.ts",
             "import { createStore } from \"@app/store\";\nimport { PrismaStore, getPrisma } from \"@app/prisma\";\nexport const STORES = {\n  postStore: createStore((f: any) => f, () => new PrismaStore(getPrisma().post)),\n};\nexport const postStore = new PrismaStore(getPrisma().article);\n",

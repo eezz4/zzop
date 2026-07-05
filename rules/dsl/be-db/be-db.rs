@@ -1,4 +1,4 @@
-//! End-to-end tests for `rules/dsl/be-db/be-db.json`, exercised via `zpz_engine::analyze_tree` so
+//! End-to-end tests for `rules/dsl/be-db/be-db.json`, exercised via `zzop_engine::analyze_tree` so
 //! `Matcher::MethodScan` rules run against real parser-derived `SourceSymbol` body spans (not hand-built
 //! spans). See `be-db.json` for each rule's exact trigger/veto shape and message.
 //!
@@ -13,8 +13,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_core::{load_dsl_packs, RulePackDef};
-use zpz_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
+use zzop_core::{load_dsl_packs, RulePackDef};
+use zzop_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
 
 /// A self-cleaning temp directory (std-only mkdtemp equivalent — same pattern as `sql/sql.rs`).
 struct TempDir(PathBuf);
@@ -81,7 +81,7 @@ fn scan(dir: &TempDir) -> AnalyzeOutput {
     analyze_tree(dir.path(), &config())
 }
 
-fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zpz_core::Finding> {
+fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {
     out.findings
         .iter()
         .filter(|f| f.rule_id == format!("be-db/{rule}"))
@@ -92,7 +92,7 @@ fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zpz_core::Finding> {
 
 #[test]
 fn update_many_with_no_where_anywhere_in_function_is_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function bulkArchive() {\n  await prisma.order.updateMany({ data: { archived: true } });\n}\n",
@@ -106,7 +106,7 @@ fn update_many_with_no_where_anywhere_in_function_is_flagged() {
 
 #[test]
 fn delete_many_with_where_in_same_function_is_not_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function archiveOld() {\n  await prisma.order.deleteMany({ where: { archived: false } });\n}\n",
@@ -122,7 +122,7 @@ fn delete_many_with_where_in_same_function_is_not_flagged() {
 #[test]
 fn delete_many_with_arrow_predicate_first_arg_is_not_flagged() {
     // A custom Store wrapper's `deleteMany(predicate)` takes a filter function scoped internally, not a Prisma-style `{ where: ... }` object — not a whole-table write.
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/store.ts",
         "declare const guildShareStore: any;\nexport async function removeSpaceShares(spaceId: string) {\n  await guildShareStore.deleteMany((s: any) => s.spaceId === spaceId);\n}\n",
@@ -137,7 +137,7 @@ fn delete_many_with_arrow_predicate_first_arg_is_not_flagged() {
 
 #[test]
 fn delete_many_with_no_arg_predicate_shorthand_is_not_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/store.ts",
         "declare const sessionStore: any;\nexport async function clearAllSessions() {\n  await sessionStore.deleteMany(() => true);\n}\n",
@@ -152,7 +152,7 @@ fn delete_many_with_no_arg_predicate_shorthand_is_not_flagged() {
 
 #[test]
 fn delete_many_with_function_keyword_predicate_is_not_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/store.ts",
         "declare const recordStore: any;\nexport async function purgeExpired() {\n  await recordStore.deleteMany(function (r: any) { return r.expired; });\n}\n",
@@ -167,7 +167,7 @@ fn delete_many_with_function_keyword_predicate_is_not_flagged() {
 
 #[test]
 fn delete_many_with_no_arguments_is_still_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function wipeOrders() {\n  await prisma.order.deleteMany();\n}\n",
@@ -179,7 +179,7 @@ fn delete_many_with_no_arguments_is_still_flagged() {
 
 #[test]
 fn no_where_ok_marker_directly_above_the_bulk_write_line_suppresses_the_finding() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function bulkArchiveMarked() {\n  // no-where-ok: admin console confirmed intentional full-table archive\n  await prisma.order.updateMany({ data: { archived: true } });\n}\n",
@@ -196,7 +196,7 @@ fn no_where_ok_marker_directly_above_the_bulk_write_line_suppresses_the_finding(
 
 #[test]
 fn skip_take_pagination_with_no_orderby_is_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function listUsers(page: number) {\n  return prisma.user.findMany({ skip: page * 20, take: 20 });\n}\n",
@@ -209,7 +209,7 @@ fn skip_take_pagination_with_no_orderby_is_flagged() {
 
 #[test]
 fn skip_take_pagination_with_orderby_in_same_function_is_not_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function listUsersSorted(page: number) {\n  return prisma.user.findMany({ skip: page * 20, take: 20, orderBy: { id: \"asc\" } });\n}\n",
@@ -225,7 +225,7 @@ fn skip_take_pagination_with_orderby_in_same_function_is_not_flagged() {
 #[test]
 fn comment_mentioning_the_word_skip_with_a_colon_is_not_flagged() {
     // A comment documenting a `skip:` parameter can satisfy the `pagination` pattern's `\bskip\s*:` shape even with no real pagination call in the function.
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "export async function listUsersDocumented(page: number) {\n  // Note: skip: this function currently loads everything, pagination not yet implemented\n  return [];\n}\n",
@@ -240,7 +240,7 @@ fn comment_mentioning_the_word_skip_with_a_colon_is_not_flagged() {
 
 #[test]
 fn pagination_ok_marker_directly_above_the_pagination_line_suppresses_the_finding() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function listUsersMarked(page: number) {\n  // pagination-ok: single-admin dashboard, deterministic dataset snapshot\n  return prisma.user.findMany({ skip: page * 20, take: 20 });\n}\n",
@@ -257,7 +257,7 @@ fn pagination_ok_marker_directly_above_the_pagination_line_suppresses_the_findin
 fn apollo_skip_option_with_no_find_many_in_function_is_not_flagged() {
     // Apollo Client's `useQuery(..., { skip: boolean })` flag shares the `skip:` option-name shape with
     // Prisma's row-offset pagination option but has nothing to do with a database; requiring a `.findMany(` co-occurrence excludes it.
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/hooks/usePageLayout.tsx",
         "declare function useQuery(query: unknown, options: { skip: boolean }): { data: unknown };\ndeclare function isDefined(v: unknown): boolean;\ndeclare const pageLayoutQuery: unknown;\ndeclare const isOnPageLayoutPage: boolean;\ndeclare const pageLayoutId: string | undefined;\nexport function usePageLayout() {\n  return useQuery(pageLayoutQuery, { skip: !isOnPageLayoutPage || !isDefined(pageLayoutId) });\n}\n",
@@ -274,7 +274,7 @@ fn apollo_skip_option_with_no_find_many_in_function_is_not_flagged() {
 
 #[test]
 fn new_prisma_client_inside_request_handler_is_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/handler.ts",
         "declare class PrismaClient { user: any; }\nexport async function handleRequest(req: any, res: any) {\n  const prisma = new PrismaClient();\n  const users = await prisma.user.findMany();\n  res.json(users);\n}\n",
@@ -288,7 +288,7 @@ fn new_prisma_client_inside_request_handler_is_flagged() {
 #[test]
 fn module_top_level_singleton_prisma_client_is_not_flagged() {
     // A module-top-level `new PrismaClient()` has no enclosing function span, so it's never scanned here regardless of the handler-context co-pattern (see module doc).
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/handler.ts",
         "declare class PrismaClient { user: any; }\nconst prisma = new PrismaClient();\nexport async function handleRequest(req: any, res: any) {\n  const users = await prisma.user.findMany();\n  res.json(users);\n}\n",
@@ -303,7 +303,7 @@ fn module_top_level_singleton_prisma_client_is_not_flagged() {
 
 #[test]
 fn prisma_client_ok_marker_directly_above_the_new_client_line_suppresses_the_finding() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/handler.ts",
         "declare class PrismaClient { user: any; }\nexport async function handleAdminRequest(req: any, res: any) {\n  // prisma-client-ok: cold-start admin tool, single-invocation script\n  const prisma = new PrismaClient();\n  const users = await prisma.user.findMany();\n  res.json(users);\n}\n",
@@ -320,7 +320,7 @@ fn prisma_client_ok_marker_directly_above_the_new_client_line_suppresses_the_fin
 
 #[test]
 fn fetch_call_inside_transaction_callback_is_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\ndeclare function fetch(url: string, init?: any): Promise<any>;\nexport async function checkoutOrder(orderId: string) {\n  await prisma.$transaction(async (tx: any) => {\n    await tx.order.update({ where: { id: orderId }, data: { status: \"paid\" } });\n    await fetch(\"https://payments.example.com/notify\", { method: \"POST\" });\n  });\n}\n",
@@ -333,7 +333,7 @@ fn fetch_call_inside_transaction_callback_is_flagged() {
 
 #[test]
 fn fetch_call_with_no_transaction_in_function_is_not_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\ndeclare function fetch(url: string, init?: any): Promise<any>;\nexport async function checkoutOrderSafe(orderId: string) {\n  const paymentResult = await fetch(\"https://payments.example.com/notify\", { method: \"POST\" });\n  await prisma.order.update({ where: { id: orderId }, data: { status: \"paid\" } });\n  return paymentResult;\n}\n",
@@ -348,7 +348,7 @@ fn fetch_call_with_no_transaction_in_function_is_not_flagged() {
 
 #[test]
 fn tx_egress_ok_marker_directly_above_the_fetch_line_suppresses_the_finding() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\ndeclare function fetch(url: string, init?: any): Promise<any>;\nexport async function checkoutOrderMarked(orderId: string) {\n  await prisma.$transaction(async (tx: any) => {\n    await tx.order.update({ where: { id: orderId }, data: { status: \"paid\" } });\n    // tx-egress-ok: payment gateway called via idempotent webhook retry, safe inside tx\n    await fetch(\"https://payments.example.com/notify\", { method: \"POST\" });\n  });\n}\n",
@@ -365,7 +365,7 @@ fn tx_egress_ok_marker_directly_above_the_fetch_line_suppresses_the_finding() {
 
 #[test]
 fn fire_and_forget_create_call_is_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function logEvent(id: string) {\n  prisma.event.create({ data: { id } });\n}\n",
@@ -379,7 +379,7 @@ fn fire_and_forget_create_call_is_flagged() {
 
 #[test]
 fn captured_promise_create_call_is_not_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function logEventCaptured(id: string) {\n  const p = prisma.event.create({ data: { id } });\n  return p;\n}\n",
@@ -394,7 +394,7 @@ fn captured_promise_create_call_is_not_flagged() {
 
 #[test]
 fn unawaited_ok_marker_directly_above_the_write_line_suppresses_the_finding() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function logEventMarked(id: string) {\n  // unawaited-ok: best-effort audit log, failure intentionally ignored\n  prisma.event.create({ data: { id } });\n}\n",
@@ -410,7 +410,7 @@ fn unawaited_ok_marker_directly_above_the_write_line_suppresses_the_finding() {
 #[test]
 fn in_memory_set_delete_is_not_flagged() {
     // The receiver allowlist excludes non-DB calls like an in-memory Set/Map `.delete()`/`.create()`.
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/tabs.ts",
         "declare const attachedTabs: Set<string>;\nexport function detachTab(id: string) {\n  attachedTabs.delete(id);\n}\n",
@@ -425,7 +425,7 @@ fn in_memory_set_delete_is_not_flagged() {
 
 #[test]
 fn in_memory_map_delete_is_not_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/cache.ts",
         "declare const cache: Map<string, unknown>;\nexport function evict(k: string) {\n  cache.delete(k);\n}\n",
@@ -442,7 +442,7 @@ fn in_memory_map_delete_is_not_flagged() {
 fn report_update_is_not_flagged() {
     // `report` starts with `repo`, so a naive `repo\w*` receiver group would over-match a non-DB `report.update(...)` call.
     // The receiver group `repo(sitory|sitories)?s?` matches only `repo`/`repos`/`repository`/`repositories`.
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/report.ts",
         "declare const report: { update: (data: unknown) => void };\nexport function refreshReport(data: unknown) {\n  report.update(data);\n}\n",
@@ -457,7 +457,7 @@ fn report_update_is_not_flagged() {
 
 #[test]
 fn fire_and_forget_prisma_user_create_is_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function trackSignup(email: string) {\n  prisma.user.create({ data: { email } });\n}\n",
@@ -470,7 +470,7 @@ fn fire_and_forget_prisma_user_create_is_flagged() {
 
 #[test]
 fn awaited_prisma_user_create_is_not_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function trackSignupAwaited(email: string) {\n  await prisma.user.create({ data: { email } });\n}\n",
@@ -487,7 +487,7 @@ fn awaited_prisma_user_create_is_not_flagged() {
 
 #[test]
 fn take_sourced_directly_from_req_query_is_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\ndeclare const req: any;\nexport async function listUsers() {\n  return prisma.user.findMany({ take: Number(req.query.limit) });\n}\n",
@@ -500,7 +500,7 @@ fn take_sourced_directly_from_req_query_is_flagged() {
 
 #[test]
 fn take_clamped_with_math_min_is_not_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\ndeclare const req: any;\nexport async function listUsersClamped() {\n  return prisma.user.findMany({ take: Math.min(50, Number(req.query.limit)) });\n}\n",
@@ -515,7 +515,7 @@ fn take_clamped_with_math_min_is_not_flagged() {
 
 #[test]
 fn limit_ok_marker_directly_above_the_take_line_suppresses_the_finding() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\ndeclare const req: any;\nexport async function listUsersMarked() {\n  // limit-ok: internal admin tool, request volume trusted\n  return prisma.user.findMany({ take: Number(req.query.limit) });\n}\n",
@@ -532,7 +532,7 @@ fn limit_ok_marker_directly_above_the_take_line_suppresses_the_finding() {
 
 #[test]
 fn find_first_then_create_with_no_unique_guard_is_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function ensureUser(email: string) {\n  const existing = await prisma.user.findFirst({ where: { email } });\n  if (!existing) {\n    await prisma.user.create({ data: { email } });\n  }\n}\n",
@@ -545,7 +545,7 @@ fn find_first_then_create_with_no_unique_guard_is_flagged() {
 
 #[test]
 fn find_first_then_create_inside_transaction_is_not_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function ensureUserSafe(email: string) {\n  await prisma.$transaction(async (tx: any) => {\n    const existing = await tx.user.findFirst({ where: { email } });\n    if (!existing) {\n      await tx.user.create({ data: { email } });\n    }\n  });\n}\n",
@@ -560,7 +560,7 @@ fn find_first_then_create_inside_transaction_is_not_flagged() {
 
 #[test]
 fn find_create_ok_marker_directly_above_the_create_line_suppresses_the_finding() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function ensureUserMarked(email: string) {\n  const existing = await prisma.user.findFirst({ where: { email } });\n  if (!existing) {\n    // find-create-ok: low-traffic admin-only path, race window accepted\n    await prisma.user.create({ data: { email } });\n  }\n}\n",
@@ -577,7 +577,7 @@ fn find_create_ok_marker_directly_above_the_create_line_suppresses_the_finding()
 
 #[test]
 fn strict_equality_on_money_named_identifier_against_a_float_literal_is_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "export function isBasicPlan(price: number) {\n  return price === 19.99;\n}\n",
@@ -590,7 +590,7 @@ fn strict_equality_on_money_named_identifier_against_a_float_literal_is_flagged(
 
 #[test]
 fn float_literal_first_strict_equality_against_a_money_named_identifier_is_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "export function isBasicPlan(price: number) {\n  return 19.99 === price;\n}\n",
@@ -605,7 +605,7 @@ fn float_literal_first_strict_equality_against_a_money_named_identifier_is_flagg
 fn strict_equality_between_two_money_named_identifiers_is_not_flagged() {
     // Under-detection by design: a variable-vs-variable comparison is out of reach for a line-scan heuristic.
     // A bare `total` keyword would also substring-match unrelated identifiers like `totalCredits`, so it's excluded.
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "export function hasNoCredits(totalCredits: number) {\n  return totalCredits === 0;\n}\n",
@@ -620,7 +620,7 @@ fn strict_equality_between_two_money_named_identifiers_is_not_flagged() {
 
 #[test]
 fn epsilon_based_money_comparison_is_not_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const expectedTotal: number;\ndeclare const EPSILON: number;\nexport function isFullyPaid(totalPrice: number) {\n  return Math.abs(totalPrice - expectedTotal) < EPSILON;\n}\n",
@@ -635,7 +635,7 @@ fn epsilon_based_money_comparison_is_not_flagged() {
 
 #[test]
 fn money_ok_marker_directly_above_the_comparison_line_suppresses_the_finding() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "export function isBasicPlanMarked(price: number) {\n  // money-ok: price is stored as integer cents already scaled, exact by construction\n  return price === 19.99;\n}\n",
@@ -652,7 +652,7 @@ fn money_ok_marker_directly_above_the_comparison_line_suppresses_the_finding() {
 
 #[test]
 fn empty_catch_around_a_write_call_is_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function archiveQuietly(id: string) {\n  try {\n    await prisma.order.update({ where: { id }, data: { archived: true } });\n  } catch (e) {}\n}\n",
@@ -665,7 +665,7 @@ fn empty_catch_around_a_write_call_is_flagged() {
 
 #[test]
 fn catch_that_logs_the_error_is_not_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\ndeclare const logger: any;\nexport async function archiveLogged(id: string) {\n  try {\n    await prisma.order.update({ where: { id }, data: { archived: true } });\n  } catch (e) {\n    logger.error(e);\n  }\n}\n",
@@ -680,7 +680,7 @@ fn catch_that_logs_the_error_is_not_flagged() {
 
 #[test]
 fn empty_catch_ok_marker_directly_above_the_catch_line_suppresses_the_finding() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function archiveQuietlyMarked(id: string) {\n  try {\n    await prisma.order.update({ where: { id }, data: { archived: true } });\n  // empty-catch-ok: best-effort archive, failure intentionally ignored\n  } catch (e) {}\n}\n",
@@ -698,10 +698,10 @@ fn minified_bundle_with_a_giant_single_line_is_not_flagged() {
     // A bundled/minified `.mjs` file collapses onto a few giant physical lines; `MethodScan`'s line-based
     // span extraction then makes every symbol on such a line spuriously "co-occur" with unrelated
     // write/catch patterns elsewhere on the same line. The engine skips the whole file for every DSL rule
-    // pack before any rule runs (`zpz_core::dsl::is_minified_or_generated`). This fixture trips the
+    // pack before any rule runs (`zzop_core::dsl::is_minified_or_generated`). This fixture trips the
     // classifier's RATIO prong: a single ~690-byte line makes up ~96% of the file's bytes (500+ char lines
     // must dominate >= 50% of the file for the file to classify as minified).
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     let content = format!(
         "declare const prisma: any;\nconst bundled = \"{}\"; function f() {{ try {{ prisma.order.update({{}}); }} catch (e) {{}} }}\n",
         "x".repeat(600)
@@ -721,7 +721,7 @@ fn minified_bundle_with_a_giant_single_line_is_not_flagged() {
 
 #[test]
 fn update_many_call_mentioned_only_in_a_comment_is_not_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function bulkArchive() {\n  // prisma.order.updateMany({ data: { archived: true } }) -- old approach, replaced below\n  return 0;\n}\n",
@@ -736,7 +736,7 @@ fn update_many_call_mentioned_only_in_a_comment_is_not_flagged() {
 
 #[test]
 fn take_sourced_from_req_query_in_a_test_fixture_path_is_not_flagged() {
-    let dir = TempDir::new("zpz-be-db");
+    let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/__tests__/service.test.ts",
         "declare const prisma: any;\ndeclare const req: any;\nexport async function listUsers() {\n  return prisma.user.findMany({ take: Number(req.query.limit) });\n}\n",

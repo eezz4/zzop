@@ -10,8 +10,8 @@
 
 use std::collections::BTreeSet;
 
-use zpz_core::io::CrossLayerResult;
-use zpz_core::{Finding, Severity};
+use zzop_core::io::CrossLayerResult;
+use zzop_core::{Finding, Severity};
 
 pub fn shared_db_table_findings(cross_layer: &CrossLayerResult) -> Vec<Finding> {
     let mut by_key: std::collections::BTreeMap<String, Vec<(String, String, u32)>> =
@@ -91,10 +91,10 @@ pub fn shared_db_table_findings(cross_layer: &CrossLayerResult) -> Vec<Finding> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zpz_core::io::{
+    use zzop_core::io::{
         AmbiguousConsume, CrossLayerEdge, EdgeFrom, EdgeTo, TaggedConsume, TaggedProvide,
     };
-    use zpz_core::IoConsume;
+    use zzop_core::IoConsume;
 
     fn edge(kind: &str, key: &str, from_source: &str, file: &str, line: u32) -> CrossLayerEdge {
         CrossLayerEdge {
@@ -204,7 +204,7 @@ mod tests {
                 },
                 candidates: vec![TaggedProvide {
                     source: "db1".to_string(),
-                    provide: zpz_core::IoProvide {
+                    provide: zzop_core::IoProvide {
                         kind: "db-table".to_string(),
                         key: "table:orders".to_string(),
                         file: "s1.sql".to_string(),

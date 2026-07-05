@@ -7,14 +7,14 @@ and when to reach for a native rule instead.
 ## File placement
 
 A pack is one `<id>.json` file, loaded from a configured packs directory (the `packsDir` option — see
-[../modules/napi.md](../modules/napi.md)) via `zpz_core::pack_loader::load_dsl_packs`. Two directory shapes
+[../modules/napi.md](../modules/napi.md)) via `zzop_core::pack_loader::load_dsl_packs`. Two directory shapes
 are supported, and may be mixed in the same directory:
 
 - **Flat** — `<packsDir>/<id>.json`, directly under the directory. This is what an external/third-party
   `packsDir` typically uses.
 - **Depth-1 nested (pack folder)** — `<packsDir>/<name>/<id>.json`, one subdirectory per pack. This repo's
   own first-party packs use this shape: `rules/dsl/<pack>/<pack>.json`, with the pack's end-to-end tests
-  co-located right next to it as `rules/dsl/<pack>/<pack>.rs` (wired into the `zpz-rule-packs` crate,
+  co-located right next to it as `rules/dsl/<pack>/<pack>.rs` (wired into the `zzop-rule-packs` crate,
   `rules/Cargo.toml` — see [`rules/README.md`](../../rules/README.md)).
 
 Neither shape is required over the other — nesting is purely organizational. Both are scanned in the same
@@ -64,7 +64,7 @@ into source) — a small but realistic `line-scan` rule with a suppress marker:
   avoids running the real (costlier) pattern against every line of every file.
 - `// debug-token-ok: rotated in CI` on the offending line or the single line directly above it suppresses
   the finding (see `docs/rules/dsl-reference.md#suppress-marker-semantics`).
-- Drop this into a `RuleContext` (or run it through `zpz_engine::analyze_tree` with `packs` including it)
+- Drop this into a `RuleContext` (or run it through `zzop_engine::analyze_tree` with `packs` including it)
   and it behaves exactly like any shipped pack — there is no first-party/third-party distinction at the
   interpreter level.
 

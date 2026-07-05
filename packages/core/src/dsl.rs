@@ -666,7 +666,7 @@ fn compile_require_all(patterns: &[String]) -> Option<Vec<regex::Regex>> {
 
 /// How far above a finding a `// <marker>-ok` comment still suppresses it, one uniform window across every
 /// rule. Set to 1: a wider window risks a marker aimed at one call silently suppressing unrelated sibling
-/// findings a few lines below it. Bump `zpz-engine`'s `DSL_INTERPRETER_FINGERPRINT` when changing this.
+/// findings a few lines below it. Bump `zzop-engine`'s `DSL_INTERPRETER_FINGERPRINT` when changing this.
 const MARKER_LOOKBACK_LINES: usize = 1;
 
 /// Whether the marker comment appears on the finding's own line or within `MARKER_LOOKBACK_LINES` above it.

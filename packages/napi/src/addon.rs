@@ -6,7 +6,7 @@
 //! ## Never a panic across the FFI boundary
 //! `std::panic::catch_unwind` wraps every call here, one layer outside `api.rs`'s own internal
 //! `catch_unwind` (the engine's per-file pass already isolates a single bad file — see
-//! `zpz_engine`'s crate doc). Unwinding across a `#[napi]`-exported `extern "C"` function is
+//! `zzop_engine`'s crate doc). Unwinding across a `#[napi]`-exported `extern "C"` function is
 //! undefined behavior, so a caught panic becomes an ordinary JS `Error` instead.
 use napi::{Error, Result};
 use napi_derive::napi;
@@ -18,7 +18,7 @@ fn catch<F: FnOnce() -> std::result::Result<String, String> + std::panic::Unwind
         Ok(Ok(json)) => Ok(json),
         Ok(Err(message)) => Err(Error::from_reason(message)),
         Err(_) => Err(Error::from_reason(
-            "zpz-napi: internal panic (this is a bug — please report it)".to_string(),
+            "zzop-napi: internal panic (this is a bug — please report it)".to_string(),
         )),
     }
 }

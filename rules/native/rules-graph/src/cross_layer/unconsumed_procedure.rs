@@ -9,8 +9,8 @@
 //! Provider sites in test-path files (`crate::unreachable::is_test_file`) are skipped — a test-only router
 //! isn't deployed surface.
 
-use zpz_core::io::TaggedProvide;
-use zpz_core::{Finding, Severity};
+use zzop_core::io::TaggedProvide;
+use zzop_core::{Finding, Severity};
 
 use super::split_key;
 
@@ -60,7 +60,7 @@ pub fn unconsumed_procedure_findings(unconsumed_provides: &[TaggedProvide]) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zpz_core::io::IoProvide;
+    use zzop_core::io::IoProvide;
 
     fn dead(
         kind: &str,

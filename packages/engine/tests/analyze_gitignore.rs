@@ -18,7 +18,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_engine::{analyze_tree, AnalyzeOutput, DispatchConfig, EngineConfig, DEFAULT_SIZE_CAP};
+use zzop_engine::{analyze_tree, AnalyzeOutput, DispatchConfig, EngineConfig, DEFAULT_SIZE_CAP};
 
 struct TempDir(PathBuf);
 
@@ -92,7 +92,7 @@ fn symbol_files(out: &AnalyzeOutput) -> BTreeSet<String> {
 
 #[test]
 fn gitignored_files_at_root_and_nested_are_excluded_non_ignored_siblings_are_kept() {
-    let dir = TempDir::new("zpz-gi-nested");
+    let dir = TempDir::new("zzop-gi-nested");
     dir.write(".gitignore", "out/\n");
     dir.write("keep.ts", "export function keep() { return 1; }\n");
     dir.write(
@@ -133,7 +133,7 @@ fn gitignored_files_at_root_and_nested_are_excluded_non_ignored_siblings_are_kep
 
 #[test]
 fn tree_without_any_gitignore_walks_every_file_same_as_before() {
-    let dir = TempDir::new("zpz-gi-none");
+    let dir = TempDir::new("zzop-gi-none");
     dir.write("a.ts", "export function a() { return 1; }\n");
     dir.write("b.ts", "export function b() { return 2; }\n");
     dir.write("sub/c.ts", "export function c() { return 3; }\n");
@@ -162,7 +162,7 @@ fn negated_pattern_under_an_otherwise_ignored_glob_is_still_analyzed() {
     // child pattern — including a negation — is ever consulted; that is a distinct, well-known gitignore
     // gotcha this test deliberately does NOT exercise, since `sub2/*` is the shape that is actually
     // negatable.)
-    let dir = TempDir::new("zpz-gi-negate");
+    let dir = TempDir::new("zzop-gi-negate");
     dir.write(".gitignore", "sub2/*\n!sub2/keep.ts\n");
     dir.write("sub2/drop.ts", "export function drop_() { return 1; }\n");
     dir.write("sub2/keep.ts", "export function keep() { return 2; }\n");
@@ -187,7 +187,7 @@ fn negated_pattern_under_an_otherwise_ignored_glob_is_still_analyzed() {
 
 #[test]
 fn default_skip_dirs_are_still_skipped_without_any_gitignore() {
-    let dir = TempDir::new("zpz-gi-skipdirs");
+    let dir = TempDir::new("zzop-gi-skipdirs");
     dir.write(
         "node_modules/pkg/index.ts",
         "export function pkg() { return 1; }\n",
@@ -214,7 +214,7 @@ fn default_skip_dirs_are_still_skipped_without_any_gitignore() {
 
 #[test]
 fn ancestor_gitignore_at_git_toplevel_applies_to_a_subdirectory_analysis_root() {
-    let dir = TempDir::new("zpz-gi-ancestor-toplevel");
+    let dir = TempDir::new("zzop-gi-ancestor-toplevel");
     fs::create_dir_all(dir.path().join(".git")).unwrap();
     dir.write(".gitignore", "out/\n");
     dir.write("apps/keep.ts", "export function keep() { return 1; }\n");
@@ -250,7 +250,7 @@ fn ancestor_gitignore_at_git_toplevel_applies_to_a_subdirectory_analysis_root() 
 
 #[test]
 fn stray_parent_gitignore_in_a_non_git_tree_is_never_consulted() {
-    let dir = TempDir::new("zpz-gi-nongit-stray-parent");
+    let dir = TempDir::new("zzop-gi-nongit-stray-parent");
     // Deliberately NO `.git` anywhere in this fixture.
     dir.write(".gitignore", "out/\n");
     dir.write("apps/keep.ts", "export function keep() { return 1; }\n");
@@ -276,7 +276,7 @@ fn stray_parent_gitignore_in_a_non_git_tree_is_never_consulted() {
 
 #[test]
 fn nested_ancestor_gitignore_chain_applies_every_level() {
-    let dir = TempDir::new("zpz-gi-ancestor-chain");
+    let dir = TempDir::new("zzop-gi-ancestor-chain");
     fs::create_dir_all(dir.path().join(".git")).unwrap();
     dir.write(".gitignore", "top_out/\n");
     dir.write("mid/.gitignore", "mid_out/\n");
@@ -310,7 +310,7 @@ fn nested_ancestor_gitignore_chain_applies_every_level() {
 
 #[test]
 fn negated_pattern_in_an_ancestor_gitignore_is_still_analyzed() {
-    let dir = TempDir::new("zpz-gi-ancestor-negate");
+    let dir = TempDir::new("zzop-gi-ancestor-negate");
     fs::create_dir_all(dir.path().join(".git")).unwrap();
     dir.write(".gitignore", "*.log\n!important.log\n");
     dir.write("apps/debug.log", "not real ts, just a gitignore probe\n");

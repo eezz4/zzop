@@ -36,7 +36,7 @@ use swc_core::ecma::ast::{
     MemberProp, NewExpr, Pat, TsEntityName, TsType, TsTypeAnn, VarDeclarator,
 };
 use swc_core::ecma::visit::{Visit, VisitWith};
-use zpz_core::{ImportMap, RouterMountEntry, RouterMountFragment};
+use zzop_core::{ImportMap, RouterMountEntry, RouterMountFragment};
 
 /// Extract one file's router-mount fragments. Pure; parses `text` with the crate's swc pipeline.
 /// Returns an empty vec for files with no recognized router.

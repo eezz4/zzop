@@ -1,5 +1,5 @@
 //! End-to-end test for the 6 `cross-layer/*` native rules (`rules/native/rules-graph::cross_layer`), wired
-//! from `zpz_engine::analyze_trees` into `MultiAnalyzeOutput::cross_layer_findings`. Mirrors
+//! from `zzop_engine::analyze_trees` into `MultiAnalyzeOutput::cross_layer_findings`. Mirrors
 //! `analyze_multi_tree.rs`'s FE/BE fixture shapes (real TypeScript `fetch` calls + Hono routes, parsed for
 //! real — not hand-built `Finding`s) and exercises at least 3 of the 6 rules end to end:
 //! `cross-layer/unconsumed-endpoint`, `cross-layer/method-mismatch`, and `cross-layer/duplicate-route`, plus
@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_engine::{analyze_trees, EngineConfig};
+use zzop_engine::{analyze_trees, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -54,7 +54,7 @@ impl Drop for TempDir {
 /// (`POST /api/v1/orders` — the BE only provides it as `PUT`), and a version-skew consume
 /// (`GET /api/v1/accounts` — the BE only provides `GET /api/v2/accounts`).
 fn fe_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-xlf-fe");
+    let dir = TempDir::new("zzop-engine-xlf-fe");
     dir.write(
         "src/Ctx.tsx",
         "export function ok() { return fetch(\"/authen/getUserInfo\"); }\n\
@@ -69,7 +69,7 @@ fn fe_tree() -> TempDir {
 /// (`GET /authen/getGoogleRedirect` — drives `cross-layer/unconsumed-endpoint`), PLUS
 /// `DELETE /api/legacy/purge` — also provided by BE tree 2, driving cross-tree `duplicate-route`.
 fn be1_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-xlf-be1");
+    let dir = TempDir::new("zzop-engine-xlf-be1");
     dir.write(
         "routes/apiRoutes.ts",
         "const apiRoutes = new Hono();\n\
@@ -85,7 +85,7 @@ fn be1_tree() -> TempDir {
 /// BE tree 2: independently provides the SAME `DELETE /api/legacy/purge` route as BE tree 1 — a genuine
 /// cross-tree route duplicate nobody in this fixture consumes (so it surfaces via `unconsumed_provides`).
 fn be2_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-xlf-be2");
+    let dir = TempDir::new("zzop-engine-xlf-be2");
     dir.write(
         "routes/legacy.ts",
         "const legacyRoutes = new Hono();\nlegacyRoutes.delete(\"/api/legacy/purge\", api.purge2);\n",
@@ -100,7 +100,7 @@ fn config(source_id: &str) -> EngineConfig {
     }
 }
 
-fn find<'a>(findings: &'a [zpz_core::Finding], rule_id: &str) -> Vec<&'a zpz_core::Finding> {
+fn find<'a>(findings: &'a [zzop_core::Finding], rule_id: &str) -> Vec<&'a zzop_core::Finding> {
     findings.iter().filter(|f| f.rule_id == rule_id).collect()
 }
 
@@ -162,7 +162,7 @@ fn cross_layer_findings_cover_at_least_four_of_the_six_rules_end_to_end() {
     // entries must all sort after every `Warning` entry.
     let mut saw_info = false;
     for f in &out.cross_layer_findings {
-        if f.severity == zpz_core::Severity::Info {
+        if f.severity == zzop_core::Severity::Info {
             saw_info = true;
         } else {
             assert!(

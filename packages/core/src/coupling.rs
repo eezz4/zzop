@@ -1,5 +1,5 @@
-//! `CommitFileSet` — one commit's touched-file set (shared IR). Produced by `zpz_git`, consumed by
-//! `zpz_engine`; the co-change coupling computation lives in `zpz_metrics::coupling`. Shared IR types
+//! `CommitFileSet` — one commit's touched-file set (shared IR). Produced by `zzop_git`, consumed by
+//! `zzop_engine`; the co-change coupling computation lives in `zzop_metrics::coupling`. Shared IR types
 //! stay in core even when their downstream computation lives in a dedicated crate.
 
 use serde::{Deserialize, Serialize};

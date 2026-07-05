@@ -1,9 +1,9 @@
 {
-  "name": "@zpz/native",
+  "name": "@zzop/native",
   "version": "0.0.0",
   "license": "MIT",
-  "description": "zpz N-API binding (single Node<->Rust boundary) — see src/lib.rs for the addon-feature build.",
-  "repository": "github:eezz4/zpz",
+  "description": "zzop N-API binding (single Node<->Rust boundary) — see src/lib.rs for the addon-feature build.",
+  "repository": "github:eezz4/zzop",
   "main": "index.js",
   "types": "index.d.ts",
   "publishConfig": {
@@ -21,10 +21,10 @@
     "prepack": "node scripts/copy-rules.mjs"
   },
   "optionalDependencies": {
-    "@zpz/native-win32-x64-msvc": "0.0.0",
-    "@zpz/native-darwin-x64": "0.0.0",
-    "@zpz/native-darwin-arm64": "0.0.0",
-    "@zpz/native-linux-x64-gnu": "0.0.0",
-    "@zpz/native-linux-arm64-gnu": "0.0.0"
+    "@zzop/native-win32-x64-msvc": "0.0.0",
+    "@zzop/native-darwin-x64": "0.0.0",
+    "@zzop/native-darwin-arm64": "0.0.0",
+    "@zzop/native-linux-x64-gnu": "0.0.0",
+    "@zzop/native-linux-arm64-gnu": "0.0.0"
   }
 }

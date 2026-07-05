@@ -1,5 +1,5 @@
 //! Exercises `rules/dsl/browser/browser.json`'s browser-footgun rules end-to-end via
-//! `zpz_engine::analyze_tree`, routing through real engine dispatch rather than calling the line-scan
+//! `zzop_engine::analyze_tree`, routing through real engine dispatch rather than calling the line-scan
 //! matcher directly.
 //!
 //! Bare `confirm()`/`alert()`/`prompt()` trip `no-system-dialogs`; `document.write`/`writeln` trip
@@ -16,8 +16,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_core::RulePackDef;
-use zpz_engine::{analyze_tree, AnalyzeOutput, DispatchConfig, EngineConfig, DEFAULT_SIZE_CAP};
+use zzop_core::RulePackDef;
+use zzop_engine::{analyze_tree, AnalyzeOutput, DispatchConfig, EngineConfig, DEFAULT_SIZE_CAP};
 
 struct TempDir(PathBuf);
 
@@ -78,7 +78,7 @@ fn scan(dir: &TempDir) -> AnalyzeOutput {
 
 #[test]
 fn bare_confirm_alert_prompt_each_flagged_no_system_dialogs() {
-    let dir = TempDir::new("zpz-browser");
+    let dir = TempDir::new("zzop-browser");
     dir.write(
         "ui.ts",
         "export function ask() {\n  const ok = confirm(\"sure?\");\n  if (ok) {\n    alert(\"done\");\n  }\n  return prompt(\"name\");\n}\n",
@@ -95,7 +95,7 @@ fn bare_confirm_alert_prompt_each_flagged_no_system_dialogs() {
 
 #[test]
 fn window_confirm_and_globalthis_alert_flagged_with_receiver() {
-    let dir = TempDir::new("zpz-browser");
+    let dir = TempDir::new("zzop-browser");
     dir.write(
         "g.ts",
         "export function f() {\n  window.confirm(\"a\");\n  globalThis.alert(\"b\");\n}\n",
@@ -113,7 +113,7 @@ fn window_confirm_and_globalthis_alert_flagged_with_receiver() {
 
 #[test]
 fn document_write_and_writeln_each_flagged_no_document_write() {
-    let dir = TempDir::new("zpz-browser");
+    let dir = TempDir::new("zzop-browser");
     dir.write(
         "w.ts",
         "export function f() {\n  document.write(\"<b>x</b>\");\n  document.writeln(\"y\");\n}\n",
@@ -129,7 +129,7 @@ fn document_write_and_writeln_each_flagged_no_document_write() {
 
 #[test]
 fn member_call_on_unrelated_object_is_not_flagged() {
-    let dir = TempDir::new("zpz-browser");
+    let dir = TempDir::new("zzop-browser");
     dir.write(
         "ok.ts",
         "declare const logger: any;\ndeclare const db: any;\nexport function f() { logger.alert(\"x\"); db.prompt(\"y\"); }\n",
@@ -143,7 +143,7 @@ fn member_call_on_unrelated_object_is_not_flagged() {
 
 #[test]
 fn clean_frontend_file_has_zero_findings() {
-    let dir = TempDir::new("zpz-browser");
+    let dir = TempDir::new("zzop-browser");
     dir.write(
         "clean.ts",
         "export const greet = (n: string) => \"hi \" + n;\n",
@@ -157,7 +157,7 @@ fn clean_frontend_file_has_zero_findings() {
 
 #[test]
 fn browser_ok_comment_on_or_above_the_line_suppresses_the_finding() {
-    let dir = TempDir::new("zpz-browser");
+    let dir = TempDir::new("zzop-browser");
     dir.write(
         "exempt.ts",
         "export function f() {\n  // document-write-ok: legacy print path\n  document.write(\"x\");\n  alert(\"y\"); // browser-ok: deliberate\n}\n",
@@ -176,7 +176,7 @@ fn browser_ok_comment_on_or_above_the_line_suppresses_the_finding() {
 /// flags the bare global `document`, not an arbitrary variable named `document`.
 #[test]
 fn document_write_on_a_window_handle_receiver_is_skipped() {
-    let dir = TempDir::new("zpz-browser");
+    let dir = TempDir::new("zzop-browser");
     dir.write(
         "export.ts",
         "export function printGrid(html: string) {\n  const win = window.open(\"\", \"_blank\");\n  if (!win) return;\n  win.document.write(html);\n  win.document.close();\n}\n",
@@ -193,7 +193,7 @@ fn document_write_on_a_window_handle_receiver_is_skipped() {
 
 #[test]
 fn bare_document_write_still_flagged() {
-    let dir = TempDir::new("zpz-browser");
+    let dir = TempDir::new("zzop-browser");
     dir.write(
         "legacy.ts",
         "export function inject(html: string) {\n  document.write(html);\n}\n",
@@ -212,7 +212,7 @@ fn bare_document_write_still_flagged() {
 /// are declarations, not calls, and are never flagged.
 #[test]
 fn dialog_shaped_interface_signatures_are_not_calls() {
-    let dir = TempDir::new("zpz-browser");
+    let dir = TempDir::new("zzop-browser");
     dir.write(
         "api.ts",
         "export interface NanoSession {\n  prompt(input: string): Promise<string>;\n  alert(msg: string): void;\n}\nexport function ask(s: NanoSession) {\n  return s.prompt(\"hi\");\n}\n",
@@ -231,7 +231,7 @@ fn dialog_shaped_interface_signatures_are_not_calls() {
 /// line eligible, so a genuine `alert(` call inside it still fires.
 #[test]
 fn one_line_method_body_with_a_dialog_call_still_fires() {
-    let dir = TempDir::new("zpz-browser");
+    let dir = TempDir::new("zzop-browser");
     dir.write(
         "cls.ts",
         "export class Notifier {\n  warn(msg: string): void { alert(msg); }\n}\n",
@@ -251,7 +251,7 @@ fn one_line_method_body_with_a_dialog_call_still_fires() {
 
 #[test]
 fn document_write_inside_a_test_fixture_path_is_not_flagged() {
-    let dir = TempDir::new("zpz-browser");
+    let dir = TempDir::new("zzop-browser");
     dir.write(
         "__tests__/legacy.ts",
         "export function inject(html: string) {\n  document.write(html);\n}\n",

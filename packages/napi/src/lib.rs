@@ -1,4 +1,4 @@
-//! zpz-napi — the Node<->Rust boundary (N-API binding). Builds the addon itself, plus the
+//! zzop-napi — the Node<->Rust boundary (N-API binding). Builds the addon itself, plus the
 //! loader/smoke test a prebuild pipeline wraps (see `docs/modules/napi.md`).
 //!
 //! ## Feature gating: `addon` is off by default
@@ -17,7 +17,7 @@
 //!
 //! The real addon builds MSVC-only:
 //! ```text
-//! cargo +stable-x86_64-pc-windows-msvc build -p zpz-napi --release --features addon
+//! cargo +stable-x86_64-pc-windows-msvc build -p zzop-napi --release --features addon
 //! ```
 //! `node packages/napi/smoke.mjs` exercises the built `.node` afterward.
 

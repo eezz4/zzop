@@ -41,7 +41,7 @@ use swc_core::ecma::ast::{
     Callee, Decl, Expr, MemberProp, ModuleDecl, ModuleItem, ObjectLit, Pat, Prop, PropName,
     PropOrSpread, Stmt,
 };
-use zpz_core::{ImportMap, TrpcRouterEntry, TrpcRouterFragment};
+use zzop_core::{ImportMap, TrpcRouterEntry, TrpcRouterFragment};
 
 /// Extract every top-level tRPC router fragment from one file's raw source. Returns an empty `Vec`
 /// (never panics) when the file fails to parse at all.

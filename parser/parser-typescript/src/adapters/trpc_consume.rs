@@ -29,7 +29,7 @@ use std::collections::HashSet;
 use swc_core::common::SourceMap;
 use swc_core::ecma::ast::{CallExpr, Callee, Expr, MemberProp, Pat, VarDeclarator};
 use swc_core::ecma::visit::{Visit, VisitWith};
-use zpz_core::IoConsume;
+use zzop_core::IoConsume;
 
 /// Extract tRPC client-call CONSUME entries from one file.
 pub fn extract_trpc_consumes(rel: &str, text: &str) -> Vec<IoConsume> {

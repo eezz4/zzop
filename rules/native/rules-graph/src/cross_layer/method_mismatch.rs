@@ -6,8 +6,8 @@
 
 use std::collections::BTreeMap;
 
-use zpz_core::io::TaggedConsume;
-use zpz_core::{Finding, Severity};
+use zzop_core::io::TaggedConsume;
+use zzop_core::{Finding, Severity};
 
 use super::{split_key, HttpProvideSite};
 
@@ -109,7 +109,7 @@ mod tests {
     ) -> TaggedConsume {
         TaggedConsume {
             source: source.to_string(),
-            consume: zpz_core::IoConsume {
+            consume: zzop_core::IoConsume {
                 kind: kind.to_string(),
                 key: key.map(str::to_string),
                 file: file.to_string(),

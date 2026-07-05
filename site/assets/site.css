@@ -1,5 +1,5 @@
 /* ==========================================================================
-   zpz documentation site — shared design system
+   zzop documentation site — shared design system
    Plain CSS, no build step. Dark theme only (fixed, no toggle).
    ========================================================================== */
 
@@ -374,7 +374,7 @@ button {
   margin-bottom: 32px;
 }
 
-/* prominent prose block ("Why zpz") */
+/* prominent prose block ("Why zzop") */
 
 .prose-block {
   font-size: 1.125rem;

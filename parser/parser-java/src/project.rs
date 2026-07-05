@@ -28,7 +28,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use regex::Regex;
-use zpz_core::{http_interface_key, IoProvide, SourceSymbol, SourceSymbolKind};
+use zzop_core::{http_interface_key, IoProvide, SourceSymbol, SourceSymbolKind};
 
 use crate::parse_method_spans;
 use crate::provides::{class_annotation_facts, enclosing_class, first_quoted_string, method_route};

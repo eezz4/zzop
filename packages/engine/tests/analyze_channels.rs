@@ -1,9 +1,9 @@
 //! End-to-end coverage for the two metrics channels wired into `AnalyzeOutput` by this task (the
 //! co-churn/aggregates wiring follow-up to the crate-boundary split):
 //!
-//! - `folders` (`zpz_metrics::build_folder_aggregates`): NOT git-gated — populated on any tree that
+//! - `folders` (`zzop_metrics::build_folder_aggregates`): NOT git-gated — populated on any tree that
 //!   reaches assembly, since it only needs `nodes`/the dep graph (both built unconditionally).
-//! - `layer_co_churn` (`zpz_metrics::build_cross_layer_co_churn` + `layer_of`): git-gated exactly like
+//! - `layer_co_churn` (`zzop_metrics::build_cross_layer_co_churn` + `layer_of`): git-gated exactly like
 //!   `scores`/`health` — `None` when `EngineConfig::git` is `None`, `Some` (real content) when git
 //!   collection succeeds.
 //!
@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_engine::{analyze_tree, EngineConfig, GitOptions};
+use zzop_engine::{analyze_tree, EngineConfig, GitOptions};
 
 struct TempDir(PathBuf);
 
@@ -68,7 +68,7 @@ fn config() -> EngineConfig {
 /// to hand-check `aggregate_by_folder`/`aggregate_dep_by_folder`'s output at `DEFAULT_FOLDER_DEPTH` (2,
 /// which truncates to 1 leading segment here since neither path has 2 folder segments).
 fn folder_fixture() -> TempDir {
-    let dir = TempDir::new("zpz-engine-channels-folders");
+    let dir = TempDir::new("zzop-engine-channels-folders");
     dir.write(
         "aaa/f1.ts",
         "import { x } from '../bbb/f3';\nexport const f1 = x;\n",
@@ -118,7 +118,7 @@ fn folders_are_byte_for_byte_identical_across_two_runs() {
 fn folders_present_even_on_a_git_disabled_empty_tree() {
     // Genuinely no dep edges, no folders beyond "." — folders must still be `Some` with empty/trivial
     // content, never `None` standing in for "ran and found nothing" (see `AnalyzeOutput::folders`'s doc).
-    let dir = TempDir::new("zpz-engine-channels-folders-empty");
+    let dir = TempDir::new("zzop-engine-channels-folders-empty");
     dir.write("a.ts", "export const a = 1;\n");
     let out = analyze_tree(dir.path(), &config());
     let folders = out.folders.expect("folders should be Some even here");
@@ -159,7 +159,7 @@ fn run_git(dir: &Path, args: &[&str]) {
 /// `CrossLayerCoChurnOptions::default()`'s `min_co_changes: 2` threshold), plus a same-layer-only commit
 /// that must NOT contribute a cross-layer pair.
 fn git_layer_fixture_repo() -> TempDir {
-    let dir = TempDir::new("zpz-engine-channels-git-fixture");
+    let dir = TempDir::new("zzop-engine-channels-git-fixture");
     run_git(dir.path(), &["init", "-q"]);
     run_git(dir.path(), &["config", "user.email", "test@example.com"]);
     run_git(dir.path(), &["config", "user.name", "Test User"]);

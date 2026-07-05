@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use zpz_core::{DepGraph, ImportMap};
+use zzop_core::{DepGraph, ImportMap};
 
 /// Extensions / index files tried in order when resolving a specifier base.
 pub const RESOLVE_EXTS: &[&str] = &[
@@ -80,7 +80,7 @@ pub fn try_ext(base: &str, all_paths: &HashSet<String>) -> Option<String> {
 /// One directory's effective TypeScript path-mapping config: `compilerOptions.baseUrl` (POSIX dir
 /// relative to the analysis root, `""` for root) and `compilerOptions.paths` (alias pattern -> ordered
 /// target list, joined against `base_url` only at resolution time). Built from tsconfig.json (+ one
-/// local `extends` level) by `zpz-engine`'s `pipeline::tsconfig_scan`; stays pure/filesystem-free.
+/// local `extends` level) by `zzop-engine`'s `pipeline::tsconfig_scan`; stays pure/filesystem-free.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TsconfigPaths {
     pub base_url: String,
@@ -182,7 +182,7 @@ fn resolve_via_base_url(
 }
 
 /// A workspace (monorepo) package as seen by the import resolver, resolving both a bare `<name>` and a
-/// `<name>/subpath` specifier. Built by `zpz-engine`'s `pipeline::package_json_entries` from `package.json`.
+/// `<name>/subpath` specifier. Built by `zzop-engine`'s `pipeline::package_json_entries` from `package.json`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspacePkg {
     /// The package's own directory (POSIX, relative to the analysis root; `""` for root-level) — resolves
@@ -477,7 +477,7 @@ mod tests {
 
     #[test]
     fn build_dep_excludes_deferred() {
-        use zpz_core::ImportBinding;
+        use zzop_core::ImportBinding;
         let mut imports = ImportMap::new();
         imports.insert(
             "Y".to_string(),
@@ -685,7 +685,7 @@ mod tests {
         let mut imports = ImportMap::new();
         imports.insert(
             "utils".to_string(),
-            zpz_core::ImportBinding {
+            zzop_core::ImportBinding {
                 specifier: "@acme/utils-core".into(),
                 original: "*".into(),
                 deferred: false,

@@ -1,4 +1,4 @@
-//! zpz-cache — the file-level analysis cache.
+//! zzop-cache — the file-level analysis cache.
 //!
 //! Two separate on-disk entries per file: the Common IR slice (keyed by content hash + parser
 //! fingerprint) and per-file rule findings (same key + ruleset fingerprint), so a rule-pack-only

@@ -6,7 +6,7 @@
 use super::config::ScoresConfig;
 use super::shared::{classify_path, is_external, round};
 use super::types::{FsdScore, FsdViolation, FsdViolationKind};
-use zpz_core::DepGraph;
+use zzop_core::DepGraph;
 
 /// FSD L2 (slice) layer number.
 const SLICE_LAYER: u8 = 2;

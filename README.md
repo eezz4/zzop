@@ -1,4 +1,4 @@
-# zpz ( Zero Pain Zone )
+# zzop ( Zero Zone Of Pain )
 
 A multi-language SAST / architecture-analysis engine, written in Rust. It parses a source tree into a
 language-neutral IR, runs a layered rule system (native whole-graph analyses + declarative JSON rule
@@ -44,18 +44,18 @@ cargo fmt --all
 The N-API addon needs the MSVC toolchain on Windows:
 
 ```
-cargo +stable-x86_64-pc-windows-msvc build -p zpz-napi --release --features addon
+cargo +stable-x86_64-pc-windows-msvc build -p zzop-napi --release --features addon
 node packages/napi/smoke.mjs
 ```
 
 Cold/warm benchmark over a real tree:
 
 ```
-cargo run --release -p zpz-engine --example bench -- <root> --packs rules/dsl --cache <dir> --git
+cargo run --release -p zzop-engine --example bench -- <root> --packs rules/dsl --cache <dir> --git
 ```
 
 Other `packages/engine/examples/` ad hoc harnesses: `cross_layer_rule_counts` (per-`cross-layer/*`-rule
-finding counts across 1+ tree roots; set `ZPZ_DUMP_MESSAGES=<n>` to print sample messages),
+finding counts across 1+ tree roots; set `ZZOP_DUMP_MESSAGES=<n>` to print sample messages),
 `dep_graph_export` (exports the file-level dependency graph as Graphviz DOT or Mermaid), and
 `fastapi_overlay_adapter` (reference external adapter — a lexical FastAPI/Python router scanner feeding
 `EngineConfig::adapter_overlays`, Mode B; see [`docs/NORMALIZED_AST.md`](docs/NORMALIZED_AST.md)'s

@@ -3,8 +3,8 @@
 //! These contracts previously existed only as human convention (a prior audit found real drift: DSL rules
 //! shipped with no `suppress_marker`, rule messages that never told the reader how to exclude a finding,
 //! and `docs/rules/catalog.md` totals out of sync with the actual pack/registry data). This file loads
-//! every shipped DSL pack (`rules/dsl/*.json`, via `zpz_core::load_dsl_packs`) and the native registry
-//! (`zpz_engine::register_all_native`, composing `zpz_rules_graph`/`zpz_rules_schema`/`zpz_metrics`'s own
+//! every shipped DSL pack (`rules/dsl/*.json`, via `zzop_core::load_dsl_packs`) and the native registry
+//! (`zzop_engine::register_all_native`, composing `zzop_rules_graph`/`zzop_rules_schema`/`zzop_metrics`'s own
 //! `register_native_analyses`) fresh in each test, so drift in either is caught the next time
 //! `cargo test --workspace` runs — no test here hand-copies rule data, everything is read from the same
 //! source the engine itself loads at runtime.
@@ -59,8 +59,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use zpz_core::{load_dsl_packs, Matcher, RuleDef, RuleMeta, RulePackDef, RuleRegistry};
-use zpz_engine::register_all_native;
+use zzop_core::{load_dsl_packs, Matcher, RuleDef, RuleMeta, RulePackDef, RuleRegistry};
+use zzop_engine::register_all_native;
 
 // ---------------------------------------------------------------------------------------------
 // Shared fixtures — every test loads the SAME real data the engine loads at runtime, never a
@@ -171,8 +171,8 @@ fn suppress_markers_are_unique_within_each_pack() {
 // ---------------------------------------------------------------------------------------------
 
 /// Every DSL rule's `message` names its own suppress marker OR the literal `disabled_rules`/`disabledRules`
-/// string somewhere in the text — the "how to exclude" leg of zpz's finding contract (every finding must
-/// tell the reader the problem, the fix, AND how to turn it off — zpz's finding-output design
+/// string somewhere in the text — the "how to exclude" leg of zzop's finding contract (every finding must
+/// tell the reader the problem, the fix, AND how to turn it off — zzop's finding-output design
 /// principle; see docs/rules/authoring-guide.md's quality bar). A rule that legitimately has no
 /// per-finding marker (native-analysis-style disable-only rules ported into the DSL, if any ever are) still
 /// passes via the `disabled_rules` leg — this test accepts EITHER, not just the marker.
@@ -593,11 +593,11 @@ fn core_rs_files_excluding_mechanism_files() -> Vec<PathBuf> {
     out
 }
 
-/// The kernel-is-rule-vocabulary-free central contract: `zpz_core::register_native_analysis_stub`
+/// The kernel-is-rule-vocabulary-free central contract: `zzop_core::register_native_analysis_stub`
 /// (`packages/core/src/registry.rs`) is a generic, id-agnostic MECHANISM — the kernel itself must never
 /// name a specific native analysis id. Every id lives in its owning rules crate's own
-/// `register_native_analyses` (`zpz_rules_graph`, `zpz_rules_schema`, `zpz_metrics`), composed by
-/// `zpz_engine::register_all_native` — never hand-copied here, so this test cannot drift from the real id
+/// `register_native_analyses` (`zzop_rules_graph`, `zzop_rules_schema`, `zzop_metrics`), composed by
+/// `zzop_engine::register_all_native` — never hand-copied here, so this test cannot drift from the real id
 /// list the same way contract 5's catalog-sync tests can't.
 ///
 /// Pragmatic grep-proxy, same spirit as contract 3: for every registered id, checks whether the exact

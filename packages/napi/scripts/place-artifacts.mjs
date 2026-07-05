@@ -1,10 +1,10 @@
 // Copies prebuilt addon binaries out of a flat CI-artifact directory into their npm/<platform>/
 // sub-package, where index.js's loader cascade expects to find them at install time.
 //
-// Expects files named `zpz-napi.<rust-target-triple>.node` — the exact naming
+// Expects files named `zzop-napi.<rust-target-triple>.node` — the exact naming
 // .github/workflows/prebuild.yml's "Collect artifact" step already produces (e.g.
-// `zpz-napi.x86_64-pc-windows-msvc.node`), so no change to that workflow's naming was needed. If the
-// artifacts were downloaded via `actions/download-artifact` per-job (one dir per `zpz-napi-<target>`
+// `zzop-napi.x86_64-pc-windows-msvc.node`), so no change to that workflow's naming was needed. If the
+// artifacts were downloaded via `actions/download-artifact` per-job (one dir per `zzop-napi-<target>`
 // artifact name), flatten them into one directory first — this script does not recurse.
 //
 // Usage: node scripts/place-artifacts.mjs <artifacts-dir>
@@ -43,7 +43,7 @@ function main() {
   let placed = 0;
 
   for (const entry of entries) {
-    const match = /^zpz-napi\.(.+)\.node$/.exec(entry);
+    const match = /^zzop-napi\.(.+)\.node$/.exec(entry);
     if (!match) continue;
 
     const target = match[1];
@@ -59,14 +59,14 @@ function main() {
       continue;
     }
 
-    const dest = path.join(destDir, 'zpz-napi.node');
+    const dest = path.join(destDir, 'zzop-napi.node');
     fs.copyFileSync(path.join(artifactsDir, entry), dest);
     console.log(`place-artifacts: ${entry} -> ${path.relative(process.cwd(), dest)}`);
     placed += 1;
   }
 
   if (placed === 0) {
-    console.error(`place-artifacts: no recognized "zpz-napi.<target>.node" files found in ${artifactsDir}`);
+    console.error(`place-artifacts: no recognized "zzop-napi.<target>.node" files found in ${artifactsDir}`);
     process.exit(1);
   }
 

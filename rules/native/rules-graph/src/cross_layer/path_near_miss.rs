@@ -4,8 +4,8 @@
 //! `user`) do NOT count, since fuzzy-matching would turn this into a guesser rather than a precise "one side
 //! generalized a parameter" signal. Info severity: lower confidence than a rule that pins down what differs.
 
-use zpz_core::io::TaggedConsume;
-use zpz_core::{Finding, Severity};
+use zzop_core::io::TaggedConsume;
+use zzop_core::{Finding, Severity};
 
 use super::{path_segments, split_key, HttpProvideSite};
 
@@ -106,7 +106,7 @@ mod tests {
     ) -> TaggedConsume {
         TaggedConsume {
             source: source.to_string(),
-            consume: zpz_core::IoConsume {
+            consume: zzop_core::IoConsume {
                 kind: kind.to_string(),
                 key: key.map(str::to_string),
                 file: file.to_string(),

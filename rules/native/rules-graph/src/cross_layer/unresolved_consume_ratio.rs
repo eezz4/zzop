@@ -9,8 +9,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use zpz_core::io::TaggedConsume;
-use zpz_core::{Finding, Severity};
+use zzop_core::io::TaggedConsume;
+use zzop_core::{Finding, Severity};
 
 // Shared with `sdk_import_no_visible_consume`, which fires only BELOW this floor — the two rules
 // partition the blind-spot space and never co-fire on one tree (see mod.rs).
@@ -105,7 +105,7 @@ pub fn unresolved_consume_ratio_findings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zpz_core::io::IoConsume;
+    use zzop_core::io::IoConsume;
 
     fn unresolved(source: &str, file: &str, line: u32, raw: Option<&str>) -> TaggedConsume {
         TaggedConsume {

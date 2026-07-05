@@ -1,4 +1,4 @@
-//! End-to-end test for the whole-project Java Spring provides pass (`zpz_parser_java::
+//! End-to-end test for the whole-project Java Spring provides pass (`zzop_parser_java::
 //! extract_http_provides_project`, wired into `analyze::assemble` by `run_java_provides_project_pass`)
 //! reaching `analyze_tree`/`analyze_trees` — a shape neither the fused per-file pass
 //! (`crate::io::extract_java_file_io`) nor `analyze_io_java.rs`'s single-file fixture can see on their own:
@@ -13,7 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_engine::{analyze_tree, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -50,7 +50,7 @@ impl Drop for TempDir {
 }
 
 fn fixture_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-io-java-project-fixture");
+    let dir = TempDir::new("zzop-engine-io-java-project-fixture");
     dir.write(
         "constants/ce/PathsCE.java",
         concat!(

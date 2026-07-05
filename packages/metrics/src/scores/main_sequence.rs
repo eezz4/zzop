@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashSet};
 use super::config::ScoresConfig;
 use super::shared::{is_external, module_of};
 use super::types::{FileKind, FileKinds, MainSequenceScore, ModuleMainSeq};
-use zpz_core::DepGraph;
+use zzop_core::DepGraph;
 
 /// Per-module accumulator before ratios are derived.
 struct Acc {

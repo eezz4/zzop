@@ -1,5 +1,5 @@
-//! zpz-parser-typescript — native swc TS parser -> Common IR projection (0 N-API crossings). swc types
-//! stay inside this crate (an swc upgrade should never leak into the public IR); only zpz-core types are
+//! zzop-parser-typescript — native swc TS parser -> Common IR projection (0 N-API crossings). swc types
+//! stay inside this crate (an swc upgrade should never leak into the public IR); only zzop-core types are
 //! exposed.
 //!
 //! ## 2-layer layout
@@ -31,7 +31,7 @@ pub use lang::resolve::{
     TsconfigPaths, WorkspacePkg, RESOLVE_EXTS,
 };
 
-/// Cache key ingredient for `zpz-cache`: parser id + pinned swc version + a logic-version counter, so an
+/// Cache key ingredient for `zzop-cache`: parser id + pinned swc version + a logic-version counter, so an
 /// swc upgrade or a change in this crate's projected IR shape invalidates stale cached entries. The
 /// `swc_core-71.0.5` segment must match this crate's `Cargo.toml` pin exactly (TODO Phase 2: derive it
 /// from the pin automatically instead of hand-syncing). Each `+name-vN` suffix marks a projection-shape
@@ -65,7 +65,7 @@ use swc_core::ecma::ast::{
 };
 use swc_core::ecma::parser::{parse_file_as_module, Syntax, TsSyntax};
 use swc_core::ecma::visit::{Visit, VisitWith};
-use zpz_core::{
+use zzop_core::{
     CommonIr, ImportBinding, ImportMap, IoFacts, MinimalIr, ReExport, SourceSymbol,
     SourceSymbolKind,
 };
@@ -1566,7 +1566,7 @@ export class PivotTableComponent {
     }
 
     // --- parseSymbols (top-level; sub-symbols are follow-ups) ---
-    use zpz_core::SourceSymbolKind as K;
+    use zzop_core::SourceSymbolKind as K;
 
     fn names(syms: &[SourceSymbol]) -> Vec<&str> {
         syms.iter().map(|s| s.name.as_str()).collect()
@@ -1948,7 +1948,7 @@ export class PivotTableComponent {
             ),
         ];
         let ir = build_common_ir("app", &files);
-        let cycles = zpz_core::circular_from_dep(&ir.ir.dep);
+        let cycles = zzop_core::circular_from_dep(&ir.ir.dep);
         assert_eq!(cycles.len(), 1);
         let mut got = cycles[0].clone();
         got.sort();
@@ -1958,7 +1958,7 @@ export class PivotTableComponent {
     #[test]
     fn cross_layer_fe_to_be_end_to_end() {
         // Crown-jewel slice: FE TS egress -> IoFacts -> cross-layer join to a BE provider.
-        use zpz_core::{link_cross_layer_io, IoFacts, IoProvide, SourceIo};
+        use zzop_core::{link_cross_layer_io, IoFacts, IoProvide, SourceIo};
         let fe_files = vec![(
             "Ctx.tsx".to_string(),
             r#"axios.get("/authen/getUserInfo")"#.to_string(),
@@ -1981,7 +1981,7 @@ export class PivotTableComponent {
                 consumes: Vec::new(),
             },
         };
-        let r = link_cross_layer_io(&[fe, be], &zpz_core::LinkOptions::default());
+        let r = link_cross_layer_io(&[fe, be], &zzop_core::LinkOptions::default());
         assert_eq!(r.edges.len(), 1);
         assert!(r.edges[0].cross_source);
         assert_eq!(r.edges[0].key, "GET /authen/getUserInfo");

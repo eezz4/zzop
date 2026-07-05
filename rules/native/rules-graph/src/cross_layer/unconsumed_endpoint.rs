@@ -7,8 +7,8 @@
 //! in a test fixture is not deployed surface. A dead route provided by 2+ trees ALSO fires one warning
 //! `cross-layer/duplicate-route` finding for the same key — intentional overlap, different questions.
 
-use zpz_core::io::{TaggedConsume, TaggedProvide};
-use zpz_core::{Finding, Severity};
+use zzop_core::io::{TaggedConsume, TaggedProvide};
+use zzop_core::{Finding, Severity};
 
 pub fn unconsumed_endpoint_findings(
     unconsumed_provides: &[TaggedProvide],
@@ -61,7 +61,7 @@ mod tests {
     fn dead(key: &str, source: &str, file: &str, line: u32) -> TaggedProvide {
         TaggedProvide {
             source: source.to_string(),
-            provide: zpz_core::IoProvide {
+            provide: zzop_core::IoProvide {
                 kind: "http".to_string(),
                 key: key.to_string(),
                 file: file.to_string(),
@@ -74,7 +74,7 @@ mod tests {
     fn dead_kind(kind: &str, key: &str, source: &str, file: &str, line: u32) -> TaggedProvide {
         TaggedProvide {
             source: source.to_string(),
-            provide: zpz_core::IoProvide {
+            provide: zzop_core::IoProvide {
                 kind: kind.to_string(),
                 key: key.to_string(),
                 file: file.to_string(),
@@ -87,7 +87,7 @@ mod tests {
     fn unresolved(kind: &str, source: &str) -> TaggedConsume {
         TaggedConsume {
             source: source.to_string(),
-            consume: zpz_core::IoConsume {
+            consume: zzop_core::IoConsume {
                 kind: kind.to_string(),
                 key: None,
                 file: "dyn.ts".to_string(),

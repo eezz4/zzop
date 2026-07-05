@@ -1,12 +1,12 @@
 //! End-to-end demo of the Mode B external-adapter injection path (`EngineConfig::adapter_overlays`)
-//! against a FastAPI (Python) backend — a language zpz has no native in-process parser for, so
+//! against a FastAPI (Python) backend — a language zzop has no native in-process parser for, so
 //! without an overlay it reports zero provides no matter how many `.py` files exist under a root.
 //!
 //! This example plays two roles at once:
 //!  1. **External adapter author** — a lexical scanner over `.py` text (line/regex-based, no real
 //!     Python AST) that recognizes FastAPI's router-registration idioms and projects them into the
 //!     engine's `NormalizedEnvelope` / `FileProjection` fragment-channel contract (see
-//!     `docs/NORMALIZED_AST.md`'s "Adapter overlays" section; shapes in `zpz_core::fragments`).
+//!     `docs/NORMALIZED_AST.md`'s "Adapter overlays" section; shapes in `zzop_core::fragments`).
 //!  2. **Engine caller** — feeds that envelope into `EngineConfig::adapter_overlays` and runs
 //!     `analyze_tree` (Mode B: the overlay merges onto a native per-file pass over the same tree, so
 //!     a mixed TypeScript-frontend/Python-backend tree still gets a native pass on its own half).
@@ -35,16 +35,16 @@
 //!    anywhere is excluded from being a root, resolved or not — under-reporting is honest, mis-keying
 //!    is not).
 //!
-//! Usage: `cargo run --release -p zpz-engine --example fastapi_overlay_adapter -- <root>`
+//! Usage: `cargo run --release -p zzop-engine --example fastapi_overlay_adapter -- <root>`
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use zpz_core::{
+use zzop_core::{
     FileProjection, IoFacts, NormalizedEnvelope, RouterMountEntry, RouterMountFragment,
     NORMALIZED_AST_FORMAT,
 };
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_engine::{analyze_tree, EngineConfig};
 
 fn main() {
     let root = match std::env::args().nth(1) {
@@ -80,9 +80,9 @@ fn main() {
         if verb_count == 1 { "y" } else { "ies" },
         if mount_count == 1 { "y" } else { "ies" },
     );
-    // ZPZ_DUMP_FRAGMENTS=1: dump every extracted fragment/entry, to distinguish an adapter bug
+    // ZZOP_DUMP_FRAGMENTS=1: dump every extracted fragment/entry, to distinguish an adapter bug
     // (wrong extraction) from an engine composition bug (dropped a correct extraction).
-    if std::env::var("ZPZ_DUMP_FRAGMENTS").is_ok() {
+    if std::env::var("ZZOP_DUMP_FRAGMENTS").is_ok() {
         for f in &envelope.files {
             for frag in &f.router_mount_fragments {
                 eprintln!("  fragment '{}' @ {}", frag.name, f.path);
@@ -134,7 +134,7 @@ fn main() {
     }
 }
 
-fn print_summary(label: &str, out: &zpz_engine::AnalyzeOutput) {
+fn print_summary(label: &str, out: &zzop_engine::AnalyzeOutput) {
     let (provides, consumes) = out
         .ir
         .ir
@@ -199,7 +199,7 @@ fn build_overlay(scan_root: &Path, scan_prefix: &str) -> NormalizedEnvelope {
             path: full_path,
             loc,
             symbols: Vec::new(),
-            imports: zpz_core::ImportMap::new(),
+            imports: zzop_core::ImportMap::new(),
             re_exports: Vec::new(),
             used_names: Vec::new(),
             const_map_fragment: HashMap::new(),

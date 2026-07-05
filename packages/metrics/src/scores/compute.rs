@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use zpz_core::{DepGraph, FileNode};
+use zzop_core::{DepGraph, FileNode};
 
 use super::config::ScoresConfig;
 use super::lod::LodChain;

@@ -3,7 +3,7 @@
 
 use crate::scores::config::ScoresConfig;
 use crate::scores::types::FixRatioScore;
-use zpz_core::FileNode;
+use zzop_core::FileNode;
 
 /// The 0-100 score scale.
 const PERCENT: f64 = 100.0;

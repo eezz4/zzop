@@ -2,11 +2,11 @@
 //! becomes a per-file `SourceFile.io` provide AND merges into the tree-wide `CommonIr.ir.io`; an
 //! FE file's `fetch(...)` becomes a consume, merged the same way; an inline io-scan DSL pack (NOT
 //! `rules/dsl/*.json` — inlined so the test controls the exact rule) fires on the unversioned
-//! provide end to end through `zpz_engine::analyze_tree`.
+//! provide end to end through `zzop_engine::analyze_tree`.
 //!
 //! The BE fixture is deliberately Nest-style, NOT Hono-style: since the `+router-mounts-v1` batch,
 //! code-registered router (Hono) provides compose whole-tree at assembly and are NOT visible to
-//! the per-file `io-scan` matcher (a documented trade — `zpz_engine::io`'s module doc). Nest
+//! the per-file `io-scan` matcher (a documented trade — `zzop_engine::io`'s module doc). Nest
 //! decorator provides remain per-file, so they are what exercises the io-scan seam; the composed
 //! router path has its own e2e coverage (`analyze_routes_hono.rs`, `analyze_multi_tree.rs`).
 
@@ -14,8 +14,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_core::RulePackDef;
-use zpz_engine::{analyze_tree, EngineConfig};
+use zzop_core::RulePackDef;
+use zzop_engine::{analyze_tree, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -54,7 +54,7 @@ impl Drop for TempDir {
 /// A tiny inline io-scan pack — deliberately NOT one of `rules/dsl/*.json`, to prove `io-scan` rules can be
 /// supplied entirely at runtime rather than only from a shipped pack file. Mirrors the shape of the
 /// `endpoint-version-prefix` rule from the (test-only, not shipped) `http-conventions` fixture in
-/// `zpz_core::dsl`'s own tests closely enough to prove the wiring, without depending on that fixture.
+/// `zzop_core::dsl`'s own tests closely enough to prove the wiring, without depending on that fixture.
 fn unversioned_provide_pack() -> RulePackDef {
     let json = r#"{
         "id": "test-io",
@@ -79,7 +79,7 @@ fn unversioned_provide_pack() -> RulePackDef {
 }
 
 fn fixture_tree() -> TempDir {
-    let dir = TempDir::new("zpz-engine-io-fixture");
+    let dir = TempDir::new("zzop-engine-io-fixture");
     dir.write(
         "routes/apiRoutes.ts",
         "@Controller('authen')\nclass AuthenController {\n  @Get('getUserInfo')\n  getUserInfo() {}\n}\n",

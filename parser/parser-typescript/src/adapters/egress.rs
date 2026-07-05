@@ -22,7 +22,7 @@ use swc_core::ecma::ast::{
     Pat, Prop, PropName, PropOrSpread, Stmt,
 };
 use swc_core::ecma::visit::{Visit, VisitWith};
-use zpz_core::{http_interface_key, IoConsume};
+use zzop_core::{http_interface_key, IoConsume};
 
 /// Extract HTTP egress IoConsume entries across all files (the const map is project-wide).
 pub fn extract_http_egress(files: &[(String, String)]) -> Vec<IoConsume> {
@@ -101,7 +101,7 @@ fn is_external(u: &str) -> bool {
     l.starts_with("http://") || l.starts_with("https://")
 }
 
-/// Public form of the internal/external classification, exported so `zpz-engine`'s late cross-file
+/// Public form of the internal/external classification, exported so `zzop-engine`'s late cross-file
 /// resolution can apply the same three-way gating (leading `/` = internal, `http(s)://` = external
 /// verbatim key, else unresolved) instead of force-keying every resolved constant as internal.
 pub fn is_external_url(u: &str) -> bool {

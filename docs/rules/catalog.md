@@ -1,7 +1,7 @@
 # Rule catalog
 
 Everything the engine ships today, read directly from `rules/dsl/**/*.json` and
-`zpz_engine::register_all_native` (which composes `zpz_rules_graph`/`zpz_rules_schema`/`zpz_metrics`'s own
+`zzop_engine::register_all_native` (which composes `zzop_rules_graph`/`zzop_rules_schema`/`zzop_metrics`'s own
 `register_native_analyses` — the kernel, `packages/core`, registers no ids itself). Schema/matcher
 semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 [authoring-guide.md](authoring-guide.md).
@@ -154,8 +154,8 @@ rule-vocabulary-free): `rules/native/rules-graph` owns `circular`, `unreachable`
 `rules/native/rules-schema` owns `schema-structural`, `schema-usage`, `soft-delete-bypass`,
 `orderby-unindexed`, `enum-string-drift`; `packages/metrics` owns `seams`, `criticality`, `scores`,
 `health`, `recommendations` (score computations, not findings-producing rules — they only ride the same
-toggle/gating surface). `zpz_engine::register_all_native` composes all three. The 20
-`cross-layer/*` ids are the MULTI-TREE exception: they run over `zpz_engine::analyze_trees`'s joined
+toggle/gating surface). `zzop_engine::register_all_native` composes all three. The 20
+`cross-layer/*` ids are the MULTI-TREE exception: they run over `zzop_engine::analyze_trees`'s joined
 `CrossLayerResult` (every other row here runs per-tree), exposed as `crossLayerFindings` alongside
 `crossLayer` in `analyzeTrees`'s output. None of the 20 honor an inline suppression marker (disable-only, via
 `disabledRules`) — see `rules/native/rules-graph/src/cross_layer/mod.rs`'s module doc.

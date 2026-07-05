@@ -11,7 +11,7 @@
 //!   multi-key object or the array form used for multi-field ordering) on a resolvable model, where
 //!   `field` has no `@id`/`@unique` of its own and is not the leading column of any `@@index`/`@@unique`.
 //! - `enum-string-drift`: for a field whose type resolves to a declared enum (via
-//!   `zpz_parser_prisma::parse_schema_enums`) and whose field name maps to exactly one enum type across every
+//!   `zzop_parser_prisma::parse_schema_enums`) and whose field name maps to exactly one enum type across every
 //!   model (ambiguous names are skipped), flags direct literal-object `fieldName: 'Literal'` occurrences whose
 //!   value isn't a declared enum member; a literal inside `in: [...]`, a variable, or a nested value is skipped.
 
@@ -22,7 +22,7 @@ use std::path::Path;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use zpz_core::{SchemaEnum, SchemaModel, Severity};
+use zzop_core::{SchemaEnum, SchemaModel, Severity};
 
 use crate::usage::{capitalize, walk_ts_files};
 
@@ -376,7 +376,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use zpz_core::{FieldAttr, SchemaField};
+    use zzop_core::{FieldAttr, SchemaField};
 
     struct TempDir(PathBuf);
 
@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn scan_query_call_sites_empty_getter_returns_empty() {
-        let dir = TempDir::new("zpz-join-sites");
+        let dir = TempDir::new("zzop-join-sites");
         dir.write(
             "src/domains/item/repo.ts",
             "export function f() { return getPrisma().item.findMany({}); }\n",
@@ -464,13 +464,13 @@ mod tests {
 
     #[test]
     fn scan_query_call_sites_no_src_dir_returns_empty() {
-        let dir = TempDir::new("zpz-join-sites");
+        let dir = TempDir::new("zzop-join-sites");
         assert!(scan_query_call_sites(dir.path(), GETTER).is_empty());
     }
 
     #[test]
     fn scan_query_call_sites_finds_find_many_with_model_and_line() {
-        let dir = TempDir::new("zpz-join-sites");
+        let dir = TempDir::new("zzop-join-sites");
         dir.write(
             "src/domains/item/repo.ts",
             "export function list() {\n  return getPrisma().item.findMany({ where: { ownerId: 1 } });\n}\n",
@@ -486,7 +486,7 @@ mod tests {
 
     #[test]
     fn scan_query_call_sites_captures_balanced_span_across_nested_braces() {
-        let dir = TempDir::new("zpz-join-sites");
+        let dir = TempDir::new("zzop-join-sites");
         dir.write(
             "src/domains/item/repo.ts",
             "export function list() {\n  return getPrisma().item.findMany({\n    where: { ownerId: 1, meta: { a: fn(1, 2) } },\n    orderBy: { name: 'asc' },\n  });\n}\n",
@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn scan_query_call_sites_multiple_sites_same_file_correct_lines() {
-        let dir = TempDir::new("zpz-join-sites");
+        let dir = TempDir::new("zzop-join-sites");
         dir.write(
             "src/domains/item/repo.ts",
             "export function a() {\n  return getPrisma().item.findMany({});\n}\n\nexport function b() {\n  return getPrisma().item.count({});\n}\n",
@@ -514,7 +514,7 @@ mod tests {
 
     #[test]
     fn scan_query_call_sites_ignores_non_query_methods() {
-        let dir = TempDir::new("zpz-join-sites");
+        let dir = TempDir::new("zzop-join-sites");
         dir.write(
             "src/domains/item/repo.ts",
             "export function f() { return getPrisma().item.create({ data: {} }); }\n",

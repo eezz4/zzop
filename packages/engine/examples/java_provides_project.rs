@@ -1,9 +1,9 @@
-//! Ad hoc verification harness for `zpz_parser_java::extract_http_provides_project` (the
+//! Ad hoc verification harness for `zzop_parser_java::extract_http_provides_project` (the
 //! whole-project Spring HTTP route pass — see that module's doc). Not wired into the fused per-file
 //! engine pipeline (see `project.rs`), so this walks a `.java` tree directly and calls the parser
 //! crate's entry point itself, rather than going through `analyze_tree`.
 //!
-//! Usage: `cargo run --release -p zpz-engine --example java_provides_project -- <root> [sample_n]`
+//! Usage: `cargo run --release -p zzop-engine --example java_provides_project -- <root> [sample_n]`
 
 use std::path::PathBuf;
 
@@ -43,7 +43,7 @@ fn main() {
     }
     eprintln!("java files scanned: {}", files.len());
 
-    let report = zpz_parser_java::extract_http_provides_project(&files);
+    let report = zzop_parser_java::extract_http_provides_project(&files);
     println!("provides_total={}", report.provides.len());
     println!(
         "skipped_unresolved_prefix={}",

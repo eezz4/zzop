@@ -1,6 +1,6 @@
 //! End-to-end coverage for the three fullstack io/graph native rules added alongside `duplicate-route`/
 //! `route-shadowing`'s siblings (rule-pack catalog #46/#47/#48): `route-shadowing`, `mutating-route-no-auth`,
-//! and `unprovided-consume` — all `zpz_rules_graph`, wired into `zpz_engine::analyze::assemble` beside
+//! and `unprovided-consume` — all `zzop_rules_graph`, wired into `zzop_engine::analyze::assemble` beside
 //! `schema-usage`/`duplicate-route`. Same `TempDir` fixture-tree pattern as `pack_sql.rs`/
 //! `analyze_callgraph.rs`.
 
@@ -8,8 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zpz_core::RuleConfig;
-use zpz_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
+use zzop_core::RuleConfig;
+use zzop_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
 
 struct TempDir(PathBuf);
 
@@ -45,7 +45,7 @@ impl Drop for TempDir {
     }
 }
 
-fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zpz_core::Finding> {
+fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {
     out.findings.iter().filter(|f| f.rule_id == rule).collect()
 }
 
@@ -76,7 +76,7 @@ fn disabled(rule: &str) -> RuleConfig {
 
 /// An earlier `:id` param route shadows a later `/items/active` literal route in the same file.
 fn route_shadowing_fixture() -> TempDir {
-    let dir = TempDir::new("zpz-route-shadowing");
+    let dir = TempDir::new("zzop-route-shadowing");
     dir.write(
         "routes/items.ts",
         "const apiRoutes = new Hono();\napiRoutes.get(\"/items/:id\", api.getItem);\napiRoutes.get(\"/items/active\", api.listActive);\n",
@@ -92,14 +92,14 @@ fn earlier_param_route_shadowing_a_later_literal_route_is_flagged() {
     assert_eq!(found.len(), 1, "{:?}", out.findings);
     assert_eq!(found[0].file, "routes/items.ts");
     assert_eq!(found[0].line, 3);
-    assert_eq!(found[0].severity, zpz_core::Severity::Warning);
+    assert_eq!(found[0].severity, zzop_core::Severity::Warning);
     assert!(found[0].message.contains("line 2"));
     assert!(found[0].message.contains("disabled_rules"));
 }
 
 #[test]
 fn literal_route_registered_before_the_param_route_is_not_flagged() {
-    let dir = TempDir::new("zpz-route-shadowing-negative");
+    let dir = TempDir::new("zzop-route-shadowing-negative");
     dir.write(
         "routes/items.ts",
         "const apiRoutes = new Hono();\napiRoutes.get(\"/items/active\", api.listActive);\napiRoutes.get(\"/items/:id\", api.getItem);\n",
@@ -130,7 +130,7 @@ fn route_shadowing_disabled_via_config_removes_the_finding() {
 /// `POST /users` -> `createUser` never calls anything guard-shaped. `DELETE /users/:id` ->
 /// `deleteUserGuarded` calls `requireAuth` (same-file call edge) before deleting.
 fn mutating_no_auth_fixture() -> TempDir {
-    let dir = TempDir::new("zpz-mutating-no-auth");
+    let dir = TempDir::new("zzop-mutating-no-auth");
     dir.write(
         "routes/api.ts",
         "const apiRoutes = new Hono();\napiRoutes.post(\"/users\", createUser);\napiRoutes.delete(\"/users/:id\", deleteUserGuarded);\n",
@@ -150,7 +150,7 @@ fn mutating_handler_never_reaching_a_guard_is_flagged() {
     assert_eq!(found.len(), 1, "{:?}", out.findings);
     assert_eq!(found[0].file, "routes/api.ts");
     assert_eq!(found[0].line, 2);
-    assert_eq!(found[0].severity, zpz_core::Severity::Info);
+    assert_eq!(found[0].severity, zzop_core::Severity::Info);
     let data = found[0].data.as_ref().unwrap();
     assert_eq!(data["method"], "POST");
     assert_eq!(data["path"], "/users");
@@ -161,7 +161,7 @@ fn mutating_handler_never_reaching_a_guard_is_flagged() {
 
 #[test]
 fn auth_acquisition_path_route_with_no_guard_is_never_flagged() {
-    let dir = TempDir::new("zpz-mutating-no-auth-acquisition");
+    let dir = TempDir::new("zzop-mutating-no-auth-acquisition");
     dir.write(
         "routes/api.ts",
         "const apiRoutes = new Hono();\napiRoutes.post(\"/api/auth/register\", registerUser);\n",
@@ -183,7 +183,7 @@ fn conditional_exempt_segment_with_no_auth_family_segment_still_fires() {
     // /devices/register — "register" is a conditional-tier auth-acquisition word, but no auth-family
     // segment (auth/login/signin/signup/session/oauth) appears anywhere else in the path, so this is an
     // ordinary device-registration route, not the auth-acquisition surface — it is checked normally.
-    let dir = TempDir::new("zpz-mutating-no-auth-devices-register");
+    let dir = TempDir::new("zzop-mutating-no-auth-devices-register");
     dir.write(
         "routes/api.ts",
         "const apiRoutes = new Hono();\napiRoutes.post(\"/devices/register\", registerDevice);\n",
@@ -202,7 +202,7 @@ fn conditional_exempt_segment_with_no_auth_family_segment_still_fires() {
 fn conditional_exempt_segment_paired_with_auth_family_segment_is_exempt() {
     // /auth/register — "register" (conditional tier) paired with "auth" (auth-family) elsewhere in the
     // path IS exempt, unlike the standalone /devices/register case above.
-    let dir = TempDir::new("zpz-mutating-no-auth-auth-register");
+    let dir = TempDir::new("zzop-mutating-no-auth-auth-register");
     dir.write(
         "routes/api.ts",
         "const apiRoutes = new Hono();\napiRoutes.post(\"/auth/register\", registerAccount);\n",
@@ -224,7 +224,7 @@ fn author_path_route_with_no_guard_still_fires_segment_precision() {
     // Handler is deliberately named without an "auth" substring (unlike the path) so this test isolates
     // the PATH-segment exemption from the separate, unrelated guard-vocabulary name match on the handler
     // symbol itself (which would independently clear a handler literally named e.g. `updateAuthorProfile`).
-    let dir = TempDir::new("zpz-mutating-no-auth-author");
+    let dir = TempDir::new("zzop-mutating-no-auth-author");
     dir.write(
         "routes/api.ts",
         "const apiRoutes = new Hono();\napiRoutes.post(\"/author/profile\", patchWriterBio);\n",
@@ -236,7 +236,7 @@ fn author_path_route_with_no_guard_still_fires_segment_precision() {
     let out = scan(&dir);
     let found = hits(&out, "mutating-route-no-auth");
     assert_eq!(found.len(), 1, "{:?}", out.findings);
-    assert_eq!(found[0].severity, zpz_core::Severity::Info);
+    assert_eq!(found[0].severity, zzop_core::Severity::Info);
 }
 
 #[test]
@@ -267,7 +267,7 @@ fn mutating_route_no_auth_disabled_via_config_removes_the_finding() {
 fn mutating_route_registered_in_a_test_fixture_file_is_not_flagged() {
     // A route defined/invoked only from a __test__/__tests__ fixture file (to exercise a handler in
     // isolation) is not exposed application surface, and must not be flagged.
-    let dir = TempDir::new("zpz-mutating-no-auth-test-fixture");
+    let dir = TempDir::new("zzop-mutating-no-auth-test-fixture");
     dir.write(
         "routes/__tests__/api.test.ts",
         "const apiRoutes = new Hono();\napiRoutes.post(\"/users\", createUser);\n",
@@ -290,7 +290,7 @@ fn nestjs_class_level_use_guards_exempts_every_route_in_the_controller() {
     // handler's own body never calls anything guard-named, so the call-graph BFS alone would
     // false-positive on it. This is the end-to-end test proving the fix works through the real
     // engine: real swc parse, real BFS, real `extract_nest_guarded_lines` wiring in `analyze.rs`.
-    let dir = TempDir::new("zpz-mutating-no-auth-nest-guarded");
+    let dir = TempDir::new("zzop-mutating-no-auth-nest-guarded");
     dir.write(
         "items.controller.ts",
         concat!(
@@ -317,7 +317,7 @@ fn nestjs_class_level_use_guards_exempts_every_route_in_the_controller() {
 fn nestjs_route_with_no_use_guards_anywhere_still_fires() {
     // Companion negative fixture — proves the NestJS `@UseGuards` exemption is precise, not a blanket
     // suppression of the whole rule for NestJS-shaped trees.
-    let dir = TempDir::new("zpz-mutating-no-auth-nest-unguarded");
+    let dir = TempDir::new("zzop-mutating-no-auth-nest-unguarded");
     dir.write(
         "items.controller.ts",
         concat!(
@@ -339,7 +339,7 @@ fn nestjs_route_with_no_use_guards_anywhere_still_fires() {
 
 #[test]
 fn safe_get_routes_are_never_checked_for_missing_auth() {
-    let dir = TempDir::new("zpz-mutating-no-auth-get");
+    let dir = TempDir::new("zzop-mutating-no-auth-get");
     dir.write(
         "routes/api.ts",
         "const apiRoutes = new Hono();\napiRoutes.get(\"/users\", listUsers);\n",
@@ -363,7 +363,7 @@ fn safe_get_routes_are_never_checked_for_missing_auth() {
 /// This tree both provides `GET /api/users` and consumes it (matched, line 2) plus a nonexistent
 /// `GET /api/missing` (unmatched, line 3).
 fn unprovided_consume_fixture() -> TempDir {
-    let dir = TempDir::new("zpz-unprovided-consume");
+    let dir = TempDir::new("zzop-unprovided-consume");
     dir.write(
         "routes/api.ts",
         "const apiRoutes = new Hono();\napiRoutes.get(\"/api/users\", api.listUsers);\n",
@@ -383,7 +383,7 @@ fn unmatched_consume_is_flagged_when_the_tree_also_provides_http_routes() {
     assert_eq!(found.len(), 1, "{:?}", out.findings);
     assert_eq!(found[0].file, "src/client.ts");
     assert_eq!(found[0].line, 2);
-    assert_eq!(found[0].severity, zpz_core::Severity::Info);
+    assert_eq!(found[0].severity, zzop_core::Severity::Info);
     assert_eq!(
         found[0].data.as_ref().unwrap()["key"].as_str(),
         Some("GET /api/missing")
@@ -395,7 +395,7 @@ fn unmatched_consume_is_flagged_when_the_tree_also_provides_http_routes() {
 
 #[test]
 fn static_asset_extension_consume_is_never_flagged() {
-    let dir = TempDir::new("zpz-unprovided-consume-asset");
+    let dir = TempDir::new("zzop-unprovided-consume-asset");
     dir.write(
         "routes/api.ts",
         "const apiRoutes = new Hono();\napiRoutes.get(\"/api/users\", api.listUsers);\n",
@@ -416,7 +416,7 @@ fn static_asset_extension_consume_is_never_flagged() {
 fn rails_style_json_api_route_with_an_api_segment_still_fires() {
     // GET /api/users.json is a real Rails-style, format-suffixed API route — the /api/ segment stops
     // the default json/xml veto from applying.
-    let dir = TempDir::new("zpz-unprovided-consume-json-api");
+    let dir = TempDir::new("zzop-unprovided-consume-json-api");
     dir.write(
         "routes/api.ts",
         "const apiRoutes = new Hono();\napiRoutes.get(\"/api/accounts\", api.listAccounts);\n",
@@ -432,12 +432,12 @@ fn rails_style_json_api_route_with_an_api_segment_still_fires() {
         found[0].data.as_ref().unwrap()["key"].as_str(),
         Some("GET /api/users.json")
     );
-    assert_eq!(found[0].severity, zpz_core::Severity::Info);
+    assert_eq!(found[0].severity, zzop_core::Severity::Info);
 }
 
 #[test]
 fn json_under_a_public_asset_directory_is_vetoed() {
-    let dir = TempDir::new("zpz-unprovided-consume-public-json");
+    let dir = TempDir::new("zzop-unprovided-consume-public-json");
     dir.write(
         "routes/api.ts",
         "const apiRoutes = new Hono();\napiRoutes.get(\"/api/users\", api.listUsers);\n",
@@ -460,7 +460,7 @@ fn next_js_public_prefix_stripped_json_path_is_vetoed() {
     // `public/i18n/ko.json` on disk is fetched at `GET /i18n/ko.json` — no asset-directory segment
     // survives in the key for a directory allowlist to match. The inverted (API-segment) gate still
     // vetoes it since no /api/,/graphql/,/rpc/,/vN/ segment is present either.
-    let dir = TempDir::new("zpz-unprovided-consume-i18n-json");
+    let dir = TempDir::new("zzop-unprovided-consume-i18n-json");
     dir.write(
         "routes/api.ts",
         "const apiRoutes = new Hono();\napiRoutes.get(\"/api/users\", api.listUsers);\n",
@@ -479,7 +479,7 @@ fn next_js_public_prefix_stripped_json_path_is_vetoed() {
 
 #[test]
 fn pure_fe_tree_with_zero_http_provides_is_never_flagged() {
-    let dir = TempDir::new("zpz-unprovided-consume-pure-fe");
+    let dir = TempDir::new("zzop-unprovided-consume-pure-fe");
     dir.write(
         "src/client.ts",
         "export function loadRemote() { return axios.get(\"/remote/thing\"); }\n",

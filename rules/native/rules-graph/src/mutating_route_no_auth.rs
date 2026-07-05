@@ -1,5 +1,5 @@
 //! `mutating-route-no-auth` — flags a POST/PUT/PATCH/DELETE `IoProvide` (an HTTP route) whose handler
-//! symbol, walked via call-graph BFS (`zpz_core::callgraph::bfs_reachable` over the whole-repo
+//! symbol, walked via call-graph BFS (`zzop_core::callgraph::bfs_reachable` over the whole-repo
 //! `SymbolGraph`), never reaches a callee whose NAME looks like an auth guard. Unlike the DSL
 //! `http/auth-gates` rule (`rules/dsl/http/http.json`), which only inspects the registration line's handler
 //! identifier text, this rule follows the handler's actual downstream calls.
@@ -56,7 +56,7 @@
 //! not a call edge (the same structural blind spot as route-level middleware, just a different guise of
 //! it). The exemption set is a side-channel `HashSet<(file, line)>` — see
 //! [`ScanMutatingRouteNoAuthInput::nest_guarded`] — computed independently by
-//! `zpz_parser_typescript::extract_controller_guarded_lines` and matched against each provide's own
+//! `zzop_parser_typescript::extract_controller_guarded_lines` and matched against each provide's own
 //! `(file, line)`.
 //!
 //! **Residual (not fixed here):** NestJS global guards (`app.useGlobalGuards(...)` in `main.ts`, or an
@@ -68,8 +68,8 @@
 use std::collections::HashMap;
 
 use regex::Regex;
-use zpz_core::callgraph::{bfs_reachable, SymbolGraph};
-use zpz_core::{Finding, Severity, SourceSymbol};
+use zzop_core::callgraph::{bfs_reachable, SymbolGraph};
+use zzop_core::{Finding, Severity, SourceSymbol};
 
 use crate::http_scan::{build_name_index, resolve_handler};
 use crate::unreachable::is_test_file;
@@ -92,10 +92,10 @@ const MUTATING_METHODS: [&str; 4] = ["POST", "PUT", "PATCH", "DELETE"];
 
 /// Input for [`scan_mutating_route_no_auth`]. Takes `io_provides` directly (not the `ApiEndpoint` shape
 /// `http_scan`'s two rules take) so the emitted `Finding` can anchor on the route's own registration
-/// `file`/`line` — `ApiEndpoint` carries no line number (see `zpz_engine::io`'s module doc, "`ApiEndpoint`
+/// `file`/`line` — `ApiEndpoint` carries no line number (see `zzop_engine::io`'s module doc, "`ApiEndpoint`
 /// has no line number"), and this rule's problem IS the route registration, not a downstream write site.
 pub struct ScanMutatingRouteNoAuthInput<'a> {
-    pub io_provides: &'a [zpz_core::IoProvide],
+    pub io_provides: &'a [zzop_core::IoProvide],
     pub symbols: &'a [SourceSymbol],
     pub symbol_graph: &'a SymbolGraph,
     pub auth_guard_pattern: &'a str,
@@ -117,7 +117,7 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
         standalone_re.is_match(path)
             || (conditional_re.is_match(path) && auth_family_re.is_match(path))
     };
-    let mutating: Vec<&zpz_core::IoProvide> = input
+    let mutating: Vec<&zzop_core::IoProvide> = input
         .io_provides
         .iter()
         .filter(|p| p.kind == "http")
@@ -215,8 +215,8 @@ mod tests {
     //! Unit tests for `scan_mutating_route_no_auth`'s BFS + guard-vocabulary logic in isolation (e2e coverage
     //! — real handler-file fixtures — lives in `packages/engine/tests/analyze_io_natives.rs`).
     use super::*;
-    use zpz_core::callgraph::SymbolEdge;
-    use zpz_core::SourceSymbolKind;
+    use zzop_core::callgraph::SymbolEdge;
+    use zzop_core::SourceSymbolKind;
 
     fn sym(file: &str, name: &str, line: u32) -> SourceSymbol {
         SourceSymbol {
@@ -232,8 +232,8 @@ mod tests {
         }
     }
 
-    fn provide(key: &str, file: &str, line: u32, handler: &str) -> zpz_core::IoProvide {
-        zpz_core::IoProvide {
+    fn provide(key: &str, file: &str, line: u32, handler: &str) -> zzop_core::IoProvide {
+        zzop_core::IoProvide {
             kind: "http".to_string(),
             key: key.to_string(),
             file: file.to_string(),
@@ -463,7 +463,7 @@ mod tests {
 
     #[test]
     fn provide_with_no_symbol_captured_is_skipped() {
-        let provides = vec![zpz_core::IoProvide {
+        let provides = vec![zzop_core::IoProvide {
             kind: "http".to_string(),
             key: "POST /anon".to_string(),
             file: "routes/api.ts".to_string(),
@@ -682,7 +682,7 @@ mod tests {
 
     #[test]
     fn non_http_provides_are_ignored() {
-        let provides = vec![zpz_core::IoProvide {
+        let provides = vec![zzop_core::IoProvide {
             kind: "queue".to_string(),
             key: "POST /topic".to_string(),
             file: "routes/api.ts".to_string(),

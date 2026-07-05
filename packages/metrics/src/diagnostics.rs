@@ -1,5 +1,5 @@
 //! Self-diagnostics for an analysis run — turns "ran without error but produced empty/degenerate data" (silent
-//! failure) into explicit warnings. A new language, module system, repo layout, or commit convention can make zpz
+//! failure) into explicit warnings. A new language, module system, repo layout, or commit convention can make zzop
 //! succeed with hollow output; "no error" is not validation. The counts report success *scope* (N of M), and the
 //! warnings flag degenerate signals (0 dep edges, 0 symbols, all-abstract, untagged commits) so the consumer knows
 //! a coverage gap exists and where to look (config/adapter). Pure — caller computes the counts from the assembled IR.

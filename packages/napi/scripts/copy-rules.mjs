@@ -6,7 +6,7 @@
 // Source layout: both flat (<repo root>/rules/dsl/<id>.json) and depth-1 nested
 // (<repo root>/rules/dsl/<name>/<id>.json — this repo's own "pack folder" layout, see
 // ../../../rules/README.md) pack files are discovered and copied, mirroring
-// `zpz_core::pack_loader::load_dsl_packs`'s own two-shape scan (packages/core/src/pack_loader.rs) so the
+// `zzop_core::pack_loader::load_dsl_packs`'s own two-shape scan (packages/core/src/pack_loader.rs) so the
 // copied tree needs no special-casing by the loader. Nested structure is PRESERVED in destDir (not
 // flattened) — same relative layout as the source. Only `*.json` is copied: a pack folder's co-located
 // `<pack>.rs` (Rust source, e.g. `be-db/be-db.rs`) never ships in the npm package.

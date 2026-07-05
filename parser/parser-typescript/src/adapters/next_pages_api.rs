@@ -1,7 +1,7 @@
 //! Lexical scan for Next.js `pages/api` default-export handlers: `export default <expr>` is
 //! invisible to `parse_symbols` (which only surfaces `ExportDefaultDecl`), and one handler serves
 //! every HTTP method via `req.method` checks or a `defaultHandler({ GET: …, POST: … })` verb map.
-//! `zpz-engine`'s file-convention route composition calls this scan to learn whether a candidate
+//! `zzop-engine`'s file-convention route composition calls this scan to learn whether a candidate
 //! file default-exports a handler and which methods its body names.
 //!
 //! Deliberately line-based/lexical, not AST-based. An empty `verbs` is an honest "statically

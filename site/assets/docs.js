@@ -1,5 +1,5 @@
 /*
- * zpz docs — vanilla JS, no dependencies.
+ * zzop docs — vanilla JS, no dependencies.
  * (a) right-hand TOC scroll-spy via IntersectionObserver
  * (b) mobile toggle for the left docs nav sidebar
  * No-ops entirely on pages that lack these elements (e.g. the home page).

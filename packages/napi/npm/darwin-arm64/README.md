@@ -1,3 +1,3 @@
-# @zpz/native-darwin-arm64
+# @zzop/native-darwin-arm64
 
-Prebuilt `zpz-napi` native addon for darwin/arm64. Not for direct use — installed as an optional dependency of [`@zpz/native`](../../README.md).
+Prebuilt `zzop-napi` native addon for darwin/arm64. Not for direct use — installed as an optional dependency of [`@zzop/native`](../../README.md).

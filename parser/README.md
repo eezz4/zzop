@@ -23,8 +23,8 @@ parsers stay **inside** the parser crate and never leak into the engine or rules
 
 JSP/Python (and any other language) support does not require its own crate here — it arrives via the
 **external-parser envelope protocol** (`docs/NORMALIZED_AST.md`): any out-of-process tool that emits a
-`NormalizedEnvelope` JSON document (validated by `zpz_core::validate_envelope`, consumed by
-`zpz_engine::analyze_envelope`) plugs in without touching this workspace at all. `docs/examples/jsp-envelope.example.json`
+`NormalizedEnvelope` JSON document (validated by `zzop_core::validate_envelope`, consumed by
+`zzop_engine::analyze_envelope`) plugs in without touching this workspace at all. `docs/examples/jsp-envelope.example.json`
 is a worked example of exactly that for JSP. Earlier placeholder crates (`parser-jsp`, `parser-python`) were
 removed since they carried no code beyond a stub comment — the envelope protocol supersedes needing an
 in-workspace crate per language up front.

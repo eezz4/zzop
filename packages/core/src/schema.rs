@@ -1,8 +1,8 @@
-//! Prisma schema IR — the normalized schema representation `zpz-parser-prisma` constructs directly while
-//! parsing `.prisma` text, and the usage-evidence IR both `zpz-engine` and `zpz-parser-prisma` assemble
-//! directly from their own source scans. Kept in `zpz-core` as a shared IR contract per the crate-boundary
+//! Prisma schema IR — the normalized schema representation `zzop-parser-prisma` constructs directly while
+//! parsing `.prisma` text, and the usage-evidence IR both `zzop-engine` and `zzop-parser-prisma` assemble
+//! directly from their own source scans. Kept in `zzop-core` as a shared IR contract per the crate-boundary
 //! split: the schema *rules* that operate on this IR
-//! (structural anti-patterns, usage-aware cross-checks) moved to `zpz-rules-schema`, but these types stay
+//! (structural anti-patterns, usage-aware cross-checks) moved to `zzop-rules-schema`, but these types stay
 //! here since a foundational parser crate constructs them directly and must not depend on a rules crate.
 
 use std::collections::{HashMap, HashSet};
@@ -30,10 +30,10 @@ pub struct SchemaField {
 }
 
 /// A Prisma `enum Name { MEMBER ... }` block — the enum-type counterpart to `SchemaModel`, projected
-/// directly by `zpz-parser-prisma::parse_schema_enums` from `.prisma` text. Unlike `SchemaModel` (whose
+/// directly by `zzop-parser-prisma::parse_schema_enums` from `.prisma` text. Unlike `SchemaModel` (whose
 /// `.prisma` declaration line is looked up lazily and separately, via `model_decl_line`, only when a
 /// finding needs to anchor at one), `line` is carried on the struct itself since the one consumer of this
-/// type (`zpz_rules_schema::join::enum_string_drift_issues`, via `zpz-engine`) has no other line evidence
+/// type (`zzop_rules_schema::join::enum_string_drift_issues`, via `zzop-engine`) has no other line evidence
 /// to fall back on for a schema-anchored enum-level finding.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SchemaEnum {
@@ -63,9 +63,9 @@ pub struct SchemaModel {
 }
 
 /// Usage/change signals a producer extracts from BE code + migration history, cross-checked against the
-/// schema-IR by `zpz_rules_schema::analyze_schema_with_usage` (dead-model / dead-field / schema-churn). A
+/// schema-IR by `zzop_rules_schema::analyze_schema_with_usage` (dead-model / dead-field / schema-churn). A
 /// producer with no code access can omit this entirely and only the structural rules run
-/// (`zpz_rules_schema::analyze_schema`).
+/// (`zzop_rules_schema::analyze_schema`).
 #[derive(Debug, Clone, Default)]
 pub struct SchemaUsage {
     /// PascalCase model name -> whether a bound store/repository exists in code. Drives dead-model.

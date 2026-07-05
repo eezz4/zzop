@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashSet};
 use super::config::ScoresConfig;
 use super::shared::is_external;
 use super::types::{DiamondPair, DiamondScore};
-use zpz_core::DepGraph;
+use zzop_core::DepGraph;
 
 /// A pair only counts as a diamond when at least two distinct first-hop nodes reach the same leaf.
 const MIN_THROUGH: usize = 2;

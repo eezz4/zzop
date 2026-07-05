@@ -1,4 +1,4 @@
-//! zpz-engine — the fused execution engine: per-file parse + DSL-rule pass (`pipeline.rs`), then a
+//! zzop-engine — the fused execution engine: per-file parse + DSL-rule pass (`pipeline.rs`), then a
 //! whole-graph assembly pass (`analyze.rs`), composed for public consumption by `analyze_tree`.
 //!
 //! Implements the two design principles this crate is built against:
@@ -11,7 +11,7 @@
 //!   re-walk) + rayon file parallelism.
 //!
 //! ## Deliberate implementation choices (see also doc comments at each cited site)
-//! - **TS parse-failure signal** (`pipeline::parse_typescript`'s doc): `zpz-parser-typescript`'s public
+//! - **TS parse-failure signal** (`pipeline::parse_typescript`'s doc): `zzop-parser-typescript`'s public
 //!   API swallows a swc syntax error into an empty, successful-looking result — there is no `Result`/
 //!   panic this crate can observe to tell "broken file" apart from "legitimately empty file" without a
 //!   direct swc dependency (rejected — this crate depends only on the parser crates, never swc itself).
@@ -45,10 +45,10 @@ mod pipeline;
 
 use std::path::{Path, PathBuf};
 
-use zpz_core::{
+use zzop_core::{
     dsl::RuleTiming, CommonIr, FileNode, Finding, RuleConfig, RulePackDef, RuleRegistry, SourceIo,
 };
-use zpz_metrics::{
+use zzop_metrics::{
     CriticalFile, CrossLayerCoChurn, FolderAggregates, HealthIndex, Recommendation, Scores,
     ScoresConfig, SeamCandidate,
 };
@@ -59,11 +59,11 @@ pub use io::IoOptions;
 
 /// Composes every crate's own `register_native_analyses` into one `RuleRegistry` — the engine aggregator
 /// half of the extensibility contract (`rules/README.md`'s "Adding a rule" section). The kernel
-/// (`zpz_core`) itself registers nothing; native analyses live in their owning crates.
+/// (`zzop_core`) itself registers nothing; native analyses live in their owning crates.
 pub fn register_all_native(registry: &mut RuleRegistry) {
-    zpz_rules_graph::register_native_analyses(registry);
-    zpz_rules_schema::register_native_analyses(registry);
-    zpz_metrics::register_native_analyses(registry);
+    zzop_rules_graph::register_native_analyses(registry);
+    zzop_rules_schema::register_native_analyses(registry);
+    zzop_metrics::register_native_analyses(registry);
 }
 
 /// A size cap above which a file skips structural parsing entirely and falls back to a lexical count
@@ -73,10 +73,10 @@ pub fn register_all_native(registry: &mut RuleRegistry) {
 pub const DEFAULT_SIZE_CAP: usize = 1_500_000;
 
 /// Engine configuration for one `analyze_tree` call. `packs` is already-loaded `RulePackDef`s (e.g. via
-/// `zpz_core::pack_loader::load_dsl_packs`) — this crate does not read `rules/dsl/*.json` off disk itself,
+/// `zzop_core::pack_loader::load_dsl_packs`) — this crate does not read `rules/dsl/*.json` off disk itself,
 /// keeping "where rule packs live" a caller concern (a CLI, a test, an N-API host).
 pub struct EngineConfig {
-    /// Tags the assembled `CommonIr`'s `source` field (zpz's multi-tree / cross-layer-join convention).
+    /// Tags the assembled `CommonIr`'s `source` field (zzop's multi-tree / cross-layer-join convention).
     pub source_id: String,
     pub dispatch: DispatchConfig,
     /// Files strictly larger than this (in bytes) skip structural parsing (see `DEFAULT_SIZE_CAP`).
@@ -85,15 +85,15 @@ pub struct EngineConfig {
     pub packs: Vec<RulePackDef>,
     /// Router-identifier-name config for the per-file Hono-route provide projection — see `crate::io`.
     pub io: IoOptions,
-    /// When `Some`, `analyze_tree` runs `zpz_git::collect` over `root` and, if it succeeds, builds real
+    /// When `Some`, `analyze_tree` runs `zzop_git::collect` over `root` and, if it succeeds, builds real
     /// `FileNode`s from the collected history and computes `scores`/`health`/`recommendations`/
     /// `critical`/`seams`. `None` (the default) leaves those fields empty/`None`; no git process is ever
     /// spawned. A `Some` on a non-git root does not panic — see `AnalyzeOutput::warnings`.
     pub git: Option<GitOptions>,
-    /// Override for `zpz_metrics::compute_scores`'s threshold/vocabulary config. Only consulted when
+    /// Override for `zzop_metrics::compute_scores`'s threshold/vocabulary config. Only consulted when
     /// `git` is `Some` and collection succeeds.
     pub scores_config: ScoresConfig,
-    /// When `Some`, `analyze_tree` opens (creating if absent) a `zpz_cache::AnalysisCache` at this path
+    /// When `Some`, `analyze_tree` opens (creating if absent) a `zzop_cache::AnalysisCache` at this path
     /// and drives the fused per-file pass through it: a file whose content hash + parser fingerprint +
     /// ruleset fingerprint already has a cached IR *and* findings entry skips parsing and rule
     /// evaluation entirely. `None` (the default) never touches a cache directory. A cache directory that
@@ -109,8 +109,8 @@ pub struct EngineConfig {
     /// adapter that wants to participate in a NATIVE `analyze_tree` run without reimplementing a parser
     /// (contrast with Mode A, `analyze_envelope`, a full envelope standing in for the entire tree).
     /// Empty (the default) runs no overlay processing. Each overlay is
-    /// `zpz_core::validate_envelope`-checked; an invalid one is skipped with a `warnings` entry.
-    pub adapter_overlays: Vec<zpz_core::NormalizedEnvelope>,
+    /// `zzop_core::validate_envelope`-checked; an invalid one is skipped with a `warnings` entry.
+    pub adapter_overlays: Vec<zzop_core::NormalizedEnvelope>,
 }
 
 impl Default for EngineConfig {
@@ -131,8 +131,8 @@ impl Default for EngineConfig {
     }
 }
 
-/// Git-history collection options for `EngineConfig::git` — a thin mirror of `zpz_git::CollectOptions`.
-/// `zpz_metrics::default_commit_type_patterns()` is always used for the commit-type vocabulary.
+/// Git-history collection options for `EngineConfig::git` — a thin mirror of `zzop_git::CollectOptions`.
+/// `zzop_metrics::default_commit_type_patterns()` is always used for the commit-type vocabulary.
 #[derive(Debug, Clone)]
 pub struct GitOptions {
     /// `git log --since=<since>`; `None` = full history.
@@ -151,7 +151,7 @@ impl Default for GitOptions {
 }
 
 /// The result of one `analyze_tree` call: the assembled tree-wide Common IR, every finding
-/// (per-file DSL + whole-graph native, merged/sorted via `zpz_core::merge_findings`), which files
+/// (per-file DSL + whole-graph native, merged/sorted via `zzop_core::merge_findings`), which files
 /// degraded to a lexical fallback, and the total file count the walk visited.
 ///
 /// `nodes` is always populated (dep-graph + LOC only when `EngineConfig::git` is `None`, real
@@ -175,13 +175,13 @@ pub struct AnalyzeOutput {
     pub recommendations: Vec<Recommendation>,
     pub critical: Vec<CriticalFile>,
     pub seams: Vec<SeamCandidate>,
-    /// Folder-granularity rollup over `nodes`/`ir.ir.dep` at `zpz_metrics::DEFAULT_FOLDER_DEPTH`. Unlike
+    /// Folder-granularity rollup over `nodes`/`ir.ir.dep` at `zzop_metrics::DEFAULT_FOLDER_DEPTH`. Unlike
     /// `scores`/`health`, this is NOT git-gated — `nodes` and the dep graph are built unconditionally, so
     /// this is `Some` on every call that reaches assembly (never a stand-in for "ran and found nothing":
     /// an empty-but-real tree still gets `Some` with empty `Vec`s).
     pub folders: Option<FolderAggregates>,
     /// Cross-layer co-churn: commit co-changes between files in different architectural layers
-    /// (`zpz_metrics::layer_of`, using `EngineConfig::scores_config`'s `hierarchy_shared_dirs`
+    /// (`zzop_metrics::layer_of`, using `EngineConfig::scores_config`'s `hierarchy_shared_dirs`
     /// vocabulary). Git-gated exactly like `scores`/`health`: `None` when git is inactive, `Some`
     /// (possibly an empty `Vec`) when collection succeeded.
     pub layer_co_churn: Option<Vec<CrossLayerCoChurn>>,
@@ -240,7 +240,7 @@ pub fn analyze_tree(root: &Path, config: &EngineConfig) -> AnalyzeOutput {
 pub struct MultiAnalyzeOutput {
     /// `(root, config.source_id, output)` for each input tree, in the same order as `trees`.
     pub trees: Vec<(PathBuf, String, AnalyzeOutput)>,
-    pub cross_layer: zpz_core::CrossLayerResult,
+    pub cross_layer: zzop_core::CrossLayerResult,
     /// The 20 `cross-layer/*` native rules run over `cross_layer` — see `compute_cross_layer_findings`'s
     /// doc for the gating/derivation/sort contract. Always populated: even a single-tree `analyze_trees`
     /// call runs these (most find nothing, since e.g. `shared-db-table`/`duplicate-route` need 2+
@@ -249,7 +249,7 @@ pub struct MultiAnalyzeOutput {
 }
 
 /// Cross-layer multi-tree API: runs `analyze_tree` once per `(root, config)` pair, then joins every
-/// tree's `CommonIr.ir.io` via `zpz_core::link_cross_layer_io` (an exact `(kind, key)` join). Each tree
+/// tree's `CommonIr.ir.io` via `zzop_core::link_cross_layer_io` (an exact `(kind, key)` join). Each tree
 /// keeps its own `EngineConfig::source_id` as the join's per-tree tag, so a consume in tree A and a
 /// provide in tree B join into a `cross_source: true` edge when their normalized keys match. A tree with
 /// `ir.io = None` contributes an empty `IoFacts` to the join — never a panic, never a skipped tree.
@@ -272,19 +272,19 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
         });
         outputs.push((root.clone(), config.source_id.clone(), output));
     }
-    let link_opts = zpz_core::LinkOptions {
+    let link_opts = zzop_core::LinkOptions {
         // Default generic-path vocabulary (health/ping/metrics/...) is analysis-domain, not join
-        // mechanism, so it lives in `zpz-metrics` rather than `zpz-core`.
-        low_confidence_key_patterns: zpz_metrics::default_generic_interface_key_patterns(),
+        // mechanism, so it lives in `zzop-metrics` rather than `zzop-core`.
+        low_confidence_key_patterns: zzop_metrics::default_generic_interface_key_patterns(),
     };
-    let cross_layer = zpz_core::link_cross_layer_io(&source_ios, &link_opts);
-    let package_imports: Vec<zpz_rules_graph::PackageImportSite> = outputs
+    let cross_layer = zzop_core::link_cross_layer_io(&source_ios, &link_opts);
+    let package_imports: Vec<zzop_rules_graph::PackageImportSite> = outputs
         .iter()
         .flat_map(|(_, source, output)| {
             output
                 .package_imports
                 .iter()
-                .map(move |p| zpz_rules_graph::PackageImportSite {
+                .map(move |p| zzop_rules_graph::PackageImportSite {
                     source: source.clone(),
                     specifier: p.specifier.clone(),
                     file_count: p.file_count,
@@ -301,7 +301,7 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
     }
 }
 
-/// Runs the 20 `cross-layer/*` native rules (`zpz_rules_graph::cross_layer`) over `cross_layer` and
+/// Runs the 20 `cross-layer/*` native rules (`zzop_rules_graph::cross_layer`) over `cross_layer` and
 /// returns their merged, sorted findings.
 ///
 /// ## disabledRules gating: union, exclude-only
@@ -315,14 +315,14 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
 /// join itself was built from.
 ///
 /// ## Sort
-/// `zpz_core::merge_findings`, the same (severity, file, line, ruleId) order `AnalyzeOutput::findings`
+/// `zzop_core::merge_findings`, the same (severity, file, line, ruleId) order `AnalyzeOutput::findings`
 /// uses, called with a default `RuleConfig` purely for that shared sort/merge primitive (disabling is
 /// the only lever for cross-layer findings, handled above via `is_enabled`).
 fn compute_cross_layer_findings(
     source_ios: &[SourceIo],
-    cross_layer: &zpz_core::CrossLayerResult,
+    cross_layer: &zzop_core::CrossLayerResult,
     trees: &[(PathBuf, EngineConfig)],
-    package_imports: &[zpz_rules_graph::PackageImportSite],
+    package_imports: &[zzop_rules_graph::PackageImportSite],
 ) -> Vec<Finding> {
     let mut disabled_union: Vec<String> = Vec::new();
     for (_, config) in trees {
@@ -333,13 +333,13 @@ fn compute_cross_layer_findings(
         ..RuleConfig::default()
     };
 
-    let http_provides: Vec<zpz_rules_graph::HttpProvideSite> = source_ios
+    let http_provides: Vec<zzop_rules_graph::HttpProvideSite> = source_ios
         .iter()
         .flat_map(|s| {
             s.io.provides
                 .iter()
                 .filter(|p| p.kind == "http")
-                .map(move |p| zpz_rules_graph::HttpProvideSite {
+                .map(move |p| zzop_rules_graph::HttpProvideSite {
                     source: s.source.clone(),
                     key: p.key.clone(),
                     file: p.file.clone(),
@@ -357,113 +357,113 @@ fn compute_cross_layer_findings(
         .collect();
 
     let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(20);
-    if zpz_core::is_enabled(&gate, "cross-layer/unconsumed-endpoint") {
-        sources.push(zpz_rules_graph::unconsumed_endpoint_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/unconsumed-endpoint") {
+        sources.push(zzop_rules_graph::unconsumed_endpoint_findings(
             &cross_layer.unconsumed_provides,
             &cross_layer.unresolved_consumes,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/method-mismatch") {
-        sources.push(zpz_rules_graph::method_mismatch_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/method-mismatch") {
+        sources.push(zzop_rules_graph::method_mismatch_findings(
             &cross_layer.unprovided_consumes,
             &http_provides,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/version-skew") {
-        sources.push(zpz_rules_graph::version_skew_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/version-skew") {
+        sources.push(zzop_rules_graph::version_skew_findings(
             &cross_layer.unprovided_consumes,
             &http_provides,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/path-near-miss") {
-        sources.push(zpz_rules_graph::path_near_miss_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/path-near-miss") {
+        sources.push(zzop_rules_graph::path_near_miss_findings(
             &cross_layer.unprovided_consumes,
             &http_provides,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/shared-db-table") {
-        sources.push(zpz_rules_graph::shared_db_table_findings(cross_layer));
+    if zzop_core::is_enabled(&gate, "cross-layer/shared-db-table") {
+        sources.push(zzop_rules_graph::shared_db_table_findings(cross_layer));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/duplicate-route") {
-        sources.push(zpz_rules_graph::cross_layer_duplicate_route_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/duplicate-route") {
+        sources.push(zzop_rules_graph::cross_layer_duplicate_route_findings(
             cross_layer,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/external-shadow-internal") {
-        sources.push(zpz_rules_graph::external_shadow_internal_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/external-shadow-internal") {
+        sources.push(zzop_rules_graph::external_shadow_internal_findings(
             &cross_layer.external_consumes,
             &http_provides,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/external-secret-in-url") {
-        sources.push(zpz_rules_graph::external_secret_in_url_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/external-secret-in-url") {
+        sources.push(zzop_rules_graph::external_secret_in_url_findings(
             &cross_layer.external_consumes,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/external-duplicated-integration") {
-        sources.push(zpz_rules_graph::external_duplicated_integration_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/external-duplicated-integration") {
+        sources.push(zzop_rules_graph::external_duplicated_integration_findings(
             &cross_layer.external_consumes,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/external-host-fanout") {
-        sources.push(zpz_rules_graph::external_host_fanout_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/external-host-fanout") {
+        sources.push(zzop_rules_graph::external_host_fanout_findings(
             &cross_layer.external_consumes,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/external-base-url-drift") {
-        sources.push(zpz_rules_graph::external_base_url_drift_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/external-base-url-drift") {
+        sources.push(zzop_rules_graph::external_base_url_drift_findings(
             &cross_layer.external_consumes,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/external-version-inconsistent") {
-        sources.push(zpz_rules_graph::external_version_inconsistent_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/external-version-inconsistent") {
+        sources.push(zzop_rules_graph::external_version_inconsistent_findings(
             &cross_layer.external_consumes,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/external-ip-literal") {
-        sources.push(zpz_rules_graph::external_ip_literal_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/external-ip-literal") {
+        sources.push(zzop_rules_graph::external_ip_literal_findings(
             &cross_layer.external_consumes,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/ambiguous-consume") {
-        sources.push(zpz_rules_graph::ambiguous_consume_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/ambiguous-consume") {
+        sources.push(zzop_rules_graph::ambiguous_consume_findings(
             &cross_layer.ambiguous_consumes,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/unconsumed-mutation-endpoint") {
-        sources.push(zpz_rules_graph::unconsumed_mutation_endpoint_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/unconsumed-mutation-endpoint") {
+        sources.push(zzop_rules_graph::unconsumed_mutation_endpoint_findings(
             &cross_layer.unconsumed_provides,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/unprovided-mutation-call") {
-        sources.push(zpz_rules_graph::unprovided_mutation_call_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/unprovided-mutation-call") {
+        sources.push(zzop_rules_graph::unprovided_mutation_call_findings(
             &cross_layer.unprovided_consumes,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/route-shadowing") {
-        sources.push(zpz_rules_graph::cross_tree_route_shadowing_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/route-shadowing") {
+        sources.push(zzop_rules_graph::cross_tree_route_shadowing_findings(
             &http_provides,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/unresolved-consume-ratio") {
-        sources.push(zpz_rules_graph::unresolved_consume_ratio_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/unresolved-consume-ratio") {
+        sources.push(zzop_rules_graph::unresolved_consume_ratio_findings(
             &cross_layer.unresolved_consumes,
             &http_consume_totals,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/sdk-import-no-visible-consume") {
-        sources.push(zpz_rules_graph::sdk_import_no_visible_consume_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/sdk-import-no-visible-consume") {
+        sources.push(zzop_rules_graph::sdk_import_no_visible_consume_findings(
             package_imports,
             &http_consume_totals,
         ));
     }
-    if zpz_core::is_enabled(&gate, "cross-layer/unconsumed-procedure") {
-        sources.push(zpz_rules_graph::unconsumed_procedure_findings(
+    if zzop_core::is_enabled(&gate, "cross-layer/unconsumed-procedure") {
+        sources.push(zzop_rules_graph::unconsumed_procedure_findings(
             &cross_layer.unconsumed_provides,
         ));
     }
 
-    zpz_core::merge_findings(sources, &RuleConfig::default())
+    zzop_core::merge_findings(sources, &RuleConfig::default())
 }
 
 #[cfg(test)]
@@ -531,7 +531,7 @@ mod tests {
     /// - `generated/big.ts`: exceeds `size_cap` -> oversized lexical fallback.
     /// - `broken.ts`: unbalanced braces -> structurally-broken lexical fallback.
     fn fixture_tree() -> TempDir {
-        let dir = TempDir::new("zpz-engine-fixture");
+        let dir = TempDir::new("zzop-engine-fixture");
         dir.write(
             "a.ts",
             "import { b } from './b';\nexport function a() { return b(); }\n",
@@ -724,7 +724,7 @@ mod tests {
 
     #[test]
     fn cross_file_constant_indirection_resolves_via_late_consume_resolution() {
-        let dir = TempDir::new("zpz-engine-late-resolve");
+        let dir = TempDir::new("zzop-engine-late-resolve");
         dir.write(
             "ControlKey.ts",
             "export const ControlKey = { AUTHEN: { getUserInfo: '/api/auth/user' } };\n",
@@ -760,7 +760,7 @@ mod tests {
 
     #[test]
     fn duplicate_const_key_across_two_files_resolves_to_the_lexicographically_first_file() {
-        let dir = TempDir::new("zpz-engine-late-resolve-dup");
+        let dir = TempDir::new("zzop-engine-late-resolve-dup");
         // Both files declare the SAME dotted constant key with different values — "a-consts.ts" sorts
         // before "z-consts.ts", so its value must win regardless of file-walk/rayon scheduling order.
         dir.write("a-consts.ts", "export const K = { path: '/from/a' };\n");
@@ -787,7 +787,7 @@ mod tests {
 
     #[test]
     fn trpc_router_composes_across_files_and_joins_to_a_client_consume() {
-        let dir = TempDir::new("zpz-engine-trpc");
+        let dir = TempDir::new("zzop-engine-trpc");
         // `viewer.ts`: the leaf procedure's own router fragment.
         dir.write(
             "viewer.ts",

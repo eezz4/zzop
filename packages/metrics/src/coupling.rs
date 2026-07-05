@@ -2,15 +2,15 @@
 //! that touched both a and b (symmetric). Commits exceeding MAX_FILES_PER_COMMIT files are skipped
 //! to suppress large-refactor noise.
 //!
-//! `CommitFileSet` (this module's input type) stays in `zpz_core` — it is shared IR, constructed by
-//! `zpz_git` and consumed directly by `zpz_engine` — per the crate-boundary split: shared IR stays in
+//! `CommitFileSet` (this module's input type) stays in `zzop_core` — it is shared IR, constructed by
+//! `zzop_git` and consumed directly by `zzop_engine` — per the crate-boundary split: shared IR stays in
 //! core even as its downstream computation moves to a dedicated crate.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use zpz_core::CommitFileSet;
+use zzop_core::CommitFileSet;
 
 /// A commit must touch at least this many files to form a co-change pair (1-file commits couple nothing).
 pub const MIN_FILES_PER_COMMIT: usize = 2;

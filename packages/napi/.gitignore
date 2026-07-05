@@ -1,5 +1,5 @@
 # Built Node addon (napi convention: `.node` extension). Built per-platform by
-# `cargo +stable-x86_64-pc-windows-msvc build -p zpz-napi --release --features addon` (see src/lib.rs);
+# `cargo +stable-x86_64-pc-windows-msvc build -p zzop-napi --release --features addon` (see src/lib.rs);
 # prebuild packaging (optionalDependencies matrix) is a later phase — see docs/modules/napi.md's
 # "Packaging layout" section.
 *.node

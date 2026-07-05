@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use zpz_core::{load_dsl_packs, CommonIr, FileNode, Finding, NormalizedEnvelope, RulePackDef};
-use zpz_engine::{AnalyzeOutput, CacheStats, EngineConfig, GitOptions, DEFAULT_SIZE_CAP};
-use zpz_metrics::{
+use zzop_core::{load_dsl_packs, CommonIr, FileNode, Finding, NormalizedEnvelope, RulePackDef};
+use zzop_engine::{AnalyzeOutput, CacheStats, EngineConfig, GitOptions, DEFAULT_SIZE_CAP};
+use zzop_metrics::{
     CriticalFile, CrossLayerCoChurn, FolderAggregates, HealthIndex, Recommendation, Scores,
     SeamCandidate,
 };
@@ -53,7 +53,7 @@ pub struct AnalyzeRequest {
     pub disabled_rules: Vec<String>,
 }
 
-/// `AnalyzeRequest::git`'s payload — mirrors `zpz_engine::GitOptions` field-for-field, as JSON input.
+/// `AnalyzeRequest::git`'s payload — mirrors `zzop_engine::GitOptions` field-for-field, as JSON input.
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct GitOptionsRequest {
@@ -62,7 +62,7 @@ pub struct GitOptionsRequest {
 }
 
 /// `analyzeTrees`'s request shape: `{trees: AnalyzeRequest[]}` — one `EngineConfig` per tree, joined by
-/// `zpz_engine::analyze_trees` (multi-tree/cross-layer).
+/// `zzop_engine::analyze_trees` (multi-tree/cross-layer).
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AnalyzeTreesRequest {
@@ -71,7 +71,7 @@ pub struct AnalyzeTreesRequest {
 
 /// `analyzeEnvelope`'s request shape (`docs/NORMALIZED_AST.md`'s protocol receiver): unlike
 /// `AnalyzeRequest` there is no `root`/`cacheDir`/`git`/`sizeCap` — an envelope carries no filesystem
-/// location the engine can re-read (see `zpz_engine::analyze_envelope`'s own module doc for exactly
+/// location the engine can re-read (see `zzop_engine::analyze_envelope`'s own module doc for exactly
 /// which config knobs envelope mode ignores and why).
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
@@ -84,7 +84,7 @@ pub struct EnvelopeAnalyzeRequest {
 /// The shared "load `packs_dir`, build the DSL-pack list + `RuleConfig`" step both `build_engine_config`
 /// (tree-rooted requests) and `analyze_envelope_json` (envelope requests) need.
 ///
-/// `packs_dirs` is loaded in order, one `zpz_core::pack_loader::load_dsl_packs` call per directory, and
+/// `packs_dirs` is loaded in order, one `zzop_core::pack_loader::load_dsl_packs` call per directory, and
 /// merged into a single pack list: if two directories each ship a pack with the same `RulePackDef::id`,
 /// the LATER directory's pack REPLACES the earlier one whole — not a rule-level merge inside that pack id.
 /// This is the intentional override path (see `docs/modules/napi.md`'s "Defaults" section) — the JS
@@ -122,7 +122,7 @@ fn base_engine_config(
     EngineConfig {
         source_id: source_id.to_string(),
         packs,
-        rule_config: zpz_core::RuleConfig {
+        rule_config: zzop_core::RuleConfig {
             disabled_rules: disabled_rules.to_vec(),
             ..Default::default()
         },
@@ -151,7 +151,7 @@ fn build_engine_config(req: &AnalyzeRequest, warnings: &mut Vec<String>) -> Engi
     config
 }
 
-/// A JSON-serializable mirror of `zpz_engine::CacheStats` (which does not itself derive `Serialize` — see
+/// A JSON-serializable mirror of `zzop_engine::CacheStats` (which does not itself derive `Serialize` — see
 /// `AnalyzeOutputView`'s doc for why this crate mirrors rather than forks/modifies engine types).
 /// `#[serde(rename_all = "camelCase")]` is a no-op today (`hits`/`misses` are already one word) — applied
 /// for consistency with every other output-facing type at this boundary.
@@ -171,7 +171,7 @@ impl From<CacheStats> for CacheStatsView {
     }
 }
 
-/// A JSON-serializable *view* over `&zpz_engine::AnalyzeOutput`.
+/// A JSON-serializable *view* over `&zzop_engine::AnalyzeOutput`.
 ///
 /// `AnalyzeOutput` (and its small `CacheStats` payload) do not derive `Serialize`, so this is a
 /// **by-reference, zero-copy view**: every field is borrowed straight out of the real `AnalyzeOutput`
@@ -184,10 +184,10 @@ impl From<CacheStats> for CacheStatsView {
 /// struct-level `rename_all` only governs that struct's own fields, not nested types — each nested type
 /// needs its own attribute.
 ///
-/// `zpz_core::SourceSymbol` doubles as the deserialize target for `docs/NORMALIZED_AST.md`'s frozen v1
+/// `zzop_core::SourceSymbol` doubles as the deserialize target for `docs/NORMALIZED_AST.md`'s frozen v1
 /// external-parser envelope input contract (`FileProjection.symbols`): output is camelCase like
 /// everything else, while per-field `#[serde(alias = ...)]` attributes keep accepting the frozen
-/// contract's snake_case names on the way in (zpz only ever receives an envelope, never emits one).
+/// contract's snake_case names on the way in (zzop only ever receives an envelope, never emits one).
 ///
 /// `Finding.data` is the one exception, by design: it is opaque `serde_json::Value` authored ad hoc per
 /// rule, never a `#[derive(Serialize)]` struct with a uniform convention to enforce — see
@@ -209,7 +209,7 @@ struct AnalyzeOutputView<'a> {
     layer_co_churn: &'a Option<Vec<CrossLayerCoChurn>>,
     warnings: &'a [String],
     cache: Option<CacheStatsView>,
-    rule_timings: &'a Option<Vec<zpz_core::dsl::RuleTiming>>,
+    rule_timings: &'a Option<Vec<zzop_core::dsl::RuleTiming>>,
 }
 
 impl<'a> AnalyzeOutputView<'a> {
@@ -235,45 +235,45 @@ impl<'a> AnalyzeOutputView<'a> {
 }
 
 /// `analyze(configJson)`: deserializes `configJson` into an `AnalyzeRequest`, builds
-/// an `EngineConfig` (loading DSL packs from `packs_dir` via `zpz_core::load_dsl_packs` when given), runs
-/// `zpz_engine::analyze_tree`, and serializes the result. Every failure mode (bad JSON, a pack directory
+/// an `EngineConfig` (loading DSL packs from `packs_dir` via `zzop_core::load_dsl_packs` when given), runs
+/// `zzop_engine::analyze_tree`, and serializes the result. Every failure mode (bad JSON, a pack directory
 /// that doesn't exist) returns `Err(message)` — never a panic; `addon.rs` maps `Err` to a napi `Error`.
 pub fn analyze_json(config_json: &str) -> Result<String, String> {
     let req: AnalyzeRequest = serde_json::from_str(config_json)
-        .map_err(|e| format!("zpz-napi: invalid analyze() config JSON: {e}"))?;
+        .map_err(|e| format!("zzop-napi: invalid analyze() config JSON: {e}"))?;
     if req.root.is_empty() {
-        return Err("zpz-napi: analyze() config is missing required field \"root\"".to_string());
+        return Err("zzop-napi: analyze() config is missing required field \"root\"".to_string());
     }
     let root = PathBuf::from(&req.root);
 
     let mut warnings = Vec::new();
     let config = build_engine_config(&req, &mut warnings);
-    let mut output = zpz_engine::analyze_tree(&root, &config);
+    let mut output = zzop_engine::analyze_tree(&root, &config);
     warnings.append(&mut output.warnings);
     output.warnings = warnings;
 
     serde_json::to_string(&AnalyzeOutputView::of(&output))
-        .map_err(|e| format!("zpz-napi: failed to serialize analyze() output: {e}"))
+        .map_err(|e| format!("zzop-napi: failed to serialize analyze() output: {e}"))
 }
 
 /// `analyzeTrees(configJson)`: deserializes `configJson` into an `AnalyzeTreesRequest`
-/// (`{trees: AnalyzeRequest[]}`), runs `zpz_engine::analyze_tree` once per entry, then
-/// `zpz_engine::analyze_trees`'s cross-layer join over every tree's `IoFacts`. Per-tree DSL-pack-load
+/// (`{trees: AnalyzeRequest[]}`), runs `zzop_engine::analyze_tree` once per entry, then
+/// `zzop_engine::analyze_trees`'s cross-layer join over every tree's `IoFacts`. Per-tree DSL-pack-load
 /// warnings are attached to that same tree's own `AnalyzeOutput.warnings` (not globally pooled), so a
 /// consumer can tell which tree a warning came from.
 pub fn analyze_trees_json(config_json: &str) -> Result<String, String> {
     let req: AnalyzeTreesRequest = serde_json::from_str(config_json)
-        .map_err(|e| format!("zpz-napi: invalid analyzeTrees() config JSON: {e}"))?;
+        .map_err(|e| format!("zzop-napi: invalid analyzeTrees() config JSON: {e}"))?;
     if req.trees.is_empty() {
         return Err(
-            "zpz-napi: analyzeTrees() config must include at least one entry in \"trees\""
+            "zzop-napi: analyzeTrees() config must include at least one entry in \"trees\""
                 .to_string(),
         );
     }
     for (i, tree_req) in req.trees.iter().enumerate() {
         if tree_req.root.is_empty() {
             return Err(format!(
-                "zpz-napi: analyzeTrees() trees[{i}] is missing required field \"root\""
+                "zzop-napi: analyzeTrees() trees[{i}] is missing required field \"root\""
             ));
         }
     }
@@ -287,7 +287,7 @@ pub fn analyze_trees_json(config_json: &str) -> Result<String, String> {
         trees.push((PathBuf::from(&tree_req.root), config));
     }
 
-    let mut result = zpz_engine::analyze_trees(&trees);
+    let mut result = zzop_engine::analyze_trees(&trees);
     for (warnings, (_, _, output)) in per_tree_warnings.into_iter().zip(result.trees.iter_mut()) {
         let mut merged = warnings;
         merged.append(&mut output.warnings);
@@ -306,11 +306,11 @@ pub fn analyze_trees_json(config_json: &str) -> Result<String, String> {
     #[serde(rename_all = "camelCase")]
     struct MultiAnalyzeOutputView<'a> {
         trees: Vec<TreeEntryView<'a>>,
-        cross_layer: &'a zpz_core::CrossLayerResult,
-        /// The 6 `cross-layer/*` native rules run over `cross_layer` (`zpz_engine::analyze_trees`'s own
+        cross_layer: &'a zzop_core::CrossLayerResult,
+        /// The 6 `cross-layer/*` native rules run over `cross_layer` (`zzop_engine::analyze_trees`'s own
         /// `MultiAnalyzeOutput::cross_layer_findings` field — a plain `&'a [Finding]` borrow, same
         /// zero-copy-view convention as every other field on this struct, since `Finding` already derives
-        /// `Serialize` in `zpz-core`).
+        /// `Serialize` in `zzop-core`).
         cross_layer_findings: &'a [Finding],
     }
 
@@ -329,25 +329,25 @@ pub fn analyze_trees_json(config_json: &str) -> Result<String, String> {
     };
 
     serde_json::to_string(&view)
-        .map_err(|e| format!("zpz-napi: failed to serialize analyzeTrees() output: {e}"))
+        .map_err(|e| format!("zzop-napi: failed to serialize analyzeTrees() output: {e}"))
 }
 
 /// `analyzeEnvelope(envelopeJson, configJson)` (`docs/NORMALIZED_AST.md`'s protocol receiver): validates
-/// `envelopeJson` against the v1 Normalized AST contract (`zpz_core::validate_envelope` — a wrong
+/// `envelopeJson` against the v1 Normalized AST contract (`zzop_core::validate_envelope` — a wrong
 /// `format`/too-new `version`/empty or duplicate `path`/inverted `body_start`..`body_end` all fail here
 /// with a structured, joined message, never a panic), deserializes `configJson` into an
-/// `EnvelopeAnalyzeRequest`, and runs `zpz_engine::analyze_envelope`. Same JSON-string-in/JSON-string-out,
+/// `EnvelopeAnalyzeRequest`, and runs `zzop_engine::analyze_envelope`. Same JSON-string-in/JSON-string-out,
 /// `AnalyzeOutputView`-serialized shape as `analyze_json`/`analyze_trees_json`.
 pub fn analyze_envelope_json(envelope_json: &str, config_json: &str) -> Result<String, String> {
     let envelope: NormalizedEnvelope =
-        zpz_core::validate_envelope(envelope_json).map_err(|errors| {
+        zzop_core::validate_envelope(envelope_json).map_err(|errors| {
             format!(
-                "zpz-napi: invalid analyzeEnvelope() envelope JSON: {}",
+                "zzop-napi: invalid analyzeEnvelope() envelope JSON: {}",
                 errors.join("; ")
             )
         })?;
     let req: EnvelopeAnalyzeRequest = serde_json::from_str(config_json)
-        .map_err(|e| format!("zpz-napi: invalid analyzeEnvelope() config JSON: {e}"))?;
+        .map_err(|e| format!("zzop-napi: invalid analyzeEnvelope() config JSON: {e}"))?;
 
     let mut warnings = Vec::new();
     let packs_dirs = req
@@ -361,24 +361,24 @@ pub fn analyze_envelope_json(envelope_json: &str, config_json: &str) -> Result<S
         &req.disabled_rules,
         &mut warnings,
     );
-    let mut output = zpz_engine::analyze_envelope(&envelope, &config);
+    let mut output = zzop_engine::analyze_envelope(&envelope, &config);
     warnings.append(&mut output.warnings);
     output.warnings = warnings;
 
     serde_json::to_string(&AnalyzeOutputView::of(&output))
-        .map_err(|e| format!("zpz-napi: failed to serialize analyzeEnvelope() output: {e}"))
+        .map_err(|e| format!("zzop-napi: failed to serialize analyzeEnvelope() output: {e}"))
 }
 
 /// `version()`: this crate's own Cargo version plus every parser's
-/// `PARSER_FINGERPRINT` (`zpz-cache`'s cache-key ingredient — see `zpz_parser_typescript::PARSER_FINGERPRINT`'s
+/// `PARSER_FINGERPRINT` (`zzop-cache`'s cache-key ingredient — see `zzop_parser_typescript::PARSER_FINGERPRINT`'s
 /// doc), so a host app can log/report exactly which parser build produced a given analysis without needing
 /// its own copy of those constants.
 pub fn version_string() -> String {
     format!(
-        "zpz-napi/{} zpz-parser-typescript={} zpz-parser-prisma={}",
+        "zzop-napi/{} zzop-parser-typescript={} zzop-parser-prisma={}",
         env!("CARGO_PKG_VERSION"),
-        zpz_parser_typescript::PARSER_FINGERPRINT,
-        zpz_parser_prisma::PARSER_FINGERPRINT,
+        zzop_parser_typescript::PARSER_FINGERPRINT,
+        zzop_parser_prisma::PARSER_FINGERPRINT,
     )
 }
 
@@ -425,7 +425,7 @@ mod tests {
     }
 
     fn cycle_fixture() -> TempDir {
-        let dir = TempDir::new("zpz-napi-fixture");
+        let dir = TempDir::new("zzop-napi-fixture");
         dir.write(
             "a.ts",
             "import { b } from './b';\nexport function a() { return b(); }\n",
@@ -462,7 +462,7 @@ mod tests {
     /// - `a.ts`'s `tag_counts` gets 3 distinct tags (FEAT/FIX/DOCS) from 3 separately-tagged commits, so
     ///   sorting actually has something to do (a single-key map would trivially "sort").
     fn cycle_and_git_fixture() -> TempDir {
-        let dir = TempDir::new("zpz-napi-determinism-fixture");
+        let dir = TempDir::new("zzop-napi-determinism-fixture");
         run_git(dir.path(), &["init", "-q"]);
         run_git(dir.path(), &["config", "user.email", "test@example.com"]);
         run_git(dir.path(), &["config", "user.name", "Test User"]);
@@ -620,9 +620,9 @@ mod tests {
         let dir = cycle_fixture();
         dir.write("marker.ts", "// MARKER_A\n// MARKER_B\n");
 
-        let packs_a = TempDir::new("zpz-napi-packs-a");
+        let packs_a = TempDir::new("zzop-napi-packs-a");
         packs_a.write("pack-a.json", &dsl_pack_json("pack-a", "r1", "MARKER_A"));
-        let packs_b = TempDir::new("zpz-napi-packs-b");
+        let packs_b = TempDir::new("zzop-napi-packs-b");
         packs_b.write("pack-b.json", &dsl_pack_json("pack-b", "r1", "MARKER_B"));
 
         let config = format!(
@@ -649,12 +649,12 @@ mod tests {
         let dir = cycle_fixture();
         dir.write("marker.ts", "// OLD_MARKER\n// NEW_MARKER\n");
 
-        let packs_old = TempDir::new("zpz-napi-packs-old");
+        let packs_old = TempDir::new("zzop-napi-packs-old");
         packs_old.write(
             "custom.json",
             &dsl_pack_json("custom", "marker-old", "OLD_MARKER"),
         );
-        let packs_new = TempDir::new("zpz-napi-packs-new");
+        let packs_new = TempDir::new("zzop-napi-packs-new");
         packs_new.write(
             "custom.json",
             &dsl_pack_json("custom", "marker-new", "NEW_MARKER"),
@@ -684,7 +684,7 @@ mod tests {
         let dir = cycle_fixture();
         dir.write("marker.ts", "// MARKER_A\n");
 
-        let packs_good = TempDir::new("zpz-napi-packs-good");
+        let packs_good = TempDir::new("zzop-napi-packs-good");
         packs_good.write("pack-a.json", &dsl_pack_json("pack-a", "r1", "MARKER_A"));
         let bad_dir = dir.path().join("no-such-packs-dir");
 
@@ -712,12 +712,12 @@ mod tests {
 
     #[test]
     fn analyze_trees_json_joins_two_trees_and_rejects_empty_input() {
-        let fe = TempDir::new("zpz-napi-fe");
+        let fe = TempDir::new("zzop-napi-fe");
         fe.write(
             "client.ts",
             "import axios from 'axios';\nexport const load = () => axios.get('/api/users');\n",
         );
-        let be = TempDir::new("zpz-napi-be");
+        let be = TempDir::new("zzop-napi-be");
         be.write(
             "server.ts",
             "import { apiRoutes } from './router';\napiRoutes.get('/api/users', () => {});\n",
@@ -744,7 +744,7 @@ mod tests {
 
     fn tiny_envelope_json() -> String {
         r#"{
-            "format": "zpz-normalized-ast",
+            "format": "zzop-normalized-ast",
             "version": 1,
             "parser": "jsp-lexical/1",
             "source": "legacy",
@@ -780,7 +780,7 @@ mod tests {
 
     #[test]
     fn analyze_envelope_json_rejects_an_invalid_envelope_without_panicking() {
-        let bad_envelope = tiny_envelope_json().replace("zpz-normalized-ast", "bogus-format");
+        let bad_envelope = tiny_envelope_json().replace("zzop-normalized-ast", "bogus-format");
         let err = analyze_envelope_json(&bad_envelope, r#"{"sourceId": "legacy"}"#).unwrap_err();
         assert!(err.contains("invalid analyzeEnvelope() envelope JSON"));
         assert!(err.contains("unknown format"));
@@ -795,7 +795,7 @@ mod tests {
     #[test]
     fn version_string_includes_parser_fingerprints() {
         let v = version_string();
-        assert!(v.contains("zpz-parser-typescript="));
-        assert!(v.contains("zpz-parser-prisma="));
+        assert!(v.contains("zzop-parser-typescript="));
+        assert!(v.contains("zzop-parser-prisma="));
     }
 }

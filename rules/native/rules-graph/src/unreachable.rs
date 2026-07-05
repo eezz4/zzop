@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use zpz_core::{DepGraph, FileNode, Finding, Severity};
+use zzop_core::{DepGraph, FileNode, Finding, Severity};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnreachableFile {

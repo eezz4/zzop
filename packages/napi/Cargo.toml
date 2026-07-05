@@ -1,5 +1,5 @@
 [package]
-name = "zpz-napi"
+name = "zzop-napi"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,13 +13,13 @@ build = "build.rs"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-zpz-core = { path = "../core" }
-zpz-metrics = { path = "../metrics" }
-zpz-engine = { path = "../engine" }
+zzop-core = { path = "../core" }
+zzop-metrics = { path = "../metrics" }
+zzop-engine = { path = "../engine" }
 # Path deps purely for `version()`'s diagnostic string (`PARSER_FINGERPRINT` constants) — not part of the
-# analyze pipeline itself (that lives entirely inside `zpz-engine`).
-zpz-parser-typescript = { path = "../../parser/parser-typescript" }
-zpz-parser-prisma = { path = "../../parser/parser-prisma" }
+# analyze pipeline itself (that lives entirely inside `zzop-engine`).
+zzop-parser-typescript = { path = "../../parser/parser-typescript" }
+zzop-parser-prisma = { path = "../../parser/parser-prisma" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
@@ -34,5 +34,5 @@ napi-build = { version = "2.3", optional = true }
 default = []
 # Turns on the real `#[napi]`-exported surface (`src/addon.rs`) plus `napi-build`'s MSVC delay-load linker
 # setup. Build the addon with:
-#   cargo +stable-x86_64-pc-windows-msvc build -p zpz-napi --release --features addon
+#   cargo +stable-x86_64-pc-windows-msvc build -p zzop-napi --release --features addon
 addon = ["dep:napi", "dep:napi-derive", "dep:napi-build"]

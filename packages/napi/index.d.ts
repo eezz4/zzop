@@ -1,9 +1,9 @@
-// Typed surface for @zpz/native. The addon itself is JSON-string-in / JSON-string-out (see src/lib.rs's
+// Typed surface for @zzop/native. The addon itself is JSON-string-in / JSON-string-out (see src/lib.rs's
 // module doc — "single N-API entry"); these types describe the *shape* of that JSON on both sides so a
 // TypeScript host doesn't have to hand-roll it, without this package taking on a JSON-schema/codegen step
 // (a later-phase concern, same as prebuild packaging).
 
-/** One tree's `analyze()`/`analyzeTrees()` input — see `zpz_napi::api::AnalyzeRequest` (Rust). */
+/** One tree's `analyze()`/`analyzeTrees()` input — see `zzop_napi::api::AnalyzeRequest` (Rust). */
 export interface AnalyzeConfig {
   /** Absolute or process-relative path to the tree root. Required. */
   root: string;
@@ -32,7 +32,7 @@ export interface AnalyzeTreesConfig {
 }
 
 /**
- * `analyzeEnvelope()`'s config input — see `zpz_napi::api::EnvelopeAnalyzeRequest` (Rust). Unlike
+ * `analyzeEnvelope()`'s config input — see `zzop_napi::api::EnvelopeAnalyzeRequest` (Rust). Unlike
  * `AnalyzeConfig` there is no `root`/`cacheDir`/`git`/`sizeCap`: an envelope carries no filesystem
  * location the engine can re-read (see the external-parser protocol doc, `docs/NORMALIZED_AST.md`).
  */
@@ -56,10 +56,10 @@ export type NormalizedAstEnvelope = Record<string, unknown>;
 
 /**
  * `analyze(configJson)` -> parsed JSON shape. Left as `Record<string, unknown>` rather than a full 1:1 port
- * of every `zpz-core` IR type (`CommonIr`, `Finding`, `FileNode`, `Scores`, ...) — those are Rust structs
+ * of every `zzop-core` IR type (`CommonIr`, `Finding`, `FileNode`, `Scores`, ...) — those are Rust structs
  * whose JSON field casing/shape this package does not want to fork/duplicate and risk drifting from; a
  * generated/shared `.d.ts` for the IR itself is a later-phase concern (see also `src/api.rs`'s doc on why
- * this crate mirrors rather than forks `zpz_engine::AnalyzeOutput` for serialization).
+ * this crate mirrors rather than forks `zzop_engine::AnalyzeOutput` for serialization).
  */
 export type AnalyzeOutputJson = Record<string, unknown>;
 

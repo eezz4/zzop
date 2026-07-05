@@ -1,6 +1,6 @@
 //! `unprovided-consume` — an `IoConsume` (`kind == "http"`, `key` resolved `Some`) with no matching
 //! `IoProvide` key in the same analysis. A single-tree, narrower cousin of
-//! `zpz_core::link_cross_layer_io`'s `unprovided_consumes` set.
+//! `zzop_core::link_cross_layer_io`'s `unprovided_consumes` set.
 //!
 //! ## The zero-provides veto
 //! A pure front-end tree with ZERO `http` provides of its own legitimately consumes routes served by a
@@ -31,7 +31,7 @@
 //! wrongly flagged. This is a deliberate SKIP rather than a fabricated join, since stripping the host risks
 //! a false negative masking a real mismatch. A non-localhost absolute URL goes through existing logic as usual.
 //!
-//! [`Severity::Info`]: zpz_core::Severity::Info
+//! [`Severity::Info`]: zzop_core::Severity::Info
 
 use std::collections::HashSet;
 
@@ -55,9 +55,9 @@ const API_SEGMENT_PATTERN: &str = r"(?i)/(api|graphql|rpc|v[0-9]+)(/|$)";
 const LOCALHOST_HOST_PATTERN: &str = r"(?i)^\S+\s+https?://(localhost|127\.0\.0\.1)(:\d+)?(/|$)";
 
 pub fn unprovided_consume_findings(
-    io_provides: &[zpz_core::IoProvide],
-    io_consumes: &[zpz_core::IoConsume],
-) -> Vec<zpz_core::Finding> {
+    io_provides: &[zzop_core::IoProvide],
+    io_consumes: &[zzop_core::IoConsume],
+) -> Vec<zzop_core::Finding> {
     let has_http_provide = io_provides.iter().any(|p| p.kind == "http");
     if !has_http_provide {
         return Vec::new();
@@ -72,7 +72,7 @@ pub fn unprovided_consume_findings(
     let api_segment_re = Regex::new(API_SEGMENT_PATTERN).unwrap();
     let localhost_host_re = Regex::new(LOCALHOST_HOST_PATTERN).unwrap();
 
-    let mut findings: Vec<zpz_core::Finding> = io_consumes
+    let mut findings: Vec<zzop_core::Finding> = io_consumes
         .iter()
         .filter(|c| c.kind == "http")
         .filter_map(|c| {
@@ -89,9 +89,9 @@ pub fn unprovided_consume_findings(
             if asset_dir_gated_re.is_match(key) && !api_segment_re.is_match(key) {
                 return None; // json/xml with no API-ish path segment — vetoed by default, see module doc
             }
-            Some(zpz_core::Finding {
+            Some(zzop_core::Finding {
                 rule_id: "unprovided-consume".to_string(),
-                severity: zpz_core::Severity::Info,
+                severity: zzop_core::Severity::Info,
                 file: c.file.clone(),
                 line: c.line,
                 message: format!(
@@ -135,8 +135,8 @@ mod tests {
     //! real FE/BE fixtures — lives in `packages/engine/tests/analyze_io_natives.rs`).
     use super::*;
 
-    fn provide(key: &str, file: &str, line: u32) -> zpz_core::IoProvide {
-        zpz_core::IoProvide {
+    fn provide(key: &str, file: &str, line: u32) -> zzop_core::IoProvide {
+        zzop_core::IoProvide {
             kind: "http".to_string(),
             key: key.to_string(),
             file: file.to_string(),
@@ -145,8 +145,8 @@ mod tests {
         }
     }
 
-    fn consume(kind: &str, key: Option<&str>, file: &str, line: u32) -> zpz_core::IoConsume {
-        zpz_core::IoConsume {
+    fn consume(kind: &str, key: Option<&str>, file: &str, line: u32) -> zzop_core::IoConsume {
+        zzop_core::IoConsume {
             kind: kind.to_string(),
             key: key.map(str::to_string),
             file: file.to_string(),
@@ -165,7 +165,7 @@ mod tests {
         assert_eq!(found[0].file, "client.ts");
         assert_eq!(found[0].line, 3);
         assert_eq!(found[0].rule_id, "unprovided-consume");
-        assert_eq!(found[0].severity, zpz_core::Severity::Info);
+        assert_eq!(found[0].severity, zzop_core::Severity::Info);
         assert!(found[0].message.contains("GET /missing"));
     }
 
@@ -235,7 +235,7 @@ mod tests {
         let consumes = vec![consume("http", Some("GET /api/users.json"), "client.ts", 3)];
         let found = unprovided_consume_findings(&provides, &consumes);
         assert_eq!(found.len(), 1, "{:?}", found);
-        assert_eq!(found[0].severity, zpz_core::Severity::Info);
+        assert_eq!(found[0].severity, zzop_core::Severity::Info);
         assert!(found[0].message.contains("GET /api/users.json"));
     }
 
@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn a_non_http_provide_does_not_satisfy_the_zero_provides_gate() {
-        let provides = vec![zpz_core::IoProvide {
+        let provides = vec![zzop_core::IoProvide {
             kind: "queue".to_string(),
             key: "topic:x".to_string(),
             file: "worker.ts".to_string(),

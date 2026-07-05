@@ -2,7 +2,7 @@
 //! "Normalized AST" envelope an external/custom parser (Java, Python, JSP, anything the engine does
 //! not parse natively) emits per source tree, frozen v1 by `docs/NORMALIZED_AST.md`. These types
 //! mirror that document's Envelope/FileProjection JSON shapes field-for-field and reuse the SAME
-//! `zpz_core` serde types (`SourceSymbol`/`ImportBinding`/`ReExport`/`IoFacts`) native parsers already
+//! `zzop_core` serde types (`SourceSymbol`/`ImportBinding`/`ReExport`/`IoFacts`) native parsers already
 //! project into — an external parser is first-class regardless of how crude it is, as long as its
 //! projection round-trips through these exact structs (see the doc's Validation section).
 
@@ -13,7 +13,7 @@ use crate::ir::{ImportMap, ReExport, SourceSymbol};
 
 /// The exact `format` string every conforming envelope must carry (`docs/NORMALIZED_AST.md`'s Envelope
 /// section).
-pub const NORMALIZED_AST_FORMAT: &str = "zpz-normalized-ast";
+pub const NORMALIZED_AST_FORMAT: &str = "zzop-normalized-ast";
 
 /// The highest `NormalizedEnvelope::version` this engine build understands — same "reject newer, never
 /// guess" policy as `pack_loader::SUPPORTED_DSL_SCHEMA_VERSION` (see `docs/NORMALIZED_AST.md`'s "a
@@ -37,7 +37,7 @@ pub struct NormalizedEnvelope {
 }
 
 /// One file's projection (`docs/NORMALIZED_AST.md`'s FileProjection section) — every field mirrors a
-/// reused `zpz_core` serde type; see that document for the authoritative semantics of each
+/// reused `zzop_core` serde type; see that document for the authoritative semantics of each
 /// (loc/symbols/imports/re_exports/used_names/io/degraded). Every optional-in-practice field defaults
 /// to its empty value when a producer omits it (a minimal/degraded parser may legitimately have nothing
 /// to say about, say, `re_exports`), matching the doc's "graceful degrade, never an error" convention.
@@ -67,7 +67,7 @@ pub struct FileProjection {
     #[serde(default)]
     pub used_names: Vec<String>,
     /// Producer FRAGMENT CHANNELS for cross-file composition — the envelope equivalent of what
-    /// `zpz_engine::analyze`'s `compose_trpc_provides` / `compose_router_mount_provides` already
+    /// `zzop_engine::analyze`'s `compose_trpc_provides` / `compose_router_mount_provides` already
     /// compose from native in-process adapters' per-file fragments. An external adapter that only
     /// knows plain io facts may omit all three entirely (default = empty, and that is a fully valid,
     /// non-degraded projection); one that additionally understands a router framework (tRPC,
@@ -175,7 +175,7 @@ mod tests {
 
     fn valid_envelope_json() -> String {
         r#"{
-            "format": "zpz-normalized-ast",
+            "format": "zzop-normalized-ast",
             "version": 1,
             "parser": "jsp-lexical/1",
             "source": "legacy",
@@ -208,7 +208,7 @@ mod tests {
     fn minimal_envelope_with_defaulted_fields_round_trips() {
         // A minimal/degraded producer omits every optional field.
         let json = r#"{
-            "format": "zpz-normalized-ast",
+            "format": "zzop-normalized-ast",
             "version": 1,
             "parser": "min/1",
             "source": "s",
@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn rejects_unknown_format() {
-        let json = valid_envelope_json().replace("zpz-normalized-ast", "some-other-format");
+        let json = valid_envelope_json().replace("zzop-normalized-ast", "some-other-format");
         let errors = validate_envelope(&json).unwrap_err();
         assert!(errors.iter().any(|e| e.contains("unknown format")));
     }
@@ -421,7 +421,7 @@ mod tests {
     #[test]
     fn collects_multiple_errors_at_once() {
         let json = valid_envelope_json()
-            .replace("zpz-normalized-ast", "bogus")
+            .replace("zzop-normalized-ast", "bogus")
             .replace("\"version\": 1", "\"version\": 99");
         let errors = validate_envelope(&json).unwrap_err();
         assert_eq!(errors.len(), 2);

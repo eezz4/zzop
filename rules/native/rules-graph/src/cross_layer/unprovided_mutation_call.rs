@@ -6,8 +6,8 @@
 //! consume site: those name the EXACT shape of drift when a close-enough candidate provide exists. Their
 //! absence means no near candidate exists at all — the target may not exist anywhere in this run.
 
-use zpz_core::io::TaggedConsume;
-use zpz_core::{Finding, Severity};
+use zzop_core::io::TaggedConsume;
+use zzop_core::{Finding, Severity};
 
 use super::{is_write_method, split_key};
 
@@ -59,7 +59,7 @@ pub fn unprovided_mutation_call_findings(unprovided_consumes: &[TaggedConsume]) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zpz_core::io::IoConsume;
+    use zzop_core::io::IoConsume;
 
     fn consume(
         kind: &str,

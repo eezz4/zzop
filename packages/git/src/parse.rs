@@ -1,5 +1,5 @@
-//! Pure `git log --numstat` output parser — the single source of both per-file `GitStats` (zpz_core)
-//! and per-commit `CommitFileSet`s (zpz_core), built in one streaming pass: same commit-header shape,
+//! Pure `git log --numstat` output parser — the single source of both per-file `GitStats` (zzop_core)
+//! and per-commit `CommitFileSet`s (zzop_core), built in one streaming pass: same commit-header shape,
 //! numstat line shape, rename (`"old => new"` / `"{old => new}"`) handling, and `--reverse` traversal
 //! (oldest-first) so a rename's pre-rename contributions — already accumulated under the old path —
 //! can be folded into the new canonical path the moment the rename is seen.
@@ -8,7 +8,7 @@
 //! - No path-prefix stripping, extension filter, decay half-life, or branch selection — this crate
 //!   collects the WHOLE repo's history in one pass; a caller narrows/filters downstream if needed.
 //! - The recent window defaults to 30 days (`CollectOptions::recent_days`, shared with
-//!   `zpz_core::node::DEFAULT_RECENT_THRESHOLD_DAYS`, the lifecycle classifier's own recency window)
+//!   `zzop_core::node::DEFAULT_RECENT_THRESHOLD_DAYS`, the lifecycle classifier's own recency window)
 //!   so a file's "recent" churn lines up with the same window the lifecycle classifier uses.
 //! - `recentChurn`/`recentChangeCount` are always populated (`Some`), since this crate always computes
 //!   them; `GitPathStats`'s `Option`-ness instead marks fields that may genuinely be absent when
@@ -22,7 +22,7 @@
 
 use std::collections::BTreeMap;
 
-use zpz_core::{CommitFileSet, GitPathStats, GitStats};
+use zzop_core::{CommitFileSet, GitPathStats, GitStats};
 
 use crate::iso_date::parse_iso_to_ms;
 use crate::process::{COMMIT_MARKER, FIELD_SEP};

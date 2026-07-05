@@ -1,8 +1,8 @@
 //! Default "low confidence" HTTP interface-key pattern table — analysis vocabulary (which paths are
 //! generic enough that many unrelated services legitimately share them) used by
-//! `zpz_engine::analyze_trees` as the default `zpz_core::LinkOptions::low_confidence_key_patterns`
-//! override. Lives here rather than in `zpz-core`, mirroring the mechanism/vocabulary split of
-//! `zpz_git::CollectOptions::commit_type_patterns` (see that module's doc): `zpz-core`'s
+//! `zzop_engine::analyze_trees` as the default `zzop_core::LinkOptions::low_confidence_key_patterns`
+//! override. Lives here rather than in `zzop-core`, mirroring the mechanism/vocabulary split of
+//! `zzop_git::CollectOptions::commit_type_patterns` (see that module's doc): `zzop-core`'s
 //! `link_cross_layer_io` owns the injectable pattern-matching mechanism only, not which paths count
 //! as "generic".
 
@@ -31,7 +31,7 @@ pub fn default_generic_interface_key_patterns() -> Vec<(regex::Regex, String)> {
 mod tests {
     //! Pins the shipped table's shape (count, every pattern compiles) plus a handful of match/no-match
     //! cases exercising the anchoring — end-to-end join behavior (an edge actually getting
-    //! `low_confidence_reason` set) is `zpz_core::io`'s job, covered there with an injected table.
+    //! `low_confidence_reason` set) is `zzop_core::io`'s job, covered there with an injected table.
     use super::*;
 
     #[test]

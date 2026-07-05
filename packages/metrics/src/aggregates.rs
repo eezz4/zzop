@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use zpz_core::{DepGraph, FileNode};
+use zzop_core::{DepGraph, FileNode};
 
 // ---------------------------------------------------------------------------------------------
 // aggregateByFolder — rolls up FileNodes by folder prefix up to the given depth. Files shallower
@@ -173,7 +173,7 @@ fn folder_of(path: &str, depth: usize) -> String {
 //
 // Casing note: unlike every other type in this file, `ActionUse`/`ActionDepSummary` do NOT carry
 // `#[serde(rename_all = "camelCase")]` — neither `aggregate_action_deps` nor these two types is wired
-// into `AnalyzeOutputView` (no caller in `zpz-engine`/`zpz-napi` today), so they never reach the napi
+// into `AnalyzeOutputView` (no caller in `zzop-engine`/`zzop-napi` today), so they never reach the napi
 // JSON boundary this casing unification covers. Add the attribute when/if this aggregate is wired up.
 // ---------------------------------------------------------------------------------------------
 
@@ -313,7 +313,7 @@ mod tests {
         assert_eq!(agg[0].folder, ".");
     }
 
-    /// A non-source file's `risk_score` is zeroed upstream (`zpz_core::build_file_nodes`'s `is_source`
+    /// A non-source file's `risk_score` is zeroed upstream (`zzop_core::build_file_nodes`'s `is_source`
     /// gate) before it ever reaches `aggregate_by_folder` — this exercises the folder rollup's side of
     /// that contract: a huge, high-churn data file (risk pre-zeroed, as the real pipeline would produce)
     /// must not dominate `totalRisk`/`maxRisk`, even though its `churn`/`loc` still roll up honestly.
