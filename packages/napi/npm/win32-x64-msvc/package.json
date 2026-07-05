@@ -10,6 +10,7 @@
     "zzop-napi.node"
   ],
   "license": "MIT",
+  "repository": "github:eezz4/zzop",
   "os": [
     "win32"
   ],
