@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>zzop — SDK &amp; embedding</title>
+<meta name="description" content="Embed the zzop engine directly with @zzop/native — the JSON-in / JSON-out SDK layer: functions, request/output shapes, and multi-repo analysis.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a href="index.html" class="brand">
+      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#1e222b"></rect><path d="M9 16.5 13.5 21 23 10.5" fill="none" stroke="#34d399" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      <span class="brand__wordmark">zzop</span>
+    </a>
+    <nav class="site-nav">
+      <a href="index.html" class="site-nav__link">Overview</a>
+      <a href="architecture.html" class="site-nav__link">Architecture</a>
+      <a href="usage.html" class="site-nav__link">Usage</a>
+      <a href="sdk.html" class="site-nav__link is-active">SDK</a>
+      <a href="rules.html" class="site-nav__link">Rules</a>
+    </nav>
+    <div class="site-header__actions">
+      <a href="https://github.com/eezz4/zzop" target="_blank" rel="noreferrer" aria-label="GitHub" class="icon-btn">
+        <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"></path></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<div class="docs-layout">
+
+  <button type="button" class="docs-nav-toggle" aria-expanded="false" aria-controls="docs-nav">
+    Docs menu
+  </button>
+
+  <aside class="docs-nav" id="docs-nav">
+    <div class="docs-nav__group">
+      <div class="docs-nav__group-label">Docs</div>
+      <a href="index.html" class="docs-nav__link">Overview</a>
+      <a href="architecture.html" class="docs-nav__link">Architecture</a>
+      <a href="usage.html" class="docs-nav__link">Usage</a>
+      <a href="sdk.html" class="docs-nav__link is-active">SDK</a>
+      <a href="rules.html" class="docs-nav__link">Rules</a>
+    </div>
+  </aside>
+
+  <main class="docs-content">
+    <div class="docs-content-header">
+      <h1>Embedding zzop</h1>
+      <p>If you're building a tool on top of zzop rather than running it as a CLI, depend on <code>@zzop/native</code> directly and call it JSON-in / JSON-out — the same engine the <a href="usage.html">CLI</a> drives. Install it the same way; <code>npm install @zzop/native</code> pulls the matching prebuilt binary — nothing to compile. This page documents that library layer; if you just want to run zzop, use the CLI instead.</p>
+    </div>
+
+    <section id="functions">
+      <span class="eyebrow eyebrow--sm">@zzop/native</span>
+      <h2>Four functions, JSON in / JSON out</h2>
+      <p>All four are JSON-string-in / JSON-string-out, except <code>version</code>. Core logic lives in <code>packages/napi/src/api.rs</code> as plain Rust with no napi dependency at all (so it compiles and unit-tests under the workspace's default toolchain); <code>packages/napi/src/addon.rs</code> is a thin <code>#[napi]</code>-annotated wrapper over those same functions, gated behind the <code>addon</code> Cargo feature.</p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>analyze</code></td><td><code>(configJson: string) -&gt; string</code></td><td><code>AnalyzeRequest</code> &rarr; <code>AnalyzeOutputView</code>. Analyzes one tree.</td></tr>
+            <tr><td><code>analyzeTrees</code></td><td><code>(configJson: string) -&gt; string</code></td><td><code>AnalyzeTreesRequest</code> (<code>{ trees: AnalyzeRequest[] }</code>) &rarr; <code>MultiAnalyzeOutputView</code>. Analyzes several trees and joins them cross-layer.</td></tr>
+            <tr><td><code>analyzeEnvelope</code></td><td><code>(envelopeJson: string, configJson: string) -&gt; string</code></td><td><code>NormalizedEnvelope</code> + <code>EnvelopeAnalyzeRequest</code> &rarr; <code>AnalyzeOutputView</code>. Analyzes a Normalized AST envelope produced by an external parser adapter.</td></tr>
+            <tr><td><code>version</code></td><td><code>() -&gt; string</code></td><td>Engine + parser fingerprint version string. Has no <code>Result</code> — cannot fail.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="zero-config">
+      <span class="eyebrow eyebrow--sm">Defaults</span>
+      <h2>Zero config runs the full analysis</h2>
+      <p>A bare <code>{ root: "." }</code> request is the entire required configuration:</p>
+      <div class="code-panel">
+        <div class="code-panel__tab">analyze() call</div>
+        <pre class="code-block"><code>import zzop from '@zzop/native';
+
+const result = JSON.parse(
+  zzop.analyze(JSON.stringify({ root: '.' }))
+);</code></pre>
+      </div>
+      <p>The package is CommonJS, so both module systems work: <code>import zzop from '@zzop/native'</code> in ESM, <code>const zzop = require('@zzop/native')</code> in CommonJS.</p>
+      <p>Before the config crosses into Rust, the JS wrapper (<code>index.js</code>) injects two defaults — so a bare <code>{ root }</code> request runs the full analysis instead of quietly degrading to native analyses only:</p>
+      <ul>
+        <li><strong>packsDir omitted</strong> — defaults to the bundled DSL rule packs: <code>&lt;repo root&gt;/rules/dsl</code> in a source checkout (always the live copy), or the <code>rules/</code> directory copied into the installed package at publish time by the <code>prepack</code> script.</li>
+        <li><strong>packsDir given</strong> — the wrapper prepends the bundled directory rather than replacing it: the effective load order becomes <code>[bundled, ...yourDirs]</code>. All listed directories are loaded and merged; if two directories ship a pack with the same id, the later directory replaces that pack whole (not a rule-by-rule merge) — so a caller's pack always wins a collision against a shipped one.</li>
+        <li><strong>packsDir: null</strong> — the one case the wrapper leaves untouched: disables all DSL pack loading, bundled packs included.</li>
+        <li><strong>git omitted</strong> — defaults to <code>git: {}</code>, so the engine applies its own <code>recentDays: 30</code> default. <code>git: null</code> disables git collection entirely. If <code>root</code> is not a git repository, the engine degrades gracefully and reports it in <code>warnings</code>.</li>
+      </ul>
+    </section>
+
+    <section id="config-reference">
+      <span class="eyebrow eyebrow--sm">Config reference</span>
+      <h2>AnalyzeRequest</h2>
+      <p><code>#[serde(rename_all = "camelCase", default)]</code> — every field is optional except <code>root</code>, and unknown fields are ignored rather than rejected.</p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>root</code></td><td>string (required)</td><td>Tree root to analyze. An empty string is rejected with <code>Err</code>.</td></tr>
+            <tr><td><code>sourceId</code></td><td>string (default <code>""</code>)</td><td>Free-form label carried through into cross-tree output.</td></tr>
+            <tr><td><code>packsDir</code></td><td>string | string[] (optional)</td><td>Directory (or directories) of <code>*.json</code> DSL rule packs to load. Multiple directories are loaded and merged — a pack id repeated across directories is taken whole from the later directory. A missing/unreadable directory is a non-fatal <code>warnings</code> entry, not a failure.</td></tr>
+            <tr><td><code>cacheDir</code></td><td>string (optional)</td><td>Per-file IR/rule-result cache directory (content hash + parser/ruleset fingerprint keyed). Omit to run uncached.</td></tr>
+            <tr><td><code>git</code></td><td><code>{ since?: string, recentDays?: number }</code> (optional)</td><td>Enables git-derived <code>scores</code>/<code>health</code>/<code>recommendations</code>/<code>critical</code>/<code>seams</code>. <code>recentDays</code> defaults to <code>30</code>.</td></tr>
+            <tr><td><code>sizeCap</code></td><td>number (optional)</td><td>Default <code>1,500,000</code> bytes (~1.5&nbsp;MB). Files larger than this skip structural parsing and are listed under <code>degraded</code>.</td></tr>
+            <tr><td><code>disabledRules</code></td><td>string[]</td><td>Rule / native-analysis ids to disable entirely (exact match).</td></tr>
+            <tr><td><code>severityOverrides</code></td><td>object</td><td>Rule id &rarr; <code>"critical" | "warning" | "info"</code>. Promote or demote a specific id without forking its pack.</td></tr>
+            <tr><td><code>suppressions</code></td><td>object[]</td><td>Finding accept-list: each <code>{ rule, path?, glob? }</code> drops findings for <code>rule</code> — everywhere (no filter), in files whose path contains <code>path</code> (substring), or in files matching <code>glob</code> (full-path glob; <code>glob</code> wins over <code>path</code>).</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><code>analyzeEnvelope</code>'s config (<code>EnvelopeAnalyzeRequest</code>) is a smaller shape: <code>sourceId</code>, <code>packsDir</code>, and <code>disabledRules</code> only. An envelope carries no filesystem location the engine can re-read, so <code>root</code>, <code>cacheDir</code>, <code>git</code>, and <code>sizeCap</code> don't apply — only <code>symbol-scan</code>/<code>io-scan</code> DSL rules ever fire in envelope mode, since no source text is available.</p>
+    </section>
+
+    <section id="multi-repo">
+      <span class="eyebrow eyebrow--sm">Cross-repo</span>
+      <h2>Analyzing multiple repositories together</h2>
+      <p><code>analyzeTrees({ trees: [...] })</code> runs <code>analyze</code> once per tree, then joins every tree's declared IoFacts (HTTP/DB/tRPC provides and consumes) across all of them. A frontend checkout and a backend checkout can be two entirely separate git repositories that share nothing on disk and still get joined.</p>
+      <div class="code-panel">
+        <div class="code-panel__tab">Frontend + backend</div>
+        <pre class="code-block"><code>const result = JSON.parse(zzop.analyzeTrees(JSON.stringify({
+  trees: [
+    { root: '../frontend', sourceId: 'web' },
+    { root: '../backend', sourceId: 'api' },
+  ],
+})));</code></pre>
+      </div>
+      <p>The result shape is <code>{ trees: [{ root, sourceId, output }], crossLayer, crossLayerFindings }</code>. <code>crossLayer</code> carries the raw join result — matched <code>edges</code>, <code>unconsumedProvides</code>, <code>unprovidedConsumes</code>, <code>unresolvedConsumes</code>, <code>ambiguousConsumes</code> multi-tree matches, and <code>externalConsumes</code> (absolute-URL) consumes. <code>crossLayerFindings</code> is the output of the 20 <code>cross-layer/*</code> native rules that run over that join (see the rule catalog for the full id list). No single tree owns a cross-layer finding, so disabling one of these rule ids via <code>disabledRules</code> on <em>any one</em> tree drops it from the combined array for every tree — a union, not a per-tree gate.</p>
+    </section>
+
+    <section id="output-schema">
+      <span class="eyebrow eyebrow--sm">Output</span>
+      <h2>AnalyzeOutputView</h2>
+      <p>Same input, byte-identical output — no timestamps, no unstable map/array ordering. A capability a given run cannot provide is <strong>absent from the schema and self-reported in <code>warnings</code></strong>, never stubbed with a fake empty value. An empty array, by contrast, always means "this was analyzed and nothing was found."</p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>ir</code></td><td>object</td><td>Language-neutral common IR: <code>symbols</code>, <code>dep</code> (import graph), <code>loc</code>, <code>io</code> (IoFacts).</td></tr>
+            <tr><td><code>findings</code></td><td>object[]</td><td>Sorted <code>(severity, file, line, ruleId)</code> ascending, critical first. A finding suppressed by an inline marker comment never appears at all.</td></tr>
+            <tr><td><code>degraded</code></td><td>string[]</td><td>Paths that hit <code>sizeCap</code> or otherwise failed to parse structurally.</td></tr>
+            <tr><td><code>fileCount</code></td><td>number</td><td>Files walked.</td></tr>
+            <tr><td><code>nodes</code></td><td>object[]</td><td>Per-file churn/fan-in/fan-out/risk metrics — fully populated only when <code>git</code> is set.</td></tr>
+            <tr><td><code>scores</code></td><td>object | null</td><td>Structural sub-scores, 0–100. <code>null</code> unless <code>git</code> is set.</td></tr>
+            <tr><td><code>health</code></td><td>object | null</td><td>One composite index rolled up from <code>scores</code>.</td></tr>
+            <tr><td><code>recommendations</code></td><td>object[]</td><td>ROI-ranked refactor candidates. An item whose file carries a rule-confirmed critical finding moves (never copies) into a synthetic <code>urgent-bug-risk</code> group; its <code>roi</code> number never changes.</td></tr>
+            <tr><td><code>critical</code></td><td>object[]</td><td>Files ranked by blast radius (transitive dependent count).</td></tr>
+            <tr><td><code>seams</code></td><td>object[]</td><td>Folders that are good first-extraction candidates (low boundary-crossing coupling).</td></tr>
+            <tr><td><code>folders</code></td><td>object</td><td>Folder-granularity rollup of <code>nodes</code> and the dependency graph. Not gated by git — always present, even for an empty tree.</td></tr>
+            <tr><td><code>layerCoChurn</code></td><td>object[] | null</td><td>Cross-layer commit co-churn pairs. <code>null</code> unless <code>git</code> is set; <code>[]</code> (not <code>null</code>) when git is active but no pair meets the co-change threshold.</td></tr>
+            <tr><td><code>warnings</code></td><td>string[]</td><td>Non-fatal issues plus capability self-report notes — see below.</td></tr>
+            <tr><td><code>cache</code></td><td>{ hits, misses } | null</td><td>Set only when <code>cacheDir</code> was given.</td></tr>
+            <tr><td><code>ruleTimings</code></td><td>object[] | null</td><td>Per-rule id + elapsed time + finding count, when profiling is enabled. <code>AnalyzeRequest</code> does not currently expose a field to request profiling, so this is <code>null</code> in every <code>analyze</code>/<code>analyzeTrees</code>/<code>analyzeEnvelope</code> call today.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The whole JSON tree is camelCase, top to bottom — every nested type carries its own casing rule, not just the top-level view. <code>Finding.data</code> is the one deliberate exception: opaque, rule-authored JSON with no uniform casing rule.</p>
+      <div class="def-list">
+        <div class="def-list__title">Finding — the common shape every finding shares</div>
+        <div class="def-list__grid">
+          <code>ruleId</code><span><code>"{pack}/{rule}"</code> for a DSL rule (e.g. <code>"sql/nplus1"</code>), or a plain id for a native analysis (e.g. <code>"circular"</code>).</span>
+          <code>severity</code><span><code>"critical" | "warning" | "info"</code> — the rule's default severity.</span>
+          <code>file</code><span>Path relative to <code>root</code>.</span>
+          <code>line</code><span>1-based line number.</span>
+          <code>message</code><span>Human-facing cause/fix hint, copied verbatim from the rule definition.</span>
+          <code>data</code><span>Matcher-specific JSON payload — opaque, rule-specific keys.</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="self-report">
+      <span class="eyebrow eyebrow--sm">Honest output</span>
+      <h2>A narrowed scope self-reports in warnings, never silently</h2>
+      <p>An error means the call failed. A missing capability is not an error — the analysis completes normally, and the engine says exactly what it skipped and why. This self-report happens inside the engine itself, not the JS wrapper, so it applies identically to a non-JS consumer calling the Rust engine directly.</p>
+      <div class="code-panel">
+        <div class="code-panel__tab">git option omitted</div>
+        <pre class="code-block"><code>"warnings": [
+  "git history not requested (git option omitted): scores, health,
+   recommendations, criticality, seams and layerCoChurn are null.
+   Pass git: {} to enable them."
+]</code></pre>
+      </div>
+      <p>The same pattern applies when no DSL rule packs could be found: the engine reports that only its native analyses ran, and names how many, rather than returning a quietly smaller <code>findings</code> array with no explanation.</p>
+    </section>
+
+    <section id="errors">
+      <span class="eyebrow eyebrow--sm">Panic safety</span>
+      <h2>The process never crashes</h2>
+      <p>Two layers. <code>api.rs</code> never panics by contract — every fallible path (malformed JSON, a missing <code>root</code>, an invalid envelope) returns a <code>Result&lt;String, String&gt;</code>. <code>addon.rs</code> wraps each fallible call in a second, outer safety net:</p>
+      <div class="code-panel">
+        <div class="code-panel__tab">addon.rs — outer safety net</div>
+        <pre class="code-block"><code>fn catch&lt;F: FnOnce() -&gt; Result&lt;String, String&gt; + UnwindSafe&gt;(f: F) -&gt; napi::Result&lt;String&gt; {
+    match std::panic::catch_unwind(f) {
+        Ok(Ok(json)) =&gt; Ok(json),
+        Ok(Err(message)) =&gt; Err(Error::from_reason(message)),
+        Err(_) =&gt; Err(Error::from_reason("zzop-napi: internal panic (this is a bug — please report it)")),
+    }
+}</code></pre>
+      </div>
+      <p>This exists because unwinding across a <code>#[napi]</code>-exported boundary is undefined behavior and must never happen — the engine already isolates a single file's parse/rule failure internally, well before this outer net is ever needed. In practice a JS caller sees either a resolved value or a rejected/thrown <code>Error</code>, never a process crash. <code>version</code> has no <code>Result</code> and no <code>catch</code> wrapper — it cannot fail.</p>
+    </section>
+
+  </main>
+
+  <aside class="docs-toc">
+    <div class="docs-toc__label">On this page</div>
+    <a href="#functions" class="docs-toc__link">API functions</a>
+    <a href="#zero-config" class="docs-toc__link">Zero-config defaults</a>
+    <a href="#config-reference" class="docs-toc__link">Config reference</a>
+    <a href="#multi-repo" class="docs-toc__link">Multi-repo analysis</a>
+    <a href="#output-schema" class="docs-toc__link">Output schema</a>
+    <a href="#self-report" class="docs-toc__link">Warnings self-report</a>
+    <a href="#errors" class="docs-toc__link">Panic safety</a>
+  </aside>
+
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <span class="site-footer__brand">zzop</span>
+    <span>— Zero Zone Of Pain · MIT License · © 2026</span>
+    <a href="https://github.com/eezz4/zzop" target="_blank" rel="noreferrer" class="site-footer__gh">GitHub</a>
+  </div>
+</footer>
+
+<script src="assets/docs.js"></script>
+</body>
+</html>

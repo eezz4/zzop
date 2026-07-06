@@ -7,8 +7,9 @@
 //! - [`structural`]: the 9 structural rules, keyed off a model's own declaration (god-model,
 //!   missing-timestamps, redundant-index, float-money, stale-updated-at, temporal-as-string, fk-no-index,
 //!   nullable-fk, implicit-fk).
-//! - [`usage`]: usage-evidence collectors (field usage, migration churn, store map) and the rules built on
-//!   them (dead-model, dead-field, schema-churn).
+//! - [`usage`]: usage-evidence collectors (per-file field-usage tokens, migration churn) and the rules
+//!   built on them (dead-model, dead-field, schema-churn). Store-binding evidence for `dead-model` is a
+//!   parser-side fact now (`zzop_parser_typescript::extract_store_bound_models`), not a collector here.
 //! - [`join`]: schema x usage JOIN rules (soft-delete-bypass, orderby-unindexed, enum-string-drift),
 //!   anchored at the query call site instead of the model declaration.
 //! - [`message`]: the human-facing prose for every rule id above.
@@ -41,14 +42,14 @@ pub fn register_native_analyses(registry: &mut RuleRegistry) {
 }
 
 pub use join::{
-    enum_string_drift_issues, orderby_unindexed_issues, scan_query_call_sites,
-    soft_delete_bypass_issues, JoinIssue, QueryCallSite,
+    enum_string_drift_issues, orderby_unindexed_issues, soft_delete_bypass_issues, JoinIssue,
+    QueryCallSite,
 };
 pub use message::{join_issue_message, schema_issue_message};
 pub use structural::{
     analyze_schema, apply_schema_rules, SchemaAnalysis, SchemaIssue, STRUCTURAL_RULES_VERSION,
 };
 pub use usage::{
-    analyze_schema_with_usage, apply_churn_rule, cross_check_schema, scan_field_usage,
-    scan_migration_churn, scan_store_map,
+    analyze_schema_with_usage, apply_churn_rule, cross_check_schema, field_usage_tokens,
+    scan_migration_churn,
 };

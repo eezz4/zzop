@@ -6,8 +6,9 @@ to the diagram's "Parser" layer.
 
 ## Contract
 Each parser produces a `core::CommonIr` (dep/symbols/loc + optional `IoFacts`). The native types of swc / external
-parsers stay **inside** the parser crate and never leak into the engine or rules — see `docs/modules/parsers.md`'s
-"Isolation invariant" section (swc version isolation: an swc upgrade should never leak into the public IR).
+parsers stay **inside** the parser crate and never leak into the engine or rules — see
+[`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md)'s "The IR your `ir` field contains" section (an swc upgrade
+should never leak into the public IR).
 
 | Crate | Approach |
 |-------|----------|

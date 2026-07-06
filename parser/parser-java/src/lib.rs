@@ -168,6 +168,7 @@ pub fn parse_method_spans(rel: &str, text: &str) -> Vec<SourceSymbol> {
                             is_default: false,
                             body_start: Some(body_start),
                             body_end: Some(line),
+                            write_sites: Vec::new(),
                         });
                     }
                 }

@@ -3,6 +3,14 @@
 **/*.rs.bk
 *.pdb
 
+# Local detection-benchmark corpus (labeled fixture — not shipped; see
+# .claude/context/plans/benchmark-corpus-2026-07.md)
+/benchmark
+
+# zzop report output (runtime artifact; --out / report.dir)
+zzop-report.*/
+/zzop-reports/
+
 # OS / editor
 .DS_Store
 Thumbs.db

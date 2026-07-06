@@ -3,94 +3,36 @@
 //! type drift) are out of scope: both need capabilities beyond a single-repo call graph.
 //!
 //! Both scanners resolve a method-gated `ApiEndpoint`'s handler to a symbol id, then BFS downstream over
-//! the whole-repo `SymbolGraph` (`zzop_core::callgraph::bfs_reachable`) until a symbol whose body contains a
-//! flaggable write pattern is found (lowest depth wins; ties break by symbol id ascending). This crate has
-//! no parser dependency, so write-site detection is a regex scan over the reached symbol's raw text span
-//! rather than an AST walk: it matches a bare identifier receiver, or exactly one `base.member` level
-//! before the write call (a 3+-level chain is unmatched). Two narrowing consequences: a nested function's
-//! body is included in its outer symbol's scanned span, so a write inside it attributes to the outer
-//! symbol; and a raw-SQL label truncates at the first newline, so a multi-line statement's label can be
-//! incomplete.
+//! the whole-repo `SymbolGraph` (`zzop_core::callgraph::bfs_reachable`) until a symbol carrying a
+//! qualifying write site is found (lowest depth wins; ties break by symbol id ascending). Write-site
+//! detection itself is NOT done here: it is a structural attribute computed once at TS parse time
+//! (`zzop_parser_typescript::write_sites_for_symbol`, feeding `SourceSymbol::write_sites`) rather than a
+//! regex re-scan of each BFS-reached symbol's raw text on every analysis run — see that function's module
+//! doc for the detection rules (vocabulary, SQL-vs-ORM precedence, the `unsafe-read-endpoint`-specific
+//! counter-site exclusion) and their two narrowing consequences, both unchanged by the move: a nested
+//! function's body is included in its outer symbol's scanned span, so a write inside it attributes to the
+//! outer symbol; and a raw-SQL label truncates at the first newline, so a multi-line statement's label can
+//! be incomplete.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use regex::{Match, Regex};
+use regex::Regex;
 use zzop_core::callgraph::{bfs_reachable, SymbolGraph};
-use zzop_core::{ApiEndpoint, Finding, Severity, SourceSymbol};
-
-/// Default ORM-receiver pattern: a Repository/Store suffix, or a bare prisma/db/orm/tx/trx identifier.
-pub const DEFAULT_ORM_RECEIVER_PATTERN: &str = r"Repository$|Store$|^prisma$|^db$|^orm$|^tx$|^trx$";
-
-/// Default write-method vocabulary for `scan_unsafe_read_endpoint`, overridden via `write_methods`.
-pub const DEFAULT_WRITE_METHODS: &[&str] = &[
-    "create",
-    "createMany",
-    "update",
-    "updateMany",
-    "delete",
-    "deleteMany",
-    "upsert",
-    "insert",
-    "save",
-    "remove",
-];
+use zzop_core::{ApiEndpoint, Finding, NonIdempotentKind, Severity, SourceSymbol, WriteSite};
 
 /// Lines above a handler's body start to look back for an `idempotent-ok` marker (shared by both scanners).
 const OK_MARKER_LOOKBACK_LINES: u32 = 4;
-const WRITE_LABEL_TOKEN_COUNT: usize = 3;
 
 const SAFE_METHODS: [&str; 2] = ["GET", "HEAD"];
 const WRITE_HTTP_METHODS: [&str; 4] = ["PUT", "DELETE", "POST", "PATCH"];
-
-const CREATE_METHODS: [&str; 3] = ["create", "createMany", "insert"];
-const UPDATE_METHODS: [&str; 3] = ["update", "updateMany", "upsert"];
-const COUNTER_METHODS: [&str; 4] = ["incr", "incrby", "decr", "decrby"];
-const ATOMIC_OP_KEYS: [&str; 4] = ["increment", "decrement", "push", "multiply"];
 
 fn ok_marker_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| Regex::new(r"//\s*idempotent-ok:").unwrap())
 }
 
-/// Raw-SQL write in a string literal — covers stacks issuing SQL directly (Cloudflare D1, better-sqlite3,
-/// `pg`) rather than through a store-method call. Never matches a SELECT.
-fn sql_write_re() -> &'static Regex {
-    static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| {
-        Regex::new(
-            r"(?i)\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE\s+\w|DELETE\s+FROM|REPLACE\s+INTO)\b",
-        )
-        .unwrap()
-    })
-}
-
-fn atomic_op_re() -> &'static Regex {
-    static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(&format!(r"\b(?:{})\s*:", ATOMIC_OP_KEYS.join("|"))).unwrap())
-}
-
-/// A store-shaped method call, receiver/method captured generically (classified in `symbol_bad_sites`).
-fn method_call_re() -> &'static Regex {
-    static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| {
-        Regex::new(r"\b([A-Za-z_$][\w$]*)(?:\.[A-Za-z_$][\w$]*)?\.([A-Za-z_$][\w$]*)\s*\(").unwrap()
-    })
-}
-
-/// Write-method-vocab-driven variant of `method_call_re`, for `scan_unsafe_read_endpoint`'s configurable
-/// write-methods list.
-fn write_call_re(methods: &[String]) -> Regex {
-    let alts: Vec<String> = methods.iter().map(|m| regex::escape(m)).collect();
-    Regex::new(&format!(
-        r"\b([A-Za-z_$][\w$]*)(?:\.[A-Za-z_$][\w$]*)?\.(?:{})\s*\(",
-        alts.join("|")
-    ))
-    .unwrap()
-}
-
-// --- Shared helpers (name index / handler resolution / whitelist / span text) ---
+// --- Shared helpers (name index / handler resolution / whitelist) ---
 
 fn ident_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
@@ -148,89 +90,29 @@ fn is_whitelisted(
     false
 }
 
-/// Joins `text`'s lines `body_start..=body_end` (1-based) into one block, plus `body_start` for `line_at`.
-fn symbol_span_text(text: &str, body_start: u32, body_end: u32) -> (String, u32) {
-    let lines: Vec<&str> = text.split('\n').collect();
-    let start_idx = (body_start.saturating_sub(1)) as usize;
-    let end_idx = (body_end as usize).min(lines.len());
-    if start_idx >= end_idx {
-        return (String::new(), body_start);
-    }
-    (lines[start_idx..end_idx].join("\n"), body_start)
-}
-
-/// Absolute 1-based line for a byte `offset` into a `symbol_span_text` block.
-fn line_at(block: &str, first_line: u32, offset: usize) -> u32 {
-    let capped = offset.min(block.len());
-    first_line + block[..capped].matches('\n').count() as u32
-}
-
-/// The bracket-balanced argument text after a call's `(` (`open_after` = byte offset right after it, at depth 1).
-fn call_args_span(block: &str, open_after: usize) -> &str {
-    let mut depth = 1i32;
-    let mut pos = open_after;
-    let mut end = block.len();
-    for c in block[open_after..].chars() {
-        match c {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    end = pos;
-                    break;
-                }
-            }
-            _ => {}
-        }
-        pos += c.len_utf8();
-    }
-    &block[open_after..end]
-}
-
-fn args_have_atomic_op(args: &str) -> bool {
-    atomic_op_re().is_match(args)
-}
-
-fn write_sink_label(matched: &str) -> String {
-    matched
-        .trim_end()
-        .trim_end_matches('(')
-        .trim_end()
-        .to_string()
-}
-
-/// A short "verb + next token(s)" label for a raw-SQL write match, truncated at the first newline.
-fn sql_label(rest_from_match_start: &str) -> String {
-    rest_from_match_start
-        .chars()
-        .take_while(|&c| c != '\n')
-        .collect::<String>()
-        .replace(['"', '\'', '`'], "")
-        .split_whitespace()
-        .take(WRITE_LABEL_TOKEN_COUNT)
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 // --- scan_unsafe_read_endpoint ---
 
-/// Input for [`scan_unsafe_read_endpoint`]. `write_methods`/`orm_receiver_pattern` are explicit params —
-/// callers pass [`DEFAULT_WRITE_METHODS`] / [`DEFAULT_ORM_RECEIVER_PATTERN`] for the default vocabulary.
+/// Input for [`scan_unsafe_read_endpoint`].
 pub struct ScanUnsafeReadEndpointInput<'a> {
     pub api_endpoints: &'a [ApiEndpoint],
     pub symbols: &'a [SourceSymbol],
     pub symbol_graph: &'a SymbolGraph,
-    /// rel path -> full source text, for both write-site scanning and the `idempotent-ok` whitelist lookback.
+    /// rel path -> full source text, for the `idempotent-ok` whitelist lookback only (write-site
+    /// detection reads `symbol.write_sites`, precomputed at parse time — see the module doc).
     pub files: &'a HashMap<String, String>,
-    pub write_methods: &'a [String],
-    pub orm_receiver_pattern: &'a str,
 }
 
-#[derive(Debug, Clone)]
-struct WriteSite {
-    file: String,
-    line: u32,
-    sink: String,
+/// The first (lowest-position) write site in `sym.write_sites` that counts as "any write" for this rule —
+/// every kind qualifies EXCEPT a pure counter-bump (`Counter`), since the vocabulary
+/// `unsafe-read-endpoint` always used (`create`/`createMany`/`update`/`updateMany`/`delete`/`deleteMany`/
+/// `upsert`/`insert`/`save`/`remove`) never included the counter vocabulary
+/// (`incr`/`incrby`/`decr`/`decrby`) that `non-idempotent-write` also inspects — see
+/// `zzop_parser_typescript::write_site`'s module doc for why this reproduces the old two-scan split
+/// exactly now that both rules share one `write_sites` list.
+fn first_unsafe_write_site(sym: &SourceSymbol) -> Option<&WriteSite> {
+    sym.write_sites
+        .iter()
+        .find(|w| w.kind != Some(NonIdempotentKind::Counter))
 }
 
 /// Flags a "safe" method endpoint (GET/HEAD) whose handler reaches a database write — per RFC 7231, GET/HEAD
@@ -248,23 +130,12 @@ pub fn scan_unsafe_read_endpoint(input: &ScanUnsafeReadEndpointInput) -> Vec<Fin
     let name_index = build_name_index(input.symbols);
     let symbols_by_id: HashMap<&str, &SourceSymbol> =
         input.symbols.iter().map(|s| (s.id.as_str(), s)).collect();
-    let write_re = write_call_re(input.write_methods);
-    let orm_re = Regex::new(input.orm_receiver_pattern)
-        .unwrap_or_else(|_| Regex::new(DEFAULT_ORM_RECEIVER_PATTERN).unwrap());
 
-    let cache: RefCell<HashMap<String, Option<WriteSite>>> = RefCell::new(HashMap::new());
     let site_at = |id: &str| -> Option<WriteSite> {
-        if let Some(hit) = cache.borrow().get(id) {
-            return hit.clone();
-        }
-        let site = symbols_by_id.get(id).and_then(|s| {
-            input
-                .files
-                .get(&s.file)
-                .and_then(|text| symbol_write_site(s, text, &write_re, &orm_re))
-        });
-        cache.borrow_mut().insert(id.to_string(), site.clone());
-        site
+        symbols_by_id
+            .get(id)
+            .and_then(|s| first_unsafe_write_site(s))
+            .cloned()
     };
 
     let mut out = Vec::new();
@@ -320,93 +191,16 @@ pub fn scan_unsafe_read_endpoint(input: &ScanUnsafeReadEndpointInput) -> Vec<Fin
     out
 }
 
-/// Locates the first (in source order) qualifying write in a symbol's body — a raw-SQL write string or a
-/// store-like write call, whichever comes first.
-fn symbol_write_site(
-    sym: &SourceSymbol,
-    text: &str,
-    write_re: &Regex,
-    orm_re: &Regex,
-) -> Option<WriteSite> {
-    let (start, end) = (sym.body_start?, sym.body_end?);
-    let (block, first_line) = symbol_span_text(text, start, end);
-    if block.is_empty() {
-        return None;
-    }
-
-    let sql_m = sql_write_re().find(&block);
-    let write_m = first_orm_write_match(&block, write_re, orm_re);
-
-    let use_sql = match (&sql_m, &write_m) {
-        (Some(s), Some(w)) => s.start() <= w.start(),
-        (Some(_), None) => true,
-        (None, _) => false,
-    };
-
-    if use_sql {
-        let m = sql_m?;
-        return Some(WriteSite {
-            file: sym.file.clone(),
-            line: line_at(&block, first_line, m.start()),
-            sink: sql_label(&block[m.start()..]),
-        });
-    }
-    let m = write_m?;
-    Some(WriteSite {
-        file: sym.file.clone(),
-        line: line_at(&block, first_line, m.start()),
-        sink: write_sink_label(m.as_str()),
-    })
-}
-
-/// The leftmost match of `write_re` in `block` whose captured base receiver satisfies `orm_re` — a call
-/// whose method name matches the vocab but whose receiver isn't store-like is skipped, not treated as a match.
-fn first_orm_write_match<'t>(
-    block: &'t str,
-    write_re: &Regex,
-    orm_re: &Regex,
-) -> Option<Match<'t>> {
-    write_re
-        .captures_iter(block)
-        .find(|caps| orm_re.is_match(&caps[1]))
-        .map(|caps| caps.get(0).unwrap())
-}
-
 // --- scan_non_idempotent_write ---
 
-/// Input for [`scan_non_idempotent_write`]. Unlike `scan_unsafe_read_endpoint`, this scanner's
-/// create/update/counter method sets are fixed — only the ORM-receiver pattern is caller-supplied.
+/// Input for [`scan_non_idempotent_write`].
 pub struct ScanNonIdempotentWriteInput<'a> {
     pub api_endpoints: &'a [ApiEndpoint],
     pub symbols: &'a [SourceSymbol],
     pub symbol_graph: &'a SymbolGraph,
+    /// rel path -> full source text, for the `idempotent-ok` whitelist lookback only (see
+    /// [`ScanUnsafeReadEndpointInput::files`]'s doc).
     pub files: &'a HashMap<String, String>,
-    pub orm_receiver_pattern: &'a str,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NonIdempotentKind {
-    Create,
-    AtomicAccumulate,
-    Counter,
-}
-
-impl NonIdempotentKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Create => "create",
-            Self::AtomicAccumulate => "atomic-accumulate",
-            Self::Counter => "counter",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct BadSite {
-    file: String,
-    line: u32,
-    sink: String,
-    kind: NonIdempotentKind,
 }
 
 /// Which finding kinds apply to a method: `create` only matters for PUT/DELETE (idempotency-promising); POST/PATCH are flagged only for accumulation.
@@ -440,25 +234,14 @@ pub fn scan_non_idempotent_write(input: &ScanNonIdempotentWriteInput) -> Vec<Fin
     let name_index = build_name_index(input.symbols);
     let symbols_by_id: HashMap<&str, &SourceSymbol> =
         input.symbols.iter().map(|s| (s.id.as_str(), s)).collect();
-    let orm_re = Regex::new(input.orm_receiver_pattern)
-        .unwrap_or_else(|_| Regex::new(DEFAULT_ORM_RECEIVER_PATTERN).unwrap());
 
-    let cache: RefCell<HashMap<String, Vec<BadSite>>> = RefCell::new(HashMap::new());
-    let sites_at = |id: &str| -> Vec<BadSite> {
-        if let Some(hit) = cache.borrow().get(id) {
-            return hit.clone();
-        }
-        let sites = symbols_by_id
+    // Only classified sites (`kind` set) are relevant here — mirrors the old `symbol_bad_sites`, which
+    // never emitted an unclassified write.
+    let sites_at = |id: &str| -> Vec<&WriteSite> {
+        symbols_by_id
             .get(id)
-            .and_then(|s| {
-                input
-                    .files
-                    .get(&s.file)
-                    .map(|text| symbol_bad_sites(s, text, &orm_re))
-            })
-            .unwrap_or_default();
-        cache.borrow_mut().insert(id.to_string(), sites.clone());
-        sites
+            .map(|s| s.write_sites.iter().filter(|w| w.kind.is_some()).collect())
+            .unwrap_or_default()
     };
 
     let mut out = Vec::new();
@@ -472,13 +255,16 @@ pub fn scan_non_idempotent_write(input: &ScanNonIdempotentWriteInput) -> Vec<Fin
             continue;
         }
         let Some((id, depth)) = bfs_reachable(input.symbol_graph, &handler_symbol, |id| {
-            sites_at(id).iter().any(|s| allowed.contains(&s.kind))
+            sites_at(id)
+                .iter()
+                .any(|s| allowed.contains(&s.kind.expect("filtered to Some above")))
         }) else {
             continue;
         };
         let site = sites_at(&id)
             .into_iter()
-            .find(|s| allowed.contains(&s.kind))
+            .find(|s| allowed.contains(&s.kind.expect("filtered to Some above")))
+            .cloned()
             .expect("predicate true implies a matching site exists");
 
         let hint = hint_for(&method, &e.path, &site, depth);
@@ -497,7 +283,7 @@ pub fn scan_non_idempotent_write(input: &ScanNonIdempotentWriteInput) -> Vec<Fin
                 "writeFile": site.file,
                 "writeLine": site.line,
                 "sink": site.sink,
-                "kind": site.kind.as_str(),
+                "kind": site.kind.expect("filtered to Some above").as_str(),
                 "depth": depth,
                 "hint": hint,
             })),
@@ -506,13 +292,16 @@ pub fn scan_non_idempotent_write(input: &ScanNonIdempotentWriteInput) -> Vec<Fin
     out
 }
 
-fn hint_for(method: &str, path: &str, site: &BadSite, depth: u32) -> String {
+fn hint_for(method: &str, path: &str, site: &WriteSite, depth: u32) -> String {
     let where_ = if depth == 0 {
         "directly".to_string()
     } else {
         format!("{depth} call(s) deep")
     };
-    let why = match site.kind {
+    let kind = site
+        .kind
+        .expect("hint_for is only called with a classified site");
+    let why = match kind {
         NonIdempotentKind::Create => "a retry inserts a duplicate row",
         NonIdempotentKind::AtomicAccumulate => {
             "a retry applies the increment again (doubles the effect)"
@@ -530,53 +319,17 @@ fn hint_for(method: &str, path: &str, site: &BadSite, depth: u32) -> String {
          handler if a retry is genuinely safe here. Disable via rule config \
          `disabled_rules: [\"non-idempotent-write\"]` if this applies more broadly.",
         site.sink,
-        site.kind.as_str()
+        kind.as_str()
     )
-}
-
-fn symbol_bad_sites(sym: &SourceSymbol, text: &str, orm_re: &Regex) -> Vec<BadSite> {
-    let Some((start, end)) = sym.body_start.zip(sym.body_end) else {
-        return Vec::new();
-    };
-    let (block, first_line) = symbol_span_text(text, start, end);
-    if block.is_empty() {
-        return Vec::new();
-    }
-
-    let mut out = Vec::new();
-    for caps in method_call_re().captures_iter(&block) {
-        let base = &caps[1];
-        if !orm_re.is_match(base) {
-            continue;
-        }
-        let method = &caps[2];
-        let lower = method.to_lowercase();
-        let m0 = caps.get(0).unwrap();
-        let kind = if CREATE_METHODS.contains(&method) {
-            Some(NonIdempotentKind::Create)
-        } else if COUNTER_METHODS.contains(&lower.as_str()) {
-            Some(NonIdempotentKind::Counter)
-        } else if UPDATE_METHODS.contains(&method) {
-            let args = call_args_span(&block, m0.end());
-            args_have_atomic_op(args).then_some(NonIdempotentKind::AtomicAccumulate)
-        } else {
-            None
-        };
-        let Some(kind) = kind else { continue };
-        out.push(BadSite {
-            file: sym.file.clone(),
-            line: line_at(&block, first_line, m0.start()),
-            sink: write_sink_label(m0.as_str()),
-            kind,
-        });
-    }
-    out
 }
 
 #[cfg(test)]
 mod tests {
-    //! Tests for `scan_unsafe_read_endpoint` and `scan_non_idempotent_write`, using hand-built fixtures (no
-    //! parser). Every fixture body is single-line, so `body_start == body_end == <declaration line>`.
+    //! Tests for `scan_unsafe_read_endpoint` and `scan_non_idempotent_write`. Fixtures build real
+    //! `write_sites` via `zzop_parser_typescript::write_sites_for_symbol` (the same function production
+    //! code calls at parse time) rather than re-implementing a test double, so these tests exercise the
+    //! real detection + the BFS/selection logic together. Every fixture body is single-line, so
+    //! `body_start == body_end == <declaration line>`.
     use super::*;
     use zzop_core::callgraph::SymbolEdge;
     use zzop_core::SourceSymbolKind;
@@ -599,7 +352,25 @@ mod tests {
             is_default: false,
             body_start: Some(line),
             body_end: Some(line),
+            write_sites: Vec::new(),
         }
+    }
+
+    /// Fills in each symbol's `write_sites` from its own file's text, using the moved detection function —
+    /// mirrors what `zzop_parser_typescript::parse_symbols` does for a real TS parse.
+    fn with_write_sites(
+        files: &HashMap<String, String>,
+        symbols: Vec<SourceSymbol>,
+    ) -> Vec<SourceSymbol> {
+        symbols
+            .into_iter()
+            .map(|mut s| {
+                if let Some(text) = files.get(&s.file) {
+                    s.write_sites = zzop_parser_typescript::write_sites_for_symbol(&s, text);
+                }
+                s
+            })
+            .collect()
     }
 
     fn endpoint(method: &str, path: &str, handler: &str) -> ApiEndpoint {
@@ -618,13 +389,6 @@ mod tests {
         }
     }
 
-    fn write_methods() -> Vec<String> {
-        DEFAULT_WRITE_METHODS
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
-    }
-
     // --- scan_unsafe_read_endpoint ---
 
     #[test]
@@ -639,11 +403,14 @@ mod tests {
                 "export function activate(id: string) { return prisma.user.update({ where: { id }, data: { active: true } }); }\n",
             ),
         ]);
-        let symbols = vec![
-            sym("api/handlers.ts", "activateUser", 1),
-            sym("api/handlers.ts", "getUser", 2),
-            sym("api/service.ts", "activate", 1),
-        ];
+        let symbols = with_write_sites(
+            &files,
+            vec![
+                sym("api/handlers.ts", "activateUser", 1),
+                sym("api/handlers.ts", "getUser", 2),
+                sym("api/service.ts", "activate", 1),
+            ],
+        );
         let graph = vec![edge(
             "api/handlers.ts#activateUser",
             "api/service.ts#activate",
@@ -652,14 +419,11 @@ mod tests {
             endpoint("GET", "/users/:id/activate", "activateUser"),
             endpoint("GET", "/users/:id", "getUser"),
         ];
-        let wm = write_methods();
         let out = scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
             api_endpoints: &endpoints,
             symbols: &symbols,
             symbol_graph: &graph,
             files: &files,
-            write_methods: &wm,
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert_eq!(out.len(), 1);
         let data = out[0].data.as_ref().unwrap();
@@ -676,14 +440,12 @@ mod tests {
             "api/h.ts",
             "export function touch(c: any) { return prisma.ping.create({ data: {} }); }\n",
         )]);
-        let symbols = vec![sym("api/h.ts", "touch", 1)];
+        let symbols = with_write_sites(&files, vec![sym("api/h.ts", "touch", 1)]);
         let out = scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
             api_endpoints: &[endpoint("GET", "/touch", "touch")],
             symbols: &symbols,
             symbol_graph: &Vec::new(),
             files: &files,
-            write_methods: &write_methods(),
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].data.as_ref().unwrap()["depth"], 0);
@@ -695,14 +457,12 @@ mod tests {
             "api/h.ts",
             "export function create(c: any) { return prisma.user.create({ data: {} }); }\n",
         )]);
-        let symbols = vec![sym("api/h.ts", "create", 1)];
+        let symbols = with_write_sites(&files, vec![sym("api/h.ts", "create", 1)]);
         let out = scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
             api_endpoints: &[endpoint("POST", "/users", "create")],
             symbols: &symbols,
             symbol_graph: &Vec::new(),
             files: &files,
-            write_methods: &write_methods(),
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert!(out.is_empty());
     }
@@ -713,14 +473,12 @@ mod tests {
             "api/h.ts",
             "export function list(c: any) { return prisma.user.findMany(); }\n",
         )]);
-        let symbols = vec![sym("api/h.ts", "list", 1)];
+        let symbols = with_write_sites(&files, vec![sym("api/h.ts", "list", 1)]);
         let out = scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
             api_endpoints: &[endpoint("GET", "/users", "list")],
             symbols: &symbols,
             symbol_graph: &Vec::new(),
             files: &files,
-            write_methods: &write_methods(),
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert!(out.is_empty());
     }
@@ -734,18 +492,19 @@ mod tests {
                 "export async function refresh(env: any) { await env.DB.prepare(\"INSERT INTO fx_rates (id, rates) VALUES (1, ?)\").bind(x).run(); }\n",
             ),
         ]);
-        let symbols = vec![
-            sym("api/h.ts", "getRates", 1),
-            sym("api/refresh.ts", "refresh", 1),
-        ];
+        let symbols = with_write_sites(
+            &files,
+            vec![
+                sym("api/h.ts", "getRates", 1),
+                sym("api/refresh.ts", "refresh", 1),
+            ],
+        );
         let graph = vec![edge("api/h.ts#getRates", "api/refresh.ts#refresh")];
         let out = scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
             api_endpoints: &[endpoint("GET", "/api/rates", "getRates")],
             symbols: &symbols,
             symbol_graph: &graph,
             files: &files,
-            write_methods: &write_methods(),
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert_eq!(out.len(), 1);
         let data = out[0].data.as_ref().unwrap();
@@ -762,14 +521,12 @@ mod tests {
             "api/h.ts",
             "export function list(c: any) { return c.env.DB.prepare(\"SELECT * FROM fx_rates\").all(); }\n",
         )]);
-        let symbols = vec![sym("api/h.ts", "list", 1)];
+        let symbols = with_write_sites(&files, vec![sym("api/h.ts", "list", 1)]);
         let out = scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
             api_endpoints: &[endpoint("GET", "/api/rates", "list")],
             symbols: &symbols,
             symbol_graph: &Vec::new(),
             files: &files,
-            write_methods: &write_methods(),
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert!(out.is_empty());
     }
@@ -780,14 +537,12 @@ mod tests {
             "api/h.ts",
             "// idempotent-ok: write is a fire-and-forget audit log, safe to repeat\nexport function touch(c: any) { return prisma.ping.create({ data: {} }); }\n",
         )]);
-        let symbols = vec![sym("api/h.ts", "touch", 2)];
+        let symbols = with_write_sites(&files, vec![sym("api/h.ts", "touch", 2)]);
         let out = scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
             api_endpoints: &[endpoint("GET", "/touch", "touch")],
             symbols: &symbols,
             symbol_graph: &Vec::new(),
             files: &files,
-            write_methods: &write_methods(),
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert!(out.is_empty());
     }
@@ -801,14 +556,15 @@ mod tests {
             ),
             ("api/b.ts", "export function dup(c: any) { return 1; }\n"),
         ]);
-        let symbols = vec![sym("api/a.ts", "dup", 1), sym("api/b.ts", "dup", 1)];
+        let symbols = with_write_sites(
+            &files,
+            vec![sym("api/a.ts", "dup", 1), sym("api/b.ts", "dup", 1)],
+        );
         let out = scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
             api_endpoints: &[endpoint("GET", "/x", "dup")],
             symbols: &symbols,
             symbol_graph: &Vec::new(),
             files: &files,
-            write_methods: &write_methods(),
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert!(out.is_empty());
     }
@@ -819,14 +575,12 @@ mod tests {
             "api/h.ts",
             "export function getThing(c: any) { return prisma.thing.delete({ where: { id: 1 } }); }\n",
         )]);
-        let symbols = vec![sym("api/h.ts", "getThing", 1)];
+        let symbols = with_write_sites(&files, vec![sym("api/h.ts", "getThing", 1)]);
         let out = scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
             api_endpoints: &[endpoint("GET", "/thing", "rateLimit(getThing)")],
             symbols: &symbols,
             symbol_graph: &Vec::new(),
             files: &files,
-            write_methods: &write_methods(),
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].data.as_ref().unwrap()["sink"], "prisma.thing.delete");
@@ -837,13 +591,12 @@ mod tests {
     #[test]
     fn put_handler_that_creates_a_row_is_flagged_kind_create() {
         let files = files(&[("api/h.ts", "export function putThing(c: any) { return prisma.thing.create({ data: { id: c.id } }); }\n")]);
-        let symbols = vec![sym("api/h.ts", "putThing", 1)];
+        let symbols = with_write_sites(&files, vec![sym("api/h.ts", "putThing", 1)]);
         let out = scan_non_idempotent_write(&ScanNonIdempotentWriteInput {
             api_endpoints: &[endpoint("PUT", "/things/:id", "putThing")],
             symbols: &symbols,
             symbol_graph: &Vec::new(),
             files: &files,
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert_eq!(out.len(), 1);
         let data = out[0].data.as_ref().unwrap();
@@ -862,17 +615,19 @@ mod tests {
                 "export function log(id: string) { return prisma.auditRow.create({ data: { id } }); }\n",
             ),
         ]);
-        let symbols = vec![
-            sym("api/h.ts", "removeThing", 1),
-            sym("api/audit.ts", "log", 1),
-        ];
+        let symbols = with_write_sites(
+            &files,
+            vec![
+                sym("api/h.ts", "removeThing", 1),
+                sym("api/audit.ts", "log", 1),
+            ],
+        );
         let graph = vec![edge("api/h.ts#removeThing", "api/audit.ts#log")];
         let out = scan_non_idempotent_write(&ScanNonIdempotentWriteInput {
             api_endpoints: &[endpoint("DELETE", "/things/:id", "removeThing")],
             symbols: &symbols,
             symbol_graph: &graph,
             files: &files,
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert_eq!(out.len(), 1);
         let data = out[0].data.as_ref().unwrap();
@@ -887,13 +642,12 @@ mod tests {
             "api/h.ts",
             "export function bump(c: any) { return prisma.counter.update({ where: { id: c.id }, data: { hits: { increment: 1 } } }); }\n",
         )]);
-        let symbols = vec![sym("api/h.ts", "bump", 1)];
+        let symbols = with_write_sites(&files, vec![sym("api/h.ts", "bump", 1)]);
         let out = scan_non_idempotent_write(&ScanNonIdempotentWriteInput {
             api_endpoints: &[endpoint("PUT", "/counter/:id", "bump")],
             symbols: &symbols,
             symbol_graph: &Vec::new(),
             files: &files,
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].data.as_ref().unwrap()["kind"], "atomic-accumulate");
@@ -905,13 +659,12 @@ mod tests {
             "api/h.ts",
             "export function setName(c: any) { return prisma.user.update({ where: { id: c.id }, data: { name: c.name } }); }\n",
         )]);
-        let symbols = vec![sym("api/h.ts", "setName", 1)];
+        let symbols = with_write_sites(&files, vec![sym("api/h.ts", "setName", 1)]);
         let out = scan_non_idempotent_write(&ScanNonIdempotentWriteInput {
             api_endpoints: &[endpoint("PUT", "/users/:id", "setName")],
             symbols: &symbols,
             symbol_graph: &Vec::new(),
             files: &files,
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert!(out.is_empty());
     }
@@ -922,13 +675,12 @@ mod tests {
             "api/h.ts",
             "export function put(c: any) { return prisma.profile.upsert({ where: { id: c.id }, create: { id: c.id }, update: { name: c.name } }); }\n",
         )]);
-        let symbols = vec![sym("api/h.ts", "put", 1)];
+        let symbols = with_write_sites(&files, vec![sym("api/h.ts", "put", 1)]);
         let out = scan_non_idempotent_write(&ScanNonIdempotentWriteInput {
             api_endpoints: &[endpoint("PUT", "/profile/:id", "put")],
             symbols: &symbols,
             symbol_graph: &Vec::new(),
             files: &files,
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert!(out.is_empty());
     }
@@ -939,13 +691,12 @@ mod tests {
             "api/h.ts",
             "export function put(c: any) { return rateStore.incr(c.key); }\n",
         )]);
-        let symbols = vec![sym("api/h.ts", "put", 1)];
+        let symbols = with_write_sites(&files, vec![sym("api/h.ts", "put", 1)]);
         let out = scan_non_idempotent_write(&ScanNonIdempotentWriteInput {
             api_endpoints: &[endpoint("PUT", "/rate/:key", "put")],
             symbols: &symbols,
             symbol_graph: &Vec::new(),
             files: &files,
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].data.as_ref().unwrap()["kind"], "counter");
@@ -957,7 +708,7 @@ mod tests {
             "api/h.ts",
             "export function create(c: any) { return prisma.user.create({ data: {} }); }\n",
         )]);
-        let symbols = vec![sym("api/h.ts", "create", 1)];
+        let symbols = with_write_sites(&files, vec![sym("api/h.ts", "create", 1)]);
         let out = scan_non_idempotent_write(&ScanNonIdempotentWriteInput {
             api_endpoints: &[
                 endpoint("POST", "/users", "create"),
@@ -966,7 +717,6 @@ mod tests {
             symbols: &symbols,
             symbol_graph: &Vec::new(),
             files: &files,
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert!(out.is_empty());
     }
@@ -977,13 +727,12 @@ mod tests {
             "api/h.ts",
             "export function vote(c: any) { return prisma.poll.update({ where: { id: c.id }, data: { votes: { increment: 1 } } }); }\n",
         )]);
-        let symbols = vec![sym("api/h.ts", "vote", 1)];
+        let symbols = with_write_sites(&files, vec![sym("api/h.ts", "vote", 1)]);
         let out = scan_non_idempotent_write(&ScanNonIdempotentWriteInput {
             api_endpoints: &[endpoint("POST", "/polls/:id/vote", "vote")],
             symbols: &symbols,
             symbol_graph: &Vec::new(),
             files: &files,
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert_eq!(out.len(), 1);
         let data = out[0].data.as_ref().unwrap();
@@ -998,13 +747,12 @@ mod tests {
             "api/h.ts",
             "// idempotent-ok: create guarded by a unique constraint, retry is a no-op\nexport function put(c: any) { return prisma.thing.create({ data: { id: c.id } }); }\n",
         )]);
-        let symbols = vec![sym("api/h.ts", "put", 2)];
+        let symbols = with_write_sites(&files, vec![sym("api/h.ts", "put", 2)]);
         let out = scan_non_idempotent_write(&ScanNonIdempotentWriteInput {
             api_endpoints: &[endpoint("PUT", "/things/:id", "put")],
             symbols: &symbols,
             symbol_graph: &Vec::new(),
             files: &files,
-            orm_receiver_pattern: DEFAULT_ORM_RECEIVER_PATTERN,
         });
         assert!(out.is_empty());
     }

@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
   collectFindings,
+  collectWarnings,
   groupByFile,
   countBySeverity,
   formatPretty,
@@ -135,6 +136,19 @@ test('formatPretty on empty findings says so', () => {
   const out = formatPretty({ fileCount: 1, findings: [] }, { color: false });
   assert.match(out, /No findings/);
   assert.match(out, /0 findings in 1 file/);
+});
+
+test('collectWarnings gathers engine warnings, tagging multi-tree entries by source', () => {
+  assert.deepEqual(collectWarnings({ warnings: ['a', 'b'] }), ['a', 'b']);
+  assert.deepEqual(
+    collectWarnings({
+      trees: [{ sourceId: 'api', output: { warnings: ['x'] } }],
+      warnings: ['top'],
+    }),
+    ['[api] x', 'top']
+  );
+  assert.deepEqual(collectWarnings(null), []);
+  assert.deepEqual(collectWarnings({}), []);
 });
 
 test('formatJson pretty-prints the raw output', () => {

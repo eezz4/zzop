@@ -298,8 +298,10 @@ mod tests {
                 is_default: false,
                 body_start: Some(1),
                 body_end: Some(3),
+                write_sites: Vec::new(),
             }],
             imports: Some(zzop_core::ImportMap::new()),
+            re_exports: Vec::new(),
             loc,
             degraded: false,
             io: None,
@@ -310,6 +312,9 @@ mod tests {
             router_mount_fragments: Vec::new(),
             wrapper_def_fragments: Vec::new(),
             wrapper_call_fragments: Vec::new(),
+            query_call_sites: Vec::new(),
+            store_bound_models: Vec::new(),
+            field_usage_tokens: Vec::new(),
         }
     }
 

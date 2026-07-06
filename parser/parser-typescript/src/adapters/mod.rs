@@ -8,10 +8,12 @@
 //! sibling half of this crate's 2-layer layout.
 
 pub mod controller_decorators;
+pub mod db_table_consume;
 pub mod egress;
 pub mod hono_client;
 pub mod next_pages_api;
 pub mod router_mounts;
+pub mod store_binding;
 pub mod trpc_consume;
 pub mod trpc_router;
 pub mod wrapper_calls;

@@ -22,7 +22,7 @@ Settings → Pages → Source → "GitHub Actions".
 
 ## Editing
 
-- Pages: `index.html`, `usage.html`, `architecture.html`, `rules.html`
+- Pages: `index.html`, `usage.html`, `architecture.html`, `rules.html`, `sdk.html` (SDK & embedding)
 - Shared styles/behavior: `assets/site.css`, `assets/docs.js`
 - The rule catalog page mirrors `docs/rules/catalog.md` (the machine-checked
   source of truth) — update it from there, not ad hoc.

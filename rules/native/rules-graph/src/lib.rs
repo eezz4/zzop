@@ -93,9 +93,8 @@ pub use dead_exports::{
 };
 pub use duplicate_route::duplicate_route_findings;
 pub use http_scan::{
-    scan_non_idempotent_write, scan_unsafe_read_endpoint, NonIdempotentKind,
-    ScanNonIdempotentWriteInput, ScanUnsafeReadEndpointInput, DEFAULT_ORM_RECEIVER_PATTERN,
-    DEFAULT_WRITE_METHODS,
+    scan_non_idempotent_write, scan_unsafe_read_endpoint, ScanNonIdempotentWriteInput,
+    ScanUnsafeReadEndpointInput,
 };
 pub use mutating_route_no_auth::{
     scan_mutating_route_no_auth, ScanMutatingRouteNoAuthInput, DEFAULT_AUTH_GUARD_PATTERN,

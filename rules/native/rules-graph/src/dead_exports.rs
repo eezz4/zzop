@@ -377,6 +377,7 @@ mod tests {
             specifier: specifier.to_string(),
             original: original.to_string(),
             local_alias: local_alias.to_string(),
+            type_only: false,
         }
     }
 

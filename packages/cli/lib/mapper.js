@@ -220,6 +220,61 @@ function buildSharedOptions(config) {
   return shared;
 }
 
+// Known config keys, by scope. Used ONLY to warn on drift — never to reject (the engine deliberately
+// ignores unknown fields; see `packages/napi/src/api.rs`). An unknown key almost always means a typo or a
+// config written for a different zzop version, and silently ignoring it defeats zzop's "narrowed scope
+// self-reports in warnings, never silently" contract — so we surface it as a warning, not an error.
+const KNOWN_KEYS = {
+  top: ['roots', 'trees', 'packs', 'rules', 'git', 'cacheDir', 'sizeCap', 'format', 'failOn', 'report'],
+  packs: ['extraDirs', 'disabled'],
+  git: ['since', 'recentDays'],
+  report: ['dir', 'formats'],
+  tree: ['root', 'sourceId'],
+  ruleObject: ['severity', 'exclude'],
+};
+
+/**
+ * Collect warnings for config keys the CLI does not recognize (typos, or a config written for a different
+ * zzop version). Never throws and never rejects — unknown keys stay ignored, exactly as the engine treats
+ * them; this only makes the drift visible. Returns an array of human-readable warning strings (possibly
+ * empty). Covers the top level plus the fixed-shape nested objects (`packs`/`git`/`report`), each tree, and
+ * each rule object; `rules`' own keys are rule ids (open set) so they are not checked.
+ *
+ * @param {object} config  parsed config object
+ * @returns {string[]}
+ */
+function collectConfigWarnings(config) {
+  const warnings = [];
+  if (!isPlainObject(config)) return warnings;
+
+  const check = (obj, known, scope) => {
+    if (!isPlainObject(obj)) return;
+    for (const key of Object.keys(obj)) {
+      if (!known.includes(key)) {
+        const where = scope ? `under "${scope.replace(/\.$/, '')}"` : 'at the top level';
+        warnings.push(
+          `unknown config key "${scope}${key}" (ignored) — a typo, or a key from a different zzop ` +
+            `version. Known keys ${where}: ${known.join(', ')}.`
+        );
+      }
+    }
+  };
+
+  check(config, KNOWN_KEYS.top, '');
+  check(config.packs, KNOWN_KEYS.packs, 'packs.');
+  check(config.git, KNOWN_KEYS.git, 'git.');
+  check(config.report, KNOWN_KEYS.report, 'report.');
+  if (Array.isArray(config.trees)) {
+    config.trees.forEach((tree, i) => check(tree, KNOWN_KEYS.tree, `trees[${i}].`));
+  }
+  if (isPlainObject(config.rules)) {
+    for (const [ruleId, entry] of Object.entries(config.rules)) {
+      if (isPlainObject(entry)) check(entry, KNOWN_KEYS.ruleObject, `rules.${ruleId}.`);
+    }
+  }
+  return warnings;
+}
+
 /**
  * Map a validated config object to a native request: `{ method, request }` where `method` is
  * `"analyze"` (single tree) or `"analyzeTrees"` (multi-tree) and `request` is the JSON-serializable
@@ -283,6 +338,7 @@ module.exports = {
   normalizeSeverity,
   severityRank,
   configToRequest,
+  collectConfigWarnings,
   ENGINE_SEVERITY,
   OFF,
 };

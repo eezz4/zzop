@@ -99,10 +99,10 @@ fn is_entry_file(path: &str) -> bool {
 }
 
 /// Shared test-path predicate — also used by `mutating_route_no_auth` to skip route registrations in a
-/// test/fixture file. Kept `pub(crate)`: same crate, one test-path convention.
-pub(crate) fn is_test_file(path: &str) -> bool {
-    test_patterns().iter().any(|re| re.is_match(path))
-}
+/// test/fixture file. Now lives in `zzop_core` (also needed by the TS parser's DB-table extractors);
+/// re-exported here so all existing `crate::unreachable::is_test_file` call sites in this crate keep
+/// compiling unchanged.
+pub(crate) use zzop_core::is_test_file;
 
 /// Files loaded directly by a dev tool or `tsc` rather than imported by app code — so `fan_in == 0` on them
 /// is "not the kind of file the import graph would ever point at", not a "no importers" signal (e.g.
@@ -167,27 +167,6 @@ fn entry_patterns() -> &'static [Regex] {
             r"Application\.java$",
             r"(^|/)Main\.java$",
             r"(^|/)(__main__|manage|wsgi|asgi)\.py$",
-        ]
-        .iter()
-        .map(|p| Regex::new(p).unwrap())
-        .collect()
-    })
-}
-
-fn test_patterns() -> &'static [Regex] {
-    static R: OnceLock<Vec<Regex>> = OnceLock::new();
-    R.get_or_init(|| {
-        [
-            r"\.(test|spec)\.(t|j)sx?$",
-            r"_test\.go$",
-            r"(^|/)test_[^/]*\.py$",
-            r"_test\.py$",
-            r"Tests?\.java$",
-            r"(^|/)Test[A-Z][^/]*\.java$",
-            r"(^|/)(__tests__|__test__|tests?|spec)/",
-            // Directories named for a test runner (or literally `testing`) are test surface by the same
-            // "not deployed" reasoning as `__tests__`.
-            r"(^|/)(e2e|cypress|playwright|testing)/",
         ]
         .iter()
         .map(|p| Regex::new(p).unwrap())

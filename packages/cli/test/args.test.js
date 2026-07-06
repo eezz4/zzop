@@ -15,6 +15,12 @@ test('run-only flags parse under run (explicit or default command)', () => {
   assert.equal(parseArgs(['run', '-a']).all, true);
   assert.equal(parseArgs(['--json']).format, 'json');
   assert.equal(parseArgs(['--config', 'z.jsonc']).config, 'z.jsonc');
+  assert.equal(parseArgs(['--out', 'zzop-reports']).out, 'zzop-reports');
+});
+
+test('--out requires a dir argument, and is rejected on init', () => {
+  assert.throws(() => parseArgs(['--out']), (e) => e instanceof ConfigError && /--out requires/.test(e.message));
+  assert.throws(() => parseArgs(['init', '--out', 'x']), (e) => e instanceof ConfigError && /not valid for the `init`/.test(e.message));
 });
 
 test('--force parses under init', () => {

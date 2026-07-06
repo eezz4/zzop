@@ -170,6 +170,7 @@ mod tests {
             is_default: false,
             body_start,
             body_end,
+            write_sites: Vec::new(),
         }
     }
 

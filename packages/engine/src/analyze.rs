@@ -16,9 +16,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
 
 use zzop_core::{
-    build_file_nodes, circular_from_dep, dsl::RuleTiming, http_interface_key, is_enabled,
+    build_file_nodes, circular_from_dep_excluding, dsl::RuleTiming, http_interface_key, is_enabled,
     merge_findings, CommonIr, DepGraph, DepStats, FileNode, Finding, GitStats, ImportMap,
-    IoConsume, IoFacts, IoProvide, MinimalIr, DEFAULT_WEIGHTS,
+    IoConsume, IoFacts, IoProvide, MinimalIr, ReExport, DEFAULT_WEIGHTS,
 };
 use zzop_metrics::{
     build_coupling, build_cross_layer_co_churn, build_diagnostics, build_folder_aggregates,
@@ -47,6 +47,11 @@ pub(crate) fn assemble(
     let mut all_symbols = Vec::new();
     let mut loc_by_path: HashMap<String, u32> = HashMap::new();
     let mut ts_import_pairs: Vec<(String, ImportMap)> = Vec::new();
+    // `build_dep_with_workspace`'s Defect-A substrate: each TS file's own re-exports (specifier +
+    // `type_only`), paired with its `rel` — merged into the dep graph as real edges alongside
+    // `ts_import_pairs`' bindings. Only collected for files that also participate in the dep graph
+    // (`ts_import_pairs`'s own gate below), same convention as the other per-file fragment `Vec`s.
+    let mut ts_re_export_pairs: Vec<(String, Vec<ReExport>)> = Vec::new();
     let mut ts_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut degraded: Vec<String> = Vec::new();
     // `pipeline::eval_packs`' minified/generated skip — a separate list from `degraded` (see
@@ -95,6 +100,20 @@ pub(crate) fn assemble(
     // `axios.request(opts)`) to the real FE call sites.
     let mut wrapper_def_pairs: Vec<(String, Vec<zzop_core::WrapperDefFragment>)> = Vec::new();
     let mut wrapper_call_pairs: Vec<(String, Vec<zzop_core::WrapperCallFragment>)> = Vec::new();
+    // `run_schema_join_rules`' substrate: every file's Prisma query-call-site facts, collected tree-wide
+    // then sorted by `(file, line)` below to match the removed filesystem scan's own ordering.
+    let mut query_call_sites: Vec<zzop_core::QueryCallSite> = Vec::new();
+    // `schema_usage_findings`'s `SchemaUsage.bound_models` substrate: every file's store-binding model
+    // names, unioned tree-wide — replaces that pass's own `scan_store_map` filesystem re-walk.
+    let mut bound_models: HashSet<String> = HashSet::new();
+    // `schema_usage_findings`'s `SchemaUsage.identifier_counts` substrate: every file's comment/string-
+    // stripped identifier tokens, unioned tree-wide — replaces that pass's own `scan_field_usage`
+    // filesystem re-walk. Deliberately NOT `used_names_by_file` below: that field is AST-based
+    // (`parse_local_identifier_refs`) and excludes member-property names (`obj.field`) by design (see
+    // its own doc), which would make almost every model field whose only BE usage is property access
+    // read as "dead" — the opposite of `scan_field_usage`'s lenient, comment/string-stripped raw-text
+    // token scan this substrate must instead mirror.
+    let mut field_usage_tokens: HashSet<String> = HashSet::new();
 
     for artifact in artifacts {
         loc_by_path.insert(artifact.rel.clone(), artifact.loc);
@@ -122,6 +141,9 @@ pub(crate) fn assemble(
                 }
             }
             ts_paths.insert(artifact.rel.clone());
+            if !artifact.re_exports.is_empty() {
+                ts_re_export_pairs.push((artifact.rel.clone(), artifact.re_exports));
+            }
             ts_import_pairs.push((artifact.rel.clone(), imports));
             used_names_by_file.insert(artifact.rel.clone(), artifact.used_names.clone());
         }
@@ -144,6 +166,9 @@ pub(crate) fn assemble(
         if !artifact.wrapper_call_fragments.is_empty() {
             wrapper_call_pairs.push((artifact.rel.clone(), artifact.wrapper_call_fragments));
         }
+        query_call_sites.extend(artifact.query_call_sites);
+        bound_models.extend(artifact.store_bound_models);
+        field_usage_tokens.extend(artifact.field_usage_tokens);
         all_symbols.extend(artifact.symbols);
         for t in artifact.rule_timings {
             let entry = rule_time.entry(t.rule_id).or_insert((0, 0));
@@ -152,6 +177,9 @@ pub(crate) fn assemble(
         }
         per_file_findings.extend(artifact.findings);
     }
+    // Files are collected in `artifacts`' own `rel` order (`pipeline::run_file_pass`'s invariant), so a
+    // stable sort by `(file, line)` alone reproduces the removed filesystem scan's ordering exactly.
+    query_call_sites.sort_by(|a, b| (a.file.as_str(), a.line).cmp(&(b.file.as_str(), b.line)));
 
     late_resolve_cross_file_consumes(fragment_pairs, &mut io_consumes);
 
@@ -248,13 +276,19 @@ pub(crate) fn assemble(
         io_provides.extend(composed);
     }
 
-    let dep: DepGraph = zzop_parser_typescript::build_dep_with_workspace(
-        &ts_import_pairs,
-        &ts_paths,
-        &pkg_scan.workspace_pkgs,
-        &tsconfigs,
-    );
-    let cycles = circular_from_dep(&dep);
+    // `type_only_edges` is the ephemeral Defect-B exclusion set (never cached/serialized — see
+    // `circular_from_dep_excluding`'s doc): a pair present here is contributed ONLY by type-only
+    // bindings/re-exports, so `circular_findings` below must not count it as a cycle edge even though
+    // `dep` itself (fan-in/dead-exports/every other metric) still includes it.
+    let (dep, type_only_edges): (DepGraph, HashSet<(String, String)>) =
+        zzop_parser_typescript::build_dep_with_workspace(
+            &ts_import_pairs,
+            &ts_re_export_pairs,
+            &ts_paths,
+            &pkg_scan.workspace_pkgs,
+            &tsconfigs,
+        );
+    let cycles = circular_from_dep_excluding(&dep, &type_only_edges);
 
     let dep_stats = dep_stats_from_dep(&dep);
 
@@ -327,7 +361,12 @@ pub(crate) fn assemble(
 
     if is_enabled(&config.rule_config, "schema-usage") {
         let t0 = profile.then(Instant::now);
-        let found = crate::pipeline::schema_usage_findings(root, &prisma_rels);
+        let found = crate::pipeline::schema_usage_findings(
+            root,
+            &prisma_rels,
+            &bound_models,
+            &field_usage_tokens,
+        );
         record_native_timing(&mut rule_time, t0, "schema-usage", found.len());
         global_findings.extend(found);
     }
@@ -336,6 +375,7 @@ pub(crate) fn assemble(
     run_schema_join_rules(
         root,
         &prisma_rels,
+        &query_call_sites,
         config,
         profile,
         &mut rule_time,
@@ -1135,11 +1175,6 @@ fn run_callgraph_rules(
         &local_symbols_by_file,
         &resolve_file_fn,
     );
-    let write_methods: Vec<String> = zzop_rules_graph::DEFAULT_WRITE_METHODS
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-
     if run_unsafe_read {
         let t0 = profile.then(Instant::now);
         let found = zzop_rules_graph::scan_unsafe_read_endpoint(
@@ -1148,8 +1183,6 @@ fn run_callgraph_rules(
                 symbols: all_symbols,
                 symbol_graph: &symbol_graph,
                 files: &file_texts,
-                write_methods: &write_methods,
-                orm_receiver_pattern: zzop_rules_graph::DEFAULT_ORM_RECEIVER_PATTERN,
             },
         );
         record_native_timing(rule_time, t0, "unsafe-read-endpoint", found.len());
@@ -1163,7 +1196,6 @@ fn run_callgraph_rules(
                 symbols: all_symbols,
                 symbol_graph: &symbol_graph,
                 files: &file_texts,
-                orm_receiver_pattern: zzop_rules_graph::DEFAULT_ORM_RECEIVER_PATTERN,
             },
         );
         record_native_timing(rule_time, t0, "non-idempotent-write", found.len());
@@ -1245,20 +1277,23 @@ fn run_java_provides_project_pass(
 
 /// Runs the three schema x usage JOIN native rules (`soft-delete-bypass` / `orderby-unindexed` /
 /// `enum-string-drift` — `zzop_rules_schema::join`'s module doc) — a whole-tree pass over every
-/// non-degraded Prisma file (`prisma_rels`, same eligibility as `schema-usage`) plus a fresh
-/// `scan_query_call_sites` walk of the BE source tree, gated per-id via `is_enabled` and timed via
-/// `record_native_timing`, the same shape every other whole-tree native analysis in `assemble` uses.
+/// non-degraded Prisma file (`prisma_rels`, same eligibility as `schema-usage`) plus `sites`, every
+/// file's Prisma query-call-site facts already collected by `assemble`'s per-artifact loop (parser
+/// output, not a filesystem walk of this function's own — see `zzop_parser_typescript::
+/// extract_query_call_sites`), gated per-id via `is_enabled` and timed via `record_native_timing`, the
+/// same shape every other whole-tree native analysis in `assemble` uses.
 ///
 /// `enum-string-drift` also collects `SchemaEnum`s (via `zzop_parser_prisma::parse_schema_enums`,
 /// alongside the per-file `parse_schema` call for models) over the same `prisma_rels`, so
 /// `enum_string_drift_issues` has both model and enum substrate to join call-site literals against.
 ///
 /// All three rules need evidence spanning the whole BE source tree (every query call site for a model,
-/// not just one file), so this is recomputed in full on every `assemble` call and never enters the
-/// per-file findings cache.
+/// not just one file), so the model/enum parse is recomputed in full on every `assemble` call and never
+/// enters the per-file findings cache (`sites` itself IS cached, per-file, via `FileIrSlice`).
 fn run_schema_join_rules(
     root: &std::path::Path,
     prisma_rels: &[String],
+    sites: &[zzop_core::QueryCallSite],
     config: &EngineConfig,
     profile: bool,
     rule_time: &mut HashMap<String, (u128, usize)>,
@@ -1287,17 +1322,12 @@ fn run_schema_join_rules(
         return;
     }
 
-    let sites = zzop_rules_schema::scan_query_call_sites(
-        root,
-        zzop_parser_prisma::DEFAULT_PRISMA_CLIENT_GETTER_FN,
-    );
-
     run_join_rule(
         "soft-delete-bypass",
         &config.rule_config,
         profile,
         &models,
-        &sites,
+        sites,
         zzop_rules_schema::soft_delete_bypass_issues,
         rule_time,
         global_findings,
@@ -1307,7 +1337,7 @@ fn run_schema_join_rules(
         &config.rule_config,
         profile,
         &models,
-        &sites,
+        sites,
         zzop_rules_schema::orderby_unindexed_issues,
         rule_time,
         global_findings,
@@ -1317,7 +1347,7 @@ fn run_schema_join_rules(
         &config.rule_config,
         profile,
         &models,
-        &sites,
+        sites,
         |m, s| zzop_rules_schema::enum_string_drift_issues(m, &enums, s),
         rule_time,
         global_findings,
@@ -2390,5 +2420,22 @@ mod trpc_compose_tests {
         let out1 = compose_trpc_provides(build(false), resolve());
         let out2 = compose_trpc_provides(build(true), resolve());
         assert_eq!(keys(&out1), keys(&out2));
+    }
+}
+
+#[cfg(test)]
+mod prisma_client_getter_consistency_tests {
+    //! `zzop_parser_typescript::PRISMA_CLIENT_GETTER` and `zzop_parser_prisma::DEFAULT_PRISMA_CLIENT_GETTER_FN`
+    //! are twin recognizers of the same "Prisma client getter function name" convention, kept in two
+    //! separate parser crates on purpose: `zzop_core` is vocabulary-free (no Prisma-specific concept
+    //! belongs there), and a parser-typescript -> parser-prisma dependency edge for one string would be
+    //! architecturally backwards. This guard — living here since `zzop_engine` already depends on both
+    //! parsers — catches the two twins silently drifting apart without forcing either coupling.
+    #[test]
+    fn prisma_client_getter_twins_stay_in_sync() {
+        assert_eq!(
+            zzop_parser_typescript::PRISMA_CLIENT_GETTER,
+            zzop_parser_prisma::DEFAULT_PRISMA_CLIENT_GETTER_FN
+        );
     }
 }

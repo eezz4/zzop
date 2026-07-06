@@ -97,15 +97,34 @@ pub fn find_cycles(node_ids: &[String], edges: &[ComponentEdge]) -> Vec<Vec<Stri
     sccs
 }
 
-/// File-level circular dependencies from a dep graph: nodes = all files, edges = dep.
-/// Node/edge order is made deterministic (sorted) since a DepGraph (HashMap) has no stable iteration order.
+/// File-level circular dependencies from a dep graph: nodes = all files, edges = dep. Thin wrapper over
+/// [`circular_from_dep_excluding`] with an empty exclusion set — every `DepGraph` edge is a candidate
+/// cycle edge. Node/edge order is made deterministic (sorted) since a DepGraph (HashMap) has no stable
+/// iteration order.
 pub fn circular_from_dep(dep: &crate::ir::DepGraph) -> Vec<Vec<String>> {
+    circular_from_dep_excluding(dep, &std::collections::HashSet::new())
+}
+
+/// `circular_from_dep`, additionally skipping any `(from, to)` edge present in `excluded` — the ephemeral
+/// type-only-edge set a caller computes alongside its own dep-graph build (e.g.
+/// `zzop_parser_typescript::lang::resolve::build_dep`/`build_dep_with_workspace`'s second return value):
+/// a file pair linked ONLY by `import type`/per-specifier `{ type X }` bindings must not read as a
+/// circular dependency, since no runtime module-load edge exists between them. `excluded` is deliberately
+/// never cached/serialized by any caller — circular detection is a non-cached whole-graph pass, so this
+/// set only needs to live for the duration of one analysis run.
+pub fn circular_from_dep_excluding(
+    dep: &crate::ir::DepGraph,
+    excluded: &std::collections::HashSet<(String, String)>,
+) -> Vec<Vec<String>> {
     let mut node_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut edges = Vec::new();
     for (from, tos) in dep {
         node_set.insert(from.clone());
         for to in tos {
             node_set.insert(to.clone());
+            if excluded.contains(&(from.clone(), to.clone())) {
+                continue;
+            }
             edges.push(ComponentEdge {
                 source: from.clone(),
                 target: to.clone(),

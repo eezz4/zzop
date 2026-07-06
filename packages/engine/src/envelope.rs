@@ -33,8 +33,8 @@
 use std::collections::{HashMap, HashSet};
 
 use zzop_core::{
-    circular_from_dep, eval_pack, is_enabled, merge_findings, pack_loader, registry, CommonIr,
-    DepGraph, Finding, GitStats, IoConsume, IoFacts, IoProvide, Matcher, MinimalIr,
+    circular_from_dep_excluding, eval_pack, is_enabled, merge_findings, pack_loader, registry,
+    CommonIr, DepGraph, Finding, GitStats, IoConsume, IoFacts, IoProvide, Matcher, MinimalIr,
     NormalizedEnvelope, RuleContext, RulePackDef, SourceFile, DEFAULT_WEIGHTS,
 };
 
@@ -74,6 +74,11 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     let mut io_provides: Vec<IoProvide> = Vec::new();
     let mut io_consumes: Vec<IoConsume> = Vec::new();
     let mut dep: DepGraph = DepGraph::new();
+    // Defect B's ephemeral exclusion set (see `circular_from_dep_excluding`'s doc) — never
+    // cached/serialized, lives only for this one `analyze_envelope` call. A `(from, to)` pair lands here
+    // when EVERY binding contributing that edge is type-only; a pair with at least one value binding to
+    // the same target is never inserted, so it still counts toward `cycles` below.
+    let mut excluded_type_only_edges: HashSet<(String, String)> = HashSet::new();
     let mut per_file_findings: Vec<Finding> = Vec::new();
     // Fragment-composition substrate — the envelope-mode counterpart of `analyze::assemble`'s own
     // `trpc_fragment_pairs`/`router_mount_pairs`/`fragment_pairs`: collected during the per-file loop,
@@ -109,6 +114,10 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         // it as a graph node, letting an isolated (import-free) file still get a `FileNode`.
         let mut seen = HashSet::new();
         let mut targets = Vec::new();
+        // target -> true iff every binding resolving to it so far is type-only — mirrors
+        // `zzop_parser_typescript::lang::resolve::build_dep_impl`'s own aggregation, folded in here since
+        // envelope mode builds `dep` by hand rather than calling that shared helper.
+        let mut target_type_only: HashMap<String, bool> = HashMap::new();
         for binding in file.imports.values() {
             // Non-relative specifier naming no projected file = a package import — summarized for
             // `cross-layer/sdk-import-no-visible-consume`.
@@ -124,11 +133,39 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
             if binding.deferred {
                 continue; // lazy import: no module-load edge.
             }
-            if binding.specifier != file.path
-                && all_paths.contains(binding.specifier.as_str())
-                && seen.insert(binding.specifier.clone())
-            {
-                targets.push(binding.specifier.clone());
+            if binding.specifier != file.path && all_paths.contains(binding.specifier.as_str()) {
+                target_type_only
+                    .entry(binding.specifier.clone())
+                    .and_modify(|all_type_only| *all_type_only &= binding.type_only)
+                    .or_insert(binding.type_only);
+                if seen.insert(binding.specifier.clone()) {
+                    targets.push(binding.specifier.clone());
+                }
+            }
+        }
+        // Defect A (envelope parity): fold each non-type-only re-export's specifier in too, mirroring
+        // `zzop_parser_typescript::lang::resolve::build_dep_impl`'s own re-export merge — a barrel
+        // `export { x } from './impl'` with no local import of `impl` must still give `impl` a dep
+        // edge (fan-in), or `dead-candidates` false-positives it. Type-only re-exports are erased by TS
+        // at compile time: skipped entirely, not even added to the type-only exclusion set below (a
+        // type-only re-export was never a runtime nor a cycle edge in the first place).
+        for re in &file.re_exports {
+            if re.type_only {
+                continue;
+            }
+            if re.specifier != file.path && all_paths.contains(re.specifier.as_str()) {
+                // Always a real (non-type-only) edge, same as `build_dep_impl`'s re-export handling —
+                // overwrites rather than `&=`s, since a re-export binding itself carries no separate
+                // type-only-per-import distinction beyond `ReExport::type_only`, already checked above.
+                target_type_only.insert(re.specifier.clone(), false);
+                if seen.insert(re.specifier.clone()) {
+                    targets.push(re.specifier.clone());
+                }
+            }
+        }
+        for (target, all_type_only) in target_type_only {
+            if all_type_only {
+                excluded_type_only_edges.insert((file.path.clone(), target));
             }
         }
         dep.insert(file.path.clone(), targets);
@@ -171,7 +208,7 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     }
     crate::analyze::late_resolve_cross_file_consumes(const_fragment_pairs, &mut io_consumes);
 
-    let cycles = circular_from_dep(&dep);
+    let cycles = circular_from_dep_excluding(&dep, &excluded_type_only_edges);
     let dep_stats = dep_stats_from_dep(&dep);
     // Every `FileProjection` is, by construction, a parsed-source file (an external parser only ever
     // projects source it understood) — so `is_source` is unconditionally true here, unlike
@@ -426,6 +463,13 @@ fn synthetic_artifact_from_projection(
         rel: projection.path.clone(),
         symbols: Vec::new(),
         imports: None,
+        // Left empty rather than `projection.re_exports.clone()`: `analyze::assemble` only ever folds
+        // an artifact's `re_exports` into `ts_re_export_pairs` inside its `if let Some(imports) =
+        // artifact.imports` branch (see `analyze.rs`), and this synthetic artifact's `imports` is `None`
+        // right above — so a populated `re_exports` here would be dead data, never reaching the dep
+        // graph. (Mode A's `analyze_envelope` is unaffected: it builds `dep` by hand from
+        // `FileProjection` directly, per this file's own re-export merge above, not through this struct.)
+        re_exports: Vec::new(),
         loc: projection.loc,
         findings: Vec::new(),
         degraded: false,
@@ -436,10 +480,14 @@ fn synthetic_artifact_from_projection(
         const_map_fragment: projection.const_map_fragment.clone(),
         trpc_router_fragments: projection.trpc_router_fragments.clone(),
         router_mount_fragments: projection.router_mount_fragments.clone(),
-        // Wrapper resolution is a native-TS-source concern; an external adapter emits final
-        // io/router fragments instead, so a synthetic overlay artifact never carries these.
+        // Wrapper resolution, query-call-site recognition, store-binding recognition, and field-usage-
+        // token scanning are all native-TS-source concerns; an external adapter emits final io/router
+        // fragments instead, so a synthetic overlay artifact never carries these.
         wrapper_def_fragments: Vec::new(),
         wrapper_call_fragments: Vec::new(),
+        query_call_sites: Vec::new(),
+        store_bound_models: Vec::new(),
+        field_usage_tokens: Vec::new(),
     }
 }
 
@@ -502,7 +550,7 @@ fn envelope_rule_pack(pack: &RulePackDef) -> RulePackDef {
 mod tests {
     use super::*;
     use zzop_core::{
-        FileProjection, ImportBinding, ImportMap, SourceSymbol, SourceSymbolKind,
+        FileProjection, ImportBinding, ImportMap, ReExport, SourceSymbol, SourceSymbolKind,
         NORMALIZED_AST_FORMAT,
     };
 
@@ -552,6 +600,7 @@ mod tests {
             is_default: false,
             body_start: None,
             body_end: None,
+            write_sites: Vec::new(),
         });
         let env = envelope(vec![a]);
         let out = analyze_envelope(&env, &config());
@@ -585,6 +634,72 @@ mod tests {
             out.ir.ir.dep.get("b.jsp").cloned().unwrap_or_default(),
             Vec::<String>::new()
         );
+    }
+
+    // --- Envelope-mode parity for Defect A: bare re-exports merge into the dep graph too ---
+
+    #[test]
+    fn bare_re_export_creates_dep_edge_and_gives_the_target_fan_in_in_envelope_mode() {
+        // `export { x } from './impl'` with no local import of `impl` — mirrors
+        // `zzop_parser_typescript::lang::resolve::build_dep_impl`'s own
+        // `bare_named_re_export_creates_dep_edge`/`re_export_target_gains_fan_in_via_reverse_dep_edge`,
+        // but through the envelope entry point (`analyze_envelope`), which builds `dep` by hand rather
+        // than calling `build_dep_impl`.
+        let mut barrel = projection("barrel.jsp", 5);
+        barrel.re_exports.push(ReExport {
+            specifier: "impl.jsp".to_string(),
+            original: "x".to_string(),
+            local_alias: "x".to_string(),
+            type_only: false,
+        });
+        let impl_file = projection("impl.jsp", 5);
+        let env = envelope(vec![barrel, impl_file]);
+        let out = analyze_envelope(&env, &config());
+
+        assert_eq!(
+            out.ir.ir.dep.get("barrel.jsp").cloned().unwrap_or_default(),
+            vec!["impl.jsp".to_string()]
+        );
+        // `impl.jsp` must not read as dead — some other file's `dep` entry now names it, i.e. it has
+        // fan-in via the reverse edge, and `dead-candidates` (a whole-graph analysis run above) must not
+        // flag it.
+        let fan_in = out
+            .ir
+            .ir
+            .dep
+            .values()
+            .filter(|tos| tos.contains(&"impl.jsp".to_string()))
+            .count();
+        assert_eq!(fan_in, 1);
+        assert!(!out
+            .findings
+            .iter()
+            .any(|f| f.rule_id == "dead-candidates" && f.file == "impl.jsp"));
+    }
+
+    #[test]
+    fn type_only_re_export_creates_no_dep_edge_in_envelope_mode() {
+        // `export type { X } from './y'` is erased by TS at compile time — no edge at all, mirroring
+        // `build_dep_impl`'s own `type_only_re_export_creates_no_dep_edge`.
+        let mut barrel = projection("barrel.jsp", 5);
+        barrel.re_exports.push(ReExport {
+            specifier: "y.jsp".to_string(),
+            original: "X".to_string(),
+            local_alias: "X".to_string(),
+            type_only: true,
+        });
+        let y_file = projection("y.jsp", 5);
+        let env = envelope(vec![barrel, y_file]);
+        let out = analyze_envelope(&env, &config());
+
+        assert!(out
+            .ir
+            .ir
+            .dep
+            .get("barrel.jsp")
+            .cloned()
+            .unwrap_or_default()
+            .is_empty());
     }
 
     #[test]
@@ -696,6 +811,7 @@ mod tests {
             is_default: false,
             body_start: None,
             body_end: None,
+            write_sites: Vec::new(),
         });
         let env = envelope(vec![a]);
         let mut cfg = config();

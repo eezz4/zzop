@@ -11,8 +11,8 @@
 
 use serde::{Deserialize, Serialize};
 use zzop_core::{
-    ImportMap, IoFacts, RouterMountFragment, SourceSymbol, TrpcRouterFragment, WrapperCallFragment,
-    WrapperDefFragment,
+    ImportMap, IoFacts, QueryCallSite, ReExport, RouterMountFragment, SourceSymbol,
+    TrpcRouterFragment, WrapperCallFragment, WrapperDefFragment,
 };
 
 /// One file's Common-IR slice, as produced by parse + per-file projection.
@@ -22,6 +22,12 @@ pub struct FileIrSlice {
     /// `Some` (possibly empty) for files that participate in the TS dep graph; `None` for files that
     /// never do (e.g. Prisma / lexical-only) — mirrors `FileArtifact::imports`.
     pub imports: Option<ImportMap>,
+    /// This file's re-exports (specifier + `type_only`) — mirrors `FileArtifact::re_exports`. Must
+    /// round-trip through the cache: dropping it on a hit would silently undercount a re-exported-only
+    /// barrel file's fan-in and re-introduce Defect A's `dead-candidates` false positive for that file on
+    /// every subsequent cache-warm run.
+    #[serde(default)]
+    pub re_exports: Vec<ReExport>,
     pub loc: u32,
     /// Whether this file's slice came from the lexical fallback path rather than a full structural
     /// parse — mirrors `FileArtifact::degraded`.
@@ -63,4 +69,22 @@ pub struct FileIrSlice {
     /// def) — mirrors `FileArtifact::wrapper_call_fragments`. Same round-trip reasoning.
     #[serde(default)]
     pub wrapper_call_fragments: Vec<WrapperCallFragment>,
+    /// This file's Prisma query-call-site facts (`<clientAccessor>().<model>.<method>(...)`) — mirrors
+    /// `FileArtifact::query_call_sites`. Must round-trip through the cache: dropping it on a hit would
+    /// silently starve the schema x usage JOIN rules (`soft-delete-bypass`/`orderby-unindexed`/
+    /// `enum-string-drift`) of call-site evidence for this file, same reasoning as `io` above.
+    #[serde(default)]
+    pub query_call_sites: Vec<QueryCallSite>,
+    /// This file's store-binding model names (`zzop_parser_typescript::extract_store_bound_models`) —
+    /// mirrors `FileArtifact::store_bound_models`. Must round-trip through the cache: dropping it on a
+    /// hit would silently starve the `schema-usage` native rule's `dead-model` check of this file's
+    /// binding evidence, same reasoning as `query_call_sites` above.
+    #[serde(default)]
+    pub store_bound_models: Vec<String>,
+    /// This file's comment/string-stripped identifier tokens (`zzop_rules_schema::field_usage_tokens`) —
+    /// mirrors `FileArtifact::field_usage_tokens`. Must round-trip through the cache: dropping it on a
+    /// hit would silently starve the `schema-usage` native rule's `dead-field` check of this file's
+    /// usage evidence, same reasoning as `query_call_sites` above.
+    #[serde(default)]
+    pub field_usage_tokens: Vec<String>,
 }

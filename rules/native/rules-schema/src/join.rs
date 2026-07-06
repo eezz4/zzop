@@ -1,8 +1,10 @@
 //! Schema x usage JOIN rules — `soft-delete-bypass`, `orderby-unindexed`, `enum-string-drift`: rules whose
 //! verdict needs BOTH the schema IR (`SchemaModel`/`SchemaField`/attrs, `SchemaEnum`) AND a call-site scan
 //! of BE source (which model + method a query call targets, and its argument-span text). `usage.rs`'s
-//! collectors only produce aggregates with no positional evidence, so these rules use a dedicated collector
-//! (`scan_query_call_sites`) that keeps file/line/call-text per call site instead of folding it into a count.
+//! collectors only produce aggregates with no positional evidence, so these rules instead take a
+//! pre-collected `&[zzop_core::QueryCallSite]` that keeps file/line/call-text per call site rather than
+//! folding it into a count — produced per-file by `zzop_parser_typescript::extract_query_call_sites`
+//! during the fused pass and assembled tree-wide by `zzop_engine::analyze::run_schema_join_rules`.
 //!
 //! - `soft-delete-bypass`: flags `findMany`/`findFirst`/`findUnique`/`count` call sites on a model with a
 //!   `deletedAt`/`deleted_at` field whose argument span never mentions that field name — conservative by
@@ -16,125 +18,12 @@
 //!   value isn't a declared enum member; a literal inside `in: [...]`, a variable, or a nested value is skipped.
 
 use std::collections::HashMap;
-use std::fs;
-use std::path::Path;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+pub use zzop_core::QueryCallSite;
 use zzop_core::{SchemaEnum, SchemaModel, Severity};
-
-use crate::usage::{capitalize, walk_ts_files};
-
-/// One resolved Prisma query call site: `<clientAccessor>().<modelAccessor>.<method>(...)`, using the same
-/// `getPrisma()`-style accessor vocabulary as `usage::scan_store_map`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct QueryCallSite {
-    /// PascalCase model name, derived by capitalizing the camelCase client accessor (`item` -> `Item`).
-    pub model: String,
-    /// One of `findMany` / `findFirst` / `findUnique` / `count`.
-    pub method: String,
-    pub file: String,
-    /// 1-based line of the method-call token itself.
-    pub line: u32,
-    /// The balanced-paren argument span, `(...)` inclusive — raw source text, comments/strings not stripped.
-    pub call_text: String,
-}
-
-/// Prisma query methods both `soft-delete-bypass` and `orderby-unindexed` scan. `findUnique` is included
-/// even though a unique-key lookup has different soft-delete semantics than a list query; a repo relying
-/// on that intentionally (e.g. an admin "restore" flow) disables the rule id.
-const QUERY_METHODS: [&str; 4] = ["findMany", "findFirst", "findUnique", "count"];
-
-/// Collects every Prisma query call site (`<prisma_client_getter_fn>().<model>.<method>(...)`) under
-/// `app_dir/src` (empty when the getter name is empty or `app_dir/src` doesn't exist). Scans raw file text
-/// rather than through `usage::strip_comments_and_strings`, since that pass shifts line numbers after a
-/// multi-line comment or template literal — wrong when a collector anchors findings at an exact call-site
-/// line. A call pattern that happens to sit inside a comment or string literal is scanned as if live code.
-pub fn scan_query_call_sites(app_dir: &Path, prisma_client_getter_fn: &str) -> Vec<QueryCallSite> {
-    let mut out = Vec::new();
-    if prisma_client_getter_fn.is_empty() {
-        return out;
-    }
-    let src_dir = app_dir.join("src");
-    if !src_dir.is_dir() {
-        return out;
-    }
-    let escaped = regex::escape(prisma_client_getter_fn);
-    let call_re = Regex::new(&format!(
-        r"{escaped}\s*\(\s*\)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*(findMany|findFirst|findUnique|count)\s*\("
-    ))
-    .unwrap();
-    for file in walk_ts_files(&src_dir) {
-        let Ok(text) = fs::read_to_string(&file) else {
-            continue;
-        };
-        let rel = relative_slash_path(app_dir, &file);
-        for m in call_re.captures_iter(&text) {
-            let whole = m.get(0).unwrap();
-            let model_accessor = &m[1];
-            let method = &m[2];
-            let open_paren = whole.end() - 1; // the literal `(` the regex ends on.
-            let call_text = extract_balanced_parens(&text, open_paren);
-            let line = 1 + text[..whole.start()].matches('\n').count() as u32;
-            out.push(QueryCallSite {
-                model: capitalize(model_accessor),
-                method: method.to_string(),
-                file: rel.clone(),
-                line,
-                call_text,
-            });
-        }
-    }
-    out.sort_by(|a, b| (a.file.as_str(), a.line).cmp(&(b.file.as_str(), b.line)));
-    out
-}
-
-fn relative_slash_path(base: &Path, file: &Path) -> String {
-    let rel = file.strip_prefix(base).unwrap_or(file);
-    rel.components()
-        .map(|c| c.as_os_str().to_string_lossy().into_owned())
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
-/// From `open_idx` (the byte index of a `(`), walks forward tracking paren depth and string/template
-/// literals — so a `)` inside a string can't prematurely close the span — and returns the balanced
-/// `(...)` span, inclusive. Falls back to "rest of file" on unbalanced (malformed/truncated) input rather
-/// than panicking or looping forever.
-fn extract_balanced_parens(text: &str, open_idx: usize) -> String {
-    let bytes = text.as_bytes();
-    let mut depth = 0i32;
-    let mut i = open_idx;
-    let mut in_str: Option<u8> = None;
-    while i < bytes.len() {
-        let c = bytes[i];
-        if let Some(q) = in_str {
-            if c == b'\\' {
-                i += 2;
-                continue;
-            }
-            if c == q {
-                in_str = None;
-            }
-            i += 1;
-            continue;
-        }
-        match c {
-            b'"' | b'\'' | b'`' => in_str = Some(c),
-            b'(' => depth += 1,
-            b')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return text[open_idx..=i].to_string();
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    text[open_idx..].to_string()
-}
 
 /// A schema x usage JOIN issue. Unlike `structural::SchemaIssue` (anchored at the model's `.prisma`
 /// declaration line), these fire at a BE-source call site, so `file`/`line` point there directly.
@@ -195,7 +84,10 @@ pub fn soft_delete_bypass_issues(
         };
         let word_re = Regex::new(&format!(r"\b{}\b", regex::escape(field_name))).unwrap();
         for site in sites {
-            if site.model != model.name || !QUERY_METHODS.contains(&site.method.as_str()) {
+            // `sites` arrives pre-filtered to the 4 query methods by
+            // `zzop_parser_typescript::extract_query_call_sites` (that crate's `QUERY_METHODS` is the
+            // single source of truth) — only the model needs checking here.
+            if site.model != model.name {
                 continue;
             }
             if word_re.is_match(&site.call_text) {
@@ -374,46 +266,7 @@ pub fn enum_string_drift_issues(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
     use zzop_core::{FieldAttr, SchemaField};
-
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(prefix: &str) -> Self {
-            static COUNTER: AtomicU64 = AtomicU64::new(0);
-            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let dir =
-                std::env::temp_dir().join(format!("{prefix}-{}-{nanos}-{n}", std::process::id()));
-            fs::create_dir_all(&dir).unwrap();
-            TempDir(dir)
-        }
-
-        fn path(&self) -> &Path {
-            &self.0
-        }
-
-        fn write(&self, rel: &str, content: &str) {
-            let full = self.0.join(rel);
-            if let Some(parent) = full.parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
-            fs::write(full, content).unwrap();
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    const GETTER: &str = "getPrisma";
 
     fn field(name: &str, ty: &str, attrs: &[&str]) -> SchemaField {
         SchemaField {
@@ -448,78 +301,6 @@ mod tests {
 
     fn cols(xs: &[&str]) -> Vec<String> {
         xs.iter().map(|s| s.to_string()).collect()
-    }
-
-    // --- scanQueryCallSites ---
-
-    #[test]
-    fn scan_query_call_sites_empty_getter_returns_empty() {
-        let dir = TempDir::new("zzop-join-sites");
-        dir.write(
-            "src/domains/item/repo.ts",
-            "export function f() { return getPrisma().item.findMany({}); }\n",
-        );
-        assert!(scan_query_call_sites(dir.path(), "").is_empty());
-    }
-
-    #[test]
-    fn scan_query_call_sites_no_src_dir_returns_empty() {
-        let dir = TempDir::new("zzop-join-sites");
-        assert!(scan_query_call_sites(dir.path(), GETTER).is_empty());
-    }
-
-    #[test]
-    fn scan_query_call_sites_finds_find_many_with_model_and_line() {
-        let dir = TempDir::new("zzop-join-sites");
-        dir.write(
-            "src/domains/item/repo.ts",
-            "export function list() {\n  return getPrisma().item.findMany({ where: { ownerId: 1 } });\n}\n",
-        );
-        let sites = scan_query_call_sites(dir.path(), GETTER);
-        assert_eq!(sites.len(), 1);
-        assert_eq!(sites[0].model, "Item");
-        assert_eq!(sites[0].method, "findMany");
-        assert_eq!(sites[0].file, "src/domains/item/repo.ts");
-        assert_eq!(sites[0].line, 2);
-        assert!(sites[0].call_text.contains("ownerId"));
-    }
-
-    #[test]
-    fn scan_query_call_sites_captures_balanced_span_across_nested_braces() {
-        let dir = TempDir::new("zzop-join-sites");
-        dir.write(
-            "src/domains/item/repo.ts",
-            "export function list() {\n  return getPrisma().item.findMany({\n    where: { ownerId: 1, meta: { a: fn(1, 2) } },\n    orderBy: { name: 'asc' },\n  });\n}\n",
-        );
-        let sites = scan_query_call_sites(dir.path(), GETTER);
-        assert_eq!(sites.len(), 1);
-        assert!(sites[0].call_text.contains("orderBy"));
-        assert!(sites[0].call_text.trim_end().ends_with(");") || sites[0].call_text.ends_with(')'));
-    }
-
-    #[test]
-    fn scan_query_call_sites_multiple_sites_same_file_correct_lines() {
-        let dir = TempDir::new("zzop-join-sites");
-        dir.write(
-            "src/domains/item/repo.ts",
-            "export function a() {\n  return getPrisma().item.findMany({});\n}\n\nexport function b() {\n  return getPrisma().item.count({});\n}\n",
-        );
-        let sites = scan_query_call_sites(dir.path(), GETTER);
-        assert_eq!(sites.len(), 2);
-        assert_eq!(sites[0].line, 2);
-        assert_eq!(sites[0].method, "findMany");
-        assert_eq!(sites[1].line, 6);
-        assert_eq!(sites[1].method, "count");
-    }
-
-    #[test]
-    fn scan_query_call_sites_ignores_non_query_methods() {
-        let dir = TempDir::new("zzop-join-sites");
-        dir.write(
-            "src/domains/item/repo.ts",
-            "export function f() { return getPrisma().item.create({ data: {} }); }\n",
-        );
-        assert!(scan_query_call_sites(dir.path(), GETTER).is_empty());
     }
 
     // --- softDeleteBypassIssues ---

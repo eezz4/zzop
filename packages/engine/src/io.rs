@@ -85,6 +85,10 @@ pub(crate) fn extract_file_io(rel: &str, text: &str, opts: &IoOptions) -> Option
     consumes.extend(zzop_parser_typescript::extract_hono_client_consumes(
         rel, text,
     ));
+    // db-table consumes (kind "db-table"): a Prisma `getPrisma().<model>.<method>(...)` access, keyed at
+    // extraction time. Feeds the generic cross-layer linker so `cross-layer/shared-db-table` can fire when
+    // 2+ trees touch one table. See decisions/2026-07-rule-side-lexical-reparse-leak.md.
+    consumes.extend(zzop_parser_typescript::extract_db_table_consumes(rel, text));
 
     // Code-registered router provides (Hono-style) come from `FileArtifact::router_mount_fragments`
     // instead (module doc). `opts.router_names` is consumed by that fragment projection, not here.

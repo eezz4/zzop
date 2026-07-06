@@ -37,6 +37,13 @@ pub(crate) struct FileArtifact {
     pub rel: String,
     pub symbols: Vec<SourceSymbol>,
     pub imports: Option<ImportMap>,
+    /// This file's re-exports (`export { x } from './y'` / `export * from './y'`, each carrying its own
+    /// `type_only`) — `analyze::assemble`'s substrate for merging non-type-only re-export specifiers into
+    /// `build_dep_with_workspace`'s dep graph as real edges (Defect A: a barrel file re-exporting only,
+    /// with no local import, used to be invisible to the dep graph, undercounting its target's fan-in and
+    /// false-positiving `dead-candidates`). Empty for non-TypeScript/degraded files, same convention as
+    /// `imports`.
+    pub re_exports: Vec<zzop_core::ReExport>,
     pub loc: u32,
     pub findings: Vec<zzop_core::Finding>,
     pub degraded: bool,
@@ -64,6 +71,23 @@ pub(crate) struct FileArtifact {
     pub wrapper_def_fragments: Vec<zzop_core::WrapperDefFragment>,
     /// Wrapper-CALL fragment — each call is resolved via its import specifier back to a def.
     pub wrapper_call_fragments: Vec<zzop_core::WrapperCallFragment>,
+    /// This file's Prisma query-call-site facts (`<clientAccessor>().<model>.<method>(...)`, restricted
+    /// to the 4 read-only query methods) — `analyze::assemble`'s substrate for `run_schema_join_rules`,
+    /// replacing that pass's own filesystem re-walk (`zzop_rules_schema::join::scan_query_call_sites`,
+    /// now removed).
+    pub query_call_sites: Vec<zzop_core::QueryCallSite>,
+    /// This file's store-binding model names (`zzop_parser_typescript::extract_store_bound_models`) —
+    /// `analyze::assemble`'s substrate for `SchemaUsage.bound_models`, replacing
+    /// `zzop_rules_schema::usage::scan_store_map`'s own `<root>/src/domains/**` filesystem re-walk (now
+    /// removed). Empty for non-TypeScript/degraded files and any file outside the store-file convention.
+    pub store_bound_models: Vec<String>,
+    /// This file's comment/string-stripped identifier tokens (`zzop_rules_schema::field_usage_tokens`) —
+    /// `analyze::assemble`'s substrate for `SchemaUsage.identifier_counts` (presence only), replacing
+    /// `zzop_rules_schema::usage::scan_field_usage`'s own `<root>/src` filesystem re-walk (now removed).
+    /// Unlike most fields on this struct, this one is populated for ANY `.ts`/`.tsx` file regardless of
+    /// `language`/`degraded` — the removed `scan_field_usage` was a raw-text regex scan, never an AST
+    /// parse, so it never cared whether swc could parse the file.
+    pub field_usage_tokens: Vec<String>,
 }
 
 /// Runs the fused per-file pass over every file under `root` (skipping `config.dispatch.skip_dirs`) and
@@ -280,6 +304,7 @@ fn process_file(
                 rel: rel.to_string(),
                 symbols: Vec::new(),
                 imports: None,
+                re_exports: Vec::new(),
                 loc: 0,
                 findings: Vec::new(),
                 degraded: true,
@@ -292,6 +317,9 @@ fn process_file(
                 router_mount_fragments: Vec::new(),
                 wrapper_def_fragments: Vec::new(),
                 wrapper_call_fragments: Vec::new(),
+                query_call_sites: Vec::new(),
+                store_bound_models: Vec::new(),
+                field_usage_tokens: Vec::new(),
             };
         }
     };
@@ -352,6 +380,7 @@ fn process_file(
         let ir_slice = FileIrSlice {
             symbols: artifact.symbols.clone(),
             imports: artifact.imports.clone(),
+            re_exports: artifact.re_exports.clone(),
             loc: artifact.loc,
             degraded: artifact.degraded,
             io: artifact.io.clone(),
@@ -362,6 +391,9 @@ fn process_file(
             router_mount_fragments: artifact.router_mount_fragments.clone(),
             wrapper_def_fragments: artifact.wrapper_def_fragments.clone(),
             wrapper_call_fragments: artifact.wrapper_call_fragments.clone(),
+            query_call_sites: artifact.query_call_sites.clone(),
+            store_bound_models: artifact.store_bound_models.clone(),
+            field_usage_tokens: artifact.field_usage_tokens.clone(),
         };
         let _ = cache.put_ir(key, &ir_slice);
         let _ = cache.put_findings(key, &artifact.findings);
@@ -383,6 +415,7 @@ fn artifact_from_ir(
         rel: rel.to_string(),
         symbols: ir.symbols,
         imports: ir.imports,
+        re_exports: ir.re_exports,
         loc: ir.loc,
         findings,
         degraded: ir.degraded,
@@ -395,6 +428,9 @@ fn artifact_from_ir(
         router_mount_fragments: ir.router_mount_fragments,
         wrapper_def_fragments: ir.wrapper_def_fragments,
         wrapper_call_fragments: ir.wrapper_call_fragments,
+        query_call_sites: ir.query_call_sites,
+        store_bound_models: ir.store_bound_models,
+        field_usage_tokens: ir.field_usage_tokens,
     }
 }
 
@@ -411,7 +447,9 @@ fn compute_fresh_artifact(
     if bytes.len() > config.size_cap {
         // Oversized: loc counted lexically, no symbols/imports/io, but the text is still scanned by
         // line-scan DSL rules (lexical-only files are excluded from structural projection, not rule
-        // evaluation).
+        // evaluation). `store_bound_models`/`field_usage_tokens` are both raw-text regex scans, never an
+        // AST parse, so — like the removed `scan_store_map`/`scan_field_usage` filesystem walks they
+        // replace — they run here too, unaffected by the size cap.
         let loc = lexical_loc(text);
         let (findings, rule_timings, minified_or_generated) =
             eval_packs(packs, rel, text, &[], None, config.profile_rules);
@@ -419,6 +457,7 @@ fn compute_fresh_artifact(
             rel: rel.to_string(),
             symbols: Vec::new(),
             imports: ts_slot(language),
+            re_exports: Vec::new(),
             loc,
             findings,
             degraded: true,
@@ -431,6 +470,9 @@ fn compute_fresh_artifact(
             router_mount_fragments: Vec::new(),
             wrapper_def_fragments: Vec::new(),
             wrapper_call_fragments: Vec::new(),
+            query_call_sites: Vec::new(),
+            store_bound_models: zzop_parser_typescript::extract_store_bound_models(rel, text),
+            field_usage_tokens: sorted_field_usage_tokens(rel, text),
         };
     }
 
@@ -456,12 +498,13 @@ fn compute_fresh_artifact(
         Some(Language::JavaLexical) => crate::io::extract_java_file_io(rel, text),
         _ => None,
     };
-    // The next four projections are all TypeScript-only, reusing `text` already in hand (an extra parse
+    // The next five projections are all TypeScript-only, reusing `text` already in hand (an extra parse
     // of already-read text, not a second file read): const-map fragment (feeds `analyze::assemble`'s
     // merge + late consume re-resolution), tRPC router fragment (`analyze::compose_trpc_provides`),
     // router-mount fragment (Hono chained builders / cross-file mounts, for
-    // `analyze::compose_router_mount_provides`), and wrapper def/call fragments (`analyze`'s
-    // assemble-time wrapper-consume join, defs indexed by `(file, name)`).
+    // `analyze::compose_router_mount_provides`), wrapper def/call fragments (`analyze`'s assemble-time
+    // wrapper-consume join, defs indexed by `(file, name)`), and query-call-site facts (`analyze`'s
+    // `run_schema_join_rules` substrate).
     let const_map_fragment = match language {
         Some(Language::TypeScript) if !degraded => {
             zzop_parser_typescript::const_map_fragment(rel, text)
@@ -482,12 +525,32 @@ fn compute_fresh_artifact(
         }
         _ => Vec::new(),
     };
+    // Re-exports (`export {x} from './y'` / `export * from './y'`) — `analyze::assemble`'s substrate for
+    // merging non-type-only specifiers into the dep graph (Defect A: see `FileArtifact::re_exports`'s doc).
+    let re_exports = match language {
+        Some(Language::TypeScript) if !degraded => {
+            zzop_parser_typescript::parse_re_exports(rel, text)
+        }
+        _ => Vec::new(),
+    };
     let (wrapper_def_fragments, wrapper_call_fragments) = match language {
         Some(Language::TypeScript) if !degraded => {
             zzop_parser_typescript::extract_wrapper_fragments(rel, text)
         }
         _ => (Vec::new(), Vec::new()),
     };
+    let query_call_sites = match language {
+        Some(Language::TypeScript) if !degraded => {
+            zzop_parser_typescript::extract_query_call_sites(rel, text)
+        }
+        _ => Vec::new(),
+    };
+    // Store-binding and field-usage-token facts are both raw-text regex scans, never an AST parse, so —
+    // like the removed `scan_store_map`/`scan_field_usage` filesystem walks they replace — they run
+    // unconditionally on `rel`/`text` here regardless of `language`/`degraded`; each gates its own
+    // applicability internally (the store-file convention, the `.ts`/`.tsx` extension, respectively).
+    let store_bound_models = zzop_parser_typescript::extract_store_bound_models(rel, text);
+    let field_usage_tokens = sorted_field_usage_tokens(rel, text);
     let (mut findings, rule_timings, minified_or_generated) =
         eval_packs(packs, rel, text, &symbols, io.clone(), config.profile_rules);
     if schema_findings_eligible(language, degraded) {
@@ -497,6 +560,7 @@ fn compute_fresh_artifact(
         rel: rel.to_string(),
         symbols,
         imports,
+        re_exports,
         loc,
         findings,
         degraded,
@@ -509,7 +573,20 @@ fn compute_fresh_artifact(
         router_mount_fragments,
         wrapper_def_fragments,
         wrapper_call_fragments,
+        query_call_sites,
+        store_bound_models,
+        field_usage_tokens,
     }
+}
+
+/// `zzop_rules_schema::field_usage_tokens`'s presence-only result, sorted for deterministic
+/// serialization — mirrors `used_names`'s own "sorted" convention on `FileArtifact`/`FileIrSlice`.
+fn sorted_field_usage_tokens(rel: &str, text: &str) -> Vec<String> {
+    let mut tokens: Vec<String> = zzop_rules_schema::field_usage_tokens(rel, text)
+        .into_iter()
+        .collect();
+    tokens.sort();
+    tokens
 }
 
 /// `Some(empty map)` for a TypeScript-dispatched file (gives it a dep-graph node even when parsing was
@@ -684,22 +761,23 @@ fn schema_findings(
 }
 
 /// The usage counterpart of `schema_findings`: wires the usage cross-check (dead-model / dead-field /
-/// schema-churn) via `zzop_rules_schema::cross_check_schema`/`apply_churn_rule`. Unlike
-/// `schema_findings` this is a whole-tree pass — usage evidence (store bindings, identifier counts,
-/// migration churn) spans every source file, so it runs from `analyze::assemble`'s global stage and is
-/// recomputed each run, never entering the per-file findings cache. `analyze_schema_with_usage` is
-/// deliberately not used here since it re-runs the structural rules the per-file pass already emitted.
+/// schema-churn) via `zzop_rules_schema::cross_check_schema`/`apply_churn_rule`. Unlike `schema_findings`
+/// this is a whole-tree pass — usage evidence (store bindings, identifier presence, migration churn)
+/// spans every source file, so it runs from `analyze::assemble`'s global stage and is recomputed each
+/// run, never entering the per-file findings cache. `analyze_schema_with_usage` is deliberately not used
+/// here since it re-runs the structural rules the per-file pass already emitted.
 ///
-/// `scan_store_map` needs store-factory/client-getter vocabulary; this engine has no general vocabulary
-/// config, so `zzop_parser_prisma`'s defaults apply. Degraded `.prisma` files are excluded by the
-/// caller; unreadable files are skipped.
-///
-/// Scope asymmetry (intentional): `prisma_rels` honors the engine's dispatch/skip config, but the
-/// three usage collectors walk `root/src` themselves with only their own skips — an engine-excluded
-/// source file still contributes identifier counts and store bindings.
+/// `bound_models`/`used_names` are the tree-wide unions `analyze::assemble` already collects from every
+/// `FileArtifact::store_bound_models`/`field_usage_tokens` (themselves populated by
+/// `zzop_parser_typescript::extract_store_bound_models`/`zzop_rules_schema::field_usage_tokens` in the
+/// fused per-file pass) — this fn no longer walks the filesystem for either; only `scan_migration_churn`
+/// (a separate concern, untouched by this) still does. Degraded `.prisma` files are excluded by the
+/// caller; unreadable schema files are skipped.
 pub(crate) fn schema_usage_findings(
     root: &Path,
     prisma_rels: &[String],
+    bound_models: &std::collections::HashSet<String>,
+    used_names: &std::collections::HashSet<String>,
 ) -> Vec<zzop_core::Finding> {
     if prisma_rels.is_empty() {
         return Vec::new();
@@ -718,14 +796,8 @@ pub(crate) fn schema_usage_findings(
     }
     let churn = zzop_rules_schema::scan_migration_churn(root, &models);
     let usage = zzop_core::SchemaUsage {
-        bound_models: zzop_rules_schema::scan_store_map(
-            root,
-            zzop_parser_prisma::DEFAULT_STORE_FACTORY_FN,
-            zzop_parser_prisma::DEFAULT_PRISMA_CLIENT_GETTER_FN,
-        )
-        .into_values()
-        .collect(),
-        identifier_counts: zzop_rules_schema::scan_field_usage(root),
+        bound_models: bound_models.clone(),
+        identifier_counts: used_names.iter().map(|name| (name.clone(), 1u32)).collect(),
         model_churn: None, // `apply_churn_rule` is called explicitly below instead
     };
     let mut issues = zzop_rules_schema::cross_check_schema(&models, &usage);

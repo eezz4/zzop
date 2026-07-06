@@ -237,6 +237,7 @@ mod tests {
             is_default,
             body_start: None,
             body_end: None,
+            write_sites: Vec::new(),
         }
     }
 

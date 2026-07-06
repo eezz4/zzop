@@ -129,6 +129,36 @@ test('exclude routes glob patterns to `glob` and plain fragments to `path`', () 
   ]);
 });
 
+test('collectConfigWarnings flags unknown keys (never rejects) but stays silent on known ones', () => {
+  const { collectConfigWarnings } = require('../lib/mapper');
+  // all-known config -> no warnings
+  assert.deepEqual(
+    collectConfigWarnings({
+      roots: ['.'],
+      packs: { extraDirs: [], disabled: [] },
+      rules: { toctou: { severity: 'warn', exclude: [] } },
+      git: { recentDays: 30 },
+      report: { dir: 'r', formats: ['json'] },
+      format: 'pretty',
+      failOn: 'warn',
+    }),
+    []
+  );
+  // unknown keys at each scope -> one warning each
+  const w = collectConfigWarnings({
+    rulez: {}, // top-level typo
+    packs: { extraDirz: [] }, // nested typo
+    git: { recentDays: 30, foo: 1 }, // nested typo alongside a known key
+    trees: [{ root: '.', srcId: 'x' }], // tree typo
+    rules: { toctou: { severty: 'warn' } }, // rule-object typo
+  });
+  assert.ok(w.some((x) => /"rulez"/.test(x)));
+  assert.ok(w.some((x) => /"packs\.extraDirz"/.test(x)));
+  assert.ok(w.some((x) => /"git\.foo"/.test(x)));
+  assert.ok(w.some((x) => /"trees\[0\]\.srcId"/.test(x)));
+  assert.ok(w.some((x) => /"rules\.toctou\.severty"/.test(x)));
+});
+
 test('rule object severity "off" -> disabledRules, not severityOverrides', () => {
   const { request } = configToRequest({ roots: ['.'], rules: { toctou: { severity: 'off' } } });
   assert.deepEqual(request.disabledRules, ['toctou']);

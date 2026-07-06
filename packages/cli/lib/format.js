@@ -61,6 +61,32 @@ function collectFindings(output) {
   return { findings, fileCount };
 }
 
+/**
+ * Collect the engine's self-reported `warnings` (non-fatal issues + capability self-report notes) from a
+ * parsed native output, tagging multi-tree entries with their sourceId. The engine reports a narrowed scope
+ * here rather than failing or silently degrading; the CLI must surface these, not swallow them.
+ *
+ * @param {object} output  parsed native output
+ * @returns {string[]}
+ */
+function collectWarnings(output) {
+  if (!output || typeof output !== 'object') return [];
+  const out = [];
+  const push = (arr, tag) => {
+    if (!Array.isArray(arr)) return;
+    for (const w of arr) out.push(tag ? `[${tag}] ${w}` : String(w));
+  };
+  if (Array.isArray(output.trees)) {
+    for (const tree of output.trees) {
+      push(tree && tree.output && tree.output.warnings, tree && tree.sourceId);
+    }
+    push(output.warnings);
+  } else {
+    push(output.warnings);
+  }
+  return out;
+}
+
 function countBySeverity(findings) {
   const counts = { critical: 0, warning: 0, info: 0, other: 0 };
   for (const f of findings) {
@@ -236,6 +262,7 @@ function computeExitCode(findings, failOn) {
 
 module.exports = {
   collectFindings,
+  collectWarnings,
   groupByFile,
   countBySeverity,
   formatPretty,

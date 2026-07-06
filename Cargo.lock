@@ -1636,6 +1636,7 @@ dependencies = [
  "serde",
  "serde_json",
  "zzop-core",
+ "zzop-parser-typescript",
 ]
 
 [[package]]

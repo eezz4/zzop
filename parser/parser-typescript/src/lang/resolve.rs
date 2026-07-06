@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use zzop_core::{DepGraph, ImportMap};
+use zzop_core::{DepGraph, ImportMap, ReExport};
 
 /// Extensions / index files tried in order when resolving a specifier base.
 pub const RESOLVE_EXTS: &[&str] = &[
@@ -264,59 +264,105 @@ pub fn resolve_file_with_workspace(
     }
 }
 
-/// `build_dep`, aware of workspace packages and tsconfig `paths`/`baseUrl`: resolves each binding via
-/// `resolve_file_with_workspace`. Behaviorally equivalent to `build_dep` when both maps are empty.
+/// Shared implementation behind `build_dep`/`build_dep_with_workspace`. Per file: resolves each
+/// non-deferred import binding via `resolve`, keeping deduped internal edges (external/deferred
+/// specifiers excluded) — feeding circular detection and fan-in/out. Also merges in each file's
+/// non-type-only re-export specifiers (`export {x} from './y'` / `export * from './y'`) as the same kind
+/// of edge, resolved+deduped into the same vector (Defect A — a bare re-export used to be invisible to
+/// the dep graph, undercounting a barrel file's fan-in and false-positiving `dead-candidates`); a
+/// type-only re-export (`export type {X} from './y'`) is skipped entirely — erased by TS at compile time,
+/// it is not a runtime edge at all, not even one excluded from circular only.
+///
+/// Separately (Defect B) returns an ephemeral `(from, to)` exclusion set: pairs where EVERY binding/
+/// re-export contributing that edge is type-only (`import type`/per-specifier `{ type X }`). The returned
+/// `DepGraph` still includes these edges (fan-in/dead-exports/every metric legitimately count a type
+/// import as a "use" of the target); only `zzop_core::circular_from_dep_excluding` consults the exclusion
+/// set, and only for the duration of one analysis run — it is never cached or serialized. A pair with
+/// BOTH a type-only and a value binding to the same target is not excluded (a real runtime edge exists).
+fn build_dep_impl<F>(
+    files: &[(String, ImportMap)],
+    re_exports: &[(String, Vec<ReExport>)],
+    mut resolve: F,
+) -> (DepGraph, HashSet<(String, String)>)
+where
+    F: FnMut(&str, &str) -> Option<String>,
+{
+    let re_export_map: HashMap<&str, &Vec<ReExport>> = re_exports
+        .iter()
+        .map(|(rel, rs)| (rel.as_str(), rs))
+        .collect();
+    let mut dep = DepGraph::new();
+    let mut type_only_edges = HashSet::new();
+    for (rel, imports) in files {
+        let mut seen = HashSet::new();
+        let mut resolved = Vec::new();
+        // target -> true iff every binding/re-export resolving to it so far is type-only.
+        let mut target_type_only: HashMap<String, bool> = HashMap::new();
+        for binding in imports.values() {
+            if binding.deferred {
+                continue; // lazy require/import: no module-load edge
+            }
+            if let Some(target) = resolve(&binding.specifier, rel) {
+                target_type_only
+                    .entry(target.clone())
+                    .and_modify(|all_type_only| *all_type_only &= binding.type_only)
+                    .or_insert(binding.type_only);
+                if seen.insert(target.clone()) {
+                    resolved.push(target);
+                }
+            }
+        }
+        if let Some(res) = re_export_map.get(rel.as_str()) {
+            for re in res.iter() {
+                if re.type_only {
+                    continue; // erased at compile time: not a runtime edge, not a cycle edge either
+                }
+                if let Some(target) = resolve(&re.specifier, rel) {
+                    target_type_only.insert(target.clone(), false); // always a real (non-type-only) edge
+                    if seen.insert(target.clone()) {
+                        resolved.push(target);
+                    }
+                }
+            }
+        }
+        for (target, all_type_only) in target_type_only {
+            if all_type_only {
+                type_only_edges.insert((rel.clone(), target));
+            }
+        }
+        dep.insert(rel.clone(), resolved);
+    }
+    (dep, type_only_edges)
+}
+
+/// `build_dep`, aware of workspace packages and tsconfig `paths`/`baseUrl`: resolves each binding/
+/// re-export via `resolve_file_with_workspace`. Behaviorally equivalent to `build_dep` when both maps are
+/// empty. See `build_dep_impl`'s doc for the merged-re-export-edge/type-only-exclusion-set behavior both
+/// `build_dep`/`build_dep_with_workspace` share.
 pub fn build_dep_with_workspace(
     files: &[(String, ImportMap)],
+    re_exports: &[(String, Vec<ReExport>)],
     all_paths: &HashSet<String>,
     workspace_pkgs: &HashMap<String, WorkspacePkg>,
     tsconfigs: &BTreeMap<String, TsconfigPaths>,
-) -> DepGraph {
-    let mut dep = DepGraph::new();
-    for (rel, imports) in files {
-        let mut seen = HashSet::new();
-        let mut resolved = Vec::new();
-        for binding in imports.values() {
-            if binding.deferred {
-                continue;
-            }
-            if let Some(target) = resolve_file_with_workspace(
-                &binding.specifier,
-                rel,
-                all_paths,
-                workspace_pkgs,
-                tsconfigs,
-            ) {
-                if seen.insert(target.clone()) {
-                    resolved.push(target);
-                }
-            }
-        }
-        dep.insert(rel.clone(), resolved);
-    }
-    dep
+) -> (DepGraph, HashSet<(String, String)>) {
+    build_dep_impl(files, re_exports, |specifier, rel| {
+        resolve_file_with_workspace(specifier, rel, all_paths, workspace_pkgs, tsconfigs)
+    })
 }
 
-/// Build a file-level dep graph: per file, resolve each non-deferred import and keep deduped internal
-/// edges (external/deferred specifiers excluded), feeding circular detection and fan-in/out.
-pub fn build_dep(files: &[(String, ImportMap)], all_paths: &HashSet<String>) -> DepGraph {
-    let mut dep = DepGraph::new();
-    for (rel, imports) in files {
-        let mut seen = HashSet::new();
-        let mut resolved = Vec::new();
-        for binding in imports.values() {
-            if binding.deferred {
-                continue; // lazy require: no module-load edge
-            }
-            if let Some(target) = resolve_file(&binding.specifier, rel, all_paths) {
-                if seen.insert(target.clone()) {
-                    resolved.push(target);
-                }
-            }
-        }
-        dep.insert(rel.clone(), resolved);
-    }
-    dep
+/// Build a file-level dep graph: per file, resolve each non-deferred import (and non-type-only
+/// re-export) and keep deduped internal edges (external/deferred/type-only-re-export specifiers
+/// excluded), feeding circular detection and fan-in/out. See `build_dep_impl`'s doc for the full
+/// re-export-merge/type-only-exclusion-set behavior (the second return value).
+pub fn build_dep(
+    files: &[(String, ImportMap)],
+    re_exports: &[(String, Vec<ReExport>)],
+    all_paths: &HashSet<String>,
+) -> (DepGraph, HashSet<(String, String)>) {
+    build_dep_impl(files, re_exports, |specifier, rel| {
+        resolve_file(specifier, rel, all_paths)
+    })
 }
 
 /// POSIX dirname: text before the last '/', or "." when there is no '/'.
@@ -404,21 +450,118 @@ mod tests {
     fn barrel_index_js_specifier_reexport_chain_resolves_end_to_end() {
         // a.ts -> ./b/index.js (real: b/index.ts) -> ./c.js (real: c.ts), both hops using a literal
         // `.js` extension (NodeNext style), chained through `build_dep` to prove both hops resolve.
-        // `b/index.ts` uses an import-then-local-export barrel, not a bare `export { c } from './c.js'`
-        // re-export — a bare re-export produces no dep-graph edge today, since `parse_imports` only
-        // walks `ModuleDecl::Import`, never `ExportNamed`/`ExportAll`'s `src`.
+        // `b/index.ts` uses an import-then-local-export barrel (an `import` + a local, from-less
+        // `export { c }`), not a bare `export { c } from './c.js'` re-export — that shape is covered
+        // separately by `bare_named_re_export_creates_dep_edge` below, now that `build_dep` merges
+        // `parse_re_exports` output into the graph too.
         let a = parse_imports("a.ts", "import { c } from './b/index.js';\n");
         let b = parse_imports(
             "b/index.ts",
             "import { c } from '../c.js';\nexport { c };\n",
         );
         let all = paths(&["a.ts", "b/index.ts", "c.ts"]);
-        let dep = build_dep(
+        let (dep, _type_only) = build_dep(
             &[("a.ts".to_string(), a), ("b/index.ts".to_string(), b)],
+            &[],
             &all,
         );
         assert_eq!(dep["a.ts"], vec!["b/index.ts".to_string()]);
         assert_eq!(dep["b/index.ts"], vec!["c.ts".to_string()]);
+    }
+
+    // --- Defect A: bare re-exports merge into the dep graph as runtime edges ---
+
+    #[test]
+    fn bare_named_re_export_creates_dep_edge() {
+        // `export { x } from './b'` alone (no local import) used to be invisible to `build_dep` — the
+        // whole point of Defect A's fix.
+        let re_exports = vec![(
+            "barrel.ts".to_string(),
+            vec![zzop_core::ReExport {
+                specifier: "./b".to_string(),
+                original: "x".to_string(),
+                local_alias: "x".to_string(),
+                type_only: false,
+            }],
+        )];
+        let all = paths(&["barrel.ts", "b.ts"]);
+        let (dep, _type_only) = build_dep(
+            &[("barrel.ts".to_string(), ImportMap::new())],
+            &re_exports,
+            &all,
+        );
+        assert_eq!(dep["barrel.ts"], vec!["b.ts".to_string()]);
+    }
+
+    #[test]
+    fn bare_star_re_export_creates_dep_edge() {
+        // `export * from './z'` alone — same fix, the star-form re-export.
+        let re_exports = vec![(
+            "barrel.ts".to_string(),
+            vec![zzop_core::ReExport {
+                specifier: "./z".to_string(),
+                original: "*".to_string(),
+                local_alias: "*".to_string(),
+                type_only: false,
+            }],
+        )];
+        let all = paths(&["barrel.ts", "z.ts"]);
+        let (dep, _type_only) = build_dep(
+            &[("barrel.ts".to_string(), ImportMap::new())],
+            &re_exports,
+            &all,
+        );
+        assert_eq!(dep["barrel.ts"], vec!["z.ts".to_string()]);
+    }
+
+    #[test]
+    fn type_only_re_export_creates_no_dep_edge() {
+        // `export type { X } from './y'` is erased by TS at compile time — no edge at all, not even one
+        // excluded from circular only (unlike a type-only import binding — see Defect B tests below).
+        let re_exports = vec![(
+            "barrel.ts".to_string(),
+            vec![zzop_core::ReExport {
+                specifier: "./y".to_string(),
+                original: "X".to_string(),
+                local_alias: "X".to_string(),
+                type_only: true,
+            }],
+        )];
+        let all = paths(&["barrel.ts", "y.ts"]);
+        let (dep, type_only_edges) = build_dep(
+            &[("barrel.ts".to_string(), ImportMap::new())],
+            &re_exports,
+            &all,
+        );
+        assert!(dep["barrel.ts"].is_empty());
+        assert!(type_only_edges.is_empty());
+    }
+
+    #[test]
+    fn re_export_target_gains_fan_in_via_reverse_dep_edge() {
+        // The dep-graph consumer side of Defect A: a barrel-only re-export gives its target an inbound
+        // edge, which is exactly what `fan_in` (reverse-edge count, `analyze.rs`'s `dep_stats_from_dep`)
+        // counts to avoid `dead-candidates` false-positiving a re-exported-only file.
+        let re_exports = vec![(
+            "barrel.ts".to_string(),
+            vec![zzop_core::ReExport {
+                specifier: "./impl".to_string(),
+                original: "x".to_string(),
+                local_alias: "x".to_string(),
+                type_only: false,
+            }],
+        )];
+        let all = paths(&["barrel.ts", "impl.ts"]);
+        let (dep, _type_only) = build_dep(
+            &[("barrel.ts".to_string(), ImportMap::new())],
+            &re_exports,
+            &all,
+        );
+        let fan_in = dep
+            .values()
+            .filter(|tos| tos.contains(&"impl.ts".to_string()))
+            .count();
+        assert_eq!(fan_in, 1);
     }
 
     #[test]
@@ -471,7 +614,7 @@ mod tests {
     fn build_dep_keeps_internal_drops_external() {
         let imports = parse_imports("a.ts", "import { x } from './b';\nimport 'react';\n");
         let all = paths(&["a.ts", "b.ts"]);
-        let dep = build_dep(&[("a.ts".to_string(), imports)], &all);
+        let (dep, _type_only) = build_dep(&[("a.ts".to_string(), imports)], &[], &all);
         assert_eq!(dep["a.ts"], vec!["b.ts".to_string()]);
     }
 
@@ -489,8 +632,150 @@ mod tests {
             },
         );
         let all = paths(&["x.js", "y.ts"]);
-        let dep = build_dep(&[("x.js".to_string(), imports)], &all);
+        let (dep, _type_only) = build_dep(&[("x.js".to_string(), imports)], &[], &all);
         assert!(dep["x.js"].is_empty());
+    }
+
+    // --- Defect B: type-only bindings stay in the DepGraph, but excluded from circular only ---
+
+    #[test]
+    fn type_only_binding_stays_in_dep_graph_but_is_flagged_excludable() {
+        use zzop_core::ImportBinding;
+        let mut imports = ImportMap::new();
+        imports.insert(
+            "T".to_string(),
+            ImportBinding {
+                specifier: "./y".into(),
+                original: "T".into(),
+                deferred: false,
+                type_only: true,
+            },
+        );
+        let all = paths(&["x.ts", "y.ts"]);
+        let (dep, type_only_edges) = build_dep(&[("x.ts".to_string(), imports)], &[], &all);
+        // Fan-in/metrics still see the edge — a type import is still a "use" of the target.
+        assert_eq!(dep["x.ts"], vec!["y.ts".to_string()]);
+        // But circular detection's exclusion set flags it.
+        assert!(type_only_edges.contains(&("x.ts".to_string(), "y.ts".to_string())));
+    }
+
+    #[test]
+    fn value_and_type_only_binding_to_same_target_is_not_excluded() {
+        // A real value import to the same target as a type-only one means a genuine runtime edge exists
+        // — the pair must not be excluded from circular even though a type-only binding also targets it.
+        use zzop_core::ImportBinding;
+        let mut imports = ImportMap::new();
+        imports.insert(
+            "T".to_string(),
+            ImportBinding {
+                specifier: "./y".into(),
+                original: "T".into(),
+                deferred: false,
+                type_only: true,
+            },
+        );
+        imports.insert(
+            "v".to_string(),
+            ImportBinding {
+                specifier: "./y".into(),
+                original: "v".into(),
+                deferred: false,
+                type_only: false,
+            },
+        );
+        let all = paths(&["x.ts", "y.ts"]);
+        let (dep, type_only_edges) = build_dep(&[("x.ts".to_string(), imports)], &[], &all);
+        assert_eq!(dep["x.ts"], vec!["y.ts".to_string()]);
+        assert!(!type_only_edges.contains(&("x.ts".to_string(), "y.ts".to_string())));
+    }
+
+    #[test]
+    fn import_type_only_pair_does_not_form_a_circular_dependency() {
+        // Two files linked ONLY by `import type` (both directions) must not read as a cycle; a value
+        // import between the same two files still must.
+        use zzop_core::{circular_from_dep_excluding, ImportBinding};
+        let mut a_imports = ImportMap::new();
+        a_imports.insert(
+            "B".to_string(),
+            ImportBinding {
+                specifier: "./b".into(),
+                original: "B".into(),
+                deferred: false,
+                type_only: true,
+            },
+        );
+        let mut b_imports = ImportMap::new();
+        b_imports.insert(
+            "A".to_string(),
+            ImportBinding {
+                specifier: "./a".into(),
+                original: "A".into(),
+                deferred: false,
+                type_only: true,
+            },
+        );
+        let all = paths(&["a.ts", "b.ts"]);
+        let (dep, type_only_edges) = build_dep(
+            &[
+                ("a.ts".to_string(), a_imports),
+                ("b.ts".to_string(), b_imports),
+            ],
+            &[],
+            &all,
+        );
+        assert!(circular_from_dep_excluding(&dep, &type_only_edges).is_empty());
+    }
+
+    #[test]
+    fn value_import_pair_still_forms_a_circular_dependency() {
+        // Same shape as above, but with plain value imports both ways — must still be a cycle.
+        use zzop_core::{circular_from_dep_excluding, ImportBinding};
+        let mut a_imports = ImportMap::new();
+        a_imports.insert(
+            "B".to_string(),
+            ImportBinding {
+                specifier: "./b".into(),
+                original: "B".into(),
+                deferred: false,
+                type_only: false,
+            },
+        );
+        let mut b_imports = ImportMap::new();
+        b_imports.insert(
+            "A".to_string(),
+            ImportBinding {
+                specifier: "./a".into(),
+                original: "A".into(),
+                deferred: false,
+                type_only: false,
+            },
+        );
+        let all = paths(&["a.ts", "b.ts"]);
+        let (dep, type_only_edges) = build_dep(
+            &[
+                ("a.ts".to_string(), a_imports),
+                ("b.ts".to_string(), b_imports),
+            ],
+            &[],
+            &all,
+        );
+        assert_eq!(circular_from_dep_excluding(&dep, &type_only_edges).len(), 1);
+    }
+
+    #[test]
+    fn per_specifier_type_only_import_is_also_excluded_from_circular() {
+        // `import { type X } from './y'` (per-specifier, not a whole `import type` clause) — parsed via
+        // `parse_imports`, proving the exclusion set works end-to-end from real TS source, not just a
+        // hand-built `ImportBinding`.
+        let a = parse_imports("a.ts", "import { type B } from './b';\n");
+        let b = parse_imports("b.ts", "import { type A } from './a';\n");
+        let all = paths(&["a.ts", "b.ts"]);
+        let (dep, type_only_edges) = build_dep(
+            &[("a.ts".to_string(), a), ("b.ts".to_string(), b)],
+            &[],
+            &all,
+        );
+        assert!(zzop_core::circular_from_dep_excluding(&dep, &type_only_edges).is_empty());
     }
 
     // --- matchWorkspacePkg ---
@@ -693,8 +978,9 @@ mod tests {
             },
         );
         let all = paths(&["a.ts", "packages/utils-core/src/index.ts"]);
-        let dep = build_dep_with_workspace(
+        let (dep, _type_only) = build_dep_with_workspace(
             &[("a.ts".to_string(), imports)],
+            &[],
             &all,
             &ws_pkgs(),
             &no_tsconfigs(),
@@ -709,13 +995,38 @@ mod tests {
     fn build_dep_with_workspace_matches_build_dep_when_no_workspace_pkgs() {
         let imports = parse_imports("a.ts", "import { x } from './b';\n");
         let all = paths(&["a.ts", "b.ts"]);
-        let dep = build_dep_with_workspace(
+        let (dep, _type_only) = build_dep_with_workspace(
             &[("a.ts".to_string(), imports)],
+            &[],
             &all,
             &HashMap::new(),
             &no_tsconfigs(),
         );
         assert_eq!(dep["a.ts"], vec!["b.ts".to_string()]);
+    }
+
+    #[test]
+    fn build_dep_with_workspace_merges_re_exports_too() {
+        // Same Defect A fix as `bare_named_re_export_creates_dep_edge`, through the workspace-aware
+        // entry point the engine's incremental path actually calls.
+        let re_exports = vec![(
+            "barrel.ts".to_string(),
+            vec![zzop_core::ReExport {
+                specifier: "./b".to_string(),
+                original: "x".to_string(),
+                local_alias: "x".to_string(),
+                type_only: false,
+            }],
+        )];
+        let all = paths(&["barrel.ts", "b.ts"]);
+        let (dep, _type_only) = build_dep_with_workspace(
+            &[("barrel.ts".to_string(), ImportMap::new())],
+            &re_exports,
+            &all,
+            &HashMap::new(),
+            &no_tsconfigs(),
+        );
+        assert_eq!(dep["barrel.ts"], vec!["b.ts".to_string()]);
     }
 
     // --- TsconfigPaths: resolve_via_paths / resolve_via_base_url / governing_tsconfig ---

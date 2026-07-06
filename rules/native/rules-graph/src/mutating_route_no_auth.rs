@@ -229,6 +229,7 @@ mod tests {
             is_default: false,
             body_start: Some(line),
             body_end: Some(line),
+            write_sites: Vec::new(),
         }
     }
 

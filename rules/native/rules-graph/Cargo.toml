@@ -9,3 +9,10 @@ zzop-core = { path = "../../../packages/core" }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+# Test-only: builds `write_sites` on hand-built fixtures via the same detection function production
+# code uses (`zzop_parser_typescript::write_sites_for_symbol`), so http_scan's unit tests exercise the
+# real parser-computed fact rather than a re-implemented test double. Production code in this crate
+# still depends on `zzop-core` only (see `lib.rs`'s module doc).
+zzop-parser-typescript = { path = "../../../parser/parser-typescript" }

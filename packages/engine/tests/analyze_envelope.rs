@@ -93,6 +93,7 @@ fn envelope_produces_ir_dep_and_native_analyses_deterministically() {
         is_default: false,
         body_start: Some(5),
         body_end: Some(20),
+        write_sites: Vec::new(),
     });
     controller.io.provides.push(IoProvide {
         kind: "http".to_string(),
@@ -288,6 +289,7 @@ fn envelope_disabled_rules_drops_one_rule_and_leaves_its_sibling_pack_mate_intac
         is_default: false,
         body_start: None,
         body_end: None,
+        write_sites: Vec::new(),
     });
     handler.symbols.push(SourceSymbol {
         id: "legacy/Handler.jsp#postOrder".to_string(),
@@ -299,6 +301,7 @@ fn envelope_disabled_rules_drops_one_rule_and_leaves_its_sibling_pack_mate_intac
         is_default: false,
         body_start: None,
         body_end: None,
+        write_sites: Vec::new(),
     });
 
     let envelope = NormalizedEnvelope {

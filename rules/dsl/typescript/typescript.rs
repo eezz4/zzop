@@ -349,12 +349,12 @@ fn as_const_assertion_is_not_counted_as_as_cast() {
 
 #[test]
 fn jsx_as_prop_is_not_counted_but_a_real_cast_still_is() {
-    // A polymorphic-component `as` prop (`<MonoText as="span">`, Mantine/styled-components style) is a
+    // A polymorphic-component `as` prop (`<Box as="span">`, Mantine/styled-components style) is a
     // JSX attribute, not a TS cast — the `as=` form is excluded. A genuine cast on its own line still
     // fires.
     let f = as_cast_findings(&[(
         "poly.tsx",
-        "const a = <MonoText as=\"span\">hi</MonoText>;\nconst b = raw as Size;\n",
+        "const a = <Box as=\"span\">hi</Box>;\nconst b = raw as Size;\n",
     )]);
     assert_eq!(lines_of(&f), vec![2], "{f:?}");
 }

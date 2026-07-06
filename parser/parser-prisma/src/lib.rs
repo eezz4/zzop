@@ -19,8 +19,8 @@ pub const PARSER_FINGERPRINT: &str = "prisma/v1";
 use regex::Regex;
 use zzop_core::{FieldAttr, SchemaEnum, SchemaField, SchemaModel, SchemaUsage};
 use zzop_rules_schema::{
-    analyze_schema, analyze_schema_with_usage, scan_field_usage, scan_migration_churn,
-    scan_store_map, SchemaAnalysis,
+    analyze_schema, analyze_schema_with_usage, field_usage_tokens, scan_migration_churn,
+    SchemaAnalysis,
 };
 
 /// Parse a schema.prisma string into models. `source_path`/`domain` tag each model (multi-file merge).
@@ -324,7 +324,7 @@ pub fn prisma_schema_analysis(app_dir: &Path, target: &str) -> Option<SchemaAnal
 // prismaSchemaAnalysisWithUsage — usage-aware orchestrator: schema.prisma + BE source scan -> full analysis.
 // ---------------------------------------------------------------------------------------------
 
-/// Scanner-vocabulary defaults for the store-binding convention `scan_store_map` expects in a
+/// Scanner-vocabulary defaults for the store-binding convention [`scan_store_map_dir`] expects in a
 /// standard BE app layout (a store-factory function paired with a Prisma-client accessor).
 pub const DEFAULT_STORE_FACTORY_FN: &str = "createStore";
 pub const DEFAULT_PRISMA_CLIENT_GETTER_FN: &str = "getPrisma";
@@ -335,13 +335,18 @@ pub const DEFAULT_PRISMA_CLIENT_GETTER_FN: &str = "getPrisma";
 /// `zzop_rules_schema::analyze_schema_with_usage`, enabling the usage-gated rules (dead-model / dead-field /
 /// schema-churn). Differs from `prisma_schema_analysis` in also scanning `.ts` source and
 /// prisma/migrations SQL — richer signal at the cost of reading the host source tree.
-/// `store_factory_fn`/`prisma_client_getter_fn` are the store-binding vocabulary terms `scan_store_map`
-/// looks for; pass `DEFAULT_STORE_FACTORY_FN`/`DEFAULT_PRISMA_CLIENT_GETTER_FN` for the standard convention.
+/// `store_factory_fn`/`prisma_client_getter_fn` are the store-binding vocabulary terms
+/// [`scan_store_map_dir`] looks for; pass `DEFAULT_STORE_FACTORY_FN`/`DEFAULT_PRISMA_CLIENT_GETTER_FN`
+/// for the standard convention.
 ///
 /// NOTE: `zzop-engine` does NOT call this orchestrator — its global pass calls
 /// `cross_check_schema`/`apply_churn_rule` directly, since the engine's per-file pass already emitted the
-/// structural findings this function would re-run. This entry point is the standalone (non-engine) host
-/// API; keep both call paths in sync when usage-rule semantics change.
+/// structural findings this function would re-run, sourcing usage evidence from per-file facts the fused
+/// pass already collected instead of a second filesystem walk (see `zzop_rules_schema::usage`'s module
+/// doc). This standalone entry point has no such fused pass to draw from, so [`scan_field_usage_dir`]/
+/// [`scan_store_map_dir`] below still walk the host source tree directly, mirroring the walks
+/// `zzop_rules_schema::usage::scan_field_usage`/`scan_store_map` used to run before that crate moved to
+/// per-file-fact consumption. Keep both call paths in sync when usage-rule semantics change.
 pub fn prisma_schema_analysis_with_usage(
     app_dir: &Path,
     target: &str,
@@ -356,15 +361,168 @@ pub fn prisma_schema_analysis_with_usage(
         return None;
     }
     let bound_models: HashSet<String> =
-        scan_store_map(app_dir, store_factory_fn, prisma_client_getter_fn)
+        scan_store_map_dir(app_dir, store_factory_fn, prisma_client_getter_fn)
             .into_values()
             .collect();
     let usage = SchemaUsage {
         bound_models,
-        identifier_counts: scan_field_usage(app_dir),
+        identifier_counts: scan_field_usage_dir(app_dir),
         model_churn: Some(scan_migration_churn(app_dir, &models)),
     };
     Some(analyze_schema_with_usage(models, Some(usage)))
+}
+
+// --- standalone usage-evidence walks (this orchestrator's own `<root>/src` filesystem re-walk; the
+// fused-per-file-pass alternative `zzop_engine::analyze::assemble` uses instead is not available here) ---
+
+/// Per-file identifier-token presence -> a 1-count map, via a directory walk over `app_dir/src`. The
+/// per-file regex scan itself is [`zzop_rules_schema::field_usage_tokens`] (shared with the engine's
+/// fused per-file pass); only the walk + `node_modules`/`dist`/`data` exclusion is local to this
+/// standalone entry point, since it has no engine tree-walk to lean on.
+fn scan_field_usage_dir(app_dir: &Path) -> std::collections::HashMap<String, u32> {
+    let mut counts = std::collections::HashMap::new();
+    let src_dir = app_dir.join("src");
+    if !src_dir.is_dir() {
+        return counts;
+    }
+    for file in walk_ts_files(&src_dir) {
+        let Ok(text) = fs::read_to_string(&file) else {
+            continue;
+        };
+        let rel = relative_slash_path(app_dir, &file);
+        for token in field_usage_tokens(&rel, &text) {
+            *counts.entry(token).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn walk_ts_files(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    walk_ts_files_into(dir, &mut out);
+    out
+}
+
+fn walk_ts_files_into(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if path.is_dir() {
+            if name == "node_modules" || name == "dist" || name == "data" {
+                continue;
+            }
+            walk_ts_files_into(&path, out);
+        } else {
+            let is_d_ts = name.ends_with(".d.ts");
+            let is_ts_like = name.ends_with(".ts") || name.ends_with(".tsx");
+            if is_ts_like && !is_d_ts {
+                out.push(path);
+            }
+        }
+    }
+}
+
+/// Extracts `{storeName -> Prisma model name}` mappings from STORES files in a BE app. Pattern: `<storeName>: <storeFactoryFn>(..., () => new PrismaStore(<prismaClientGetterFn>().<client>))`, where
+/// `client` is a camelCase accessor mapped to a model name by uppercasing its first letter. `store_factory_fn`/`prisma_client_getter_fn` are producer-supplied vocabulary; an empty map is returned if
+/// either is empty. Ported from the removed `zzop_rules_schema::usage::scan_store_map` (this standalone entry point still needs the parameterized vocabulary that fn offered; the engine-facing
+/// replacement, `zzop_parser_typescript::extract_store_bound_models`, fixes the vocabulary to the standard convention instead, since the engine never had a second one to plug in).
+fn scan_store_map_dir(
+    app_dir: &Path,
+    store_factory_fn: &str,
+    prisma_client_getter_fn: &str,
+) -> std::collections::HashMap<String, String> {
+    let mut result = std::collections::HashMap::new();
+    if store_factory_fn.is_empty() || prisma_client_getter_fn.is_empty() {
+        return result;
+    }
+    let domains_dir = app_dir.join("src").join("domains");
+    let Ok(domains) = fs::read_dir(&domains_dir) else {
+        return result;
+    };
+    let escaped_factory = regex::escape(store_factory_fn);
+    let escaped_getter = regex::escape(prisma_client_getter_fn);
+    // E.g. `itemStore: createStore(..., () => new PrismaStore(getPrisma().item))`.
+    let factory_re = Regex::new(&format!(
+        r"([A-Za-z0-9_]+):\s*{escaped_factory}[\s\S]*?{escaped_getter}\(\)\.([A-Za-z0-9_]+)"
+    ))
+    .unwrap();
+    // Standalone variant: `export const userStore = new PrismaStore(getPrisma().user)`.
+    let standalone_re = Regex::new(&format!(
+        r"(?:const|let)\s+([A-Za-z0-9_]+Store)\s*=[\s\S]*?{escaped_getter}\(\)\.([A-Za-z0-9_]+)"
+    ))
+    .unwrap();
+
+    let mut domains: Vec<_> = domains.filter_map(Result::ok).collect();
+    domains.sort_by_key(|e| e.file_name());
+    for domain in domains {
+        if !domain.path().is_dir() {
+            continue;
+        }
+        scan_domain_stores(&domain.path(), &mut result, &factory_re, &standalone_re);
+    }
+    result
+}
+
+fn store_file_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"STORES?\.ts$|[Ss]tore\.ts$").unwrap())
+}
+
+fn scan_domain_stores(
+    domain_dir: &Path,
+    out: &mut std::collections::HashMap<String, String>,
+    factory_re: &Regex,
+    standalone_re: &Regex,
+) {
+    let Ok(entries) = fs::read_dir(domain_dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !store_file_re().is_match(&name) {
+            continue;
+        }
+        parse_store_file(&path, out, factory_re, standalone_re);
+    }
+}
+
+fn parse_store_file(
+    file: &Path,
+    out: &mut std::collections::HashMap<String, String>,
+    factory_re: &Regex,
+    standalone_re: &Regex,
+) {
+    let Ok(text) = fs::read_to_string(file) else {
+        return;
+    };
+    for c in factory_re.captures_iter(&text) {
+        out.insert(c[1].to_string(), capitalize(&c[2]));
+    }
+    for c in standalone_re.captures_iter(&text) {
+        out.entry(c[1].to_string())
+            .or_insert_with(|| capitalize(&c[2]));
+    }
+}
+
+fn capitalize(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
 }
 
 /// Project schema.prisma files into a `CommonIr` — the parser -> engine bridge (mirrors the
@@ -390,6 +548,7 @@ pub fn build_common_ir(source_id: &str, files: &[(String, String)]) -> zzop_core
                 is_default: false,
                 body_start: None,
                 body_end: None,
+                write_sites: Vec::new(),
             });
         }
         loc.insert(rel.clone(), count_schema_loc(text));

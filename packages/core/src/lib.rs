@@ -16,6 +16,7 @@ pub mod ir;
 pub mod node;
 pub mod normalized;
 pub mod pack_loader;
+pub mod paths;
 pub mod registry;
 pub mod schema;
 pub mod serde_util;
@@ -36,15 +37,16 @@ pub use dsl::{
 
 pub use finding::{Finding, RuleExplain, Severity};
 pub use graph::{
-    circular_from_dep, connected_components, find_cycles, ComponentEdge, ConnectedComponentsResult,
+    circular_from_dep, circular_from_dep_excluding, connected_components, find_cycles,
+    ComponentEdge, ConnectedComponentsResult,
 };
 pub use io::{
     http_interface_key, link_cross_layer_io, AmbiguousConsume, CrossLayerEdge, CrossLayerResult,
     IoConsume, IoFacts, IoKind, IoProvide, LinkOptions, SourceIo,
 };
 pub use ir::{
-    ApiEndpoint, CommonIr, DepGraph, ImportBinding, ImportMap, MinimalIr, ReExport, SourceSymbol,
-    SourceSymbolKind,
+    ApiEndpoint, CommonIr, DepGraph, ImportBinding, ImportMap, MinimalIr, NonIdempotentKind,
+    QueryCallSite, ReExport, SourceSymbol, SourceSymbolKind, WriteSite,
 };
 pub use node::{
     calc_risk_score, classify_lifecycle, compute_median_churn, FileNode, Lifecycle, RiskInput,
@@ -55,6 +57,7 @@ pub use normalized::{
     SUPPORTED_NORMALIZED_AST_VERSION,
 };
 pub use pack_loader::{applies_to, load_dsl_packs, LoadResult, PackLoadError};
+pub use paths::is_test_file;
 pub use registry::{
     apply_severity_override, is_enabled, is_suppressed, merge_findings,
     register_native_analysis_stub, RuleConfig, RuleDescriptor, RuleKind, RuleMeta, RuleRegistry,

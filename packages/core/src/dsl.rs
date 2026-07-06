@@ -1022,6 +1022,7 @@ mod tests {
             is_default: false,
             body_start: Some(body_start),
             body_end: Some(body_end),
+            write_sites: Vec::new(),
         }
     }
 
@@ -1228,6 +1229,7 @@ mod tests {
             is_default: false,
             body_start: None,
             body_end: None,
+            write_sites: Vec::new(),
         }
     }
 
@@ -1970,6 +1972,7 @@ mod tests {
             is_default: false,
             body_start: Some(1),
             body_end: Some(5),
+            write_sites: Vec::new(),
         };
         let inner = method("C.method", 2, 4);
         let f = scan_pack(&call_scan_pack(), "f.ts", src, vec![outer, inner]);

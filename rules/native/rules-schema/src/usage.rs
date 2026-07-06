@@ -1,13 +1,16 @@
-//! Prisma schema-usage analysis — usage-evidence collectors (source scan, migration churn, store bindings) plus the usage-aware cross-check layered on top of the structural analyzer in `structural.rs`.
+//! Prisma schema-usage analysis — usage-evidence collectors (per-file field-usage tokens, migration churn) plus the usage-aware cross-check layered on top of the structural analyzer in `structural.rs`.
 //! `SchemaUsage` (the usage-evidence IR a producer assembles) lives in `zzop-core`; every function that consumes or produces it lives here. `analyze_schema_with_usage` wraps `structural::analyze_schema`
 //! rather than modifying it, layering cross-check/churn issues and risk points on top. `structural::severity_points` is private to `structural.rs`, so it's duplicated here — keep the two in sync.
 //!
-//! The store/client-binding vocabulary (factory names like "createStore"/"getPrisma") isn't read from an ambient registry; `scan_store_map` takes `store_factory_fn` / `prisma_client_getter_fn` as explicit
-//! parameters instead, with default values owned by the parser-prisma orchestrator that uses them.
+//! `bound_models`/`identifier_counts` evidence used to come from this crate's own `<root>/src` filesystem re-walks (`scan_store_map`/`scan_field_usage`, both removed). Both are now sourced from per-file
+//! facts carried through `zzop_engine`'s fused per-file pass instead: [`field_usage_tokens`] (this module) is the direct per-file substrate for `identifier_counts`, called once per file with the text
+//! that pass already has in hand; the store-binding sibling (`extract_store_bound_models`) moved to `zzop_parser_typescript` since it needs the AST-based recognizer `db_table_consume.rs` already hosts.
+//! Store/client-binding vocabulary (factory name "createStore" / getter name "getPrisma") is now a fixed literal at that call site rather than a caller-supplied parameter — this engine never had a second
+//! vocabulary to plug in, so the parameterization the removed `scan_store_map` offered was unused generality.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -25,63 +28,42 @@ macro_rules! lazy_re {
     };
 }
 
-// --- scanFieldUsage ---
+// --- fieldUsageTokens (replaces the removed scanFieldUsage filesystem walk) ---
 
-/// Collects field-name occurrence counts across BE source files as evidence for dead-field detection. Matches
-/// plain identifier tokens on comment/string-stripped text; common names (id/name) appear everywhere, so
-/// they're effectively never flagged dead — this keeps false positives low at the cost of recall.
-pub fn scan_field_usage(app_dir: &Path) -> HashMap<String, u32> {
-    let mut counts = HashMap::new();
-    let src_dir = app_dir.join("src");
-    if !src_dir.is_dir() {
-        return counts;
+/// Comment/string-stripped identifier tokens referenced anywhere in one file's raw text — the direct
+/// per-file substrate `zzop_engine`'s fused per-file pass now feeds into `SchemaUsage.identifier_counts`
+/// (each file's set unioned tree-wide, then re-counted to presence — see that crate's `assemble`).
+/// Replaces the removed `scan_field_usage`'s own `<root>/src` filesystem walk: same recognizer (plain
+/// identifier tokens on comment/string-stripped text — common names like id/name appear everywhere, so
+/// they're effectively never flagged dead, keeping false positives low at the cost of recall), just
+/// invoked once per file instead of via a second full-tree walk. `rel` gates which files are worth
+/// scanning at all (see [`is_field_usage_scan_file`]); an excluded file yields an empty set regardless of
+/// `text`.
+pub fn field_usage_tokens(rel: &str, text: &str) -> HashSet<String> {
+    if !is_field_usage_scan_file(rel) {
+        return HashSet::new();
     }
-    for file in walk_ts_files(&src_dir) {
-        let Ok(text) = fs::read_to_string(&file) else {
-            continue;
-        };
-        let stripped = strip_comments_and_strings(&text);
-        for token in ident_re().find_iter(&stripped) {
-            *counts.entry(token.as_str().to_string()).or_insert(0) += 1;
-        }
-    }
-    counts
+    let stripped = strip_comments_and_strings(text);
+    ident_re()
+        .find_iter(&stripped)
+        .map(|m| m.as_str().to_string())
+        .collect()
 }
 
-/// `pub(crate)`: shared with `crate::join`'s `scan_query_call_sites`, which uses the same `.ts`/`.tsx` walk.
-pub(crate) fn walk_ts_files(dir: &Path) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    walk_ts_files_into(dir, &mut out);
-    out
-}
-
-fn walk_ts_files_into(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
-    entries.sort_by_key(|e| e.file_name());
-    for entry in entries {
-        let path = entry.path();
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if path.is_dir() {
-            if name == "node_modules" || name == "dist" || name == "data" {
-                continue;
-            }
-            walk_ts_files_into(&path, out);
-        } else if is_scannable_ts_file(&name) {
-            out.push(path);
-        }
-    }
-}
-
-/// `.ts`/`.tsx` only, excluding `.d.ts` declaration files.
-fn is_scannable_ts_file(name: &str) -> bool {
-    if name.ends_with(".d.ts") {
+/// `.ts`/`.tsx` only, excluding `.d.ts` declaration files — mirrors the removed `walk_ts_files`'s own
+/// per-file filename filter. The old walk also hard-excluded `node_modules`/`dist`/`data` directories;
+/// that exclusion isn't reproduced here since the fused per-file pass this now runs inside already skips
+/// `node_modules`/`dist` under the DEFAULT `skip_dirs` (`EngineConfig`) — a subset of the old exclusions,
+/// so under default config the fused pass covers every file the old `<root>/src` walk did plus more,
+/// which only ADDS identifier evidence (the accepted tree-wide-widening deviation, see module doc) and
+/// never adds a false dead-field positive. Caveat: a MORE-aggressive custom `skip_dirs` could exclude a
+/// source dir the old walk scanned, dropping "used" tokens and potentially surfacing a false dead-field —
+/// acceptable, since a user who scopes analysis away from a directory is opting out of its evidence.
+fn is_field_usage_scan_file(rel: &str) -> bool {
+    if rel.ends_with(".d.ts") {
         return false;
     }
-    name.ends_with(".ts") || name.ends_with(".tsx")
+    rel.ends_with(".ts") || rel.ends_with(".tsx")
 }
 
 fn strip_comments_and_strings(src: &str) -> String {
@@ -186,102 +168,6 @@ fn to_snake_case(pascal: &str) -> String {
     snake_case_re()
         .replace_all(pascal, "${1}_${2}")
         .to_lowercase()
-}
-
-// --- scanStoreMap ---
-
-/// Extracts `{storeName -> Prisma model name}` mappings from STORES files in a BE app. Pattern: `<storeName>: <storeFactoryFn>(..., () => new PrismaStore(<prismaClientGetterFn>().<client>))`, where
-/// `client` is a camelCase accessor mapped to a model name by uppercasing its first letter. `store_factory_fn`/`prisma_client_getter_fn` are producer-supplied vocabulary (see module doc); an empty map
-/// is returned if either is empty.
-pub fn scan_store_map(
-    app_dir: &Path,
-    store_factory_fn: &str,
-    prisma_client_getter_fn: &str,
-) -> HashMap<String, String> {
-    let mut result = HashMap::new();
-    if store_factory_fn.is_empty() || prisma_client_getter_fn.is_empty() {
-        return result;
-    }
-    let domains_dir = app_dir.join("src").join("domains");
-    let Ok(domains) = fs::read_dir(&domains_dir) else {
-        return result;
-    };
-    let escaped_factory = regex::escape(store_factory_fn);
-    let escaped_getter = regex::escape(prisma_client_getter_fn);
-    // E.g. `itemStore: createStore(..., () => new PrismaStore(getPrisma().item))`.
-    let factory_re = Regex::new(&format!(
-        r"([A-Za-z0-9_]+):\s*{escaped_factory}[\s\S]*?{escaped_getter}\(\)\.([A-Za-z0-9_]+)"
-    ))
-    .unwrap();
-    // Standalone variant: `export const userStore = new PrismaStore(getPrisma().user)`.
-    let standalone_re = Regex::new(&format!(
-        r"(?:const|let)\s+([A-Za-z0-9_]+Store)\s*=[\s\S]*?{escaped_getter}\(\)\.([A-Za-z0-9_]+)"
-    ))
-    .unwrap();
-
-    let mut domains: Vec<_> = domains.filter_map(Result::ok).collect();
-    domains.sort_by_key(|e| e.file_name());
-    for domain in domains {
-        if !domain.path().is_dir() {
-            continue;
-        }
-        scan_domain_stores(&domain.path(), &mut result, &factory_re, &standalone_re);
-    }
-    result
-}
-
-lazy_re!(store_file_re, r"STORES?\.ts$|[Ss]tore\.ts$");
-
-fn scan_domain_stores(
-    domain_dir: &Path,
-    out: &mut HashMap<String, String>,
-    factory_re: &Regex,
-    standalone_re: &Regex,
-) {
-    let Ok(entries) = fs::read_dir(domain_dir) else {
-        return;
-    };
-    let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
-    entries.sort_by_key(|e| e.file_name());
-    for entry in entries {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if !store_file_re().is_match(&name) {
-            continue;
-        }
-        parse_store_file(&path, out, factory_re, standalone_re);
-    }
-}
-
-fn parse_store_file(
-    file: &Path,
-    out: &mut HashMap<String, String>,
-    factory_re: &Regex,
-    standalone_re: &Regex,
-) {
-    let Ok(text) = fs::read_to_string(file) else {
-        return;
-    };
-    for c in factory_re.captures_iter(&text) {
-        out.insert(c[1].to_string(), capitalize(&c[2]));
-    }
-    for c in standalone_re.captures_iter(&text) {
-        out.entry(c[1].to_string())
-            .or_insert_with(|| capitalize(&c[2]));
-    }
-}
-
-/// `pub(crate)`: shared with `crate::join`'s `scan_query_call_sites` for the same camelCase-to-PascalCase mapping.
-pub(crate) fn capitalize(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
-    }
 }
 
 // --- crossCheckSchema + applyChurnRule + analyzeSchema (usage branch) ---
@@ -396,7 +282,7 @@ mod tests {
     //! Unit tests for the usage-evidence collectors, the usage-aware cross-check, the churn rule, and
     //! `analyze_schema_with_usage`'s composition of structural + usage signals.
     use super::*;
-    use std::collections::HashSet;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     use zzop_core::{FieldAttr, SchemaField};
 
@@ -437,135 +323,70 @@ mod tests {
         }
     }
 
-    // --- scanFieldUsage ---
+    // --- fieldUsageTokens ---
 
     #[test]
-    fn field_usage_empty_map_when_src_dir_missing() {
-        let dir = TempDir::new("zzop-field-usage");
-        let result = scan_field_usage(dir.path());
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn field_usage_collects_identifier_counts_from_ts_files_under_src() {
-        let dir = TempDir::new("zzop-field-usage");
-        dir.write(
+    fn field_usage_tokens_collects_identifiers_from_one_file() {
+        let result = field_usage_tokens(
             "src/domains/post/routes/createPostHandlers.ts",
             "export function getPostTitle(post: any) {\n  return post.title;\n}\n",
         );
-        let result = scan_field_usage(dir.path());
-        assert!(result.get("title").copied().unwrap_or(0) > 0);
-        assert!(result.get("post").copied().unwrap_or(0) > 0);
+        assert!(result.contains("title"));
+        assert!(result.contains("post"));
     }
 
     #[test]
-    fn field_usage_merges_multiple_files_same_identifier_counts_accumulate() {
-        let dir = TempDir::new("zzop-field-usage");
-        dir.write(
-            "src/domains/post/routes/createPostHandlers.ts",
-            "export function a(post: any) { return post.title; }\n",
-        );
-        dir.write(
-            "src/domains/user/routes/createUserHandlers.ts",
-            "export function b(post: any) { return post.title + \"!\"; }\n",
-        );
-        let result = scan_field_usage(dir.path());
-        assert!(result.get("title").copied().unwrap_or(0) >= 2);
-    }
-
-    #[test]
-    fn field_usage_dead_field_with_zero_usages_absent_or_zero() {
-        let dir = TempDir::new("zzop-field-usage");
-        dir.write(
+    fn field_usage_tokens_dead_field_absent_when_never_referenced() {
+        let result = field_usage_tokens(
             "src/domains/post/routes/createPostHandlers.ts",
             "export function f(post: any) { return post.title; }\n",
         );
-        let result = scan_field_usage(dir.path());
-        assert_eq!(result.get("deadField").copied().unwrap_or(0), 0);
+        assert!(!result.contains("deadField"));
     }
 
     #[test]
-    fn field_usage_multiple_fields_appear_at_correct_relative_frequencies() {
-        let dir = TempDir::new("zzop-field-usage");
-        dir.write(
-            "src/domains/order/routes/createOrderHandlers.ts",
-            "export function f(o: any) {\n  const a = o.status;\n  const b = o.status;\n  const c = o.amount;\n  return { a, b, c };\n}\n",
-        );
-        let result = scan_field_usage(dir.path());
-        let status_count = result.get("status").copied().unwrap_or(0);
-        let amount_count = result.get("amount").copied().unwrap_or(0);
-        assert!(status_count >= 2);
-        assert!(amount_count >= 1);
-        assert!(status_count > amount_count);
-    }
-
-    #[test]
-    fn field_usage_excludes_node_modules_directory() {
-        let dir = TempDir::new("zzop-field-usage");
-        dir.write(
-            "src/node_modules/some-lib/index.ts",
-            "export const superRareFieldXYZ = 1;\n",
-        );
-        let result = scan_field_usage(dir.path());
-        assert_eq!(result.get("superRareFieldXYZ").copied().unwrap_or(0), 0);
-    }
-
-    #[test]
-    fn field_usage_excludes_dist_directory() {
-        let dir = TempDir::new("zzop-field-usage");
-        dir.write(
-            "src/dist/output.ts",
-            "export const compiledOnlyFieldABC = 1;\n",
-        );
-        let result = scan_field_usage(dir.path());
-        assert_eq!(result.get("compiledOnlyFieldABC").copied().unwrap_or(0), 0);
-    }
-
-    #[test]
-    fn field_usage_excludes_d_ts_files() {
-        let dir = TempDir::new("zzop-field-usage");
-        dir.write(
+    fn field_usage_tokens_empty_for_a_d_ts_file() {
+        let result = field_usage_tokens(
             "src/types/generated.d.ts",
             "export interface Generated { declarationOnlyFieldDEF: string; }\n",
         );
-        let result = scan_field_usage(dir.path());
-        assert_eq!(
-            result.get("declarationOnlyFieldDEF").copied().unwrap_or(0),
-            0
-        );
+        assert!(result.is_empty());
     }
 
     #[test]
-    fn field_usage_excludes_js_files() {
-        let dir = TempDir::new("zzop-field-usage");
-        dir.write(
+    fn field_usage_tokens_empty_for_a_js_file() {
+        let result = field_usage_tokens(
             "src/domains/post/routes/helper.js",
             "const jsOnlyFieldGHI = 1; module.exports = { jsOnlyFieldGHI };\n",
         );
-        let result = scan_field_usage(dir.path());
-        assert_eq!(result.get("jsOnlyFieldGHI").copied().unwrap_or(0), 0);
+        assert!(result.is_empty());
     }
 
     #[test]
-    fn field_usage_excludes_identifiers_inside_comments() {
-        let dir = TempDir::new("zzop-field-usage");
-        dir.write(
+    fn field_usage_tokens_excludes_identifiers_inside_comments() {
+        let result = field_usage_tokens(
             "src/domains/post/routes/createPostHandlers.ts",
             "// commentOnlyFieldJKL: this is a comment\n/* also commentOnlyFieldJKL */\nexport function f() { return 1; }\n",
         );
-        let result = scan_field_usage(dir.path());
-        assert_eq!(result.get("commentOnlyFieldJKL").copied().unwrap_or(0), 0);
+        assert!(!result.contains("commentOnlyFieldJKL"));
     }
 
     #[test]
-    fn field_usage_excludes_identifiers_inside_string_literals() {
-        let dir = TempDir::new("zzop-field-usage");
-        dir.write(
+    fn field_usage_tokens_excludes_identifiers_inside_string_literals() {
+        let result = field_usage_tokens(
             "src/domains/post/routes/createPostHandlers.ts",
             "export function f() {\n  const s = \"stringOnlyFieldMNO\";\n  const t = 'stringOnlyFieldMNO';\n  return s + t;\n}\n",
         );
-        let result = scan_field_usage(dir.path());
-        assert_eq!(result.get("stringOnlyFieldMNO").copied().unwrap_or(0), 0);
+        assert!(!result.contains("stringOnlyFieldMNO"));
+    }
+
+    #[test]
+    fn field_usage_tokens_tsx_file_also_scanned() {
+        let result = field_usage_tokens(
+            "src/domains/post/PostCard.tsx",
+            "export function PostCard(post: any) { return post.title; }\n",
+        );
+        assert!(result.contains("title"));
     }
 
     // --- scanMigrationChurn ---
@@ -742,140 +563,6 @@ mod tests {
         let models = vec![churn_model("Post", Some("post"))];
         let result = scan_migration_churn(dir.path(), &models);
         assert_eq!(result.get("Post").copied(), Some(1));
-    }
-
-    // --- scanStoreMap ---
-
-    const FACTORY: &str = "createStore";
-    const GETTER: &str = "getPrisma";
-
-    #[test]
-    fn store_map_stores_ts_pattern() {
-        let dir = TempDir::new("zzop-store-map");
-        dir.write(
-            "src/domains/item/STORES.ts",
-            "import { createStore } from \"@app/store\";\nimport { PrismaStore, getPrisma } from \"@app/prisma\";\nexport const STORES = {\n  itemStore: createStore(\n    (filters: any) => filters,\n    () => new PrismaStore(getPrisma().item),\n  ),\n};\n",
-        );
-        let result = scan_store_map(dir.path(), FACTORY, GETTER);
-        assert_eq!(result.get("itemStore").map(String::as_str), Some("Item"));
-    }
-
-    #[test]
-    fn store_map_compound_camel_case_client_to_pascal_case_model() {
-        let dir = TempDir::new("zzop-store-map");
-        dir.write(
-            "src/domains/item/STORES.ts",
-            "import { createStore } from \"@app/store\";\nimport { PrismaStore, getPrisma } from \"@app/prisma\";\nexport const STORES = {\n  itemUserLimitStore: createStore(\n    (f: any) => f,\n    () => new PrismaStore(getPrisma().itemUserLimit),\n  ),\n};\n",
-        );
-        let result = scan_store_map(dir.path(), FACTORY, GETTER);
-        assert_eq!(
-            result.get("itemUserLimitStore").map(String::as_str),
-            Some("ItemUserLimit")
-        );
-    }
-
-    #[test]
-    fn store_map_standalone_const_pattern() {
-        let dir = TempDir::new("zzop-store-map");
-        dir.write(
-            "src/domains/user/store.ts",
-            "import { PrismaStore, getPrisma } from \"@app/prisma\";\nexport const userStore = new PrismaStore(getPrisma().user);\n",
-        );
-        let result = scan_store_map(dir.path(), FACTORY, GETTER);
-        assert_eq!(result.get("userStore").map(String::as_str), Some("User"));
-    }
-
-    #[test]
-    fn store_map_multiple_domain_files_collected_independently() {
-        let dir = TempDir::new("zzop-store-map");
-        dir.write(
-            "src/domains/post/STORES.ts",
-            "import { createStore } from \"@app/store\";\nimport { PrismaStore, getPrisma } from \"@app/prisma\";\nexport const STORES = {\n  postStore: createStore((f: any) => f, () => new PrismaStore(getPrisma().post)),\n  postLikeStore: createStore((f: any) => f, () => new PrismaStore(getPrisma().postLike)),\n};\n",
-        );
-        dir.write(
-            "src/domains/comment/STORES.ts",
-            "import { createStore } from \"@app/store\";\nimport { PrismaStore, getPrisma } from \"@app/prisma\";\nexport const STORES = {\n  commentStore: createStore((f: any) => f, () => new PrismaStore(getPrisma().comment)),\n};\n",
-        );
-        let result = scan_store_map(dir.path(), FACTORY, GETTER);
-        assert_eq!(result.get("postStore").map(String::as_str), Some("Post"));
-        assert_eq!(
-            result.get("postLikeStore").map(String::as_str),
-            Some("PostLike")
-        );
-        assert_eq!(
-            result.get("commentStore").map(String::as_str),
-            Some("Comment")
-        );
-        assert_eq!(result.len(), 3);
-    }
-
-    #[test]
-    fn store_map_store_ts_mixed_case_variant_is_scanned() {
-        let dir = TempDir::new("zzop-store-map");
-        dir.write(
-            "src/domains/session/Store.ts",
-            "import { PrismaStore, getPrisma } from \"@app/prisma\";\nexport const sessionStore = new PrismaStore(getPrisma().session);\n",
-        );
-        let result = scan_store_map(dir.path(), FACTORY, GETTER);
-        assert_eq!(
-            result.get("sessionStore").map(String::as_str),
-            Some("Session")
-        );
-    }
-
-    #[test]
-    fn store_map_store_ts_singular_is_scanned() {
-        let dir = TempDir::new("zzop-store-map");
-        dir.write(
-            "src/domains/notification/STORE.ts",
-            "import { createStore } from \"@app/store\";\nimport { PrismaStore, getPrisma } from \"@app/prisma\";\nexport const STORES = {\n  notificationStore: createStore((f: any) => f, () => new PrismaStore(getPrisma().notification)),\n};\n",
-        );
-        let result = scan_store_map(dir.path(), FACTORY, GETTER);
-        assert_eq!(
-            result.get("notificationStore").map(String::as_str),
-            Some("Notification")
-        );
-    }
-
-    #[test]
-    fn store_map_no_domains_folder_empty_map() {
-        let dir = TempDir::new("zzop-store-map");
-        let result = scan_store_map(dir.path(), FACTORY, GETTER);
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn store_map_domain_without_stores_file_empty_map() {
-        let dir = TempDir::new("zzop-store-map");
-        dir.write(
-            "src/domains/post/routes/createPostHandlers.ts",
-            "export function handler() { return null; }",
-        );
-        let result = scan_store_map(dir.path(), FACTORY, GETTER);
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn store_map_file_without_get_prisma_pattern_not_mapped() {
-        let dir = TempDir::new("zzop-store-map");
-        dir.write(
-            "src/domains/post/STORES.ts",
-            "import { JsonStore } from \"@app/json-store\";\nexport const STORES = {\n  postStore: new JsonStore(\"posts\"),\n};\n",
-        );
-        let result = scan_store_map(dir.path(), FACTORY, GETTER);
-        assert!(!result.contains_key("postStore"));
-    }
-
-    #[test]
-    fn store_map_same_store_name_twice_first_entry_wins() {
-        let dir = TempDir::new("zzop-store-map");
-        dir.write(
-            "src/domains/post/STORES.ts",
-            "import { createStore } from \"@app/store\";\nimport { PrismaStore, getPrisma } from \"@app/prisma\";\nexport const STORES = {\n  postStore: createStore((f: any) => f, () => new PrismaStore(getPrisma().post)),\n};\nexport const postStore = new PrismaStore(getPrisma().article);\n",
-        );
-        let result = scan_store_map(dir.path(), FACTORY, GETTER);
-        // createStore pattern (post) is registered first; standalone entry is ignored since key already exists.
-        assert_eq!(result.get("postStore").map(String::as_str), Some("Post"));
     }
 
     // --- crossCheckSchema ---

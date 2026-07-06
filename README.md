@@ -21,7 +21,7 @@ npx zzop init     # writes an annotated zzop.config.jsonc
 npx zzop          # analyzes using that config and prints a report
 ```
 
-`@zzop/cli` and `@zzop/native` publish as `v0.1.0` and land with the first tagged release. See
+`@zzop/cli` and `@zzop/native` are published on npm; each tagged release drives the published version. See
 [`packages/cli/README.md`](packages/cli/README.md) for the full CLI and config reference.
 
 To embed the engine instead of running the CLI, depend on `@zzop/native` directly and call it
@@ -48,15 +48,10 @@ const report = JSON.parse(zzop.analyze(JSON.stringify({ root: '.' })));
   fingerprint)
 - `packages/napi` — the single Node↔Rust boundary (`analyze`/`analyzeTrees`/`analyzeEnvelope`/`version`) + npm
   distribution skeleton ([packages/napi/README.md](packages/napi/README.md))
-- `parser/` — parser frontends: source → Common IR, including HTTP route extraction (code-registered —
-  NestJS-style decorators, Hono/Express router-mount composition across files; file-convention — Next.js
-  `pages/api` + app router, Remix flat routes, Medusa-style `src/api`; tRPC procedures) and consume
-  resolution (wrapper re-anchoring, `hono/client` typed-RPC) ([parser/README.md](parser/README.md))
-- `rules/native/` — whole-graph native rules (`rules-graph`: circular/unreachable/dead-exports/
-  duplicate-route, plus the 20 `cross-layer/*` multi-tree rules joining HTTP/DB/tRPC IO facts across
-  trees (unconsumed endpoints, method/version drift, external egress, tRPC procedure coverage, ...);
-  `rules-schema`: Prisma structural + usage rules) / `rules/dsl/` — declarative DSL
-  rule packs (JSON) ([rules/README.md](rules/README.md))
+- `parser/` — parser frontends: source → Common IR, including HTTP route/consume extraction across
+  languages and frameworks ([parser/README.md](parser/README.md))
+- `rules/native/` — whole-graph native rules (`rules-graph`, `rules-schema`) plus `rules/dsl/`
+  declarative JSON rule packs ([rules/README.md](rules/README.md))
 
 ## Build & test
 
@@ -66,12 +61,8 @@ cargo clippy --workspace --all-targets   # kept at 0 warnings
 cargo fmt --all
 ```
 
-The N-API addon needs the MSVC toolchain on Windows:
-
-```
-cargo +stable-x86_64-pc-windows-msvc build -p zzop-napi --release --features addon
-node packages/napi/smoke.mjs
-```
+See [`packages/napi/README.md`](packages/napi/README.md) for the N-API addon build/toolchain details
+(`cargo build -p zzop-napi --release --features addon`).
 
 Cold/warm benchmark over a real tree:
 

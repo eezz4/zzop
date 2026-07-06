@@ -16,12 +16,16 @@ pub mod lang;
 pub use adapters::controller_decorators::{
     extract_controller_guarded_lines, extract_controller_provides,
 };
+pub use adapters::db_table_consume::{
+    extract_db_table_consumes, extract_query_call_sites, PRISMA_CLIENT_GETTER,
+};
 pub use adapters::egress::{
     const_map_fragment, extract_http_egress, is_external_url, resolve_raw_path,
 };
 pub use adapters::hono_client::extract_hono_client_consumes;
 pub use adapters::next_pages_api::{scan_pages_api_handler, PagesApiHandlerScan};
 pub use adapters::router_mounts::extract_router_mount_fragments;
+pub use adapters::store_binding::extract_store_bound_models;
 pub use adapters::trpc_consume::extract_trpc_consumes;
 pub use adapters::trpc_router::extract_trpc_router_fragments;
 pub use adapters::wrapper_calls::extract_wrapper_fragments;
@@ -29,6 +33,9 @@ pub use lang::calls::parse_calls;
 pub use lang::resolve::{
     build_dep, build_dep_with_workspace, resolve_file, resolve_file_with_workspace, try_ext,
     TsconfigPaths, WorkspacePkg, RESOLVE_EXTS,
+};
+pub use lang::write_site::{
+    write_sites_for_symbol, DEFAULT_ORM_RECEIVER_PATTERN, DEFAULT_WRITE_METHODS,
 };
 
 /// Cache key ingredient for `zzop-cache`: parser id + pinned swc version + a logic-version counter, so an
@@ -49,7 +56,19 @@ pub use lang::resolve::{
 /// - `hono-client-v1`: Hono's typed `hc<AppType>()` proxy-client call shape as HTTP consumes.
 /// - `router-mounts-v2`: router-mount fragments gain an Express vocabulary alongside Hono; the
 ///   fragment shape and engine-side compose pass are unchanged, only the recognizer's vocabulary grew.
-pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2";
+/// - `query-call-sites-v1`: `extract_query_call_sites` — per-file `zzop_core::QueryCallSite` facts for
+///   the schema x usage JOIN rules, replacing `zzop_rules_schema::join`'s own filesystem re-walk.
+/// - `store-binding-v1`: `extract_store_bound_models` — per-file store-binding model names for the
+///   `schema-usage` native rule's `dead-model` check, replacing `zzop_rules_schema::usage::scan_store_map`'s
+///   own `<root>/src/domains/**` filesystem re-walk.
+/// - `write-sites-v1`: `SourceSymbol::write_sites` — per-symbol store-write site detection, computed once
+///   here instead of `zzop_rules_graph::http_scan` re-scanning each BFS-reached symbol's raw text on every
+///   analysis run.
+/// - `reexport-edges-v1`: `FileArtifact`/`FileIrSlice` now carry each file's `parse_re_exports` output
+///   (specifier + `type_only`) so `lang::resolve::build_dep`/`build_dep_with_workspace` can merge
+///   non-type-only re-export specifiers into the dep graph as real edges — a barrel file's re-exports
+///   used to be invisible to `dep`, undercounting fan-in and false-positiving `dead-candidates`.
+pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1";
 
 use std::collections::{HashMap, HashSet};
 
@@ -297,7 +316,13 @@ fn bind_require_target(name: &Pat, specifier: &str, deferred: bool, map: &mut Im
     }
 }
 
-/// Extracts only `export { A as B } from "./y"` / `export * from "./y"` / `export * as ns from "./y"` — a bare `export { x }` with no from-clause is a local declaration and is excluded.
+/// Extracts only `export { A as B } from "./y"` / `export * from "./y"` / `export * as ns from "./y"` — a
+/// bare `export { x }` with no from-clause is a local declaration and is excluded. `type_only` is set from
+/// the export clause's own `type_only`/`export type * from` flag AND, per named specifier, its own
+/// per-specifier `export { type X } from "./y"` marker (mirrors `parse_imports`'s
+/// `clause_type_only || n.is_type_only` combination) — a type-only re-export is erased by TS at compile
+/// time and must not become a dep-graph edge (`lang::resolve::build_dep`/`build_dep_with_workspace` skip
+/// it entirely rather than merging it into `resolved`).
 pub fn parse_re_exports(file: &str, source: &str) -> Vec<ReExport> {
     let mut out = Vec::new();
     let Some(module) = parse_module(file, source) else {
@@ -308,13 +333,14 @@ pub fn parse_re_exports(file: &str, source: &str) -> Vec<ReExport> {
             continue;
         };
         match decl {
-            // `export * from "..."`
+            // `export * from "..."` / `export type * from "..."`
             ModuleDecl::ExportAll(all) => out.push(ReExport {
                 specifier: all.src.value.as_str().unwrap_or_default().to_string(),
                 original: "*".into(),
                 local_alias: "*".into(),
+                type_only: all.type_only,
             }),
-            // `export { ... } from "..."` / `export * as ns from "..."`
+            // `export { ... } from "..."` / `export * as ns from "..."` / `export type { ... } from "..."`
             ModuleDecl::ExportNamed(named) => {
                 let Some(src) = &named.src else {
                     continue; // no from-clause -> local export, not a re-export
@@ -332,12 +358,14 @@ pub fn parse_re_exports(file: &str, source: &str) -> Vec<ReExport> {
                                 specifier: specifier.clone(),
                                 original,
                                 local_alias,
+                                type_only: named.type_only || n.is_type_only,
                             });
                         }
                         ExportSpecifier::Namespace(ns) => out.push(ReExport {
                             specifier: specifier.clone(),
                             original: "*".into(),
                             local_alias: export_name(&ns.name),
+                            type_only: named.type_only,
                         }),
                         ExportSpecifier::Default(_) => {}
                     }
@@ -541,6 +569,12 @@ pub fn parse_symbols(file: &str, source: &str) -> Vec<SourceSymbol> {
             out.push(cjs);
         }
     }
+    // Write-site detection is a pure function of (this symbol's own body span, constant vocab), so it
+    // runs as a final pass over the fully-built list rather than being threaded through every symbol
+    // constructor above.
+    for sym in &mut out {
+        sym.write_sites = lang::write_site::write_sites_for_symbol(sym, source);
+    }
     out
 }
 
@@ -639,6 +673,7 @@ fn emit_var_declarator(
                 is_default: false,
                 body_start,
                 body_end,
+                write_sites: Vec::new(),
             });
             // Factory: `const api = { m: () => {} }` -> api.m sub-symbols.
             if let Some(Expr::Object(obj)) = d.init.as_deref() {
@@ -667,6 +702,7 @@ fn emit_var_declarator(
                     is_default: false,
                     body_start: None,
                     body_end: None,
+                    write_sites: Vec::new(),
                 });
             }
         }
@@ -696,6 +732,7 @@ fn fn_symbol(
         is_default,
         body_start,
         body_end,
+        write_sites: Vec::new(),
     }
 }
 
@@ -718,6 +755,7 @@ fn class_symbol(
         is_default,
         body_start: Some(line), // class bodyStart uses the node's own start line
         body_end: Some(line_of(cm, class.span.hi)),
+        write_sites: Vec::new(),
     }
 }
 
@@ -773,6 +811,7 @@ fn emit_class(
             is_default: false,
             body_start: body_span.map(|s| line_of(cm, s.lo)),
             body_end: body_span.map(|s| line_of(cm, s.hi)),
+            write_sites: Vec::new(),
         });
     }
 }
@@ -803,6 +842,7 @@ fn simple_symbol(
         is_default: false,
         body_start: None,
         body_end: None,
+        write_sites: Vec::new(),
     }
 }
 
@@ -977,6 +1017,7 @@ fn extract_object_methods(
                     is_default: false,
                     body_start,
                     body_end,
+                    write_sites: Vec::new(),
                 });
             }
         }
@@ -1153,6 +1194,7 @@ fn build_member_symbol(
         is_default: false,
         body_start,
         body_end,
+        write_sites: Vec::new(),
     }
 }
 
@@ -1162,13 +1204,19 @@ pub fn build_common_ir(source_id: &str, files: &[(String, String)]) -> CommonIr 
         files.iter().map(|(rel, _)| rel.clone()).collect();
     let mut symbols = Vec::new();
     let mut import_pairs = Vec::new();
+    let mut re_export_pairs = Vec::new();
     let mut loc = std::collections::HashMap::new();
     for (rel, text) in files {
         symbols.extend(parse_symbols(rel, text));
         import_pairs.push((rel.clone(), parse_imports(rel, text)));
+        re_export_pairs.push((rel.clone(), parse_re_exports(rel, text)));
         loc.insert(rel.clone(), count_loc(text));
     }
-    let dep = lang::resolve::build_dep(&import_pairs, &all_paths);
+    // `build_dep`'s second return value (the ephemeral type-only-edge exclusion set) feeds circular
+    // detection only; this whole-tree, non-incremental projection doesn't run `circular_from_dep` itself
+    // (that's an engine-side whole-graph pass), so it's discarded here.
+    let (dep, _type_only_edges) =
+        lang::resolve::build_dep(&import_pairs, &re_export_pairs, &all_paths);
     // Project the IO this tree consumes (HTTP egress) so the cross-layer linker can join it to BE providers.
     let consumes = adapters::egress::extract_http_egress(files);
     let io = if consumes.is_empty() {
@@ -1394,10 +1442,20 @@ export class PivotTableComponent {
     // --- parseReExportsFromAst ---
 
     fn reexport(specifier: &str, original: &str, local_alias: &str) -> ReExport {
+        reexport_ex(specifier, original, local_alias, false)
+    }
+
+    fn reexport_ex(
+        specifier: &str,
+        original: &str,
+        local_alias: &str,
+        type_only: bool,
+    ) -> ReExport {
         ReExport {
             specifier: specifier.into(),
             original: original.into(),
             local_alias: local_alias.into(),
+            type_only,
         }
     }
 
@@ -1438,6 +1496,46 @@ export class PivotTableComponent {
         assert_eq!(
             parse_re_exports("x.ts", "const x = 1; export { x };\n"),
             Vec::<ReExport>::new()
+        );
+    }
+
+    #[test]
+    fn type_only_named_re_export_clause() {
+        // `export type { X } from "./y"` — clause-level type-only.
+        assert_eq!(
+            parse_re_exports("x.ts", "export type { X } from \"./a\";\n"),
+            vec![reexport_ex("./a", "X", "X", true)]
+        );
+    }
+
+    #[test]
+    fn type_only_per_specifier_re_export() {
+        // `export { type X, y } from "./a"` — only `X` is type-only; `y` is still a runtime re-export.
+        let out = parse_re_exports("x.ts", "export { type X, y } from \"./a\";\n");
+        assert_eq!(
+            out,
+            vec![
+                reexport_ex("./a", "X", "X", true),
+                reexport("./a", "y", "y"),
+            ]
+        );
+    }
+
+    #[test]
+    fn type_only_star_re_export() {
+        // `export type * from "./a"` — the whole re-export is type-only.
+        assert_eq!(
+            parse_re_exports("x.ts", "export type * from \"./a\";\n"),
+            vec![reexport_ex("./a", "*", "*", true)]
+        );
+    }
+
+    #[test]
+    fn type_only_namespace_re_export() {
+        // `export type * as ns from "./a"` — clause-level type-only applies to the namespace alias too.
+        assert_eq!(
+            parse_re_exports("x.ts", "export type * as ns from \"./a\";\n"),
+            vec![reexport_ex("./a", "*", "ns", true)]
         );
     }
 

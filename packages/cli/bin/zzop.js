@@ -11,8 +11,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { loadConfig, DEFAULT_CONFIG_FILENAME } = require('../lib/config');
-const { configToRequest, ConfigError } = require('../lib/mapper');
-const { collectFindings, formatPretty, formatJson, computeExitCode } = require('../lib/format');
+const { configToRequest, collectConfigWarnings, ConfigError } = require('../lib/mapper');
+const {
+  collectFindings,
+  collectWarnings,
+  formatPretty,
+  formatJson,
+  computeExitCode,
+} = require('../lib/format');
+const { buildReports } = require('../lib/report');
 const { CONFIG_TEMPLATE } = require('../lib/init');
 
 const USAGE = `zzop — zero-config multi-language SAST/architecture analysis
@@ -25,6 +32,7 @@ Options (run):
   --config <path>                  Config file to use (default ./${DEFAULT_CONFIG_FILENAME}).
   --format <pretty|json>           Output format (overrides config).
   --json                           Alias for --format json.
+  --out <dir>                      Also write reports to <dir>/zzop-report.<epoch>/ (json + sarif).
   -a, --all                        Expand info-level findings (folded to per-rule counts by default).
   -h, --help                       Show this help.
   --version                        Show the CLI and engine versions.
@@ -48,6 +56,7 @@ function parseArgs(argv) {
     help: false,
     version: false,
     all: false,
+    out: null,
   };
   const rest = [];
   // Scoped flags seen, for the command/flag cross-check below: `{ flag, scope }`.
@@ -84,6 +93,11 @@ function parseArgs(argv) {
       case '--format':
         opts.format = argv[++i];
         if (opts.format === undefined) throw new ConfigError('--format requires <pretty|json>.');
+        scoped.push({ flag: arg, scope: 'run' });
+        break;
+      case '--out':
+        opts.out = argv[++i];
+        if (opts.out === undefined) throw new ConfigError('--out requires a <dir> argument.');
         scoped.push({ flag: arg, scope: 'run' });
         break;
       default:
@@ -132,10 +146,19 @@ function resolveFormat(opts, config) {
   return format;
 }
 
+// Emit warnings to stderr (prefixed, one per line) so they never pollute stdout — pretty or JSON.
+function emitWarnings(warnings) {
+  for (const w of warnings) {
+    process.stderr.write(`zzop: warning: ${w}\n`);
+  }
+}
+
 function runAnalyze(opts) {
   const configPath = opts.config || DEFAULT_CONFIG_FILENAME;
   const config = loadConfig(configPath);
   const format = resolveFormat(opts, config);
+  // Surface unknown config keys (typos / cross-version drift) — ignored by the engine, but not silently.
+  emitWarnings(collectConfigWarnings(config));
   const { method, request } = configToRequest(config);
 
   // Load the native engine lazily so `zzop init` / `--help` work without the addon installed/built.
@@ -167,6 +190,9 @@ function runAnalyze(opts) {
     return;
   }
 
+  // Surface the engine's own self-reported warnings (narrowed scope, git not requested, no packs found, …).
+  emitWarnings(collectWarnings(output));
+
   if (format === 'json') {
     process.stdout.write(`${formatJson(output)}\n`);
   } else {
@@ -174,9 +200,48 @@ function runAnalyze(opts) {
     process.stdout.write(`${formatPretty(output, { color, showAllInfo: opts.all })}\n`);
   }
 
+  writeReports(opts, config, output);
+
   const { findings } = collectFindings(output);
   const failOn = config.failOn == null ? 'warn' : config.failOn;
   process.exit(computeExitCode(findings, failOn));
+}
+
+/**
+ * Write report files when reporting is enabled (via `--out <dir>` or config `report.dir`). Each run lands
+ * in its own `<dir>/zzop-report.<epoch-seconds>/` subdirectory so successive runs accumulate rather than
+ * overwrite — two runs within the same wall-clock second share a subdir and the later one overwrites.
+ * No-op (stdout stays the only output) when neither source names a directory.
+ */
+function writeReports(opts, config, output) {
+  const reportCfg = (config && config.report) || {};
+  const baseDir = opts.out || reportCfg.dir;
+  if (!baseDir) {
+    return;
+  }
+  const formats = Array.isArray(reportCfg.formats) ? reportCfg.formats : undefined;
+
+  let files;
+  try {
+    files = buildReports(output, { formats, toolVersion: require('../package.json').version });
+  } catch (err) {
+    fail(`Report generation failed: ${err && err.message}`, 2);
+    return;
+  }
+
+  const stamp = String(Math.floor(Date.now() / 1000));
+  const dir = path.resolve(process.cwd(), String(baseDir), `zzop-report.${stamp}`);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    for (const f of files) {
+      fs.writeFileSync(path.join(dir, f.name), f.content, 'utf8');
+    }
+  } catch (err) {
+    fail(`Failed to write reports to ${dir}: ${err && err.message}`, 2);
+    return;
+  }
+  const rel = path.relative(process.cwd(), dir) || dir;
+  process.stdout.write(`Wrote ${files.length} report${files.length === 1 ? '' : 's'} to ${rel}\n`);
 }
 
 function main() {

@@ -43,9 +43,24 @@ zzop           # analyzes using that config and prints a report
 | `--config <path>` | Config file to load (default `./zzop.config.jsonc`). |
 | `--format <pretty\|json>` | Output format, overriding the config's `format`. |
 | `--json` | Alias for `--format json`. |
+| `--out <dir>` | Also write report files to `<dir>/zzop-report.<epoch>/` (a fresh subdir per run, so runs accumulate). Defaults to `json` + `sarif`; equivalent to config `report.dir`. |
 | `-a, --all` | Expand info-level findings. By default they are folded to a per-rule count so warnings/errors stay visible. |
 | `-h, --help` | Show help. |
 | `--version` | Show the CLI and engine versions. |
+
+Stdout is the default output; `--out` (or `report` in the config) additionally persists reports to disk.
+`sarif` is [SARIF 2.1.0](https://sarifweb.azurewebsites.net/), which GitHub code scanning and the VS Code
+SARIF viewer read directly.
+
+### Warnings
+
+zzop follows a "narrowed scope self-reports in `warnings`, never silently" contract, so the CLI prints
+warnings to **stderr** (stdout stays clean — pretty or JSON):
+
+- **Unknown config keys** — a key the CLI doesn't recognize (a typo, or a key from a different zzop
+  version) is *ignored* (never rejected), but reported: `zzop: warning: unknown config key "rulez" …`.
+- **Engine self-reports** — a narrowed scope (git not requested, no rule packs found, a file that couldn't
+  be parsed structurally, …) is surfaced rather than swallowed.
 
 ### Exit codes
 
@@ -104,6 +119,10 @@ annotated copy; the reference below summarizes each option.
 
   // "pretty" or "json"; overridden by --format / --json.
   "format": "pretty",
+
+  // Persist reports to disk in addition to stdout. Each run writes to
+  // <dir>/zzop-report.<epoch>/ so runs accumulate. Omit to print to stdout only.
+  // "report": { "dir": "zzop-reports", "formats": ["json", "sarif"] },
 
   // Exit non-zero when any finding is at or above this severity, or "off" to
   // always exit 0.
