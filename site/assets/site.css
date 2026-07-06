@@ -831,6 +831,38 @@ h3 code {
   white-space: nowrap;
 }
 
+/* click-to-sort headers (behavior in docs.js) */
+.docs-content th.is-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.docs-content th.is-sortable:hover {
+  color: var(--text-secondary);
+}
+
+.docs-content th.is-sortable::after {
+  content: "\2195"; /* up-down: unsorted */
+  margin-left: 0.4em;
+  opacity: 0.4;
+  font-size: 0.9em;
+}
+
+.docs-content th[aria-sort="ascending"],
+.docs-content th[aria-sort="descending"] {
+  color: var(--accent);
+}
+
+.docs-content th[aria-sort="ascending"]::after {
+  content: "\2191"; /* up: ascending */
+  opacity: 0.95;
+}
+
+.docs-content th[aria-sort="descending"]::after {
+  content: "\2193"; /* down: descending */
+  opacity: 0.95;
+}
+
 .docs-content td {
   padding: 12px 12px 12px 0;
   border-bottom: 1px solid var(--border-subtle);
