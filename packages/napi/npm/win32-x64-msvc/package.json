@@ -11,6 +11,8 @@
   ],
   "license": "MIT",
   "repository": "github:eezz4/zzop",
+  "homepage": "https://eezz4.github.io/zzop/",
+  "bugs": "https://github.com/eezz4/zzop/issues",
   "os": [
     "win32"
   ],

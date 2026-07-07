@@ -1,0 +1,65 @@
+name: Bug report
+description: Something is broken — a crash, a wrong finding, or unexpected CLI/SDK behavior.
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: zzop version
+      description: Output of `npx zzop --version`.
+      placeholder: "0.3.0"
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: OS / platform
+      placeholder: "macOS 14 / Ubuntu 22.04 / Windows 11, arch (x64/arm64)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-ran
+    attributes:
+      label: What was run
+      description: The CLI command or SDK call (e.g. `analyze`/`analyzeTrees`) that triggered this, including relevant config.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+      description: What you expected to happen, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal repro or finding JSON
+      description: A small reproducing snippet/repo, or the relevant finding JSON from the report output.
+      render: json
+    validations:
+      required: false
+
+  - type: dropdown
+    id: false-positive
+    attributes:
+      label: Is this a rule false positive?
+      options:
+        - "No"
+        - "Yes"
+    validations:
+      required: true
+
+  - type: input
+    id: rule-id
+    attributes:
+      label: Rule ID (if a false positive)
+      description: The rule id from the finding (e.g. `dead-candidates`, `as-cast`).
+      placeholder: "rule-id"
+    validations:
+      required: false

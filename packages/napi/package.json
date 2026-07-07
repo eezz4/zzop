@@ -4,6 +4,23 @@
   "license": "MIT",
   "description": "zzop N-API binding (single Node<->Rust boundary) — see src/lib.rs for the addon-feature build.",
   "repository": "github:eezz4/zzop",
+  "homepage": "https://eezz4.github.io/zzop/",
+  "bugs": "https://github.com/eezz4/zzop/issues",
+  "keywords": [
+    "sast",
+    "static-analysis",
+    "architecture",
+    "code-analysis",
+    "security",
+    "napi",
+    "native",
+    "typescript",
+    "javascript",
+    "java"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "main": "index.js",
   "types": "index.d.ts",
   "publishConfig": {

@@ -1,5 +1,9 @@
 # zzop ( Zero Zone Of Pain )
 
+[![CI](https://github.com/eezz4/zzop/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/eezz4/zzop/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/%40zzop%2Fcli)](https://www.npmjs.com/package/@zzop/cli)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 A multi-language SAST / architecture-analysis engine, written in Rust. It parses a source tree into a
 language-neutral IR, runs a layered rule system (native whole-graph analyses + declarative JSON rule
 packs) over it, and returns structural findings, dependency/dead-code analysis, and health scores as
@@ -33,6 +37,40 @@ import zzop from '@zzop/native';
 const report = JSON.parse(zzop.analyze(JSON.stringify({ root: '.' })));
 ```
 
+### Result (abridged)
+
+Every finding carries a rule id, severity, and a `file:line` location, e.g.:
+
+```json
+{
+  "findings": [
+    {
+      "ruleId": "sql/nplus1",
+      "severity": "warning",
+      "file": "src/routes/orders.ts",
+      "line": 42,
+      "message": "Query inside a loop — likely N+1. Batch with a single IN (...) query or a join."
+    }
+  ],
+  "scores":             { /* structural subscores, 0-100 */ },
+  "health":             { "pain": 12.4, "contributors": [ /* metrics driving the pain score, highest first */ ] },
+  "recommendations":    [ /* refactor-first candidates, ROI-ordered */ ],
+  "warnings":           [ /* anything this run could not provide */ ]
+}
+```
+
+`analyzeTrees` (multi-tree) additionally returns `crossLayerFindings` — frontend fetch <-> backend
+route joins — which has no single-tree equivalent.
+
+## Supported languages
+
+| Language | Support |
+|---|---|
+| TypeScript / JavaScript (`.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts`) | Native, full: symbols, imports, calls, HTTP routes/egress |
+| Prisma schema (`.prisma`) | Native: schema models/fields (structural + usage-aware schema rules) |
+| Java (`.java`) | Native, lexical-level: method/class body spans only, enough for `method-scan` rules |
+| Anything else (Python, JSP, ...) | Lexical fallback in-tree (line count + `line-scan` rules only), or first-class support via an external parser adapter conforming to the [Normalized AST protocol](docs/NORMALIZED_AST.md) |
+
 ## Layout
 
 - `packages/core` — engine library: Common IR, cross-layer linker, graph analyses, call graph, rule
@@ -53,7 +91,11 @@ const report = JSON.parse(zzop.analyze(JSON.stringify({ root: '.' })));
 - `rules/native/` — whole-graph native rules (`rules-graph`, `rules-http`, `rules-cross-layer`, `rules-schema`) plus `rules/dsl/`
   declarative JSON rule packs ([rules/README.md](rules/README.md))
 
-## Build & test
+## Development
+
+Contributing? Start with [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+
+### Build & test
 
 ```
 cargo test --workspace
@@ -83,3 +125,7 @@ notes directory, which is gitignored and not part of this repo's published conte
 ```
 bash scripts/check-english-source.sh
 ```
+
+## License
+
+MIT — see [`LICENSE`](./LICENSE).

@@ -1,0 +1,30 @@
+name: Feature request
+description: Propose a new capability, rule, or SDK behavior.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What are you trying to do, and where does zzop fall short today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What should zzop do instead? Include example config/CLI/SDK usage if relevant.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: pr
+    attributes:
+      label: Willing to open a PR for this?
+      options:
+        - "Yes"
+        - "No"
+        - "Maybe, with guidance"
+    validations:
+      required: true

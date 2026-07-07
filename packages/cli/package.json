@@ -4,6 +4,20 @@
   "description": "Config-driven CLI for the zzop multi-language SAST/architecture engine — write a zzop.config.jsonc, run `npx zzop`.",
   "license": "MIT",
   "repository": "github:eezz4/zzop",
+  "homepage": "https://eezz4.github.io/zzop/",
+  "bugs": "https://github.com/eezz4/zzop/issues",
+  "keywords": [
+    "sast",
+    "static-analysis",
+    "architecture",
+    "code-analysis",
+    "security",
+    "lint",
+    "typescript",
+    "javascript",
+    "java",
+    "prisma"
+  ],
   "publishConfig": {
     "access": "public"
   },

@@ -27,6 +27,13 @@ jobs:
       - name: rules catalog ↔ site sync guard
         run: bash scripts/check-rules-catalog-sync.sh
 
+  cli-readme-sync-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: CLI README ↔ --help sync guard
+        run: bash scripts/check-cli-readme-sync.sh
+
   test:
     runs-on: ubuntu-latest
     steps:

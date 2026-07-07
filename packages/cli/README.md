@@ -45,6 +45,7 @@ zzop           # analyzes using that config and prints a report
 | `--json` | Alias for `--format json`. |
 | `--out <dir>` | Also write report files to `<dir>/zzop-report.<epoch>/` (a fresh subdir per run, so runs accumulate). Defaults to `json` + `sarif`; equivalent to config `report.dir`. |
 | `-a, --all` | Expand info-level findings. By default they are folded to a per-rule count so warnings/errors stay visible. |
+| `--severity <critical\|warning\|info\|off>` | Only display findings at or above this severity (default `off` = show all). This is a display filter only — the exit code is always computed from the unfiltered findings and the config's `failOn`, never from `--severity`. |
 | `-h, --help` | Show help. |
 | `--version` | Show the CLI and engine versions. |
 
