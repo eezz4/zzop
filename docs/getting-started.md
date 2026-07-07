@@ -46,10 +46,15 @@ never changes the exit code — that's always computed from the full, unfiltered
 | `1` | At least one finding at or above `failOn` (CI gate). |
 | `2` | Config or usage error. |
 
-**`--out <dir>`** (or config `report.dir`) additionally persists reports to
-`<dir>/zzop-report.<epoch>/` — a fresh subdirectory per run, so runs accumulate rather than overwrite.
-The default formats are `json` and [SARIF 2.1.0](https://sarifweb.azurewebsites.net/), which GitHub code
-scanning and the VS Code SARIF viewer read directly.
+**Every run also writes a Markdown report to disk by default** — the hand-off surface for a cross-repo
+review (e.g. a frontend agent reviewing a backend, or attaching results to a PR): `./zzop-reports/
+zzop.<epoch-seconds>/` gets one `<sourceId>.md` per analyzed tree, plus a `cross-repo.md` summary (edges,
+unresolved/unprovided/unconsumed buckets, and any "this tree is blind to its own consumes" self-reports)
+when the run covers more than one tree. `--out <dir>` (or config `report.dir`) overrides the base
+directory; each run gets a fresh `zzop.<epoch>/` subdir, so runs accumulate rather than overwrite. Set
+config `report.formats` (e.g. `["md", "json", "sarif"]`) to also emit
+[SARIF 2.1.0](https://sarifweb.azurewebsites.net/) or raw JSON, or `report.enabled: false` to turn report
+writing off entirely.
 
 ## Suppressing findings
 

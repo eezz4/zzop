@@ -228,7 +228,7 @@ const KNOWN_KEYS = {
   top: ['roots', 'trees', 'packs', 'rules', 'git', 'cacheDir', 'sizeCap', 'format', 'failOn', 'report'],
   packs: ['extraDirs', 'disabled'],
   git: ['since', 'recentDays'],
-  report: ['dir', 'formats'],
+  report: ['dir', 'formats', 'enabled'],
   tree: ['root', 'sourceId'],
   ruleObject: ['severity', 'exclude'],
 };

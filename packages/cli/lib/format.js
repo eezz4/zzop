@@ -227,6 +227,22 @@ function formatPretty(output, opts = {}) {
 }
 
 /**
+ * Fold a findings array into per-rule counts, highest count first (ties broken alphabetically by rule
+ * id) — the shared shape behind the terminal's folded info block and the markdown report's `info
+ * (folded)` subsection.
+ * @param {object[]} findings
+ * @returns {[string, number][]}
+ */
+function foldByRule(findings) {
+  const byRule = new Map();
+  for (const f of findings) {
+    const key = String(f.ruleId || '(unknown rule)');
+    byRule.set(key, (byRule.get(key) || 0) + 1);
+  }
+  return [...byRule.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+/**
  * Render folded info findings as a per-rule count block, highest count first. Returns an array of lines
  * (no trailing blank). Only called when there is at least one info finding.
  * @param {object[]} info
@@ -234,12 +250,7 @@ function formatPretty(output, opts = {}) {
  * @returns {string[]}
  */
 function foldedInfoBlock(info, color) {
-  const byRule = new Map();
-  for (const f of info) {
-    const key = String(f.ruleId || '(unknown rule)');
-    byRule.set(key, (byRule.get(key) || 0) + 1);
-  }
-  const rows = [...byRule.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const rows = foldByRule(info);
   const width = String(rows[0][1]).length;
   const header = paint(
     `info — ${info.length} finding${info.length === 1 ? '' : 's'} folded (pass --all to show):`,
@@ -306,6 +317,7 @@ module.exports = {
   collectWarnings,
   groupByFile,
   countBySeverity,
+  foldByRule,
   filterOutputBySeverity,
   formatPretty,
   formatJson,

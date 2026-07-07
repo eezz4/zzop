@@ -33,7 +33,10 @@ Options (run):
   --config <path>                  Config file to use (default ./${DEFAULT_CONFIG_FILENAME}).
   --format <pretty|json>           Output format (overrides config).
   --json                           Alias for --format json.
-  --out <dir>                      Also write reports to <dir>/zzop-report.<epoch>/ (json + sarif).
+  --out <dir>                      Write reports to <dir>/zzop.<epoch>/ (default dir ./zzop-reports).
+                                    Default format is markdown: one file per tree, plus cross-repo.md for
+                                    a multi-tree run. Set config report.formats to also/instead emit
+                                    json/sarif, or report.enabled: false to disable report writing.
   -a, --all                        Expand info-level findings (folded to per-rule counts by default).
   --severity <critical|warning|info|off>
                                     Only display findings at/above this severity (default: off = show all).
@@ -222,7 +225,7 @@ function runAnalyze(opts) {
     );
   }
 
-  writeReports(opts, config, output);
+  writeReports(opts, config, output, method, request);
 
   // Exit code is ALWAYS computed from the unfiltered findings — `--severity` is a display-only filter and
   // must never change whether the process exits nonzero for `failOn`.
@@ -231,30 +234,50 @@ function runAnalyze(opts) {
   process.exit(computeExitCode(findings, failOn));
 }
 
+// Base report directory when neither `--out` nor config `report.dir` names one — reports are written by
+// default now (markdown is meant to be the delivery surface for a cross-repo review), so this always
+// applies unless report writing is explicitly disabled (see `report.enabled` below).
+const DEFAULT_REPORT_BASE_DIR = 'zzop-reports';
+
 /**
- * Write report files when reporting is enabled (via `--out <dir>` or config `report.dir`). Each run lands
- * in its own `<dir>/zzop-report.<epoch-seconds>/` subdirectory so successive runs accumulate rather than
+ * Write report files. Reports are written BY DEFAULT (default format `md`, default base dir
+ * `./zzop-reports`) — set config `report.enabled: false` to opt out entirely (e.g. for CI runs that don't
+ * want files on disk). `--out <dir>` (or config `report.dir`) overrides the base dir; config
+ * `report.formats` (e.g. `["md", "json", "sarif"]`) overrides which formats are written. Each run lands in
+ * its own `<baseDir>/zzop.<epoch-seconds>/` subdirectory so successive runs accumulate rather than
  * overwrite — two runs within the same wall-clock second share a subdir and the later one overwrites.
- * No-op (stdout stays the only output) when neither source names a directory.
+ *
+ * @param {object} opts    parsed CLI opts (`--out`)
+ * @param {object} config  loaded config (`report.dir`/`report.formats`/`report.enabled`)
+ * @param {object} output  parsed native output
+ * @param {'analyze'|'analyzeTrees'} method  which native entry point produced `output`
+ * @param {object} request  the request object passed to that native entry point (its `root`/`sourceId`
+ *   back-fill the single-tree markdown report's identity — see `buildMarkdownReports`'s doc for why the
+ *   single-tree output shape alone doesn't carry them)
  */
-function writeReports(opts, config, output) {
+function writeReports(opts, config, output, method, request) {
   const reportCfg = (config && config.report) || {};
-  const baseDir = opts.out || reportCfg.dir;
-  if (!baseDir) {
+  if (reportCfg.enabled === false) {
     return;
   }
-  const formats = Array.isArray(reportCfg.formats) ? reportCfg.formats : undefined;
+  const baseDir = opts.out || reportCfg.dir || DEFAULT_REPORT_BASE_DIR;
+  const formats = Array.isArray(reportCfg.formats) && reportCfg.formats.length ? reportCfg.formats : ['md'];
 
   let files;
   try {
-    files = buildReports(output, { formats, toolVersion: require('../package.json').version });
+    files = buildReports(output, {
+      formats,
+      toolVersion: require('../package.json').version,
+      sourceId: method === 'analyze' ? request.sourceId : undefined,
+      root: method === 'analyze' ? request.root : undefined,
+    });
   } catch (err) {
     fail(`Report generation failed: ${err && err.message}`, 2);
     return;
   }
 
   const stamp = String(Math.floor(Date.now() / 1000));
-  const dir = path.resolve(process.cwd(), String(baseDir), `zzop-report.${stamp}`);
+  const dir = path.resolve(process.cwd(), String(baseDir), `zzop.${stamp}`);
   try {
     fs.mkdirSync(dir, { recursive: true });
     for (const f of files) {

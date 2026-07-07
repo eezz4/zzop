@@ -43,15 +43,24 @@ zzop           # analyzes using that config and prints a report
 | `--config <path>` | Config file to load (default `./zzop.config.jsonc`). |
 | `--format <pretty\|json>` | Output format, overriding the config's `format`. |
 | `--json` | Alias for `--format json`. |
-| `--out <dir>` | Also write report files to `<dir>/zzop-report.<epoch>/` (a fresh subdir per run, so runs accumulate). Defaults to `json` + `sarif`; equivalent to config `report.dir`. |
+| `--out <dir>` | Override the report base directory (default `./zzop-reports`; equivalent to config `report.dir`). Each run writes to `<dir>/zzop.<epoch>/`, a fresh subdir per run so runs accumulate. |
 | `-a, --all` | Expand info-level findings. By default they are folded to a per-rule count so warnings/errors stay visible. |
 | `--severity <critical\|warning\|info\|off>` | Only display findings at or above this severity (default `off` = show all). This is a display filter only — the exit code is always computed from the unfiltered findings and the config's `failOn`, never from `--severity`. |
 | `-h, --help` | Show help. |
 | `--version` | Show the CLI and engine versions. |
 
-Stdout is the default output; `--out` (or `report` in the config) additionally persists reports to disk.
-`sarif` is [SARIF 2.1.0](https://sarifweb.azurewebsites.net/), which GitHub code scanning and the VS Code
-SARIF viewer read directly.
+Stdout is the default *interactive* output. On top of that, **every run also persists a Markdown report to
+disk by default** — this is the delivery surface for handing an analysis to someone else (e.g. a
+cross-repo review, or attaching results to a PR): `./zzop-reports/zzop.<epoch-seconds>/` gets one
+`<sourceId>.md` per analyzed tree, plus a `cross-repo.md` summary (edges, unresolved/unprovided/unconsumed
+buckets, coverage self-reports) when the run covers more than one tree. `--out <dir>` (or config
+`report.dir`) overrides the base directory.
+
+Set config `report.formats` to change which formats are written — e.g. `["md", "json", "sarif"]` to also
+emit machine-readable reports alongside the default Markdown, or `["json"]` to switch off Markdown
+entirely. `sarif` is [SARIF 2.1.0](https://sarifweb.azurewebsites.net/), which GitHub code scanning and the
+VS Code SARIF viewer read directly. To disable report writing altogether (e.g. a CI job that only cares
+about the exit code), set config `report.enabled: false`.
 
 ### Warnings
 
@@ -121,9 +130,15 @@ annotated copy; the reference below summarizes each option.
   // "pretty" or "json"; overridden by --format / --json.
   "format": "pretty",
 
-  // Persist reports to disk in addition to stdout. Each run writes to
-  // <dir>/zzop-report.<epoch>/ so runs accumulate. Omit to print to stdout only.
-  // "report": { "dir": "zzop-reports", "formats": ["json", "sarif"] },
+  // Reports are persisted to disk by default (Markdown: one file per tree, plus
+  // cross-repo.md for a multi-tree run) in addition to stdout. Each run writes to
+  // <dir>/zzop.<epoch>/ so runs accumulate. Omit "report" entirely to keep the
+  // defaults (dir "zzop-reports", formats ["md"]).
+  // "report": {
+  //   "dir": "zzop-reports",
+  //   "formats": ["md", "json", "sarif"],
+  //   "enabled": true // set false to disable report writing entirely
+  // },
 
   // Exit non-zero when any finding is at or above this severity, or "off" to
   // always exit 0.

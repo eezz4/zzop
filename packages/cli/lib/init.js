@@ -68,10 +68,16 @@ const CONFIG_TEMPLATE = `{
   // by --format / --json on the command line.
   "format": "pretty",
 
-  // Persist reports to disk (in addition to stdout). Each run writes to
-  // <dir>/zzop-report.<epoch>/ so runs accumulate. "sarif" is read by GitHub
-  // code scanning and the VS Code SARIF viewer. Same as the --out <dir> flag.
-  // "report": { "dir": "zzop-reports", "formats": ["json", "sarif"] },
+  // Reports are persisted to disk by default (Markdown: one file per tree, plus
+  // cross-repo.md for a multi-tree run) in addition to stdout. Each run writes to
+  // <dir>/zzop.<epoch>/ so runs accumulate. Omit "report" entirely to keep the
+  // defaults (dir "zzop-reports", formats ["md"]); --out <dir> overrides "dir".
+  // "sarif" is read by GitHub code scanning and the VS Code SARIF viewer.
+  // "report": {
+  //   "dir": "zzop-reports",
+  //   "formats": ["md", "json", "sarif"],
+  //   "enabled": true // set false to disable report writing entirely
+  // },
 
   // Exit non-zero when any finding is at or above this severity — for CI gating.
   //   "info" | "warn" | "critical", or "off" to always exit 0.
