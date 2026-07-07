@@ -358,7 +358,7 @@ fn compute_cross_layer_findings(
         })
         .collect();
 
-    let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(20);
+    let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(21);
     if zzop_core::is_enabled(&gate, "cross-layer/unconsumed-endpoint") {
         sources.push(zzop_rules_cross_layer::unconsumed_endpoint_findings(
             &cross_layer.unconsumed_provides,
@@ -379,6 +379,12 @@ fn compute_cross_layer_findings(
     }
     if zzop_core::is_enabled(&gate, "cross-layer/path-near-miss") {
         sources.push(zzop_rules_cross_layer::path_near_miss_findings(
+            &cross_layer.unprovided_consumes,
+            &http_provides,
+        ));
+    }
+    if zzop_core::is_enabled(&gate, "cross-layer/route-near-miss") {
+        sources.push(zzop_rules_cross_layer::route_near_miss_findings(
             &cross_layer.unprovided_consumes,
             &http_provides,
         ));

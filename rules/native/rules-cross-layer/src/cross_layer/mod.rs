@@ -1,4 +1,4 @@
-//! `cross-layer/*` — 20 native rules that run over `zzop_core::CrossLayerResult`, the multi-tree join result
+//! `cross-layer/*` — 21 native rules that run over `zzop_core::CrossLayerResult`, the multi-tree join result
 //! `zzop_engine::analyze_trees` produces (see `packages/core/src/io.rs`'s module doc for the join itself:
 //! exact `(kind, key)` join with an ambiguity gate for keys provided by 2+ distinct source trees, an
 //! external-egress gate for host-carrying consume keys, and a low-confidence tag for generic paths).
@@ -17,6 +17,9 @@
 //! - [`path_near_miss`]: `path_near_miss_findings` — an unprovided consume whose key matches a provide after
 //!   allowing `{}` positions to differ, but is otherwise segment-identical (`cross-layer/path-near-miss`,
 //!   info).
+//! - [`route_near_miss`]: `route_near_miss_findings` — an unprovided consume whose key differs from a
+//!   same-method provide by exactly one of `case`/`prefix` (an all-literal 1-2 segment base path),
+//!   disjoint from `path_near_miss`'s parameter-generalization case (`cross-layer/route-near-miss`, info).
 //! - [`shared_db_table`]: `shared_db_table_findings` — the same `db-table` key consumed by 2+ distinct
 //!   source trees (`cross-layer/shared-db-table`, warning).
 //! - [`duplicate_route`]: `cross_layer_duplicate_route_findings` — the same `http` `(method, path)` key
@@ -72,8 +75,9 @@
 //! Every rule here is disable-only via `RuleConfig::disabled_rules` (message text says so).
 //!
 //! ## The provide-key universe
-//! `method_mismatch`/`version_skew`/`path_near_miss`/`external_shadow_internal`/`cross_tree_route_shadowing`
-//! need to compare against every `http` provide across every tree, not just the ones `CrossLayerResult`
+//! `method_mismatch`/`version_skew`/`path_near_miss`/`route_near_miss`/`external_shadow_internal`/
+//! `cross_tree_route_shadowing` need to compare against every `http` provide across every tree, not just the
+//! ones `CrossLayerResult`
 //! happens to expose (`unconsumed_provides` excludes ambiguous-candidate provides; `edges`/`ambiguous_consumes` only cover
 //! provides some consume already matched). That full universe is deliberately NOT threaded through
 //! `zzop_core::io::link_cross_layer_io`'s return type (`packages/core` stays rule-vocabulary-free by design —
@@ -84,7 +88,7 @@
 //! consume totals (`Vec<(String, usize)>`, engine-derived).
 //!
 //! One unprovided consume CAN legitimately fire 2+ of `method_mismatch`/`version_skew`/`path_near_miss`/
-//! `unprovided_mutation_call` at once when different comparisons hold (e.g. consume `POST /api/v1/orders` against
+//! `route_near_miss`/`unprovided_mutation_call` at once when different comparisons hold (e.g. consume `POST /api/v1/orders` against
 //! provides `PUT /api/v1/orders` and `POST /api/v2/orders`). That co-firing is intentional, not a dedup
 //! bug — each finding carries a distinct diagnosis of the same broken call. Likewise `unconsumed_mutation_endpoint`
 //! intentionally co-fires with `unconsumed_endpoint` (same site, severity-split diagnosis).
@@ -101,6 +105,7 @@ pub mod external_shadow_internal;
 pub mod external_version_inconsistent;
 pub mod method_mismatch;
 pub mod path_near_miss;
+pub mod route_near_miss;
 pub mod sdk_import_no_visible_consume;
 pub mod shared_db_table;
 pub mod unconsumed_endpoint;
@@ -122,6 +127,7 @@ pub use external_shadow_internal::external_shadow_internal_findings;
 pub use external_version_inconsistent::external_version_inconsistent_findings;
 pub use method_mismatch::method_mismatch_findings;
 pub use path_near_miss::path_near_miss_findings;
+pub use route_near_miss::route_near_miss_findings;
 pub use sdk_import_no_visible_consume::sdk_import_no_visible_consume_findings;
 pub use shared_db_table::shared_db_table_findings;
 pub use unconsumed_endpoint::unconsumed_endpoint_findings;

@@ -6,7 +6,7 @@ Everything the engine ships today, read directly from `rules/dsl/**/*.json` and
 semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 [authoring-guide.md](authoring-guide.md).
 
-**Totals** (machine-checked by `packages/engine/tests/rule_contracts.rs`'s `catalog_totals_match_loaded_rule_and_analysis_counts`): 16 DSL packs, 71 DSL rules, 40 native analysis ids. 11 packs ship rules; 5 are stub packs (see "Stub packs" below).
+**Totals** (machine-checked by `packages/engine/tests/rule_contracts.rs`'s `catalog_totals_match_loaded_rule_and_analysis_counts`): 16 DSL packs, 71 DSL rules, 41 native analysis ids. 11 packs ship rules; 5 are stub packs (see "Stub packs" below).
 
 ## DSL packs (`rules/dsl/<pack>/<pack>.json`)
 
@@ -188,6 +188,7 @@ toggle/gating surface). `zzop_engine::register_all_native` composes all five. Th
 | `cross-layer/method-mismatch` | warning | A `crossLayer.unprovidedConsumes` `http` consume whose path exactly matches a provide somewhere in the analysis, but the method differs (e.g. FE calls `POST /api/users`, only `GET /api/users` is provided) (`rules/native/rules-cross-layer/src/cross_layer/method_mismatch.rs`). |
 | `cross-layer/version-skew` | warning | A `crossLayer.unprovidedConsumes` `http` consume whose key differs from a provide only in one version-shaped path segment (`/v1/` vs `/v2/`) (`rules/native/rules-cross-layer/src/cross_layer/version_skew.rs`). |
 | `cross-layer/path-near-miss` | info | A `crossLayer.unprovidedConsumes` `http` consume whose key matches a provide once `{}` parameter positions are allowed to differ, but is otherwise segment-identical — strict elsewhere (a plural/typo literal difference does not count) (`rules/native/rules-cross-layer/src/cross_layer/path_near_miss.rs`). |
+| `cross-layer/route-near-miss` | info | A `crossLayer.unprovidedConsumes` `http` consume whose key differs from a same-method provide by EXACTLY ONE structural dimension — `case` (letter casing) or `prefix` (an all-literal 1-2 segment leading base path added/removed, e.g. `/api`) — disjoint from `path-near-miss`'s same-count parameter-generalization case; names the exact dimension so the fix is actionable (`rules/native/rules-cross-layer/src/cross_layer/route_near_miss.rs`). |
 | `cross-layer/shared-db-table` | warning | The same `db-table` key CONSUMED (not provided) by 2+ distinct source trees — evidence of a naming collision or a genuinely shared database; message says to verify which (`rules/native/rules-cross-layer/src/cross_layer/shared_db_table.rs`). |
 | `cross-layer/duplicate-route` | warning | The same `http` `(method, path)` key PROVIDED by 2+ DISTINCT source trees — the cross-tree counterpart to `duplicate-route` above (`rules/native/rules-cross-layer/src/cross_layer/duplicate_route.rs`). |
 | `cross-layer/external-shadow-internal` | warning | A `crossLayer.externalConsumes` consume (absolute URL) whose normalized method+path matches a route an analyzed tree provides — the caller hardcodes one environment's host instead of the relative/proxied path (`rules/native/rules-cross-layer/src/cross_layer/external_shadow_internal.rs`). |
