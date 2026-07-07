@@ -582,6 +582,12 @@ pub(crate) fn assemble(
         git_active,
     ));
 
+    if file_count == 0 {
+        warnings.push(
+            "root produced 0 analyzable files — check the path exists and contains supported source files".to_string(),
+        );
+    }
+
     let rule_timings = profile.then(|| sort_rule_timings(rule_time));
 
     let ir = CommonIr {
