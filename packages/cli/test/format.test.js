@@ -8,6 +8,7 @@ const {
   collectWarnings,
   groupByFile,
   countBySeverity,
+  filterOutputBySeverity,
   formatPretty,
   formatJson,
   computeExitCode,
@@ -173,4 +174,142 @@ test('computeExitCode: failOn off always 0', () => {
 
 test('computeExitCode: empty findings -> 0', () => {
   assert.equal(computeExitCode([], 'warn'), 0);
+});
+
+// --- --severity display filter ------------------------------------------------------------------------
+
+test('formatPretty: minSeverity "warning" hides info entirely (no folded block) and keeps warning/critical', () => {
+  const output = {
+    fileCount: 3,
+    findings: [
+      { ruleId: 'b-rule', severity: 'warning', file: 'src/z.ts', line: 10, message: 'zzz' },
+      { ruleId: 'a-rule', severity: 'critical', file: 'src/a.ts', line: 5, message: 'boom' },
+      { ruleId: 'dead-candidates', severity: 'info', file: 'src/c.ts', line: 1, message: 'note' },
+    ],
+  };
+  const out = formatPretty(output, { color: false, minSeverity: 'warning' });
+  assert.match(out, /src\/z\.ts/);
+  assert.match(out, /src\/a\.ts/);
+  assert.doesNotMatch(out, /src\/c\.ts/);
+  assert.doesNotMatch(out, /folded/);
+  assert.doesNotMatch(out, /dead-candidates/);
+  // footer tallies only the filtered (displayed) findings — info is dropped, not just folded.
+  // fileCount is a files-analyzed metric, unaffected by the display filter, so it stays as reported (3).
+  assert.match(out, /2 findings in 3 files/);
+  assert.match(out, /0 info/);
+});
+
+test('formatPretty: minSeverity "critical" shows only critical findings', () => {
+  const output = {
+    fileCount: 3,
+    findings: [
+      { ruleId: 'b-rule', severity: 'warning', file: 'src/z.ts', line: 10, message: 'zzz' },
+      { ruleId: 'a-rule', severity: 'critical', file: 'src/a.ts', line: 5, message: 'boom' },
+      { ruleId: 'dead-candidates', severity: 'info', file: 'src/c.ts', line: 1, message: 'note' },
+    ],
+  };
+  const out = formatPretty(output, { color: false, minSeverity: 'critical' });
+  assert.match(out, /src\/a\.ts/);
+  assert.doesNotMatch(out, /src\/z\.ts/);
+  assert.doesNotMatch(out, /src\/c\.ts/);
+  assert.match(out, /1 finding in 3 files/);
+});
+
+test('formatPretty: minSeverity omitted / null / "off" is identical to today (regression guard)', () => {
+  const base = formatPretty(singleOutput, { color: false });
+  assert.equal(formatPretty(singleOutput, { color: false, minSeverity: null }), base);
+  assert.equal(formatPretty(singleOutput, { color: false, minSeverity: undefined }), base);
+  assert.equal(formatPretty(singleOutput, { color: false, minSeverity: 'off' }), base);
+});
+
+test('filterOutputBySeverity: single-tree drops sub-threshold findings, leaves rest of output intact', () => {
+  const output = {
+    fileCount: 3,
+    warnings: ['w'],
+    findings: [
+      { ruleId: 'a', severity: 'critical', file: 'a.ts', line: 1 },
+      { ruleId: 'b', severity: 'warning', file: 'b.ts', line: 2 },
+      { ruleId: 'c', severity: 'info', file: 'c.ts', line: 3 },
+    ],
+  };
+  const filtered = filterOutputBySeverity(output, 'warning');
+  assert.deepEqual(
+    filtered.findings.map((f) => f.ruleId),
+    ['a', 'b']
+  );
+  assert.equal(filtered.fileCount, 3);
+  assert.deepEqual(filtered.warnings, ['w']);
+});
+
+test('filterOutputBySeverity: multi-tree filters each trees[].output.findings AND top-level crossLayerFindings', () => {
+  const output = {
+    trees: [
+      {
+        root: './api',
+        sourceId: 'api',
+        output: {
+          fileCount: 2,
+          findings: [
+            { ruleId: 'x', severity: 'warning', file: 'api/h.ts', line: 1 },
+            { ruleId: 'x2', severity: 'info', file: 'api/i.ts', line: 2 },
+          ],
+        },
+      },
+      {
+        root: './web',
+        sourceId: 'web',
+        output: {
+          fileCount: 4,
+          findings: [{ ruleId: 'y', severity: 'critical', file: 'web/i.ts', line: 9 }],
+        },
+      },
+    ],
+    crossLayer: {},
+    crossLayerFindings: [
+      { ruleId: 'cl-1', severity: 'warning', file: 'x.ts', line: 1 },
+      { ruleId: 'cl-2', severity: 'info', file: 'y.ts', line: 2 },
+    ],
+  };
+  const filtered = filterOutputBySeverity(output, 'warning');
+  assert.deepEqual(
+    filtered.trees[0].output.findings.map((f) => f.ruleId),
+    ['x']
+  );
+  assert.deepEqual(
+    filtered.trees[1].output.findings.map((f) => f.ruleId),
+    ['y']
+  );
+  assert.deepEqual(
+    filtered.crossLayerFindings.map((f) => f.ruleId),
+    ['cl-1']
+  );
+  // sibling fields untouched
+  assert.equal(filtered.trees[0].root, './api');
+  assert.equal(filtered.trees[0].output.fileCount, 2);
+  assert.deepEqual(filtered.crossLayer, {});
+});
+
+test('filterOutputBySeverity: null/undefined/"off"/"info" are no-ops (identical to unfiltered)', () => {
+  const output = { fileCount: 1, findings: [{ ruleId: 'a', severity: 'info', file: 'a.ts', line: 1 }] };
+  assert.deepEqual(filterOutputBySeverity(output, null), output);
+  assert.deepEqual(filterOutputBySeverity(output, undefined), output);
+  assert.deepEqual(filterOutputBySeverity(output, 'off'), output);
+  assert.deepEqual(filterOutputBySeverity(output, 'info'), output);
+});
+
+test('exit code is computed from UNFILTERED findings, not the --severity display filter', () => {
+  const output = {
+    fileCount: 1,
+    findings: [{ ruleId: 'a', severity: 'warning', file: 'a.ts', line: 1 }],
+  };
+  // Simulate `zzop --severity critical` on a repo that only has warnings: the displayed view is empty...
+  const filtered = filterOutputBySeverity(output, 'critical');
+  assert.equal(filtered.findings.length, 0);
+  // ...but the exit-code path reads collectFindings(output) off the ORIGINAL output, never the filtered one.
+  const { findings: unfilteredFindings } = collectFindings(output);
+  assert.equal(computeExitCode(unfilteredFindings, 'warn'), 1);
+  // Sanity check: computing from the filtered findings would have (wrongly) returned 0 — proving the two
+  // paths must read from different sources.
+  const { findings: filteredFindings } = collectFindings(filtered);
+  assert.equal(computeExitCode(filteredFindings, 'warn'), 0);
 });

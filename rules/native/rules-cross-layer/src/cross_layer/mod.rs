@@ -21,7 +21,7 @@
 //!   source trees (`cross-layer/shared-db-table`, warning).
 //! - [`duplicate_route`]: `cross_layer_duplicate_route_findings` — the same `http` `(method, path)` key
 //!   PROVIDED by 2+ distinct source trees (`cross-layer/duplicate-route`, warning) — distinct from the
-//!   existing single-tree `crate::duplicate_route` rule (different id, different join scope: this one only
+//!   existing single-tree `zzop_rules_http::duplicate_route` rule (different id, different join scope: this one only
 //!   fires across trees, never within one).
 //!
 //! The `external_consumes` bucket (host-carrying consume keys, verbatim URLs) has its own dedicated readers;

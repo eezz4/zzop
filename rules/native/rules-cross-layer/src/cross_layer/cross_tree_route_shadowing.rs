@@ -5,7 +5,7 @@
 //! request ever reaches tree B).
 //!
 //! ## No overlap with the single-tree `route-shadowing` rule
-//! `crate::route_shadowing` compares routes within ONE file, using registration order as the first-match
+//! `zzop_rules_http::route_shadowing` compares routes within ONE file, using registration order as the first-match
 //! signal — that only makes sense within a single router instance. This rule fires ONLY across DIFFERENT
 //! source trees, where there is no shared registration order to reason about (each tree's internal route
 //! order is invisible to the other), so it ignores line order entirely and flags the shape overlap itself,
@@ -14,7 +14,7 @@
 //! and never double-fire on the same pair.
 //!
 //! ## Decidable subset
-//! - provides registered in a test/fixture file are skipped (`crate::unreachable::is_test_file`) — not real
+//! - provides registered in a test/fixture file are skipped (`zzop_core::is_test_file`) — not real
 //!   deployed surface;
 //! - same HTTP method, same segment count;
 //! - every segment pairwise equal, OR the pattern's segment at that position is `{}` (any number of `{}`
@@ -31,7 +31,7 @@
 use std::collections::BTreeMap;
 
 use super::{path_segments, split_key, HttpProvideSite};
-use crate::unreachable::is_test_file;
+use zzop_core::is_test_file;
 
 pub fn cross_tree_route_shadowing_findings(
     all_provides: &[HttpProvideSite],

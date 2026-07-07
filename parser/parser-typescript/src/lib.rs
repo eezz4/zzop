@@ -62,13 +62,18 @@ pub use lang::write_site::{
 ///   `schema-usage` native rule's `dead-model` check, replacing `zzop_rules_schema::usage::scan_store_map`'s
 ///   own `<root>/src/domains/**` filesystem re-walk.
 /// - `write-sites-v1`: `SourceSymbol::write_sites` — per-symbol store-write site detection, computed once
-///   here instead of `zzop_rules_graph::http_scan` re-scanning each BFS-reached symbol's raw text on every
+///   here instead of `zzop_rules_http::http_scan` re-scanning each BFS-reached symbol's raw text on every
 ///   analysis run.
 /// - `reexport-edges-v1`: `FileArtifact`/`FileIrSlice` now carry each file's `parse_re_exports` output
 ///   (specifier + `type_only`) so `lang::resolve::build_dep`/`build_dep_with_workspace` can merge
 ///   non-type-only re-export specifiers into the dep graph as real edges — a barrel file's re-exports
 ///   used to be invisible to `dep`, undercounting fan-in and false-positiving `dead-candidates`.
-pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1";
+/// - `dynamic-import-edges-v1`: `FileArtifact`/`FileIrSlice` now carry each file's `parse_dynamic_imports`
+///   output (dynamic `import()` specifiers), merged into the dep graph as real edges (excluded from
+///   circular) so a code-split-only module keeps its fan-in and isn't false-positived by
+///   `dead-candidates`. Also, a type-only re-export now gains the same edge-but-excluded-from-cycles
+///   treatment a type-only import binding already had, instead of being dropped entirely.
+pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1";
 
 use std::collections::{HashMap, HashSet};
 
@@ -320,9 +325,11 @@ fn bind_require_target(name: &Pat, specifier: &str, deferred: bool, map: &mut Im
 /// bare `export { x }` with no from-clause is a local declaration and is excluded. `type_only` is set from
 /// the export clause's own `type_only`/`export type * from` flag AND, per named specifier, its own
 /// per-specifier `export { type X } from "./y"` marker (mirrors `parse_imports`'s
-/// `clause_type_only || n.is_type_only` combination) — a type-only re-export is erased by TS at compile
-/// time and must not become a dep-graph edge (`lang::resolve::build_dep`/`build_dep_with_workspace` skip
-/// it entirely rather than merging it into `resolved`).
+/// `clause_type_only || n.is_type_only` combination). A type-only re-export is erased by TS at compile
+/// time, so `lang::resolve::build_dep`/`build_dep_with_workspace` merge it into `resolved` as a real edge
+/// (the target is still "used" — fan-in/dead-exports/metrics need it) but add it to the noncycle
+/// exclusion set so it is never treated as a circular-dependency edge — the same treatment a type-only
+/// import binding gets.
 pub fn parse_re_exports(file: &str, source: &str) -> Vec<ReExport> {
     let mut out = Vec::new();
     let Some(module) = parse_module(file, source) else {
@@ -1205,18 +1212,24 @@ pub fn build_common_ir(source_id: &str, files: &[(String, String)]) -> CommonIr 
     let mut symbols = Vec::new();
     let mut import_pairs = Vec::new();
     let mut re_export_pairs = Vec::new();
+    let mut dynamic_import_pairs = Vec::new();
     let mut loc = std::collections::HashMap::new();
     for (rel, text) in files {
         symbols.extend(parse_symbols(rel, text));
         import_pairs.push((rel.clone(), parse_imports(rel, text)));
         re_export_pairs.push((rel.clone(), parse_re_exports(rel, text)));
+        dynamic_import_pairs.push((rel.clone(), parse_dynamic_imports(rel, text)));
         loc.insert(rel.clone(), count_loc(text));
     }
-    // `build_dep`'s second return value (the ephemeral type-only-edge exclusion set) feeds circular
+    // `build_dep`'s second return value (the ephemeral noncycle-edge exclusion set) feeds circular
     // detection only; this whole-tree, non-incremental projection doesn't run `circular_from_dep` itself
     // (that's an engine-side whole-graph pass), so it's discarded here.
-    let (dep, _type_only_edges) =
-        lang::resolve::build_dep(&import_pairs, &re_export_pairs, &all_paths);
+    let (dep, _noncycle_edges) = lang::resolve::build_dep(
+        &import_pairs,
+        &re_export_pairs,
+        &dynamic_import_pairs,
+        &all_paths,
+    );
     // Project the IO this tree consumes (HTTP egress) so the cross-layer linker can join it to BE providers.
     let consumes = adapters::egress::extract_http_egress(files);
     let io = if consumes.is_empty() {

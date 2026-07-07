@@ -40,7 +40,7 @@
 //! ## NestJS `@UseGuards` decorator exemption (`extract_controller_guarded_lines`)
 //! Detects `@UseGuards(...)` auth-guard coverage at class level (every route in that controller) or
 //! method level (just that route). A decorator application is metadata, not a call edge, so it is
-//! invisible to a call-graph BFS — see `zzop_rules_graph::mutating_route_no_auth`'s module doc. A
+//! invisible to a call-graph BFS — see `zzop_rules_http::mutating_route_no_auth`'s module doc. A
 //! returned line always matches a route `extract_controller_provides` would emit (same file/line).
 //! Guard presence is checked by decorator name only, not argument identities.
 //!

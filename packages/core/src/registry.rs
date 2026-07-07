@@ -288,11 +288,11 @@ pub fn merge_findings(sources: Vec<Vec<Finding>>, config: &RuleConfig) -> Vec<Fi
 // ---------------------------------------------------------------------------------------------
 // This crate (the kernel) carries ZERO rule vocabulary: no native analysis id, pack id, or rule id string
 // literal lives here. What stays here is only the MECHANISM every owning rules crate uses to plug its own
-// ids into the one shared registry. Each owning crate (`zzop_rules_graph`, `zzop_rules_schema`,
-// `zzop_metrics`) exposes its own `register_native_analyses(&mut RuleRegistry)` that calls
-// `register_native_analysis_stub` once per id it owns; `zzop_engine::register_all_native` composes all
-// three. See `rules/README.md`'s "Adding a rule" section and `packages/engine/tests/rule_contracts.rs`'s
-// "kernel is rule-vocabulary-free" contract test.
+// ids into the one shared registry. Each owning crate (`zzop_rules_graph`, `zzop_rules_http`,
+// `zzop_rules_cross_layer`, `zzop_rules_schema`, `zzop_metrics`) exposes its own
+// `register_native_analyses(&mut RuleRegistry)` that calls `register_native_analysis_stub` once per id it
+// owns; `zzop_engine::register_all_native` composes all five. See `rules/README.md`'s "Adding a rule"
+// section and `packages/engine/tests/rule_contracts.rs`'s "kernel is rule-vocabulary-free" contract test.
 
 /// A native analysis's registry entry. Whole-graph analyses (circular, unreachable, criticality, scores,
 /// ...) take their own inputs (`DepGraph`, `CouplingMap`, ...), not a single `CommonIr` — they are invoked

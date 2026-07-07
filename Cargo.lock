@@ -1553,7 +1553,9 @@ dependencies = [
  "zzop-parser-java",
  "zzop-parser-prisma",
  "zzop-parser-typescript",
+ "zzop-rules-cross-layer",
  "zzop-rules-graph",
+ "zzop-rules-http",
  "zzop-rules-schema",
 ]
 
@@ -1629,7 +1631,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "zzop-rules-cross-layer"
+version = "0.0.0"
+dependencies = [
+ "regex",
+ "serde",
+ "serde_json",
+ "zzop-core",
+]
+
+[[package]]
 name = "zzop-rules-graph"
+version = "0.0.0"
+dependencies = [
+ "regex",
+ "serde",
+ "serde_json",
+ "zzop-core",
+]
+
+[[package]]
+name = "zzop-rules-http"
 version = "0.0.0"
 dependencies = [
  "regex",

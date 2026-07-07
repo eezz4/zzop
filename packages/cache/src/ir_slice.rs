@@ -28,6 +28,11 @@ pub struct FileIrSlice {
     /// every subsequent cache-warm run.
     #[serde(default)]
     pub re_exports: Vec<ReExport>,
+    /// This file's dynamic-`import()` specifiers — mirrors `FileArtifact::dynamic_imports`. Must
+    /// round-trip through the cache: dropping it on a hit would silently undercount a code-split-only
+    /// module's fan-in and re-introduce its `dead-candidates` false positive on every cache-warm run.
+    #[serde(default)]
+    pub dynamic_imports: Vec<String>,
     pub loc: u32,
     /// Whether this file's slice came from the lexical fallback path rather than a full structural
     /// parse — mirrors `FileArtifact::degraded`.

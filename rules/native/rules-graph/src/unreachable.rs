@@ -98,11 +98,11 @@ fn is_entry_file(path: &str) -> bool {
     entry_patterns().iter().any(|re| re.is_match(path))
 }
 
-/// Shared test-path predicate — also used by `mutating_route_no_auth` to skip route registrations in a
-/// test/fixture file. Now lives in `zzop_core` (also needed by the TS parser's DB-table extractors);
-/// re-exported here so all existing `crate::unreachable::is_test_file` call sites in this crate keep
-/// compiling unchanged.
-pub(crate) use zzop_core::is_test_file;
+/// Shared test-path predicate — also used by `zzop_rules_http::mutating_route_no_auth` and several
+/// `zzop_rules_cross_layer` rules to skip route/consume registrations in a test/fixture file. Lives in
+/// `zzop_core` (also needed by the TS parser's DB-table extractors); those other crates import it
+/// directly as `zzop_core::is_test_file` rather than through this module.
+use zzop_core::is_test_file;
 
 /// Files loaded directly by a dev tool or `tsc` rather than imported by app code — so `fan_in == 0` on them
 /// is "not the kind of file the import graph would ever point at", not a "no importers" signal (e.g.

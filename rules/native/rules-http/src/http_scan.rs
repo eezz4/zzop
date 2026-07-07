@@ -378,7 +378,6 @@ mod tests {
             method: method.to_string(),
             path: path.to_string(),
             handler: handler.to_string(),
-            drift_ok: false,
         }
     }
 

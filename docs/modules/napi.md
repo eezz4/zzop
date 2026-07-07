@@ -26,7 +26,8 @@ plain napi-free Rust (compiles/tests under the workspace's default `gnu` toolcha
 | `sizeCap` | `Option<usize>` | Default 1,500,000 bytes (~1.5MB) — see [degraded files](../ARCHITECTURE.md#degraded-files). |
 | `disabledRules` | `Vec<String>` | Rule/analysis ids to turn off — see [rules/catalog.md](../rules/catalog.md) for the id list. |
 | `severityOverrides` | `BTreeMap<String, "critical" \| "warning" \| "info">` (default `{}`) | Per-rule severity remap, keyed by rule id (same id space as `disabledRules`). Promotes/demotes a rule's findings without editing the pack — applied post-merge, so it also re-sorts the finding into its new severity band. |
-| `suppressions` | `Vec<{ rule: String, path?: String }>` (default `[]`) | Finding-level accept-list. Each entry drops findings for `rule` either everywhere (no `path`) or only in files whose path CONTAINS `path` as a plain substring (case-sensitive, no glob). Multiple entries for one rule are OR-ed. |
+| `suppressions` | `Vec<{ rule: String, path?, glob? }>` (default `[]`) | Finding-level accept-list. Each entry drops findings for `rule` either everywhere (no filter), only in files whose path CONTAINS `path` as a plain substring (case-sensitive), or only in files matching `glob` (full-path shell glob; `glob` takes precedence over `path`). Multiple entries for one rule are OR-ed. |
+| `adapterOverlays` | `Vec<NormalizedEnvelope>` (default `[]`) | Mode-B adapter overlays: partial Normalized-AST envelopes merged ON TOP of native analysis (each re-validated, soft-skipped with a warning if invalid). How a framework/SDK adapter adds IoFacts the engine does not parse natively without reimplementing the parser — contrast `analyzeEnvelope`, where a full envelope REPLACES native analysis. Post-cache, so it does not affect the cache key. See [../NORMALIZED_AST.md](../NORMALIZED_AST.md). |
 
 ### Defaults (zero-config = full analysis)
 
@@ -64,7 +65,7 @@ calling the Rust engine directly), it self-reports on `warnings` instead of stay
 These are capability notes, not errors — the analysis still completes normally. The zero-packs note
 also applies to `analyzeEnvelope`; the git note never does (envelope mode has no git by design).
 
-`EnvelopeAnalyzeRequest { sourceId: String, packsDir: Option<String | Vec<String>>, disabledRules: Vec<String>, severityOverrides: BTreeMap<String, Severity>, suppressions: Vec<{ rule, path? }> }` —
+`EnvelopeAnalyzeRequest { sourceId: String, packsDir: Option<String | Vec<String>>, disabledRules: Vec<String>, severityOverrides: BTreeMap<String, Severity>, suppressions: Vec<{ rule, path?, glob? }> }` —
 deliberately no `root`/`cacheDir`/`git`/`sizeCap` (envelope mode has no filesystem root or git repo).
 `severityOverrides`/`suppressions` behave identically to their `AnalyzeConfig` counterparts above.
 `NormalizedEnvelope` shape: see `../NORMALIZED_AST.md`.

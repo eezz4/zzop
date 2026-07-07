@@ -72,7 +72,7 @@ use zzop_core::callgraph::{bfs_reachable, SymbolGraph};
 use zzop_core::{Finding, Severity, SourceSymbol};
 
 use crate::http_scan::{build_name_index, resolve_handler};
-use crate::unreachable::is_test_file;
+use zzop_core::is_test_file;
 
 /// Default guard-name vocabulary — see module doc "Guard vocabulary".
 pub const DEFAULT_AUTH_GUARD_PATTERN: &str = r"(?i)(auth|guard|verify|session|token|permission|acl|owner|admin|role|(?:has|can|check|require)access|is(?:local|dev|production))";

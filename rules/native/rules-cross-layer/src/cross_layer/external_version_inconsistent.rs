@@ -4,7 +4,7 @@
 //! [`super::VERSION_SEGMENT_PATTERN`] (same pattern `version_skew` uses); findings are anchored at the
 //! first versionless consume site, sorted by `(file, line)`.
 //!
-//! Consume sites in test-path files (`crate::unreachable::is_test_file`) are skipped, including from the
+//! Consume sites in test-path files (`zzop_core::is_test_file`) are skipped, including from the
 //! per-host counting — a test mocking a vendor/own API is not deployed egress.
 //!
 //! ## Message framing
@@ -27,7 +27,7 @@ pub fn external_version_inconsistent_findings(external_consumes: &[TaggedConsume
     let mut by_host: BTreeMap<String, Vec<(String, &TaggedConsume)>> = BTreeMap::new();
     for c in external_consumes
         .iter()
-        .filter(|c| c.consume.kind == "http" && !crate::unreachable::is_test_file(&c.consume.file))
+        .filter(|c| c.consume.kind == "http" && !zzop_core::is_test_file(&c.consume.file))
     {
         let Some(key) = c.consume.key.as_deref() else {
             continue;

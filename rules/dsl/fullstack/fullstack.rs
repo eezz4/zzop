@@ -1,4 +1,4 @@
-//! End-to-end coverage for `rules/dsl/fullstack/fullstack.json` plus the native `duplicate-route` analysis (`zzop_engine::pipeline::duplicate_route_findings`, registered in `zzop_rules_graph::register_native_analyses`).
+//! End-to-end coverage for `rules/dsl/fullstack/fullstack.json` plus the native `duplicate-route` analysis (`zzop_rules_http::duplicate_route_findings`, registered in `zzop_rules_http::register_native_analyses`).
 //!
 //! `duplicate-route` is native, not a DSL rule, so its findings carry the plain id `"duplicate-route"` (no `fullstack/` prefix) despite running alongside the pack here.
 

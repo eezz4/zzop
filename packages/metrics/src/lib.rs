@@ -23,8 +23,9 @@ use zzop_core::{register_native_analysis_stub, RuleRegistry, Severity};
 
 /// Registers every native analysis id whose implementation lives in THIS crate — the metrics half of the
 /// extensibility contract's per-crate registration (see `rules/README.md`'s "Adding a rule" section and
-/// `zzop_engine::register_all_native`, which composes this with `zzop_rules_graph`'s and `zzop_rules_schema`'s
-/// own `register_native_analyses`). These 5 ids are not findings-producing rules — they gate SCORE
+/// `zzop_engine::register_all_native`, which composes this with `zzop_rules_graph`'s, `zzop_rules_http`'s,
+/// `zzop_rules_cross_layer`'s, and `zzop_rules_schema`'s own `register_native_analyses`). These 5 ids are
+/// not findings-producing rules — they gate SCORE
 /// computations (`compute_seams`/`compute_criticality`/`compute_scores`/`compute_health_index`/
 /// `build_recommendations`) that only ride the same enabled/severity/suppression toggle surface as native
 /// rules do (see this crate's module doc). Ids/severities moved verbatim from the old

@@ -40,7 +40,8 @@ the linker is an exact join on normalized keys, never AST matching).
   "const_map_fragment": { "<dotted.const.KEY>": "<literal-string-value>" },
   "trpc_router_fragments": [ <TrpcRouterFragment> ],
   "router_mount_fragments": [ <RouterMountFragment> ],
-  "degraded": false
+  "degraded": false,
+  "is_entry": false
 }
 ```
 
@@ -95,6 +96,12 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
   same "never guess" convention this doc already documents above for `io` consume keys.
 - `degraded` — the parser could not fully process the file (size cap, syntax failure); `loc` must
   still be present.
+- `is_entry` — OPTIONAL (`#[serde(default)]`, default `false`). Marks this file a framework/runtime
+  ENTRY loaded by convention rather than imported (a SvelteKit `hooks.*`/`+page`, a `.vue` route, ...),
+  so zero in-repo importers is expected, not dead-code signal — the overlay counterpart of a
+  package.json manifest entry. Meaningful in Mode B (adapter overlays, below): every `is_entry: true`
+  file's `path` across all configured overlays is unioned into the `dead-candidates` analysis's exempt
+  set. Mode A (`analyze_envelope`) does not read this field.
 
 ## Delivery
 
@@ -147,10 +154,20 @@ callers can refer to either unambiguously.
     entries (an overlay entry EXACTLY duplicating a native one — same kind/key/file/line — is deduped,
     never double-counted), its fragment channels (`trpc_router_fragments`/`router_mount_fragments`) are
     appended, and `const_map_fragment` merges NATIVE-FIRST (a key the native pass already resolved is
-    never overwritten by an overlay).
-  - If no native artifact exists at that path (an adapter-only file — e.g. a generated route table the
-    native TS parser never sees as a distinct file): a synthetic minimal artifact is created from the
-    projection so it still contributes its `io`/fragments to the whole-tree composition.
+    never overwritten by an overlay). The native artifact's own `imports`/`re_exports`/`dynamic_imports`
+    are left untouched — native dep-graph facts stay authoritative; this merge branch never adds to them.
+  - If no native artifact exists at that path (an adapter-only file — e.g. a `.svelte`/`.vue`/`.astro`
+    file, or a generated route table the native TS parser never sees as a distinct file): a synthetic
+    artifact is created from the projection, carrying its OWN `imports`/`re_exports`/`dynamic_imports`
+    in addition to `io`/fragments — so an adapter for any non-TS file type can complete the dep graph:
+    its imports give their native TS targets real fan-in edges, exactly like a native TS importer's
+    would (keeping `dead-candidates` from false-positiving them). `imports` stays absent when the
+    projection carries no dep-graph data at all (none of the three fields populated).
+
+  Independently of the merge branch above, every `is_entry: true` `FileProjection`'s `path` across ALL
+  configured overlays is unioned into the `dead-candidates` analysis's exempt set (the overlay
+  counterpart of a package.json manifest entry) — a framework-loaded file an adapter declares reachable
+  by convention is never flagged dead for having zero in-repo importers.
 
   Overlay-added fragments then flow through the EXACT SAME whole-tree composition passes as anything
   else (`compose_trpc_provides`/`compose_router_mount_provides`) — an overlay is not a separate code path
@@ -217,6 +234,21 @@ resolution rule documented above for fragment specifiers.
 field — so a multi-overlay run's output does not depend on caller-supplied `Vec` order. The io-entry
 dedup key is `(kind, key, file, line)`, applied to both `provides` and `consumes`.
 
-**Scope note.** Overlays are engine-config-supplied only — Rust `EngineConfig::adapter_overlays`. napi
-(`packages/napi`) exposure is a PLANNED FOLLOW-UP, not yet wired: do not assume it is reachable from
-JS/napi callers today.
+**napi exposure.** Overlays are reachable from Rust (`EngineConfig::adapter_overlays`) AND from napi
+callers: `analyze`/`analyzeTrees`'s config accepts an `adapterOverlays` array of envelopes with this
+same shape (`AnalyzeRequest::adapter_overlays` in `packages/napi/src/api.rs`, `Array<Record<string,
+unknown>>` in `packages/napi/index.d.ts`'s `AnalyzeConfig`), e.g.:
+
+```json
+{
+  "root": "/path/to/tree",
+  "sourceId": "api",
+  "adapterOverlays": [
+    { "format": "zzop-normalized-ast", "version": 1, "parser": "hono-router-overlay/1", "source": "api", "files": [ ... ] }
+  ]
+}
+```
+
+An overlay is re-validated and soft-skipped with a warning if invalid, same as the Rust path above.
+`analyzeEnvelope` (Mode A) has no equivalent field — a full envelope REPLACES native analysis rather
+than augmenting it, so the two modes don't combine.

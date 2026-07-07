@@ -64,12 +64,14 @@ fn projection(path: &str, loc: u32) -> FileProjection {
         symbols: Vec::new(),
         imports: ImportMap::new(),
         re_exports: Vec::new(),
+        dynamic_imports: Vec::new(),
         used_names: Vec::new(),
         const_map_fragment: std::collections::HashMap::new(),
         trpc_router_fragments: Vec::new(),
         router_mount_fragments: Vec::new(),
         io: IoFacts::default(),
         degraded: false,
+        is_entry: false,
     }
 }
 

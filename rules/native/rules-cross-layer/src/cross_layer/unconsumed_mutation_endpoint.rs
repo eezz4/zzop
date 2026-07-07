@@ -5,7 +5,7 @@
 //! This rule intentionally co-fires with that rule for the same site: it reports "unreferenced" uniformly
 //! across all methods, while this one is the severity-split for the write subset specifically.
 //!
-//! Provider sites in test-path files (`crate::unreachable::is_test_file`) are skipped — not deployed surface.
+//! Provider sites in test-path files (`zzop_core::is_test_file`) are skipped — not deployed surface.
 
 use zzop_core::io::TaggedProvide;
 use zzop_core::{Finding, Severity};
@@ -17,7 +17,7 @@ pub fn unconsumed_mutation_endpoint_findings(
 ) -> Vec<Finding> {
     let mut out: Vec<Finding> = unconsumed_provides
         .iter()
-        .filter(|p| p.provide.kind == "http" && !crate::unreachable::is_test_file(&p.provide.file))
+        .filter(|p| p.provide.kind == "http" && !zzop_core::is_test_file(&p.provide.file))
         .filter_map(|p| {
             let (method, _path) = split_key(&p.provide.key)?;
             if !is_write_method(method) {

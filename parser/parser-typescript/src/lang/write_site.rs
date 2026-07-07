@@ -1,5 +1,5 @@
 //! Per-symbol write-site detection — a pure `(symbol body-span text, constant vocab) -> Vec<WriteSite>`
-//! regex scan, moved here from `zzop_rules_graph::http_scan` so it runs ONCE at parse time (feeding
+//! regex scan, moved here from `zzop_rules_http::http_scan` so it runs ONCE at parse time (feeding
 //! `SourceSymbol::write_sites`) instead of once per BFS-reached symbol on every analysis run. Detects two
 //! independent shapes within a symbol's body span (`body_start..=body_end`, 1-based, inclusive):
 //! - a raw-SQL write string (`INSERT`/`UPDATE ...`/`DELETE FROM`/`REPLACE INTO`, case-insensitive, never a
@@ -11,7 +11,7 @@
 //!   atomic-accumulate / counter).
 //!
 //! Both shapes are merged into one position-sorted `Vec<zzop_core::WriteSite>` per symbol, so a single
-//! list serves both call-graph scanners in `zzop_rules_graph::http_scan`:
+//! list serves both call-graph scanners in `zzop_rules_http::http_scan`:
 //! - `unsafe-read-endpoint` wants "any write site" — every entry EXCEPT a pure counter-bump
 //!   (`kind == Some(Counter)`) qualifies, since [`DEFAULT_WRITE_METHODS`] (the vocabulary
 //!   `unsafe-read-endpoint` always used) never included the counter vocabulary
@@ -150,7 +150,7 @@ fn sql_label(rest_from_match_start: &str) -> String {
 }
 
 /// Classifies a store-like method call by its (case-sensitive) method name and, for an UPDATE-family
-/// method, whether its call args carry an atomic-op key — the same precedence `zzop_rules_graph`'s old
+/// method, whether its call args carry an atomic-op key — the same precedence `zzop_rules_http`'s old
 /// `symbol_bad_sites` used: create-family first, then counter (case-insensitive), then update-family
 /// gated on an atomic op being present.
 fn classify(method: &str, block: &str, args_start: usize) -> Option<NonIdempotentKind> {

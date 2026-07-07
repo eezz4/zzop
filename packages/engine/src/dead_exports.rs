@@ -21,6 +21,23 @@ use zzop_core::{Finding, ImportMap, SourceSymbol};
 use zzop_parser_typescript::{TsconfigPaths, WorkspacePkg};
 use zzop_rules_graph::{DeadExportCandidate, DeadExportInputFile};
 
+/// True for the extensions the dispatch table routes to TypeScript. The whole-tree second passes here and
+/// in `analyze`'s call-graph scan re-read + re-parse each `ts_paths` member AS TypeScript; a NON-TS
+/// dep-graph participant a Mode B overlay added (e.g. a `.svelte` file whose imports were projected) must
+/// be skipped — its dep-graph facts already reached `build_dep` via its projection, and parsing its raw
+/// non-TS text as TypeScript would be garbage (and could inject spurious call edges). Extension-based and
+/// duplicated rather than threading the dispatch config: these passes only ever see TS-or-overlay paths.
+pub(crate) fn is_ts_source_ext(rel: &str) -> bool {
+    matches!(
+        Path::new(rel)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .as_deref(),
+        Some("ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "mts" | "cts")
+    )
+}
+
 /// Runs the whole-tree dead-export computation and converts each result into a `Finding` at its symbol's
 /// declaration line. Returns an empty `Vec` immediately when there are no TypeScript-dispatched files.
 ///
@@ -53,6 +70,9 @@ pub(crate) fn dead_export_findings(
 
     let mut files: Vec<DeadExportInputFile> = Vec::with_capacity(ts_paths.len());
     for rel in ts_paths {
+        if !is_ts_source_ext(rel) {
+            continue; // non-TS overlay participant (e.g. .svelte) — not re-parseable as TypeScript
+        }
         let (re_exports, dynamic_imports) = match std::fs::read(root.join(rel)) {
             Ok(bytes) => {
                 let text = String::from_utf8_lossy(&bytes).into_owned();

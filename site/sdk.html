@@ -113,10 +113,12 @@ const result = JSON.parse(
             <tr><td><code>disabledRules</code></td><td>string[]</td><td>Rule / native-analysis ids to disable entirely (exact match).</td></tr>
             <tr><td><code>severityOverrides</code></td><td>object</td><td>Rule id &rarr; <code>"critical" | "warning" | "info"</code>. Promote or demote a specific id without forking its pack.</td></tr>
             <tr><td><code>suppressions</code></td><td>object[]</td><td>Finding accept-list: each <code>{ rule, path?, glob? }</code> drops findings for <code>rule</code> — everywhere (no filter), in files whose path contains <code>path</code> (substring), or in files matching <code>glob</code> (full-path glob; <code>glob</code> wins over <code>path</code>).</td></tr>
+            <tr><td><code>adapterOverlays</code></td><td>object[]</td><td>Mode-B adapter overlays: partial Normalized-AST envelopes (typically just <code>io</code> + fragment channels for a handful of files) merged <em>on top of</em> this tree's native analysis — how a framework/SDK adapter adds IoFacts the engine does not parse natively, without reimplementing the parser. Each overlay is re-validated and soft-skipped with a warning if invalid. Contrast <code>analyzeEnvelope</code>, where a full envelope <em>replaces</em> native analysis. See <a href="https://github.com/eezz4/zzop/blob/main/docs/NORMALIZED_AST.md">NORMALIZED_AST.md</a>.</td></tr>
           </tbody>
         </table>
       </div>
       <p><code>analyzeEnvelope</code>'s config (<code>EnvelopeAnalyzeRequest</code>) is a smaller shape: <code>sourceId</code>, <code>packsDir</code>, and <code>disabledRules</code> only. An envelope carries no filesystem location the engine can re-read, so <code>root</code>, <code>cacheDir</code>, <code>git</code>, and <code>sizeCap</code> don't apply — only <code>symbol-scan</code>/<code>io-scan</code> DSL rules ever fire in envelope mode, since no source text is available.</p>
+      <p>Two reference Mode-B adapters ship in the repo as worked examples: an <a href="https://github.com/eezz4/zzop/tree/main/docs/examples/openapi-sdk-adapter">OpenAPI-SDK adapter</a> (resolves generated-SDK cross-layer consumption) and a <a href="https://github.com/eezz4/zzop/tree/main/docs/examples/svelte-adapter">Svelte/SvelteKit adapter</a> (fills <code>.svelte</code> import fan-in and exempts route entrypoints via each file's <code>is_entry</code> marker).</p>
     </section>
 
     <section id="multi-repo">

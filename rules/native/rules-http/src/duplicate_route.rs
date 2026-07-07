@@ -6,14 +6,14 @@
 //! every later site gets one `Finding` naming it. This whole-tree pass is recomputed on every `analyze_tree`
 //! call rather than cached, since its output is never read back out of a stale per-file cache entry.
 //!
-//! Provider sites in test-path files (`crate::unreachable::is_test_file`) are skipped — an isolated test
+//! Provider sites in test-path files (`zzop_core::is_test_file`) are skipped — an isolated test
 //! fixture's route never coexists with the "duplicate" at runtime.
 
 pub fn duplicate_route_findings(io_provides: &[zzop_core::IoProvide]) -> Vec<zzop_core::Finding> {
     let mut by_key: std::collections::BTreeMap<&str, Vec<&zzop_core::IoProvide>> =
         std::collections::BTreeMap::new();
     for p in io_provides {
-        if p.kind == "http" && !crate::unreachable::is_test_file(&p.file) {
+        if p.kind == "http" && !zzop_core::is_test_file(&p.file) {
             by_key.entry(p.key.as_str()).or_default().push(p);
         }
     }

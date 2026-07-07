@@ -61,6 +61,13 @@ pub struct AnalyzeRequest {
     /// Finding-level accept-list — `{rule, path?}` entries dropping matching findings. Reuses
     /// `zzop_core::Suppression`/`RuleConfig::suppressions` directly. Default: empty (nothing suppressed).
     pub suppressions: Vec<Suppression>,
+    /// Mode-B adapter overlays: partial `NormalizedEnvelope`s (typically just `io` + fragment channels
+    /// for a handful of files) merged ON TOP of native TypeScript analysis for this tree — the napi
+    /// exposure of `EngineConfig::adapter_overlays`. Each overlay is re-validated and soft-skipped with a
+    /// warning if invalid (see `envelope::apply_adapter_overlays`); a structurally-unparseable overlay
+    /// fails request deserialization (producer's contract to emit well-formed envelopes). Overlays are
+    /// re-applied every run AFTER the native cache, so they need no cache-key participation.
+    pub adapter_overlays: Vec<zzop_core::NormalizedEnvelope>,
 }
 
 /// `AnalyzeRequest::git`'s payload — mirrors `zzop_engine::GitOptions` field-for-field, as JSON input.
@@ -172,6 +179,9 @@ fn build_engine_config(req: &AnalyzeRequest, warnings: &mut Vec<String>) -> Engi
             .recent_days
             .unwrap_or_else(|| GitOptions::default().recent_days),
     });
+    // Overlays flow to `analyze_tree`'s unconditional `apply_adapter_overlays` merge; no cache-key
+    // impact (applied post-cache, re-applied every run regardless of hit/miss).
+    config.adapter_overlays = req.adapter_overlays.clone();
     config
 }
 
@@ -668,6 +678,60 @@ mod tests {
                 .iter()
                 .any(|f| f["ruleId"] == "circular"),
             "suppressions must drop the circular finding in envelope mode, got: {value}"
+        );
+    }
+
+    #[test]
+    fn analyze_request_adapter_overlays_flow_into_engine_config() {
+        // Plumbing-only: proves the napi-facing `adapterOverlays` JSON field deserializes into
+        // `AnalyzeRequest::adapter_overlays` and survives `build_engine_config` into
+        // `EngineConfig::adapter_overlays` unchanged. The overlay MERGE itself (into a real
+        // `analyze_tree` run) is already covered end-to-end by
+        // `packages/engine/tests/analyze_adapter_overlay.rs` — this test never touches a filesystem
+        // root, since `build_engine_config` doesn't need one to build the config.
+        let config_json = r#"{
+            "root": "unused",
+            "sourceId": "t",
+            "adapterOverlays": [
+                {
+                    "format": "zzop-normalized-ast",
+                    "version": 1,
+                    "parser": "test-adapter/1",
+                    "source": "legacy",
+                    "files": [
+                        {
+                            "path": "a.ts",
+                            "loc": 10,
+                            "io": {
+                                "provides": [
+                                    {"kind": "http", "key": "GET /foo", "file": "a.ts", "line": 1}
+                                ],
+                                "consumes": []
+                            }
+                        }
+                    ]
+                }
+            ]
+        }"#;
+        let req: AnalyzeRequest =
+            serde_json::from_str(config_json).expect("valid AnalyzeRequest JSON");
+        assert_eq!(
+            req.adapter_overlays.len(),
+            1,
+            "expected the field to deserialize"
+        );
+
+        let mut warnings = Vec::new();
+        let config = build_engine_config(&req, &mut warnings);
+        assert_eq!(
+            config.adapter_overlays.len(),
+            1,
+            "expected adapterOverlays to flow into EngineConfig::adapter_overlays"
+        );
+        assert_eq!(config.adapter_overlays[0].parser, "test-adapter/1");
+        assert_eq!(
+            config.adapter_overlays[0].files[0].io.provides[0].key, "GET /foo",
+            "expected the overlay's io.provides entry to survive the round trip"
         );
     }
 

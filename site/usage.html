@@ -134,6 +134,7 @@ npx zzop          # analyzes using that config and prints a report</code></pre>
             <tr><td><code>--format &lt;pretty|json&gt;</code>, <code>--json</code></td><td>Output format, overriding the config's <code>format</code>.</td></tr>
             <tr><td><code>--out &lt;dir&gt;</code></td><td>Also write reports to <code>&lt;dir&gt;/zzop-report.&lt;epoch&gt;/</code> — a fresh subdir per run (JSON + SARIF). Same as config <code>report.dir</code>.</td></tr>
             <tr><td><code>-a, --all</code></td><td>Expand info-level findings (folded to per-rule counts by default so warnings stay visible).</td></tr>
+            <tr><td><code>--severity &lt;critical|warning|info|off&gt;</code></td><td>Only display findings at or above this severity (default <code>off</code>, show all). Display-only — the exit code still uses the unfiltered findings, so <code>failOn</code> is unaffected.</td></tr>
             <tr><td><code>-h, --help</code> / <code>--version</code></td><td>Show help / the CLI and engine versions.</td></tr>
           </tbody>
         </table>

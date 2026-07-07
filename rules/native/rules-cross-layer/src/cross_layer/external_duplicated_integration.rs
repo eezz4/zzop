@@ -4,7 +4,7 @@
 //! applied in multiple places instead of one. Anchored at the first site; the fix is to centralize behind
 //! one client/backend proxy that every tree goes through instead of calling the vendor directly.
 //!
-//! Consume sites in test-path files (`crate::unreachable::is_test_file`) are skipped, including from the
+//! Consume sites in test-path files (`zzop_core::is_test_file`) are skipped, including from the
 //! per-host source-tree count — a test mocking a vendor API is not deployed egress.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -26,7 +26,7 @@ pub fn external_duplicated_integration_findings(
     let mut by_host: BTreeMap<&str, Vec<Site<'_>>> = BTreeMap::new();
     for c in external_consumes
         .iter()
-        .filter(|c| c.consume.kind == "http" && !crate::unreachable::is_test_file(&c.consume.file))
+        .filter(|c| c.consume.kind == "http" && !zzop_core::is_test_file(&c.consume.file))
     {
         let Some(key) = c.consume.key.as_deref() else {
             continue;

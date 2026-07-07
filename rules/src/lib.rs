@@ -9,7 +9,8 @@
 //! as dev-dependencies.
 //!
 //! Native rules (whole-graph analyses each registered via their own owning crate's
-//! `register_native_analyses`, e.g. `cross-layer/duplicate-route`/`zzop_rules_graph`,
-//! `schema-structural`/`zzop_rules_schema` — composed by `zzop_engine::register_all_native`; the kernel
-//! (`zzop-core`) itself registers none) are NOT packs and do not live here — they are ordinary Rust crates
-//! under `rules/native/` (`rules-graph`, `rules-schema`), statically linked into `zzop-engine`.
+//! `register_native_analyses`, e.g. `circular`/`zzop_rules_graph`, `duplicate-route`/`zzop_rules_http`,
+//! `cross-layer/duplicate-route`/`zzop_rules_cross_layer`, `schema-structural`/`zzop_rules_schema` —
+//! composed by `zzop_engine::register_all_native`; the kernel (`zzop-core`) itself registers none) are NOT
+//! packs and do not live here — they are ordinary Rust crates under `rules/native/` (`rules-graph`,
+//! `rules-http`, `rules-cross-layer`, `rules-schema`), statically linked into `zzop-engine`.

@@ -87,6 +87,47 @@ function collectWarnings(output) {
   return out;
 }
 
+/**
+ * Return a shallow-cloned output with all findings arrays filtered to `severityRank >= minSeverity`'s
+ * threshold. Display-only helper — never touches exit-code computation, which must run on the
+ * unfiltered findings. Filters, in order: single-tree top-level `findings`, each `trees[].output.findings`
+ * in a multi-tree output, and the top-level `crossLayerFindings` (multi-tree cross-layer rule hits).
+ *
+ * `minSeverity` of `null`/`undefined`/`"off"` (the CLI's default/unset state) is a no-op, returning
+ * `output` unchanged. `"info"` is also a no-op: it is the lowest real severity, so thresholding on it
+ * would incorrectly drop any finding carrying an unrecognized severity string (rank 0) that the
+ * unfiltered/default view would otherwise still show.
+ *
+ * @param {object} output  parsed native output
+ * @param {'critical'|'warning'|'info'|'off'|null} [minSeverity]
+ * @returns {object}
+ */
+function filterOutputBySeverity(output, minSeverity) {
+  if (!output || typeof output !== 'object') return output;
+  if (minSeverity == null) return output;
+  const normalized = normalizeSeverity(minSeverity, 'severity');
+  if (normalized === OFF || normalized === 'info') return output;
+
+  const threshold = severityRank(normalized);
+  const keep = (f) => severityRank(f && f.severity) >= threshold;
+
+  if (Array.isArray(output.trees)) {
+    const trees = output.trees.map((tree) => {
+      const treeOutput = (tree && tree.output) || {};
+      if (!Array.isArray(treeOutput.findings)) return tree;
+      return { ...tree, output: { ...treeOutput, findings: treeOutput.findings.filter(keep) } };
+    });
+    const result = { ...output, trees };
+    if (Array.isArray(output.crossLayerFindings)) {
+      result.crossLayerFindings = output.crossLayerFindings.filter(keep);
+    }
+    return result;
+  }
+
+  if (!Array.isArray(output.findings)) return output;
+  return { ...output, findings: output.findings.filter(keep) };
+}
+
 function countBySeverity(findings) {
   const counts = { critical: 0, warning: 0, info: 0, other: 0 };
   for (const f of findings) {
@@ -134,13 +175,13 @@ function groupByFile(findings) {
  * The footer always tallies every finding, folded or not.
  *
  * @param {object} output  parsed native output
- * @param {{ color?: boolean, showAllInfo?: boolean }} [opts]
+ * @param {{ color?: boolean, showAllInfo?: boolean, minSeverity?: 'critical'|'warning'|'info'|'off'|null }} [opts]
  * @returns {string}
  */
 function formatPretty(output, opts = {}) {
   const color = Boolean(opts.color);
   const showAllInfo = Boolean(opts.showAllInfo);
-  const { findings, fileCount } = collectFindings(output);
+  const { findings, fileCount } = collectFindings(filterOutputBySeverity(output, opts.minSeverity));
 
   if (findings.length === 0) {
     const ok = paint('No findings.', ANSI.dim, color);
@@ -265,6 +306,7 @@ module.exports = {
   collectWarnings,
   groupByFile,
   countBySeverity,
+  filterOutputBySeverity,
   formatPretty,
   formatJson,
   computeExitCode,

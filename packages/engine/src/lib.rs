@@ -62,6 +62,8 @@ pub use io::IoOptions;
 /// (`zzop_core`) itself registers nothing; native analyses live in their owning crates.
 pub fn register_all_native(registry: &mut RuleRegistry) {
     zzop_rules_graph::register_native_analyses(registry);
+    zzop_rules_http::register_native_analyses(registry);
+    zzop_rules_cross_layer::register_native_analyses(registry);
     zzop_rules_schema::register_native_analyses(registry);
     zzop_metrics::register_native_analyses(registry);
 }
@@ -278,13 +280,13 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
         low_confidence_key_patterns: zzop_metrics::default_generic_interface_key_patterns(),
     };
     let cross_layer = zzop_core::link_cross_layer_io(&source_ios, &link_opts);
-    let package_imports: Vec<zzop_rules_graph::PackageImportSite> = outputs
+    let package_imports: Vec<zzop_rules_cross_layer::PackageImportSite> = outputs
         .iter()
         .flat_map(|(_, source, output)| {
             output
                 .package_imports
                 .iter()
-                .map(move |p| zzop_rules_graph::PackageImportSite {
+                .map(move |p| zzop_rules_cross_layer::PackageImportSite {
                     source: source.clone(),
                     specifier: p.specifier.clone(),
                     file_count: p.file_count,
@@ -301,7 +303,7 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
     }
 }
 
-/// Runs the 20 `cross-layer/*` native rules (`zzop_rules_graph::cross_layer`) over `cross_layer` and
+/// Runs the 20 `cross-layer/*` native rules (`zzop_rules_cross_layer::cross_layer`) over `cross_layer` and
 /// returns their merged, sorted findings.
 ///
 /// ## disabledRules gating: union, exclude-only
@@ -322,7 +324,7 @@ fn compute_cross_layer_findings(
     source_ios: &[SourceIo],
     cross_layer: &zzop_core::CrossLayerResult,
     trees: &[(PathBuf, EngineConfig)],
-    package_imports: &[zzop_rules_graph::PackageImportSite],
+    package_imports: &[zzop_rules_cross_layer::PackageImportSite],
 ) -> Vec<Finding> {
     let mut disabled_union: Vec<String> = Vec::new();
     for (_, config) in trees {
@@ -333,13 +335,13 @@ fn compute_cross_layer_findings(
         ..RuleConfig::default()
     };
 
-    let http_provides: Vec<zzop_rules_graph::HttpProvideSite> = source_ios
+    let http_provides: Vec<zzop_rules_cross_layer::HttpProvideSite> = source_ios
         .iter()
         .flat_map(|s| {
             s.io.provides
                 .iter()
                 .filter(|p| p.kind == "http")
-                .map(move |p| zzop_rules_graph::HttpProvideSite {
+                .map(move |p| zzop_rules_cross_layer::HttpProvideSite {
                     source: s.source.clone(),
                     key: p.key.clone(),
                     file: p.file.clone(),
@@ -358,107 +360,115 @@ fn compute_cross_layer_findings(
 
     let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(20);
     if zzop_core::is_enabled(&gate, "cross-layer/unconsumed-endpoint") {
-        sources.push(zzop_rules_graph::unconsumed_endpoint_findings(
+        sources.push(zzop_rules_cross_layer::unconsumed_endpoint_findings(
             &cross_layer.unconsumed_provides,
             &cross_layer.unresolved_consumes,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/method-mismatch") {
-        sources.push(zzop_rules_graph::method_mismatch_findings(
+        sources.push(zzop_rules_cross_layer::method_mismatch_findings(
             &cross_layer.unprovided_consumes,
             &http_provides,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/version-skew") {
-        sources.push(zzop_rules_graph::version_skew_findings(
+        sources.push(zzop_rules_cross_layer::version_skew_findings(
             &cross_layer.unprovided_consumes,
             &http_provides,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/path-near-miss") {
-        sources.push(zzop_rules_graph::path_near_miss_findings(
+        sources.push(zzop_rules_cross_layer::path_near_miss_findings(
             &cross_layer.unprovided_consumes,
             &http_provides,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/shared-db-table") {
-        sources.push(zzop_rules_graph::shared_db_table_findings(cross_layer));
-    }
-    if zzop_core::is_enabled(&gate, "cross-layer/duplicate-route") {
-        sources.push(zzop_rules_graph::cross_layer_duplicate_route_findings(
+        sources.push(zzop_rules_cross_layer::shared_db_table_findings(
             cross_layer,
         ));
     }
+    if zzop_core::is_enabled(&gate, "cross-layer/duplicate-route") {
+        sources.push(zzop_rules_cross_layer::cross_layer_duplicate_route_findings(cross_layer));
+    }
     if zzop_core::is_enabled(&gate, "cross-layer/external-shadow-internal") {
-        sources.push(zzop_rules_graph::external_shadow_internal_findings(
+        sources.push(zzop_rules_cross_layer::external_shadow_internal_findings(
             &cross_layer.external_consumes,
             &http_provides,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/external-secret-in-url") {
-        sources.push(zzop_rules_graph::external_secret_in_url_findings(
+        sources.push(zzop_rules_cross_layer::external_secret_in_url_findings(
             &cross_layer.external_consumes,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/external-duplicated-integration") {
-        sources.push(zzop_rules_graph::external_duplicated_integration_findings(
-            &cross_layer.external_consumes,
-        ));
+        sources.push(
+            zzop_rules_cross_layer::external_duplicated_integration_findings(
+                &cross_layer.external_consumes,
+            ),
+        );
     }
     if zzop_core::is_enabled(&gate, "cross-layer/external-host-fanout") {
-        sources.push(zzop_rules_graph::external_host_fanout_findings(
+        sources.push(zzop_rules_cross_layer::external_host_fanout_findings(
             &cross_layer.external_consumes,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/external-base-url-drift") {
-        sources.push(zzop_rules_graph::external_base_url_drift_findings(
+        sources.push(zzop_rules_cross_layer::external_base_url_drift_findings(
             &cross_layer.external_consumes,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/external-version-inconsistent") {
-        sources.push(zzop_rules_graph::external_version_inconsistent_findings(
-            &cross_layer.external_consumes,
-        ));
+        sources.push(
+            zzop_rules_cross_layer::external_version_inconsistent_findings(
+                &cross_layer.external_consumes,
+            ),
+        );
     }
     if zzop_core::is_enabled(&gate, "cross-layer/external-ip-literal") {
-        sources.push(zzop_rules_graph::external_ip_literal_findings(
+        sources.push(zzop_rules_cross_layer::external_ip_literal_findings(
             &cross_layer.external_consumes,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/ambiguous-consume") {
-        sources.push(zzop_rules_graph::ambiguous_consume_findings(
+        sources.push(zzop_rules_cross_layer::ambiguous_consume_findings(
             &cross_layer.ambiguous_consumes,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/unconsumed-mutation-endpoint") {
-        sources.push(zzop_rules_graph::unconsumed_mutation_endpoint_findings(
-            &cross_layer.unconsumed_provides,
-        ));
+        sources.push(
+            zzop_rules_cross_layer::unconsumed_mutation_endpoint_findings(
+                &cross_layer.unconsumed_provides,
+            ),
+        );
     }
     if zzop_core::is_enabled(&gate, "cross-layer/unprovided-mutation-call") {
-        sources.push(zzop_rules_graph::unprovided_mutation_call_findings(
+        sources.push(zzop_rules_cross_layer::unprovided_mutation_call_findings(
             &cross_layer.unprovided_consumes,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/route-shadowing") {
-        sources.push(zzop_rules_graph::cross_tree_route_shadowing_findings(
+        sources.push(zzop_rules_cross_layer::cross_tree_route_shadowing_findings(
             &http_provides,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/unresolved-consume-ratio") {
-        sources.push(zzop_rules_graph::unresolved_consume_ratio_findings(
+        sources.push(zzop_rules_cross_layer::unresolved_consume_ratio_findings(
             &cross_layer.unresolved_consumes,
             &http_consume_totals,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/sdk-import-no-visible-consume") {
-        sources.push(zzop_rules_graph::sdk_import_no_visible_consume_findings(
-            package_imports,
-            &http_consume_totals,
-        ));
+        sources.push(
+            zzop_rules_cross_layer::sdk_import_no_visible_consume_findings(
+                package_imports,
+                &http_consume_totals,
+            ),
+        );
     }
     if zzop_core::is_enabled(&gate, "cross-layer/unconsumed-procedure") {
-        sources.push(zzop_rules_graph::unconsumed_procedure_findings(
+        sources.push(zzop_rules_cross_layer::unconsumed_procedure_findings(
             &cross_layer.unconsumed_provides,
         ));
     }

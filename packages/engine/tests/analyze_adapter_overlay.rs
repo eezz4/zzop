@@ -20,6 +20,17 @@
 //! - `projection_for_an_unknown_rel_still_contributes_its_provide`: an overlay carries a
 //!   `FileProjection` whose `path` matches no file in the native tree at all — proves the
 //!   synthetic-`FileArtifact` push path works (not just the merge-onto-existing-artifact path).
+//! - `overlay_import_from_a_synthetic_projection_gives_a_native_target_fan_in`: the dep-graph-completion
+//!   contract (the injection contract extends past io/fragments to dep-graph facts, so any non-TS
+//!   adapter can complete the graph) — a synthetic overlay `FileProjection` (a `.svelte` path the native
+//!   dispatch table never recognizes) whose `imports` names a native TS module with no OTHER importer
+//!   anywhere in the tree.
+//!   Asserts BOTH directions: without the overlay the TS module reads as a `dead-candidates` finding;
+//!   with it, the overlay's import edge gives it real fan-in and the finding disappears.
+//! - `overlay_is_entry_marker_exempts_an_otherwise_dead_native_file`: an overlay `FileProjection` for an
+//!   existing native TS file's own path, marked `is_entry: true` — proves `assemble` unions it into
+//!   `dead_candidate_findings`'s `extra_entries` (the overlay counterpart of a package.json manifest
+//!   entry), suppressing a finding that fires with no overlay at all.
 
 use std::collections::HashMap;
 use std::fs;
@@ -27,8 +38,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use zzop_core::{
-    FileProjection, IoFacts, IoProvide, NormalizedEnvelope, RouterMountEntry, RouterMountFragment,
-    NORMALIZED_AST_FORMAT,
+    FileProjection, ImportBinding, IoFacts, IoProvide, NormalizedEnvelope, RouterMountEntry,
+    RouterMountFragment, NORMALIZED_AST_FORMAT,
 };
 use zzop_engine::{analyze_tree, EngineConfig};
 
@@ -84,12 +95,14 @@ fn projection(path: &str, loc: u32) -> FileProjection {
         symbols: Vec::new(),
         imports: zzop_core::ImportMap::new(),
         re_exports: Vec::new(),
+        dynamic_imports: Vec::new(),
         used_names: Vec::new(),
         const_map_fragment: HashMap::new(),
         trpc_router_fragments: Vec::new(),
         router_mount_fragments: Vec::new(),
         io: IoFacts::default(),
         degraded: false,
+        is_entry: false,
     }
 }
 
@@ -261,5 +274,161 @@ fn projection_for_an_unknown_rel_still_contributes_its_provide() {
             .any(|p| p.key == "GET /legacy/status" && p.file == "external/legacy.jsp"),
         "{:?}",
         provides
+    );
+}
+
+#[test]
+fn overlay_import_from_a_synthetic_projection_gives_a_native_target_fan_in() {
+    // Mode B dep-graph-completion contract: the injection contract extends past io/fragments to
+    // dep-graph facts, so a synthetic overlay `FileProjection` (a `.svelte` path the native dispatch
+    // table never recognizes) whose `imports` names a native TS module gives that module real fan-in,
+    // exactly like a native TS importer would.
+    let dir = TempDir::new("zzop-adapter-overlay");
+    // No other file in the tree imports this — dead-candidate bait without the overlay.
+    dir.write("src/used.ts", "export const helper = 1;\n");
+
+    let baseline = analyze_tree(dir.path(), &config());
+    assert!(
+        baseline
+            .findings
+            .iter()
+            .any(|f| f.rule_id == "dead-candidates" && f.file == "src/used.ts"),
+        "expected src/used.ts to read as dead with no overlay at all: {:?}",
+        baseline.findings
+    );
+
+    // A `.svelte` file the native dispatch table never dispatches at all — pushed down the synthetic
+    // (no-native-match) branch of `apply_adapter_overlays`. Its ONLY import is a relative specifier
+    // (`./used`, resolved from its own directory via the same `resolve_file_with_workspace` the native
+    // path uses — NOT `analyze_envelope`'s exact-path-first resolver, since this is Mode B).
+    let mut view = projection("src/View.svelte", 6);
+    view.imports.insert(
+        "helper".to_string(),
+        ImportBinding {
+            specifier: "./used".to_string(),
+            original: "helper".to_string(),
+            deferred: false,
+            type_only: false,
+        },
+    );
+
+    let mut cfg = config();
+    cfg.adapter_overlays = vec![overlay("svelte-adapter/1", vec![view])];
+    let out = analyze_tree(dir.path(), &cfg);
+
+    // The overlay edge is real dep-graph data, not just a suppression side effect.
+    assert!(
+        out.ir
+            .ir
+            .dep
+            .get("src/View.svelte")
+            .cloned()
+            .unwrap_or_default()
+            .contains(&"src/used.ts".to_string()),
+        "{:?}",
+        out.ir.ir.dep
+    );
+    assert!(
+        !out.findings
+            .iter()
+            .any(|f| f.rule_id == "dead-candidates" && f.file == "src/used.ts"),
+        "expected the overlay's import edge to give src/used.ts fan-in: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn overlay_is_entry_marker_exempts_an_otherwise_dead_native_file() {
+    // `FileProjection::is_entry` — the overlay counterpart of a package.json manifest entry: `assemble`
+    // unions every `is_entry: true` overlay path into `dead_candidate_findings`'s `extra_entries`.
+    let dir = TempDir::new("zzop-adapter-overlay");
+    // Not an entry-pattern name (no `index`/`main`/`App`/...), so it reads as dead with no overlay.
+    dir.write("src/hooks.server.ts", "export const noop = 1;\n");
+
+    let baseline = analyze_tree(dir.path(), &config());
+    assert!(
+        baseline
+            .findings
+            .iter()
+            .any(|f| f.rule_id == "dead-candidates" && f.file == "src/hooks.server.ts"),
+        "expected src/hooks.server.ts to read as dead with no overlay at all: {:?}",
+        baseline.findings
+    );
+
+    // Merges onto the EXISTING native artifact at the same path (not the synthetic branch) — `is_entry`
+    // is read straight from `config.adapter_overlays` in `assemble`, so it applies regardless of which
+    // merge branch a projection's `path` takes.
+    let mut hooks = projection("src/hooks.server.ts", 1);
+    hooks.is_entry = true;
+
+    let mut cfg = config();
+    cfg.adapter_overlays = vec![overlay("sveltekit-entry-adapter/1", vec![hooks])];
+    let out = analyze_tree(dir.path(), &cfg);
+
+    assert!(
+        !out.findings
+            .iter()
+            .any(|f| f.rule_id == "dead-candidates" && f.file == "src/hooks.server.ts"),
+        "expected is_entry to exempt src/hooks.server.ts from dead-candidates: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn overlay_import_onto_a_degraded_on_disk_file_gives_a_target_fan_in() {
+    // The MERGE-onto-existing branch (distinct from the synthetic branch above), and the one the real
+    // SvelteKit case actually hits: the native pass walks EVERY file, so a `.svelte` file present ON DISK
+    // becomes a degraded artifact with `imports: None`. An overlay for that same path then FILLS its
+    // dep-graph data (a parsed TS artifact's own imports would instead stay authoritative — only a
+    // `None` is filled).
+    let dir = TempDir::new("zzop-adapter-overlay");
+    dir.write("src/used.ts", "export const helper = 1;\n");
+    // Present on disk -> native pass makes a degraded artifact for it (dispatch table can't parse .svelte).
+    dir.write(
+        "src/View.svelte",
+        "<script>import { helper } from './used';</script>\n",
+    );
+
+    let baseline = analyze_tree(dir.path(), &config());
+    assert!(
+        baseline
+            .findings
+            .iter()
+            .any(|f| f.rule_id == "dead-candidates" && f.file == "src/used.ts"),
+        "the native pass can't parse .svelte, so src/used.ts reads as dead without the overlay: {:?}",
+        baseline.findings
+    );
+
+    let mut view = projection("src/View.svelte", 1);
+    view.imports.insert(
+        "helper".to_string(),
+        ImportBinding {
+            specifier: "./used".to_string(),
+            original: "helper".to_string(),
+            deferred: false,
+            type_only: false,
+        },
+    );
+    let mut cfg = config();
+    cfg.adapter_overlays = vec![overlay("svelte-adapter/1", vec![view])];
+    let out = analyze_tree(dir.path(), &cfg);
+
+    assert!(
+        out.ir
+            .ir
+            .dep
+            .get("src/View.svelte")
+            .cloned()
+            .unwrap_or_default()
+            .contains(&"src/used.ts".to_string()),
+        "the overlay must fill the degraded on-disk .svelte artifact's dep edges: {:?}",
+        out.ir.ir.dep
+    );
+    assert!(
+        !out.findings
+            .iter()
+            .any(|f| f.rule_id == "dead-candidates" && f.file == "src/used.ts"),
+        "expected the overlay edge on the degraded .svelte artifact to give src/used.ts fan-in: {:?}",
+        out.findings
     );
 }

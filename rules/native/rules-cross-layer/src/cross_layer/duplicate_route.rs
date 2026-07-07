@@ -6,11 +6,11 @@
 //! produce a `CrossLayerEdge` — the linker routes it to `ambiguous_consumes` before edge emission — so those
 //! two buckets together cover every multi-source-provided http key, and `edges` is never a source here.
 //!
-//! Distinct from the existing single-tree `crate::duplicate_route` rule (id `"duplicate-route"`): that one
+//! Distinct from the existing single-tree `zzop_rules_http::duplicate_route` rule (id `"duplicate-route"`): that one
 //! flags 2+ registrations of a route WITHIN one tree; this one only fires when the duplicates span 2+
 //! DIFFERENT trees. Different id, so both can be registered/disabled independently.
 //!
-//! Provider sites in test-path files (`crate::unreachable::is_test_file`) are skipped, same policy as
+//! Provider sites in test-path files (`zzop_core::is_test_file`) are skipped, same policy as
 //! `mutating-route-no-auth`. A dead multi-tree route also yields per-provider
 //! `cross-layer/unconsumed-endpoint` info findings — the overlap is intentional (different questions: "who
 //! serves this?" vs "who calls this?").
@@ -27,7 +27,7 @@ pub fn cross_layer_duplicate_route_findings(cross_layer: &CrossLayerResult) -> V
     for p in cross_layer
         .unconsumed_provides
         .iter()
-        .filter(|p| p.provide.kind == "http" && !crate::unreachable::is_test_file(&p.provide.file))
+        .filter(|p| p.provide.kind == "http" && !zzop_core::is_test_file(&p.provide.file))
     {
         by_key.entry(p.provide.key.clone()).or_default().push((
             p.source.clone(),
@@ -41,7 +41,7 @@ pub fn cross_layer_duplicate_route_findings(cross_layer: &CrossLayerResult) -> V
         .filter(|a| a.consume.kind == "http")
     {
         for cand in &a.candidates {
-            if crate::unreachable::is_test_file(&cand.provide.file) {
+            if zzop_core::is_test_file(&cand.provide.file) {
                 continue;
             }
             by_key.entry(cand.provide.key.clone()).or_default().push((

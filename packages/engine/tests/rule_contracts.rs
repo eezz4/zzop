@@ -4,8 +4,9 @@
 //! shipped with no `suppress_marker`, rule messages that never told the reader how to exclude a finding,
 //! and `docs/rules/catalog.md` totals out of sync with the actual pack/registry data). This file loads
 //! every shipped DSL pack (`rules/dsl/*.json`, via `zzop_core::load_dsl_packs`) and the native registry
-//! (`zzop_engine::register_all_native`, composing `zzop_rules_graph`/`zzop_rules_schema`/`zzop_metrics`'s own
-//! `register_native_analyses`) fresh in each test, so drift in either is caught the next time
+//! (`zzop_engine::register_all_native`, composing `zzop_rules_graph`/`zzop_rules_http`/
+//! `zzop_rules_cross_layer`/`zzop_rules_schema`/`zzop_metrics`'s own `register_native_analyses`) fresh in
+//! each test, so drift in either is caught the next time
 //! `cargo test --workspace` runs — no test here hand-copies rule data, everything is read from the same
 //! source the engine itself loads at runtime.
 //!
@@ -596,7 +597,8 @@ fn core_rs_files_excluding_mechanism_files() -> Vec<PathBuf> {
 /// The kernel-is-rule-vocabulary-free central contract: `zzop_core::register_native_analysis_stub`
 /// (`packages/core/src/registry.rs`) is a generic, id-agnostic MECHANISM — the kernel itself must never
 /// name a specific native analysis id. Every id lives in its owning rules crate's own
-/// `register_native_analyses` (`zzop_rules_graph`, `zzop_rules_schema`, `zzop_metrics`), composed by
+/// `register_native_analyses` (`zzop_rules_graph`, `zzop_rules_http`, `zzop_rules_cross_layer`,
+/// `zzop_rules_schema`, `zzop_metrics`), composed by
 /// `zzop_engine::register_all_native` — never hand-copied here, so this test cannot drift from the real id
 /// list the same way contract 5's catalog-sync tests can't.
 ///

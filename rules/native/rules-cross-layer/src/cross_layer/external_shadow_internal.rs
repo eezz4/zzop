@@ -6,7 +6,7 @@
 //! whatever the proxy/gateway layer was meant to enforce (auth, rewriting, rate limiting). Anchored at the
 //! consume — the fix (drop the hardcoded host, go through the relative/proxied path) lands there.
 //!
-//! Consume sites in test-path files (`crate::unreachable::is_test_file`) are skipped — a test mocking a
+//! Consume sites in test-path files (`zzop_core::is_test_file`) are skipped — a test mocking a
 //! vendor/own API is not deployed egress.
 
 use std::collections::BTreeMap;
@@ -36,7 +36,7 @@ pub fn external_shadow_internal_findings(
     let mut out = Vec::new();
     for c in external_consumes
         .iter()
-        .filter(|c| c.consume.kind == "http" && !crate::unreachable::is_test_file(&c.consume.file))
+        .filter(|c| c.consume.kind == "http" && !zzop_core::is_test_file(&c.consume.file))
     {
         let Some(key) = c.consume.key.as_deref() else {
             continue;

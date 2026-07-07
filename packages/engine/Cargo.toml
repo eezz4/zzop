@@ -14,6 +14,8 @@ zzop-parser-typescript = { path = "../../parser/parser-typescript" }
 zzop-parser-prisma = { path = "../../parser/parser-prisma" }
 zzop-parser-java = { path = "../../parser/parser-java" }
 zzop-rules-graph = { path = "../../rules/native/rules-graph" }
+zzop-rules-http = { path = "../../rules/native/rules-http" }
+zzop-rules-cross-layer = { path = "../../rules/native/rules-cross-layer" }
 zzop-rules-schema = { path = "../../rules/native/rules-schema" }
 serde = { workspace = true }
 serde_json = { workspace = true }

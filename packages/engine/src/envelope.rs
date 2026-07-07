@@ -74,11 +74,12 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     let mut io_provides: Vec<IoProvide> = Vec::new();
     let mut io_consumes: Vec<IoConsume> = Vec::new();
     let mut dep: DepGraph = DepGraph::new();
-    // Defect B's ephemeral exclusion set (see `circular_from_dep_excluding`'s doc) — never
+    // Ephemeral noncycle-exclusion set (see `circular_from_dep_excluding`'s doc) — never
     // cached/serialized, lives only for this one `analyze_envelope` call. A `(from, to)` pair lands here
-    // when EVERY binding contributing that edge is type-only; a pair with at least one value binding to
-    // the same target is never inserted, so it still counts toward `cycles` below.
-    let mut excluded_type_only_edges: HashSet<(String, String)> = HashSet::new();
+    // when EVERY edge contributing that target is excludable from cycle detection (type-only binding/
+    // re-export, or a dynamic import); a pair with at least one plain value edge to the same target is
+    // never inserted, so it still counts toward `cycles` below.
+    let mut noncycle_edges: HashSet<(String, String)> = HashSet::new();
     let mut per_file_findings: Vec<Finding> = Vec::new();
     // Fragment-composition substrate — the envelope-mode counterpart of `analyze::assemble`'s own
     // `trpc_fragment_pairs`/`router_mount_pairs`/`fragment_pairs`: collected during the per-file loop,
@@ -114,10 +115,11 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         // it as a graph node, letting an isolated (import-free) file still get a `FileNode`.
         let mut seen = HashSet::new();
         let mut targets = Vec::new();
-        // target -> true iff every binding resolving to it so far is type-only — mirrors
+        // target -> true iff EVERY edge resolving to it so far is excludable from cycle detection
+        // (type-only, or a dynamic import) — mirrors
         // `zzop_parser_typescript::lang::resolve::build_dep_impl`'s own aggregation, folded in here since
         // envelope mode builds `dep` by hand rather than calling that shared helper.
-        let mut target_type_only: HashMap<String, bool> = HashMap::new();
+        let mut target_noncycle: HashMap<String, bool> = HashMap::new();
         for binding in file.imports.values() {
             // Non-relative specifier naming no projected file = a package import — summarized for
             // `cross-layer/sdk-import-no-visible-consume`.
@@ -134,38 +136,46 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
                 continue; // lazy import: no module-load edge.
             }
             if binding.specifier != file.path && all_paths.contains(binding.specifier.as_str()) {
-                target_type_only
+                target_noncycle
                     .entry(binding.specifier.clone())
-                    .and_modify(|all_type_only| *all_type_only &= binding.type_only)
+                    .and_modify(|all| *all &= binding.type_only)
                     .or_insert(binding.type_only);
                 if seen.insert(binding.specifier.clone()) {
                     targets.push(binding.specifier.clone());
                 }
             }
         }
-        // Defect A (envelope parity): fold each non-type-only re-export's specifier in too, mirroring
+        // Defect A/1 (envelope parity): fold each re-export's specifier in too, mirroring
         // `zzop_parser_typescript::lang::resolve::build_dep_impl`'s own re-export merge — a barrel
-        // `export { x } from './impl'` with no local import of `impl` must still give `impl` a dep
-        // edge (fan-in), or `dead-candidates` false-positives it. Type-only re-exports are erased by TS
-        // at compile time: skipped entirely, not even added to the type-only exclusion set below (a
-        // type-only re-export was never a runtime nor a cycle edge in the first place).
+        // `export { x } from './impl'` with no local import of `impl` must still give `impl` a dep edge
+        // (fan-in), or `dead-candidates` false-positives it. A type-only re-export (Defect 1) now gets
+        // the same edge-but-excluded-from-cycles treatment as a type-only import binding, rather than
+        // being dropped entirely.
         for re in &file.re_exports {
-            if re.type_only {
-                continue;
-            }
             if re.specifier != file.path && all_paths.contains(re.specifier.as_str()) {
-                // Always a real (non-type-only) edge, same as `build_dep_impl`'s re-export handling —
-                // overwrites rather than `&=`s, since a re-export binding itself carries no separate
-                // type-only-per-import distinction beyond `ReExport::type_only`, already checked above.
-                target_type_only.insert(re.specifier.clone(), false);
+                target_noncycle
+                    .entry(re.specifier.clone())
+                    .and_modify(|all| *all &= re.type_only)
+                    .or_insert(re.type_only);
                 if seen.insert(re.specifier.clone()) {
                     targets.push(re.specifier.clone());
                 }
             }
         }
-        for (target, all_type_only) in target_type_only {
-            if all_type_only {
-                excluded_type_only_edges.insert((file.path.clone(), target));
+        // Defect 2 (envelope parity): a dynamic `import()` specifier gives its target fan-in but is
+        // never a synchronous-load cycle edge — always excludable, mirroring `build_dep_impl`'s own
+        // dynamic-import handling.
+        for spec in &file.dynamic_imports {
+            if spec != &file.path && all_paths.contains(spec.as_str()) {
+                target_noncycle.entry(spec.clone()).or_insert(true);
+                if seen.insert(spec.clone()) {
+                    targets.push(spec.clone());
+                }
+            }
+        }
+        for (target, all_noncycle) in target_noncycle {
+            if all_noncycle {
+                noncycle_edges.insert((file.path.clone(), target));
             }
         }
         dep.insert(file.path.clone(), targets);
@@ -208,7 +218,7 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     }
     crate::analyze::late_resolve_cross_file_consumes(const_fragment_pairs, &mut io_consumes);
 
-    let cycles = circular_from_dep_excluding(&dep, &excluded_type_only_edges);
+    let cycles = circular_from_dep_excluding(&dep, &noncycle_edges);
     let dep_stats = dep_stats_from_dep(&dep);
     // Every `FileProjection` is, by construction, a parsed-source file (an external parser only ever
     // projects source it understood) — so `is_source` is unconditionally true here, unlike
@@ -336,9 +346,16 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
 /// Per `FileProjection`: if `path` matches an existing artifact's `rel`, it's merged in place — `io`
 /// entries appended minus exact-duplicate `(kind, key, file, line)` tuples (`file` normalized to
 /// `projection.path` first), fragments appended with no dedup (composition dedups later), and
-/// `const_map_fragment` native-first (existing key wins). If `path` names no existing artifact (e.g. a
-/// `.py`/`.jsp` sibling the native dispatch table doesn't recognize), it's pushed as a synthetic
-/// `FileArtifact` with every native-only field at its empty/default value.
+/// `const_map_fragment` native-first (existing key wins); the native artifact's own
+/// `imports`/`re_exports`/`dynamic_imports` are left untouched (native dep-graph facts stay
+/// authoritative — see `merge_projection_onto_artifact`'s doc). If `path` names no existing artifact
+/// (e.g. a `.py`/`.jsp`/`.svelte` sibling the native dispatch table doesn't recognize), it's pushed as a
+/// synthetic `FileArtifact` carrying the projection's OWN `imports`/`re_exports`/`dynamic_imports` (so
+/// it contributes real dep-graph fan-in edges too — see `synthetic_artifact_from_projection`'s doc) with
+/// every other native-only field (symbols, wrapper/query/store/field-usage fragments) at its
+/// empty/default value. A `FileProjection` additionally marked `is_entry: true` has its `path` unioned
+/// into `dead_candidate_findings`'s `extra_entries` set in `analyze::assemble`, exempting it from
+/// `dead-candidates` the same way a package.json manifest entry is exempt.
 ///
 /// `artifacts` is re-sorted by `rel` before returning — `analyze::assemble` relies on that order for
 /// `ir.ir.symbols`'s determinism.
@@ -400,11 +417,28 @@ fn normalize_io_file_field(io: &mut IoFacts, path: &str) {
 }
 
 /// The "found" branch of `apply_adapter_overlays`'s per-`FileProjection` merge (see that function's doc
-/// for the dedup/native-first semantics per channel).
+/// for the dedup/native-first semantics per channel). A TypeScript artifact the native pass parsed keeps
+/// its own authoritative `imports`/`re_exports`/`dynamic_imports` (an overlay never overrides parsed
+/// facts). But the native pass walks EVERY file, so a non-TS file type the engine can't parse (e.g. a
+/// `.svelte` component) lands here too as a degraded artifact with `imports: None` — nothing to preserve
+/// — and an overlay carrying dep-graph data then fills it, letting an adapter complete the graph for that
+/// file type (its imports become real fan-in edges to their TS targets).
 fn merge_projection_onto_artifact(
     artifact: &mut crate::pipeline::FileArtifact,
     projection: &zzop_core::FileProjection,
 ) {
+    // Dep-graph facts: adopt the overlay's only when the native artifact has none of its own (a
+    // degraded/non-TS file), so parsed TS imports always win over an overlay.
+    if artifact.imports.is_none()
+        && (!projection.imports.is_empty()
+            || !projection.re_exports.is_empty()
+            || !projection.dynamic_imports.is_empty())
+    {
+        artifact.imports = Some(projection.imports.clone());
+        artifact.re_exports = projection.re_exports.clone();
+        artifact.dynamic_imports = projection.dynamic_imports.clone();
+    }
+
     let mut incoming_io = projection.io.clone();
     normalize_io_file_field(&mut incoming_io, &projection.path);
 
@@ -459,17 +493,38 @@ fn synthetic_artifact_from_projection(
         Some(io)
     };
 
+    // Per the Mode B dep-graph-completion contract (the injection contract extends past io/fragments to
+    // dep-graph facts, so any non-TS adapter can complete the graph while the engine stays
+    // framework-neutral): `analyze::assemble` only ever folds an artifact's `imports`/`re_exports`/
+    // `dynamic_imports` into `ts_import_pairs`/`ts_re_export_pairs`/`ts_dynamic_import_pairs` (-> real
+    // dep-graph edges, via `build_dep_with_workspace`) inside its `if let Some(imports) = artifact.imports`
+    // branch — so `imports` must be `Some` whenever ANY of the three carries data, not just when `imports`
+    // itself is non-empty (a bare re-export or a dynamic-only file can have an empty `imports` map and
+    // still need graph participation, mirroring `analyze_envelope`'s own Defect-A/2 handling below). Truly
+    // empty (none of the three populated) keeps `imports: None` so a no-data overlay file doesn't
+    // needlessly enter `ts_import_pairs`/`ts_paths`/`package_import_files`.
+    let has_dep_graph_data = !projection.imports.is_empty()
+        || !projection.re_exports.is_empty()
+        || !projection.dynamic_imports.is_empty();
+
     crate::pipeline::FileArtifact {
         rel: projection.path.clone(),
         symbols: Vec::new(),
-        imports: None,
-        // Left empty rather than `projection.re_exports.clone()`: `analyze::assemble` only ever folds
-        // an artifact's `re_exports` into `ts_re_export_pairs` inside its `if let Some(imports) =
-        // artifact.imports` branch (see `analyze.rs`), and this synthetic artifact's `imports` is `None`
-        // right above — so a populated `re_exports` here would be dead data, never reaching the dep
-        // graph. (Mode A's `analyze_envelope` is unaffected: it builds `dep` by hand from
-        // `FileProjection` directly, per this file's own re-export merge above, not through this struct.)
-        re_exports: Vec::new(),
+        // Was unconditionally `None` ("dead data" by design) — now carries the projection's own imports
+        // whenever there is dep-graph data to contribute, so an injected non-TS file (`.svelte`/`.vue`/
+        // `.astro`) gives its imported native TS targets real fan-in, exactly like a native TS importer
+        // would. This is the synthetic-artifact half of the injection contract's dep-graph completion;
+        // `merge_projection_onto_artifact` (the onto-an-EXISTING-native-artifact branch, above) is
+        // deliberately NOT touched here — native imports stay authoritative there, a separate concern.
+        imports: has_dep_graph_data.then(|| projection.imports.clone()),
+        // Now carried through (previously always `Vec::new()` — see the superseded comment this
+        // replaces) via the SAME `if let Some(imports)` branch in `analyze::assemble` as `imports` right
+        // above: a synthetic overlay file's bare re-export or dynamic `import()` now gives its target
+        // real fan-in too. (Mode A's `analyze_envelope` is unaffected either way: it builds `dep` by hand
+        // straight from `FileProjection`, per this file's own re-export/dynamic-import merge in that
+        // function, never through this struct.)
+        re_exports: projection.re_exports.clone(),
+        dynamic_imports: projection.dynamic_imports.clone(),
         loc: projection.loc,
         findings: Vec::new(),
         degraded: false,
@@ -561,12 +616,14 @@ mod tests {
             symbols: Vec::new(),
             imports: ImportMap::new(),
             re_exports: Vec::new(),
+            dynamic_imports: Vec::new(),
             used_names: Vec::new(),
             const_map_fragment: HashMap::new(),
             trpc_router_fragments: Vec::new(),
             router_mount_fragments: Vec::new(),
             io: IoFacts::default(),
             degraded: false,
+            is_entry: false,
         }
     }
 
@@ -678,9 +735,10 @@ mod tests {
     }
 
     #[test]
-    fn type_only_re_export_creates_no_dep_edge_in_envelope_mode() {
-        // `export type { X } from './y'` is erased by TS at compile time — no edge at all, mirroring
-        // `build_dep_impl`'s own `type_only_re_export_creates_no_dep_edge`.
+    fn type_only_re_export_creates_excludable_dep_edge_in_envelope_mode() {
+        // `export type { X } from './y'` is erased by TS at compile time, so it must never form a real
+        // runtime cycle — but (Defect 1) it now DOES gain a real dep edge (fan-in), mirroring
+        // `build_dep_impl`'s own `type_only_re_export_creates_excludable_dep_edge`.
         let mut barrel = projection("barrel.jsp", 5);
         barrel.re_exports.push(ReExport {
             specifier: "y.jsp".to_string(),
@@ -692,14 +750,37 @@ mod tests {
         let env = envelope(vec![barrel, y_file]);
         let out = analyze_envelope(&env, &config());
 
-        assert!(out
-            .ir
-            .ir
-            .dep
-            .get("barrel.jsp")
-            .cloned()
-            .unwrap_or_default()
-            .is_empty());
+        assert_eq!(
+            out.ir.ir.dep.get("barrel.jsp").cloned().unwrap_or_default(),
+            vec!["y.jsp".to_string()]
+        );
+        assert!(!out
+            .findings
+            .iter()
+            .any(|f| f.rule_id == "dead-candidates" && f.file == "y.jsp"));
+    }
+
+    #[test]
+    fn dynamic_import_creates_excludable_dep_edge_in_envelope_mode() {
+        // Defect 2 (envelope parity): a dynamic `import()` specifier used to create no dep edge at all,
+        // so a code-split-only module looked dead. It now gains a real edge (fan-in), and the cycle it
+        // would otherwise form with a mutual dynamic import is not reported (mirrors
+        // `dynamic_import_creates_excludable_dep_edge`/`dynamic_import_cycle_is_not_reported_as_circular`
+        // in `zzop_parser_typescript::lang::resolve`'s own tests).
+        let mut page = projection("page.jsp", 5);
+        page.dynamic_imports.push("chart.jsp".to_string());
+        let chart = projection("chart.jsp", 5);
+        let env = envelope(vec![page, chart]);
+        let out = analyze_envelope(&env, &config());
+
+        assert_eq!(
+            out.ir.ir.dep.get("page.jsp").cloned().unwrap_or_default(),
+            vec!["chart.jsp".to_string()]
+        );
+        assert!(!out
+            .findings
+            .iter()
+            .any(|f| f.rule_id == "dead-candidates" && f.file == "chart.jsp"));
     }
 
     #[test]
@@ -761,6 +842,20 @@ mod tests {
         let env = envelope(vec![a, b]);
         let out = analyze_envelope(&env, &config());
         assert!(out.findings.iter().any(|f| f.rule_id == "circular"));
+    }
+
+    #[test]
+    fn mutual_dynamic_import_pair_does_not_produce_a_circular_finding_in_envelope_mode() {
+        // Defect 2 (envelope parity): two files linked ONLY by dynamic `import()` (both directions) must
+        // not read as a cycle — a value-import cycle between the same two files still must (covered by
+        // `circular_import_pair_produces_a_circular_finding` above).
+        let mut a = projection("a.jsp", 5);
+        a.dynamic_imports.push("b.jsp".to_string());
+        let mut b = projection("b.jsp", 5);
+        b.dynamic_imports.push("a.jsp".to_string());
+        let env = envelope(vec![a, b]);
+        let out = analyze_envelope(&env, &config());
+        assert!(!out.findings.iter().any(|f| f.rule_id == "circular"));
     }
 
     #[test]

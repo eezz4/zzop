@@ -1,5 +1,5 @@
 //! End-to-end test for the call-graph-BFS native rules (`rule-pack-porting.md`'s "http GRAPH-classified" backlog):
-//! `zzop-rules-graph`'s `scan_unsafe_read_endpoint` / `scan_non_idempotent_write`, wired into
+//! `zzop-rules-http`'s `scan_unsafe_read_endpoint` / `scan_non_idempotent_write`, wired into
 //! `zzop_engine::analyze::assemble` via the documented v1 "second pass" (`analyze.rs::run_callgraph_rules`'s
 //! doc — re-reads TS file text off disk to extract `RawCall`s, since `FileArtifact` does not carry them).
 //! Exercises the whole path: a Hono-style route file's per-file `IoProvide` -> reconstructed `ApiEndpoint` ->

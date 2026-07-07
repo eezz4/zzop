@@ -6,7 +6,7 @@
 //! TypeScript's compiler guarantees the OPPOSITE direction — a call site naming a nonexistent procedure is
 //! a compile error — but gives no signal for a procedure that exists and is never called, since an unused
 //! router entry is perfectly well-typed. That asymmetry is exactly the gap this rule fills.
-//! Provider sites in test-path files (`crate::unreachable::is_test_file`) are skipped — a test-only router
+//! Provider sites in test-path files (`zzop_core::is_test_file`) are skipped — a test-only router
 //! isn't deployed surface.
 
 use zzop_core::io::TaggedProvide;
@@ -17,7 +17,7 @@ use super::split_key;
 pub fn unconsumed_procedure_findings(unconsumed_provides: &[TaggedProvide]) -> Vec<Finding> {
     let mut out: Vec<Finding> = unconsumed_provides
         .iter()
-        .filter(|p| p.provide.kind == "trpc" && !crate::unreachable::is_test_file(&p.provide.file))
+        .filter(|p| p.provide.kind == "trpc" && !zzop_core::is_test_file(&p.provide.file))
         .filter_map(|p| {
             let key = &p.provide.key;
             let (verb, procedure_path) = split_key(key)?;

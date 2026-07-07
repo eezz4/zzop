@@ -29,9 +29,9 @@ directly.
 Both directions can be extended by an **external adapter** without touching this workspace — a
 producer of a Normalized AST envelope that either stands in for an entire tree (Mode A,
 `analyzeEnvelope`) or overlays extra `io`/router facts onto a natively-parsed tree (Mode B, the Rust
-`EngineConfig::adapter_overlays` field) — see [NORMALIZED_AST.md](NORMALIZED_AST.md)'s "Adapter
-overlays" section and `packages/engine/examples/fastapi_overlay_adapter.rs` for a runnable FastAPI/
-Python demo (adapter overlays are Rust-config-supplied only; napi exposure is a planned follow-up).
+`EngineConfig::adapter_overlays` field, also reachable via napi's `adapterOverlays` config field) — see
+[NORMALIZED_AST.md](NORMALIZED_AST.md)'s "Adapter overlays" section and
+`packages/engine/examples/fastapi_overlay_adapter.rs` for a runnable FastAPI/Python demo.
 
 ## Degraded files
 

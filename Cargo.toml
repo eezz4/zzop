@@ -19,6 +19,8 @@ members = [
 
   # Native rules — whole-graph, statically linked into core
   "rules/native/rules-graph",
+  "rules/native/rules-http",
+  "rules/native/rules-cross-layer",
   "rules/native/rules-schema",
 
   # Language/environment rule packs are declarative DSL data (rules/dsl/<pack>/<pack>.json), not crates —

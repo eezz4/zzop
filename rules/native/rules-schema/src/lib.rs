@@ -27,7 +27,8 @@ use zzop_core::{register_native_analysis_stub, RuleRegistry, Severity};
 
 /// Registers every native analysis id implemented in this crate — the schema half of the extensibility
 /// contract's per-crate registration (see `zzop_engine::register_all_native`, which composes this with
-/// `zzop_rules_graph`'s and `zzop_metrics`'s own `register_native_analyses`).
+/// `zzop_rules_graph`'s, `zzop_rules_http`'s, `zzop_rules_cross_layer`'s, and `zzop_metrics`'s own
+/// `register_native_analyses`).
 pub fn register_native_analyses(registry: &mut RuleRegistry) {
     let analyses: &[(&str, Severity)] = &[
         ("schema-structural", Severity::Warning),

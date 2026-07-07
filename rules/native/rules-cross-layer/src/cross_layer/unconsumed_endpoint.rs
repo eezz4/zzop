@@ -3,7 +3,7 @@
 //! warning) because "no consumer WITHIN this analysis" is weaker evidence than "no consumer at all" — see
 //! the message's own caveat.
 //!
-//! Provider sites in test-path files (`crate::unreachable::is_test_file`) are skipped — a route registered
+//! Provider sites in test-path files (`zzop_core::is_test_file`) are skipped — a route registered
 //! in a test fixture is not deployed surface. A dead route provided by 2+ trees ALSO fires one warning
 //! `cross-layer/duplicate-route` finding for the same key — intentional overlap, different questions.
 
@@ -21,7 +21,7 @@ pub fn unconsumed_endpoint_findings(
 
     let mut out: Vec<Finding> = unconsumed_provides
         .iter()
-        .filter(|p| p.provide.kind == "http" && !crate::unreachable::is_test_file(&p.provide.file))
+        .filter(|p| p.provide.kind == "http" && !zzop_core::is_test_file(&p.provide.file))
         .map(|p| {
             let key = &p.provide.key;
             let message = format!(

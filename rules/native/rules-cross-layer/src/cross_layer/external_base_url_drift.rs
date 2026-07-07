@@ -9,7 +9,7 @@
 //! a path also share an (approximate) registrable domain — see [`registrable_domain`] — dropping any host
 //! that shares nothing but the path with the rest of the group.
 //!
-//! Consume sites in test-path files (`crate::unreachable::is_test_file`) are skipped, including from the
+//! Consume sites in test-path files (`zzop_core::is_test_file`) are skipped, including from the
 //! per-path host-count threshold — a test mocking a vendor/own API is not deployed egress.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -53,7 +53,7 @@ pub fn external_base_url_drift_findings(external_consumes: &[TaggedConsume]) -> 
     let mut by_path: BTreeMap<&str, Vec<Site<'_>>> = BTreeMap::new();
     for c in external_consumes
         .iter()
-        .filter(|c| c.consume.kind == "http" && !crate::unreachable::is_test_file(&c.consume.file))
+        .filter(|c| c.consume.kind == "http" && !zzop_core::is_test_file(&c.consume.file))
     {
         let Some(key) = c.consume.key.as_deref() else {
             continue;

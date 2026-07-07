@@ -44,6 +44,13 @@ pub(crate) struct FileArtifact {
     /// false-positiving `dead-candidates`). Empty for non-TypeScript/degraded files, same convention as
     /// `imports`.
     pub re_exports: Vec<zzop_core::ReExport>,
+    /// This file's dynamic-`import()` specifiers (`parse_dynamic_imports`, which recurses into
+    /// `dynamic(() => import('./x'))` / `lazy(() => import('./x'))` wrappers) — `analyze::assemble`'s
+    /// substrate for merging them into `build_dep_with_workspace`'s dep graph as real edges that give the
+    /// target fan-in but are excluded from circular detection (a code-split-only module used to be
+    /// invisible to the dep graph and false-positived `dead-candidates`). Empty for non-TypeScript/degraded
+    /// files, same convention as `re_exports`.
+    pub dynamic_imports: Vec<String>,
     pub loc: u32,
     pub findings: Vec<zzop_core::Finding>,
     pub degraded: bool,
@@ -305,6 +312,7 @@ fn process_file(
                 symbols: Vec::new(),
                 imports: None,
                 re_exports: Vec::new(),
+                dynamic_imports: Vec::new(),
                 loc: 0,
                 findings: Vec::new(),
                 degraded: true,
@@ -381,6 +389,7 @@ fn process_file(
             symbols: artifact.symbols.clone(),
             imports: artifact.imports.clone(),
             re_exports: artifact.re_exports.clone(),
+            dynamic_imports: artifact.dynamic_imports.clone(),
             loc: artifact.loc,
             degraded: artifact.degraded,
             io: artifact.io.clone(),
@@ -416,6 +425,7 @@ fn artifact_from_ir(
         symbols: ir.symbols,
         imports: ir.imports,
         re_exports: ir.re_exports,
+        dynamic_imports: ir.dynamic_imports,
         loc: ir.loc,
         findings,
         degraded: ir.degraded,
@@ -458,6 +468,7 @@ fn compute_fresh_artifact(
             symbols: Vec::new(),
             imports: ts_slot(language),
             re_exports: Vec::new(),
+            dynamic_imports: Vec::new(),
             loc,
             findings,
             degraded: true,
@@ -533,6 +544,15 @@ fn compute_fresh_artifact(
         }
         _ => Vec::new(),
     };
+    // Dynamic `import()` specifiers (`import('./x')`, including inside `dynamic(() => import('./x'))`/
+    // `lazy(() => import('./x'))` wrappers) — `analyze::assemble`'s substrate for merging them into the
+    // dep graph as real, circular-excluded edges (Defect 2: see `FileArtifact::dynamic_imports`'s doc).
+    let dynamic_imports = match language {
+        Some(Language::TypeScript) if !degraded => {
+            zzop_parser_typescript::parse_dynamic_imports(rel, text)
+        }
+        _ => Vec::new(),
+    };
     let (wrapper_def_fragments, wrapper_call_fragments) = match language {
         Some(Language::TypeScript) if !degraded => {
             zzop_parser_typescript::extract_wrapper_fragments(rel, text)
@@ -561,6 +581,7 @@ fn compute_fresh_artifact(
         symbols,
         imports,
         re_exports,
+        dynamic_imports,
         loc,
         findings,
         degraded,

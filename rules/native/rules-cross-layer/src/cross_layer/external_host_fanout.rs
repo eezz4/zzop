@@ -6,7 +6,7 @@
 //! Co-fires with `cross-layer/external-duplicated-integration` when a host is both multi-file and
 //! multi-source; the remedies differ (extract one client module vs. pick one source to own the call).
 //!
-//! Test-path consume sites (`crate::unreachable::is_test_file`) are skipped, including from the file-count
+//! Test-path consume sites (`zzop_core::is_test_file`) are skipped, including from the file-count
 //! threshold — a test mocking a vendor API is not deployed egress. Counts are a lower bound: only consume
 //! keys the join extracted directly at the call site are counted, so a host literal returned from a helper
 //! function can leave calling files uncounted even though they reach the host at runtime — hence "at least N
@@ -34,7 +34,7 @@ pub fn external_host_fanout_findings(external_consumes: &[TaggedConsume]) -> Vec
     let mut by_host: BTreeMap<&str, Vec<Site<'_>>> = BTreeMap::new();
     for c in external_consumes
         .iter()
-        .filter(|c| c.consume.kind == "http" && !crate::unreachable::is_test_file(&c.consume.file))
+        .filter(|c| c.consume.kind == "http" && !zzop_core::is_test_file(&c.consume.file))
     {
         let Some(key) = c.consume.key.as_deref() else {
             continue;

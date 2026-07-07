@@ -15,6 +15,7 @@ const { configToRequest, collectConfigWarnings, ConfigError } = require('../lib/
 const {
   collectFindings,
   collectWarnings,
+  filterOutputBySeverity,
   formatPretty,
   formatJson,
   computeExitCode,
@@ -34,9 +35,15 @@ Options (run):
   --json                           Alias for --format json.
   --out <dir>                      Also write reports to <dir>/zzop-report.<epoch>/ (json + sarif).
   -a, --all                        Expand info-level findings (folded to per-rule counts by default).
+  --severity <critical|warning|info|off>
+                                    Only display findings at/above this severity (default: off = show all).
   -h, --help                       Show this help.
   --version                        Show the CLI and engine versions.
 `;
+
+// Valid `--severity` values. Exact match only (no friendly aliases like the config's "warn") — this is a
+// small, literal display-filter flag, not the config's severity-override surface.
+const SEVERITY_VALUES = ['critical', 'warning', 'info', 'off'];
 
 function fail(message, code = 2) {
   process.stderr.write(`zzop: ${message}\n`);
@@ -57,6 +64,7 @@ function parseArgs(argv) {
     version: false,
     all: false,
     out: null,
+    severity: null,
   };
   const rest = [];
   // Scoped flags seen, for the command/flag cross-check below: `{ flag, scope }`.
@@ -98,6 +106,18 @@ function parseArgs(argv) {
       case '--out':
         opts.out = argv[++i];
         if (opts.out === undefined) throw new ConfigError('--out requires a <dir> argument.');
+        scoped.push({ flag: arg, scope: 'run' });
+        break;
+      case '--severity':
+        opts.severity = argv[++i];
+        if (opts.severity === undefined) {
+          throw new ConfigError('--severity requires <critical|warning|info|off>.');
+        }
+        if (!SEVERITY_VALUES.includes(opts.severity)) {
+          throw new ConfigError(
+            `Invalid severity "${opts.severity}". Expected one of: ${SEVERITY_VALUES.join(', ')}.`
+          );
+        }
         scoped.push({ flag: arg, scope: 'run' });
         break;
       default:
@@ -194,14 +214,18 @@ function runAnalyze(opts) {
   emitWarnings(collectWarnings(output));
 
   if (format === 'json') {
-    process.stdout.write(`${formatJson(output)}\n`);
+    process.stdout.write(`${formatJson(filterOutputBySeverity(output, opts.severity))}\n`);
   } else {
     const color = Boolean(process.stdout.isTTY);
-    process.stdout.write(`${formatPretty(output, { color, showAllInfo: opts.all })}\n`);
+    process.stdout.write(
+      `${formatPretty(output, { color, showAllInfo: opts.all, minSeverity: opts.severity })}\n`
+    );
   }
 
   writeReports(opts, config, output);
 
+  // Exit code is ALWAYS computed from the unfiltered findings — `--severity` is a display-only filter and
+  // must never change whether the process exits nonzero for `failOn`.
   const { findings } = collectFindings(output);
   const failOn = config.failOn == null ? 'warn' : config.failOn;
   process.exit(computeExitCode(findings, failOn));

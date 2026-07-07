@@ -1,5 +1,5 @@
 [package]
-name = "zzop-rules-graph"
+name = "zzop-rules-cross-layer"
 version = "0.0.0"
 edition = "2021"
 publish = false

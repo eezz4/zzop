@@ -201,12 +201,14 @@ fn build_overlay(scan_root: &Path, scan_prefix: &str) -> NormalizedEnvelope {
             symbols: Vec::new(),
             imports: zzop_core::ImportMap::new(),
             re_exports: Vec::new(),
+            dynamic_imports: Vec::new(),
             used_names: Vec::new(),
             const_map_fragment: HashMap::new(),
             trpc_router_fragments: Vec::new(),
             router_mount_fragments,
             io: IoFacts::default(),
             degraded: false,
+            is_entry: false,
         });
     }
 

@@ -52,6 +52,10 @@ pub(crate) fn assemble(
     // `ts_import_pairs`' bindings. Only collected for files that also participate in the dep graph
     // (`ts_import_pairs`'s own gate below), same convention as the other per-file fragment `Vec`s.
     let mut ts_re_export_pairs: Vec<(String, Vec<ReExport>)> = Vec::new();
+    // `build_dep_with_workspace`'s Defect-2 substrate: each TS file's own dynamic-`import()` specifiers,
+    // paired with its `rel` — merged into the dep graph as real (circular-excluded) edges alongside
+    // `ts_re_export_pairs`. Same collection gate as `ts_re_export_pairs`.
+    let mut ts_dynamic_import_pairs: Vec<(String, Vec<String>)> = Vec::new();
     let mut ts_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut degraded: Vec<String> = Vec::new();
     // `pipeline::eval_packs`' minified/generated skip — a separate list from `degraded` (see
@@ -143,6 +147,9 @@ pub(crate) fn assemble(
             ts_paths.insert(artifact.rel.clone());
             if !artifact.re_exports.is_empty() {
                 ts_re_export_pairs.push((artifact.rel.clone(), artifact.re_exports));
+            }
+            if !artifact.dynamic_imports.is_empty() {
+                ts_dynamic_import_pairs.push((artifact.rel.clone(), artifact.dynamic_imports));
             }
             ts_import_pairs.push((artifact.rel.clone(), imports));
             used_names_by_file.insert(artifact.rel.clone(), artifact.used_names.clone());
@@ -276,14 +283,16 @@ pub(crate) fn assemble(
         io_provides.extend(composed);
     }
 
-    // `type_only_edges` is the ephemeral Defect-B exclusion set (never cached/serialized — see
-    // `circular_from_dep_excluding`'s doc): a pair present here is contributed ONLY by type-only
-    // bindings/re-exports, so `circular_findings` below must not count it as a cycle edge even though
-    // `dep` itself (fan-in/dead-exports/every other metric) still includes it.
+    // `type_only_edges` is the ephemeral noncycle-exclusion set (never cached/serialized — see
+    // `circular_from_dep_excluding`'s doc): a pair present here is contributed ONLY by edges excludable
+    // from cycle detection — type-only bindings/re-exports, or a dynamic `import()` (Defect 2) — so
+    // `circular_findings` below must not count it as a cycle edge even though `dep` itself (fan-in/
+    // dead-exports/every other metric) still includes it.
     let (dep, type_only_edges): (DepGraph, HashSet<(String, String)>) =
         zzop_parser_typescript::build_dep_with_workspace(
             &ts_import_pairs,
             &ts_re_export_pairs,
+            &ts_dynamic_import_pairs,
             &ts_paths,
             &pkg_scan.workspace_pkgs,
             &tsconfigs,
@@ -330,6 +339,13 @@ pub(crate) fn assemble(
         global_findings.extend(found);
     }
     if is_enabled(&config.rule_config, "unreachable") {
+        // No `extra_entries`/exempt-set parameter exists here to thread an overlay `is_entry` union
+        // through (unlike `dead_candidate_findings` below) — `unreachable_findings`/`find_unreachable`
+        // already treat every `fan_in == 0` file as an implicit entry point (false-positive-safe by
+        // construction), so an `is_entry`-marked overlay file with zero fan-in is already exempt without
+        // any change here. Threading a real exempt set through for a fan_in > 0 case is a follow-up, not
+        // addressed by this task's scope (see `dead_export_findings` below, which has no such parameter
+        // either and is a second, separate follow-up).
         let t0 = profile.then(Instant::now);
         let found = unreachable_findings(&nodes, &dep);
         record_native_timing(&mut rule_time, t0, "unreachable", found.len());
@@ -338,9 +354,24 @@ pub(crate) fn assemble(
     if is_enabled(&config.rule_config, "dead-candidates") {
         // `extra_entries`: package.json-referenced files (manifest entry fields + lexically-scanned
         // `scripts` path tokens) — real entry points loaded by Node/bundlers/npm directly, never via
-        // `import`, so `fan_in == 0` on them is expected, not dead-code signal.
+        // `import`, so `fan_in == 0` on them is expected, not dead-code signal — UNIONED with every Mode
+        // B adapter-overlay `FileProjection` marked `is_entry: true` (`EngineConfig::adapter_overlays`),
+        // the overlay counterpart of a manifest entry: a framework-loaded file (SvelteKit `hooks.*`/
+        // `+page`, a `.vue` route, ...) an adapter declares reachable by convention rather than import.
+        // Overlays are applied post-cache (`envelope::apply_adapter_overlays`, called from `analyze_tree`
+        // before this function runs) and never merged into `pkg_scan` itself (a filesystem-only scan), so
+        // this reads `config.adapter_overlays` directly rather than threading a new parameter through.
         let t0 = profile.then(Instant::now);
-        let found = dead_candidate_findings(&nodes, &dep, &pkg_scan.extra_entries);
+        let mut extra_entries = pkg_scan.extra_entries.clone();
+        extra_entries.extend(
+            config
+                .adapter_overlays
+                .iter()
+                .flat_map(|overlay| overlay.files.iter())
+                .filter(|file| file.is_entry)
+                .map(|file| file.path.clone()),
+        );
+        let found = dead_candidate_findings(&nodes, &dep, &extra_entries);
         record_native_timing(&mut rule_time, t0, "dead-candidates", found.len());
         global_findings.extend(found);
     }
@@ -386,26 +417,26 @@ pub(crate) fn assemble(
     // whole-tree pass over `io_provides` already collected above.
     if is_enabled(&config.rule_config, "duplicate-route") {
         let t0 = profile.then(Instant::now);
-        let found = zzop_rules_graph::duplicate_route_findings(&io_provides);
+        let found = zzop_rules_http::duplicate_route_findings(&io_provides);
         record_native_timing(&mut rule_time, t0, "duplicate-route", found.len());
         global_findings.extend(found);
     }
 
     // Native fullstack rule: within one file, an earlier param route shadows a later literal route of
-    // the same shape (see `zzop_rules_graph::route_shadowing`'s module doc for the decidable subset).
+    // the same shape (see `zzop_rules_http::route_shadowing`'s module doc for the decidable subset).
     if is_enabled(&config.rule_config, "route-shadowing") {
         let t0 = profile.then(Instant::now);
-        let found = zzop_rules_graph::route_shadowing_findings(&io_provides);
+        let found = zzop_rules_http::route_shadowing_findings(&io_provides);
         record_native_timing(&mut rule_time, t0, "route-shadowing", found.len());
         global_findings.extend(found);
     }
 
     // Native fullstack rule: a resolved `http` consume with no matching provide anywhere in this tree,
     // gated on this tree itself having at least one `http` provide (see
-    // `zzop_rules_graph::unprovided_consume`'s module doc for the zero-provides veto).
+    // `zzop_rules_http::unprovided_consume`'s module doc for the zero-provides veto).
     if is_enabled(&config.rule_config, "unprovided-consume") {
         let t0 = profile.then(Instant::now);
-        let found = zzop_rules_graph::unprovided_consume_findings(&io_provides, &io_consumes);
+        let found = zzop_rules_http::unprovided_consume_findings(&io_provides, &io_consumes);
         record_native_timing(&mut rule_time, t0, "unprovided-consume", found.len());
         global_findings.extend(found);
     }
@@ -1095,7 +1126,7 @@ pub(crate) fn unreachable_findings(nodes: &[FileNode], dep: &DepGraph) -> Vec<Fi
     zzop_rules_graph::unreachable_findings(nodes, dep)
 }
 
-/// Runs the three call-graph-BFS native rules — `zzop-rules-graph`'s `scan_unsafe_read_endpoint` /
+/// Runs the three call-graph-BFS native rules — `zzop-rules-http`'s `scan_unsafe_read_endpoint` /
 /// `scan_non_idempotent_write` / `scan_mutating_route_no_auth` — and extends `global_findings` in place.
 /// Gated behind `is_enabled` per rule id and behind having at least one reconstructed `ApiEndpoint`, so
 /// a tree with no HTTP routes never pays the cost below.
@@ -1134,7 +1165,6 @@ fn run_callgraph_rules(
                 method: method.to_string(),
                 path: path.to_string(),
                 handler: p.symbol.clone().unwrap_or_default(),
-                drift_ok: false,
             })
         })
         .collect();
@@ -1152,6 +1182,9 @@ fn run_callgraph_rules(
     let mut raw_calls = Vec::new();
     let mut file_texts: HashMap<String, String> = HashMap::new();
     for rel in ts_paths {
+        if !crate::dead_exports::is_ts_source_ext(rel) {
+            continue; // non-TS overlay participant (e.g. .svelte) — re-parsing as TS would inject noise
+        }
         if let Ok(bytes) = std::fs::read(root.join(rel)) {
             let text = String::from_utf8_lossy(&bytes).into_owned();
             raw_calls.extend(zzop_parser_typescript::parse_calls(rel, &text));
@@ -1177,8 +1210,8 @@ fn run_callgraph_rules(
     );
     if run_unsafe_read {
         let t0 = profile.then(Instant::now);
-        let found = zzop_rules_graph::scan_unsafe_read_endpoint(
-            &zzop_rules_graph::ScanUnsafeReadEndpointInput {
+        let found = zzop_rules_http::scan_unsafe_read_endpoint(
+            &zzop_rules_http::ScanUnsafeReadEndpointInput {
                 api_endpoints: &api_endpoints,
                 symbols: all_symbols,
                 symbol_graph: &symbol_graph,
@@ -1190,8 +1223,8 @@ fn run_callgraph_rules(
     }
     if run_non_idempotent {
         let t0 = profile.then(Instant::now);
-        let found = zzop_rules_graph::scan_non_idempotent_write(
-            &zzop_rules_graph::ScanNonIdempotentWriteInput {
+        let found = zzop_rules_http::scan_non_idempotent_write(
+            &zzop_rules_http::ScanNonIdempotentWriteInput {
                 api_endpoints: &api_endpoints,
                 symbols: all_symbols,
                 symbol_graph: &symbol_graph,
@@ -1219,12 +1252,12 @@ fn run_callgraph_rules(
             })
             .collect();
         let t0 = profile.then(Instant::now);
-        let found = zzop_rules_graph::scan_mutating_route_no_auth(
-            &zzop_rules_graph::ScanMutatingRouteNoAuthInput {
+        let found = zzop_rules_http::scan_mutating_route_no_auth(
+            &zzop_rules_http::ScanMutatingRouteNoAuthInput {
                 io_provides,
                 symbols: all_symbols,
                 symbol_graph: &symbol_graph,
-                auth_guard_pattern: zzop_rules_graph::DEFAULT_AUTH_GUARD_PATTERN,
+                auth_guard_pattern: zzop_rules_http::DEFAULT_AUTH_GUARD_PATTERN,
                 nest_guarded: &nest_guarded,
             },
         );

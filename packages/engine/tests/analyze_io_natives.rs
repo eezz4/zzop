@@ -1,6 +1,6 @@
 //! End-to-end coverage for the three fullstack io/graph native rules added alongside `duplicate-route`/
 //! `route-shadowing`'s siblings (rule-pack catalog #46/#47/#48): `route-shadowing`, `mutating-route-no-auth`,
-//! and `unprovided-consume` — all `zzop_rules_graph`, wired into `zzop_engine::analyze::assemble` beside
+//! and `unprovided-consume` — all `zzop_rules_http`, wired into `zzop_engine::analyze::assemble` beside
 //! `schema-usage`/`duplicate-route`. Same `TempDir` fixture-tree pattern as `pack_sql.rs`/
 //! `analyze_callgraph.rs`.
 

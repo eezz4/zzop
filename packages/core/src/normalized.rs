@@ -64,6 +64,11 @@ pub struct FileProjection {
     pub imports: ImportMap,
     #[serde(default)]
     pub re_exports: Vec<ReExport>,
+    /// This file's dynamic-`import()` specifiers (external-parser contract; optional). Mirrors the native
+    /// `FileArtifact::dynamic_imports` — folded into the envelope dep graph as real (circular-excluded)
+    /// edges so a code-split-only module keeps its fan-in on the envelope path too.
+    #[serde(default)]
+    pub dynamic_imports: Vec<String>,
     #[serde(default)]
     pub used_names: Vec<String>,
     /// Producer FRAGMENT CHANNELS for cross-file composition — the envelope equivalent of what
@@ -89,6 +94,16 @@ pub struct FileProjection {
     /// present regardless.
     #[serde(default)]
     pub degraded: bool,
+    /// Adapter-declared framework ENTRY / reachable-root: a file loaded by the framework/runtime by
+    /// convention (e.g. SvelteKit `hooks.*`/`+page`, a `.vue` route) rather than imported, so its
+    /// `fan_in == 0` is expected — exempts it from `dead-candidates`/`unreachable`, the overlay
+    /// counterpart of package.json manifest entries (`pipeline::package_json_entries`'s
+    /// `extra_entries`). Meaningful in Mode B (`apply_adapter_overlays` unions every `is_entry` path
+    /// across `EngineConfig::adapter_overlays` into `dead_candidate_findings`'s `extra_entries`); Mode A
+    /// (`analyze_envelope`) does not read this field at all today (no filesystem-manifest concept to
+    /// union it against). Default `false`.
+    #[serde(default)]
+    pub is_entry: bool,
 }
 
 /// Validates `json` against the v1 Normalized AST contract (`docs/NORMALIZED_AST.md`) beyond what plain
@@ -229,6 +244,10 @@ mod tests {
         assert!(file.const_map_fragment.is_empty());
         assert!(file.trpc_router_fragments.is_empty());
         assert!(file.router_mount_fragments.is_empty());
+        // `is_entry` defaults to `false` — a producer that knows nothing about framework entry
+        // conventions makes no exemption claim, same "absent means the least-privileged value" rule as
+        // every other optional field here.
+        assert!(!file.is_entry);
     }
 
     #[test]
@@ -249,6 +268,7 @@ mod tests {
                 symbols: vec![],
                 imports: ImportMap::new(),
                 re_exports: vec![],
+                dynamic_imports: vec![],
                 used_names: vec![],
                 const_map_fragment,
                 trpc_router_fragments: vec![TrpcRouterFragment {
@@ -270,6 +290,7 @@ mod tests {
                 }],
                 io: IoFacts::default(),
                 degraded: false,
+                is_entry: false,
             }],
         };
         let json = serde_json::to_string(&envelope).unwrap();
@@ -338,12 +359,14 @@ mod tests {
                     symbols: vec![],
                     imports: ImportMap::new(),
                     re_exports: vec![],
+                    dynamic_imports: vec![],
                     used_names: vec![],
                     const_map_fragment: std::collections::HashMap::new(),
                     trpc_router_fragments: vec![],
                     router_mount_fragments: vec![],
                     io: IoFacts::default(),
                     degraded: false,
+                    is_entry: false,
                 },
                 FileProjection {
                     path: "a.ext".to_string(),
@@ -351,12 +374,14 @@ mod tests {
                     symbols: vec![],
                     imports: ImportMap::new(),
                     re_exports: vec![],
+                    dynamic_imports: vec![],
                     used_names: vec![],
                     const_map_fragment: std::collections::HashMap::new(),
                     trpc_router_fragments: vec![],
                     router_mount_fragments: vec![],
                     io: IoFacts::default(),
                     degraded: false,
+                    is_entry: false,
                 },
             ],
         };

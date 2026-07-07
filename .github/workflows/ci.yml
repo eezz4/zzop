@@ -20,6 +20,13 @@ jobs:
       - name: swc isolation guard
         run: bash scripts/check-swc-isolation.sh
 
+  rules-catalog-sync-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: rules catalog ↔ site sync guard
+        run: bash scripts/check-rules-catalog-sync.sh
+
   test:
     runs-on: ubuntu-latest
     steps:

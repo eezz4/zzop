@@ -31,6 +31,12 @@ export interface AnalyzeConfig {
    * within a segment, `**` spans `/`, `{a,b}` alternates). `glob` takes precedence over `path`. Default:
    * nothing suppressed. */
   suppressions?: { rule: string; path?: string; glob?: string }[];
+  /** Mode-B adapter overlays: partial Normalized-AST envelopes (typically just `io` + fragment channels
+   * for a handful of files — see `docs/NORMALIZED_AST.md`) merged ON TOP of this tree's native analysis.
+   * Left as `Record<string, unknown>[]` for the same reason `NormalizedAstEnvelope` is (see that type's
+   * doc). Default: none (no overlay processing). Contrast with `analyzeEnvelope()`, where a full envelope
+   * REPLACES native analysis rather than augmenting it — this field has no equivalent there. */
+  adapterOverlays?: Array<Record<string, unknown>>;
 }
 
 /** `analyzeTrees()`'s input: one `AnalyzeConfig` per tree, joined by IoFacts. */

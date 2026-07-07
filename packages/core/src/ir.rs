@@ -20,7 +20,7 @@ pub enum SourceSymbolKind {
     Interface,
 }
 
-/// Classifies a store-write call as non-idempotent for `zzop_rules_graph::http_scan`'s
+/// Classifies a store-write call as non-idempotent for `zzop_rules_http::http_scan`'s
 /// `non-idempotent-write` rule: a retry of any of these effects is not a no-op. `as_str` gives the
 /// wire/label form used both in `Finding::data.kind` and (via serde) in the cache.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,7 +100,7 @@ pub struct SourceSymbol {
     pub body_end: Option<u32>,
     /// Pre-computed store-write sites within this symbol's body span, in source order — computed once
     /// at parse time (TS only; empty for non-TS/degraded/type symbols). Feeds
-    /// `zzop_rules_graph::http_scan`'s `unsafe-read-endpoint`/`non-idempotent-write` call-graph scanners.
+    /// `zzop_rules_http::http_scan`'s `unsafe-read-endpoint`/`non-idempotent-write` call-graph scanners.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub write_sites: Vec<WriteSite>,
 }
@@ -172,9 +172,6 @@ pub struct ApiEndpoint {
     pub method: String,
     pub path: String,
     pub handler: String,
-    /// `// drift-ok: <reason>` marker — an intentionally dead route (whitelist for be-route-not-called).
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub drift_ok: bool,
 }
 
 /// The minimal IR a parser must produce.

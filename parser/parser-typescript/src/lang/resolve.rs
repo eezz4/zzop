@@ -267,21 +267,27 @@ pub fn resolve_file_with_workspace(
 /// Shared implementation behind `build_dep`/`build_dep_with_workspace`. Per file: resolves each
 /// non-deferred import binding via `resolve`, keeping deduped internal edges (external/deferred
 /// specifiers excluded) — feeding circular detection and fan-in/out. Also merges in each file's
-/// non-type-only re-export specifiers (`export {x} from './y'` / `export * from './y'`) as the same kind
-/// of edge, resolved+deduped into the same vector (Defect A — a bare re-export used to be invisible to
-/// the dep graph, undercounting a barrel file's fan-in and false-positiving `dead-candidates`); a
-/// type-only re-export (`export type {X} from './y'`) is skipped entirely — erased by TS at compile time,
-/// it is not a runtime edge at all, not even one excluded from circular only.
+/// re-export specifiers (`export {x} from './y'` / `export * from './y'`, including type-only ones) and
+/// dynamic-`import()` specifiers as the same kind of edge, resolved+deduped into the same vector: a bare
+/// re-export used to be invisible to the dep graph (Defect A), undercounting a barrel file's fan-in and
+/// false-positiving `dead-candidates`; a code-split-only module reached solely via `import('./x')` had
+/// the same problem (Defect 2) since dynamic imports never reached this builder at all. A type-only
+/// re-export (`export type {X} from './y'`) now gets the same edge-but-excluded-from-cycles treatment as
+/// a type-only import binding, rather than being dropped entirely — see below.
 ///
-/// Separately (Defect B) returns an ephemeral `(from, to)` exclusion set: pairs where EVERY binding/
-/// re-export contributing that edge is type-only (`import type`/per-specifier `{ type X }`). The returned
-/// `DepGraph` still includes these edges (fan-in/dead-exports/every metric legitimately count a type
-/// import as a "use" of the target); only `zzop_core::circular_from_dep_excluding` consults the exclusion
-/// set, and only for the duration of one analysis run — it is never cached or serialized. A pair with
-/// BOTH a type-only and a value binding to the same target is not excluded (a real runtime edge exists).
+/// Separately returns an ephemeral `(from, to)` exclusion set consulted only by
+/// `zzop_core::circular_from_dep_excluding` (never cached/serialized, lives only for one analysis run):
+/// pairs where EVERY edge contributing that target is excludable from cycle detection — a type-only
+/// import/re-export (`import type`/per-specifier `{ type X }`/`export type {X} from`, erased at compile
+/// time) or a dynamic `import()` (async; never a synchronous module-load cycle, and specifically how
+/// people BREAK cycles). The returned `DepGraph` still includes these edges (fan-in/dead-exports/every
+/// other metric legitimately count a type import or a dynamic import as a "use" of the target). A pair
+/// with at least one plain synchronous value edge to the same target is not excluded (a real runtime
+/// cycle edge exists).
 fn build_dep_impl<F>(
     files: &[(String, ImportMap)],
     re_exports: &[(String, Vec<ReExport>)],
+    dynamic_imports: &[(String, Vec<String>)],
     mut resolve: F,
 ) -> (DepGraph, HashSet<(String, String)>)
 where
@@ -291,21 +297,28 @@ where
         .iter()
         .map(|(rel, rs)| (rel.as_str(), rs))
         .collect();
+    let dyn_import_map: HashMap<&str, &Vec<String>> = dynamic_imports
+        .iter()
+        .map(|(rel, ds)| (rel.as_str(), ds))
+        .collect();
     let mut dep = DepGraph::new();
-    let mut type_only_edges = HashSet::new();
+    let mut noncycle_edges = HashSet::new();
     for (rel, imports) in files {
         let mut seen = HashSet::new();
         let mut resolved = Vec::new();
-        // target -> true iff every binding/re-export resolving to it so far is type-only.
-        let mut target_type_only: HashMap<String, bool> = HashMap::new();
+        // target -> true iff EVERY edge resolving to it so far is excluded from cycle detection: a
+        // type-only import/re-export (erased at compile time) or a dynamic `import()` (async — never a
+        // synchronous module-load cycle). Any one plain value edge flips it false. The target still
+        // gains a real dep edge (fan-in) either way; only `circular_from_dep_excluding` consults this set.
+        let mut target_noncycle: HashMap<String, bool> = HashMap::new();
         for binding in imports.values() {
             if binding.deferred {
                 continue; // lazy require/import: no module-load edge
             }
             if let Some(target) = resolve(&binding.specifier, rel) {
-                target_type_only
+                target_noncycle
                     .entry(target.clone())
-                    .and_modify(|all_type_only| *all_type_only &= binding.type_only)
+                    .and_modify(|all| *all &= binding.type_only)
                     .or_insert(binding.type_only);
                 if seen.insert(target.clone()) {
                     resolved.push(target);
@@ -314,53 +327,71 @@ where
         }
         if let Some(res) = re_export_map.get(rel.as_str()) {
             for re in res.iter() {
-                if re.type_only {
-                    continue; // erased at compile time: not a runtime edge, not a cycle edge either
-                }
+                // Defect 1: a type-only re-export used to be dropped entirely (no edge, no fan-in). It
+                // now gets the same treatment as a type-only binding — a real edge, excluded from cycles.
                 if let Some(target) = resolve(&re.specifier, rel) {
-                    target_type_only.insert(target.clone(), false); // always a real (non-type-only) edge
+                    target_noncycle
+                        .entry(target.clone())
+                        .and_modify(|all| *all &= re.type_only)
+                        .or_insert(re.type_only);
                     if seen.insert(target.clone()) {
                         resolved.push(target);
                     }
                 }
             }
         }
-        for (target, all_type_only) in target_type_only {
-            if all_type_only {
-                type_only_edges.insert((rel.clone(), target));
+        if let Some(dyns) = dyn_import_map.get(rel.as_str()) {
+            for spec in dyns.iter() {
+                // Defect 2: a dynamic `import()` gives the target fan-in (it IS used) but is never a
+                // synchronous-load cycle edge — always excludable. `or_insert(true)` (not `&= true`)
+                // because `& true` is identity: a pre-existing `false` from a value edge must stay false.
+                if let Some(target) = resolve(spec, rel) {
+                    target_noncycle.entry(target.clone()).or_insert(true);
+                    if seen.insert(target.clone()) {
+                        resolved.push(target);
+                    }
+                }
+            }
+        }
+        for (target, all_noncycle) in target_noncycle {
+            if all_noncycle {
+                noncycle_edges.insert((rel.clone(), target));
             }
         }
         dep.insert(rel.clone(), resolved);
     }
-    (dep, type_only_edges)
+    (dep, noncycle_edges)
 }
 
 /// `build_dep`, aware of workspace packages and tsconfig `paths`/`baseUrl`: resolves each binding/
-/// re-export via `resolve_file_with_workspace`. Behaviorally equivalent to `build_dep` when both maps are
-/// empty. See `build_dep_impl`'s doc for the merged-re-export-edge/type-only-exclusion-set behavior both
-/// `build_dep`/`build_dep_with_workspace` share.
+/// re-export/dynamic-import via `resolve_file_with_workspace`. Behaviorally equivalent to `build_dep`
+/// when both maps are empty. See `build_dep_impl`'s doc for the merged-re-export/dynamic-import-edge and
+/// noncycle-exclusion-set behavior both `build_dep`/`build_dep_with_workspace` share.
 pub fn build_dep_with_workspace(
     files: &[(String, ImportMap)],
     re_exports: &[(String, Vec<ReExport>)],
+    dynamic_imports: &[(String, Vec<String>)],
     all_paths: &HashSet<String>,
     workspace_pkgs: &HashMap<String, WorkspacePkg>,
     tsconfigs: &BTreeMap<String, TsconfigPaths>,
 ) -> (DepGraph, HashSet<(String, String)>) {
-    build_dep_impl(files, re_exports, |specifier, rel| {
+    build_dep_impl(files, re_exports, dynamic_imports, |specifier, rel| {
         resolve_file_with_workspace(specifier, rel, all_paths, workspace_pkgs, tsconfigs)
     })
 }
 
-/// Build a file-level dep graph: per file, resolve each non-deferred import (and non-type-only
-/// re-export) and keep deduped internal edges (external/deferred/type-only-re-export specifiers
-/// excluded), feeding circular detection and fan-in/out. See `build_dep_impl`'s doc for the full
-/// re-export-merge/type-only-exclusion-set behavior (the second return value).
+/// Build a file-level dep graph: per file, resolve each non-deferred import, re-export (type-only
+/// included — see `build_dep_impl`'s doc), and dynamic-`import()` specifier, keeping deduped internal
+/// edges (external/deferred specifiers excluded), feeding circular detection and fan-in/out. See
+/// `build_dep_impl`'s doc for the full re-export/dynamic-import-merge/noncycle-exclusion-set behavior (the
+/// second return value).
 pub fn build_dep(
     files: &[(String, ImportMap)],
     re_exports: &[(String, Vec<ReExport>)],
+    dynamic_imports: &[(String, Vec<String>)],
     all_paths: &HashSet<String>,
 ) -> (DepGraph, HashSet<(String, String)>) {
-    build_dep_impl(files, re_exports, |specifier, rel| {
+    build_dep_impl(files, re_exports, dynamic_imports, |specifier, rel| {
         resolve_file(specifier, rel, all_paths)
     })
 }
@@ -460,8 +491,9 @@ mod tests {
             "import { c } from '../c.js';\nexport { c };\n",
         );
         let all = paths(&["a.ts", "b/index.ts", "c.ts"]);
-        let (dep, _type_only) = build_dep(
+        let (dep, _noncycle) = build_dep(
             &[("a.ts".to_string(), a), ("b/index.ts".to_string(), b)],
+            &[],
             &[],
             &all,
         );
@@ -485,9 +517,10 @@ mod tests {
             }],
         )];
         let all = paths(&["barrel.ts", "b.ts"]);
-        let (dep, _type_only) = build_dep(
+        let (dep, _noncycle) = build_dep(
             &[("barrel.ts".to_string(), ImportMap::new())],
             &re_exports,
+            &[],
             &all,
         );
         assert_eq!(dep["barrel.ts"], vec!["b.ts".to_string()]);
@@ -506,18 +539,21 @@ mod tests {
             }],
         )];
         let all = paths(&["barrel.ts", "z.ts"]);
-        let (dep, _type_only) = build_dep(
+        let (dep, _noncycle) = build_dep(
             &[("barrel.ts".to_string(), ImportMap::new())],
             &re_exports,
+            &[],
             &all,
         );
         assert_eq!(dep["barrel.ts"], vec!["z.ts".to_string()]);
     }
 
     #[test]
-    fn type_only_re_export_creates_no_dep_edge() {
-        // `export type { X } from './y'` is erased by TS at compile time — no edge at all, not even one
-        // excluded from circular only (unlike a type-only import binding — see Defect B tests below).
+    fn type_only_re_export_creates_excludable_dep_edge() {
+        // `export type { X } from './y'` is erased by TS at compile time, so it must never form a real
+        // runtime cycle — but (Defect 1) it now DOES gain a real dep edge (fan-in), same treatment as a
+        // type-only import binding (see the Defect B / noncycle tests below): the edge is present in
+        // `dep` and the `(src, target)` pair lands in the returned noncycle-exclusion set.
         let re_exports = vec![(
             "barrel.ts".to_string(),
             vec![zzop_core::ReExport {
@@ -528,13 +564,55 @@ mod tests {
             }],
         )];
         let all = paths(&["barrel.ts", "y.ts"]);
-        let (dep, type_only_edges) = build_dep(
+        let (dep, noncycle_edges) = build_dep(
             &[("barrel.ts".to_string(), ImportMap::new())],
             &re_exports,
+            &[],
             &all,
         );
-        assert!(dep["barrel.ts"].is_empty());
-        assert!(type_only_edges.is_empty());
+        assert_eq!(dep["barrel.ts"], vec!["y.ts".to_string()]);
+        assert!(noncycle_edges.contains(&("barrel.ts".to_string(), "y.ts".to_string())));
+    }
+
+    #[test]
+    fn dynamic_import_creates_excludable_dep_edge() {
+        // Defect 2: `import('./MoodChart')` (including inside a `dynamic(() => import('./X'))`/
+        // `lazy(() => import('./X'))` wrapper, per `parse_dynamic_imports`) used to create no dep edge at
+        // all, so a code-split-only module looked dead. It now gains a real edge (fan-in) but is excluded
+        // from circular detection (async — never a synchronous module-load cycle, and specifically how
+        // people BREAK cycles).
+        let dynamic_imports = vec![("page.ts".to_string(), vec!["./MoodChart".to_string()])];
+        let all = paths(&["page.ts", "MoodChart.ts"]);
+        let (dep, noncycle_edges) = build_dep(
+            &[("page.ts".to_string(), ImportMap::new())],
+            &[],
+            &dynamic_imports,
+            &all,
+        );
+        assert_eq!(dep["page.ts"], vec!["MoodChart.ts".to_string()]);
+        assert!(noncycle_edges.contains(&("page.ts".to_string(), "MoodChart.ts".to_string())));
+    }
+
+    #[test]
+    fn dynamic_import_cycle_is_not_reported_as_circular() {
+        // Two files linked ONLY by dynamic `import()` (both directions) must not read as a cycle —
+        // mirrors `import_type_only_pair_does_not_form_a_circular_dependency` below, for Defect 2.
+        use zzop_core::circular_from_dep_excluding;
+        let dynamic_imports = vec![
+            ("a.ts".to_string(), vec!["./b".to_string()]),
+            ("b.ts".to_string(), vec!["./a".to_string()]),
+        ];
+        let all = paths(&["a.ts", "b.ts"]);
+        let (dep, noncycle_edges) = build_dep(
+            &[
+                ("a.ts".to_string(), ImportMap::new()),
+                ("b.ts".to_string(), ImportMap::new()),
+            ],
+            &[],
+            &dynamic_imports,
+            &all,
+        );
+        assert!(circular_from_dep_excluding(&dep, &noncycle_edges).is_empty());
     }
 
     #[test]
@@ -552,9 +630,10 @@ mod tests {
             }],
         )];
         let all = paths(&["barrel.ts", "impl.ts"]);
-        let (dep, _type_only) = build_dep(
+        let (dep, _noncycle) = build_dep(
             &[("barrel.ts".to_string(), ImportMap::new())],
             &re_exports,
+            &[],
             &all,
         );
         let fan_in = dep
@@ -614,7 +693,7 @@ mod tests {
     fn build_dep_keeps_internal_drops_external() {
         let imports = parse_imports("a.ts", "import { x } from './b';\nimport 'react';\n");
         let all = paths(&["a.ts", "b.ts"]);
-        let (dep, _type_only) = build_dep(&[("a.ts".to_string(), imports)], &[], &all);
+        let (dep, _noncycle) = build_dep(&[("a.ts".to_string(), imports)], &[], &[], &all);
         assert_eq!(dep["a.ts"], vec!["b.ts".to_string()]);
     }
 
@@ -632,7 +711,7 @@ mod tests {
             },
         );
         let all = paths(&["x.js", "y.ts"]);
-        let (dep, _type_only) = build_dep(&[("x.js".to_string(), imports)], &[], &all);
+        let (dep, _noncycle) = build_dep(&[("x.js".to_string(), imports)], &[], &[], &all);
         assert!(dep["x.js"].is_empty());
     }
 
@@ -652,7 +731,7 @@ mod tests {
             },
         );
         let all = paths(&["x.ts", "y.ts"]);
-        let (dep, type_only_edges) = build_dep(&[("x.ts".to_string(), imports)], &[], &all);
+        let (dep, type_only_edges) = build_dep(&[("x.ts".to_string(), imports)], &[], &[], &all);
         // Fan-in/metrics still see the edge — a type import is still a "use" of the target.
         assert_eq!(dep["x.ts"], vec!["y.ts".to_string()]);
         // But circular detection's exclusion set flags it.
@@ -684,7 +763,7 @@ mod tests {
             },
         );
         let all = paths(&["x.ts", "y.ts"]);
-        let (dep, type_only_edges) = build_dep(&[("x.ts".to_string(), imports)], &[], &all);
+        let (dep, type_only_edges) = build_dep(&[("x.ts".to_string(), imports)], &[], &[], &all);
         assert_eq!(dep["x.ts"], vec!["y.ts".to_string()]);
         assert!(!type_only_edges.contains(&("x.ts".to_string(), "y.ts".to_string())));
     }
@@ -720,6 +799,7 @@ mod tests {
                 ("a.ts".to_string(), a_imports),
                 ("b.ts".to_string(), b_imports),
             ],
+            &[],
             &[],
             &all,
         );
@@ -757,6 +837,7 @@ mod tests {
                 ("b.ts".to_string(), b_imports),
             ],
             &[],
+            &[],
             &all,
         );
         assert_eq!(circular_from_dep_excluding(&dep, &type_only_edges).len(), 1);
@@ -772,6 +853,7 @@ mod tests {
         let all = paths(&["a.ts", "b.ts"]);
         let (dep, type_only_edges) = build_dep(
             &[("a.ts".to_string(), a), ("b.ts".to_string(), b)],
+            &[],
             &[],
             &all,
         );
@@ -978,8 +1060,9 @@ mod tests {
             },
         );
         let all = paths(&["a.ts", "packages/utils-core/src/index.ts"]);
-        let (dep, _type_only) = build_dep_with_workspace(
+        let (dep, _noncycle) = build_dep_with_workspace(
             &[("a.ts".to_string(), imports)],
+            &[],
             &[],
             &all,
             &ws_pkgs(),
@@ -995,8 +1078,9 @@ mod tests {
     fn build_dep_with_workspace_matches_build_dep_when_no_workspace_pkgs() {
         let imports = parse_imports("a.ts", "import { x } from './b';\n");
         let all = paths(&["a.ts", "b.ts"]);
-        let (dep, _type_only) = build_dep_with_workspace(
+        let (dep, _noncycle) = build_dep_with_workspace(
             &[("a.ts".to_string(), imports)],
+            &[],
             &[],
             &all,
             &HashMap::new(),
@@ -1019,9 +1103,10 @@ mod tests {
             }],
         )];
         let all = paths(&["barrel.ts", "b.ts"]);
-        let (dep, _type_only) = build_dep_with_workspace(
+        let (dep, _noncycle) = build_dep_with_workspace(
             &[("barrel.ts".to_string(), ImportMap::new())],
             &re_exports,
+            &[],
             &all,
             &HashMap::new(),
             &no_tsconfigs(),

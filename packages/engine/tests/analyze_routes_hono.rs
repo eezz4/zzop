@@ -9,7 +9,7 @@
 //!
 //! This file exercises the native `duplicate-route` analysis
 //! (`zzop_engine::pipeline::duplicate_route_findings`, registered in
-//! `zzop_rules_graph::register_native_analyses`) end-to-end against exactly that registration style,
+//! `zzop_rules_http::register_native_analyses`) end-to-end against exactly that registration style,
 //! with NO `EngineConfig::io.router_names` override — proving the fix works on the default config.
 //! `duplicate-route` is native, not a DSL rule, so its findings carry the plain rule id
 //! `"duplicate-route"` (no pack prefix) and require no `packs` to be loaded (same convention as

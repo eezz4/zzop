@@ -54,3 +54,29 @@ test('version is full-name only (--version); -v is no longer an alias', () => {
 test('unknown option still errors', () => {
   assert.throws(() => parseArgs(['--nope']), ConfigError);
 });
+
+test('--severity parses each valid value and defaults to null', () => {
+  assert.equal(parseArgs([]).severity, null);
+  assert.equal(parseArgs(['--severity', 'critical']).severity, 'critical');
+  assert.equal(parseArgs(['--severity', 'warning']).severity, 'warning');
+  assert.equal(parseArgs(['--severity', 'info']).severity, 'info');
+  assert.equal(parseArgs(['--severity', 'off']).severity, 'off');
+});
+
+test('--severity requires a value and rejects unknown values', () => {
+  assert.throws(
+    () => parseArgs(['--severity']),
+    (e) => e instanceof ConfigError && /--severity requires/.test(e.message)
+  );
+  assert.throws(
+    () => parseArgs(['--severity', 'warn']),
+    (e) => e instanceof ConfigError && /Invalid severity "warn"/.test(e.message)
+  );
+});
+
+test('--severity is run-scoped and rejected on init', () => {
+  assert.throws(
+    () => parseArgs(['init', '--severity', 'warning']),
+    (e) => e instanceof ConfigError && /not valid for the `init`/.test(e.message)
+  );
+});

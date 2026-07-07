@@ -50,7 +50,7 @@ const report = JSON.parse(zzop.analyze(JSON.stringify({ root: '.' })));
   distribution skeleton ([packages/napi/README.md](packages/napi/README.md))
 - `parser/` — parser frontends: source → Common IR, including HTTP route/consume extraction across
   languages and frameworks ([parser/README.md](parser/README.md))
-- `rules/native/` — whole-graph native rules (`rules-graph`, `rules-schema`) plus `rules/dsl/`
+- `rules/native/` — whole-graph native rules (`rules-graph`, `rules-http`, `rules-cross-layer`, `rules-schema`) plus `rules/dsl/`
   declarative JSON rule packs ([rules/README.md](rules/README.md))
 
 ## Build & test
@@ -74,8 +74,8 @@ Other `packages/engine/examples/` ad hoc harnesses: `cross_layer_rule_counts` (p
 finding counts across 1+ tree roots; set `ZZOP_DUMP_MESSAGES=<n>` to print sample messages),
 `dep_graph_export` (exports the file-level dependency graph as Graphviz DOT or Mermaid), and
 `fastapi_overlay_adapter` (reference external adapter — a lexical FastAPI/Python router scanner feeding
-`EngineConfig::adapter_overlays`, Mode B; see [`docs/NORMALIZED_AST.md`](docs/NORMALIZED_AST.md)'s
-"Adapter overlays" section).
+`EngineConfig::adapter_overlays`, Mode B, also reachable via napi's `adapterOverlays` config field; see
+[`docs/NORMALIZED_AST.md`](docs/NORMALIZED_AST.md)'s "Adapter overlays" section).
 
 Run the English-only source guard (OSS-facing files must be English; Korean is confined to the internal
 notes directory, which is gitignored and not part of this repo's published contents):
