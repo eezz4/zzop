@@ -22,6 +22,7 @@ pub use adapters::db_table_consume::{
 pub use adapters::egress::{
     const_map_fragment, extract_http_egress, is_external_url, resolve_raw_path,
 };
+pub use adapters::global_prefix::extract_global_prefix_marker;
 pub use adapters::hono_client::extract_hono_client_consumes;
 pub use adapters::next_pages_api::{scan_pages_api_handler, PagesApiHandlerScan};
 pub use adapters::router_mounts::extract_router_mount_fragments;
@@ -73,7 +74,11 @@ pub use lang::write_site::{
 ///   circular) so a code-split-only module keeps its fan-in and isn't false-positived by
 ///   `dead-candidates`. Also, a type-only re-export now gains the same edge-but-excluded-from-cycles
 ///   treatment a type-only import binding already had, instead of being dropped entirely.
-pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1";
+/// - `nest-global-prefix-v1`: `extract_global_prefix_marker` — a NestJS `app.setGlobalPrefix('api')`
+///   sentinel `IoProvide { kind: "nest-global-prefix", ... }`, ridden on the existing `provides` channel
+///   (no cache-schema bump) so `zzop-engine`'s tree assembly can prepend the global prefix onto every
+///   `http` provide key and then strip the sentinel before output.
+pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1";
 
 use std::collections::{HashMap, HashSet};
 

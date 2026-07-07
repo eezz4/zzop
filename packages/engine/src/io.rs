@@ -93,7 +93,14 @@ pub(crate) fn extract_file_io(rel: &str, text: &str, opts: &IoOptions) -> Option
     // Code-registered router provides (Hono-style) come from `FileArtifact::router_mount_fragments`
     // instead (module doc). `opts.router_names` is consumed by that fragment projection, not here.
     let _ = opts;
-    let provides: Vec<IoProvide> = zzop_parser_typescript::extract_controller_provides(rel, text);
+    let mut provides: Vec<IoProvide> =
+        zzop_parser_typescript::extract_controller_provides(rel, text);
+    // NestJS `app.setGlobalPrefix('api')` sentinel (kind "nest-global-prefix"): a project-level marker
+    // consumed and stripped by `analyze::assemble` once every file's `IoFacts` are aggregated tree-wide
+    // (see `global_prefix.rs`'s module doc) — this per-file pass only needs to surface it.
+    provides.extend(zzop_parser_typescript::extract_global_prefix_marker(
+        rel, text,
+    ));
 
     if provides.is_empty() && consumes.is_empty() {
         None
@@ -177,6 +184,16 @@ axios.get(ControlKey.AUTHEN.getUserInfo);"#;
         assert_eq!(io.provides[0].key, "GET /users/{}");
         assert_eq!(io.provides[0].line, 3);
         assert_eq!(io.provides[0].symbol.as_deref(), Some("findOne"));
+    }
+
+    #[test]
+    fn captures_nest_global_prefix_marker_through_the_fused_seam() {
+        let src = "app.setGlobalPrefix('api');\n";
+        let io = extract_file_io("main.ts", src, &opts()).expect("expected io facts");
+        assert!(io.consumes.is_empty());
+        assert_eq!(io.provides.len(), 1);
+        assert_eq!(io.provides[0].kind, "nest-global-prefix");
+        assert_eq!(io.provides[0].key, "api");
     }
 
     #[test]

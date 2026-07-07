@@ -10,6 +10,7 @@
 pub mod controller_decorators;
 pub mod db_table_consume;
 pub mod egress;
+pub mod global_prefix;
 pub mod hono_client;
 pub mod next_pages_api;
 pub mod router_mounts;
