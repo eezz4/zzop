@@ -124,7 +124,7 @@ first. The engine-side receiver, `zzop_engine::analyze_envelope(envelope, config
 projects an already-validated envelope into the same per-file artifact shape a native parser produces
 and runs every language-neutral whole-graph analysis over it (see that function's own module doc for
 exactly which per-file DSL rules and analyses run in envelope mode, and why line-scan/method-scan rules
-and git-history-dependent analyses do not). `docs/examples/jsp-envelope.example.json` is a hand-written,
+and git-history-dependent analyses do not). `examples/jsp-envelope.example.json` is a hand-written,
 crude-parser-shaped fixture (symbols with no body spans, one `http` provide, one `db-table` consume, no
 imports) that validates cleanly against this contract — see `zzop-core`'s `normalized::tests::
 jsp_contract_example_validates` for the fixture-based check. A JSON Schema export ships with a future

@@ -2,11 +2,19 @@
 //! matching Hono route, analyzed via `zzop_engine::analyze_trees`, joined by `zzop_core::link_cross_layer_io`
 //! into a `cross_source: true` edge. Mirrors the FE/BE fixture shapes used by `zzop_core::io`'s own
 //! `link_cross_layer_io` unit tests and `zzop_parser_typescript::egress`/`routes`'s end-to-end tests.
+//!
+//! `overlay_injected_consume_joins_a_native_provide_across_trees` additionally locks the Mode-B injection
+//! path's cross-tree behaviour — an adapter-overlay-supplied `IoConsume` on one tree joining another tree's
+//! NATIVE provide into a `cross_source` edge (the openapi-sdk-adapter pipeline, immich's "web SDK consumes
+//! 0 -> 349" lift in miniature). The single-tree overlay tests in `analyze_adapter_overlay.rs` never cross
+//! a tree boundary, so this is the one slice of that shipped behaviour they leave unguarded.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use zzop_core::{FileProjection, IoConsume, IoFacts, NormalizedEnvelope, NORMALIZED_AST_FORMAT};
 use zzop_engine::{analyze_trees, EngineConfig};
 
 struct TempDir(PathBuf);
@@ -65,6 +73,37 @@ fn config(source_id: &str) -> EngineConfig {
     EngineConfig {
         source_id: source_id.to_string(),
         ..EngineConfig::default()
+    }
+}
+
+/// A minimal, all-empty `FileProjection` (same defaults `analyze_adapter_overlay.rs`'s own `projection`
+/// helper uses — test files in this crate don't share a utils module). A test fills only the fields it
+/// cares about.
+fn projection(path: &str, loc: u32) -> FileProjection {
+    FileProjection {
+        path: path.to_string(),
+        loc,
+        symbols: Vec::new(),
+        imports: zzop_core::ImportMap::new(),
+        re_exports: Vec::new(),
+        dynamic_imports: Vec::new(),
+        used_names: Vec::new(),
+        const_map_fragment: HashMap::new(),
+        trpc_router_fragments: Vec::new(),
+        router_mount_fragments: Vec::new(),
+        io: IoFacts::default(),
+        degraded: false,
+        is_entry: false,
+    }
+}
+
+fn overlay(parser: &str, files: Vec<FileProjection>) -> NormalizedEnvelope {
+    NormalizedEnvelope {
+        format: NORMALIZED_AST_FORMAT.to_string(),
+        version: 1,
+        parser: parser.to_string(),
+        source: "adapter".to_string(),
+        files,
     }
 }
 
@@ -205,4 +244,76 @@ fn analyze_trees_surfaces_ambiguous_external_and_low_confidence_buckets() {
         Some("GET https://vendor.com/api/users")
     );
     assert!(out.cross_layer.unprovided_consumes.is_empty());
+}
+
+/// The Mode-B injection path across a tree boundary: the FE talks to its backend only through a generated
+/// SDK function (`getUserInfo()` is not `fetch`/`axios`/`ky`, so native egress keys NOTHING), an adapter
+/// overlay projects that call site as a keyed `IoConsume` (what `openapi-sdk-adapter.mjs` emits from the
+/// spec's `operationId -> "METHOD /path"`), and `analyze_trees` joins it to the BE's native Hono provide.
+/// Asserts BOTH directions — the miniature of immich's "0 -> 349 cross-layer edges" lift — so a future
+/// change that drops overlay consumes from the cross-tree join can't regress silently.
+#[test]
+fn overlay_injected_consume_joins_a_native_provide_across_trees() {
+    let fe = TempDir::new("zzop-engine-multi-fe-sdk");
+    fe.write(
+        "src/page.ts",
+        "import { getUserInfo } from '@my/sdk';\nexport function load() { return getUserInfo(); }\n",
+    );
+    let be = be_tree(); // native Hono `GET /authen/getUserInfo`
+
+    // Baseline: with no overlay the SDK call is invisible to the native egress scan, so there is NO
+    // cross-source http edge — the "0" the overlay lifts.
+    let baseline = analyze_trees(&[
+        (fe.path().to_path_buf(), config("fe")),
+        (be.path().to_path_buf(), config("be")),
+    ]);
+    assert!(
+        baseline.cross_layer.edges.iter().all(|e| e.kind != "http"),
+        "native analysis alone must not see the SDK call: {:?}",
+        baseline.cross_layer.edges
+    );
+
+    // Overlay: project the SDK call site as a keyed http consume, exactly as the reference adapter would.
+    let mut sdk_call = projection("src/page.ts", 2);
+    sdk_call.io.consumes.push(IoConsume {
+        kind: "http".to_string(),
+        key: Some("GET /authen/getUserInfo".to_string()),
+        file: "src/page.ts".to_string(),
+        line: 2,
+        raw: None,
+        method: None,
+    });
+    let mut fe_cfg = config("fe");
+    fe_cfg.adapter_overlays = vec![overlay("openapi-sdk-adapter/1", vec![sdk_call])];
+
+    let out = analyze_trees(&[
+        (fe.path().to_path_buf(), fe_cfg),
+        (be.path().to_path_buf(), config("be")),
+    ]);
+
+    let http_edges: Vec<_> = out
+        .cross_layer
+        .edges
+        .iter()
+        .filter(|e| e.kind == "http")
+        .collect();
+    assert_eq!(
+        http_edges.len(),
+        1,
+        "the overlay-injected consume must join the BE's native provide: {:?}",
+        out.cross_layer.edges
+    );
+    let edge = http_edges[0];
+    assert_eq!(edge.key, "GET /authen/getUserInfo");
+    assert_eq!(edge.from.source, "fe");
+    assert_eq!(edge.from.file, "src/page.ts");
+    assert_eq!(edge.to.source, "be");
+    assert_eq!(edge.to.file, "routes/apiRoutes.ts");
+    assert!(
+        edge.cross_source,
+        "the overlay's FE consume and the native BE provide are different sources"
+    );
+
+    assert!(out.cross_layer.unprovided_consumes.is_empty());
+    assert!(out.cross_layer.unconsumed_provides.is_empty());
 }

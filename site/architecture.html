@@ -188,6 +188,7 @@
         </div>
       </div>
       <p>A hand-written file that happens to contain one long string or comment line among otherwise ordinary lines is not classified as minified — that shape is common enough in real source that it has to keep its rule coverage. When one or more files are classified this way, the output's <code>warnings</code> array gets a single aggregate entry naming the count and a sample of affected paths, never one entry per file.</p>
+      <p>Every run also emits a structural <strong>coverage census</strong> per tree (<code>coverage</code> in the output) — vocab-free counts of how much of each channel it actually filled (files, symbols, import edges, and IO), plus the <code>degraded</code> count above — so a consumer can tell "analyzed and found nothing" apart from "this channel was dark". When a tree analyzes files but extracts zero IO, its <code>coverage.joinContributionZero</code> flag asserts the blindness outright: the tree is invisible to the cross-layer join, so any join finding that references it is structurally weak (a client the extractor can't see — a hand-rolled HTTP wrapper, a generated SDK — is a common cause). And a run-global <code>disclosure</code> registry names the classes of silent failure zzop does, and does <em>not</em> yet, actively detect — so the tool never quietly claims to be complete.</p>
     </section>
 
   </main>

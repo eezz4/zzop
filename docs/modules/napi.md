@@ -90,6 +90,36 @@ deliberately no `root`/`cacheDir`/`git`/`sizeCap` (envelope mode has no filesyst
 | `warnings` | `string[]` | Non-fatal issues (e.g. a bad `packsDir`) plus the capability self-report notes — see [Defaults](#defaults-zero-config--full-analysis). |
 | `cache` | `{ hits, misses } \| null` | Set only when `cacheDir` was given. |
 | `ruleTimings` | `object[] \| null` | Per-rule id + elapsed time + finding count; set only when the caller requests profiling. |
+| `coverage` | `object` | Per-tree coverage census — always present. See below. |
+
+`coverage` fields (all plain counts over this tree, always present — a `0` means "counted and found
+none", not "not run"):
+
+| Field | Type | Meaning |
+|---|---|---|
+| `files` | `number` | Files walked (same as `fileCount`). |
+| `symbols` | `number` | `SourceSymbol` entries extracted (`ir.symbols[]` length). |
+| `importEdges` | `number` | Resolved import-graph edges — sum of `ir.dep` out-degrees (edge count, not source-file count). |
+| `ioProvides` | `number` | `ir.io.provides` entries. |
+| `ioConsumesKeyed` | `number` | `ir.io.consumes` entries whose key resolved statically. |
+| `ioConsumesUnresolved` | `number` | `ir.io.consumes` entries whose key could not be statically determined. |
+| `degraded` | `number` | Same count as `degraded.length`. |
+| `joinContributionZero` | `boolean` | `true` when this tree analyzed files>0 but extracted zero IO (0 `ioProvides`, 0 consumes) — the active-blindness fact: this tree is structurally invisible to `analyzeTrees`'s cross-layer join, so any join finding referencing it (`unconsumedProvides`/`unprovidedConsumes`/edges) is not meaningful for it. A framework/SDK client the extractor cannot see is a common cause; see `adapterOverlays` above (Mode B) to restore visibility. |
+
+### `disclosure` — silent-failure-class registry (run-global)
+
+`analyze`, `analyzeEnvelope` and `analyzeTrees` all emit a top-level `disclosure` array: zzop's pinned,
+honest list of the ways its own output can be silently misread. It is **run-global** (identical every
+run, emitted once — on the multi-tree output it sits beside `trees`/`crossLayer`, never repeated per
+tree) and static, so a consumer learns not just what zzop found but which *classes* of blindness zzop
+does and does not yet actively detect. Each entry:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | `string` | Stable kebab-case class id (part of the contract). |
+| `group` | `string` | Taxonomy group: `extraction-blind` \| `analysis-dark` \| `input-config` \| `trust-calibration`. |
+| `summary` | `string` | The concrete way an agent could misread zzop's output for this class (phrased as the misreading). |
+| `status` | `string` | `asserted` (surfaced from a structural fact every run — cannot be silently missed) \| `partial` (detected in common cases, a member can still slip past) \| `notYetDetected` (a real class zzop does **not** yet detect — declared so you do not assume coverage). |
 
 The whole JSON tree is camelCase — every nested type (`Finding`, `FileNode`, `Scores` and its ~30
 sub-structs, `HealthIndex`, `Recommendation`, `CriticalFile`, `SeamCandidate`, `FolderAggregates`,

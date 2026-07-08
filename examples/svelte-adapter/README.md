@@ -39,7 +39,7 @@ adapter**, not by teaching the engine Svelte vocabulary:
 5. Emit one `FileProjection` per walked file that either is a `.svelte` file with resolvable imports or
    matched the SvelteKit entry convention (`.svelte`/`.ts`/`.js` alike), carrying `imports` and/or
    `is_entry`, grouped into a Normalized-AST envelope.
-6. Feed that envelope to zzop via the **`adapterOverlays`** config field ([Mode B overlay](../../NORMALIZED_AST.md)),
+6. Feed that envelope to zzop via the **`adapterOverlays`** config field ([Mode B overlay](../../docs/NORMALIZED_AST.md)),
    which the engine merges on top of native TypeScript analysis.
 
 Because no native artifact exists at a `.svelte` file's path, the engine creates a synthetic artifact

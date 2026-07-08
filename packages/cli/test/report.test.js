@@ -84,6 +84,16 @@ function multiTreeOutput() {
             { ruleId: 'as-cast', severity: 'info', file: 'src/e.ts', line: 1, message: 'note3' },
           ],
           warnings: ['git not requested'],
+          coverage: {
+            files: 3,
+            symbols: 20,
+            importEdges: 8,
+            ioProvides: 2,
+            ioConsumesKeyed: 0,
+            ioConsumesUnresolved: 0,
+            degraded: 0,
+            joinContributionZero: false,
+          },
           ir: {
             ir: {
               io: {
@@ -104,6 +114,16 @@ function multiTreeOutput() {
           fileCount: 2,
           findings: [],
           warnings: [],
+          coverage: {
+            files: 2,
+            symbols: 10,
+            importEdges: 4,
+            ioProvides: 0,
+            ioConsumesKeyed: 1,
+            ioConsumesUnresolved: 1,
+            degraded: 0,
+            joinContributionZero: false,
+          },
           // Single-nested `ir.io` — the real napi wire shape (see packages/core/src/ir.rs's serde
           // flatten). The sibling tree above uses the doubly-nested `ir.ir.io` shape to exercise the
           // defensive fallback; both must resolve to the same HTTP-interface behavior.
@@ -166,6 +186,11 @@ function multiTreeOutput() {
         message: 'route articles.created is never consumed by any known tree. Consider removing it.',
       },
     ],
+    disclosure: [
+      { id: 'consume-side-unextracted', group: 'extraction-blind', summary: 'consume side gap.', status: 'asserted' },
+      { id: 'language-unparsed', group: 'extraction-blind', summary: 'lang gap.', status: 'partial' },
+      { id: 'provide-side-unextracted', group: 'extraction-blind', summary: 'provider under-extracted.', status: 'notYetDetected' },
+    ],
   };
 }
 
@@ -187,6 +212,16 @@ test('buildMarkdownReports: cross-repo.md surfaces coverage self-reports first, 
   const edgesIdx = content.indexOf('## Cross-repo edges');
   assert.ok(coverageIdx > -1 && edgesIdx > coverageIdx);
   assert.match(content, /\*\*web\*\* — source `web` imports the client\/SDK package/);
+
+  // Per-tree census table, sorted by sourceId ("api" before "web").
+  assert.match(content, /- `api`: 3 files, 2 provides, 0 consumes \(0 keyed \/ 0 unresolved\), 0 degraded/);
+  assert.match(content, /- `web`: 2 files, 0 provides, 2 consumes \(1 keyed \/ 1 unresolved\), 0 degraded/);
+  assert.ok(content.indexOf('- `api`:') < content.indexOf('- `web`:'));
+  assert.ok(content.indexOf('- `api`:') < coverageIdx + '## Coverage & blindness'.length + 200);
+
+  // Neither tree is joinContributionZero, so no BLIND assertion and the "no fully blind" line appears.
+  assert.doesNotMatch(content, /BLIND:/);
+  assert.match(content, /- No fully IO-blind trees detected\./);
 
   // One cross-source edge is a low-confidence match; count reflects only crossSource==true edges.
   assert.match(content, /## Cross-repo edges \(2\)/);
@@ -235,6 +270,44 @@ test('buildMarkdownReports: per-tree file has HTTP interface + findings incl. fo
   assert.match(web, /### Consumes \(routes called\)/);
   assert.match(web, /- `GET \/api\/articles` — src\/client\.ts:4/);
   assert.match(web, /- `sdk\.fetch\(x\)` \(unresolved\) — src\/client\.ts:10/);
+});
+
+test('buildMarkdownReports: per-tree file renders the Coverage section with census numbers', () => {
+  const files = buildMarkdownReports(multiTreeOutput());
+  const api = files.find((f) => f.name === 'api.md').content;
+
+  assert.match(api, /## Coverage\n- Files: 3 {3}Symbols: 20 {3}Import edges: 8/);
+  assert.match(api, /- IO: 2 provides, 0 consumes keyed, 0 unresolved {3}Degraded files: 0/);
+  // api's coverage.joinContributionZero is false -> no Blindness bullet.
+  assert.doesNotMatch(api, /Blindness:/);
+
+  const web = files.find((f) => f.name === 'web.md').content;
+  assert.match(web, /## Coverage\n- Files: 2 {3}Symbols: 10 {3}Import edges: 4/);
+  assert.match(web, /- IO: 0 provides, 1 consumes keyed, 1 unresolved {3}Degraded files: 0/);
+  assert.doesNotMatch(web, /Blindness:/);
+});
+
+test('buildMarkdownReports: per-tree file renders the Blindness bullet when joinContributionZero is true', () => {
+  const output = multiTreeOutput();
+  output.trees[1].output.coverage.joinContributionZero = true;
+  const files = buildMarkdownReports(output);
+  const web = files.find((f) => f.name === 'web.md').content;
+  assert.match(
+    web,
+    /- Blindness: no IO surface was extracted from this tree \(0 provides, 0 consumes across 2 files\), so it is invisible to the cross-layer join — discount any "unconsumed"\/"unprovided" verdict that references it\. If this tree does call an API, the calls flow through a client the extractor cannot see; project them with a Mode B adapter to restore visibility\./
+  );
+});
+
+test('buildMarkdownReports: per-tree Coverage section renders even with no coverage field at all (defensive defaults)', () => {
+  const output = {
+    fileCount: 1,
+    findings: [],
+  };
+  const files = buildMarkdownReports(output, { sourceId: 'bare', root: '.' });
+  // No census present -> Files falls back to the tree's own fileCount (1), never a self-contradictory 0.
+  assert.match(files[0].content, /## Coverage\n- Files: 1 {3}Symbols: 0 {3}Import edges: 0/);
+  assert.match(files[0].content, /- IO: 0 provides, 0 consumes keyed, 0 unresolved {3}Degraded files: 0/);
+  assert.doesNotMatch(files[0].content, /Blindness:/);
 });
 
 test('buildMarkdownReports: single-tree emits one file, no cross-repo.md', () => {
@@ -293,19 +366,75 @@ test('buildMarkdownReports: building the same output twice is byte-identical (de
   assert.deepEqual(first, second);
 });
 
-test('buildMarkdownReports: no coverage gaps message when no self-report findings present', () => {
+test('buildMarkdownReports: no coverage-rule bullets when no self-report findings present (census table still carries the section)', () => {
   const output = multiTreeOutput();
   output.crossLayerFindings = output.crossLayerFindings.filter(
     (f) => f.ruleId !== 'cross-layer/sdk-import-no-visible-consume'
   );
   const [crossRepo] = buildMarkdownReports(output);
-  assert.match(
-    crossRepo.content,
-    /No coverage gaps detected — consume extraction was visible for all trees\./
+  // The old standalone "No coverage gaps detected..." string is gone; the census table + blind
+  // assertions now carry the section, so no coverage-rule bullet (`**tag** — ...`) is printed.
+  assert.doesNotMatch(crossRepo.content, /No coverage gaps detected/);
+  assert.doesNotMatch(crossRepo.content, /\*\*web\*\* — source `web` imports the client\/SDK package/);
+  assert.match(crossRepo.content, /- `api`: 3 files, 2 provides, 0 consumes \(0 keyed \/ 0 unresolved\), 0 degraded/);
+});
+
+test('buildMarkdownReports: BLIND assertion for a joinContributionZero tree, placed before Cross-repo edges', () => {
+  const output = multiTreeOutput();
+  output.trees[1].output.coverage.joinContributionZero = true;
+  const [crossRepo] = buildMarkdownReports(output);
+  const content = crossRepo.content;
+
+  const blindIdx = content.indexOf(
+    '- BLIND: `web` contributed no IO to the join (0 provides, 0 consumes across 2 files) — join findings that reference it are structurally weak; see its per-tree report for guidance.'
   );
+  const edgesIdx = content.indexOf('## Cross-repo edges');
+  assert.ok(blindIdx > -1 && edgesIdx > blindIdx);
+  assert.doesNotMatch(content, /No fully IO-blind trees detected\./);
 });
 
 test('buildReports: format "md" flows through the generic build() and returns the multi-file set', () => {
   const files = buildReports(multiTreeOutput(), { formats: ['md'] });
   assert.deepEqual(files.map((f) => f.name), ['cross-repo.md', 'api.md', 'web.md']);
+});
+
+test('buildMarkdownReports: cross-repo.md footer renders the disclosure registry once (asserted count + not-yet-detected + partial)', () => {
+  const files = buildMarkdownReports(multiTreeOutput());
+  const crossRepo = files.find((f) => f.name === 'cross-repo.md').content;
+
+  assert.match(crossRepo, /## Disclosure coverage/);
+  assert.match(crossRepo, /zzop actively asserts 1 of 3 known silent-failure classes/);
+  // Not-yet-detected spelled out with its summary (the actionable "do not assume I caught this").
+  assert.match(crossRepo, /Not yet detected:\n- `provide-side-unextracted`: provider under-extracted\./);
+  // Partial listed by id.
+  assert.match(crossRepo, /Partial \(detected in common cases, may miss members\): `language-unparsed`\./);
+  // The registry is a footer — it comes after the cross-layer findings section.
+  assert.ok(crossRepo.indexOf('## Cross-layer findings') < crossRepo.indexOf('## Disclosure coverage'));
+
+  // Per-tree files never repeat the registry (it lives once on cross-repo.md).
+  const api = files.find((f) => f.name === 'api.md').content;
+  const web = files.find((f) => f.name === 'web.md').content;
+  assert.doesNotMatch(api, /## Disclosure coverage/);
+  assert.doesNotMatch(web, /## Disclosure coverage/);
+});
+
+test('buildMarkdownReports: single-tree file renders the disclosure registry when present at the root', () => {
+  const output = {
+    fileCount: 1,
+    findings: [],
+    disclosure: [
+      { id: 'consume-side-unextracted', group: 'extraction-blind', summary: 'ok.', status: 'asserted' },
+      { id: 'input-scope-error', group: 'input-config', summary: 'typo root reads as empty repo.', status: 'notYetDetected' },
+    ],
+  };
+  const files = buildMarkdownReports(output, { sourceId: 'solo', root: '.' });
+  assert.deepEqual(files.map((f) => f.name), ['solo.md']);
+  assert.match(files[0].content, /## Disclosure coverage/);
+  assert.match(files[0].content, /zzop actively asserts 1 of 2 known silent-failure classes/);
+  assert.match(files[0].content, /- `input-scope-error`: typo root reads as empty repo\./);
+});
+
+test('buildMarkdownReports: no Disclosure coverage section when the registry is absent (defensive)', () => {
+  const files = buildMarkdownReports({ fileCount: 1, findings: [] }, { sourceId: 'bare', root: '.' });
+  assert.doesNotMatch(files[0].content, /## Disclosure coverage/);
 });

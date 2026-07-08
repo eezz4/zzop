@@ -106,4 +106,4 @@ one only via `disabledRules`/config `rules` `"off"`, never a comment. See
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how a tree gets processed: the IR, route/IO extraction, caching, degraded files.
 - [modules/napi.md](modules/napi.md) — embed the engine directly (Node API surface, request/response shapes).
 - [rules/authoring-guide.md](rules/authoring-guide.md) — write and ship a new DSL rule pack.
-- [NORMALIZED_AST.md](NORMALIZED_AST.md) and [examples/](examples/jsp-envelope.example.json) — extend zzop to a new language or framework via an external parser/adapter.
+- [NORMALIZED_AST.md](NORMALIZED_AST.md) and [../examples/](../examples/README.md) — extend zzop to a new language or framework via an external parser/adapter.

@@ -303,6 +303,8 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         },
     };
 
+    let coverage = crate::CoverageCensus::compute(file_count, &ir, degraded.len());
+
     let package_imports = package_import_files
         .into_iter()
         .map(|(specifier, files)| crate::PackageImportSummary {
@@ -317,6 +319,7 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         findings,
         degraded,
         file_count,
+        coverage,
         package_imports,
         nodes,
         scores: None,

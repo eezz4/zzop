@@ -424,13 +424,13 @@ mod tests {
         assert!(validate_envelope(&json).is_ok());
     }
 
-    /// `docs/examples/jsp-envelope.example.json` — the JSP contract example `docs/NORMALIZED_AST.md`'s
+    /// `examples/jsp-envelope.example.json` — the JSP contract example `docs/NORMALIZED_AST.md`'s
     /// Validation section points at: a hand-written, crude-parser-shaped envelope (symbols with no body
     /// spans, one `http` provide + one `db-table` consume, no imports) that must still validate cleanly
     /// against this exact contract.
     #[test]
     fn jsp_contract_example_validates() {
-        let json = include_str!("../../../docs/examples/jsp-envelope.example.json");
+        let json = include_str!("../../../examples/jsp-envelope.example.json");
         let envelope = validate_envelope(json).expect("jsp-envelope.example.json should validate");
         assert_eq!(envelope.parser, "jsp-lexical/1");
         assert_eq!(envelope.files.len(), 1);

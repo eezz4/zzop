@@ -181,6 +181,34 @@ function firstSentence(message) {
   return idx === -1 ? s : s.slice(0, idx + 1);
 }
 
+// Render the run-global silent-failure-class registry (`output.disclosure`) as a compact footer: how many
+// classes zzop actively asserts, the not-yet-detected ones spelled out (the actionable "do not assume I
+// caught this"), and the partial ones listed by id. Deterministic (sorted by id). Returns `[]` when no
+// registry is present — an older output, or a per-tree file in a multi-tree run (there the registry lives
+// once on the cross-repo root, never repeated per tree).
+function disclosureLines(disclosure) {
+  if (!Array.isArray(disclosure) || disclosure.length === 0) return [];
+  const byStatus = (s) =>
+    disclosure.filter((c) => c && c.status === s).slice().sort((a, b) => cmpStr(a.id, b.id));
+  const asserted = byStatus('asserted');
+  const partial = byStatus('partial');
+  const notYet = byStatus('notYetDetected');
+  const lines = ['## Disclosure coverage'];
+  lines.push(
+    `zzop actively asserts ${asserted.length} of ${disclosure.length} known silent-failure classes; the rest are listed so you do not assume coverage zzop does not have.`
+  );
+  if (notYet.length > 0) {
+    lines.push('Not yet detected:');
+    for (const c of notYet) lines.push(`- \`${c.id}\`: ${c.summary || ''}`);
+  }
+  if (partial.length > 0) {
+    lines.push(
+      `Partial (detected in common cases, may miss members): ${partial.map((c) => `\`${c.id}\``).join(', ')}.`
+    );
+  }
+  return lines;
+}
+
 /**
  * Render one tree's markdown report body (used both for a multi-tree run's per-tree file and for a
  * single-tree run's only file). Deterministic: same inputs -> byte-identical output.
@@ -212,6 +240,29 @@ function buildTreeMarkdown(sourceId, root, treeOutput) {
     for (const w of warnings) lines.push(`- ${w}`);
     lines.push('');
   }
+
+  const cov = treeOutput.coverage || {};
+  // Fall back to the tree's own fileCount when a legacy/hand-built output carries no census, so the
+  // Coverage line never contradicts the "Files analyzed" line above it (the engine always populates
+  // coverage; this only matters for pre-feature outputs).
+  const covFiles = cov.files != null ? Number(cov.files) || 0 : fileCount;
+  const covSymbols = Number(cov.symbols) || 0;
+  const covImportEdges = Number(cov.importEdges) || 0;
+  const covProvides = Number(cov.ioProvides) || 0;
+  const covConsumesKeyed = Number(cov.ioConsumesKeyed) || 0;
+  const covConsumesUnresolved = Number(cov.ioConsumesUnresolved) || 0;
+  const covDegraded = Number(cov.degraded) || 0;
+  lines.push('## Coverage');
+  lines.push(`- Files: ${covFiles}   Symbols: ${covSymbols}   Import edges: ${covImportEdges}`);
+  lines.push(
+    `- IO: ${covProvides} provides, ${covConsumesKeyed} consumes keyed, ${covConsumesUnresolved} unresolved   Degraded files: ${covDegraded}`
+  );
+  if (cov.joinContributionZero) {
+    lines.push(
+      `- Blindness: no IO surface was extracted from this tree (0 provides, 0 consumes across ${covFiles} files), so it is invisible to the cross-layer join — discount any "unconsumed"/"unprovided" verdict that references it. If this tree does call an API, the calls flow through a client the extractor cannot see; project them with a Mode B adapter to restore visibility.`
+    );
+  }
+  lines.push('');
 
   const provideLines = provides
     .slice()
@@ -263,6 +314,11 @@ function buildTreeMarkdown(sourceId, root, treeOutput) {
     lines.push('');
   }
 
+  // Run-global disclosure registry footer — present on a single-tree run's only file; absent (skipped)
+  // on a per-tree file in a multi-tree run, where the cross-repo.md footer carries it once instead.
+  const disc = disclosureLines(treeOutput.disclosure);
+  if (disc.length > 0) lines.push(...disc, '');
+
   while (lines.length && lines[lines.length - 1] === '') lines.pop();
   return `${lines.join('\n')}\n`;
 }
@@ -289,6 +345,47 @@ function buildCrossRepoMarkdown(output) {
   lines.push('');
 
   lines.push('## Coverage & blindness');
+
+  // 1. Per-tree census table, sorted by sourceId.
+  const censusRows = trees
+    .map((t) => {
+      const sourceId = t && t.sourceId;
+      const cov = (t && t.output && t.output.coverage) || {};
+      return {
+        sourceId,
+        files: Number(cov.files) || 0,
+        ioProvides: Number(cov.ioProvides) || 0,
+        keyed: Number(cov.ioConsumesKeyed) || 0,
+        unresolved: Number(cov.ioConsumesUnresolved) || 0,
+        degraded: Number(cov.degraded) || 0,
+      };
+    })
+    .sort((a, b) => cmpStr(a.sourceId, b.sourceId));
+  for (const row of censusRows) {
+    lines.push(
+      `- \`${row.sourceId}\`: ${row.files} files, ${row.ioProvides} provides, ${row.keyed + row.unresolved} consumes (${row.keyed} keyed / ${row.unresolved} unresolved), ${row.degraded} degraded`
+    );
+  }
+
+  // 2. Blind-tree assertions — every tree whose coverage.joinContributionZero is truthy.
+  const blindTrees = trees
+    .filter((t) => t && t.output && t.output.coverage && t.output.coverage.joinContributionZero)
+    .map((t) => ({
+      sourceId: t.sourceId,
+      files: Number(t.output.coverage.files) || 0,
+    }))
+    .sort((a, b) => cmpStr(a.sourceId, b.sourceId));
+  if (blindTrees.length === 0) {
+    lines.push('- No fully IO-blind trees detected.');
+  } else {
+    for (const bt of blindTrees) {
+      lines.push(
+        `- BLIND: \`${bt.sourceId}\` contributed no IO to the join (0 provides, 0 consumes across ${bt.files} files) — join findings that reference it are structurally weak; see its per-tree report for guidance.`
+      );
+    }
+  }
+
+  // 3. The existing coverage-RULE findings (self-report rules), appended after the above.
   const coverage = crossLayerFindings
     .filter((f) => COVERAGE_RULE_IDS.has(String(f && f.ruleId)))
     .slice()
@@ -297,13 +394,9 @@ function buildCrossRepoMarkdown(output) {
       const sb = (b.data && b.data.source) || b.file;
       return cmpStr(sa, sb) || cmpStr(a.file, b.file) || cmpNum(a.line, b.line);
     });
-  if (coverage.length === 0) {
-    lines.push('No coverage gaps detected — consume extraction was visible for all trees.');
-  } else {
-    for (const f of coverage) {
-      const tag = (f.data && f.data.source) || f.file;
-      lines.push(`- **${tag}** — ${f.message || ''}`);
-    }
+  for (const f of coverage) {
+    const tag = (f.data && f.data.source) || f.file;
+    lines.push(`- **${tag}** — ${f.message || ''}`);
   }
   lines.push('');
 
@@ -396,6 +489,10 @@ function buildCrossRepoMarkdown(output) {
       }
     }
   }
+
+  // Run-global disclosure registry footer — emitted once here (the per-tree files omit it).
+  const disc = disclosureLines(output.disclosure);
+  if (disc.length > 0) lines.push('', ...disc);
 
   while (lines.length && lines[lines.length - 1] === '') lines.pop();
   return `${lines.join('\n')}\n`;

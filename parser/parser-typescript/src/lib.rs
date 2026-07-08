@@ -78,7 +78,7 @@ pub use lang::write_site::{
 ///   sentinel `IoProvide { kind: "nest-global-prefix", ... }`, ridden on the existing `provides` channel
 ///   (no cache-schema bump) so `zzop-engine`'s tree assembly can prepend the global prefix onto every
 ///   `http` provide key and then strip the sentinel before output.
-pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1";
+pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1";
 
 use std::collections::{HashMap, HashSet};
 
@@ -1275,7 +1275,18 @@ fn parse_with_cm(file: &str, source: &str) -> Option<(Lrc<SourceMap>, Module)> {
         source.to_string(),
     );
     let syntax = Syntax::Typescript(TsSyntax {
-        tsx: file.ends_with(".tsx"),
+        // JSX is enabled for `.tsx` and for every JS-family extension (`.jsx`, and by React/CRA
+        // convention plain `.js`/`.mjs`/`.cjs`). None of the JS-family extensions use TypeScript's
+        // `<T>x` angle-bracket cast, so treating `<...>` as JSX is unambiguous there (a real comparison
+        // `a < b > c` still parses, since JSX is only recognized in expression-start position, not after
+        // an operand). The pure-TS extensions (`.ts`/`.mts`/`.cts`) keep `tsx` OFF so a type assertion
+        // still parses. Without this, a React component in a `.js`/`.jsx` file fails to parse entirely
+        // and the caller degrades the whole file to a lexical fallback (blinding structural analysis).
+        tsx: file.ends_with(".tsx")
+            || file.ends_with(".jsx")
+            || file.ends_with(".js")
+            || file.ends_with(".mjs")
+            || file.ends_with(".cjs"),
         // Legacy/stage-2 decorator syntax (`@Component({...}) class Foo { @Input() x; }`) is
         // ubiquitous in real-world TS (Angular, NestJS, TypeORM, etc.), but swc_ecma_parser's
         // `TsSyntax::decorators` defaults to `false`. Without this, a decorated class fails to
@@ -1370,6 +1381,60 @@ export class PivotTableComponent {
         assert!(symbols
             .iter()
             .any(|s| s.name == "PivotTableComponent.onResize"));
+    }
+
+    /// Regression: a React component containing JSX in a `.js` or `.jsx` file used to fail
+    /// `parse_file_as_module` entirely and degrade the whole file, because `tsx` was enabled only for
+    /// `.tsx`. Every JS-family extension now parses JSX (`.js`/`.jsx`/`.mjs`/`.cjs`).
+    #[test]
+    fn jsx_in_js_family_files_parse_ok_and_yield_symbols_and_imports() {
+        let src = r#"
+import React from 'react';
+import { connect } from 'react-redux';
+
+export function Header({ title }) {
+  return (
+    <nav className="navbar">
+      <span>{title}</span>
+      {title ? <a href="/new">New</a> : null}
+    </nav>
+  );
+}
+
+export default connect(null, null)(Header);
+"#;
+        for rel in [
+            "src/Header.js",
+            "src/Header.jsx",
+            "src/Header.mjs",
+            "src/Header.cjs",
+        ] {
+            assert!(parse_ok(rel, src), "{rel} should parse JSX, not degrade");
+            let imports = parse_imports(rel, src);
+            assert_eq!(
+                imports["React"],
+                binding("react", "default", false),
+                "{rel}"
+            );
+            let symbols = parse_symbols(rel, src);
+            assert!(
+                symbols.iter().any(|s| s.name == "Header" && s.exported),
+                "{rel}: Header symbol survives JSX parsing"
+            );
+        }
+    }
+
+    /// A pure-TS extension keeps `tsx` off, so an angle-bracket type assertion still parses (not treated
+    /// as a JSX open tag) — the fix must not regress `.ts`/`.mts`/`.cts`.
+    #[test]
+    fn ts_extensions_keep_angle_bracket_type_assertions_parseable() {
+        let src = "const x = <string>(y as unknown);\nexport const z = x;\n";
+        for rel in ["a.ts", "a.mts", "a.cts"] {
+            assert!(
+                parse_ok(rel, src),
+                "{rel}: `<string>` stays a type assertion"
+            );
+        }
     }
 
     fn binding(specifier: &str, original: &str, type_only: bool) -> ImportBinding {

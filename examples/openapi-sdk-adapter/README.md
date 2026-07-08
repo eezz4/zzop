@@ -27,11 +27,12 @@ data that is already on disk — the engine never needs to learn the SDK's shape
    routes: `{id}` path params → `{}`).
 2. Scan the frontend for value imports from the SDK package and their call sites.
 3. Emit each call site as an `IoConsume` fact, grouped per file into a Normalized-AST envelope.
-4. Feed that envelope to zzop via the **`adapterOverlays`** config field ([Mode B overlay](../../NORMALIZED_AST.md)),
+4. Feed that envelope to zzop via the **`adapterOverlays`** config field ([Mode B overlay](../../docs/NORMALIZED_AST.md)),
    which the engine merges on top of native TypeScript analysis.
 
 This is "Mode B": the overlay *augments* native analysis (unlike `analyzeEnvelope`, which *replaces* it).
-The engine stays framework/vendor-neutral; the SDK knowledge lives only in this adapter.
+The engine stays framework/vendor-neutral; the SDK knowledge lives only in this adapter. See
+[../../docs/NORMALIZED_AST.md](../../docs/NORMALIZED_AST.md) for the overlay contract.
 
 ## Usage
 

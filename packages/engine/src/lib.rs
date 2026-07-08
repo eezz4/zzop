@@ -35,7 +35,9 @@
 
 mod analyze;
 mod cache;
+mod coverage;
 mod dead_exports;
+mod disclosure;
 mod dispatch;
 mod envelope;
 mod file_routes;
@@ -53,6 +55,8 @@ use zzop_metrics::{
     ScoresConfig, SeamCandidate,
 };
 
+pub use coverage::CoverageCensus;
+pub use disclosure::{blindness_registry, BlindnessClass, DisclosureStatus};
 pub use dispatch::{DispatchConfig, Language};
 pub use envelope::analyze_envelope;
 pub use io::IoOptions;
@@ -167,6 +171,9 @@ pub struct AnalyzeOutput {
     pub findings: Vec<Finding>,
     pub degraded: Vec<String>,
     pub file_count: usize,
+    /// Structural coverage census — see `CoverageCensus`. Always present (post-aggregate, never
+    /// git-gated).
+    pub coverage: CoverageCensus,
     /// Per non-relative import specifier: how many files import it + the first importing file. Plumbing
     /// for `cross-layer/sdk-import-no-visible-consume` (the tree IR drops package imports during dep
     /// resolution) — not part of the serialized output surface.

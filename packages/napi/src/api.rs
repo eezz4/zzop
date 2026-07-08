@@ -205,6 +205,83 @@ impl From<CacheStats> for CacheStatsView {
     }
 }
 
+/// JSON view over `zzop_engine::CoverageCensus` — the vocab-free structural coverage census (see that
+/// type). Every field is a plain scalar copy (`join_contribution_zero` is the active-blindness FACT: this
+/// tree extracted no io while analyzing `files > 0`, so it is invisible to the cross-layer join). camelCase
+/// like every other output-facing type at this boundary.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CoverageCensusView {
+    files: usize,
+    symbols: usize,
+    import_edges: usize,
+    io_provides: usize,
+    io_consumes_keyed: usize,
+    io_consumes_unresolved: usize,
+    degraded: usize,
+    join_contribution_zero: bool,
+}
+
+impl From<&zzop_engine::CoverageCensus> for CoverageCensusView {
+    fn from(c: &zzop_engine::CoverageCensus) -> Self {
+        CoverageCensusView {
+            files: c.files,
+            symbols: c.symbols,
+            import_edges: c.import_edges,
+            io_provides: c.io_provides,
+            io_consumes_keyed: c.io_consumes_keyed,
+            io_consumes_unresolved: c.io_consumes_unresolved,
+            degraded: c.degraded,
+            join_contribution_zero: c.join_contribution_zero,
+        }
+    }
+}
+
+/// JSON view over one `zzop_engine::BlindnessClass` — an entry in the pinned silent-failure-class
+/// registry (see that type). Static content, identical every run, surfaced so a consumer learns which
+/// classes of blindness zzop does and does NOT yet detect (`status`). All fields are `&'static str`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BlindnessClassView {
+    id: &'static str,
+    group: &'static str,
+    summary: &'static str,
+    status: &'static str,
+}
+
+/// The full registry as a serializable list — attached at the top level of every entry point's output
+/// (a run-global honesty channel, never per-tree, so it is emitted once regardless of tree count).
+fn disclosure_views() -> Vec<BlindnessClassView> {
+    zzop_engine::blindness_registry()
+        .iter()
+        .map(|c| BlindnessClassView {
+            id: c.id,
+            group: c.group,
+            summary: c.summary,
+            status: c.status.as_str(),
+        })
+        .collect()
+}
+
+/// Single-tree output root (`analyze`/`analyzeEnvelope`): the `AnalyzeOutputView` fields, flattened, plus
+/// the run-global `disclosure` registry as a sibling. `#[serde(flatten)]` keeps the existing single-tree
+/// shape byte-for-byte (every prior field stays at the root) and only adds `disclosure`.
+#[derive(Serialize)]
+struct SingleTreeOutputView<'a> {
+    #[serde(flatten)]
+    output: AnalyzeOutputView<'a>,
+    disclosure: Vec<BlindnessClassView>,
+}
+
+impl<'a> SingleTreeOutputView<'a> {
+    fn of(output: &'a AnalyzeOutput) -> Self {
+        SingleTreeOutputView {
+            output: AnalyzeOutputView::of(output),
+            disclosure: disclosure_views(),
+        }
+    }
+}
+
 /// A JSON-serializable *view* over `&zzop_engine::AnalyzeOutput`.
 ///
 /// `AnalyzeOutput` (and its small `CacheStats` payload) do not derive `Serialize`, so this is a
@@ -244,6 +321,8 @@ struct AnalyzeOutputView<'a> {
     warnings: &'a [String],
     cache: Option<CacheStatsView>,
     rule_timings: &'a Option<Vec<zzop_core::dsl::RuleTiming>>,
+    /// Structural coverage census — always present (post-aggregate, never git-gated).
+    coverage: CoverageCensusView,
 }
 
 impl<'a> AnalyzeOutputView<'a> {
@@ -264,6 +343,7 @@ impl<'a> AnalyzeOutputView<'a> {
             warnings: &output.warnings,
             cache: output.cache.map(CacheStatsView::from),
             rule_timings: &output.rule_timings,
+            coverage: CoverageCensusView::from(&output.coverage),
         }
     }
 }
@@ -286,7 +366,7 @@ pub fn analyze_json(config_json: &str) -> Result<String, String> {
     warnings.append(&mut output.warnings);
     output.warnings = warnings;
 
-    serde_json::to_string(&AnalyzeOutputView::of(&output))
+    serde_json::to_string(&SingleTreeOutputView::of(&output))
         .map_err(|e| format!("zzop-napi: failed to serialize analyze() output: {e}"))
 }
 
@@ -346,6 +426,9 @@ pub fn analyze_trees_json(config_json: &str) -> Result<String, String> {
         /// zero-copy-view convention as every other field on this struct, since `Finding` already derives
         /// `Serialize` in `zzop-core`).
         cross_layer_findings: &'a [Finding],
+        /// Run-global silent-failure-class registry — emitted once (not per tree), same content as the
+        /// single-tree output's `disclosure`.
+        disclosure: Vec<BlindnessClassView>,
     }
 
     let view = MultiAnalyzeOutputView {
@@ -360,6 +443,7 @@ pub fn analyze_trees_json(config_json: &str) -> Result<String, String> {
             .collect(),
         cross_layer: &result.cross_layer,
         cross_layer_findings: &result.cross_layer_findings,
+        disclosure: disclosure_views(),
     };
 
     serde_json::to_string(&view)
@@ -401,7 +485,7 @@ pub fn analyze_envelope_json(envelope_json: &str, config_json: &str) -> Result<S
     warnings.append(&mut output.warnings);
     output.warnings = warnings;
 
-    serde_json::to_string(&AnalyzeOutputView::of(&output))
+    serde_json::to_string(&SingleTreeOutputView::of(&output))
         .map_err(|e| format!("zzop-napi: failed to serialize analyzeEnvelope() output: {e}"))
 }
 
@@ -596,6 +680,55 @@ mod tests {
             "expected a circular finding, got: {value}"
         );
         assert_eq!(value["fileCount"], 2);
+    }
+
+    #[test]
+    fn analyze_json_emits_a_camelcase_coverage_census() {
+        // The cycle fixture has 2 mutually-importing files with exported functions and NO io, so it is
+        // the canonical `joinContributionZero` case: files > 0, but 0 provides / 0 consumes.
+        let dir = cycle_fixture();
+        let config = format!(r#"{{"root": {:?}, "sourceId": "t"}}"#, dir.path().display());
+        let out = analyze_json(&config).expect("analyze_json should succeed");
+        let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        let cov = value["coverage"].as_object().expect("coverage object");
+        assert_eq!(cov["files"], 2);
+        assert_eq!(cov["ioProvides"], 0);
+        assert_eq!(cov["ioConsumesKeyed"], 0);
+        assert_eq!(cov["ioConsumesUnresolved"], 0);
+        assert_eq!(cov["joinContributionZero"], true);
+        // Symbols and import edges are populated (a <-> b cycle over two exported functions).
+        assert!(cov["symbols"].as_u64().expect("symbols number") >= 2);
+        assert!(cov["importEdges"].as_u64().expect("importEdges number") >= 2);
+        assert_eq!(cov["degraded"], 0);
+    }
+
+    #[test]
+    fn analyze_json_emits_the_disclosure_registry_at_the_root() {
+        let dir = cycle_fixture();
+        let config = format!(r#"{{"root": {:?}, "sourceId": "t"}}"#, dir.path().display());
+        let out = analyze_json(&config).expect("analyze_json should succeed");
+        let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        let reg = value["disclosure"]
+            .as_array()
+            .expect("disclosure array at root");
+        assert_eq!(reg.len(), zzop_engine::blindness_registry().len());
+        // Each entry is camelCase {id, group, summary, status} with a known status token.
+        for entry in reg {
+            assert!(entry["id"].is_string());
+            assert!(entry["group"].is_string());
+            assert!(entry["summary"].is_string());
+            let status = entry["status"].as_str().expect("status string");
+            assert!(matches!(status, "asserted" | "partial" | "notYetDetected"));
+        }
+        // The Stage-1 signal is registered as an asserted class.
+        let consume_side = reg
+            .iter()
+            .find(|e| e["id"] == "consume-side-unextracted")
+            .expect("consume-side-unextracted registered");
+        assert_eq!(consume_side["status"], "asserted");
+        // The single-tree flatten kept the prior root fields intact alongside `disclosure`.
+        assert_eq!(value["fileCount"], 2);
+        assert!(value["coverage"].is_object());
     }
 
     #[test]
