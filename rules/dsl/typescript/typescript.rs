@@ -310,9 +310,9 @@ fn as_cast_findings(files: &[(&str, &str)]) -> Vec<Finding> {
 fn as_cast_usage_is_flagged_on_each_matching_line() {
     let f = as_cast_findings(&[(
         "casts.ts",
-        "const el = document.getElementById(\"root\") as HTMLElement;\nconst val = (window as any).myGlobal;\n",
+        "const el = document.getElementById(\"root\") as unknown as HTMLElement;\nconst val = (window as any).myGlobal;\n",
     )]);
-    // One `as`-cast occurrence per line here, so 2 lines -> 2 findings.
+    // One dangerous-cast occurrence per line here (`as unknown as` + `as any`), so 2 lines -> 2 findings.
     assert_eq!(lines_of(&f), vec![1, 2], "{f:?}");
 }
 
@@ -332,7 +332,7 @@ fn as_ok_marker_on_a_line_suppresses_that_as_from_the_count() {
     // that window, so it still counts.
     let f = as_cast_findings(&[(
         "marked.ts",
-        "const safe = raw as string; // as-ok: guaranteed by external API\nconst mid = 1;\nconst unsafe = raw2 as number;\n",
+        "const safe = raw as any; // as-ok: guaranteed by external API\nconst mid = 1;\nconst unsafe = raw2 as any;\n",
     )]);
     assert_eq!(lines_of(&f), vec![3], "{f:?}");
 }
@@ -354,7 +354,7 @@ fn jsx_as_prop_is_not_counted_but_a_real_cast_still_is() {
     // fires.
     let f = as_cast_findings(&[(
         "poly.tsx",
-        "const a = <Box as=\"span\">hi</Box>;\nconst b = raw as Size;\n",
+        "const a = <Box as=\"span\">hi</Box>;\nconst b = raw as unknown as Size;\n",
     )]);
     assert_eq!(lines_of(&f), vec![2], "{f:?}");
 }
@@ -379,7 +379,7 @@ fn as_cast_shaped_text_inside_a_full_line_comment_is_not_flagged() {
 fn any_and_as_cast_combined_are_aggregated_independently() {
     let files = &[(
         "mixed.ts",
-        "export function parse(raw: any): string {\n  return (raw as string).trim();\n}\n",
+        "export function parse(raw: any): string {\n  return (raw as unknown as string).trim();\n}\n",
     )];
     assert_eq!(any_findings(files).len(), 1, "{:?}", any_findings(files));
     assert_eq!(

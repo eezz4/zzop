@@ -5,7 +5,7 @@
     {
       "id": "hardcoded-secret",
       "severity": "warning",
-      "message": "Hardcoded secret-shaped literal (an API-key/password/token assignment, or a known cloud-key/API-key prefix) — a credential committed to source is exposed to every reader of the repo and every fork/clone, and cannot be rotated without a code change. Move the value to an environment variable or a secrets manager and reference it (e.g. `process.env.API_KEY`) instead of a literal. Catches both camelCase (`apiKey = \"...\"`) and SNAKE_CASE identifiers where the keyword is an underscore-delimited suffix (`CLIENT_SECRET = \"...\"`, `AUTH_TOKEN = \"...\"`) in both TypeScript/JS and Java. A value that is obviously a mock/placeholder is excluded by value shape, not by file path — a real secret in a test file is still a leak, but a value that announces itself as a placeholder is not: the veto is case-insensitive and delimiter-agnostic (`mock`/`test`/`fake`/`dummy`/`sample`/`placeholder`/`example`/`wrong`/`invalid`/`valid`, bounded by a quote/backtick/dash/underscore/digit/line-edge on each side — so `\"mock_token\"`, `\"MOCK_PASS\"`, `\"mock_token_123\"`, and `\"whsec_test\"` all match now, not just the old dash-prefix-only spelling like `test-...`; the same boundary also accepts an immediately-following uppercase letter as a camelCase continuation, case-sensitively, so `\"testAccessToken\"` and `\"mockToken\"` match too, without over-matching a plain lowercase continuation like `\"testimonials\"`). A value that is itself a multi-segment UPPER_SNAKE_CASE token (at least one underscore, e.g. `INVALID_API_KEY = \"INVALID_API_KEY\"`) or a multi-word lower_snake_case token with no digits (e.g. `refresh_token = \"refresh_token\"`) is also excluded — and, on the same narrowness rationale, so is a multi-word dash-delimited lowercase token with no digits (e.g. `refresh-token`, `access-token`): each segment must be letters-only, so a genuinely random dash-containing key (digits/mixed-case runs, e.g. `sk-a1B2c3D4e5F6g7H8i9J0`) does not match this shape and stays flagged — these are name/error-code sentinels whose value equals the identifier, not a secret; since a line-scan matcher can't compare the assigned identifier against the string value directly, this is an approximation by value shape alone (a real key that happens to look exactly like `SOME_ENV_VAR_NAME` would also be excluded — a documented gap, not a guaranteed catch). The underscore requirement is deliberately stricter than a plain `^[A-Z][A-Z0-9_]*$` shape: a bare uppercase-alphanumeric run with no underscore (`AKIAABCDEFGHIJKLMNOP`) is exactly the shape of a real AWS access key ID, so excluding it on that shape alone would silence real `known-prefix` findings — requiring a multi-segment identifier keeps the sentinel veto narrow to actual `NAME_LIKE_THIS` tokens. This is a repo-content rule (a committed secret is a leak regardless of which path it lives under), so unlike this pack's deployed-surface rules it deliberately does NOT exclude test/fixture paths. Deliberately no length/entropy floor: a vaguer placeholder with no recognized mock word or sentinel shape, like `changeme`/`changeme12345`/`password123`, still matches and stays flagged — note that a dash-joined word pair that happens to fit the sentinel shape (e.g. `changeme-please`) is excluded by that shape, same as `refresh-token`, since a line-scan can't tell an intentional weak-default value from a name-shaped sentinel once both are just two dictionary words joined by a dash — a committed weak-default credential is a finding by design, not a false positive to filter out. Precision limit: this is a shape-based line-scan, so an obvious placeholder without one of the recognized mock words or sentinel shapes looks identical to a real key and also matches — if a directory is full of such fixtures, exclude that path via the host's exclude config rather than marking every line. Known residual: a cookie-NAME literal that happens to look secret-shaped (e.g. an `authTokenName = \"auth-token\"` constant naming a cookie, not holding its value) is not excluded — no reliably narrow shape was found to distinguish it from a genuine hardcoded token without also hiding real leaks, so it is left as a documented false-positive class; suppress it with the marker instead. On the same name-sentinel family as the UPPER_SNAKE_CASE/lower_snake_case/dash-delimited shapes above, a PascalCase multi-word value with no digits (at least two capitalized segments, e.g. `ChangePasswordView`, `ForgotMyPasswordView`) is also excluded — a route/view-name constant keyed by a secret-shaped identifier suffix (`CHANGE_PASSWORD = \"ChangePasswordView\"`, a view-name registry entry) fires falsely because the ASSIGNED NAME carries the keyword, not the value; PascalCase is simply the fourth common JS/TS word-joining convention alongside camelCase/UPPER_SNAKE_CASE/lower_snake_case/dash-case, so this closes the family rather than opening a new one, and the letters-only-no-digits constraint keeps it as narrow as its siblings (a real key like `SkLiveAbCdEfGhIjKl` would need digits or non-alternating case to look random and would therefore still fail this shape in practice only coincidentally — same documented gap as the other three sentinel shapes: a real secret that happens to look exactly like a name is a known, accepted miss). Suppress a vetted case with `// secret-ok`.",
+      "message": "Hardcoded secret-shaped literal (an API-key/password/token assignment, or a known cloud-key prefix) — a credential committed to source is exposed to every reader/fork/clone and cannot be rotated without a code change. Move it to an environment variable or a secrets manager (e.g. `process.env.API_KEY`). Suppress a vetted case with `// secret-ok`.",
       "suppress_marker": "secret-ok",
       "matcher": {
         "type": "line-scan",
@@ -28,12 +28,12 @@
     {
       "id": "mass-assignment",
       "severity": "warning",
-      "message": "`req.body` (or a spread of it) is passed directly into a database write (`create`/`update`/`upsert`/`updateMany`) in the same function — an attacker can set any field the model accepts (role, isAdmin, price, ownerId, ...) that the handler never intended to expose. Whitelist the specific fields you accept (e.g. `{ data: { name: req.body.name } }` or a validated DTO) instead of forwarding the whole body. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Precision limit: method-scan only proves both calls occur in the same function body, not that the passthrough object is literally the write call's argument — an unrelated write elsewhere in the same handler would also co-trigger. Suppress a vetted case with `// mass-assignment-ok`.",
+      "message": "`req.body` (or a spread of it) passed directly into a database write (`create`/`update`/`upsert`/`updateMany`) — an attacker can set any field the model accepts (role, isAdmin, price, ownerId, ...) that the handler never intended to expose. Whitelist the fields you accept, or use a validated DTO. Suppress a vetted case with `// mass-assignment-ok`.",
       "suppress_marker": "mass-assignment-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\.(create|update|upsert|updateMany)\\s*\\(", "label": "db-write" },
@@ -46,12 +46,12 @@
     {
       "id": "raw-query-interpolation",
       "severity": "critical",
-      "message": "`$queryRawUnsafe`/`$executeRawUnsafe` called — these run the given SQL as-is with no parameterization, so any request-derived string interpolated into it is a SQL injection. Use `$queryRaw`/`$executeRaw` tagged templates (or pass values as separate arguments) so Prisma parameterizes the query. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// raw-sql-ok`.",
+      "message": "`$queryRawUnsafe`/`$executeRawUnsafe` called — these run the given SQL as-is with no parameterization, so any request-derived string interpolated into it is a SQL injection. Use `$queryRaw`/`$executeRaw` tagged templates (or pass values as separate arguments) so Prisma parameterizes the query. Suppress a vetted case with `// raw-sql-ok`.",
       "suppress_marker": "raw-sql-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "line_pattern": "\\$(queryRawUnsafe|executeRawUnsafe)\\s*\\(",
         "skip_comment_lines": true,
         "snippet_max": 160
@@ -60,12 +60,12 @@
     {
       "id": "insecure-cookie",
       "severity": "warning",
-      "message": "A cookie is set (`res.cookie`/`setCookie`/`cookies.set`) in this function without `httpOnly` appearing anywhere in the same body — a session/auth cookie without `httpOnly` is readable by any script on the page, so an XSS bug becomes full session theft. Add `{ httpOnly: true }` (plus `secure`/`sameSite` as appropriate) to the cookie options. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Precision limit: `absent` only checks the whole enclosing function body for the word `httpOnly`, not that it is actually an option on this specific call — an unrelated `httpOnly` elsewhere in the same function would also suppress this finding. Suppress a vetted case with `// cookie-ok`.",
+      "message": "A cookie is set (`res.cookie`/`setCookie`/`cookies.set`) without `httpOnly` in the same function — a session/auth cookie without it is readable by any script on the page, so an XSS bug becomes full session theft. Add `{ httpOnly: true }` (plus `secure`/`sameSite` as appropriate). Suppress a vetted case with `// cookie-ok`.",
       "suppress_marker": "cookie-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\b(res\\.cookie|setCookie|cookies?\\.set)\\s*\\(", "label": "cookie-set" }
@@ -80,12 +80,12 @@
     {
       "id": "cors-wildcard",
       "severity": "warning",
-      "message": "CORS origin set to `*` (a wildcard `Access-Control-Allow-Origin` header, or an `origin: '*'` config property) — this lets any website make cross-origin requests to this endpoint, defeating the same-origin protection CORS exists to provide. Return a specific allow-listed origin (echoing the request's `Origin` against a whitelist) instead of `*`, especially on any endpoint that accepts cookies or auth headers. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// cors-ok`.",
+      "message": "CORS origin set to `*` (a wildcard `Access-Control-Allow-Origin` header, or `origin: '*'`) — lets any website make cross-origin requests to this endpoint, defeating same-origin protection. Return a specific allow-listed origin instead, especially on endpoints that accept cookies or auth headers. Suppress a vetted case with `// cors-ok`.",
       "suppress_marker": "cors-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "any": [
           {
@@ -103,12 +103,12 @@
     {
       "id": "weak-password-hash",
       "severity": "critical",
-      "message": "Password hashed/compared with a broken algorithm (MD5/SHA-1) or with bcrypt configured at a single-digit cost factor — MD5/SHA-1 are fast and crackable at billions of guesses/sec on commodity GPUs, and a bcrypt cost below 10 is similarly too cheap to resist offline brute force. Use bcrypt/scrypt/argon2 with a cost factor of at least 10-12 (bcrypt) for password hashing. Precision limit: the low-bcrypt-rounds pattern only catches a literal single-digit numeral in the rounds argument position — a rounds value read from a variable or computed at runtime is not caught. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// weak-hash-ok`.",
+      "message": "Password hashed/compared with a broken algorithm (MD5/SHA-1) or bcrypt at a single-digit cost factor — both are too cheap to resist offline brute force at billions of guesses/sec on commodity GPUs. Use bcrypt/scrypt/argon2 with a cost factor of at least 10-12. Suppress a vetted case with `// weak-hash-ok`.",
       "suppress_marker": "weak-hash-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|java)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "any": [
           {
@@ -130,12 +130,12 @@
     {
       "id": "api-key-in-url",
       "severity": "warning",
-      "message": "A secret-shaped query parameter (`api_key`/`apikey`/`access_token`/`token`/`secret`) appears in a URL — URLs are logged by proxies, load balancers, browser history and the `Referer` header, so a secret in the query string leaks through all of those channels. Move the credential into an `Authorization` header (or a request body/cookie) instead of the URL. Deployed-surface rule (the leak channel is a running request actually being logged/proxied, not the literal text sitting in the repo), so test/e2e/fixture paths are excluded outright — unlike `hardcoded-secret`. Precision limit: designed as a line-scan over literal URL text rather than an io-scan, because the normalized IO layer drops query strings entirely — this only sees secrets that appear literally in source, not a URL assembled from separately-declared string parts. Suppress a vetted case with `// url-key-ok`.",
+      "message": "A secret-shaped query parameter (`api_key`/`access_token`/`token`/`secret`) appears in a URL — URLs are logged by proxies, load balancers, browser history and the `Referer` header. Move the credential into an `Authorization` header (or body/cookie) instead. Suppress a vetted case with `// url-key-ok`.",
       "suppress_marker": "url-key-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|java)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "line_pattern": "(?i)https?://[^\"'\\s]*[?&](api[_-]?key|apikey|access[_-]?token|token|secret)=",
         "snippet_max": 160
@@ -144,12 +144,12 @@
     {
       "id": "annotation-sql-concat",
       "severity": "critical",
-      "message": "JPA `@Query` annotation built via string concatenation (`@Query(\"...\" + ...)`) — the concatenated part is attacker-controlled input spliced directly into SQL/JPQL, the same SQL injection risk as building any other query string by hand. Use named parameters (`:param` with `@Param`) or a parameterized `Specification`/Criteria query instead of concatenating into the annotation's query string. Comment lines are skipped via `skip_comment_lines` — the annotation itself is a real code construct, not a comment, so this only filters out a commented-out `@Query` left in place, never a live one. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// query-concat-ok`.",
+      "message": "JPA `@Query` built via string concatenation (`@Query(\"...\" + ...)`) — the concatenated part is attacker-controlled input spliced into SQL/JPQL, the same SQL injection risk as building any query string by hand. Use named parameters (`:param` with `@Param`) or a parameterized query instead. Suppress a vetted case with `// query-concat-ok`.",
       "suppress_marker": "query-concat-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.java$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "line_pattern": "@Query\\s*\\(\\s*\"[^\"]*\"\\s*\\+",
         "snippet_max": 160
@@ -158,12 +158,12 @@
     {
       "id": "open-redirect",
       "severity": "warning",
-      "message": "`redirect(...)` is called in a function that also reads `req.query`/`req.params`/`req.body` — if the request-derived value flows unchecked into the redirect target, an attacker can send victims to an arbitrary external site (open redirect), a common building block for phishing and OAuth-callback token theft. Validate the target against an allow-list of known internal paths (or require it to be a same-origin relative path) before redirecting. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Precision limit: method-scan only proves both calls occur in the same function body, not that the request value is literally the redirect argument — a redirect to a hardcoded path in a handler that also happens to read other `req` fields would also co-trigger. Suppress a vetted case with `// redirect-ok`.",
+      "message": "`redirect(...)` is called in a function that also reads `req.query`/`req.params`/`req.body` — an unchecked request-derived target lets an attacker send victims to an arbitrary external site (open redirect), a common phishing/OAuth-token-theft vector. Validate the target against an allow-list of known internal paths. Suppress a vetted case with `// redirect-ok`.",
       "suppress_marker": "redirect-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\bredirect\\s*\\(", "label": "redirect" },
@@ -176,12 +176,12 @@
     {
       "id": "ssrf-user-url",
       "severity": "warning",
-      "message": "An outbound HTTP call (`fetch`/`axios`/`got`) is made in a function that also reads `req.query`/`req.params`/`req.body` — if the request-derived value becomes (part of) the request URL, the server can be made to issue requests to attacker-chosen hosts (SSRF), potentially reaching internal-only services or a cloud metadata endpoint. Validate the target against an allow-list of expected hosts/schemes before making the call. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Precision limit: method-scan only proves both calls occur in the same function body, not that the request value is literally the URL argument of the outbound call. Suppress a vetted case with `// ssrf-ok`.",
+      "message": "An outbound HTTP call (`fetch`/`axios`/`got`) is made in a function that also reads `req.query`/`req.params`/`req.body` — if that value becomes part of the URL, the server can be made to request attacker-chosen hosts (SSRF), reaching internal services or a metadata endpoint. Validate the target against an allow-list of hosts. Suppress a vetted case with `// ssrf-ok`.",
       "suppress_marker": "ssrf-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\b(fetch|axios|got)\\s*[.(]", "label": "egress" },
@@ -194,12 +194,12 @@
     {
       "id": "path-traversal",
       "severity": "warning",
-      "message": "A filesystem call (`fs`/`fsp.*`, or `readFile`/`writeFile`/`createReadStream`) reads a path built with `path.join(...)` in a function that also reads `req.params`/`req.query`/`req.body` — without normalizing/validating the segment, a `..`-laden value lets an attacker escape the intended directory (path traversal) and read/write files outside it. Reject `..` segments, or resolve the final path and verify it stays under the intended base directory, before using the request value in a path. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Precision limit: method-scan only proves the three calls co-occur in the same function body, not that the request value is literally the `path.join` argument used by the fs call. Suppress a vetted case with `// traversal-ok`.",
+      "message": "A filesystem call (`fs`/`fsp.*`, `readFile`/`writeFile`) reads a `path.join(...)` path derived from request input — an unvalidated `..` segment lets an attacker escape the intended directory (path traversal). Reject `..` segments, or verify the resolved path stays under the base directory. Suppress a vetted case with `// traversal-ok`.",
       "suppress_marker": "traversal-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\b(fs|fsp)\\.\\w+\\s*\\(|\\b(readFile|writeFile|createReadStream)\\s*\\(", "label": "fs-call" },
@@ -213,12 +213,12 @@
     {
       "id": "cors-credentials-wildcard",
       "severity": "warning",
-      "message": "`credentials: true` appears in a file that also configures `origin: '*'` — combining a wildcard origin with credentialed CORS lets any website make authenticated cross-origin requests carrying the victim's cookies/auth headers, because the wildcard removes the origin check credentialed CORS is supposed to rely on. Echo a specific allow-listed origin (never `*`) whenever `credentials: true` is set. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Precision limit: `require_file_all` only proves both settings exist somewhere in the same file, not that they're on the same CORS config object — a file with two unrelated CORS configs (one wildcard, one credentialed) would also co-trigger. Suppress a vetted case with `// cors-cred-ok`.",
+      "message": "`credentials: true` appears in a file that also configures `origin: '*'` — a wildcard origin with credentialed CORS lets any website make authenticated cross-origin requests carrying the victim's cookies/auth headers. Echo a specific allow-listed origin (never `*`) whenever `credentials: true` is set. Suppress a vetted case with `// cors-cred-ok`.",
       "suppress_marker": "cors-cred-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "line_pattern": "credentials\\s*:\\s*true",
         "require_file_all": ["origin\\s*:\\s*['\"]\\*['\"]"],
@@ -228,12 +228,12 @@
     {
       "id": "jwt-no-expiry",
       "severity": "warning",
-      "message": "`jwt.sign(...)` is called in a function where `expiresIn` never appears — a token with no expiry is valid forever, so if it leaks (logs, XSS, a compromised client) it can be replayed indefinitely with no way to force re-authentication. Pass `{ expiresIn: '...' }` (or set `exp` in the payload) so tokens expire. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Precision limit: `absent` checks the whole enclosing function body for the literal word `expiresIn`, not that it's actually an option on this specific call — an unrelated `expiresIn` elsewhere in the same function would also suppress this finding, and a wrapper that sets `expiresIn` internally would still be flagged since the string never appears at this call site. Suppress a vetted case with `// jwt-expiry-ok`.",
+      "message": "`jwt.sign(...)` is called where `expiresIn` never appears in the same function — a token with no expiry is valid forever, so a leak (logs, XSS, a compromised client) can be replayed indefinitely. Pass `{ expiresIn: '...' }` (or set `exp` in the payload) so tokens expire. Suppress a vetted case with `// jwt-expiry-ok`.",
       "suppress_marker": "jwt-expiry-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\bjwt\\.sign\\s*\\(", "label": "jwt-sign" }
@@ -248,12 +248,12 @@
     {
       "id": "weak-token-random",
       "severity": "warning",
-      "message": "`Math.random()` is used on the same line as a token/otp/nonce/session-id/secret-shaped identifier — `Math.random()` is a seeded, statistically predictable PRNG (not cryptographically secure), so a value generated this way for a security-sensitive purpose can be guessed or brute-forced. Use `crypto.randomBytes(n).toString('hex')` or `crypto.randomUUID()` instead. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// weak-random-ok`.",
+      "message": "`Math.random()` is used on the same line as a token/otp/nonce/session-id/secret-shaped identifier — it's a predictable PRNG, not cryptographically secure, so a value generated this way can be guessed or brute-forced. Use `crypto.randomBytes(n).toString('hex')` or `crypto.randomUUID()`. Suppress a vetted case with `// weak-random-ok`.",
       "suppress_marker": "weak-random-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "any": [
           { "pattern": "(?i)\\b(token|otp|nonce|session_?id|secret)\\b.*Math\\.random\\s*\\(", "label": "ctx-before" },
@@ -265,12 +265,12 @@
     {
       "id": "timing-unsafe-compare",
       "severity": "info",
-      "message": "A secret/token/signature/hmac/api-key-shaped identifier is compared with `===`/`!==` — the built-in equality operators short-circuit on the first differing byte, so comparison time leaks how many leading bytes matched, a timing side-channel an attacker can exploit to recover the value byte-by-byte. Use `crypto.timingSafeEqual(...)` (comparing fixed-length buffers) instead of `===`/`!==` for secret comparisons. A comparison against `undefined`/`null` is excluded outright — that is a presence/existence check, not a secret-value comparison, regardless of what the identifier is named (e.g. `tokens !== undefined`). A `typeof` type-guard is also excluded outright — `typeof apiKeyHeader === 'string'`/`typeof tokenData === 'object'`/`typeof data.secret === 'string'` (any of JS's eight `typeof` result strings: `string`/`number`/`boolean`/`object`/`function`/`bigint`/`symbol`/`undefined`) is structurally checking the VALUE'S TYPE, never comparing two secret VALUES, so it can never be the timing side-channel this rule is about — this is the dominant false-positive shape for this rule, concentrated in the narrow-and-return input-validation idiom `typeof data.apiKey === 'string' ? data.apiKey : undefined`. Precision limit: this is a shape-based line-scan keyed only on the identifier name touching `===`/`!==`, so it has a high false-positive rate (e.g. comparing a public token id, a dependency-injection container token, a lexer/parser token type tag, a stale-async-response race-guard counter, or an unrelated field that happens to share one of these words) — starts at `info` severity for that reason; these residual shapes are accepted, not further narrowed, since `token` in particular is one of the most overloaded identifier words in JS/TS (DI tokens, request-generation tokens, lexer tokens) and no shape-only regex reliably tells them apart from a real secret token without risking real misses. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// timing-ok`.",
+      "message": "A secret/token/signature/hmac/api-key-shaped identifier is compared with `===`/`!==` — equality operators short-circuit on the first differing byte, leaking a timing side-channel an attacker can exploit to recover the value byte-by-byte. Use `crypto.timingSafeEqual(...)` on fixed-length buffers instead. Suppress a vetted case with `// timing-ok`.",
       "suppress_marker": "timing-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "line_pattern": "(?i)\\b(secret|token|signature|hmac|api_?key)\\w*\\s*[!=]==\\s*",
         "exclude_pattern": "(?i)[!=]==\\s*(undefined|null)\\b|(?i)\\btypeof\\s+[\\w$.\\[\\]'\"]*(secret|token|signature|hmac|api_?key)\\w*\\s*[!=]==\\s*['\"](string|number|boolean|object|function|bigint|symbol|undefined)['\"]",
@@ -280,12 +280,12 @@
     {
       "id": "error-leak-to-client",
       "severity": "warning",
-      "message": "A raw error object is sent directly to the client (`res.status(5xx).send/json(err)`, or Hono's `c.json(err)`) — error objects often carry stack traces, file paths, SQL fragments, or internal config, all of which help an attacker map the system's internals. Log the error server-side and send a generic message (e.g. `{ error: 'Internal server error' }`) to the client instead of the raw error object. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// error-leak-ok`.",
+      "message": "A raw error object is sent directly to the client (`res.status(5xx).send/json(err)`, or Hono's `c.json(err)`) — errors often carry stack traces, file paths, or internal config that help an attacker map the system. Log server-side and send a generic message (e.g. `{ error: 'Internal server error' }`) instead. Suppress a vetted case with `// error-leak-ok`.",
       "suppress_marker": "error-leak-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "any": [
           { "pattern": "res\\.status\\s*\\(\\s*5\\d\\d\\s*\\)\\s*\\.\\s*(send|json)\\s*\\(\\s*(err|error|e)\\b", "label": "status5xx" },
@@ -297,12 +297,12 @@
     {
       "id": "secret-env-in-fe",
       "severity": "warning",
-      "message": "A server-only-shaped env var (name containing `SECRET`/`PRIVATE`/`SERVICE_ROLE`/`SERVICE_KEY`) is referenced from frontend code (`.tsx`/`.jsx`, or a `.ts`/`.js` file under a `fe/`/`frontend/`/`client`/`web/` directory) — frontend build tools inline `process.env.*`/`import.meta.env.*` references into the shipped JS bundle, so this value ends up readable by anyone who opens devtools, not just running server-side. Move the value behind a backend endpoint (or use a build-time-only, non-secret public var, e.g. `NEXT_PUBLIC_`/`VITE_`-prefixed) instead of referencing the secret name directly in frontend code. Deployed-surface rule (the leak mechanism is the production bundler inlining a value from real app source; a `*.test.ts` file is not part of that bundle), so test/e2e/fixture paths are excluded outright. Suppress a vetted case with `// fe-env-ok`.",
+      "message": "A server-only-shaped env var (`SECRET`/`PRIVATE`/`SERVICE_ROLE`/`SERVICE_KEY`) is referenced from frontend code — build tools inline `process.env.*`/`import.meta.env.*` into the shipped JS bundle, making it readable in devtools. Move it behind a backend endpoint, or use a non-secret public var (`NEXT_PUBLIC_`/`VITE_`-prefixed). Suppress a vetted case with `// fe-env-ok`.",
       "suppress_marker": "fe-env-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)(\\.(tsx|jsx)$|(^|/)(fe|frontend|client|web)/.*\\.(ts|js)$)",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "line_pattern": "(?i)(process\\.env|import\\.meta\\.env)\\.[A-Z0-9_]*(SECRET|PRIVATE|SERVICE_ROLE|SERVICE_KEY)[A-Z0-9_]*",
         "snippet_max": 160
@@ -311,12 +311,12 @@
     {
       "id": "localstorage-jwt",
       "severity": "warning",
-      "message": "A token/JWT-shaped value is written to `localStorage` — anything in `localStorage` is readable by any script running on the page, so a single XSS bug anywhere on the origin (including a compromised third-party script) can exfiltrate the token with no further exploitation needed. Store the token in an `httpOnly` cookie instead, so client-side JS (and therefore XSS) cannot read it. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// ls-token-ok`.",
+      "message": "A token/JWT-shaped value is written to `localStorage` — readable by any script on the page, so a single XSS bug anywhere on the origin can exfiltrate it with no further exploitation. Store the token in an `httpOnly` cookie instead, so client-side JS (and XSS) cannot read it. Suppress a vetted case with `// ls-token-ok`.",
       "suppress_marker": "ls-token-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "line_pattern": "(?i)localStorage\\.setItem\\s*\\([^)]*\\b(token|jwt|access_?token)\\b",
         "snippet_max": 160
@@ -325,7 +325,7 @@
     {
       "id": "java-hardcoded-password",
       "severity": "warning",
-      "message": "A password-shaped literal is hardcoded — either a direct assignment (`password = \"...\"`) or a JDBC `getConnection(url, user, password)` call with literal username/password — a credential committed to source is exposed to every reader of the repo and cannot be rotated without a code change. Read the credential from an environment variable, a properties file excluded from version control, or a secrets manager. This is a repo-content rule, the same family as this pack's `hardcoded-secret` — a literal credential in a test file is still a leak, so test/fixture paths are deliberately NOT excluded here. Suppress a vetted case with `// java-pwd-ok`.",
+      "message": "A password-shaped literal is hardcoded — a direct assignment (`password = \"...\"`) or a JDBC `getConnection(url, user, password)` call with literal credentials — exposed to every reader of the repo and impossible to rotate without a code change. Read it from an environment variable, an excluded properties file, or a secrets manager. Suppress a vetted case with `// java-pwd-ok`.",
       "suppress_marker": "java-pwd-ok",
       "matcher": {
         "type": "line-scan",
@@ -341,12 +341,12 @@
     {
       "id": "xxe-no-guard",
       "severity": "critical",
-      "message": "`DocumentBuilderFactory`/`SAXParserFactory.newInstance()` is called in a function where no XXE guard (`disallow-doctype-decl` or `FEATURE_SECURE_PROCESSING`) appears — an XML parser configured with defaults resolves external entities, so a crafted `<!DOCTYPE>` in attacker-supplied XML can read local files, perform SSRF, or exhaust memory (billion laughs). Set `setFeature(\"http://apache.org/xml/features/disallow-doctype-decl\", true)` (or `XMLConstants.FEATURE_SECURE_PROCESSING`) on the factory before parsing untrusted input. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Precision limit: `absent` checks the whole enclosing method body for the literal guard string, not that it's actually applied to this specific factory instance — a guard set on an unrelated factory in the same method would also suppress this finding. Suppress a vetted case with `// xxe-ok`.",
+      "message": "`DocumentBuilderFactory`/`SAXParserFactory.newInstance()` with no XXE guard in the same method — a default-configured XML parser resolves external entities, so crafted XML can read local files, perform SSRF, or exhaust memory. Set `disallow-doctype-decl` or `FEATURE_SECURE_PROCESSING` before parsing untrusted input. Suppress a vetted case with `// xxe-ok`.",
       "suppress_marker": "xxe-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.java$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "(DocumentBuilderFactory|SAXParserFactory)\\.newInstance\\s*\\(", "label": "factory" }
@@ -361,12 +361,12 @@
     {
       "id": "unsafe-deserialization",
       "severity": "warning",
-      "message": "`ObjectInputStream.readObject()` is called on data from an `ObjectInputStream` in this function — Java's native deserialization invokes arbitrary code paths (gadget chains) while reconstructing an object, so deserializing an attacker-controlled byte stream can lead to remote code execution regardless of what type is expected. Avoid native Java deserialization for untrusted input entirely — use a data format with no executable semantics (JSON/Protobuf) or, if `ObjectInputStream` is unavoidable, validate the stream with an allow-list `ObjectInputFilter`. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// deser-ok`.",
+      "message": "`ObjectInputStream.readObject()` is called in this function — Java's native deserialization invokes arbitrary code paths (gadget chains), so deserializing an attacker-controlled byte stream can lead to remote code execution. Use JSON/Protobuf instead, or validate the stream with an allow-list `ObjectInputFilter`. Suppress a vetted case with `// deser-ok`.",
       "suppress_marker": "deser-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.java$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "new\\s+ObjectInputStream", "label": "ois" },
@@ -379,12 +379,12 @@
     {
       "id": "java-path-traversal",
       "severity": "warning",
-      "message": "`new File(...)` is constructed in a function that also reads `request.getParameter(...)` — if the parameter value flows unchecked into the path, a `..`-laden value lets an attacker escape the intended directory (path traversal) and read/write files outside it. Validate/normalize the parameter (reject `..` segments, or resolve and compare against the intended base directory) before using it in a `File` path. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Precision limit: method-scan only proves both calls occur in the same method body, not that the parameter value is literally the `File` constructor argument. Suppress a vetted case with `// java-traversal-ok`.",
+      "message": "`new File(...)` is constructed in a function that also reads `request.getParameter(...)` — an unvalidated parameter flowing into the path lets an attacker escape the intended directory and read/write files outside it. Reject `..` segments, or resolve and compare against the base directory before use. Suppress a vetted case with `// java-traversal-ok`.",
       "suppress_marker": "java-traversal-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.java$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "new\\s+File\\s*\\(", "label": "new-file" },
@@ -397,12 +397,12 @@
     {
       "id": "java-weak-random",
       "severity": "warning",
-      "message": "`new Random()` is used on the same line as a token/session/otp/nonce-shaped identifier — `java.util.Random` is a seeded, statistically predictable PRNG (not cryptographically secure), so a value generated this way for a security-sensitive purpose can be predicted or brute-forced. Use `java.security.SecureRandom` instead of `java.util.Random` for tokens/session identifiers. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// java-random-ok`.",
+      "message": "`new Random()` is used on the same line as a token/session/otp/nonce-shaped identifier — `java.util.Random` is a predictable PRNG, not cryptographically secure, so a value generated this way can be predicted or brute-forced. Use `java.security.SecureRandom` instead. Suppress a vetted case with `// java-random-ok`.",
       "suppress_marker": "java-random-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.java$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "any": [
           { "pattern": "(?i)\\b(token|session|otp|nonce)\\b.*new\\s+Random\\s*\\(", "label": "ctx-before" },
@@ -414,12 +414,12 @@
     {
       "id": "stacktrace-to-response",
       "severity": "warning",
-      "message": "An exception's stack trace/message (`printStackTrace()` / `.getMessage()`) is produced in a method that also touches the HTTP response (`getWriter()`, `ResponseEntity`, `@ResponseBody`, or `HttpServletResponse`) — if that trace/message reaches the client, it exposes internal class names, file paths, and SQL fragments that help an attacker map the system's internals. Log the exception server-side (e.g. via a logger) and return a generic error body to the client instead. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Precision limit: method-scan only proves both occur in the same method, not that the leaked value is literally what's written to the response — a method that separately logs an exception and also returns an unrelated `ResponseEntity` would also co-trigger. Suppress a vetted case with `// stacktrace-ok`.",
+      "message": "An exception's stack trace/message (`printStackTrace()`/`.getMessage()`) touches the HTTP response (`getWriter()`, `ResponseEntity`, `@ResponseBody`) in the same method — if it reaches the client, it exposes internal class names and file paths. Log server-side and return a generic error body instead. Suppress a vetted case with `// stacktrace-ok`.",
       "suppress_marker": "stacktrace-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.java$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "printStackTrace\\s*\\(|\\.getMessage\\s*\\(\\)", "label": "leak" },
@@ -432,12 +432,12 @@
     {
       "id": "trust-all-tls",
       "severity": "critical",
-      "message": "TLS certificate/hostname verification is disabled — either a trust-all `X509TrustManager`/`TrustAllCerts`-shaped class, Apache HttpClient's `ALLOW_ALL_HOSTNAME_VERIFIER`, or a `setHostnameVerifier` lambda that unconditionally returns `true` — any of these makes the connection accept any certificate for any host, so the app can't distinguish the real server from an attacker performing a man-in-the-middle attack. Use the default trust manager / hostname verifier (or a properly configured custom one that actually validates the chain and hostname) instead of disabling verification. Test/e2e/fixture paths are excluded outright (deployed-surface rule — a test-only trust-all TLS setup for hitting a local self-signed cert is the intended target there, not a leaked bypass). Suppress a vetted case with `// trust-all-ok`.",
+      "message": "TLS certificate/hostname verification is disabled (a trust-all `X509TrustManager`, `ALLOW_ALL_HOSTNAME_VERIFIER`, or a `setHostnameVerifier` lambda always returning `true`) — accepts any certificate for any host, so the app can't detect a man-in-the-middle. Use the default (or a properly validating custom) trust manager/verifier. Suppress a vetted case with `// trust-all-ok`.",
       "suppress_marker": "trust-all-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.java$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "any": [
           { "pattern": "TrustAllCerts", "label": "trust-all-class" },

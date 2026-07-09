@@ -5,12 +5,12 @@
     {
       "id": "update-delete-no-where",
       "severity": "critical",
-      "message": "`updateMany`/`deleteMany` called with no `where:` clause anywhere in the enclosing function — this is a whole-table write (every row the model has, not a filtered subset). Add a `where:` filter that scopes the write, or if a full-table `updateMany`/`deleteMany` is genuinely intended, mark it explicitly. A call whose first argument is itself a function (`.deleteMany((item) => ...)`, `.deleteMany(x => ...)`, or `.deleteMany(function (item) {...})`) is skipped outright — that shape is a custom collection wrapper's predicate-taking `deleteMany`/`updateMany` (internally scoped by the callback), not a bare whole-table Prisma-style call; `deleteMany()`/`deleteMany({...})` (no function argument) are still flagged. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule — same convention as this pack's other write-safety checks). Suppress a vetted case with `// no-where-ok`. (Span-level check: a `where:` appearing ANYWHERE in the same function — even one guarding an unrelated call — suppresses this rule, so an intentional full-table write sharing a function with an unrelated `where:` still needs the marker; the predicate-function veto has the same span-wide caveat — an unrelated `.deleteMany(x => ...)` elsewhere in the same function also suppresses a genuine unguarded bulk write.)",
+      "message": "`updateMany`/`deleteMany` called with no `where:` clause anywhere in the enclosing function — a whole-table write, not a filtered subset. Add a `where:` filter that scopes the write, or mark a genuinely full-table write explicitly. Suppress a vetted case with `// no-where-ok`.",
       "suppress_marker": "no-where-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\.(?:updateMany|deleteMany)\\s*\\(", "label": "bulk-write" }
@@ -26,12 +26,12 @@
     {
       "id": "pagination-no-orderby",
       "severity": "warning",
-      "message": "`skip`/`take` pagination used with no `orderBy` anywhere in the enclosing function — without a stable sort, most databases don't guarantee row order, so page boundaries can shift between requests (rows skipped or duplicated across pages). Add an `orderBy:` on a unique or otherwise stable column. `skip`/`take` is only flagged when it co-occurs with a `.findMany(` call in the same function (Prisma's actual paginated-read method) — this excludes non-Prisma uses of the generic `skip`/`take` option-name vocabulary (e.g. Apollo Client's `useQuery(..., { skip: boolean })` \"skip this query\" flag, RxJS's `take(n)` operator) that have nothing to do with database pagination but share the same option name. Comment lines are skipped via `skip_comment_lines`, so a comment merely mentioning the English word \"skip\" does not fire. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// pagination-ok`. (Span-level check: an `orderBy:` anywhere in the same function suppresses this, even one ordering an unrelated query, so an intentionally unordered pagination call sharing a function with an unrelated `orderBy:` still needs the marker.)",
+      "message": "`skip`/`take` pagination used with no `orderBy` in the enclosing function — without a stable sort, page boundaries can shift between requests (rows skipped or duplicated across pages). Add an `orderBy:` on a unique or otherwise stable column. Suppress a vetted case with `// pagination-ok`.",
       "suppress_marker": "pagination-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\b(?:skip|take)\\s*:", "label": "pagination" },
@@ -47,12 +47,12 @@
     {
       "id": "client-per-request",
       "severity": "warning",
-      "message": "`new PrismaClient()` constructed inside a function that also looks like a request handler (references `req`/`res`/`ctx`/`request`/`reply`) — a fresh client per request exhausts the database connection pool under load. Hoist a single client to a module-level singleton (`const prisma = new PrismaClient()` at the top of the module, imported everywhere else) instead of constructing one per handler invocation. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// prisma-client-ok`. (Span-level co-occurrence: the handler-context keyword only needs to appear somewhere in the same function, not be provably tied to how the client is used — this co-pattern exists mainly so a legitimate module-top-level singleton, which has no enclosing function span at all, is never scanned by this rule in the first place.)",
+      "message": "`new PrismaClient()` constructed inside a function that looks like a request handler (references `req`/`res`/`ctx`/`request`/`reply`) — a fresh client per request exhausts the database connection pool under load. Hoist a single client to a module-level singleton instead. Suppress a vetted case with `// prisma-client-ok`.",
       "suppress_marker": "prisma-client-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\bnew\\s+PrismaClient\\s*\\(", "label": "new-client" },
@@ -65,12 +65,12 @@
     {
       "id": "external-call-in-tx",
       "severity": "warning",
-      "message": "A network call (`fetch`/`axios`/`got`) appears in the same function as a `$transaction(` — holding a database transaction open across a network round-trip extends lock hold time, and if the external call stalls, the transaction (and every lock it holds) stalls with it. Move the network call outside the `$transaction` block — resolve whatever data it needs before or after the transaction, not inside it. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// tx-egress-ok`. (Span-level co-occurrence approximation: `$transaction(` and the network call only need to appear ANYWHERE in the same function, not literally inside the transaction callback's own body — a call before or after the transaction in the same function also matches.)",
+      "message": "A network call (`fetch`/`axios`/`got`) appears in the same function as a `$transaction(` — holding a database transaction open across a network round-trip extends lock hold time, and stalls with it if the external call stalls. Move the network call outside the `$transaction` block. Suppress a vetted case with `// tx-egress-ok`.",
       "suppress_marker": "tx-egress-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\$transaction\\s*\\(", "label": "transaction" },
@@ -83,12 +83,12 @@
     {
       "id": "unawaited-write",
       "severity": "warning",
-      "message": "A database write (`create`/`update`/`delete`/`upsert`) call on a DB-client-shaped receiver (`prisma`/`db`/`tx`/`client`/`repo`/`repos`/`repository`/`repositories`, optionally through one model property like `prisma.user.create(...)`) whose promise is neither awaited nor returned nor chained — fire-and-forget: the write's result and any failure are silently dropped, so a failed write looks identical to a successful one to the caller. Await the call (or `return` it, or attach a `.then()`/`.catch()`) so failures propagate instead of vanishing. If your DB client uses a different receiver name than `prisma`/`db`/`tx`/`client`/`repo`/`repos`/`repository`/`repositories`, this rule won't see it — suppress with the marker instead, or rename to match. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// unawaited-ok`. Precision-limit note: this is a single-line approximation — a captured promise (`const p = prisma.order.create(...)`) and a line ending in `=>` (the write is itself an arrow-function body) are excluded from this pattern as \"handled elsewhere\", not proven safe, since the assignment/arrow shape means the promise's fate is decided on a different line than this scan inspects.",
+      "message": "A database write (`create`/`update`/`delete`/`upsert`) on a DB-client-shaped receiver (`prisma`/`db`/`tx`/`client`/`repo`) whose promise is neither awaited, returned, nor chained — a failed write looks identical to a successful one. Await the call (or return it, or attach `.then()`/`.catch()`). Suppress a vetted case with `// unawaited-ok`.",
       "suppress_marker": "unawaited-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "line_pattern": "\\b(prisma|db|tx|client|repo(sitory|sitories)?s?)\\.(\\w+\\.)?(create|update|delete|upsert)\\s*\\(",
         "exclude_pattern": "\\b(await|return)\\b|\\.then\\b|=\\s*\\w|=>",
@@ -98,12 +98,12 @@
     {
       "id": "unbounded-user-limit",
       "severity": "warning",
-      "message": "A `take`/`limit` pagination size is read directly from user input (`req.query`/`req.params`/`req.body`) with no upper-bound clamp — a client can request an arbitrarily large page size and force the server to load (and serialize) an unbounded number of rows in one response, a cheap memory/CPU exhaustion vector. Clamp the value against a maximum before passing it to the query (e.g. `take: Math.min(MAX_PAGE_SIZE, Number(req.query.limit))`). Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// limit-ok`.",
+      "message": "A `take`/`limit` pagination size is read directly from user input with no upper-bound clamp — a client can force the server to load and serialize an unbounded number of rows (memory/CPU exhaustion). Clamp it against a maximum (e.g. `Math.min(MAX_PAGE_SIZE, Number(req.query.limit))`). Suppress a vetted case with `// limit-ok`.",
       "suppress_marker": "limit-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "any": [
           { "pattern": "\\b(take|limit)\\s*:\\s*\\+?\\s*(Number\\s*\\(\\s*)?req\\.(query|params|body)", "label": "take" }
@@ -114,12 +114,12 @@
     {
       "id": "find-then-create-no-unique",
       "severity": "warning",
-      "message": "A `findFirst`/`findOne`/`findUnique` read followed by a `.create(` in the same function, with no `connectOrCreate`, `upsert`, or `$transaction(` anywhere in that function — a classic check-then-act race: two concurrent requests can both pass the \"does it already exist\" check before either has written, so both go on to create a duplicate row. Use a unique constraint plus `upsert`/`connectOrCreate`, or wrap the read and the write in a `$transaction(...)`. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// find-create-ok`. (Span-level co-occurrence: `absent` only checks the whole enclosing function body for the safe patterns, not that they actually guard this specific read+create pair — an unrelated `$transaction(` elsewhere in the same function would also suppress this finding.)",
+      "message": "A `findFirst`/`findOne`/`findUnique` read followed by `.create(` with no `connectOrCreate`, `upsert`, or `$transaction(` — a check-then-act race lets two concurrent requests both pass and create a duplicate row. Use a unique constraint plus `upsert`/`connectOrCreate`, or wrap the read+write in a transaction. Suppress a vetted case with `// find-create-ok`.",
       "suppress_marker": "find-create-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\.(findFirst|findOne|findUnique)\\s*\\(", "label": "read" },
@@ -135,12 +135,12 @@
     {
       "id": "float-money-compare",
       "severity": "info",
-      "message": "A money-named identifier (`price`/`amount`/`balance`/`fee`/`cost`) compared with `==`/`===`/`!=`/`!==` against a float literal (e.g. `price === 19.99`) — floating-point values accumulate IEEE754 rounding error, so strict equality on a monetary value is unreliable even when the two numbers are conceptually equal (e.g. `0.1 + 0.2 !== 0.3`). Represent money as integer minor units (cents) or a decimal library, and avoid strict equality on floating-point amounts entirely. Deliberately narrow (only a variable-vs-float-literal comparison is detected — a variable-vs-variable comparison, e.g. `totalCredits === expectedTotal`, is out of reach for a line-scan heuristic and is not flagged; this is under-detection by design, not a bug). Also dropped the bare `total` keyword (it substring-matched unrelated identifiers like `totalCredits`/byte counts). High-false-positive class (identifier-name heuristic, not a type check) — starts at `info` rather than `warning`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// money-ok`.",
+      "message": "A money-named identifier (`price`/`amount`/`balance`/`fee`/`cost`) compared with `==`/`===`/`!=`/`!==` against a float literal (e.g. `price === 19.99`) — floating-point rounding error makes strict equality on monetary values unreliable. Represent money as integer minor units (cents) or a decimal library. Suppress a vetted case with `// money-ok`.",
       "suppress_marker": "money-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "any": [
           { "pattern": "(?i)\\b(price|amount|balance|fee|cost)\\w*\\s*[!=]==?\\s*[0-9]+\\.[0-9]", "label": "ident-vs-float" },
@@ -152,12 +152,12 @@
     {
       "id": "empty-catch-on-write",
       "severity": "warning",
-      "message": "A database write (`create`/`update`/`delete`/`upsert`/`updateMany`/`deleteMany`) appears in the same function as an empty `catch {}` block — the write's failure is caught and silently discarded, so a failed write is indistinguishable from a successful one to every caller and to observability. Log or rethrow the error (or handle it explicitly) instead of swallowing it. Files the engine classifies as minified/generated (a 5000+ byte single line, or 500+ byte lines making up at least half the file's bytes — the signature of minified/bundled/generated output) are skipped entirely for every DSL rule, this one included: such a file collapses many unrelated symbols onto one physical line, and this rule's per-symbol span is line-based, so every symbol on that giant line spuriously \"co-occurs\" with unrelated write/catch patterns elsewhere on the same line, producing mass duplicate findings against code that isn't hand-authored source (e.g. a bundled starter-project payload checked into source, not authored application code). Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// empty-catch-ok`. Precision-limit note: only a single-line `catch { }` / `catch (e) { }` literal is detected — an empty catch block whose braces span multiple lines is not matched by this pattern.",
+      "message": "A database write (`create`/`update`/`delete`/`upsert`/`updateMany`/`deleteMany`) appears in the same function as an empty `catch {}` block — the write's failure is caught and silently discarded, indistinguishable from success. Log or rethrow the error instead of swallowing it. Suppress a vetted case with `// empty-catch-ok`.",
       "suppress_marker": "empty-catch-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\.(create|update|delete|upsert|updateMany|deleteMany)\\s*\\(", "label": "write" },

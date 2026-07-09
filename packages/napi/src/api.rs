@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use zzop_core::{
-    load_dsl_packs, CommonIr, FileNode, Finding, NormalizedEnvelope, RulePackDef, Severity,
-    Suppression,
+    load_dsl_packs, CommonIr, FileNode, Finding, GlobalExclude, NormalizedEnvelope, RulePackDef,
+    Severity, Suppression,
 };
 use zzop_engine::{AnalyzeOutput, CacheStats, EngineConfig, GitOptions, DEFAULT_SIZE_CAP};
 use zzop_metrics::{
@@ -61,6 +61,12 @@ pub struct AnalyzeRequest {
     /// Finding-level accept-list — `{rule, path?}` entries dropping matching findings. Reuses
     /// `zzop_core::Suppression`/`RuleConfig::suppressions` directly. Default: empty (nothing suppressed).
     pub suppressions: Vec<Suppression>,
+    /// Config-wide, rule-agnostic finding-level filter — the top-level `"exclude"` config key's napi
+    /// exposure (camelCase `globalExcludes`). `{path?, glob?}` entries drop matching findings from EVERY
+    /// rule at once (the file is still analyzed; only findings are filtered). Reuses
+    /// `zzop_core::GlobalExclude`/`RuleConfig::global_excludes` directly. Default: empty (nothing globally
+    /// excluded).
+    pub global_excludes: Vec<GlobalExclude>,
     /// Mode-B adapter overlays: partial `NormalizedEnvelope`s (typically just `io` + fragment channels
     /// for a handful of files) merged ON TOP of native TypeScript analysis for this tree — the napi
     /// exposure of `EngineConfig::adapter_overlays`. Each overlay is re-validated and soft-skipped with a
@@ -100,6 +106,8 @@ pub struct EnvelopeAnalyzeRequest {
     pub severity_overrides: BTreeMap<String, Severity>,
     /// Finding-level accept-list — `{rule, path?}` entries. See `AnalyzeRequest`.
     pub suppressions: Vec<Suppression>,
+    /// Config-wide, rule-agnostic finding-level filter. See `AnalyzeRequest::global_excludes`.
+    pub global_excludes: Vec<GlobalExclude>,
 }
 
 /// The shared "load `packs_dir`, build the DSL-pack list + `RuleConfig`" step both `build_engine_config`
@@ -121,6 +129,7 @@ fn base_engine_config(
     disabled_rules: &[String],
     severity_overrides: &BTreeMap<String, Severity>,
     suppressions: &[Suppression],
+    global_excludes: &[GlobalExclude],
     warnings: &mut Vec<String>,
 ) -> EngineConfig {
     let mut packs: Vec<RulePackDef> = Vec::new();
@@ -149,6 +158,7 @@ fn base_engine_config(
             disabled_rules: disabled_rules.to_vec(),
             severity_overrides: severity_overrides.clone(),
             suppressions: suppressions.to_vec(),
+            global_excludes: global_excludes.to_vec(),
         },
         ..EngineConfig::default()
     }
@@ -168,6 +178,7 @@ fn build_engine_config(req: &AnalyzeRequest, warnings: &mut Vec<String>) -> Engi
         &req.disabled_rules,
         &req.severity_overrides,
         &req.suppressions,
+        &req.global_excludes,
         warnings,
     );
 
@@ -479,6 +490,7 @@ pub fn analyze_envelope_json(envelope_json: &str, config_json: &str) -> Result<S
         &req.disabled_rules,
         &req.severity_overrides,
         &req.suppressions,
+        &req.global_excludes,
         &mut warnings,
     );
     let mut output = zzop_engine::analyze_envelope(&envelope, &config);
@@ -769,6 +781,25 @@ mod tests {
         assert!(
             !findings.iter().any(|f| f["ruleId"] == "circular"),
             "suppressions must drop the circular finding, got: {value}"
+        );
+    }
+
+    #[test]
+    fn analyze_json_global_excludes_drop_a_finding_from_any_rule() {
+        // A top-level `globalExcludes` request entry with a glob matching every file in the fixture must
+        // drop the `circular` finding, exactly like a per-rule suppression would — but rule-agnostically
+        // (no `rule` field on the entry at all).
+        let dir = cycle_fixture();
+        let config = format!(
+            r#"{{"root": {:?}, "globalExcludes": [{{"glob": "**/*.ts"}}]}}"#,
+            dir.path().display()
+        );
+        let out = analyze_json(&config).expect("analyze_json should succeed");
+        let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        let findings = value["findings"].as_array().expect("findings array");
+        assert!(
+            !findings.iter().any(|f| f["ruleId"] == "circular"),
+            "globalExcludes must drop the circular finding, got: {value}"
         );
     }
 

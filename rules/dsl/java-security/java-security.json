@@ -6,12 +6,12 @@
     {
       "id": "sql-taint",
       "severity": "warning",
-      "message": "SQL built by string concatenation — SQL injection risk. Use a parameterized/bound query (PreparedStatement `?`, JPA `:named` + setParameter). Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// sql-taint-ok`.",
+      "message": "SQL built by string concatenation — SQL injection risk. Use a parameterized/bound query (PreparedStatement `?`, JPA `:named` + setParameter). Suppress a vetted case with `// sql-taint-ok`.",
       "suppress_marker": "sql-taint-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(java|jsp|jspx|tag)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "require_file": "(?i)\\b(?:SELECT|INSERT|UPDATE|DELETE|MERGE)\\b",
         "skip_comment_lines": true,
         "line_pattern": "(?i)(?:\"[^\"]*(?:SELECT[^\"]*\\bFROM\\b|DELETE\\s+FROM\\b|INSERT\\s+INTO\\b|MERGE\\s+INTO\\b)[^\"]*\"|\"\\s*UPDATE\\b[^\"]*\")\\s*\\+\\s*[A-Za-z_$]",
@@ -21,12 +21,12 @@
     {
       "id": "weak-crypto",
       "severity": "warning",
-      "message": "Weak/deprecated cryptography — MD5·SHA-1·DES·RC4·ECB are broken. Use SHA-256+/AES-GCM; for passwords use bcrypt/PBKDF2/Argon2. (MD5/SHA-1 may be acceptable for non-security checksums — review context.) Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// weak-crypto-ok`.",
+      "message": "Weak/deprecated cryptography — MD5·SHA-1·DES·RC4·ECB are broken. Use SHA-256+/AES-GCM; for passwords use bcrypt/PBKDF2/Argon2. Suppress a vetted case with `// weak-crypto-ok`.",
       "suppress_marker": "weak-crypto-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(java|jsp|jspx|tag)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "require_file": "\\b(?:MessageDigest|DigestUtils|Cipher)\\b",
         "skip_comment_lines": true,
         "any": [
@@ -41,12 +41,12 @@
     {
       "id": "cmd-injection",
       "severity": "warning",
-      "message": "Method runs an external process (Runtime.exec / ProcessBuilder) and builds the command by string concatenation — command-injection risk. Pass arguments as an array element per token and validate/allow-list any user-controlled part. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// cmd-injection-ok`.",
+      "message": "Method runs an external process (Runtime.exec / ProcessBuilder) and builds the command by string concatenation — command-injection risk. Pass arguments as an array element per token and validate/allow-list any user-controlled part. Suppress a vetted case with `// cmd-injection-ok`.",
       "suppress_marker": "cmd-injection-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.java$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "require_file": "\\b(?:exec|ProcessBuilder)\\b",
         "skip_comment_lines": true,
         "patterns": [

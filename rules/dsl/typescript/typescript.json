@@ -6,12 +6,12 @@
     {
       "id": "no-explicit-any",
       "severity": "info",
-      "message": "`any` type used — defeats TypeScript's type checking for this value. Replace with a concrete type, a generic parameter, or `unknown` plus a type guard if the shape is genuinely dynamic. Restricted to actual type positions — a type annotation (`: any`), an `as any` cast, a generic argument opening with `any` (`<any`), or an `any[]` array type — so the bare word \"any\" in prose comments/strings (e.g. an ESLint disable comment naming `no-explicit-any`, or \"works in any UI\") no longer fires; comment lines are also skipped via `skip_comment_lines`. Precision-limit residuals from this narrowing: a type-alias/generic-default RHS with no leading `:` (`type Payload = any;`, `function f<T = any>()`) is not matched, and a non-first generic argument (`Map<string, any>`) is not matched either — both are lexically indistinguishable from unrelated `=`/`,`-separated text without a real parser. Flags one finding per matching line, not per occurrence — a line with two `any`s still counts as a single finding. Test/e2e/fixture paths are excluded outright (deployed-surface rule — test-only mocks/doubles routinely need `any`, and a loose type there is not a production type-safety bug). Suppress a vetted case with `// any-ok`.",
+      "message": "`any` type used — defeats TypeScript's type checking for this value. Replace with a concrete type, a generic parameter, or `unknown` plus a type guard if the shape is genuinely dynamic. Suppress a vetted case with `// any-ok`.",
       "suppress_marker": "any-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "line_pattern": ":\\s*any\\b|\\bas\\s+any\\b|<any\\b|\\bany\\[\\]",
         "snippet_max": 160
@@ -20,13 +20,13 @@
     {
       "id": "as-cast",
       "severity": "info",
-      "message": "`as` type cast used — bypasses TypeScript's structural checking for this expression. Prefer a type guard, a properly-typed API, or `unknown` plus a narrowing check. Import-alias `as` (e.g. `import { useState as useLocalState } from \"react\"`) does not count, nor does `as const` (a type-SAFETY idiom that narrows a literal instead of widening/escaping it, the opposite of a cast escape). A JSX `as` prop (e.g. `<Box as=\"span\">`, common in polymorphic-component libraries like Mantine/styled-components) is also excluded via the `as=` attribute form; because the exclusion is line-level, ANY line containing an `as=` token (a JSX prop, but also an `as=` inside a string literal or a trailing inline comment) is skipped — so a genuine cast sharing such a line is missed. An accepted trade-off of the line-scan matcher. `as unknown as X` still counts — it is a genuine (double) cast escape. Comment lines are skipped via `skip_comment_lines`, so prose containing the word \"as\" in a full-line comment does not count; an inline trailing comment on a real code line is not covered by that skip. Flags one finding per matching line, not per occurrence — a line with two `as` casts still counts as a single finding. Test/e2e/fixture paths are excluded outright (deployed-surface rule — same reasoning as this pack's `no-explicit-any`). Suppress a vetted case with `// as-ok`.",
+      "message": "`as any` / `as unknown as` cast — a hard escape from type checking (`as any` disables it, `as unknown as X` force-casts through an incompatible type). Prefer a type guard, a properly-typed API, or `unknown` plus a narrowing check. Plain `as X` to a compatible type is not flagged. Suppress a vetted case with `// as-ok`.",
       "suppress_marker": "as-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
-        "line_pattern": "\\bas\\b",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "line_pattern": "\\bas\\s+any\\b|\\bas\\s+unknown\\b",
         "exclude_pattern": "^\\s*import\\b|\\bas\\s+const\\b|\\bas\\s*=",
         "skip_comment_lines": true,
         "snippet_max": 160
@@ -35,12 +35,12 @@
     {
       "id": "unhandled-promise-use-effect",
       "severity": "warning",
-      "message": "useEffect callback declared async — React silently ignores the returned Promise and no cleanup function can be returned (and a rejection becomes an unhandled rejection). Move the async work into an inner async function or IIFE instead: `useEffect(() => { void doAsync(); }, deps)`. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// unhandled-promise-ok`.",
+      "message": "useEffect callback declared async — React ignores the returned Promise and no cleanup function can be returned; a rejection becomes unhandled. Move the async work into an inner async function or IIFE: `useEffect(() => { void doAsync(); }, deps)`. Suppress a vetted case with `// unhandled-promise-ok`.",
       "suppress_marker": "unhandled-promise-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "line_pattern": "\\buseEffect\\s*\\(\\s*async\\b",
         "snippet_max": 160
@@ -49,12 +49,12 @@
     {
       "id": "async-handler-no-try",
       "severity": "warning",
-      "message": "An `on<Event>={async ...}` JSX handler (or `on<Event>: async ...` handler-map property) has an `await` but no try/catch — a rejection becomes an unhandled promise rejection. Add try/catch (or `.catch()`) inside the handler. Vetoed when a `try {` appears anywhere in the SAME enclosing symbol span: the parser projects a symbol span per top-level function/class-method, not per inline JSX-attribute arrow function, so this check runs over the whole enclosing function body, not just the handler's own body — a try/catch elsewhere in that same function (unrelated to this handler) also suppresses it, and an unrelated `on*={async ...}` handler sharing a function with an unrelated bare await can also co-trigger. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Suppress a vetted case with `// async-handler-ok`.",
+      "message": "An `on<Event>={async ...}` JSX handler (or `on<Event>: async ...` handler-map property) has an `await` but no try/catch — a rejection becomes an unhandled promise rejection. Add try/catch (or `.catch()`) inside the handler. Suppress a vetted case with `// async-handler-ok`.",
       "suppress_marker": "async-handler-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "require_file": "\\bawait\\b",
         "patterns": [

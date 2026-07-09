@@ -56,7 +56,8 @@ pub fn controller_silence_warning(
     Some(format!(
         "{} file(s) carry controller-style route decorators/annotations but no http routes were extracted \
 — the framework's registration idiom may be unsupported; cross-layer joins will be silent for this tree \
-(e.g. {sample_str})",
+(e.g. {sample_str}) — project this tree's routes with a Mode B overlay adapter (see the adapter examples) \
+to restore cross-layer visibility.",
         matched.len()
     ))
 }

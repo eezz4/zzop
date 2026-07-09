@@ -132,7 +132,7 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
 | `no-explicit-any` | info | line-scan | `any-ok` | `any` type used. |
-| `as-cast` | info | line-scan | `as-ok` | `as` type cast used (import-alias `as` excluded via `exclude_pattern`). |
+| `as-cast` | info | line-scan | `as-ok` | Flags only `as any` and `as unknown as X` (hard escapes), not every `as` cast (import-alias `as` excluded via `exclude_pattern`). |
 | `unhandled-promise-use-effect` | warning | line-scan | `unhandled-promise-ok` | `useEffect` callback declared `async` — React drops the returned Promise, no cleanup possible. |
 | `async-handler-no-try` | warning | method-scan | `async-handler-ok` | An `on<Event>={async ...}` JSX handler has an `await` but no `try`/`catch`. |
 
@@ -167,7 +167,7 @@ toggle/gating surface). `zzop_engine::register_all_native` composes all five. Th
 | `circular` | warning | Import cycles in the dependency graph (Tarjan SCC, `graph.rs`). |
 | `unreachable` | info | Closed "dead islands" — files imported in-repo (fan-in > 0) yet unreachable from any entrypoint (`reachability.rs`). |
 | `dead-candidates` | info | File-level dead-code candidates: fan-in == 0 and not an entry-point pattern (tests/Storybook/dev-tool config/`.d.ts` excluded) (`dead.rs`). |
-| `dead-exports` | info | Symbol-level dead-export detection — exported symbols never imported anywhere, with unused-vs-in-file-only reasons (dev-tool config files excluded) (`dead_exports.rs`). |
+| `dead-exports` | info | Symbol-level dead-export detection — exported symbols never imported anywhere, with unused-vs-in-file-only reasons (dev-tool config files excluded) (`dead_exports.rs`). Per-tree: when a monorepo is analyzed as multiple separate trees, this rule reasons within each tree — a symbol imported only from another tree via a deep path (no barrel `export *`) can read as never-imported in its own tree and be reported dead. Barrel re-exports (`export *`) keep such public API alive. Recommendation: rely on barrels for cross-tree public API, or analyze cross-tree-shared packages as their own tree whose entry (index) exposes them. |
 | `seams` | info | Strangler-seam scoring — folders that are self-contained (few boundary-crossing import edges), i.e. good first-extraction candidates (`seams.rs`). |
 | `criticality` | warning | Transitive blast-radius scoring — surfaces stable-but-critical files a churn-weighted risk score underweights (`criticality.rs`). |
 | `scores` | info | 17 structural health scores, 0–100 (`scores/compute.rs`). |

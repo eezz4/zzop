@@ -13,10 +13,14 @@
 //! `parse_local_identifier_refs` alone; import/re-export data drives liveness only.
 //!
 //! ## Exemptions
-//! Entry/index/framework-convention files, test/story/ambient-declaration files, and tool-entry files
-//! (config loaded by its own tool, not imported, e.g. `vite.config.ts` — see
+//! Entry/index/framework-convention files, test/story/ambient-declaration files, `.storybook/` config
+//! files, and tool-entry files (config loaded by its own tool, not imported, e.g. `vite.config.ts` — see
 //! `unreachable::is_tool_entry_file`) never contribute a dead candidate; see `is_entry_or_test` for the
-//! full pattern list.
+//! full pattern list. A small named-export allowlist (`is_framework_contract_export`) additionally
+//! exempts individual exports — Storybook `decorators`/`parameters`/`globalTypes`, Next.js
+//! `getServerSideProps`/`getStaticProps`/`getStaticPaths`/`getInitialProps`/`generateMetadata`/
+//! `generateStaticParams`/`middleware` — that a framework consumes by exact identifier rather than by
+//! import, even in files that aren't otherwise excluded (e.g. Next.js Pages Router files).
 //!
 //! ## Engine wiring
 //! `dead_export_findings` shapes `find_dead_exports`'s results into `Finding`s for the `"dead-exports"`
@@ -139,6 +143,10 @@ where
             if exp.is_default && imported_keys.contains(&format!("{}#default", f.file)) {
                 continue;
             }
+            // Framework-contract export names are consumed by the framework via convention, not import.
+            if is_framework_contract_export(&exp.name) {
+                continue;
+            }
             let reason = if f.used_names.contains(&exp.name) {
                 DeadExportReason::InFileOnly
             } else {
@@ -247,11 +255,49 @@ fn exclude_patterns() -> &'static [Regex] {
             r"/__test__/",
             r"/__mocks__/",
             r"\.d\.ts$",
+            // Storybook config directory — `.storybook/preview.tsx`, `.storybook/main.ts`, etc. Storybook
+            // loads these itself by fixed filename/directory convention, never via an in-repo import.
+            r"(^|/)\.storybook/",
         ]
         .iter()
         .map(|p| Regex::new(p).unwrap())
         .collect()
     })
+}
+
+/// Framework-contract export names consumed by their framework via named-export convention rather than
+/// an `import` — flagging them dead and deleting them breaks the app at runtime even though the in-repo
+/// import graph shows zero importers. Kept deliberately small and unambiguous: every name here is a
+/// framework-reserved *camelCase* identifier that a project would essentially never coincidentally reuse
+/// for an unrelated symbol. Generic words are excluded ON PURPOSE — a bare `config`/`meta`/`parameters`/
+/// `decorators`/`middleware`/`default` is plausibly a real (possibly dead) domain symbol, so a global
+/// name exemption for those would cause false NEGATIVES (real dead code silently missed). They are left
+/// to the normal dead-export path.
+///
+/// This is load-bearing for Next.js *Pages Router* files (`pages/**`, e.g. `pages/blog/[slug].tsx`),
+/// whose file paths are arbitrary and unmatched by any entry/exclude pattern, so
+/// `getServerSideProps`/`getStaticProps`/… in such a file would otherwise read as dead. Next.js App
+/// Router convention files (`page.tsx`, `layout.tsx`, `route.ts`, …) are already wholesale-excluded via
+/// `framework_route_patterns()` in `entry_patterns()`, so the list is belt-and-suspenders for those.
+///
+/// Storybook `decorators`/`parameters`/`globalTypes` are deliberately NOT here — they live in
+/// `.storybook/`- or `.stories.`-path files, both already file-level excluded (see `exclude_patterns()`),
+/// so a name exemption would only add false-negative risk for the rare re-export-from-elsewhere case.
+/// Next.js root `middleware.ts` is likewise left out: `middleware` is too generic a name to exempt
+/// globally — a residual FP on that one convention file is preferable to missing every dead `middleware`
+/// symbol elsewhere (tracked as a follow-up: scope it by the `middleware.{ts,js}` filename instead).
+fn is_framework_contract_export(name: &str) -> bool {
+    matches!(
+        name,
+        // Next.js: reserved data-fetching/route-contract export names, read by the framework at build
+        // or request time by exact identifier — never through a normal import statement.
+        "getServerSideProps"
+            | "getStaticProps"
+            | "getStaticPaths"
+            | "getInitialProps"
+            | "generateMetadata"
+            | "generateStaticParams"
+    )
 }
 
 /// Converts every `find_dead_exports` result into a `Finding` at its symbol's declaration line.
@@ -772,5 +818,44 @@ mod tests {
             },
         ];
         assert!(find_dead_exports(&files, resolve).is_empty());
+    }
+
+    #[test]
+    fn storybook_config_dir_export_is_excluded_from_dead_candidates() {
+        // `.storybook/preview.tsx`'s `decorators` is consumed by Storybook's own builder, never imported.
+        let files = vec![file(
+            ".storybook/preview.tsx",
+            vec![export("decorators", SourceSymbolKind::Const)],
+        )];
+        assert!(find_dead_exports(&files, resolve).is_empty());
+    }
+
+    #[test]
+    fn nextjs_pages_router_data_fetching_export_is_not_dead() {
+        // Pages Router files have arbitrary filenames (unlike App Router's `page.tsx` convention), so
+        // this relies on the framework-contract-export allowlist rather than file-level exclusion.
+        let files = vec![file(
+            "pages/blog/[slug].tsx",
+            vec![export("getServerSideProps", SourceSymbolKind::Function)],
+        )];
+        assert!(find_dead_exports(&files, resolve).is_empty());
+    }
+
+    #[test]
+    fn ordinary_never_imported_export_in_a_normal_file_is_still_dead() {
+        // Regression guard: the framework-contract allowlist must not over-broaden to arbitrary symbols.
+        let files = vec![file(
+            "src/utils.ts",
+            vec![export("helper", SourceSymbolKind::Function)],
+        )];
+        assert_eq!(
+            find_dead_exports(&files, resolve),
+            vec![DeadExport {
+                file: "src/utils.ts".to_string(),
+                name: "helper".to_string(),
+                kind: SourceSymbolKind::Function,
+                reason: DeadExportReason::Unused,
+            }]
+        );
     }
 }

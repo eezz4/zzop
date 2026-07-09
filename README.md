@@ -71,6 +71,13 @@ route joins — which has no single-tree equivalent.
 | Java (`.java`) | Native, lexical-level: method/class body spans only, enough for `method-scan` rules |
 | Anything else (Python, JSP, ...) | Lexical fallback in-tree (line count + `line-scan` rules only), or first-class support via an external parser adapter conforming to the [Normalized AST protocol](docs/NORMALIZED_AST.md) |
 
+## Versioning & stability
+
+zzop is **pre-1.0 (`0.x`) and unstable** — any release may change behavior, output, rules, or
+defaults without notice, so pin an exact version (`@zzop/cli@0.6.0`, not `^0.6.0`) and re-test
+before upgrading. Semantic Versioning and a maintained changelog begin at `1.0.0`. Full policy:
+[VERSIONING.md](VERSIONING.md).
+
 ## Layout
 
 - `packages/core` — engine library: Common IR, cross-layer linker, graph analyses, call graph, rule

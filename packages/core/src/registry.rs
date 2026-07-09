@@ -114,6 +114,26 @@ pub struct Suppression {
     pub glob: Option<String>,
 }
 
+/// A config-wide, rule-agnostic finding-level filter: a file matching a `global_excludes` entry has
+/// findings from EVERY rule dropped, not just one. Same mutually-exclusive `path`/`glob` filter shape as
+/// `Suppression` (minus `rule`, since there is no rule to match) — see `Suppression`'s own field docs for
+/// the exact substring-vs-glob semantics, shared verbatim via `path_filter_matches`.
+///
+/// This is a finding-level filter, never a scan-skip: a matching file is still parsed (so the dep graph /
+/// dead-code analysis stays correct) — only its findings are suppressed, in `is_suppressed` alongside
+/// per-rule suppressions. Cache-neutral, exactly like `suppressions` (see `RuleConfig::suppressions`'s
+/// doc and `zzop_engine::cache`'s fingerprint doc) — never part of the IR/fingerprint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GlobalExclude {
+    /// Optional path filter (plain substring). See `Suppression::path`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Optional glob filter (full-path anchored). Takes precedence over `path` when both are set. See
+    /// `Suppression::glob`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glob: Option<String>,
+}
+
 /// The one user-facing config shape every rule layer (native / DSL / JS) and every native analysis is
 /// gated through. Covers the enabled/severity/disabled/suppressions surface — deliberately NOT
 /// vocabulary/threshold plumbing (out of scope here; see module doc).
@@ -130,26 +150,76 @@ pub struct RuleConfig {
     pub severity_overrides: BTreeMap<String, Severity>,
     /// Finding-level accept-list. See `is_suppressed`.
     pub suppressions: Vec<Suppression>,
+    /// Config-wide finding-level filter applied to EVERY rule at once (the top-level `"exclude"` config
+    /// key) — see `GlobalExclude`'s doc. Checked before the per-rule `suppressions` loop in
+    /// `is_suppressed`. Default: empty (nothing globally excluded).
+    #[serde(default)]
+    pub global_excludes: Vec<GlobalExclude>,
 }
 
-/// True if a finding for `rule` (optionally in `file`) is suppressed by `config.suppressions`: an entry
-/// matches when its `rule` equals `rule` AND its path filter matches. Filter precedence: `glob` (if set)
-/// is matched against the full `file` path; else `path` (if set) is a substring check; else the entry has
-/// no path filter and matches every file. A path/glob-qualified entry never matches a fileless finding.
-/// Multiple entries for the same rule are OR-ed.
+/// Shared substring-vs-glob path-filter semantics: `glob` takes precedence over `path` when both are set;
+/// a filter with neither matches every file; an unparseable glob fails safe (matches nothing). Both
+/// `suppression_matches_path` and `global_exclude_matches_path` are thin wrappers over this so the two
+/// filter shapes (`Suppression`, `GlobalExclude`) never diverge in matching behavior.
+fn path_filter_matches(glob: &Option<String>, path: &Option<String>, file: &str) -> bool {
+    if let Some(glob) = glob {
+        return glob_matches(glob, file);
+    }
+    match path {
+        None => true,
+        Some(path) => file.contains(path.as_str()),
+    }
+}
+
+/// True if a finding for `rule` (optionally in `file`) is suppressed by `config.global_excludes` (a
+/// rule-agnostic match drops the finding regardless of `rule`) OR `config.suppressions`: an entry matches
+/// when its `rule` equals `rule` AND its path filter matches (`suppression_matches_path`). A
+/// path/glob-qualified entry never matches a fileless finding. Multiple entries are OR-ed.
 pub fn is_suppressed(config: &RuleConfig, rule: &str, file: Option<&str>) -> bool {
+    if let Some(f) = file {
+        if config
+            .global_excludes
+            .iter()
+            .any(|entry| global_exclude_matches_path(entry, f))
+        {
+            return true;
+        }
+    }
     config.suppressions.iter().any(|entry| {
         if entry.rule != rule {
             return false;
         }
-        if let Some(glob) = &entry.glob {
-            return file.is_some_and(|f| glob_matches(glob, f));
-        }
-        match &entry.path {
-            None => true,
-            Some(path) => file.is_some_and(|f| f.contains(path.as_str())),
+        match file {
+            Some(f) => suppression_matches_path(entry, f),
+            // A path/glob-qualified entry never matches a fileless finding; only a filter-less entry does.
+            None => entry.glob.is_none() && entry.path.is_none(),
         }
     })
+}
+
+/// True when `suppression`'s path filter matches `file` (glob takes precedence over the substring
+/// `path`; a suppression with neither filter matches every file). Shares the exact semantics
+/// `is_suppressed` applies, exposed so a caller can detect a path/glob filter that matches no scanned
+/// file (a likely typo — see the engine's unmatched-suppression warning).
+pub fn suppression_matches_path(suppression: &Suppression, file: &str) -> bool {
+    path_filter_matches(&suppression.glob, &suppression.path, file)
+}
+
+/// True when `exclude`'s path filter matches `file`. Same substring-vs-glob semantics as
+/// `suppression_matches_path`, over a `GlobalExclude` instead of a `Suppression` — exposed so a caller can
+/// detect a top-level `exclude` entry that matches no scanned file (the engine's unmatched-exclude
+/// warning, mirroring `unmatched_suppression_warnings`).
+///
+/// One deliberate divergence from `Suppression`: a FILTER-LESS entry (`path`/`glob` both `None`) matches
+/// NOTHING here, whereas a filter-less `Suppression` matches everything for its one rule. A filter-less
+/// global exclude would silently drop EVERY finding of EVERY rule — a whole-run blast radius no one can
+/// mean (the CLI never emits one; only a malformed raw addon request can). Treating it as match-nothing
+/// also routes it into the unmatched-exclude warning instead of a silent total suppression.
+pub fn global_exclude_matches_path(exclude: &GlobalExclude, file: &str) -> bool {
+    if exclude.glob.is_none() && exclude.path.is_none() {
+        return false;
+    }
+    path_filter_matches(&exclude.glob, &exclude.path, file)
 }
 
 /// Whether `file` matches shell-style `glob` (full-path anchored). Compiled globs are memoized — a config
@@ -481,6 +551,92 @@ mod tests {
         assert!(is_suppressed(&config, "weakCrypto", Some("vendor/a.ts")));
         assert!(is_suppressed(&config, "weakCrypto", Some("scripts/b.ts")));
         assert!(!is_suppressed(&config, "weakCrypto", Some("src/c.ts")));
+    }
+
+    #[test]
+    fn global_exclude_glob_drops_a_finding_of_any_rule_id() {
+        // The motivating case: one top-level exclude entry, applied rule-agnostically — no rule field to
+        // match on, so ANY rule id in a matching file is suppressed.
+        let config = RuleConfig {
+            global_excludes: vec![GlobalExclude {
+                path: None,
+                glob: Some("**/*.stories.tsx".to_string()),
+            }],
+            ..Default::default()
+        };
+        assert!(is_suppressed(
+            &config,
+            "dead-candidates",
+            Some("web/Button.stories.tsx")
+        ));
+        assert!(is_suppressed(
+            &config,
+            "circular",
+            Some("web/Button.stories.tsx")
+        ));
+        assert!(!is_suppressed(&config, "circular", Some("web/Button.tsx")));
+    }
+
+    #[test]
+    fn filter_less_global_exclude_matches_nothing() {
+        // A `GlobalExclude` with neither `path` nor `glob` (unreachable from the CLI, possible via a raw
+        // addon request) must match NOTHING — the opposite of `Suppression`'s filter-less semantics —
+        // because rule-agnostically it would otherwise drop every finding of the whole run silently. See
+        // `global_exclude_matches_path`'s doc.
+        let entry = GlobalExclude {
+            path: None,
+            glob: None,
+        };
+        assert!(!global_exclude_matches_path(&entry, "src/anything.ts"));
+        let config = RuleConfig {
+            global_excludes: vec![entry],
+            ..Default::default()
+        };
+        assert!(!is_suppressed(&config, "circular", Some("src/anything.ts")));
+    }
+
+    #[test]
+    fn empty_global_excludes_changes_nothing() {
+        // A whole config with an empty (default) global_excludes must not alter any existing suppression
+        // behavior — the per-rule tests above still hold unmodified.
+        let config = RuleConfig {
+            suppressions: vec![suppress("nplus1", Some("legacy/"))],
+            global_excludes: Vec::new(),
+            ..Default::default()
+        };
+        assert!(is_suppressed(&config, "nplus1", Some("src/legacy/old.ts")));
+        assert!(!is_suppressed(&config, "nplus1", Some("src/fresh/new.ts")));
+        assert!(!is_suppressed(
+            &config,
+            "other-rule",
+            Some("src/legacy/old.ts")
+        ));
+    }
+
+    #[test]
+    fn global_exclude_path_substring_matches_across_rules() {
+        let config = RuleConfig {
+            global_excludes: vec![GlobalExclude {
+                path: Some("legacy/".to_string()),
+                glob: None,
+            }],
+            ..Default::default()
+        };
+        assert!(is_suppressed(
+            &config,
+            "any-rule-a",
+            Some("src/legacy/x.ts")
+        ));
+        assert!(is_suppressed(
+            &config,
+            "any-rule-b",
+            Some("src/legacy/y.ts")
+        ));
+        assert!(!is_suppressed(
+            &config,
+            "any-rule-a",
+            Some("src/fresh/x.ts")
+        ));
     }
 
     #[test]

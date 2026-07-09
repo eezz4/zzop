@@ -496,7 +496,7 @@ fn per_rule_disable_of_a_real_pack_rule_removes_only_that_rules_findings_and_inv
     let dir = TempDir::new("zzop-engine-cache-per-rule-disable");
     dir.write(
         "a.ts",
-        "export function f(x: any) {\n  return x as string;\n}\n",
+        "export function f(x: any) {\n  return x as unknown as string;\n}\n",
     );
     let cache_dir = TempDir::new("zzop-engine-cache-store");
     let pack = typescript_pack();
@@ -568,7 +568,7 @@ fn disabling_a_whole_pack_id_still_disables_every_rule_in_it() {
     let dir = TempDir::new("zzop-engine-cache-pack-level-disable");
     dir.write(
         "a.ts",
-        "export function f(x: any) {\n  return x as string;\n}\n",
+        "export function f(x: any) {\n  return x as unknown as string;\n}\n",
     );
     let cache_dir = TempDir::new("zzop-engine-cache-store");
     let cfg = EngineConfig {
@@ -599,7 +599,7 @@ fn unknown_garbage_id_in_disabled_rules_does_not_crash_and_other_rules_still_run
     let dir = TempDir::new("zzop-engine-cache-garbage-disable");
     dir.write(
         "a.ts",
-        "export function f(x: any) {\n  return x as string;\n}\n",
+        "export function f(x: any) {\n  return x as unknown as string;\n}\n",
     );
     let cache_dir = TempDir::new("zzop-engine-cache-store");
     let cfg = EngineConfig {

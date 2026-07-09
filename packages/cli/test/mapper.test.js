@@ -129,6 +129,22 @@ test('exclude routes glob patterns to `glob` and plain fragments to `path`', () 
   ]);
 });
 
+test('top-level exclude -> globalExcludes with the same glob/path split', () => {
+  const { request } = configToRequest({
+    roots: ['.'],
+    exclude: ['**/*.stories.tsx', 'legacy/'],
+  });
+  assert.deepEqual(request.globalExcludes, [
+    { glob: '**/*.stories.tsx' },
+    { path: 'legacy/' },
+  ]);
+});
+
+test('top-level exclude rejects non-array / non-string entries', () => {
+  assert.throws(() => configToRequest({ roots: ['.'], exclude: 'legacy/' }), ConfigError);
+  assert.throws(() => configToRequest({ roots: ['.'], exclude: [123] }), ConfigError);
+});
+
 test('collectConfigWarnings flags unknown keys (never rejects) but stays silent on known ones', () => {
   const { collectConfigWarnings } = require('../lib/mapper');
   // all-known config -> no warnings

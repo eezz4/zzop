@@ -206,6 +206,28 @@ function buildSharedOptions(config) {
     shared.suppressions = suppressions;
   }
 
+  // --- top-level exclude -> globalExcludes (rule-agnostic finding-level filter, applied to EVERY rule). ---
+  if (config.exclude !== undefined) {
+    if (!Array.isArray(config.exclude)) {
+      throw new ConfigError('exclude must be an array of path substrings or globs.');
+    }
+    const globalExcludes = [];
+    for (const path of config.exclude) {
+      if (typeof path !== 'string') {
+        throw new ConfigError('exclude entries must be strings.');
+      }
+      // Same glob-vs-substring split as `rules.<id>.exclude` (see `isGlobPattern`'s doc above).
+      if (isGlobPattern(path)) {
+        globalExcludes.push({ glob: path });
+      } else {
+        globalExcludes.push({ path });
+      }
+    }
+    if (globalExcludes.length > 0) {
+      shared.globalExcludes = globalExcludes;
+    }
+  }
+
   // --- pass-through knobs. ---
   if (config.git !== undefined) {
     shared.git = config.git;
@@ -225,7 +247,19 @@ function buildSharedOptions(config) {
 // config written for a different zzop version, and silently ignoring it defeats zzop's "narrowed scope
 // self-reports in warnings, never silently" contract — so we surface it as a warning, not an error.
 const KNOWN_KEYS = {
-  top: ['roots', 'trees', 'packs', 'rules', 'git', 'cacheDir', 'sizeCap', 'format', 'failOn', 'report'],
+  top: [
+    'roots',
+    'trees',
+    'packs',
+    'rules',
+    'exclude',
+    'git',
+    'cacheDir',
+    'sizeCap',
+    'format',
+    'failOn',
+    'report',
+  ],
   packs: ['extraDirs', 'disabled'],
   git: ['since', 'recentDays'],
   report: ['dir', 'formats', 'enabled'],

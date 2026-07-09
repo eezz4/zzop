@@ -118,6 +118,12 @@ annotated copy; the reference below summarizes each option.
     "dead-candidates": { "exclude": ["**/app/**/{page,layout,route}.tsx"] }
   },
 
+  // Top-level exclude: path globs/substrings dropped from EVERY rule's findings
+  // (files are still parsed for the dep graph). Same glob rules as per-rule
+  // exclude above — a `*` stays within a path segment, use `**/` to cross
+  // directories.
+  "exclude": ["**/*.stories.tsx", "legacy/"],
+
   // Enables git-history-derived signals. Omit to use engine defaults.
   "git": { "recentDays": 30 },
 

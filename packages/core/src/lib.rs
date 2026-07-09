@@ -59,9 +59,9 @@ pub use normalized::{
 pub use pack_loader::{applies_to, load_dsl_packs, LoadResult, PackLoadError};
 pub use paths::is_test_file;
 pub use registry::{
-    apply_severity_override, is_enabled, is_suppressed, merge_findings,
-    register_native_analysis_stub, RuleConfig, RuleDescriptor, RuleKind, RuleMeta, RuleRegistry,
-    Suppression,
+    apply_severity_override, global_exclude_matches_path, is_enabled, is_suppressed,
+    merge_findings, register_native_analysis_stub, suppression_matches_path, GlobalExclude,
+    RuleConfig, RuleDescriptor, RuleKind, RuleMeta, RuleRegistry, Suppression,
 };
 
 pub use file_nodes::{

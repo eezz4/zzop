@@ -6,12 +6,12 @@
     {
       "id": "mixed-content-egress",
       "severity": "warning",
-      "message": "Plain-http URL literal — mixed content/MITM; use https. Test/e2e/fixture paths are excluded outright (deployed-surface rule — same convention as this pack's `localhost-egress-committed`). Suppress a vetted case with `// mixed-content-ok`.",
+      "message": "Plain-http URL literal — mixed content/MITM risk. Use https. Suppress a vetted case with `// mixed-content-ok`.",
       "suppress_marker": "mixed-content-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "line_pattern": "['\"]http://[^'\"\\s]",
         "exclude_pattern": "(?i)(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|//192\\.168\\.|//10\\.[0-9]|//172\\.(1[6-9]|2[0-9]|3[01])\\.|xmlns|w3\\.org|schemas?\\.|\\.xsd)",
         "skip_comment_lines": true
@@ -20,12 +20,12 @@
     {
       "id": "localhost-egress-committed",
       "severity": "warning",
-      "message": "Committed localhost/private-IP endpoint — breaks outside the dev machine; move to env/config. If this file is dev-only, exclude it via config instead. Test/e2e/fixture paths (`e2e/`, `tests?/`, `__tests?__/`, `spec/`, `fixtures?/`, `testing/`, or a `*.test.*`/`*.spec.*`/`*-spec.*`/`*.e2e-spec.*` file) are excluded outright, as are test-runner/dev-tool config files anywhere in the tree by basename (`playwright.config.*`, `vitest.config.*`, `jest.config.*`, `cypress.config.*`, `vite.config.*`) — a localhost target in a Playwright/Vitest/Jest/Cypress/Vite config or an e2e fixture (including a NestJS-style `*.e2e-spec.ts` or a `packages/testing/` helper) is the intended target, not a leaked dev endpoint. Three further non-egress shapes are excluded by value/context shape rather than path: (1) the localhost literal is a `||`/`??`/ternary `?` fallback alongside `process.env`/`getEnv(`/`IS_PRODUCTION` on the same line — an env-override default IS the recommended remedy this rule would otherwise ask for, so it's already applied, not a leak (this only catches the common `env-check-then-operator` line order; a fallback written in the reverse order on the same line is a documented residual gap); (2) `new URL(x, \"http://localhost\")` — the second argument to the WHATWG `URL` constructor is a dummy base used only to parse a relative path, never an egress target; (3) an equality/inequality comparison (`=== \"http://localhost:3000\"` / `!== 'http://localhost'`) — the literal is a comparison sentinel, not a call target. `skip_comment_lines` skips a full-line `//` comment and any `/* ... */`-block line whose trimmed text starts with `*` or `/*` (e.g. JSDoc-style continuation lines) — but a block comment whose continuation lines have no leading `*` (a bare `/*\\nhttp://localhost:3000\\n*/` with no per-line `*` prefix) still has its inner line scanned, a residual gap of this line-local comment heuristic (no multi-line block-comment-state tracking). Suppress a vetted case elsewhere with `// localhost-ok`.",
+      "message": "Committed localhost/private-IP endpoint — breaks outside the dev machine. Move it to env/config; if this file is genuinely dev-only, exclude it via config instead. Suppress a vetted case with `// localhost-ok`.",
       "suppress_marker": "localhost-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "line_pattern": "['\"]https?://(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|192\\.168\\.[0-9]{1,3}\\.[0-9]{1,3}|10\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}|172\\.(1[6-9]|2[0-9]|3[01])\\.[0-9]{1,3}\\.[0-9]{1,3})",
         "exclude_pattern": "(?i)(process\\.env|getEnv\\(|IS_PRODUCTION).*(\\|\\||\\?\\?|\\?)|new\\s+URL\\s*\\(|[!=]==?\\s*[\"'`]https?://localhost",
         "skip_comment_lines": true
@@ -34,12 +34,12 @@
     {
       "id": "get-with-body",
       "severity": "warning",
-      "message": "A GET request carrying a body (`method: 'get'` alongside a `body:` property in the same function) — servers/proxies may silently drop the body on a GET, so data the caller thinks it's sending never arrives. Use POST (or another body-bearing method) or move the data to query params instead. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Precision limit: method-scan only proves a GET method literal and a `body:` property co-occur in the same function body, not that the `body:` belongs to the same request-options object as the `method:` — an unrelated `body:` elsewhere in the same function also co-triggers. Suppress a vetted case with `// get-body-ok`.",
+      "message": "A GET request carrying a body (`method: 'get'` alongside `body:` in the same function) — servers/proxies may silently drop the body on a GET, so data the caller thinks it's sending never arrives. Use POST (or another body-bearing method) or move the data to query params. Suppress a vetted case with `// get-body-ok`.",
       "suppress_marker": "get-body-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "(?i)method\\s*:\\s*['\"]get['\"]", "label": "get-method" },
@@ -51,12 +51,12 @@
     {
       "id": "ws-no-auth",
       "severity": "info",
-      "message": "WebSocket opened/upgraded (`new WebSocket(...)`/`.upgrade(...)`) with no auth material (`token`/`auth`/`session`/`cookie`/`jwt`) visible anywhere in the same function — an unauthenticated realtime channel lets anyone who can reach the socket connect. Attach a token/cookie/session credential when opening or upgrading the connection. Comment lines are skipped via `skip_comment_lines`. Test/e2e/fixture paths are excluded outright (deployed-surface rule). Precision limit: high-FP heuristic — `absent` only checks the whole enclosing function body for those words, not that any auth material found actually secures this specific connection (an auth header set elsewhere in a shared helper, or credentials read from a cookie the browser attaches automatically, are both invisible to this scan); starts at info accordingly. Suppress a vetted case with `// ws-auth-ok`.",
+      "message": "WebSocket opened/upgraded (`new WebSocket(...)`/`.upgrade(...)`) with no auth material (`token`/`auth`/`session`/`cookie`/`jwt`) in the same function — an unauthenticated realtime channel lets anyone who can reach the socket connect. Attach a token/cookie/session credential when opening or upgrading. Suppress a vetted case with `// ws-auth-ok`.",
       "suppress_marker": "ws-auth-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "new\\s+WebSocket\\s*\\(|\\.upgrade\\s*\\(", "label": "ws" }

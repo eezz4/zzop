@@ -22,6 +22,21 @@ const CONFIG_TEMPLATE = `{
   //   { "root": "./web", "sourceId": "web" }
   // ],
 
+  // Monorepo tip: analyzing a repo as a SINGLE root mixes every app's I/O into one
+  // tree, which can MASK a backend whose routes zzop cannot extract — its blindness
+  // is hidden by the frontend's signals, so it looks like "only the frontend ran".
+  // Split apps into "trees" above so each app's coverage/blindness is reported per
+  // tree — that is where the "this tree is IO-blind; inject a Mode B adapter to
+  // restore visibility" guidance surfaces.
+
+  // ── Global exclude (all rules) ─────────────────────────────────────────────
+  // Path globs/substrings dropped from EVERY rule's findings at once (files are
+  // still parsed, so the dep graph / dead-code analysis stays correct). Use this
+  // instead of repeating the same glob under each rule below. A "*" stays within one
+  // path segment — use "**/" to cross directories (so "**/*.stories.tsx", NOT
+  // "*.stories.tsx", which would only match a stories file at the repo root).
+  // "exclude": ["**/*.stories.tsx", ".storybook/"],
+
   // ── Rule packs (plugins) ───────────────────────────────────────────────────
   "packs": {
     // Extra local directories of custom DSL rule packs (rules/dsl/*.json). These
@@ -81,6 +96,9 @@ const CONFIG_TEMPLATE = `{
 
   // Exit non-zero when any finding is at or above this severity — for CI gating.
   //   "info" | "warn" | "critical", or "off" to always exit 0.
+  // The FIRST run on an untuned repo will likely exit 1 (findings exist) — that is
+  // expected, not a tool error. Triage the output, exclude non-deployed surface
+  // (tests/stories/generated) via "exclude" above, then keep "warn" gating in CI.
   "failOn": "warn"
 }
 `;
