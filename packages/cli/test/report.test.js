@@ -239,10 +239,32 @@ test('buildMarkdownReports: cross-repo.md surfaces coverage self-reports first, 
 
   assert.match(content, /Unresolved consumes: 1 {3}External consumes: 0 {3}Ambiguous consumes: 0/);
 
+  // Unresolved consume SITES are listed under the count (raw call-site text is the lead an agent
+  // needs to resolve the indirection) — not just counted.
+  assert.match(content, /- `sdk\.fetch\(x\)` \(unresolved\) — `web` src\/client\.ts:10/);
+
   // The coverage self-report rule is excluded from the generic cross-layer findings bucket (shown once).
   assert.match(content, /## Cross-layer findings \(1\)/);
   assert.match(content, /### cross-layer\/unconsumed-endpoint \(1\)/);
   assert.doesNotMatch(content, /### cross-layer\/sdk-import-no-visible-consume/);
+});
+
+test('buildMarkdownReports: unresolved consume list is capped with an announced remainder, never silently', () => {
+  const output = multiTreeOutput();
+  output.crossLayer.unresolvedConsumes = Array.from({ length: 25 }, (_, i) => ({
+    source: 'web',
+    kind: 'http',
+    key: null,
+    raw: `wrapped(${i})`,
+    file: `src/c${String(i).padStart(2, '0')}.ts`,
+    line: 1,
+  }));
+  const [crossRepo] = buildMarkdownReports(output);
+  assert.match(crossRepo.content, /Unresolved consumes: 25/);
+  assert.match(crossRepo.content, /- `wrapped\(0\)` \(unresolved\) — `web` src\/c00\.ts:1/);
+  assert.match(crossRepo.content, /- \.\.\. and 5 more unresolved consume site\(s\)/);
+  // The 21st entry (c20) is past the cap and must not be listed.
+  assert.doesNotMatch(crossRepo.content, /src\/c20\.ts/);
 });
 
 test('buildMarkdownReports: per-tree file has HTTP interface + findings incl. folded info', () => {
@@ -437,4 +459,99 @@ test('buildMarkdownReports: single-tree file renders the disclosure registry whe
 test('buildMarkdownReports: no Disclosure coverage section when the registry is absent (defensive)', () => {
   const files = buildMarkdownReports({ fileCount: 1, findings: [] }, { sourceId: 'bare', root: '.' });
   assert.doesNotMatch(files[0].content, /## Disclosure coverage/);
+});
+
+// --- one-sided IO guidance --------------------------------------------------------------------------
+
+function singleTreeConsumeOnlyOutput() {
+  return {
+    fileCount: 4,
+    findings: [],
+    warnings: [],
+    coverage: {
+      files: 4,
+      symbols: 9,
+      importEdges: 3,
+      ioProvides: 0,
+      ioConsumesKeyed: 3,
+      ioConsumesUnresolved: 1,
+      degraded: 0,
+      joinContributionZero: false,
+    },
+  };
+}
+
+test('buildMarkdownReports: single-tree file renders the one-sided IO guidance when consumes exist but provides are 0', () => {
+  const files = buildMarkdownReports(singleTreeConsumeOnlyOutput(), { sourceId: 'app', root: '.' });
+  const content = files[0].content;
+  assert.match(
+    content,
+    /- One-sided IO \(no provides\): 4 consumes were extracted but 0 provides, so every consume in this run is structurally guaranteed to look unprovided/
+  );
+  // All three fix directions, in order: attach the provider repo, Mode B injection, external-is-expected.
+  const attachIdx = content.indexOf('attach that checkout as another tree and re-run so both sides are reviewed together — `"trees": [{ "root": ".", "sourceId": "consumer" }, { "root": "../provider-repo", "sourceId": "provider" }]`');
+  const modeBIdx = content.indexOf('The serving code is inside this tree but its framework is not natively extracted: project its routes with a Mode B overlay adapter');
+  const externalIdx = content.indexOf('The consumes only target third-party/external APIs');
+  assert.ok(attachIdx > -1 && modeBIdx > attachIdx && externalIdx > modeBIdx);
+  // FE/BE-neutral wording lock: the guidance must name the non-backend serving shapes too.
+  assert.match(content, /a backend, a peer service, a module-federation remote/);
+});
+
+test('buildMarkdownReports: single-tree one-sided IO guidance absent when provides > 0 or when fully IO-blind (0/0)', () => {
+  const withProvides = singleTreeConsumeOnlyOutput();
+  withProvides.coverage.ioProvides = 2;
+  const [healthy] = buildMarkdownReports(withProvides, { sourceId: 'app', root: '.' });
+  assert.doesNotMatch(healthy.content, /One-sided IO/);
+
+  // 0 provides AND 0 consumes is the joinContributionZero case — the Blindness bullet owns it; the
+  // one-sided guidance (which requires consumes > 0) must not double-fire.
+  const blind = singleTreeConsumeOnlyOutput();
+  blind.coverage.ioConsumesKeyed = 0;
+  blind.coverage.ioConsumesUnresolved = 0;
+  blind.coverage.joinContributionZero = true;
+  const [blindFile] = buildMarkdownReports(blind, { sourceId: 'app', root: '.' });
+  assert.match(blindFile.content, /- Blindness:/);
+  assert.doesNotMatch(blindFile.content, /One-sided IO/);
+});
+
+test('buildMarkdownReports: per-tree file in a multi-tree run never renders the one-sided IO guidance (consume-only FE tree is healthy there)', () => {
+  const files = buildMarkdownReports(multiTreeOutput());
+  const web = files.find((f) => f.name === 'web.md').content;
+  // web is 0 provides / 2 consumes — one-sided as a tree, but the api tree provides; run-level check
+  // lives on cross-repo.md, so the per-tree file stays quiet.
+  assert.doesNotMatch(web, /One-sided IO/);
+});
+
+test('buildMarkdownReports: cross-repo.md renders the run-level one-sided IO guidance only when NO tree provides anything', () => {
+  // Default fixture: api has 2 provides -> no run-level one-sided guidance.
+  const [withProvider] = buildMarkdownReports(multiTreeOutput());
+  assert.doesNotMatch(withProvider.content, /One-sided IO/);
+
+  const output = multiTreeOutput();
+  output.trees[0].output.coverage.ioProvides = 0;
+  const [crossRepo] = buildMarkdownReports(output);
+  const content = crossRepo.content;
+  assert.match(
+    content,
+    /- One-sided IO \(no provides in any tree\): 2 consumes were extracted across all trees but 0 provides/
+  );
+  assert.match(content, /The serving code is inside an attached tree but its framework is not natively extracted/);
+  // Placed inside Coverage & blindness, before the edges section.
+  const oneSidedIdx = content.indexOf('One-sided IO');
+  const edgesIdx = content.indexOf('## Cross-repo edges');
+  assert.ok(oneSidedIdx > content.indexOf('## Coverage & blindness') && oneSidedIdx < edgesIdx);
+});
+
+test('buildMarkdownReports: unprovided consumes section carries the cause-taxonomy line when nonempty, not when empty', () => {
+  const [crossRepo] = buildMarkdownReports(multiTreeOutput());
+  assert.match(
+    crossRepo.content,
+    /## Unprovided consumes \(1\)\nNo attached tree provides these keys\. Three causes: \(a\) the repository serving these endpoints is not part of this run — attach its checkout as another tree so both sides are reviewed together; \(b\) the serving code is in an attached tree but its routes were not extracted — project them with a Mode B overlay adapter; \(c\) real spec drift\. A cluster sharing one path prefix usually means \(a\)\./
+  );
+
+  const output = multiTreeOutput();
+  output.crossLayer.unprovidedConsumes = [];
+  const [empty] = buildMarkdownReports(output);
+  assert.match(empty.content, /## Unprovided consumes \(0\)\nNone\./);
+  assert.doesNotMatch(empty.content, /No attached tree provides these keys/);
 });

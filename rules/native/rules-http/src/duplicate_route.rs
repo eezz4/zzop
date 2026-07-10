@@ -32,8 +32,8 @@ pub fn duplicate_route_findings(io_provides: &[zzop_core::IoProvide]) -> Vec<zzo
                 file: dup.file.clone(),
                 line: dup.line,
                 message: format!(
-                    "route `{key}` is registered more than once (first at {}:{}) — later registrations are shadowed or ambiguous depending on the framework. Merge the handlers or remove the duplicate. Disable via rule config `disabled_rules: [\"duplicate-route\"]` if this is intentional (e.g. a framework convention that legitimately registers the same route twice).",
-                    first.file, first.line
+                    "route `{key}` is registered more than once (first at {}:{}) — later registrations are shadowed or ambiguous depending on the framework. Merge the handlers or remove the duplicate. {} if this is intentional (e.g. a framework convention that legitimately registers the same route twice).",
+                    first.file, first.line, zzop_core::disable_hint("duplicate-route")
                 ),
                 data: Some(serde_json::json!({
                     "key": key,

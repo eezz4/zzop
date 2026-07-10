@@ -54,6 +54,10 @@ name = "pack_perf"
 path = "dsl/perf/perf.rs"
 
 [[test]]
+name = "pack_redis"
+path = "dsl/redis/redis.rs"
+
+[[test]]
 name = "pack_security"
 path = "dsl/security/security.rs"
 

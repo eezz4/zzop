@@ -224,7 +224,14 @@ through before it ships:
    how to fix it, and name its own `suppress_marker` — already machine-enforced by the "Message triple" check
    above, but worth checking by eye while drafting: a reviewer should never have to guess how to vet a
    false positive.
-4. **Is this pattern an English word that could appear in prose?** Comments are already excluded by item 1,
+4. **Does the message make a claim about what the matcher does or doesn't flag?** If the message
+   says "plain `as X` is not flagged", "only literal query strings are kept", "a bare `$transaction`
+   still fires" — that claim is a testable contract, and an unpinned claim WILL drift (shipped
+   examples: `as-cast`'s pattern matched a lone `as unknown` its message promised to skip;
+   `race-condition-toctou`'s message called `$transaction` insufficient while its matcher still
+   vetoed on it). Add a fixture to the pack's `.rs` test that asserts the claimed behavior — one
+   positive or negative per claim, named after the claim.
+5. **Is this pattern an English word that could appear in prose?** Comments are already excluded by item 1,
    but a string literal isn't — a keyword pattern that happens to be an ordinary English word (`do`, `for`,
    `while`, `update`, `delete`, `select`, etc.) will also match that same word sitting inside prose text
    (`"logged in to do this"` matches a bare `\bdo\b`; `"waiting for ${x}"` matches a bare `\bfor\b`). Require

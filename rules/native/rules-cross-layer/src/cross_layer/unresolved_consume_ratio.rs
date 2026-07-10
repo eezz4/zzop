@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use zzop_core::io::TaggedConsume;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 // Shared with `sdk_import_no_visible_consume`, which fires only BELOW this floor — the two rules
 // partition the blind-spot space and never co-fire on one tree (see mod.rs).
@@ -77,9 +77,9 @@ pub fn unresolved_consume_ratio_findings(
              mostly BLIND for this source: join-based findings (e.g. `cross-layer/unconsumed-endpoint`) are \
              correspondingly weaker here, since they can only reason about the consumes this analysis actually \
              resolved. Prefer literal paths at call sites where practical, or feed this source through a \
-             Normalized AST adapter that can resolve the indirection. Disable via rule config `disabled_rules: \
-             [\"cross-layer/unresolved-consume-ratio\"]` if this source is intentionally SDK-driven and the \
-             resulting blindness is accepted.",
+             Normalized AST adapter that can resolve the indirection. {} if this source is intentionally \
+             SDK-driven and the resulting blindness is accepted.",
+            disable_hint("cross-layer/unresolved-consume-ratio"),
         );
 
         out.push(Finding {

@@ -18,7 +18,7 @@
 use std::collections::BTreeSet;
 
 use zzop_core::io::CrossLayerResult;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 pub fn cross_layer_duplicate_route_findings(cross_layer: &CrossLayerResult) -> Vec<Finding> {
     let mut by_key: std::collections::BTreeMap<String, Vec<(String, String, u32)>> =
@@ -70,11 +70,11 @@ pub fn cross_layer_duplicate_route_findings(cross_layer: &CrossLayerResult) -> V
              `{first_source}`). A caller cannot deterministically tell which source's handler serves a request \
              for this route; if these sources are ever deployed behind the same host/gateway, whichever one \
              wins is a deploy-order accident, not a design decision. Merge the handlers, or namespace the \
-             routes apart (a path prefix, a different host). Disable via rule config \
-             `disabled_rules: [\"cross-layer/duplicate-route\"]` if these are intentionally separate services \
+             routes apart (a path prefix, a different host). {} if these are intentionally separate services \
              on different hosts that happen to share a route shape.",
             distinct_sources.len(),
             sites_desc.join(", "),
+            disable_hint("cross-layer/duplicate-route"),
         );
         out.push(Finding {
             rule_id: "cross-layer/duplicate-route".to_string(),

@@ -16,7 +16,17 @@
 //! - A `@Controller({ ... })` prefix that is present but not a string literal skips the WHOLE
 //!   controller — more conservative than Java's "default to empty prefix" fallback, since treating
 //!   an unresolvable prefix as empty would mis-join every route under a wrong path (this repo's
-//!   "never guess" IO convention — see `egress.rs`'s `resolve_url`).
+//!   "never guess" IO convention — see `egress.rs`'s `resolve_url`). **Exception
+//!   (`controller-prefix-ref-v1`):** when the class-level prefix arg itself is exactly a two-segment
+//!   member expression (`RouteKey.Asset`) — the dotted shape `egress::const_map_fragment` keys its
+//!   constant-map entries by — the controller is no longer skipped outright: this DEFERS resolution
+//!   to assemble time instead of skipping (`extract_controller_prefix_route_fragments` projects the
+//!   controller's methods as `zzop_core::ControllerPrefixRouteFragment`s rather than `IoProvide`s;
+//!   `zzop_engine::analyze::compose`'s controller-prefix composer resolves `prefix_ref` against the
+//!   project-wide merged const map, which can see the `enum`/`const` declaring it even when that
+//!   declaration lives in another file). Any OTHER non-literal shape — a call, a template, a computed
+//!   member, a deeper `A.B.C` chain, or the `{path: ref}` object form below — still skips the whole
+//!   controller outright.
 //! - Nest URI versioning: `{ path: 'x', version: '1' }` prefixes a `v<version>` segment ahead of the
 //!   path. A non-literal `version` best-effort skips just that segment, not the whole controller.
 //! - Method-level: `@Get`/`@Post`/`@Put`/`@Delete`/`@Patch` each imply their verb. Path comes from a
@@ -64,10 +74,10 @@ use std::collections::HashSet;
 use swc_core::common::SourceMap;
 use swc_core::ecma::ast::{
     ArrayLit, Callee, ClassDecl, ClassMember, ClassMethod, Decorator, Expr, ExprOrSpread, Lit,
-    ObjectLit, Prop, PropName, PropOrSpread, Str,
+    MemberProp, ObjectLit, Prop, PropName, PropOrSpread, Str,
 };
 use swc_core::ecma::visit::{Visit, VisitWith};
-use zzop_core::{http_interface_key, IoProvide};
+use zzop_core::{http_interface_key, ControllerPrefixRouteFragment, IoProvide};
 
 /// Method-level route-decorator name -> the HTTP verb it implies. `All` is intentionally absent —
 /// see module doc.
@@ -104,10 +114,78 @@ struct ControllerCollector<'a> {
 
 impl Visit for ControllerCollector<'_> {
     fn visit_class_decl(&mut self, n: &ClassDecl) {
-        if let Some(ctx) = controller_context(&n.class.decorators) {
+        if let Some(ControllerCtx::Literal { prefix }) = controller_context(&n.class.decorators) {
             for member in &n.class.body {
                 if let ClassMember::Method(m) = member {
-                    self.emit_method(&ctx.prefix, m);
+                    self.emit_method(&prefix, m);
+                }
+            }
+        }
+        // `ControllerCtx::DeferredRef` (a `RouteKey.Asset`-shaped prefix) emits no direct provides here
+        // — see `extract_controller_prefix_route_fragments`.
+        n.visit_children_with(self); // recurse — covers any nested class declarations
+    }
+}
+
+impl ControllerCollector<'_> {
+    fn emit_method(&mut self, prefix: &str, m: &ClassMethod) {
+        let Some((verb, name, line, paths)) = method_route_facts(self.cm, m) else {
+            return;
+        };
+        for path in paths {
+            let full_path = format!("{prefix}/{path}");
+            self.out.push(IoProvide {
+                kind: "http".to_string(),
+                key: http_interface_key(&verb, &full_path),
+                file: self.file.to_string(),
+                line,
+                symbol: Some(name.clone()),
+            });
+        }
+    }
+}
+
+/// Extracts controller-prefix route FRAGMENTS — the deferred-to-assemble counterpart of
+/// `extract_controller_provides` for the `controller-prefix-ref-v1` exception (module doc): a
+/// `@Controller(RouteKey.Asset)`-shaped (dotted member-expression) prefix cannot be resolved from this
+/// one file alone, so each qualifying controller's methods are projected as
+/// `zzop_core::ControllerPrefixRouteFragment`s instead of `IoProvide`s.
+/// `zzop_engine::analyze::compose`'s controller-prefix composer resolves `prefix_ref` against the
+/// project-wide merged const map (`egress::const_map_fragment`, which also folds string-valued `enum`
+/// members) and emits the real `IoProvide`s at assemble time. A `@Controller('literal')` class
+/// contributes nothing here (already fully resolved by `extract_controller_provides`); any other
+/// non-literal prefix shape (call, template, computed member, deeper chain, `{path: ref}` object)
+/// contributes nothing here either — same skip-whole-controller convention as
+/// `extract_controller_provides`. Returns an empty `Vec` (never panics) on an unparseable file.
+pub fn extract_controller_prefix_route_fragments(
+    rel: &str,
+    text: &str,
+) -> Vec<ControllerPrefixRouteFragment> {
+    let Some((cm, module)) = crate::parse_with_cm(rel, text) else {
+        return Vec::new();
+    };
+    let cm_ref: &SourceMap = &cm;
+    let mut c = ControllerPrefixFragmentCollector {
+        cm: cm_ref,
+        out: Vec::new(),
+    };
+    module.visit_with(&mut c);
+    c.out
+}
+
+struct ControllerPrefixFragmentCollector<'a> {
+    cm: &'a SourceMap,
+    out: Vec<ControllerPrefixRouteFragment>,
+}
+
+impl Visit for ControllerPrefixFragmentCollector<'_> {
+    fn visit_class_decl(&mut self, n: &ClassDecl) {
+        if let Some(ControllerCtx::DeferredRef { prefix_ref }) =
+            controller_context(&n.class.decorators)
+        {
+            for member in &n.class.body {
+                if let ClassMember::Method(m) = member {
+                    self.emit_fragment(&prefix_ref, m);
                 }
             }
         }
@@ -115,21 +193,16 @@ impl Visit for ControllerCollector<'_> {
     }
 }
 
-impl ControllerCollector<'_> {
-    fn emit_method(&mut self, prefix: &str, m: &ClassMethod) {
-        let Some(name) = method_name(&m.key) else {
-            return; // computed/private method key — not a recognizable route handler name
+impl ControllerPrefixFragmentCollector<'_> {
+    fn emit_fragment(&mut self, prefix_ref: &str, m: &ClassMethod) {
+        let Some((verb, name, line, paths)) = method_route_facts(self.cm, m) else {
+            return;
         };
-        let Some((verb, decorator, paths)) = method_route(&m.function.decorators) else {
-            return; // no recognized route decorator, `@All`, or an unresolvable (dynamic) path
-        };
-        let line = crate::line_of(self.cm, decorator.span.lo);
         for path in paths {
-            let full_path = format!("{prefix}/{path}");
-            self.out.push(IoProvide {
-                kind: "http".to_string(),
-                key: http_interface_key(&verb, &full_path),
-                file: self.file.to_string(),
+            self.out.push(ControllerPrefixRouteFragment {
+                prefix_ref: prefix_ref.to_string(),
+                verb: verb.clone(),
+                path,
                 line,
                 symbol: Some(name.clone()),
             });
@@ -184,10 +257,13 @@ fn has_use_guards(decorators: &[Decorator]) -> bool {
         .any(|d| decorator_name(&d.expr).as_deref() == Some("UseGuards"))
 }
 
-/// A controller class's own routing context: the resolved path prefix (already includes the
-/// `v<version>` segment when `version` was a string literal — see module doc).
-struct ControllerCtx {
-    prefix: String,
+/// A controller class's own routing context — either a fully resolved literal prefix (already
+/// including the `v<version>` segment when `version` was a string literal — see module doc), or a
+/// dotted member-expression reference DEFERRED to assemble-time resolution (`controller-prefix-ref-v1`
+/// — see module doc's "Scope (v1)" exception).
+enum ControllerCtx {
+    Literal { prefix: String },
+    DeferredRef { prefix_ref: String },
 }
 
 /// Class-level decorator names that gate a class as a controller — see module doc "Scope (v1)" for
@@ -212,22 +288,43 @@ fn controller_context(decorators: &[Decorator]) -> Option<ControllerCtx> {
 // Bare `@Controller` and empty-parens `@Controller()` both yield an empty prefix.
 fn controller_ctx_from_expr(expr: &Expr) -> Option<ControllerCtx> {
     let Expr::Call(call) = expr else {
-        return Some(ControllerCtx {
+        return Some(ControllerCtx::Literal {
             prefix: String::new(),
         });
     };
     let Some(arg) = call.args.first() else {
-        return Some(ControllerCtx {
+        return Some(ControllerCtx::Literal {
             prefix: String::new(),
         });
     };
     match &*arg.expr {
-        Expr::Lit(Lit::Str(s)) => Some(ControllerCtx {
+        Expr::Lit(Lit::Str(s)) => Some(ControllerCtx::Literal {
             prefix: str_value(s),
         }),
         Expr::Object(obj) => object_controller_ctx(obj),
-        _ => None, // dynamic prefix arg — never guess, skip the whole controller (see module doc)
+        // A dotted two-segment member expression (`RouteKey.Asset`) is deferred to assemble time
+        // rather than skipped — see module doc's `controller-prefix-ref-v1` exception. Any deeper
+        // chain (`A.B.C`) or computed member falls through `simple_member_ref` to `None`, which this
+        // `.map` propagates — same skip-whole-controller outcome as any other unrecognized shape.
+        Expr::Member(_) => {
+            simple_member_ref(&arg.expr).map(|prefix_ref| ControllerCtx::DeferredRef { prefix_ref })
+        }
+        _ => None, // dynamic prefix arg (call/template/...) — never guess, skip the whole controller
     }
+}
+
+/// A dotted two-segment member-expression reference (`RouteKey.Asset`) — exactly the shape
+/// `egress::const_map_fragment`/`flatten` key their constant-map entries by. `None` for anything
+/// deeper (`A.B.C`), computed (`A[x]`), or not identifier-rooted.
+fn simple_member_ref(expr: &Expr) -> Option<String> {
+    let Expr::Member(m) = expr else { return None };
+    let Expr::Ident(obj) = &*m.obj else {
+        return None;
+    };
+    let MemberProp::Ident(prop) = &m.prop else {
+        return None;
+    };
+    Some(format!("{}.{}", obj.sym, prop.sym))
 }
 
 fn object_controller_ctx(obj: &ObjectLit) -> Option<ControllerCtx> {
@@ -273,7 +370,7 @@ fn object_controller_ctx(obj: &ObjectLit) -> Option<ControllerCtx> {
         Some(v) => format!("v{v}/{path}"),
         None => path,
     };
-    Some(ControllerCtx { prefix })
+    Some(ControllerCtx::Literal { prefix })
 }
 
 /// A `path` attribute's value: a bare string literal, or ("first wins" — see module doc) the first
@@ -290,6 +387,22 @@ fn first_literal_path(expr: &Expr) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// One method's route facts, independent of its class's own prefix resolution — shared substrate for
+/// both `ControllerCollector::emit_method` (literal-prefix provides) and
+/// `ControllerPrefixFragmentCollector::emit_fragment` (deferred-prefix fragments): the handler name,
+/// verb, anchor line, and resolved path(s). `None` for the same reasons `method_route`/`method_name`
+/// individually return `None` (no recognizable method key, no recognized route decorator, `@All`, or an
+/// unresolvable path).
+fn method_route_facts(
+    cm: &SourceMap,
+    m: &ClassMethod,
+) -> Option<(String, String, u32, Vec<String>)> {
+    let name = method_name(&m.key)?;
+    let (verb, decorator, paths) = method_route(&m.function.decorators)?;
+    let line = crate::line_of(cm, decorator.span.lo);
+    Some((verb, name, line, paths))
 }
 
 /// Scans one method's decorators for a route-verb decorator (or `@All`) — see module doc for why
@@ -508,6 +621,88 @@ mod tests {
             out.is_empty(),
             "a dynamic class prefix must never guess a path, got: {out:?}"
         );
+    }
+
+    // --- controller-prefix-ref-v1: dotted member-expression prefix (`@Controller(RouteKey.Asset)`) ---
+
+    #[test]
+    fn member_expression_controller_prefix_emits_fragments_not_provides() {
+        let src = concat!(
+            "@Controller(RouteKey.Asset)\n",
+            "class AssetController {\n",
+            "  @Get(':id')\n",
+            "  getById() {}\n\n",
+            "  @Delete()\n",
+            "  remove() {}\n",
+            "}\n"
+        );
+        // No direct provides — resolution is deferred to assemble time.
+        let provides = extract_controller_provides("asset.controller.ts", src);
+        assert!(
+            provides.is_empty(),
+            "a member-expression prefix must never guess a provide, got: {provides:?}"
+        );
+
+        let frags = extract_controller_prefix_route_fragments("asset.controller.ts", src);
+        let mut got: Vec<(String, String, String, Option<String>)> = frags
+            .iter()
+            .map(|f| {
+                (
+                    f.prefix_ref.clone(),
+                    f.verb.clone(),
+                    f.path.clone(),
+                    f.symbol.clone(),
+                )
+            })
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                (
+                    "RouteKey.Asset".to_string(),
+                    "DELETE".to_string(),
+                    String::new(),
+                    Some("remove".to_string())
+                ),
+                (
+                    "RouteKey.Asset".to_string(),
+                    "GET".to_string(),
+                    ":id".to_string(),
+                    Some("getById".to_string())
+                ),
+            ]
+        );
+        let get_by_id = frags
+            .iter()
+            .find(|f| f.symbol.as_deref() == Some("getById"));
+        assert_eq!(get_by_id.unwrap().line, 3);
+    }
+
+    #[test]
+    fn literal_controller_prefix_contributes_no_fragments() {
+        let src = "@Controller('users')\nclass C {\n  @Get('active')\n  active() {}\n}\n";
+        let frags = extract_controller_prefix_route_fragments("c.ts", src);
+        assert!(frags.is_empty(), "{frags:?}");
+        // And its provides are byte-identical to before this change.
+        let out = extract_controller_provides("c.ts", src);
+        assert_eq!(keys(&out), vec!["GET /users/active"]);
+    }
+
+    #[test]
+    fn call_expression_prefix_still_skips_entirely() {
+        let src = "@Controller(foo())\nclass C {\n  @Get('a')\n  a() {}\n}\n";
+        assert!(extract_controller_provides("c.ts", src).is_empty());
+        assert!(extract_controller_prefix_route_fragments("c.ts", src).is_empty());
+    }
+
+    #[test]
+    fn deeper_dotted_chain_prefix_still_skips_the_whole_controller() {
+        // `A.B.C` is not the exact two-segment shape `const_map_fragment` keys by — still a full skip,
+        // not a fragment (module doc: "any OTHER non-literal shape ... still skips the whole controller").
+        let src = "@Controller(RouteKey.Nested.Asset)\nclass C {\n  @Get('a')\n  a() {}\n}\n";
+        assert!(extract_controller_provides("c.ts", src).is_empty());
+        assert!(extract_controller_prefix_route_fragments("c.ts", src).is_empty());
     }
 
     #[test]

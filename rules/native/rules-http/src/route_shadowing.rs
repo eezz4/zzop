@@ -66,10 +66,19 @@ pub fn route_shadowing_findings(io_provides: &[zzop_core::IoProvide]) -> Vec<zzo
                          route (or merge them into one handler that branches on the concrete value). Precision \
                          limit: \"first registered pattern wins\" is framework-dependent — a router that picks \
                          the most-specific match regardless of registration order is unaffected by this shape; \
-                         disable via rule config `disabled_rules: [\"route-shadowing\"]` if that's your \
-                         framework or the ordering is intentional (native rules have no inline suppression \
-                         marker).",
-                        literal.key, literal.line, param.key, param.line
+                         disable {} if that's your framework or the ordering is intentional (this rule has no \
+                         inline suppression marker).",
+                        literal.key,
+                        literal.line,
+                        param.key,
+                        param.line,
+                        // `disable_hint` itself always starts with "Disable " — this site's surrounding
+                        // sentence already supplies "disable" (mid-sentence, after a semicolon), so only the
+                        // "via config ..." remainder is spliced in, same technique
+                        // `rules-schema/src/message.rs`'s `disable_hint_tail` uses.
+                        zzop_core::disable_hint("route-shadowing")
+                            .strip_prefix("Disable ")
+                            .expect("disable_hint always starts with \"Disable \"")
                     ),
                     data: Some(serde_json::json!({
                         "literalKey": literal.key,
@@ -136,6 +145,32 @@ mod tests {
         assert_eq!(found[0].rule_id, "route-shadowing");
         assert_eq!(found[0].severity, zzop_core::Severity::Warning);
         assert!(found[0].message.contains("line 2"));
+    }
+
+    /// Pins the exact rendered message — regression coverage for the mid-sentence, lowercase-"disable"
+    /// `disable_hint` splice this message went through during the 2026-07-10 dialect-consolidation sweep
+    /// (unlike most native messages, this one reads "...disable {tail}", not "...Disable via config...").
+    #[test]
+    fn message_is_byte_identical_to_the_pre_sweep_text() {
+        let provides = vec![
+            provide("GET /items/{}", "r.ts", 2),
+            provide("GET /items/active", "r.ts", 5),
+        ];
+        let found = route_shadowing_findings(&provides);
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].message,
+            "Route `GET /items/active` (registered here at line 5) is shadowed by an earlier param route \
+             `GET /items/{}` registered at line 2 in the same file — in a first-match router (Express/Koa/\
+             Fastify-style), the param route's pattern also matches every request this literal route was \
+             meant to catch, so the earlier registration intercepts first and this handler is effectively \
+             unreachable. Fix: register the literal route BEFORE the param route (or merge them into one \
+             handler that branches on the concrete value). Precision limit: \"first registered pattern \
+             wins\" is framework-dependent — a router that picks the most-specific match regardless of \
+             registration order is unaffected by this shape; disable via config `rules: { \
+             \"route-shadowing\": \"off\" }` (embedders: `disabled_rules`) if that's your framework or the \
+             ordering is intentional (this rule has no inline suppression marker)."
+        );
     }
 
     #[test]

@@ -8,7 +8,7 @@
 use regex::Regex;
 
 use zzop_core::io::TaggedConsume;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 use super::{path_segments, split_key, HttpProvideSite, VERSION_SEGMENT_PATTERN};
 
@@ -83,10 +83,10 @@ pub fn version_skew_findings(
              route is only provided at version `{provide_version}` — {}:{} (source `{}`, key `{}`). This looks \
              like the caller was not updated when the route moved to a new version. Point the caller at the \
              current version, or confirm the old version is intentionally still expected to exist somewhere. \
-             Disable via rule config `disabled_rules: [\"cross-layer/version-skew\"]` if multiple API \
-             versions are intentionally served side by side and this caller is pinned to an older one on \
-             purpose.",
+             {} if multiple API versions are intentionally served side by side and this caller is pinned to \
+             an older one on purpose.",
             c.source, provide.file, provide.line, provide.source, provide.key,
+            disable_hint("cross-layer/version-skew"),
         );
         out.push(Finding {
             rule_id: "cross-layer/version-skew".to_string(),

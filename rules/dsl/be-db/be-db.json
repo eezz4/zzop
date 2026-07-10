@@ -114,7 +114,7 @@
     {
       "id": "find-then-create-no-unique",
       "severity": "warning",
-      "message": "A `findFirst`/`findOne`/`findUnique` read followed by `.create(` with no `connectOrCreate`, `upsert`, or `$transaction(` — a check-then-act race lets two concurrent requests both pass and create a duplicate row. Use a unique constraint plus `upsert`/`connectOrCreate`, or wrap the read+write in a transaction. Suppress a vetted case with `// find-create-ok`.",
+      "message": "A `findFirst`/`findOne`/`findUnique` read followed by `.create(` with no `connectOrCreate` or `upsert` — a check-then-act race lets two concurrent requests both pass and create a duplicate row. Add a unique constraint and replace the check-then-act with an upsert/`connectOrCreate`; wrapping the read+write in a `$transaction` alone does NOT close this race at the database's default READ COMMITTED isolation level — two concurrent transactions can both read empty and both insert. Suppress a vetted case with `// find-create-ok`.",
       "suppress_marker": "find-create-ok",
       "matcher": {
         "type": "method-scan",
@@ -127,7 +127,7 @@
         ],
         "trigger": "create",
         "absent": [
-          { "pattern": "connectOrCreate|\\bupsert\\b|\\$transaction\\s*\\(", "label": "safe" }
+          { "pattern": "connectOrCreate|\\.upsert\\s*\\(|(?i)ON\\s+CONFLICT|(?i)ON\\s+DUPLICATE\\s+KEY", "label": "safe" }
         ],
         "snippet_max": 160
       }

@@ -26,7 +26,7 @@
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
         "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
-        "line_pattern": "\\bas\\s+any\\b|\\bas\\s+unknown\\b",
+        "line_pattern": "\\bas\\s+any\\b|\\bas\\s+unknown\\s+as\\b",
         "exclude_pattern": "^\\s*import\\b|\\bas\\s+const\\b|\\bas\\s*=",
         "skip_comment_lines": true,
         "snippet_max": 160

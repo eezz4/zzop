@@ -5,7 +5,7 @@
     {
       "id": "async-route-no-catch",
       "severity": "warning",
-      "message": "Async Express/router handler with no surrounding try/catch, `next(err)`, or `.catch()` — Express doesn't catch a rejected promise from an async handler, so an unhandled rejection can crash the process or hang the request. Wrap in try/catch and call `next(err)`, or attach `.catch(next)`. Suppress a vetted case with `// route-catch-ok`.",
+      "message": "Async Express/router handler with no surrounding try/catch, `next(err)`, or `.catch()` — on Express 4, an unhandled rejection in an async handler crashes or hangs the process; Express 5 forwards async rejections to error-handling middleware automatically, so there it's a style/consistency concern rather than a crash bug. Wrap in try/catch and call `next(err)`, or attach `.catch(next)`. Suppress a vetted case with `// route-catch-ok`.",
       "suppress_marker": "route-catch-ok",
       "matcher": {
         "type": "method-scan",
@@ -165,8 +165,8 @@
     },
     {
       "id": "body-limit-missing",
-      "severity": "warning",
-      "message": "Body parser (`express.json`/`urlencoded`, `bodyParser.json`/`urlencoded`) configured without an explicit `limit` — the default may be wrong, and an unbounded parser accepts arbitrarily large payloads (payload-size DoS). Set an explicit `limit` (e.g. `{ limit: '1mb' }`) sized to the endpoint's needs. Suppress a vetted case with `// body-limit-ok`.",
+      "severity": "info",
+      "message": "Body parser (`express.json`/`urlencoded`, `bodyParser.json`/`urlencoded`) configured without an explicit `limit` — the code relies on the implicit 100kb default, which is too small for some legitimate endpoints and simply unexamined for the rest. Set an explicit `limit` (e.g. `{ limit: '1mb' }`) sized to the endpoint's needs. Suppress a vetted case with `// body-limit-ok`.",
       "suppress_marker": "body-limit-ok",
       "matcher": {
         "type": "line-scan",

@@ -114,3 +114,30 @@ pub struct WrapperCallFragment {
     /// 1-based source line of the call expression.
     pub line: u32,
 }
+
+/// One NestJS-shaped controller route whose CLASS-LEVEL prefix is a dotted member-expression reference
+/// (`@Controller(RouteKey.Asset)`) rather than a string literal — emitted by
+/// `zzop_parser_typescript::adapters::controller_decorators` INSTEAD OF a direct `IoProvide` when a
+/// controller's prefix arg is exactly the `Ident.Ident` shape `zzop_parser_typescript::const_map_fragment`
+/// keys its constant-map entries by (a single-file scan cannot know whether `RouteKey.Asset` resolves —
+/// the `enum`/`const` declaring it commonly lives in another file).
+///
+/// Resolved at assemble time (`zzop_engine::analyze::compose`'s controller-prefix composer) against the
+/// SAME project-wide merged const map the late cross-file CONSUME re-resolution uses (itself now also
+/// folding string-valued `enum` members — see `const_map_fragment`'s doc). A `prefix_ref` absent from
+/// that merged map is warned and its routes are dropped — never guessed, never emitted unprefixed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerPrefixRouteFragment {
+    /// The decorator argument's verbatim dotted text, e.g. `"RouteKey.Asset"` — looked up in the merged
+    /// const map at assemble time.
+    pub prefix_ref: String,
+    /// UPPERCASE HTTP verb (`"GET"`, `"POST"`, ...) — same vocabulary as `IoProvide::key`'s verb segment.
+    pub verb: String,
+    /// The method-level route path, possibly empty (a bare `@Get()` decorator) — joined onto the
+    /// resolved prefix as `"{prefix}/{path}"`, mirroring `extract_controller_provides`'s own join.
+    pub path: String,
+    /// 1-based source line of the route decorator — anchors the composed `IoProvide`.
+    pub line: u32,
+    /// The route handler method's name.
+    pub symbol: Option<String>,
+}

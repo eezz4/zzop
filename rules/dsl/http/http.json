@@ -22,7 +22,7 @@
     {
       "id": "auth-gates",
       "severity": "warning",
-      "message": "Route registered under a protected path segment (`/admin/`, `/internal/`, `/dev/`) whose handler identifier carries none of the admin/role/guard/protect/env-gate keywords — possible missing auth gate. Add a role/admin check in the handler (or rename it so the guard is visible in a grep). Suppress a vetted case with `// auth-gate-ok`.",
+      "message": "Route registered under a protected path segment (`/admin/`, `/internal/`, `/dev/`) whose handler identifier carries none of the admin/role/guard/protect/env-gate keywords — possible missing auth gate. If no guard exists, add a role/admin check in the handler; if one already exists but isn't grep-visible, rename/restructure so it is. Suppress a vetted case with `// auth-gate-ok`.",
       "suppress_marker": "auth-gate-ok",
       "matcher": {
         "type": "line-scan",
@@ -38,7 +38,7 @@
     {
       "id": "route-exposure",
       "severity": "warning",
-      "message": "Route registered under a dev/debug/internal/test/playground path segment whose handler carries none of the guard-hint keywords (dev/debug/internal/env/guard/isProduction/NODE_ENV) — risks leaking dev tooling to production. Gate it behind an env check or rename the handler so the guard is visible. Suppress a vetted case with `// route-exposure-ok`.",
+      "message": "Route registered under a dev/debug/internal/test/playground path segment whose handler carries none of the guard-hint keywords (dev/debug/internal/env/guard/isProduction/NODE_ENV) — risks leaking dev tooling to production. If no guard exists, gate it behind an env check; if one already exists but isn't grep-visible, rename/restructure so it is. Suppress a vetted case with `// route-exposure-ok`.",
       "suppress_marker": "route-exposure-ok",
       "matcher": {
         "type": "line-scan",

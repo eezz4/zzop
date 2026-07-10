@@ -5,7 +5,7 @@
 //! generalized a parameter" signal. Info severity: lower confidence than a rule that pins down what differs.
 
 use zzop_core::io::TaggedConsume;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 use super::{path_segments, split_key, HttpProvideSite};
 
@@ -70,10 +70,10 @@ pub fn path_near_miss_findings(
              parameter was expected (or vice versa), or it could be two unrelated routes that happen to \
              share this shape — verify manually before treating this as drift. The consume-side method and \
              path reflect what static extraction read at the call site; a helper/wrapper around the call \
-             can make them differ from the runtime request. Disable via rule config \
-             `disabled_rules: [\"cross-layer/path-near-miss\"]` if same-shaped-but-unrelated routes are \
+             can make them differ from the runtime request. {} if same-shaped-but-unrelated routes are \
              common in your stack.",
             c.source, first.key, first.file, first.line, first.source,
+            disable_hint("cross-layer/path-near-miss"),
         );
         out.push(Finding {
             rule_id: "cross-layer/path-near-miss".to_string(),

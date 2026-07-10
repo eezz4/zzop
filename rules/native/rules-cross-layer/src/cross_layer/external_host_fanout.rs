@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use zzop_core::io::TaggedConsume;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 use super::split_external_key;
 
@@ -73,14 +73,14 @@ pub fn external_host_fanout_findings(external_consumes: &[TaggedConsume]) -> Vec
              and leaves no single choke point for caching, circuit-breaking, or a base-URL change. Extract \
              one client module for this host and route every call through it. (This can co-fire with \
              `cross-layer/external-duplicated-integration` when the fanout also spans multiple sources — \
-             that is a different remedy: pick one source to own the integration.) Disable via rule config \
-             `disabled_rules: [\"cross-layer/external-host-fanout\"]` if this host is intentionally called \
-             from many independent call sites (e.g. a generic HTTP utility used ad hoc across the codebase \
-             with no shared per-vendor logic to extract).",
+             that is a different remedy: pick one source to own the integration.) {} if this host is \
+             intentionally called from many independent call sites (e.g. a generic HTTP utility used ad hoc \
+             across the codebase with no shared per-vendor logic to extract).",
             example_files.join(", "),
             first.file,
             first.line,
             first.source,
+            disable_hint("cross-layer/external-host-fanout"),
         );
         out.push(Finding {
             rule_id: "cross-layer/external-host-fanout".to_string(),

@@ -3,10 +3,53 @@
 
 use crate::join::JoinIssue;
 use crate::structural::SchemaIssue;
+use zzop_core::disable_hint;
+
+/// `disable_hint`'s own fragment minus its leading `"Disable "` word — every message in this file that
+/// embeds the disable hint mid-sentence (rather than as its own "Disable via config ..." sentence, the
+/// shape most other native rules use) splices this in after its own lead-in verb instead of hand-writing
+/// the `` `rules: {...}` (embedders: `disabled_rules`) `` fragment again, so this file still has exactly
+/// one source of truth for that fragment even though none of its call sites use `disable_hint`'s output
+/// verbatim.
+fn disable_hint_tail(id: &str) -> String {
+    disable_hint(id)
+        .strip_prefix("Disable ")
+        .expect("disable_hint always starts with \"Disable \"")
+        .to_string()
+}
+
+/// Builds the "whole family" disable-hint sentence appended to every structural/usage message
+/// (`schema_structural_disable_hint`/`schema_usage_disable_hint` below): reworded around the fact that
+/// these two gate ids disable a whole rule FAMILY, not one finding.
+fn family_disable_hint(gate_id: &str) -> String {
+    let tail = disable_hint_tail(gate_id);
+    format!(
+        " Disable the whole family {tail}; to drop just this one finding, use config `exclude` (or a \
+         per-rule `exclude`) on its file path instead."
+    )
+}
+
+/// `structural.rs`'s issue ids (`god-model`, `missing-timestamps`, `redundant-index`, `float-money`,
+/// `stale-updated-at`, `temporal-as-string`, `fk-no-index`, `nullable-fk`, `implicit-fk`) are NOT
+/// individually disableable — they're gated as one family behind the native analysis id
+/// `"schema-structural"` (`packages/engine/src/pipeline.rs`'s `schema_findings`). Appended to every
+/// structural message by `schema_issue_message`.
+fn schema_structural_disable_hint() -> String {
+    family_disable_hint("schema-structural")
+}
+
+/// `usage.rs`'s issue ids (`dead-model`, `dead-field`, `schema-churn`) are gated as one family behind the
+/// native analysis id `"schema-usage"` (`packages/engine/src/pipeline.rs`'s `schema_usage_findings`,
+/// `packages/engine/src/analyze/mod.rs`'s `is_enabled(&config.rule_config, "schema-usage")` call site).
+/// Appended to every usage message by `schema_issue_message`.
+fn schema_usage_disable_hint() -> String {
+    family_disable_hint("schema-usage")
+}
 
 /// `SchemaIssue` itself carries no message — this is the one place that prose is authored. Falls back to a
 /// generic (still informative) message for any rule id not recognized below, so an unmatched `issue.rule`
-/// never panics.
+/// never panics. Every structural/usage message ends with a disable hint naming the REAL gate — `god-model`,
+/// `fk-no-index`, `dead-model`, etc. are not disableable ids of their own (see the two hint constants' docs).
 pub fn schema_issue_message(issue: &SchemaIssue) -> String {
     let field = issue.field.as_deref().unwrap_or("?");
     let param = |key: &str| -> Option<String> {
@@ -16,7 +59,14 @@ pub fn schema_issue_message(issue: &SchemaIssue) -> String {
             .and_then(|p| p.get(key))
             .map(|v| v.to_string())
     };
-    match issue.rule.as_str() {
+    let hint = match issue.rule.as_str() {
+        "god-model" | "missing-timestamps" | "redundant-index" | "float-money"
+        | "stale-updated-at" | "temporal-as-string" | "fk-no-index" | "nullable-fk"
+        | "implicit-fk" => schema_structural_disable_hint(),
+        "dead-model" | "dead-field" | "schema-churn" => schema_usage_disable_hint(),
+        _ => String::new(),
+    };
+    let body = match issue.rule.as_str() {
         "god-model" => format!(
             "Model {} has {} fields — consider splitting it into smaller, more cohesive models.",
             issue.model,
@@ -126,7 +176,8 @@ pub fn schema_issue_message(issue: &SchemaIssue) -> String {
             "Model {} field {field}: schema rule '{other}' fired.",
             issue.model
         ),
-    }
+    };
+    format!("{body}{hint}")
 }
 
 /// Message vocabulary for `join::JoinIssue` — JOIN rules anchored at a query call site rather than a model
@@ -147,18 +198,20 @@ pub fn join_issue_message(issue: &JoinIssue) -> String {
              not-deleted convention) to the `where` clause. Note: a Prisma middleware (`$use`) or `$extends` \
              client extension that injects this filter globally is invisible to this static check — if your \
              app relies on one, this rule will false-positive on every call site for the model; disable it \
-             with `disabled_rules: [\"soft-delete-bypass\"]` in your zzop config (native rules have no inline \
-             suppression marker).",
-            issue.model
+             {} (native \
+             rules have no inline suppression marker).",
+            issue.model,
+            disable_hint_tail("soft-delete-bypass")
         ),
         "orderby-unindexed" => format!(
             "Model {} is ordered by `{field}` in this {method}() call, but {field} has no @id/@unique of its \
              own and is not the leading column of any @@index/@@unique — this sort likely forces a full \
              table scan or filesort as the table grows. Add `@@index([{field}])` to the schema (or make \
              {field} the leading column of an existing composite index). If this is intentional (e.g. a \
-             small, bounded table), disable this finding with `disabled_rules: [\"orderby-unindexed\"]` in \
-             your zzop config (native rules have no inline suppression marker).",
-            issue.model
+             small, bounded table), disable this finding {} \
+             (native rules have no inline suppression marker).",
+            issue.model,
+            disable_hint_tail("orderby-unindexed")
         ),
         "enum-string-drift" => {
             let enum_name = issue
@@ -181,9 +234,10 @@ pub fn join_issue_message(issue: &JoinIssue) -> String {
                  but a raw string literal — or a plain-JS caller — bypasses that check). Precision note: only \
                  a direct `{field}: '...'` literal-object site is checked; a literal inside an `in: [...]` \
                  array, a variable, or a computed expression is not. If this literal is intentional, disable \
-                 this finding with `disabled_rules: [\"enum-string-drift\"]` in your zzop config (native rules \
-                 have no inline suppression marker).",
-                issue.model
+                 this finding {} \
+                 (native rules have no inline suppression marker).",
+                issue.model,
+                disable_hint_tail("enum-string-drift")
             )
         }
         other => format!(
@@ -208,6 +262,44 @@ mod tests {
             field: field.map(str::to_string),
             params,
         }
+    }
+
+    /// Pins the exact byte shape of the "whole family" disable-hint tail (`family_disable_hint`) — this is
+    /// the one native message dialect that does NOT read `disable_hint`'s own "Disable via config ..."
+    /// output verbatim (it splices `disable_hint_tail` into a differently-worded sentence instead, see
+    /// `family_disable_hint`'s doc), so this regression pin exists specifically to catch a future edit that
+    /// breaks that splice.
+    #[test]
+    fn god_model_message_ends_with_the_exact_whole_family_disable_hint() {
+        let i = issue(
+            "god-model",
+            None,
+            Some(serde_json::json!({ "fieldCount": "40" })),
+        );
+        let msg = schema_issue_message(&i);
+        assert!(
+            msg.ends_with(
+                " Disable the whole family via config `rules: { \"schema-structural\": \"off\" }` \
+                 (embedders: `disabled_rules`); to drop just this one finding, use config `exclude` (or a \
+                 per-rule `exclude`) on its file path instead."
+            ),
+            "unexpected message tail: {msg:?}"
+        );
+    }
+
+    /// Same pin as the structural test above, for the usage-family gate id.
+    #[test]
+    fn dead_model_message_ends_with_the_exact_whole_family_disable_hint() {
+        let i = issue("dead-model", None, None);
+        let msg = schema_issue_message(&i);
+        assert!(
+            msg.ends_with(
+                " Disable the whole family via config `rules: { \"schema-usage\": \"off\" }` (embedders: \
+                 `disabled_rules`); to drop just this one finding, use config `exclude` (or a per-rule \
+                 `exclude`) on its file path instead."
+            ),
+            "unexpected message tail: {msg:?}"
+        );
     }
 
     #[test]
@@ -262,5 +354,65 @@ mod tests {
         );
         let msg = schema_issue_message(&i);
         assert!(msg.starts_with("Model M is missing timestamp field(s)"));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // join_issue_message disable-hint pins — same "splices disable_hint_tail mid-sentence" shape
+    // as the family hints above, regression-pinned for the same reason.
+    // -----------------------------------------------------------------------------------------
+
+    fn join_issue(rule: &str, field: Option<&str>, params: Option<serde_json::Value>) -> JoinIssue {
+        JoinIssue {
+            rule: rule.to_string(),
+            severity: Severity::Info,
+            model: "M".to_string(),
+            field: field.map(str::to_string),
+            file: "schema.prisma".to_string(),
+            line: 1,
+            params,
+        }
+    }
+
+    #[test]
+    fn soft_delete_bypass_message_ends_with_the_exact_disable_hint() {
+        let i = join_issue("soft-delete-bypass", Some("deletedAt"), None);
+        let msg = join_issue_message(&i);
+        assert!(
+            msg.ends_with(
+                "disable it via config `rules: { \"soft-delete-bypass\": \"off\" }` (embedders: \
+                 `disabled_rules`) (native rules have no inline suppression marker)."
+            ),
+            "unexpected message tail: {msg:?}"
+        );
+    }
+
+    #[test]
+    fn orderby_unindexed_message_ends_with_the_exact_disable_hint() {
+        let i = join_issue("orderby-unindexed", Some("createdAt"), None);
+        let msg = join_issue_message(&i);
+        assert!(
+            msg.ends_with(
+                "disable this finding via config `rules: { \"orderby-unindexed\": \"off\" }` (embedders: \
+                 `disabled_rules`) (native rules have no inline suppression marker)."
+            ),
+            "unexpected message tail: {msg:?}"
+        );
+    }
+
+    #[test]
+    fn enum_string_drift_message_ends_with_the_exact_disable_hint() {
+        let i = join_issue(
+            "enum-string-drift",
+            Some("status"),
+            Some(serde_json::json!({ "enum": "Status", "literal": "actve" })),
+        );
+        let msg = join_issue_message(&i);
+        assert!(
+            msg.ends_with(
+                "disable this finding via config `rules: { \"enum-string-drift\": \"off\" }` (embedders: \
+                 `disabled_rules`) (native rules have no inline suppression marker)."
+            ),
+            "unexpected message tail: {msg:?}"
+        );
     }
 }

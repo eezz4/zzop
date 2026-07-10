@@ -5,7 +5,7 @@
     {
       "id": "hardcoded-secret",
       "severity": "warning",
-      "message": "Hardcoded secret-shaped literal (an API-key/password/token assignment, or a known cloud-key prefix) — a credential committed to source is exposed to every reader/fork/clone and cannot be rotated without a code change. Move it to an environment variable or a secrets manager (e.g. `process.env.API_KEY`). Suppress a vetted case with `// secret-ok`.",
+      "message": "Hardcoded secret-shaped literal (an API-key/password/token assignment, or a known cloud-key prefix) — a credential committed to source is exposed to every reader/fork/clone and cannot be rotated without a code change. Move it to an environment variable or a secrets manager (e.g. `process.env.API_KEY`) — but that only stops the NEXT leak: this value is already exposed via git history and any forks/clones that pulled it, so rotate/revoke the actual credential too. Suppress a vetted case with `// secret-ok`.",
       "suppress_marker": "secret-ok",
       "matcher": {
         "type": "line-scan",
@@ -80,7 +80,7 @@
     {
       "id": "cors-wildcard",
       "severity": "warning",
-      "message": "CORS origin set to `*` (a wildcard `Access-Control-Allow-Origin` header, or `origin: '*'`) — lets any website make cross-origin requests to this endpoint, defeating same-origin protection. Return a specific allow-listed origin instead, especially on endpoints that accept cookies or auth headers. Suppress a vetted case with `// cors-ok`.",
+      "message": "CORS origin set to `*` (a wildcard `Access-Control-Allow-Origin` header, or `origin: '*'`) — lets any website make cross-origin requests to this endpoint, defeating same-origin protection. Return a specific allow-listed origin instead, especially on endpoints that accept cookies or auth headers. A wildcard is legitimate for a purely public, credential-less API (no cookies/auth headers involved) — suppress that case with `// cors-ok` rather than \"fixing\" it.",
       "suppress_marker": "cors-ok",
       "matcher": {
         "type": "line-scan",
@@ -103,7 +103,7 @@
     {
       "id": "weak-password-hash",
       "severity": "critical",
-      "message": "Password hashed/compared with a broken algorithm (MD5/SHA-1) or bcrypt at a single-digit cost factor — both are too cheap to resist offline brute force at billions of guesses/sec on commodity GPUs. Use bcrypt/scrypt/argon2 with a cost factor of at least 10-12. Suppress a vetted case with `// weak-hash-ok`.",
+      "message": "Password hashed/compared with a broken algorithm (MD5/SHA-1) or bcrypt at a single-digit cost factor — both are too cheap to resist offline brute force at billions of guesses/sec on commodity GPUs. Use bcrypt with a cost factor of at least 10 (bcrypt-specific — cost factor isn't a scrypt/argon2 unit), or argon2id/scrypt configured at OWASP-recommended memory/parallelism parameters. Suppress a vetted case with `// weak-hash-ok`.",
       "suppress_marker": "weak-hash-ok",
       "matcher": {
         "type": "line-scan",
@@ -144,7 +144,7 @@
     {
       "id": "annotation-sql-concat",
       "severity": "critical",
-      "message": "JPA `@Query` built via string concatenation (`@Query(\"...\" + ...)`) — the concatenated part is attacker-controlled input spliced into SQL/JPQL, the same SQL injection risk as building any query string by hand. Use named parameters (`:param` with `@Param`) or a parameterized query instead. Suppress a vetted case with `// query-concat-ok`.",
+      "message": "JPA `@Query` built via string concatenation (`@Query(\"...\" + ...)`) — if the concatenated part is request-derived, it's spliced straight into SQL/JPQL, the same SQL injection risk as building any query string by hand; a constant/literal fragment isn't injectable but still obscures the risk and makes future refactors unsafe. Use named parameters (`:param` with `@Param`) or a parameterized query instead. Suppress a vetted case with `// query-concat-ok`.",
       "suppress_marker": "query-concat-ok",
       "matcher": {
         "type": "line-scan",
@@ -213,7 +213,7 @@
     {
       "id": "cors-credentials-wildcard",
       "severity": "warning",
-      "message": "`credentials: true` appears in a file that also configures `origin: '*'` — a wildcard origin with credentialed CORS lets any website make authenticated cross-origin requests carrying the victim's cookies/auth headers. Echo a specific allow-listed origin (never `*`) whenever `credentials: true` is set. Suppress a vetted case with `// cors-cred-ok`.",
+      "message": "`credentials: true` appears in a file that also configures `origin: '*'` — browsers actually REJECT (refuse to expose the response for) a wildcard `Access-Control-Allow-Origin` combined with credentials, so this exact configuration is broken/non-functional rather than exploitable as written. The real risk: to \"fix\" the breakage, code often reflects the request's `Origin` header back with `credentials: true` still set — that treats any origin as trusted and IS the actual vulnerability. Return a specific allow-listed origin (never `*`, never an echoed `Origin`) whenever `credentials: true` is set. Suppress a vetted case with `// cors-cred-ok`.",
       "suppress_marker": "cors-cred-ok",
       "matcher": {
         "type": "line-scan",
@@ -265,7 +265,7 @@
     {
       "id": "timing-unsafe-compare",
       "severity": "info",
-      "message": "A secret/token/signature/hmac/api-key-shaped identifier is compared with `===`/`!==` — equality operators short-circuit on the first differing byte, leaking a timing side-channel an attacker can exploit to recover the value byte-by-byte. Use `crypto.timingSafeEqual(...)` on fixed-length buffers instead. Suppress a vetted case with `// timing-ok`.",
+      "message": "A secret/token/signature/hmac/api-key-shaped identifier is compared with `===`/`!==` — equality operators short-circuit on the first differing byte, so the comparison time itself can leak a timing signal about the value to an attacker positioned to measure it. Use `crypto.timingSafeEqual(...)` on fixed-length buffers instead. Suppress a vetted case with `// timing-ok`.",
       "suppress_marker": "timing-ok",
       "matcher": {
         "type": "line-scan",
@@ -297,7 +297,7 @@
     {
       "id": "secret-env-in-fe",
       "severity": "warning",
-      "message": "A server-only-shaped env var (`SECRET`/`PRIVATE`/`SERVICE_ROLE`/`SERVICE_KEY`) is referenced from frontend code — build tools inline `process.env.*`/`import.meta.env.*` into the shipped JS bundle, making it readable in devtools. Move it behind a backend endpoint, or use a non-secret public var (`NEXT_PUBLIC_`/`VITE_`-prefixed). Suppress a vetted case with `// fe-env-ok`.",
+      "message": "A server-only-shaped env var (`SECRET`/`PRIVATE`/`SERVICE_ROLE`/`SERVICE_KEY`) is referenced from frontend code — build tools inline `process.env.*`/`import.meta.env.*` into the shipped JS bundle, making it readable in devtools. If the value is genuinely secret, the only correct fix is moving its use behind a backend endpoint (proxy it server-side) — do not just rename it with a `NEXT_PUBLIC_`/`VITE_` prefix. Only reach for that prefix if the value was never actually secret to begin with (e.g. a public config flag flagged by mistake). Suppress a vetted case with `// fe-env-ok`.",
       "suppress_marker": "fe-env-ok",
       "matcher": {
         "type": "line-scan",
@@ -311,7 +311,7 @@
     {
       "id": "localstorage-jwt",
       "severity": "warning",
-      "message": "A token/JWT-shaped value is written to `localStorage` — readable by any script on the page, so a single XSS bug anywhere on the origin can exfiltrate it with no further exploitation. Store the token in an `httpOnly` cookie instead, so client-side JS (and XSS) cannot read it. Suppress a vetted case with `// ls-token-ok`.",
+      "message": "A token/JWT-shaped value is written to `localStorage` — readable by any script on the page, so a single XSS bug anywhere on the origin can exfiltrate it with no further exploitation. Default fix: store it in an `httpOnly` cookie with `sameSite` set, plus CSRF-token protection. This isn't a full fix either — cookies reintroduce CSRF risk (mitigated by `sameSite`/CSRF tokens), and an active XSS bug can still ride an existing cookie session in-place — but it does stop direct token theft/exfiltration. Accepted alternative: an in-memory access token with a rotating refresh token, or a Backend-For-Frontend (BFF) pattern. Suppress a vetted case with `// ls-token-ok`.",
       "suppress_marker": "ls-token-ok",
       "matcher": {
         "type": "line-scan",
@@ -325,7 +325,7 @@
     {
       "id": "java-hardcoded-password",
       "severity": "warning",
-      "message": "A password-shaped literal is hardcoded — a direct assignment (`password = \"...\"`) or a JDBC `getConnection(url, user, password)` call with literal credentials — exposed to every reader of the repo and impossible to rotate without a code change. Read it from an environment variable, an excluded properties file, or a secrets manager. Suppress a vetted case with `// java-pwd-ok`.",
+      "message": "A password-shaped literal is hardcoded — a direct assignment (`password = \"...\"`) or a JDBC `getConnection(url, user, password)` call with literal credentials — exposed to every reader of the repo and impossible to rotate without a code change. Read it from an environment variable, an excluded properties file, or a secrets manager — but that only stops the NEXT leak: this password is already exposed via git history and any forks/clones that pulled it, so rotate/revoke the actual credential too. Suppress a vetted case with `// java-pwd-ok`.",
       "suppress_marker": "java-pwd-ok",
       "matcher": {
         "type": "line-scan",
@@ -341,7 +341,7 @@
     {
       "id": "xxe-no-guard",
       "severity": "critical",
-      "message": "`DocumentBuilderFactory`/`SAXParserFactory.newInstance()` with no XXE guard in the same method — a default-configured XML parser resolves external entities, so crafted XML can read local files, perform SSRF, or exhaust memory. Set `disallow-doctype-decl` or `FEATURE_SECURE_PROCESSING` before parsing untrusted input. Suppress a vetted case with `// xxe-ok`.",
+      "message": "`DocumentBuilderFactory`/`SAXParserFactory.newInstance()` with no recognized XXE guard in the same method — a default-configured XML parser resolves external entities, so crafted XML can read local files, perform SSRF, or exhaust memory. Set `disallow-doctype-decl` to `true`; `FEATURE_SECURE_PROCESSING` alone does NOT disable external entity resolution and is not sufficient on its own. If DOCTYPEs are genuinely required, set both `external-general-entities` and `external-parameter-entities` to `false` instead. Each recognized guard pattern silences this finding independently (any one alone is enough to veto it). Suppress a vetted case with `// xxe-ok`.",
       "suppress_marker": "xxe-ok",
       "matcher": {
         "type": "method-scan",
@@ -353,7 +353,9 @@
         ],
         "trigger": "factory",
         "absent": [
-          { "pattern": "disallow-doctype-decl|FEATURE_SECURE_PROCESSING", "label": "guard" }
+          { "pattern": "disallow-doctype-decl[^;]*,\\s*true\\b", "label": "disallow-doctype-decl" },
+          { "pattern": "external-general-entities[^;]*,\\s*false\\b", "label": "external-general-entities-false" },
+          { "pattern": "external-parameter-entities[^;]*,\\s*false\\b", "label": "external-parameter-entities-false" }
         ],
         "snippet_max": 160
       }
@@ -361,7 +363,7 @@
     {
       "id": "unsafe-deserialization",
       "severity": "warning",
-      "message": "`ObjectInputStream.readObject()` is called in this function — Java's native deserialization invokes arbitrary code paths (gadget chains), so deserializing an attacker-controlled byte stream can lead to remote code execution. Use JSON/Protobuf instead, or validate the stream with an allow-list `ObjectInputFilter`. Suppress a vetted case with `// deser-ok`.",
+      "message": "`ObjectInputStream.readObject()` is called in this function — Java's native deserialization invokes arbitrary code paths (gadget chains), so deserializing an attacker-controlled byte stream can lead to remote code execution. Kept at `warning` because this local analysis can't prove the deserialized payload is attacker-reachable — treat it as CRITICAL wherever the input actually comes from a request body/query/header/upload. Use JSON/Protobuf instead, or validate the stream with an allow-list `ObjectInputFilter`. Suppress a vetted case with `// deser-ok`.",
       "suppress_marker": "deser-ok",
       "matcher": {
         "type": "method-scan",
@@ -444,6 +446,20 @@
           { "pattern": "ALLOW_ALL_HOSTNAME_VERIFIER", "label": "allow-all-verifier" },
           { "pattern": "setHostnameVerifier\\s*\\(\\s*\\([^)]*\\)\\s*->\\s*true", "label": "lambda-verifier" }
         ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "conn-string-credentials",
+      "severity": "critical",
+      "message": "A connection-string URL embeds a password directly in source (`scheme://user:pass@host`) — anyone with repo read access effectively owns the datastore, and git history preserves the credential even after it's later removed from HEAD. Move the URL to environment/secret configuration AND rotate the credential (treat it as already compromised). Loopback hosts (localhost/127.0.0.1) and placeholder-shaped passwords (`changeme`, `mypwd`, ...) are not flagged; suppress a remaining vetted sample with `// conn-cred-ok`.",
+      "suppress_marker": "conn-cred-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|java)$",
+        "skip_comment_lines": true,
+        "line_pattern": "(?i)\\b[a-z][a-z0-9+.-]*://[^\\s\"'@/:]+:[^\\s\"'@/]+@[^\\s\"'/]+",
+        "exclude_pattern": "(?i)(://[^\\s\"'@]*(\\$\\{|\\{\\{|<|process\\.env)[^\\s\"'@]*@|:[^@\\s\"'/]*(passwd|pwd|changeme|example|dummy|sample|placeholder|mock|fake)[^@\\s\"'/]*@|:(password|pass|secret|test|user|username|x+|\\*+)@|:(postgres(ql)?|mysql|mongo(db)?|redis|maria(db)?|mssql|oracle|rabbitmq|guest|root|admin)[0-9]*@|@(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|::1)([:/\\s\"'`]|$))",
         "snippet_max": 160
       }
     }

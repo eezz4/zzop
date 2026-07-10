@@ -8,7 +8,7 @@
 //! Provider sites in test-path files (`zzop_core::is_test_file`) are skipped — not deployed surface.
 
 use zzop_core::io::TaggedProvide;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 use super::{is_write_method, split_key};
 
@@ -33,10 +33,10 @@ pub fn unconsumed_mutation_endpoint_findings(
                  intentionally co-fires with `cross-layer/unconsumed-endpoint` for the same site — this rule \
                  is the severity-split for write verbs specifically. Confirm with real traffic/access logs \
                  before removing the route, or add authorization/rate-limiting if it must stay reachable. \
-                 Disable via rule config `disabled_rules: [\"cross-layer/unconsumed-mutation-endpoint\"]` if \
-                 provider-only write endpoints (webhook targets, endpoints consumed only outside this \
+                 {} if provider-only write endpoints (webhook targets, endpoints consumed only outside this \
                  analysis) are expected in your stack.",
-                p.source
+                p.source,
+                disable_hint("cross-layer/unconsumed-mutation-endpoint")
             );
             Some(Finding {
                 rule_id: "cross-layer/unconsumed-mutation-endpoint".to_string(),

@@ -13,8 +13,8 @@
 //! suppress genuine missing-auth findings; for a security rule the recall loss outweighs the
 //! false-positive savings, and `requireXxx` helpers with a real auth stem (`requireAuth`, `requireOwner`)
 //! still match via those stems. A real guard named outside this vocabulary still false-positives here —
-//! the finding message points at `disabled_rules: ["mutating-route-no-auth"]` as the escape hatch, since
-//! native rules have no inline suppression marker.
+//! the finding message points at config `rules: { "mutating-route-no-auth": "off" }` (embedders:
+//! `disabled_rules`) as the escape hatch, since this rule has no inline suppression marker.
 //!
 //! ## Decidable subset
 //! Only mutating-method provides whose `symbol` resolves to a UNIQUE known symbol are checked
@@ -69,7 +69,7 @@ use std::collections::HashMap;
 
 use regex::Regex;
 use zzop_core::callgraph::{bfs_reachable, SymbolGraph};
-use zzop_core::{Finding, Severity, SourceSymbol};
+use zzop_core::{disable_hint, Finding, Severity, SourceSymbol};
 
 use crate::http_scan::{build_name_index, resolve_handler};
 use zzop_core::is_test_file;
@@ -186,10 +186,10 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
              `apiRoutes.post(\"{path}\", requireAuth, {handler_ref})`, or a router-wide `.use(authMiddleware)`) \
              never appears as a call FROM the handler itself, so it is invisible to this check and WILL \
              false-positive on a route guarded only that way — this finding starts at Info severity until \
-             this check becomes middleware-aware. Disable via rule config \
-             `disabled_rules: [\"mutating-route-no-auth\"]` if your auth happens at the middleware layer \
-             (native rules have no inline suppression marker).",
-            input.auth_guard_pattern
+             this check becomes middleware-aware. {} if your auth happens at the middleware layer (this \
+             rule has no inline suppression marker).",
+            input.auth_guard_pattern,
+            disable_hint("mutating-route-no-auth")
         );
         out.push(Finding {
             rule_id: "mutating-route-no-auth".to_string(),

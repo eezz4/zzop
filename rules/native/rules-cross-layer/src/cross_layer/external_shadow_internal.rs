@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 
 use zzop_core::io::TaggedConsume;
-use zzop_core::{http_interface_key, Finding, Severity};
+use zzop_core::{disable_hint, http_interface_key, Finding, Severity};
 
 use super::{split_external_key, HttpProvideSite};
 
@@ -65,11 +65,10 @@ pub fn external_shadow_internal_findings(
              proxied path the route is normally reached through, which breaks in any other environment and \
              may bypass whatever a gateway/proxy layer enforces (auth, rewriting, rate limiting). Verify \
              whether this call is meant to hit the internal route directly, and if so replace the hardcoded \
-             host with the relative/proxy path. Disable via rule config `disabled_rules: \
-             [\"cross-layer/external-shadow-internal\"]` if hitting this host directly (bypassing the proxy) \
-             is intentional, e.g. a health check or an internal tool calling a fixed deployment URL on \
-             purpose.",
+             host with the relative/proxy path. {} if hitting this host directly (bypassing the proxy) is \
+             intentional, e.g. a health check or an internal tool calling a fixed deployment URL on purpose.",
             c.source, url.host, first.file, first.line, first.source,
+            disable_hint("cross-layer/external-shadow-internal"),
         );
         out.push(Finding {
             rule_id: "cross-layer/external-shadow-internal".to_string(),

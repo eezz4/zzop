@@ -7,7 +7,7 @@
 //! environment-drift signal this rule exists to surface. Anchored at the consume site.
 
 use zzop_core::io::TaggedConsume;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 use super::split_external_key;
 
@@ -100,10 +100,10 @@ pub fn external_ip_literal_findings(external_consumes: &[TaggedConsume]) -> Vec<
              are what let infra rotate underneath a stable name. Verify whether this should be a real hostname \
              (config/DNS drift) and replace the literal with one. (Loopback literals like `127.0.0.1`/`[::1]` \
              are intentionally not flagged here — that's the DSL `localhost-egress-committed` rule's turf.) \
-             Disable via rule config `disabled_rules: [\"cross-layer/external-ip-literal\"]` if this \
-             integration legitimately targets a fixed IP on purpose (e.g. a pinned on-prem appliance with no \
-             DNS entry).",
+             {} if this integration legitimately targets a fixed IP on purpose (e.g. a pinned on-prem \
+             appliance with no DNS entry).",
             url.method, url.host, url.path, c.source,
+            disable_hint("cross-layer/external-ip-literal"),
         );
 
         out.push(Finding {

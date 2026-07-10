@@ -221,6 +221,19 @@ pub struct CacheStats {
 /// whole-graph assembly (`analyze`), including the optional git-history-dependent analyses. Two calls
 /// over an unchanged tree (and unchanged git history) produce byte-for-byte identical output.
 pub fn analyze_tree(root: &Path, config: &EngineConfig) -> AnalyzeOutput {
+    // Input-scope self-report (`input-scope-error` in the disclosure registry): a mistyped root used
+    // to be absorbed as an empty tree whose only trace was `files: 0` in the census — which reads as a
+    // clean/empty repo. A root that does not exist (or is not a directory) is a structural fact about
+    // the REQUEST, disclosed up front; a root that exists but yields zero artifacts self-reports after
+    // the walk. A too-narrow root that still matches SOME files stays undetected (registry: partial).
+    let mut scope_warnings = Vec::new();
+    if !root.is_dir() {
+        scope_warnings.push(format!(
+            "root '{}' does not exist or is not a directory — analyzed as an empty tree (0 files). Check the path for a typo; every count and finding for this tree is a statement about nothing.",
+            root.display()
+        ));
+    }
+
     let mut cache_warnings = Vec::new();
     let analysis_cache = cache::open_cache(config, &mut cache_warnings);
     let counters = analysis_cache
@@ -229,6 +242,12 @@ pub fn analyze_tree(root: &Path, config: &EngineConfig) -> AnalyzeOutput {
 
     let mut artifacts =
         pipeline::run_file_pass(root, config, analysis_cache.as_ref(), counters.as_ref());
+    if scope_warnings.is_empty() && artifacts.is_empty() {
+        scope_warnings.push(format!(
+            "0 source files found under root '{}' — this tree contributes nothing to any analysis. If that is unexpected, the root points at the wrong directory or every file was filtered before parsing.",
+            root.display()
+        ));
+    }
     let mut overlay_warnings = Vec::new();
     if !config.adapter_overlays.is_empty() {
         envelope::apply_adapter_overlays(
@@ -239,6 +258,11 @@ pub fn analyze_tree(root: &Path, config: &EngineConfig) -> AnalyzeOutput {
     }
     let mut output = analyze::assemble(root, artifacts, config);
 
+    // Scope warnings lead: they qualify every other line ("about nothing"), so a reader hits them first.
+    if !scope_warnings.is_empty() {
+        scope_warnings.append(&mut output.warnings);
+        output.warnings = scope_warnings;
+    }
     output.warnings.extend(cache_warnings);
     output.warnings.extend(overlay_warnings);
     output.cache = counters.map(cache::CacheCounters::into_stats);

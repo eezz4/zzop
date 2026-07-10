@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use zzop_core::io::TaggedConsume;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 use super::{split_key, HttpProvideSite};
 
@@ -66,15 +66,14 @@ pub fn method_mismatch_findings(
              Verify the intended HTTP method on either side and fix the mismatched one. The consume-side \
              method reflects what static extraction read at the call site — if the call goes through a \
              helper/wrapper (multipart, a custom fetch wrapper, ...), verify the literal method manually \
-             before changing either side. Disable via rule \
-             config `disabled_rules: [\"cross-layer/method-mismatch\"]` if this path legitimately supports \
-             multiple methods registered as separate routes and the caller's method is simply not one of \
-             them yet.",
+             before changing either side. {} if this path legitimately supports multiple methods registered \
+             as separate routes and the caller's method is simply not one of them yet.",
             c.source,
             other_methods.join(", "),
             first.file,
             first.line,
             first.source,
+            disable_hint("cross-layer/method-mismatch"),
         );
         out.push(Finding {
             rule_id: "cross-layer/method-mismatch".to_string(),

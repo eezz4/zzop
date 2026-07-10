@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use zzop_core::{DepGraph, FileNode, Finding, Severity};
+use zzop_core::{disable_hint, DepGraph, FileNode, Finding, Severity};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnreachableFile {
@@ -68,10 +68,10 @@ pub fn unreachable_findings(nodes: &[FileNode], dep: &DepGraph) -> Vec<Finding> 
                 "file has {} importer(s) in this tree but is unreachable from any entrypoint — its \
                  importers form a closed island nothing outside it can reach, so it's effectively dead \
                  despite having in-repo references. Delete the island, or wire it back to a real \
-                 entrypoint if it should be reachable. Disable via rule config \
-                 `disabled_rules: [\"unreachable\"]` if this island is reached by a mechanism this graph \
-                 doesn't see (e.g. dynamic `require`, a plugin loader).",
-                u.fan_in
+                 entrypoint if it should be reachable. {} if this island is reached by a mechanism this \
+                 graph doesn't see (e.g. dynamic `require`, a plugin loader).",
+                u.fan_in,
+                disable_hint("unreachable")
             ),
             data: Some(serde_json::json!({ "loc": u.loc, "fan_in": u.fan_in })),
         })
@@ -250,6 +250,26 @@ mod tests {
         let d = dep(&[("x.test.ts", &["util.ts"]), ("util.ts", &[])]);
         let nodes = vec![node("x.test.ts", 0, 10), node("util.ts", 1, 10)];
         assert!(find_unreachable(&nodes, &d, 30).is_empty());
+    }
+
+    /// Pins the exact rendered message — regression coverage for the `disable_hint` splice
+    /// `unreachable_findings` went through during the 2026-07-10 dialect-consolidation sweep.
+    #[test]
+    fn finding_message_is_byte_identical_to_the_pre_sweep_text() {
+        let d = dep(&[("dead1.ts", &["dead2.ts"]), ("dead2.ts", &["dead1.ts"])]);
+        let nodes = vec![node("dead1.ts", 1, 10), node("dead2.ts", 1, 5)];
+        let out = unreachable_findings(&nodes, &d);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].rule_id, "unreachable");
+        assert_eq!(
+            out[0].message,
+            "file has 1 importer(s) in this tree but is unreachable from any entrypoint — its importers \
+             form a closed island nothing outside it can reach, so it's effectively dead despite having \
+             in-repo references. Delete the island, or wire it back to a real entrypoint if it should be \
+             reachable. Disable via config `rules: { \"unreachable\": \"off\" }` (embedders: \
+             `disabled_rules`) if this island is reached by a mechanism this graph doesn't see (e.g. \
+             dynamic `require`, a plugin loader)."
+        );
     }
 
     #[test]

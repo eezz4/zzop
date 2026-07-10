@@ -5,7 +5,8 @@
 //! The crux is constant indirection: a frontend rarely writes `axios.get("/x")`; it writes
 //! `axios.get(ControlKey.AUTHEN.getUserInfo)`. We build a project-wide constant map from every
 //! top-level object literal first, then resolve each call's URL against it, normalized via
-//! `core::http_interface_key` so the key matches whatever the BE adapter emits.
+//! `core::http_consume_interface_key` (which also drops any `?...`/`#...` query/fragment suffix —
+//! `query-drop-v1`) so the key matches whatever the BE adapter emits.
 //!
 //! Recognized call shapes: `axios.get/post/put/delete/patch(url)`, `ky.get/post/...(url)`,
 //! `fetch(url, { method })`, `$fetch(url, { method })`, `axios(url)`, and the oazapfts-generated-SDK
@@ -19,10 +20,10 @@ use std::collections::HashMap;
 use swc_core::common::{SourceMap, SourceMapper, Spanned};
 use swc_core::ecma::ast::{
     CallExpr, Callee, Decl, Expr, ExprOrSpread, Lit, MemberProp, ModuleDecl, ModuleItem, ObjectLit,
-    Pat, Prop, PropName, PropOrSpread, Stmt,
+    Pat, Prop, PropName, PropOrSpread, Stmt, TsEnumMemberId,
 };
 use swc_core::ecma::visit::{Visit, VisitWith};
-use zzop_core::{http_interface_key, IoConsume};
+use zzop_core::{http_consume_interface_key, IoConsume};
 
 /// Extract HTTP egress IoConsume entries across all files (the const map is project-wide).
 pub fn extract_http_egress(files: &[(String, String)]) -> Vec<IoConsume> {
@@ -61,20 +62,27 @@ impl Visit for EgressCollector<'_> {
             // Internal calls join to a same-repo BE route; external calls get a host-carrying key
             // ("METHOD https://host/path", left verbatim rather than run through `http_interface_key`,
             // which would mangle the origin) so `link_cross_layer_io`'s `"://"` gate routes them external.
+            // A base-relative literal (`users/login` — the axios `baseURL` idiom) keys as its
+            // root-normalized path; see `base_relative_path`'s doc for the exact veto list.
             let key = if internal {
-                Some(http_interface_key(&hc.method, url.as_ref().unwrap()))
+                Some(http_consume_interface_key(
+                    &hc.method,
+                    url.as_ref().unwrap(),
+                ))
             } else if external {
                 Some(format!(
                     "{} {}",
                     hc.method.to_uppercase(),
                     url.as_ref().unwrap()
                 ))
+            } else if let Some(rooted) = url.as_deref().and_then(base_relative_path) {
+                Some(http_consume_interface_key(&hc.method, &rooted))
             } else {
                 None
             };
             // Unresolved: the URL couldn't be resolved against THIS call's own `consts` map. `method`
             // travels alongside `raw` so a caller with a wider map can re-resolve it via [`resolve_raw_path`].
-            let unresolved = !internal && !external;
+            let unresolved = key.is_none();
             self.out.push(IoConsume {
                 kind: "http".into(),
                 key,
@@ -102,10 +110,37 @@ fn is_external(u: &str) -> bool {
 }
 
 /// Public form of the internal/external classification, exported so `zzop-engine`'s late cross-file
-/// resolution can apply the same three-way gating (leading `/` = internal, `http(s)://` = external
-/// verbatim key, else unresolved) instead of force-keying every resolved constant as internal.
+/// resolution can apply the same gating (leading `/` = internal, `http(s)://` = external verbatim key,
+/// base-relative = root-normalized internal, else unresolved) instead of force-keying every resolved
+/// constant as internal.
 pub fn is_external_url(u: &str) -> bool {
     is_external(u)
+}
+
+/// A base-relative path literal (`users/login`, `articles?limit=10`) — the standard axios/ky idiom of a
+/// path resolved against a configured `baseURL` whose value is invisible at the call site (cross-file
+/// config or env). Returns the ROOT-NORMALIZED path (`/users/login`): exact when the base carries no
+/// path segment, and one prefix dimension off — absorbed by `cross-layer/route-near-miss`'s
+/// "missing path prefix" explanation — when it does (decision: cross-layer-resolution, 2026-07-10,
+/// pulled by the connected-pair dogfood where 19/19 recognized axios calls fell unresolved).
+///
+/// NOT base-relative — `None`, left unresolved, never guessed: an empty string, a leading-interpolation
+/// template (`{}`-headed — the base itself is the expression), a document-relative `./`/`../` path, a
+/// query-only URL (`?page=2` — "same path, new query", which names no path at all), any
+/// scheme-carrying URL (`ws://` etc.; `http(s)://` is already the external branch), or
+/// whitespace-carrying text (not a path).
+pub fn base_relative_path(u: &str) -> Option<String> {
+    if u.is_empty()
+        || u.starts_with('/')
+        || u.starts_with('.')
+        || u.starts_with('{')
+        || u.starts_with('?')
+        || u.contains("://")
+        || u.contains(char::is_whitespace)
+    {
+        return None;
+    }
+    Some(format!("/{u}"))
 }
 
 struct HttpCall<'a> {
@@ -256,8 +291,16 @@ fn expr_text(node: &Expr, cm: &SourceMap) -> String {
 }
 
 /// One file's constant-map fragment: dotted constant access -> string value, from every top-level
-/// `const <Name> = { ... }` in this file's text alone. `build_const_map` folds this over every file; a
-/// caller with only one file in hand can merge fragments later and re-resolve via [`resolve_raw_path`].
+/// `const <Name> = { ... }` object literal PLUS every top-level (incl. `export`) `enum` whose member
+/// initializers are string literals (`RouteKey.Asset -> "assets"`) in this file's text alone. A member
+/// with a numeric, implicit (auto-incrementing), or computed initializer is skipped — never guessed.
+/// `build_const_map` folds this over every file; a caller with only one file in hand can merge fragments
+/// later and re-resolve via [`resolve_raw_path`].
+///
+/// This map feeds TWO assemble-time consumers: [`resolve_raw_path`]'s late cross-file CONSUME
+/// re-resolution, and (new) `zzop_engine::analyze::compose`'s controller-prefix PROVIDE resolution —
+/// see `zzop_core::ControllerPrefixRouteFragment`'s doc for the `@Controller(RouteKey.Asset)` shape this
+/// unblocks.
 pub fn const_map_fragment(rel: &str, text: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let Some(module) = crate::parse_module(rel, text) else {
@@ -275,6 +318,24 @@ pub fn const_map_fragment(rel: &str, text: &str) -> HashMap<String, String> {
                     if let Expr::Object(obj) = unwrap_expr(init) {
                         flatten(bi.id.sym.as_ref(), obj, &mut map);
                     }
+                }
+            }
+        }
+        if let Some(Decl::TsEnum(e)) = decl {
+            let enum_name = e.id.sym.to_string();
+            for member in &e.members {
+                let member_name = match &member.id {
+                    TsEnumMemberId::Ident(id) => id.sym.to_string(),
+                    TsEnumMemberId::Str(s) => s.value.as_str().unwrap_or_default().to_string(),
+                };
+                // A numeric or implicit (no initializer at all — swc's auto-increment) member is
+                // skipped: only a STRING literal initializer is a resolvable route-prefix constant.
+                let Some(init) = &member.init else { continue };
+                if let Expr::Lit(Lit::Str(s)) = unwrap_expr(init) {
+                    map.insert(
+                        format!("{enum_name}.{member_name}"),
+                        s.value.as_str().unwrap_or_default().to_string(),
+                    );
                 }
             }
         }
@@ -469,6 +530,65 @@ mod tests {
         assert!(out.is_empty());
     }
 
+    // --- base-relative path literals (`base-relative-egress-v1`) ---
+
+    #[test]
+    fn base_relative_literal_keys_as_its_root_normalized_path() {
+        // The axios `baseURL` idiom: paths with no leading slash, resolved against a configured base
+        // invisible at the call site. Keyed root-normalized; a base prefix (`/api`) is then a
+        // route-near-miss "missing path prefix" away, not an unexplained unresolved.
+        let out = extract_http_egress(&files(&[(
+            "conduit.ts",
+            "axios.post('users/login', body); axios.get(`articles/${slug}/comments`); axios.get('articles?limit=10');",
+        )]));
+        assert_eq!(
+            keys(&out),
+            vec![
+                Some("POST /users/login".to_string()),
+                Some("GET /articles/{}/comments".to_string()),
+                // Query suffix dropped (`query-drop-v1`) — a route provide never carries one, so
+                // `GET /articles?limit=10` could never join `GET /articles` nor be explained by
+                // route-near-miss's segment comparison (dogfood round 6: 2/19 corpus consumes
+                // were query-suffixed and silently unexplainable).
+                Some("GET /articles".to_string()),
+            ]
+        );
+        assert!(out.iter().all(|c| c.raw.is_none()));
+    }
+
+    #[test]
+    fn interpolated_query_suffix_is_dropped_from_the_key() {
+        // `` `articles?${qs}` `` resolves to `articles?{}` — the query drop must also cover the
+        // interpolated form, on both rooted and base-relative paths.
+        let out = extract_http_egress(&files(&[(
+            "q.ts",
+            "axios.get(`articles?${qs}`); axios.get(`/articles/feed?${qs}`);",
+        )]));
+        assert_eq!(
+            keys(&out),
+            vec![
+                Some("GET /articles".to_string()),
+                Some("GET /articles/feed".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn base_relative_veto_list_still_never_keys() {
+        // Leading-interpolation template (the base itself is the expression), document-relative `./`,
+        // query-only URL, non-http scheme, whitespace — all stay unresolved with raw+method carried.
+        let out = extract_http_egress(&files(&[(
+            "v.ts",
+            "axios.get(`${API_ROOT}${url}`); axios.get('./users'); axios.get('?page=2'); axios.get('ws://host/ch'); axios.get('not a path');",
+        )]));
+        assert_eq!(out.len(), 5);
+        assert!(
+            out.iter().all(|c| c.key.is_none() && c.method.is_some()),
+            "got: {:?}",
+            keys(&out)
+        );
+    }
+
     // --- oazapfts-generated-SDK call family ---
 
     #[test]
@@ -561,6 +681,58 @@ mod tests {
     fn const_map_fragment_is_empty_for_a_file_with_no_top_level_object_const() {
         let frag = const_map_fragment("x.ts", "export const n = 1;\n");
         assert!(frag.is_empty());
+    }
+
+    // --- enum members joining the const map (controller-prefix-ref-v1) ---
+
+    #[test]
+    fn exported_string_enum_member_joins_the_const_map() {
+        let frag = const_map_fragment(
+            "enum.ts",
+            "export enum RouteKey { Asset = 'assets', User = 'users' }\n",
+        );
+        assert_eq!(
+            frag.get("RouteKey.Asset").map(String::as_str),
+            Some("assets")
+        );
+        assert_eq!(frag.get("RouteKey.User").map(String::as_str), Some("users"));
+    }
+
+    #[test]
+    fn non_exported_string_enum_member_joins_the_const_map_too() {
+        let frag = const_map_fragment("enum.ts", "enum RouteKey { Asset = 'assets' }\n");
+        assert_eq!(
+            frag.get("RouteKey.Asset").map(String::as_str),
+            Some("assets")
+        );
+    }
+
+    #[test]
+    fn numeric_enum_member_is_skipped_not_guessed() {
+        let frag = const_map_fragment("enum.ts", "enum Level { Low = 0, High = 1 }\n");
+        assert!(
+            frag.is_empty(),
+            "numeric initializers must never join the const map: {frag:?}"
+        );
+    }
+
+    #[test]
+    fn implicit_auto_increment_enum_member_is_skipped_not_guessed() {
+        let frag = const_map_fragment("enum.ts", "enum Level { Low, High }\n");
+        assert!(
+            frag.is_empty(),
+            "a member with no initializer at all must never guess a value: {frag:?}"
+        );
+    }
+
+    #[test]
+    fn mixed_string_and_numeric_enum_members_only_joins_the_string_ones() {
+        let frag = const_map_fragment(
+            "enum.ts",
+            "export enum Mixed { Path = 'x', Count = 1, Auto }\n",
+        );
+        assert_eq!(frag.len(), 1);
+        assert_eq!(frag.get("Mixed.Path").map(String::as_str), Some("x"));
     }
 
     #[test]

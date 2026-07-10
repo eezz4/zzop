@@ -24,7 +24,7 @@
 
 use std::collections::BTreeMap;
 
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 use super::{PackageImportSite, MIN_TOTAL_CONSUMES};
 
@@ -121,9 +121,8 @@ pub fn sdk_import_no_visible_consume_findings(
              join-based findings (`cross-layer/unconsumed-endpoint`, `cross-layer/unprovided-mutation-call`, \
              ...) are structurally weak here. Prefer literal paths at recognized call sites where \
              practical, or feed this source through a Normalized AST adapter (Mode B) that projects the \
-             calls as `IoConsume` facts. Disable via rule config \
-             `disabled_rules: [\"cross-layer/sdk-import-no-visible-consume\"]` if the source is \
-             intentionally client/SDK-driven and the join blindness is accepted.",
+             calls as `IoConsume` facts. {} if the source is intentionally client/SDK-driven and the join \
+             blindness is accepted.",
             if names.len() == 1 { "" } else { "s" },
             names
                 .iter()
@@ -132,6 +131,7 @@ pub fn sdk_import_no_visible_consume_findings(
                 .join(", "),
             if file_count_total == 1 { "" } else { "s" },
             if visible == 1 { "" } else { "s" },
+            disable_hint("cross-layer/sdk-import-no-visible-consume"),
         );
         out.push(Finding {
             rule_id: "cross-layer/sdk-import-no-visible-consume".to_string(),

@@ -41,7 +41,13 @@ mod native_rules;
 pub(crate) use compose::{
     compose_router_mount_provides, compose_trpc_provides, late_resolve_cross_file_consumes,
 };
-pub(crate) use diagnostics::zero_packs_warning;
+// `envelope::analyze_envelope` also reaches the config-diagnostics quartet by this path (config-
+// diagnostics parity with `assemble` — a `disabled_rules` typo / dead exclude filter self-reports on
+// both entry points).
+pub(crate) use diagnostics::{
+    run_diagnostics, unmatched_global_exclude_warnings, unmatched_suppression_warnings,
+    zero_packs_warning,
+};
 // `envelope::analyze_envelope` also imports these four native-analysis delegates by this path (same
 // convention `circular_findings`'s own doc describes) — re-exported, not merely imported, so they stay
 // reachable at `crate::analyze::<name>`.
@@ -50,10 +56,7 @@ pub(crate) use native_rules::{
 };
 
 use compose::{apply_and_strip_global_prefix, resolve_wrapper_consumes};
-use diagnostics::{
-    collect_git, git_not_requested_warning, minified_files_warning, run_diagnostics,
-    unmatched_global_exclude_warnings, unmatched_suppression_warnings,
-};
+use diagnostics::{collect_git, git_not_requested_warning, minified_files_warning};
 use native_rules::{run_callgraph_rules, run_java_provides_project_pass, run_schema_join_rules};
 
 /// Consumes the fused pass's per-file artifacts and produces the final `AnalyzeOutput`. `artifacts` must
@@ -126,6 +129,14 @@ pub(crate) fn assemble(
     // `axios.request(opts)`) to the real FE call sites.
     let mut wrapper_def_pairs: Vec<(String, Vec<zzop_core::WrapperDefFragment>)> = Vec::new();
     let mut wrapper_call_pairs: Vec<(String, Vec<zzop_core::WrapperCallFragment>)> = Vec::new();
+    // Controller-prefix route composition's substrate (`compose::compose_controller_prefix_provides`):
+    // each TS file's own `@Controller(RouteKey.Asset)`-shaped (dotted member-expression prefix) route
+    // fragments, paired with its `rel` — resolved against the SAME merged const map `fragment_pairs`
+    // feeds `late_resolve_cross_file_consumes`.
+    let mut controller_prefix_route_pairs: Vec<(
+        String,
+        Vec<zzop_core::ControllerPrefixRouteFragment>,
+    )> = Vec::new();
     // `run_schema_join_rules`' substrate: every file's Prisma query-call-site facts, collected tree-wide
     // then sorted by `(file, line)` below to match the removed filesystem scan's own ordering.
     let mut query_call_sites: Vec<zzop_core::QueryCallSite> = Vec::new();
@@ -195,6 +206,12 @@ pub(crate) fn assemble(
         if !artifact.wrapper_call_fragments.is_empty() {
             wrapper_call_pairs.push((artifact.rel.clone(), artifact.wrapper_call_fragments));
         }
+        if !artifact.controller_prefix_route_fragments.is_empty() {
+            controller_prefix_route_pairs.push((
+                artifact.rel.clone(),
+                artifact.controller_prefix_route_fragments,
+            ));
+        }
         query_call_sites.extend(artifact.query_call_sites);
         bound_models.extend(artifact.store_bound_models);
         field_usage_tokens.extend(artifact.field_usage_tokens);
@@ -210,18 +227,39 @@ pub(crate) fn assemble(
     // stable sort by `(file, line)` alone reproduces the removed filesystem scan's ordering exactly.
     query_call_sites.sort_by(|a, b| (a.file.as_str(), a.line).cmp(&(b.file.as_str(), b.line)));
 
+    // The merged project-wide const map is computed BEFORE `late_resolve_cross_file_consumes` below
+    // takes ownership of `fragment_pairs` (it only borrows here) — `compose_controller_prefix_provides`
+    // needs the SAME merge (`compose::merge_const_map_fragments`'s doc) a few lines further down.
+    let merged_consts = compose::merge_const_map_fragments(&fragment_pairs);
     late_resolve_cross_file_consumes(fragment_pairs, &mut io_consumes);
 
-    // `warnings` is declared here (rather than nearer its git-related first uses further down) so the
-    // NestJS global-prefix transform immediately below can push its own honest-degrade warning at the
-    // one seam where the rewrite is correctly scoped.
+    // `warnings` is declared here (rather than nearer its git-related first uses further down) so both
+    // the controller-prefix composer and the NestJS global-prefix transform immediately below can push
+    // their own honest-degrade warnings at the seam where each rewrite is correctly scoped.
     let mut warnings: Vec<String> = Vec::new();
+
+    // Controller-prefix route PROVIDE composition (`controller-prefix-ref-v1`) — MUST run BEFORE the
+    // NestJS global-prefix apply/strip immediately below: a `@Controller(RouteKey.Asset)` controller
+    // under `app.setGlobalPrefix('api')` needs BOTH transforms, in order (`RouteKey.Asset` -> `assets`
+    // here, then global `/api` -> `GET /api/assets/{}` at the seam below) — this composer's output must
+    // already be sitting in `io_provides` for that seam to see and prepend it, same as every other
+    // per-file-composed provide.
+    if !controller_prefix_route_pairs.is_empty() {
+        let composed = compose::compose_controller_prefix_provides(
+            controller_prefix_route_pairs,
+            &merged_consts,
+            &mut warnings,
+        );
+        io_provides.extend(composed);
+    }
 
     // NestJS `app.setGlobalPrefix(...)` apply + strip — MUST run at exactly this seam: after the
     // per-file IO collection loop (the only producer of Nest-controller `http` provides and the
-    // `nest-global-prefix` sentinels), but BEFORE the Java Spring / Hono router-mount / file-convention
-    // route provide passes below all append their own `http` provides. See
-    // `apply_and_strip_global_prefix`'s doc for why scope matters (prefixing a non-Nest route is wrong).
+    // `nest-global-prefix` sentinels) AND after the controller-prefix composition immediately above
+    // (whose resolved provides are themselves Nest-controller routes needing the same global prefix),
+    // but BEFORE the Java Spring / Hono router-mount / file-convention route provide passes below all
+    // append their own `http` provides. See `apply_and_strip_global_prefix`'s doc for why scope matters
+    // (prefixing a non-Nest route is wrong).
     apply_and_strip_global_prefix(&mut io_provides, &mut warnings);
 
     // Whole-corpus Java Spring HTTP-provides resolution — a no-op when `java_rels` is empty.
@@ -619,7 +657,14 @@ pub(crate) fn assemble(
         git_active,
     ));
 
-    if file_count == 0 {
+    // `root.is_dir()` gates this so it doesn't duplicate `analyze_tree`'s more specific "root does not
+    // exist or is not a directory" self-report (`lib.rs`'s `scope_warnings`) — that one already states
+    // the cause when the root itself is invalid, and every failure mode from an invalid root funnels
+    // through `file_count == 0` too. For a root that DOES exist but simply matched no analyzable files,
+    // no such self-report ran (see `lib.rs`'s "0 source files found under root" check, which only covers
+    // that same case from a different angle), so this generic line still carries its own information and
+    // stays.
+    if file_count == 0 && root.is_dir() {
         warnings.push(
             "root produced 0 analyzable files — check the path exists and contains supported source files".to_string(),
         );

@@ -130,9 +130,8 @@ pub fn cross_tree_route_shadowing_findings(
              analysis and cannot see deploy topology, so this only actually bites when the two sources share a \
              first-match gateway — confirm that first. Fix: disambiguate the route prefixes between the sources \
              (e.g. mount each source under its own path prefix), or ensure the gateway registers literal routes \
-             before pattern routes regardless of which source provided them. Disable via rule config \
-             `disabled_rules: [\"cross-layer/route-shadowing\"]` if these sources are never routed through one \
-             shared gateway.",
+             before pattern routes regardless of which source provided them. {} if these sources are never \
+             routed through one shared gateway.",
             pattern.key,
             pattern.source,
             pattern.file,
@@ -142,6 +141,7 @@ pub fn cross_tree_route_shadowing_findings(
             example.source,
             example.file,
             example.line,
+            zzop_core::disable_hint("cross-layer/route-shadowing"),
         );
 
         out.push(zzop_core::Finding {

@@ -440,11 +440,33 @@ fn nested_prisma_model_receiver_toggle_is_flagged() {
 }
 
 #[test]
-fn atomic_transaction_wrapped_toggle_is_not_flagged() {
+fn transaction_wrapped_toggle_is_still_flagged() {
+    // A bare $transaction does NOT close a check-then-act race at READ COMMITTED — two concurrent
+    // transactions can both read empty and both insert. The old `tx-guard` veto encoded the wrong
+    // fix (matching the be-db sibling `find-then-create-no-unique` correction), so this fixture,
+    // previously pinned as a negative, is now a positive.
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "api/createTxHandlers.ts",
         "declare const prisma: any;\nexport async function toggle() {\n  await prisma.$transaction(async () => {\n    const existing = await prisma.like.findUnique({ where: { id: \"x\" } });\n    if (!existing) {\n      await prisma.like.create({ data: { id: \"y\" } });\n    }\n  });\n}\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "race-condition-toctou").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn select_for_update_locked_toggle_is_not_flagged() {
+    // SELECT ... FOR UPDATE is one of the message's recommended atomic escapes — the row lock
+    // serializes the concurrent readers, so the check-then-act shape is safe and stays silent.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "api/createLockHandlers.ts",
+        "declare const db: any;\nexport async function toggle() {\n  const existing = await db.findOne(\"SELECT * FROM likes WHERE id = $1 FOR UPDATE\");\n  if (!existing) {\n    await db.insert(\"likes\", { id: \"y\" });\n  }\n}\n",
     );
     let out = scan(&dir);
     assert!(

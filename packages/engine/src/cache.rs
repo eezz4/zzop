@@ -66,7 +66,11 @@ use crate::{CacheStats, EngineConfig};
 /// directory serve a wrong answer instead of a fresh recompute — the schema bump forces a clean cache
 /// instead. Bump whenever `FileIrSlice` (or the cached findings shape) gains, renames, or removes a
 /// field.
-pub const CACHE_SCHEMA_VERSION: &str = "zzop-cache-v16";
+///
+/// `v16` -> `v17`: `FileIrSlice` gains `controller_prefix_route_fragments`
+/// (`controller-prefix-ref-v1`) — a stale entry defaulting it to empty would silently drop a
+/// `@Controller(RouteKey.Asset)`-shaped controller's routes on every warm run instead of projecting them.
+pub const CACHE_SCHEMA_VERSION: &str = "zzop-cache-v17";
 
 /// Fingerprint for files that never reach a structural parser crate in the fused pass: no `Language` match
 /// (`dispatch::dispatch` returned `None` — unrecognized extension), or the size-cap lexical fallback

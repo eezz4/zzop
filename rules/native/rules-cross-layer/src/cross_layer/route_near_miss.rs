@@ -20,7 +20,7 @@
 //! Info.
 
 use zzop_core::io::TaggedConsume;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 use super::{path_segments, split_key, HttpProvideSite};
 
@@ -209,10 +209,10 @@ pub fn route_near_miss_findings(
              with the served route, or vice versa), or two unrelated routes that happen to be one dimension \
              apart — verify manually before treating this as drift. The consume-side method and path reflect \
              what static extraction read at the call site; a helper/wrapper around the call can make them \
-             differ from the runtime request. Disable via rule config \
-             `disabled_rules: [\"cross-layer/route-near-miss\"]` if one-dimension-apart-but-unrelated routes \
-             are common in your stack.",
+             differ from the runtime request. {} if one-dimension-apart-but-unrelated routes are common in \
+             your stack.",
             c.source, first.source, first.key, first.file, first.line,
+            disable_hint("cross-layer/route-near-miss"),
         );
 
         out.push(Finding {

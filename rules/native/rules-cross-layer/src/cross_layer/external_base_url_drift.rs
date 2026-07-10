@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use zzop_core::io::TaggedConsume;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 use super::{path_segments, split_external_key};
 
@@ -124,16 +124,16 @@ pub fn external_base_url_drift_findings(external_consumes: &[TaggedConsume]) -> 
              also fires on a port-only difference between environments. This usually means one caller still \
              points at a different base URL/deployment than another (a config that drifted, or a hardcoded \
              host that was never updated everywhere). Verify whether all these hosts are supposed to be the \
-             same logical service, and if so unify the base URL behind one config value. Disable via rule \
-             config `disabled_rules: [\"cross-layer/external-base-url-drift\"]` if this path intentionally \
-             exists on multiple independent hosts (e.g. the same open API path shape offered by unrelated \
-             vendors).",
+             same logical service, and if so unify the base URL behind one config value. {} if this path \
+             intentionally exists on multiple independent hosts (e.g. the same open API path shape offered \
+             by unrelated vendors).",
             hosts_sorted.len(),
             hosts_sorted.join(", "),
             first.file,
             first.line,
             first.source,
             first.host,
+            disable_hint("cross-layer/external-base-url-drift"),
         );
         out.push(Finding {
             rule_id: "cross-layer/external-base-url-drift".to_string(),

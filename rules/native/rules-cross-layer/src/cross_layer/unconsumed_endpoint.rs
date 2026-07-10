@@ -8,7 +8,7 @@
 //! `cross-layer/duplicate-route` finding for the same key — intentional overlap, different questions.
 
 use zzop_core::io::{TaggedConsume, TaggedProvide};
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 pub fn unconsumed_endpoint_findings(
     unconsumed_provides: &[TaggedProvide],
@@ -30,11 +30,10 @@ pub fn unconsumed_endpoint_findings(
                  repo not included in this `analyzeTrees` run, a mobile/native/third-party client, or one of \
                  the {unresolved_http} unresolved dynamic-URL http consume(s) this run could not statically \
                  match to a key (see `crossLayer.unresolvedConsumes`). Confirm with real traffic/access logs before \
-                 removing the route. Disable via rule config \
-                 `disabled_rules: [\"cross-layer/unconsumed-endpoint\"]` if provider-only endpoints (webhook \
-                 targets, health probes, endpoints consumed only outside this analysis) are expected in your \
-                 stack.",
-                p.source
+                 removing the route. {} if provider-only endpoints (webhook targets, health probes, \
+                 endpoints consumed only outside this analysis) are expected in your stack.",
+                p.source,
+                disable_hint("cross-layer/unconsumed-endpoint")
             );
             Finding {
                 rule_id: "cross-layer/unconsumed-endpoint".to_string(),

@@ -6,7 +6,7 @@ Everything the engine ships today, read directly from `rules/dsl/**/*.json` and
 semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 [authoring-guide.md](authoring-guide.md).
 
-**Totals** (machine-checked by `packages/engine/tests/rule_contracts.rs`'s `catalog_totals_match_loaded_rule_and_analysis_counts`): 16 DSL packs, 71 DSL rules, 41 native analysis ids. 11 packs ship rules; 5 are stub packs (see "Stub packs" below).
+**Totals** (machine-checked by `packages/engine/tests/rule_contracts.rs`'s `catalog_totals_match_loaded_rule_and_analysis_counts`): 16 DSL packs, 75 DSL rules, 41 native analysis ids. 12 packs ship rules; 4 are stub packs (see "Stub packs" below).
 
 ## DSL packs (`rules/dsl/<pack>/<pack>.json`)
 
@@ -20,7 +20,7 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `external-call-in-tx` | warning | method-scan | `tx-egress-ok` | A network call (`fetch`/`axios`/`got`) in the same function as a `$transaction(` — extends transaction lock hold time across a network round-trip. |
 | `unawaited-write` | warning | line-scan | `unawaited-ok` | A DB write (`create`/`update`/`delete`/`upsert`) on a DB-client-shaped receiver (`prisma`/`db`/`tx`/`client`/`repo`/...) whose promise is neither awaited, returned, nor chained — fire-and-forget; a failed write looks identical to a successful one. |
 | `unbounded-user-limit` | warning | line-scan | `limit-ok` | A `take`/`limit` pagination size read directly from user input (`req.query`/`req.params`/`req.body`) with no upper-bound clamp — unbounded page size, a cheap memory/CPU exhaustion vector. |
-| `find-then-create-no-unique` | warning | method-scan | `find-create-ok` | A `findFirst`/`findOne`/`findUnique` read followed by `.create(` in the same function with no `connectOrCreate`/`upsert`/`$transaction` anywhere — check-then-act race, concurrent requests can create duplicate rows. |
+| `find-then-create-no-unique` | warning | method-scan | `find-create-ok` | A `findFirst`/`findOne`/`findUnique` read followed by `.create(` in the same function with no `connectOrCreate`/`upsert`/`ON CONFLICT` anywhere — check-then-act race, concurrent requests can create duplicate rows (a bare `$transaction` does not close it). |
 | `float-money-compare` | info | line-scan | `money-ok` | A money-named identifier (`price`/`amount`/`balance`/`fee`/`cost`) compared with `==`/`===` against a float literal — IEEE754 rounding makes strict equality on monetary values unreliable. |
 | `empty-catch-on-write` | warning | method-scan | `empty-catch-ok` | A DB write (`create`/`update`/`delete`/`upsert`/`updateMany`/`deleteMany`) in the same function as an empty `catch {}` — write failure is silently discarded. |
 
@@ -37,12 +37,12 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `json-parse-no-try` | warning | method-scan | `json-parse-ok` | `JSON.parse(...)` called on apparent external input (`req`/`body`/`params`/`query`/...) with no surrounding `try` — malformed input throws instead of producing a handled 4xx. |
 | `fetch-no-timeout` | warning | method-scan | `fetch-timeout-ok` | Outbound HTTP call (`fetch`/`axios`/`got`) on a backend-looking path with no timeout/`AbortController` visible in the same function — a hung upstream hangs the request indefinitely. |
 | `process-exit-in-lib` | warning | method-scan | `process-exit-ok` | `process.exit(...)` called inside a function outside `scripts/`/`tools/`/`bin/` — skips cleanup and kills the whole server process, not just the current request. |
-| `body-limit-missing` | warning | line-scan | `body-limit-ok` | Body parser (`express.json`/`urlencoded`/`bodyParser.*`) configured with no explicit `limit` — unbounded payload size, a payload-size DoS vector. |
+| `body-limit-missing` | info | line-scan | `body-limit-ok` | Body parser (`express.json`/`urlencoded`/`bodyParser.*`) configured with no explicit `limit` — relies on the implicit 100kb default: too small for some endpoints, unexamined for the rest. |
 | `console-in-be` | info | line-scan | `console-ok` | `console.*` call in backend-path source (`api/`/`server/`/`backend/`/`be/`/`routes/`/`controllers/`/`services/`) — unstructured, synchronous, not queryable. |
 | `interval-no-clear` | warning | line-scan | `interval-ok` | `setInterval(...)` with no matching `clearInterval(...)` anywhere in the file — a leaked timer keeps the process/page alive and re-fires forever. |
 | `env-outside-config` | info | line-scan | `env-access-ok` | `process.env.X` accessed outside a config module (files/dirs named `config`/`env`/`settings` exempt) — scatters env parsing/validation instead of centralizing it. |
 
-### `be-security` (25 rules)
+### `be-security` (26 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
@@ -71,12 +71,13 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `java-weak-random` | warning | line-scan | `java-random-ok` | `new Random()` used on the same line as a token/session/otp/nonce-shaped identifier — a predictable, non-cryptographic PRNG for a security-sensitive value. |
 | `stacktrace-to-response` | warning | method-scan | `stacktrace-ok` | An exception's stack trace/message (`printStackTrace()`/`.getMessage()`) produced in a method that also touches the HTTP response — internal class names/paths/SQL fragments can reach the client. |
 | `trust-all-tls` | critical | line-scan | `trust-all-ok` | TLS certificate/hostname verification disabled (trust-all `X509TrustManager`, `ALLOW_ALL_HOSTNAME_VERIFIER`, or an always-`true` hostname-verifier lambda) — accepts any certificate for any host, opening a MITM path. |
+| `conn-string-credentials` | critical | line-scan | `conn-cred-ok` | Connection-string URL with a password in the userinfo slot (`scheme://user:pass@host` — redis/postgres/mongodb/amqp/...) committed to source — repo readers own the datastore and git history preserves it; move to env/secret config AND rotate. Scans test paths too (a committed credential is leaked regardless). |
 
 ### `browser` (2 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
-| `no-system-dialogs` | warning | line-scan | `browser-ok` | Blocking system dialog (`alert`/`confirm`/`prompt`) — blocks the main thread, can't be styled/tested. |
+| `no-system-dialogs` | info | line-scan | `browser-ok` | Blocking system dialog (`alert`/`confirm`/`prompt`) — freezes the page/tab (main-thread block), can't be styled or tested. |
 | `no-document-write` | warning | line-scan | `document-write-ok` | `document.write`/`writeln` — breaks HTML parsing post-load, blocked under many CSP/PWA setups. |
 
 ### `fullstack` (4 rules)
@@ -110,6 +111,14 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 |---|---|---|---|---|
 | `api-in-loop` | warning | method-scan | `api-in-loop-ok` | Network call made inside a loop or array-iteration callback — the HTTP analogue of N+1. |
 
+### `redis` (3 rules)
+
+| Rule id | Severity | Matcher | Suppress marker | Detects |
+|---|---|---|---|---|
+| `flushall-in-code` | critical | line-scan | `redis-flush-ok` | `flushall`/`flushdb` call or quoted command literal reachable from application code — wipes every key in the database/instance; one bug or exposed admin endpoint away from total data loss. |
+| `keys-glob-scan` | warning | line-scan | `redis-keys-ok` | `KEYS` scan (`.keys('pattern')` with a string argument, or a quoted `'KEYS'` command) — O(N) walk that blocks the single-threaded server; use the SCAN cursor family or an index set. |
+| `client-no-error-listener` | warning | line-scan | `redis-error-ok` | redis/ioredis client created in a file with no `.on('error', ...)` anywhere in it — node-redis emits `error` on an EventEmitter, so an unhandled listener crashes the process on the first connection blip. |
+
 ### `security` (1 rule)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
@@ -138,7 +147,7 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 
 ### Stub packs (0 rules — roadmap)
 
-`conventions`, `jsp-security`, `react`, `redis`, `routes` load successfully (valid, empty `rules: []`)
+`conventions`, `jsp-security`, `react`, `routes` load successfully (valid, empty `rules: []`)
 but currently ship no detections — each needs either declaration→use tracking, cross-repo/cross-file
 joins, or JSX/AST structure the DSL can't express (see
 [authoring-guide.md#when-a-rule-does-not-fit-the-dsl](authoring-guide.md#when-a-rule-does-not-fit-the-dsl)).

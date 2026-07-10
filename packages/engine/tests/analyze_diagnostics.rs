@@ -242,3 +242,70 @@ fn a_real_disabled_rules_entry_does_not_trigger_the_unknown_id_warning() {
         out.warnings
     );
 }
+
+// --- input-scope self-report (`input-scope-error`, disclosure registry: partial) --------------------
+
+#[test]
+fn nonexistent_root_self_reports_as_the_leading_warning() {
+    // A typo'd root used to be silently absorbed as an empty tree (`files: 0` was the only trace).
+    let cfg = config();
+    let out = analyze_tree(Path::new("does/not/exist-anywhere-zzop"), &cfg);
+    assert_eq!(out.file_count, 0);
+    assert!(
+        out.warnings
+            .first()
+            .is_some_and(|w| w.contains("does not exist or is not a directory")),
+        "the scope warning must LEAD the warnings list (it qualifies every other line), got: {:?}",
+        out.warnings
+    );
+    // The generic "root produced 0 analyzable files" line is redundant once the more specific
+    // does-not-exist self-report already fired for this same root — must not appear at all.
+    assert_eq!(
+        out.warnings
+            .iter()
+            .filter(|w| w.contains("does not exist or is not a directory")
+                || w.contains("root produced 0 analyzable files"))
+            .count(),
+        1,
+        "expected exactly one scope-related warning (no generic duplicate), got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn existing_but_empty_root_self_reports_zero_source_files() {
+    let dir = TempDir::new("zzop-engine-diag-empty-root");
+    let out = analyze_tree(dir.path(), &config());
+    assert_eq!(out.file_count, 0);
+    assert!(
+        out.warnings
+            .first()
+            .is_some_and(|w| w.contains("0 source files found under root")),
+        "got: {:?}",
+        out.warnings
+    );
+    // Unlike the nonexistent-root case, the root itself is valid here, so the generic
+    // "root produced 0 analyzable files" line still carries information and must still fire.
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains("root produced 0 analyzable files")),
+        "the generic zero-files warning must still fire for a genuinely empty (but existing) root, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn tree_with_source_files_emits_no_input_scope_warning() {
+    let dir = TempDir::new("zzop-engine-diag-scoped-ok");
+    dir.write("a.ts", "export function a() { return 1; }\n");
+    let out = analyze_tree(dir.path(), &config());
+    assert!(
+        !out.warnings.iter().any(|w| {
+            w.contains("does not exist or is not a directory")
+                || w.contains("0 source files found under root")
+        }),
+        "got: {:?}",
+        out.warnings
+    );
+}

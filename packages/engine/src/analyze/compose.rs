@@ -1,11 +1,39 @@
 //! Cross-file / fragment composition — the "fragment now, compose later" passes over data the fused
 //! per-file pass already collected (no second parse): late cross-file constant re-resolution for `http`
 //! CONSUMEs, tRPC router-fragment composition into `trpc` PROVIDEs, code-registered router-mount
-//! composition into `http` PROVIDEs, wrapper-consume joins, and the NestJS global-prefix apply/strip.
+//! composition into `http` PROVIDEs, wrapper-consume joins, controller-prefix route-fragment
+//! resolution into `http` PROVIDEs, and the NestJS global-prefix apply/strip.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use zzop_core::{http_interface_key, IoConsume, IoProvide};
+use zzop_core::{http_consume_interface_key, http_interface_key, IoConsume, IoProvide};
+
+/// Deterministically merges every file's own constant-map fragment into one project-wide map — the
+/// shared substrate both [`late_resolve_cross_file_consumes`] (CONSUME re-resolution) and
+/// `compose_controller_prefix_provides` (PROVIDE resolution) resolve against, so a `RouteKey.Asset`
+/// enum member and an `axios.get(ControlKey.X)` constant are both looked up in exactly the same map.
+///
+/// `fragments` is sorted by `rel`, then folded first-writer-wins: a constant key duplicated across two
+/// files always resolves to the lexicographically smallest file's value, independent of
+/// `HashMap`/rayon iteration order. Takes `&[...]` (not by value) so a caller can compute this merged
+/// map before separately consuming the same `fragments` `Vec` elsewhere (e.g.
+/// `late_resolve_cross_file_consumes`, which still owns its own copy of the merge for its own callers/
+/// tests).
+pub(crate) fn merge_const_map_fragments(
+    fragments: &[(String, HashMap<String, String>)],
+) -> HashMap<String, String> {
+    let mut sorted: Vec<&(String, HashMap<String, String>)> = fragments.iter().collect();
+    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut merged: BTreeMap<String, String> = BTreeMap::new();
+    for (_, fragment) in sorted {
+        for (key, value) in fragment {
+            merged.entry(key.clone()).or_insert_with(|| value.clone());
+        }
+    }
+    // `BTreeMap` above exists only so the merge loop itself is deterministic; callers have no ordering
+    // requirement of their own, so this returns a plain `HashMap`.
+    merged.into_iter().collect()
+}
 
 /// Late cross-file constant re-resolution — closes the gap `crate::io`'s module doc documents as the "v1
 /// fusion tradeoff": a one-file-slice HTTP egress scan cannot resolve a constant imported from another
@@ -13,9 +41,7 @@ use zzop_core::{http_interface_key, IoConsume, IoProvide};
 /// instead of guessing. This function fixes that up AFTER every file's own constant-map fragment has
 /// been collected, using only data the fused per-file pass already produced — no second parse.
 ///
-/// **Deterministic merge**: `fragments` is sorted by `rel`, then folded first-writer-wins: a constant
-/// key duplicated across two files always resolves to the lexicographically smallest file's value,
-/// independent of `HashMap`/rayon iteration order.
+/// **Deterministic merge**: delegates to [`merge_const_map_fragments`] — see its own doc.
 ///
 /// **Re-resolution**: every consume with `key: None` whose `raw`/`method` are both `Some` is looked up
 /// via `zzop_parser_typescript::resolve_raw_path`; a hit sets `key` to the normalized join key and
@@ -26,19 +52,10 @@ use zzop_core::{http_interface_key, IoConsume, IoProvide};
 /// Must run before `io_consumes` is frozen into `MinimalIr::io` — every whole-tree native rule that
 /// reads `io_consumes` directly must see the resolved key, not the raw one.
 pub(crate) fn late_resolve_cross_file_consumes(
-    mut fragments: Vec<(String, HashMap<String, String>)>,
+    fragments: Vec<(String, HashMap<String, String>)>,
     io_consumes: &mut [IoConsume],
 ) {
-    fragments.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut merged: BTreeMap<String, String> = BTreeMap::new();
-    for (_, fragment) in fragments {
-        for (key, value) in fragment {
-            merged.entry(key).or_insert(value);
-        }
-    }
-    // `resolve_raw_path` takes `&HashMap` — the `BTreeMap` above exists only so the merge loop itself is
-    // deterministic; the lookup below has no ordering requirement of its own.
-    let consts: HashMap<String, String> = merged.into_iter().collect();
+    let consts = merge_const_map_fragments(&fragments);
     for consume in io_consumes.iter_mut() {
         if consume.key.is_some() {
             continue;
@@ -49,14 +66,91 @@ pub(crate) fn late_resolve_cross_file_consumes(
         if let Some(path) = zzop_parser_typescript::resolve_raw_path(raw, &consts) {
             // A leading `/` is an internal route (normalized key); an absolute `http(s)://` URL keeps
             // the verbatim host-carrying key so `link_cross_layer_io`'s `"://"` gate still routes it
-            // to the `external` bucket; anything else — a bare fragment — stays unresolved.
+            // to the `external` bucket; a base-relative path literal (`users/login` — the axios
+            // `baseURL` idiom) keys as its root-normalized form, mirroring the egress extractor's own
+            // gating; anything else stays unresolved.
             if path.starts_with('/') {
-                consume.key = Some(http_interface_key(method, &path));
+                consume.key = Some(http_consume_interface_key(method, &path));
             } else if zzop_parser_typescript::is_external_url(&path) {
                 consume.key = Some(format!("{method} {path}"));
+            } else if let Some(rooted) = zzop_parser_typescript::base_relative_path(&path) {
+                consume.key = Some(http_consume_interface_key(method, &rooted));
             }
         }
     }
+}
+
+/// Resolves `ControllerPrefixRouteFragment`s (`controller-prefix-ref-v1` — a `@Controller(RouteKey.Asset)`
+/// dotted member-expression prefix, deferred by `zzop_parser_typescript::extract_controller_prefix_route_fragments`
+/// because a single file can't see where `RouteKey` is declared) into whole-tree `http` `IoProvide`s.
+///
+/// `consts` is the SAME project-wide merged constant map [`late_resolve_cross_file_consumes`] uses
+/// (built by [`merge_const_map_fragments`], which now also folds string-valued `enum` members — see
+/// `zzop_parser_typescript::const_map_fragment`'s doc) — a caller computes it once and passes it to both.
+///
+/// A `prefix_ref` present in `consts` resolves exactly like `extract_controller_provides`'s own literal
+/// path: `"{prefix}/{path}"` joined and normalized via `http_interface_key`. A `prefix_ref` ABSENT from
+/// `consts` never guesses — instead one `warnings` entry is pushed per distinct `(file, prefix_ref)`
+/// pair, naming the ref, the file, and how many routes were dropped, and no provide is emitted for any
+/// of that controller's fragments.
+///
+/// ## Placement (load-bearing — see `zzop_engine::analyze::mod`'s call site)
+/// Must run BEFORE `apply_and_strip_global_prefix`: a NestJS tree can compose BOTH a `RouteKey.Asset` ->
+/// `assets` prefix resolution here AND a `setGlobalPrefix('api')` rewrite there on the very same route
+/// (`GET /api/assets/{}`) — this function's output has to already be in `io_provides` for the global-
+/// prefix seam to see and prepend it, same requirement every other per-file-composed provide has at
+/// that seam.
+pub(crate) fn compose_controller_prefix_provides(
+    fragments: Vec<(String, Vec<zzop_core::ControllerPrefixRouteFragment>)>,
+    consts: &HashMap<String, String>,
+    warnings: &mut Vec<String>,
+) -> Vec<IoProvide> {
+    let mut fragments = fragments;
+    fragments.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut out = Vec::new();
+    // `(file, prefix_ref) -> count of routes dropped` — one aggregated warning per distinct pair rather
+    // than one per route, so a 5-route controller with an unresolvable prefix produces one honest line,
+    // not five.
+    let mut unresolved: BTreeMap<(String, String), u32> = BTreeMap::new();
+
+    for (file, frags) in &fragments {
+        for frag in frags {
+            match consts.get(&frag.prefix_ref) {
+                Some(prefix) => {
+                    let full_path = format!("{prefix}/{}", frag.path);
+                    out.push(IoProvide {
+                        kind: "http".to_string(),
+                        key: http_interface_key(&frag.verb, &full_path),
+                        file: file.clone(),
+                        line: frag.line,
+                        symbol: frag.symbol.clone(),
+                    });
+                }
+                None => {
+                    *unresolved
+                        .entry((file.clone(), frag.prefix_ref.clone()))
+                        .or_insert(0) += 1;
+                }
+            }
+        }
+    }
+
+    for ((file, prefix_ref), count) in unresolved {
+        let route_word = if count == 1 { "route" } else { "routes" };
+        warnings.push(format!(
+            "could not resolve controller prefix `{prefix_ref}` ({file}) to a literal — its {count} {route_word} are not projected; the prefix constant may live in an unanalyzed file"
+        ));
+    }
+
+    out.sort_by(|a, b| {
+        a.kind
+            .cmp(&b.kind)
+            .then_with(|| a.key.cmp(&b.key))
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.line.cmp(&b.line))
+    });
+    out
 }
 
 /// NestJS `app.setGlobalPrefix(...)` apply + strip — see `zzop_parser_typescript::adapters::global_prefix`'s
@@ -401,7 +495,7 @@ pub(crate) fn resolve_wrapper_consumes(
             let Some(path) = path else { continue };
             out.push(IoConsume {
                 kind: "http".to_string(),
-                key: Some(zzop_core::http_interface_key(&method, &path)),
+                key: Some(zzop_core::http_consume_interface_key(&method, &path)),
                 file: file.clone(),
                 line: call.line,
                 raw: None,
@@ -627,13 +721,29 @@ mod late_resolve_tests {
     }
 
     #[test]
-    fn bare_fragment_value_stays_unresolved() {
+    fn base_relative_fragment_value_keys_root_normalized() {
+        // Intent change (`base-relative-egress-v1`, cross-layer-resolution decision 2026-07-10): a
+        // path-shaped fragment (`authen/getUserInfo` — the axios `baseURL` idiom) keys as its
+        // root-normalized path instead of staying unresolved, mirroring the egress extractor's gating.
         let mut consumes = vec![unresolved("Api.frag", "GET")];
         late_resolve_cross_file_consumes(
             consts(&[("Api.frag", "authen/getUserInfo")]),
             &mut consumes,
         );
+        assert_eq!(consumes[0].key.as_deref(), Some("GET /authen/getUserInfo"));
+    }
+
+    #[test]
+    fn non_path_shaped_fragment_value_stays_unresolved() {
+        // The never-guess veto list survives the intent change: a document-relative `./` value and a
+        // whitespace-carrying value are not base-relative paths.
+        let mut consumes = vec![unresolved("Api.rel", "GET"), unresolved("Api.txt", "GET")];
+        late_resolve_cross_file_consumes(
+            consts(&[("Api.rel", "./authen"), ("Api.txt", "not a path")]),
+            &mut consumes,
+        );
         assert_eq!(consumes[0].key, None);
+        assert_eq!(consumes[1].key, None);
     }
 }
 
@@ -1553,5 +1663,176 @@ mod trpc_compose_tests {
         let out1 = compose_trpc_provides(build(false), resolve());
         let out2 = compose_trpc_provides(build(true), resolve());
         assert_eq!(keys(&out1), keys(&out2));
+    }
+}
+
+#[cfg(test)]
+mod controller_prefix_compose_tests {
+    //! Coverage for `compose_controller_prefix_provides`: literal resolution against the merged const
+    //! map, the never-guess unresolved warning (aggregated per `(file, prefix_ref)`, singular/plural
+    //! wording), a resolved and an unresolved controller side by side, and determinism.
+    use super::*;
+    use zzop_core::ControllerPrefixRouteFragment;
+
+    fn frag(
+        prefix_ref: &str,
+        verb: &str,
+        path: &str,
+        line: u32,
+        symbol: &str,
+    ) -> ControllerPrefixRouteFragment {
+        ControllerPrefixRouteFragment {
+            prefix_ref: prefix_ref.to_string(),
+            verb: verb.to_string(),
+            path: path.to_string(),
+            line,
+            symbol: Some(symbol.to_string()),
+        }
+    }
+
+    fn consts(entries: &[(&str, &str)]) -> HashMap<String, String> {
+        entries
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn resolved_prefix_ref_composes_a_joined_provide() {
+        let fragments = vec![(
+            "src/asset.controller.ts".to_string(),
+            vec![
+                frag("RouteKey.Asset", "GET", ":id", 3, "getById"),
+                frag("RouteKey.Asset", "DELETE", "", 6, "remove"),
+            ],
+        )];
+        let mut warnings = Vec::new();
+        let out = compose_controller_prefix_provides(
+            fragments,
+            &consts(&[("RouteKey.Asset", "assets")]),
+            &mut warnings,
+        );
+        let keys: Vec<&str> = out.iter().map(|p| p.key.as_str()).collect();
+        assert_eq!(keys, vec!["DELETE /assets", "GET /assets/{}"]);
+        assert!(warnings.is_empty());
+        let get = out.iter().find(|p| p.key == "GET /assets/{}").unwrap();
+        assert_eq!(get.file, "src/asset.controller.ts");
+        assert_eq!(get.line, 3);
+        assert_eq!(get.symbol.as_deref(), Some("getById"));
+    }
+
+    #[test]
+    fn unresolved_prefix_ref_drops_its_routes_and_warns_once_per_file_and_ref() {
+        let fragments = vec![(
+            "controller.ts".to_string(),
+            vec![
+                frag("RouteKey.Asset", "GET", "a", 1, "a"),
+                frag("RouteKey.Asset", "GET", "b", 2, "b"),
+            ],
+        )];
+        let mut warnings = Vec::new();
+        let out = compose_controller_prefix_provides(fragments, &consts(&[]), &mut warnings);
+        assert!(out.is_empty(), "never guess an unresolved prefix: {out:?}");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("RouteKey.Asset"));
+        assert!(warnings[0].contains("controller.ts"));
+        assert!(warnings[0].contains("2 routes"));
+    }
+
+    #[test]
+    fn singular_route_count_uses_singular_wording() {
+        let fragments = vec![(
+            "controller.ts".to_string(),
+            vec![frag("RouteKey.Asset", "GET", "a", 1, "a")],
+        )];
+        let mut warnings = Vec::new();
+        compose_controller_prefix_provides(fragments, &consts(&[]), &mut warnings);
+        assert!(warnings[0].contains("1 route "), "{warnings:?}");
+        assert!(!warnings[0].contains("1 routes"), "{warnings:?}");
+    }
+
+    #[test]
+    fn resolved_and_unresolved_controllers_are_independent() {
+        let fragments = vec![
+            (
+                "resolved.controller.ts".to_string(),
+                vec![frag("RouteKey.Asset", "GET", "a", 1, "a")],
+            ),
+            (
+                "unresolved.controller.ts".to_string(),
+                vec![frag("RouteKey.Missing", "GET", "b", 1, "b")],
+            ),
+        ];
+        let mut warnings = Vec::new();
+        let out = compose_controller_prefix_provides(
+            fragments,
+            &consts(&[("RouteKey.Asset", "assets")]),
+            &mut warnings,
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].key, "GET /assets/a");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("RouteKey.Missing"));
+    }
+
+    #[test]
+    fn output_is_deterministic_across_input_order() {
+        let build = |rev: bool| {
+            let mut v = vec![
+                (
+                    "a.controller.ts".to_string(),
+                    vec![frag("RouteKey.A", "GET", "a", 1, "a")],
+                ),
+                (
+                    "b.controller.ts".to_string(),
+                    vec![frag("RouteKey.B", "GET", "b", 1, "b")],
+                ),
+            ];
+            if rev {
+                v.reverse();
+            }
+            v
+        };
+        let c = consts(&[("RouteKey.A", "a-prefix"), ("RouteKey.B", "b-prefix")]);
+        let mut w1 = Vec::new();
+        let mut w2 = Vec::new();
+        let out1 = compose_controller_prefix_provides(build(false), &c, &mut w1);
+        let out2 = compose_controller_prefix_provides(build(true), &c, &mut w2);
+        let view = |v: &[IoProvide]| -> Vec<(String, String, u32)> {
+            v.iter()
+                .map(|p| (p.key.clone(), p.file.clone(), p.line))
+                .collect()
+        };
+        assert_eq!(view(&out1), view(&out2));
+    }
+}
+
+#[cfg(test)]
+mod merge_const_map_fragments_tests {
+    use super::*;
+
+    #[test]
+    fn first_writer_wins_by_sorted_rel_regardless_of_input_order() {
+        let mut a: HashMap<String, String> = HashMap::new();
+        a.insert("K".to_string(), "from-a".to_string());
+        let mut z: HashMap<String, String> = HashMap::new();
+        z.insert("K".to_string(), "from-z".to_string());
+
+        let in_order = vec![
+            ("a.ts".to_string(), a.clone()),
+            ("z.ts".to_string(), z.clone()),
+        ];
+        let reversed = vec![("z.ts".to_string(), z), ("a.ts".to_string(), a)];
+
+        assert_eq!(
+            merge_const_map_fragments(&in_order).get("K"),
+            merge_const_map_fragments(&reversed).get("K")
+        );
+        assert_eq!(
+            merge_const_map_fragments(&in_order)
+                .get("K")
+                .map(String::as_str),
+            Some("from-a")
+        );
     }
 }

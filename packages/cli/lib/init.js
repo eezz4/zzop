@@ -16,15 +16,17 @@ const CONFIG_TEMPLATE = `{
 
   // Alternatively, name each tree so cross-layer output can attribute findings.
   // If "trees" is present it takes precedence over "roots". Remove "roots" above
-  // if you use this form.
+  // if you use this form. A tree root may also point OUTSIDE this repo — attach the
+  // sibling checkout that serves this repo's calls (e.g. "../provider-repo": a backend,
+  // a peer service, or a module-federation remote) to review both sides together.
   // "trees": [
   //   { "root": "./api", "sourceId": "api" },
   //   { "root": "./web", "sourceId": "web" }
   // ],
 
   // Monorepo tip: analyzing a repo as a SINGLE root mixes every app's I/O into one
-  // tree, which can MASK a backend whose routes zzop cannot extract — its blindness
-  // is hidden by the frontend's signals, so it looks like "only the frontend ran".
+  // tree, which can MASK an app whose routes zzop cannot extract — its blindness is
+  // hidden by the other apps' signals, so it looks like "only part of the repo ran".
   // Split apps into "trees" above so each app's coverage/blindness is reported per
   // tree — that is where the "this tree is IO-blind; inject a Mode B adapter to
   // restore visibility" guidance surfaces.
@@ -64,7 +66,7 @@ const CONFIG_TEMPLATE = `{
 
   // ── Git-derived signals ────────────────────────────────────────────────────
   // Enables history-dependent analyses (churn/health/recommendations). Omit to
-  // let the engine apply its own defaults.
+  // skip git-derived analyses entirely; set {} to enable them with defaults.
   "git": {
     // Window, in days, for each file's recent-activity fields (default 30).
     "recentDays": 30

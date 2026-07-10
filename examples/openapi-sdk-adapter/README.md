@@ -68,11 +68,17 @@ committed `immich-openapi-specs.json`:
 | | keyed HTTP consumes in `web/` | cross-layer edges |
 |---|---|---|
 | native only (no overlay) | 0 | 0 |
-| with the consume overlay | 349 (179 files, 184 operations) | 349 |
+| consume overlay, joined against the spec-provide overlay | 349 (179 files, 184 operations) | 349 |
+| consume overlay, joined against the REAL `server/` tree (native NestJS extraction) | 349 | 361 |
 
-Every one of the 349 SDK call sites that was invisible to the native scan becomes a first-class,
-route-keyed cross-layer edge — resolved purely from the committed spec + call sites, with zero
-SDK-specific code in the engine.
+Every SDK call site that was invisible to the native scan becomes a first-class, route-keyed
+cross-layer edge — resolved purely from the committed spec + call sites, with zero SDK-specific code
+in the engine. The native-tree join is the stronger result: each edge lands on the actual controller
+method (`DELETE /api/activities/{} -> activity.controller.ts (deleteActivity)`), with ZERO
+unprovided consumes left unexplained. Two pieces make it exact: the adapter honors OpenAPI's
+effective-URL rule — the emitted key is `servers[].url`'s path part (`/api` for immich) + the
+`paths` key — and the engine resolves immich's `@Controller(RouteKey.Asset)` enum-referenced
+prefixes cross-file (`controller-prefix-ref-v1`), so the backend side serves the same keys.
 
 ## Limitations (a production adapter can go further)
 

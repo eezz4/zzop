@@ -367,6 +367,18 @@ pub fn http_interface_key(method: &str, raw_path: &str) -> String {
     format!("{} {}", method.to_uppercase(), trimmed)
 }
 
+/// [`http_interface_key`] for a CONSUME-side URL: drops the query/fragment suffix (`?...`/`#...`)
+/// before normalization. A call-site URL's `?` is always a query separator (`axios.get('articles?limit=10')`,
+/// `` `articles?${qs}` `` -> `articles?{}`), and a route provide's key never carries one, so a
+/// query-suffixed consume key is structurally guaranteed to miss the exact join AND the near-miss
+/// segment comparison — the same reasoning that already drops oazapfts's `${QS...}` suffix at
+/// extraction. Provide-side keying must NOT use this: in a route PATTERN a `?` is not a query
+/// separator (e.g. Spring's `?` single-character wildcard), so provides keep [`http_interface_key`].
+pub fn http_consume_interface_key(method: &str, raw_url: &str) -> String {
+    let path = raw_url.split(['?', '#']).next().unwrap_or(raw_url);
+    http_interface_key(method, path)
+}
+
 fn re_multi_slash() -> &'static regex::Regex {
     static R: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     R.get_or_init(|| regex::Regex::new(r"/+").unwrap())
@@ -548,6 +560,38 @@ mod tests {
         assert_eq!(http_interface_key("post", "//a//b/"), "POST /a/b");
         // root path preserved (single slash, no trailing-drop)
         assert_eq!(http_interface_key("get", ""), "GET /");
+    }
+
+    #[test]
+    fn http_consume_key_drops_query_and_fragment_suffix() {
+        // Literal query — the fe-axios RealWorld corpus shape (`axios.get('articles?limit=10')`)
+        // whose keyed form could never join `GET /articles` (dogfood round 6, 2026-07-10).
+        assert_eq!(
+            http_consume_interface_key("get", "articles?limit=10"),
+            "GET /articles"
+        );
+        // Interpolated query is normalized to `?{}` upstream — same drop.
+        assert_eq!(
+            http_consume_interface_key("get", "/articles?{}"),
+            "GET /articles"
+        );
+        // Query after a path param, and fragment suffix.
+        assert_eq!(
+            http_consume_interface_key("get", "/articles/{slug}?include=author"),
+            "GET /articles/{}"
+        );
+        assert_eq!(
+            http_consume_interface_key("get", "/docs#anchor"),
+            "GET /docs"
+        );
+        // No suffix -> identical to http_interface_key.
+        assert_eq!(
+            http_consume_interface_key("post", "//a//b/"),
+            http_interface_key("post", "//a//b/")
+        );
+        // Query-only URL degrades to the root path (the egress extractor vetoes this shape
+        // earlier — see `base_relative_path` — so it only arises from an explicit `/?x=1`).
+        assert_eq!(http_consume_interface_key("get", "/?page=2"), "GET /");
     }
 
     #[test]

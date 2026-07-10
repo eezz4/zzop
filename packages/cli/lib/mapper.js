@@ -246,26 +246,12 @@ function buildSharedOptions(config) {
 // ignores unknown fields; see `packages/napi/src/api.rs`). An unknown key almost always means a typo or a
 // config written for a different zzop version, and silently ignoring it defeats zzop's "narrowed scope
 // self-reports in warnings, never silently" contract — so we surface it as a warning, not an error.
-const KNOWN_KEYS = {
-  top: [
-    'roots',
-    'trees',
-    'packs',
-    'rules',
-    'exclude',
-    'git',
-    'cacheDir',
-    'sizeCap',
-    'format',
-    'failOn',
-    'report',
-  ],
-  packs: ['extraDirs', 'disabled'],
-  git: ['since', 'recentDays'],
-  report: ['dir', 'formats', 'enabled'],
-  tree: ['root', 'sourceId'],
-  ruleObject: ['severity', 'exclude'],
-};
+//
+// Sourced from `config-surface.json`'s `configKeys` — the single vocabulary file shared with
+// `packages/engine/tests/rule_contracts.rs`'s reference-validation meta-test, so the CLI's own drift
+// warnings and the engine's "does every message name a real knob" check can never disagree about what a
+// valid config key is.
+const KNOWN_KEYS = require('./config-surface.json').configKeys;
 
 /**
  * Collect warnings for config keys the CLI does not recognize (typos, or a config written for a different

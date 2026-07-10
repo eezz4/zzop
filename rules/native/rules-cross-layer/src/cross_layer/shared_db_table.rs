@@ -11,7 +11,7 @@
 use std::collections::BTreeSet;
 
 use zzop_core::io::CrossLayerResult;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 pub fn shared_db_table_findings(cross_layer: &CrossLayerResult) -> Vec<Finding> {
     let mut by_key: std::collections::BTreeMap<String, Vec<(String, String, u32)>> =
@@ -66,11 +66,11 @@ pub fn shared_db_table_findings(cross_layer: &CrossLayerResult) -> Vec<Finding> 
              (source `{first_source}`). This only shows the same table identifier is referenced from multiple \
              analyzed sources, not that they physically share one database: unrelated repos with independent \
              databases can coincidentally name a table the same. Verify these sources actually share one \
-             database before treating this as real coupling. Disable via rule config \
-             `disabled_rules: [\"cross-layer/shared-db-table\"]` if table-name collisions across independent \
+             database before treating this as real coupling. {} if table-name collisions across independent \
              databases are expected in your stack.",
             sources_list.len(),
             sources_list.join(", "),
+            disable_hint("cross-layer/shared-db-table"),
         );
         out.push(Finding {
             rule_id: "cross-layer/shared-db-table".to_string(),

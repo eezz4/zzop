@@ -27,9 +27,9 @@ pub struct GitDiagnosticsInput {
     pub fix_changes: u32,
     /// Number of commits in the analyzed git window.
     pub commits: u32,
-    /// The `--since` value used (None = full history / `--since=all`). Lets the 0-commit message tell "the window
-    /// is too narrow" apart from "even full history has nothing" (a submodule or brand-new files), so it doesn't
-    /// pointlessly suggest `--since=all` to someone who already used it.
+    /// The config `git.since` value used (None = `since` was omitted, meaning full history). Lets the 0-commit
+    /// message tell "the window is too narrow" apart from "even full history has nothing" (a submodule or
+    /// brand-new files), so it doesn't pointlessly suggest widening a window that already covers everything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub since: Option<String>,
 }
@@ -132,15 +132,15 @@ pub fn build_diagnostics(i: DiagnosticsInput) -> AnalysisDiagnostics {
             if git.commits == 0 {
                 let msg = match &git.since {
                     Some(since) => format!(
-                        "0 commits in the analyzed window — the history is likely entirely older than the `--since={}` window. Re-run with `--since=all` (or a wider `--since=<range>`) to widen it. Churn, FIX, lifecycle, coupling, bug-prone are all empty until the window includes real history.",
+                        "0 commits in the analyzed window — the history is likely entirely older than the configured `git.since: \"{}\"` window. Widen or remove `since` in zzop.config.jsonc (omitting `since` entirely analyzes full history). Churn, FIX, lifecycle, coupling, bug-prone are all empty until the window includes real history.",
                         since
                     ),
-                    None => "0 commits touch these files even over the FULL history (`--since=all`) — widening the window will NOT help. Most likely a git submodule (the parent repo records only the submodule's SHA, not its file history → analyze the submodule directly: `--repo=<submodule-path>`), or brand-new/untracked files. Churn, FIX, lifecycle, coupling, bug-prone stay empty.".to_string(),
+                    None => "0 commits touch these files even over the full history (`git.since` was already omitted) — widening the window further will NOT help. Most likely a git submodule (the parent repo records only the submodule's SHA, not its file history — point a `roots` entry / `trees[].root` at the submodule checkout so it is analyzed as its own tree), or brand-new/untracked files. Churn, FIX, lifecycle, coupling, bug-prone stay empty.".to_string(),
                 };
                 warnings.push(msg);
             } else {
                 warnings.push(format!(
-                    "0 git changes across {} files despite {} commit(s) in the window — the git pathspec / source-extension filter likely does not match this repo's layout/language, OR the code lives in a git submodule (submodule commits are not in the parent repo's log — analyze it directly via --repo=<submodule-path>). Churn, FIX, lifecycle, coupling, bug-prone are all empty.",
+                    "0 git changes across {} files despite {} commit(s) in the window — the git pathspec / source-extension filter likely does not match this repo's layout/language, OR the code lives in a git submodule (submodule commits are not in the parent repo's log — point a `roots` entry / `trees[].root` at the submodule checkout so it is analyzed as its own tree). Churn, FIX, lifecycle, coupling, bug-prone are all empty.",
                     i.files, git.commits
                 ));
             }
@@ -150,14 +150,14 @@ pub fn build_diagnostics(i: DiagnosticsInput) -> AnalysisDiagnostics {
             // rank by size alone and the hotspot signal collapses to pure LOC -- warn so the consumer fetches full
             // history before trusting them.
             warnings.push(format!(
-                "only {} commit(s) in the analyzed window across {} files — this is a genuinely thin history, not necessarily a tool problem. Causes: a shallow clone (`git clone --depth=1` → fix with `git fetch --unshallow`), a freshly squashed or young repo (nothing to fix — the repo simply has few commits), or a `--since` window narrower than the history (widen with `--since=all`). With so little history, churn-based signals (hotspot, lifecycle, bug-prone, silent-criticality) rank by size alone.",
+                "only {} commit(s) in the analyzed window across {} files — this is a genuinely thin history, not necessarily a tool problem. Causes: a shallow clone (`git clone --depth=1` → fix with `git fetch --unshallow`), a freshly squashed or young repo (nothing to fix — the repo simply has few commits), or a `git.since` window (in zzop.config.jsonc) narrower than the history — widen it, or omit `since` entirely for full history. With so little history, churn-based signals (hotspot, lifecycle, bug-prone, silent-criticality) rank by size alone.",
                 git.commits, i.files
             ));
         }
 
         if git.total_changes > 0 && git.tagged_changes == 0 {
             warnings.push(format!(
-                "0 of {} file-changes classified by commit type — the commit-message convention was not recognized (recognized forms: a `[FIX]`-style bracket prefix, or a `fix:`/`fixed:`/`bugfix:`/`hotfix:` keyword prefix at the subject start). To teach it YOUR convention, add patterns in config under `scanners.vocabulary.commitTypePatterns`, e.g. [{{ \"re\": \"^feat\", \"tag\": \"FEAT\" }}, {{ \"re\": \"^correctif\", \"tag\": \"FIX\" }}, {{ \"re\": \"^🐛\", \"tag\": \"FIX\" }}] (any subject prefix — YOUR language's keywords or a gitmoji; a \"FIX\"-tagged pattern re-enables FIX signals). Until then bug-prone, FIX hotspots, versioning-candidate, fixRatio are disabled.",
+                "0 of {} file-changes classified by commit type — the commit-message convention was not recognized (recognized forms: a `[FIX]`-style bracket prefix, or a `fix:`/`fixed:`/`bugfix:`/`hotfix:` keyword prefix at the subject start). Custom commit-type patterns are not yet configurable — there is no config key for teaching this a different convention today. Until commit subjects match one of the recognized forms, bug-prone, FIX hotspots, versioning-candidate, fixRatio stay disabled.",
                 git.total_changes
             ));
         }
@@ -352,7 +352,7 @@ mod tests {
         assert!(d
             .warnings
             .iter()
-            .any(|w| w.contains("0 commits in the analyzed window") && w.contains("--since=all")));
+            .any(|w| w.contains("0 commits in the analyzed window") && w.contains("git.since")));
         assert!(!d.warnings.iter().any(|w| w.contains("pathspec")));
     }
 

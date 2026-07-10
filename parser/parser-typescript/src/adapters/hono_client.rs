@@ -3,7 +3,7 @@
 //! call to its backend Hono route. Unlike `trpc_consume` (whose dotted procedure path IS the join
 //! key), a hono/client call chain only names the ROUTE TAIL, so this module also resolves the BASE
 //! PATH the client was constructed with, once per file — kind `"http"`, keyed via
-//! `http_interface_key` like `egress`'s FE HTTP-call extractor.
+//! `http_consume_interface_key` like `egress`'s FE HTTP-call extractor.
 //!
 //! Only files that import `hc` from a specifier containing `hono/client` (case-insensitively) are
 //! scanned — a bare `.signout.$post()`-shaped member call is otherwise far too generic to key.
@@ -38,7 +38,7 @@ use swc_core::ecma::ast::{
     Prop, PropName, PropOrSpread, SimpleAssignTarget, Tpl, VarDeclarator,
 };
 use swc_core::ecma::visit::{Visit, VisitWith};
-use zzop_core::{http_interface_key, IoConsume};
+use zzop_core::{http_consume_interface_key, IoConsume};
 
 /// Extract hono/client typed-RPC CONSUME entries from one file.
 pub fn extract_hono_client_consumes(rel: &str, text: &str) -> Vec<IoConsume> {
@@ -321,7 +321,7 @@ impl Visit for ConsumeCollector<'_> {
                     };
                     IoConsume {
                         kind: "http".into(),
-                        key: Some(http_interface_key(verb, &path)),
+                        key: Some(http_consume_interface_key(verb, &path)),
                         file: self.file.into(),
                         line: crate::line_of(self.cm, call.span.lo),
                         raw: None,

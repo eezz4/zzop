@@ -6,7 +6,7 @@
     {
       "id": "sql-taint",
       "severity": "warning",
-      "message": "SQL built by string concatenation — SQL injection risk. Use a parameterized/bound query (PreparedStatement `?`, JPA `:named` + setParameter). Suppress a vetted case with `// sql-taint-ok`.",
+      "message": "A SQL string is built by concatenating an expression into the statement text — if the concatenated part is request-derived, this is SQL injection (the input rewrites the query); even a constant fragment hides that risk from review. Use a parameterized/bound query instead (PreparedStatement `?`, JPA `:named` + setParameter) — never escape values into the string. Suppress a vetted case with `// sql-taint-ok`.",
       "suppress_marker": "sql-taint-ok",
       "matcher": {
         "type": "line-scan",
@@ -21,7 +21,7 @@
     {
       "id": "weak-crypto",
       "severity": "warning",
-      "message": "Weak/deprecated cryptography — MD5·SHA-1·DES·RC4·ECB are broken. Use SHA-256+/AES-GCM; for passwords use bcrypt/PBKDF2/Argon2. Suppress a vetted case with `// weak-crypto-ok`.",
+      "message": "Weak/deprecated cryptography in use — MD5 and SHA-1 have practical collision attacks (forgeable signatures/certificates), DES/RC4 are brute-forceable or biased, and ECB mode leaks plaintext structure across blocks. Use SHA-256 or stronger for hashing and AES-GCM for encryption; for passwords specifically use bcrypt/PBKDF2/Argon2 (a fast hash is the wrong tool even at SHA-256). Suppress a vetted non-security use (e.g. a legacy-interop checksum) with `// weak-crypto-ok`.",
       "suppress_marker": "weak-crypto-ok",
       "matcher": {
         "type": "line-scan",

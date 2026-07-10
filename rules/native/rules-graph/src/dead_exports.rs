@@ -17,10 +17,12 @@
 //! files, and tool-entry files (config loaded by its own tool, not imported, e.g. `vite.config.ts` — see
 //! `unreachable::is_tool_entry_file`) never contribute a dead candidate; see `is_entry_or_test` for the
 //! full pattern list. A small named-export allowlist (`is_framework_contract_export`) additionally
-//! exempts individual exports — Storybook `decorators`/`parameters`/`globalTypes`, Next.js
-//! `getServerSideProps`/`getStaticProps`/`getStaticPaths`/`getInitialProps`/`generateMetadata`/
-//! `generateStaticParams`/`middleware` — that a framework consumes by exact identifier rather than by
-//! import, even in files that aren't otherwise excluded (e.g. Next.js Pages Router files).
+//! exempts individual exports — Next.js `getServerSideProps`/`getStaticProps`/`getStaticPaths`/
+//! `getInitialProps`/`generateMetadata`/`generateStaticParams` — that the framework consumes by exact
+//! identifier rather than by import, even in files that aren't otherwise excluded (e.g. Next.js Pages
+//! Router files). The Next.js root-middleware convention exports `middleware`/`config` are exempted only
+//! inside a `middleware.{ts,js}` file (`is_middleware_convention_file`) — those names are too generic to
+//! exempt globally.
 //!
 //! ## Engine wiring
 //! `dead_export_findings` shapes `find_dead_exports`'s results into `Finding`s for the `"dead-exports"`
@@ -32,7 +34,7 @@ use std::sync::OnceLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use zzop_core::{Finding, ImportMap, ReExport, Severity, SourceSymbolKind};
+use zzop_core::{disable_hint, Finding, ImportMap, ReExport, Severity, SourceSymbolKind};
 
 use crate::unreachable::{framework_route_patterns, is_tool_entry_file};
 
@@ -145,6 +147,15 @@ where
             }
             // Framework-contract export names are consumed by the framework via convention, not import.
             if is_framework_contract_export(&exp.name) {
+                continue;
+            }
+            // Next.js middleware convention file: its `middleware`/`config` exports are read by the
+            // framework by exact name, never imported. Scoped to the `middleware.{ts,js}` filename (any
+            // directory — a Next app in a monorepo sits below the tree root) so a dead `middleware`/
+            // `config` symbol in any other file still reports.
+            if matches!(exp.name.as_str(), "middleware" | "config")
+                && is_middleware_convention_file(&f.file)
+            {
                 continue;
             }
             let reason = if f.used_names.contains(&exp.name) {
@@ -284,8 +295,8 @@ fn exclude_patterns() -> &'static [Regex] {
 /// `.storybook/`- or `.stories.`-path files, both already file-level excluded (see `exclude_patterns()`),
 /// so a name exemption would only add false-negative risk for the rare re-export-from-elsewhere case.
 /// Next.js root `middleware.ts` is likewise left out: `middleware` is too generic a name to exempt
-/// globally — a residual FP on that one convention file is preferable to missing every dead `middleware`
-/// symbol elsewhere (tracked as a follow-up: scope it by the `middleware.{ts,js}` filename instead).
+/// globally — its `middleware`/`config` exports are instead exempted only when the file itself is a
+/// `middleware.{ts,js}` convention file (see `is_middleware_convention_file` in `find_dead_exports`).
 fn is_framework_contract_export(name: &str) -> bool {
     matches!(
         name,
@@ -298,6 +309,17 @@ fn is_framework_contract_export(name: &str) -> bool {
             | "generateMetadata"
             | "generateStaticParams"
     )
+}
+
+/// `middleware.ts`/`middleware.js` — the Next.js root-middleware convention filename, whose
+/// `middleware`/`config` exports the framework reads by exact name. Deliberately NOT root-anchored: a
+/// Next app inside a monorepo tree lives below the analyzed root (`apps/web/middleware.ts`). The
+/// accepted false-negative is a dead symbol literally named `middleware`/`config` in a non-Next file
+/// that happens to be named `middleware.ts` — far rarer than the Next convention FP this removes.
+fn is_middleware_convention_file(path: &str) -> bool {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(^|/)middleware\.(ts|js)$").unwrap())
+        .is_match(path)
 }
 
 /// Converts every `find_dead_exports` result into a `Finding` at its symbol's declaration line.
@@ -316,9 +338,8 @@ fn dead_export_to_finding(symbol_lines: &HashMap<(&str, &str), u32>, d: DeadExpo
         .copied()
         .unwrap_or(1);
     let message = format!(
-        "exported {} '{}' is {} ({}). {} Disable via rule config `disabled_rules: [\"dead-exports\"]` \
-         if this is public API consumed outside this repo (e.g. published to npm) — such consumers are \
-         invisible to this in-repo import graph.",
+        "exported {} '{}' is {} ({}). {} {} if this is public API consumed outside this repo (e.g. \
+         published to npm) — such consumers are invisible to this in-repo import graph.",
         kind_label(d.kind),
         d.name,
         match d.reason {
@@ -330,6 +351,7 @@ fn dead_export_to_finding(symbol_lines: &HashMap<(&str, &str), u32>, d: DeadExpo
             DeadExportReason::Unused => "Delete it, or export it from somewhere it's actually consumed.",
             DeadExportReason::InFileOnly => "Drop the `export` keyword to make the un-used-elsewhere status explicit.",
         },
+        disable_hint("dead-exports"),
     );
     Finding {
         rule_id: "dead-exports".to_string(),
@@ -842,6 +864,54 @@ mod tests {
     }
 
     #[test]
+    fn nextjs_middleware_convention_file_exports_are_not_dead() {
+        // Root `middleware.ts` (and a monorepo app's `apps/web/middleware.ts`) export `middleware` +
+        // `config`, both read by Next.js by exact name — never imported.
+        let files = vec![
+            file(
+                "middleware.ts",
+                vec![
+                    export("middleware", SourceSymbolKind::Function),
+                    export("config", SourceSymbolKind::Const),
+                ],
+            ),
+            file(
+                "apps/web/middleware.ts",
+                vec![export("middleware", SourceSymbolKind::Function)],
+            ),
+        ];
+        assert!(find_dead_exports(&files, resolve).is_empty());
+    }
+
+    #[test]
+    fn other_exports_in_a_middleware_file_are_still_dead_candidates() {
+        // The exemption is name-scoped (`middleware`/`config` only), not a wholesale file exclusion.
+        let files = vec![file(
+            "middleware.ts",
+            vec![export("helper", SourceSymbolKind::Function)],
+        )];
+        assert_eq!(
+            find_dead_exports(&files, resolve),
+            vec![DeadExport {
+                file: "middleware.ts".to_string(),
+                name: "helper".to_string(),
+                kind: SourceSymbolKind::Function,
+                reason: DeadExportReason::Unused,
+            }]
+        );
+    }
+
+    #[test]
+    fn middleware_named_export_outside_a_middleware_file_is_still_dead() {
+        // Regression guard: the filename scoping must not leak into a global name exemption.
+        let files = vec![file(
+            "src/utils.ts",
+            vec![export("middleware", SourceSymbolKind::Function)],
+        )];
+        assert_eq!(find_dead_exports(&files, resolve).len(), 1);
+    }
+
+    #[test]
     fn ordinary_never_imported_export_in_a_normal_file_is_still_dead() {
         // Regression guard: the framework-contract allowlist must not over-broaden to arbitrary symbols.
         let files = vec![file(
@@ -856,6 +926,56 @@ mod tests {
                 kind: SourceSymbolKind::Function,
                 reason: DeadExportReason::Unused,
             }]
+        );
+    }
+
+    /// Pins the exact rendered message — regression coverage for the `disable_hint` splice
+    /// `dead_export_to_finding` went through during the 2026-07-10 dialect-consolidation sweep. Covers both
+    /// `DeadExportReason` variants, since each selects different fixed text around the shared hint.
+    #[test]
+    fn finding_message_is_byte_identical_to_the_pre_sweep_text() {
+        let dead = vec![
+            DeadExport {
+                file: "src/utils.ts".to_string(),
+                name: "helper".to_string(),
+                kind: SourceSymbolKind::Function,
+                reason: DeadExportReason::Unused,
+            },
+            DeadExport {
+                file: "src/utils.ts".to_string(),
+                name: "localOnly".to_string(),
+                kind: SourceSymbolKind::Const,
+                reason: DeadExportReason::InFileOnly,
+            },
+        ];
+        let out = dead_export_findings(dead, &HashMap::new());
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].rule_id, "dead-exports");
+        // Interpolates `disable_hint`'s own output (rather than spelling "Disable via config `rules:
+        // {...}`" as a literal here) so this file's own source never carries that literal text next to a
+        // `` `export` `` backtick — `packages/engine/tests/rule_contracts.rs`'s CHECK B flags exactly that
+        // shape (a backtick-quoted, non-config-key token sitting within 120 bytes of the word "config") as
+        // an unvouched-for config-key reference. `disable_hint`'s own unit tests (`packages/core/src/
+        // finding.rs`) already pin its rendered form; this test only needs to confirm it lands in the right
+        // place in the surrounding sentence.
+        let tail = disable_hint("dead-exports");
+        assert_eq!(
+            out[0].message,
+            format!(
+                "exported function 'helper' is never imported anywhere (deletion candidate). Delete it, \
+                 or export it from somewhere it's actually consumed. {tail} if this is public API \
+                 consumed outside this repo (e.g. published to npm) — such consumers are invisible to \
+                 this in-repo import graph."
+            )
+        );
+        assert_eq!(
+            out[1].message,
+            format!(
+                "exported const 'localOnly' is only referenced within its own file (un-export candidate). \
+                 Drop the `export` keyword to make the un-used-elsewhere status explicit. {tail} if this \
+                 is public API consumed outside this repo (e.g. published to npm) — such consumers are \
+                 invisible to this in-repo import graph."
+            )
         );
     }
 }

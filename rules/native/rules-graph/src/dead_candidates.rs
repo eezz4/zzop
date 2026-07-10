@@ -25,7 +25,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use zzop_core::{DepGraph, FileNode, Finding, Severity};
+use zzop_core::{disable_hint, DepGraph, FileNode, Finding, Severity};
 
 use crate::unreachable::{framework_route_patterns, is_tool_entry_file};
 
@@ -77,16 +77,17 @@ pub fn dead_candidate_findings(
             severity: Severity::Info,
             file: n.path,
             line: 1,
-            message: "no importers found in this tree (candidate dead file — scoped to files that \
-                      participate in the dep graph: a `dep`-map key or edge target, or a TS-dispatch \
-                      extension ts/tsx/js/jsx/mjs/cjs/mts/cts as a fallback; dev-tool config files, \
-                      ambient `.d.ts` declarations, and package.json-referenced entry files are \
-                      excluded — they're loaded by a tool/runtime directly, not imported). Delete the \
-                      file if it is genuinely unused, or wire it up if it should be reachable. Disable \
-                      via rule config `disabled_rules: [\"dead-candidates\"]` if your build loads files \
-                      this graph can't see (e.g. a custom bundler entry, a template-string dynamic \
-                      import)."
-                .to_string(),
+            message: format!(
+                "no importers found in this tree (candidate dead file — scoped to files that \
+                 participate in the dep graph: a `dep`-map key or edge target, or a TS-dispatch \
+                 extension ts/tsx/js/jsx/mjs/cjs/mts/cts as a fallback; dev-tool config files, \
+                 ambient `.d.ts` declarations, and package.json-referenced entry files are \
+                 excluded — they're loaded by a tool/runtime directly, not imported). Delete the \
+                 file if it is genuinely unused, or wire it up if it should be reachable. {} if your \
+                 build loads files this graph can't see (e.g. a custom bundler entry, a \
+                 template-string dynamic import).",
+                disable_hint("dead-candidates")
+            ),
             data: None,
         })
         .collect()
@@ -309,6 +310,27 @@ mod tests {
         );
         let paths: Vec<&str> = r.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(paths, vec!["features/x/Orphan.tsx"]);
+    }
+
+    #[test]
+    fn finding_message_renders_single_braces_in_the_disable_hint() {
+        // Regression: this message is a PLAIN string literal (not `format!`), so a `{{` written for
+        // format-escaping renders literally as `{{` in user output — the 2026-07-10 dialect sweep
+        // shipped exactly that. Pin the rendered form.
+        let out = dead_candidate_findings(
+            &[n("features/x/Orphan.tsx", 0, 1)],
+            &empty_dep(),
+            &no_extra_entries(),
+        );
+        assert_eq!(out.len(), 1);
+        assert!(
+            out[0]
+                .message
+                .contains("`rules: { \"dead-candidates\": \"off\" }`"),
+            "{}",
+            out[0].message
+        );
+        assert!(!out[0].message.contains("{{"), "{}", out[0].message);
     }
 
     #[test]

@@ -69,8 +69,8 @@
 //! ## Suppression
 //! None of these rules honor an inline `// <marker>-ok` suppression comment. Checked against how the
 //! existing native rules in this crate do it: `duplicate_route`/`route_shadowing`/`unprovided_consume`
-//! carry no marker support either, and `mutating_route_no_auth`'s own message says so explicitly ("native
-//! rules have no inline suppression marker") — inline markers are a DSL-only mechanism
+//! carry no marker support either, and `mutating_route_no_auth`'s own message says so explicitly ("this
+//! rule has no inline suppression marker") — inline markers are a DSL-only mechanism
 //! (`zzop_core::dsl::RuleDef::suppress_marker`), never wired into any native rule's `Finding` construction.
 //! Every rule here is disable-only via `RuleConfig::disabled_rules` (message text says so).
 //!

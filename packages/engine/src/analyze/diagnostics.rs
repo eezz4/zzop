@@ -49,7 +49,7 @@ pub(super) fn collect_git(
 /// itself can tell "git was never attempted" (`None`) apart from "git ran and found zero" (`Some` with
 /// honest zero counts) — `build_diagnostics` skips every git-window warning when `git` is `None`. This
 /// passes `None` when `git_active` is `false`, `Some` with the honest counts otherwise.
-pub(super) fn run_diagnostics(
+pub(crate) fn run_diagnostics(
     file_count: usize,
     dep: &DepGraph,
     symbols: &[zzop_core::SourceSymbol],
@@ -124,7 +124,7 @@ pub(crate) fn zero_packs_warning(config: &EngineConfig) -> Option<String> {
     crate::register_all_native(&mut registry);
     let native_count = registry.metas().len();
     Some(format!(
-        "no DSL rule packs loaded: only the {native_count} built-in native analyses ran. Set packsDir to a directory of *.json rule packs to enable the shipped DSL rules."
+        "no DSL rule packs loaded: only the {native_count} built-in native analyses ran. If you expected the bundled packs, reinstall/check the package (the bundled packs directory may be missing); to add your own, set `packs: {{ extraDirs: [...] }}` in zzop.config.jsonc (embedders: `packsDir`)."
     ))
 }
 
@@ -156,7 +156,7 @@ pub(super) fn minified_files_warning(sorted_rels: &[String]) -> Option<String> {
 /// scanned files — almost always a typo (classically `*.stories.tsx`, whose `*` cannot cross `/`, missing
 /// every nested `src/**/x.stories.tsx`). Mirrors `unknown_disabled_rule_ids`: honest, one warning per dead
 /// filter. Whole-rule suppressions (no path/glob) are never flagged (they legitimately match everything).
-pub(super) fn unmatched_suppression_warnings(config: &EngineConfig, rels: &[&str]) -> Vec<String> {
+pub(crate) fn unmatched_suppression_warnings(config: &EngineConfig, rels: &[&str]) -> Vec<String> {
     config
         .rule_config
         .suppressions
@@ -197,7 +197,7 @@ pub(super) fn unmatched_suppression_warnings(config: &EngineConfig, rels: &[&str
 /// filter-less entry can't occur here (`GlobalExclude` has no bare "everywhere" shape without a path/glob —
 /// unlike `Suppression`, there is no `rule` field to anchor a filter-less entry to), so every entry is
 /// checked, unlike `unmatched_suppression_warnings`'s filter-less exemption.
-pub(super) fn unmatched_global_exclude_warnings(
+pub(crate) fn unmatched_global_exclude_warnings(
     config: &EngineConfig,
     rels: &[&str],
 ) -> Vec<String> {

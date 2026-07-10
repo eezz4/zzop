@@ -128,7 +128,7 @@
     {
       "id": "race-condition-toctou",
       "severity": "warning",
-      "message": "A read (`findOne`/`findById`/`findUnique`) feeds a branch that calls `create`/`upsert`/`insert` (get-or-create/toggle) — TOCTOU race: concurrent requests can both pass the check and both write (duplicate row / unique-constraint violation). Wrap the read+write in a `$transaction`, or replace it with an upsert or a unique constraint. Suppress a vetted case with `// toctou-ok`.",
+      "message": "A read (`findOne`/`findById`/`findUnique`) feeds a branch that calls `create`/`upsert`/`insert` (get-or-create/toggle) — TOCTOU race: concurrent requests can both pass the check and both write (duplicate row / unique-constraint violation). Add a unique constraint and replace the check-then-act with an upsert; wrapping it in a `$transaction` alone does NOT close this race at the database's default READ COMMITTED isolation level — two concurrent transactions can both read empty and both insert. If you must keep the read+write shape, use `SELECT ... FOR UPDATE` or serializable isolation instead. Suppress a vetted case with `// toctou-ok`.",
       "suppress_marker": "toctou-ok",
       "matcher": {
         "type": "method-scan",
@@ -153,8 +153,12 @@
             "label": "try-guard"
           },
           {
-            "pattern": "\\$transaction\\s*\\(|\\btransaction\\s*\\(",
-            "label": "tx-guard"
+            "pattern": "(?i)FOR\\s+UPDATE|(?i)\\bserializable\\b",
+            "label": "locking-guard"
+          },
+          {
+            "pattern": "(?i)ON\\s+CONFLICT|(?i)ON\\s+DUPLICATE\\s+KEY",
+            "label": "atomic-conflict-guard"
           }
         ],
         "snippet_max": 160

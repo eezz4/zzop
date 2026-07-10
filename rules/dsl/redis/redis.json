@@ -2,5 +2,49 @@
   "id": "redis",
   "framework": "any",
   "schema_version": 1,
-  "rules": []
+  "rules": [
+    {
+      "id": "flushall-in-code",
+      "severity": "critical",
+      "message": "`.flushall(`/`.flushdb(` (or a quoted `'FLUSHALL'`/`'FLUSHDB'` command literal, e.g. `sendCommand(['FLUSHALL'])`) wipes EVERY key in the database/instance — reachable from application code, this is one bug or one exposed admin endpoint away from total data loss. Scope deletes to explicit keys (`UNLINK`) or per-namespace expiry, and keep flush commands in ops/migration scripts outside the served codebase. Suppress a vetted case (e.g. a dedicated cache-reset job) with `// redis-flush-ok`.",
+      "suppress_marker": "redis-flush-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|java)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "(?i)flush(all|db)",
+        "skip_comment_lines": true,
+        "line_pattern": "(?i)(\\.flush(all|db)\\s*\\(|['\"`]flush(all|db)['\"`])"
+      }
+    },
+    {
+      "id": "keys-glob-scan",
+      "severity": "warning",
+      "message": "`.keys(...)` called with a string-literal argument (or a quoted `'KEYS'` command literal, e.g. `sendCommand(['KEYS', pattern])`) walks the ENTIRE keyspace and blocks the single-threaded Redis server for the duration — on a production dataset this stalls every other client. Use the SCAN cursor family instead (`scanStream`/`scan_iter`, `MATCH`+`COUNT`) or maintain an explicit index set. Suppress a vetted case (tiny fixed keyspace, offline script) with `// redis-keys-ok`.",
+      "suppress_marker": "redis-keys-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|java)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "(?i)(\\.keys\\s*\\(|['\"`]KEYS['\"`])",
+        "skip_comment_lines": true,
+        "line_pattern": "\\.keys\\s*\\(\\s*['\"`]|['\"`]KEYS['\"`]"
+      }
+    },
+    {
+      "id": "client-no-error-listener",
+      "severity": "warning",
+      "message": "A redis client created with `createClient(...)` (node-redis v4) or `new Redis(...)`/`new Redis.Cluster(...)` (ioredis) with no `.on('error', ...)` listener anywhere in this file — node-redis/ioredis's client is an EventEmitter that emits `'error'` on every connection blip, and with no listener attached Node's default unhandled-`error`-event behavior CRASHES the process on the first one. Note the cross-file limitation: the client may be created here and the `'error'` listener attached in another module — that's exactly the case `// redis-error-ok` is for. Attach `.on('error', ...)` where the client is created (log it, and let the reconnect strategy do its job) so a connection error degrades to a cache miss instead of killing the process.",
+      "suppress_marker": "redis-error-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "['\"](ioredis|redis|@redis/client)['\"]",
+        "require_file_absent": ["\\.on\\s*\\(\\s*['\"`]error"],
+        "skip_comment_lines": true,
+        "line_pattern": "\\bcreateClient\\s*\\(|\\bnew\\s+Redis(\\.Cluster)?\\s*\\("
+      }
+    }
+  ]
 }

@@ -24,8 +24,8 @@ pub mod serde_util;
 pub use coupling::CommitFileSet;
 
 pub use fragments::{
-    RouterMountEntry, RouterMountFragment, TrpcRouterEntry, TrpcRouterFragment,
-    WrapperCallFragment, WrapperDefFragment,
+    ControllerPrefixRouteFragment, RouterMountEntry, RouterMountFragment, TrpcRouterEntry,
+    TrpcRouterFragment, WrapperCallFragment, WrapperDefFragment,
 };
 
 pub use schema::{FieldAttr, SchemaEnum, SchemaField, SchemaModel, SchemaUsage};
@@ -35,14 +35,14 @@ pub use dsl::{
     RuleDef, RulePackDef, SourceFile, SymbolScan,
 };
 
-pub use finding::{Finding, RuleExplain, Severity};
+pub use finding::{disable_hint, Finding, RuleExplain, Severity};
 pub use graph::{
     circular_from_dep, circular_from_dep_excluding, connected_components, find_cycles,
     ComponentEdge, ConnectedComponentsResult,
 };
 pub use io::{
-    http_interface_key, link_cross_layer_io, AmbiguousConsume, CrossLayerEdge, CrossLayerResult,
-    IoConsume, IoFacts, IoKind, IoProvide, LinkOptions, SourceIo,
+    http_consume_interface_key, http_interface_key, link_cross_layer_io, AmbiguousConsume,
+    CrossLayerEdge, CrossLayerResult, IoConsume, IoFacts, IoKind, IoProvide, LinkOptions, SourceIo,
 };
 pub use ir::{
     ApiEndpoint, CommonIr, DepGraph, ImportBinding, ImportMap, MinimalIr, NonIdempotentKind,

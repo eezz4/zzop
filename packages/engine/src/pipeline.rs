@@ -78,6 +78,11 @@ pub(crate) struct FileArtifact {
     pub wrapper_def_fragments: Vec<zzop_core::WrapperDefFragment>,
     /// Wrapper-CALL fragment — each call is resolved via its import specifier back to a def.
     pub wrapper_call_fragments: Vec<zzop_core::WrapperCallFragment>,
+    /// Controller-prefix route fragment (`controller-prefix-ref-v1`) — a `@Controller(RouteKey.Asset)`
+    /// dotted member-expression prefix this file alone cannot resolve; `analyze`'s assemble-time
+    /// controller-prefix composer resolves `prefix_ref` against the same merged const map
+    /// `const_map_fragment` feeds, and emits the real `IoProvide`s.
+    pub controller_prefix_route_fragments: Vec<zzop_core::ControllerPrefixRouteFragment>,
     /// This file's Prisma query-call-site facts (`<clientAccessor>().<model>.<method>(...)`, restricted
     /// to the 4 read-only query methods) — `analyze::assemble`'s substrate for `run_schema_join_rules`,
     /// replacing that pass's own filesystem re-walk (`zzop_rules_schema::join::scan_query_call_sites`,
@@ -325,6 +330,7 @@ fn process_file(
                 router_mount_fragments: Vec::new(),
                 wrapper_def_fragments: Vec::new(),
                 wrapper_call_fragments: Vec::new(),
+                controller_prefix_route_fragments: Vec::new(),
                 query_call_sites: Vec::new(),
                 store_bound_models: Vec::new(),
                 field_usage_tokens: Vec::new(),
@@ -400,6 +406,7 @@ fn process_file(
             router_mount_fragments: artifact.router_mount_fragments.clone(),
             wrapper_def_fragments: artifact.wrapper_def_fragments.clone(),
             wrapper_call_fragments: artifact.wrapper_call_fragments.clone(),
+            controller_prefix_route_fragments: artifact.controller_prefix_route_fragments.clone(),
             query_call_sites: artifact.query_call_sites.clone(),
             store_bound_models: artifact.store_bound_models.clone(),
             field_usage_tokens: artifact.field_usage_tokens.clone(),
@@ -438,6 +445,7 @@ fn artifact_from_ir(
         router_mount_fragments: ir.router_mount_fragments,
         wrapper_def_fragments: ir.wrapper_def_fragments,
         wrapper_call_fragments: ir.wrapper_call_fragments,
+        controller_prefix_route_fragments: ir.controller_prefix_route_fragments,
         query_call_sites: ir.query_call_sites,
         store_bound_models: ir.store_bound_models,
         field_usage_tokens: ir.field_usage_tokens,
@@ -481,6 +489,7 @@ fn compute_fresh_artifact(
             router_mount_fragments: Vec::new(),
             wrapper_def_fragments: Vec::new(),
             wrapper_call_fragments: Vec::new(),
+            controller_prefix_route_fragments: Vec::new(),
             query_call_sites: Vec::new(),
             store_bound_models: zzop_parser_typescript::extract_store_bound_models(rel, text),
             field_usage_tokens: sorted_field_usage_tokens(rel, text),
@@ -509,13 +518,14 @@ fn compute_fresh_artifact(
         Some(Language::JavaLexical) => crate::io::extract_java_file_io(rel, text),
         _ => None,
     };
-    // The next five projections are all TypeScript-only, reusing `text` already in hand (an extra parse
+    // The next projections are all TypeScript-only, reusing `text` already in hand (an extra parse
     // of already-read text, not a second file read): const-map fragment (feeds `analyze::assemble`'s
     // merge + late consume re-resolution), tRPC router fragment (`analyze::compose_trpc_provides`),
     // router-mount fragment (Hono chained builders / cross-file mounts, for
     // `analyze::compose_router_mount_provides`), wrapper def/call fragments (`analyze`'s assemble-time
-    // wrapper-consume join, defs indexed by `(file, name)`), and query-call-site facts (`analyze`'s
-    // `run_schema_join_rules` substrate).
+    // wrapper-consume join, defs indexed by `(file, name)`), controller-prefix route fragment
+    // (`analyze`'s assemble-time controller-prefix composer, resolved against the same const map),
+    // and query-call-site facts (`analyze`'s `run_schema_join_rules` substrate).
     let const_map_fragment = match language {
         Some(Language::TypeScript) if !degraded => {
             zzop_parser_typescript::const_map_fragment(rel, text)
@@ -559,6 +569,15 @@ fn compute_fresh_artifact(
         }
         _ => (Vec::new(), Vec::new()),
     };
+    // Controller-prefix route fragment (`controller-prefix-ref-v1`): a `@Controller(RouteKey.Asset)`
+    // dotted member-expression prefix, deferred to `analyze`'s assemble-time controller-prefix composer
+    // (same merged const map `const_map_fragment` above feeds).
+    let controller_prefix_route_fragments = match language {
+        Some(Language::TypeScript) if !degraded => {
+            zzop_parser_typescript::extract_controller_prefix_route_fragments(rel, text)
+        }
+        _ => Vec::new(),
+    };
     let query_call_sites = match language {
         Some(Language::TypeScript) if !degraded => {
             zzop_parser_typescript::extract_query_call_sites(rel, text)
@@ -594,6 +613,7 @@ fn compute_fresh_artifact(
         router_mount_fragments,
         wrapper_def_fragments,
         wrapper_call_fragments,
+        controller_prefix_route_fragments,
         query_call_sites,
         store_bound_models,
         field_usage_tokens,

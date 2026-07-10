@@ -5,8 +5,8 @@
   "rules": [
     {
       "id": "no-system-dialogs",
-      "severity": "warning",
-      "message": "Blocking system dialog (alert/confirm/prompt) — blocks the main thread, can't be styled/tested, and is a poor UX. Use a non-blocking in-app modal/toast/confirm component instead. Suppress a vetted case with `// browser-ok:`.",
+      "severity": "info",
+      "message": "Blocking system dialog (alert/confirm/prompt) freezes the whole page/tab while shown (blocks the main thread) and is native browser chrome — it can't be styled or driven by automated tests. Use a non-blocking in-app modal/toast/confirm component instead. Suppress a vetted case with `// browser-ok:`.",
       "suppress_marker": "browser-ok",
       "matcher": {
         "type": "line-scan",

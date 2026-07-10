@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use regex::Regex;
 
 use zzop_core::io::TaggedConsume;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 use super::{path_segments, split_external_key, VERSION_SEGMENT_PATTERN};
 
@@ -97,8 +97,7 @@ pub fn external_version_inconsistent_findings(external_consumes: &[TaggedConsume
              genuinely distinct endpoint family that `{host}` documents and versions separately from the \
              `/v*` family (not drift at all). Check `{host}`'s API docs for the versionless paths before \
              changing anything, and only unify the calls if the docs confirm they're the same API surface. \
-             Disable via rule config `disabled_rules: [\"cross-layer/external-version-inconsistent\"]` if \
-             this host legitimately serves both an unversioned default endpoint and explicit versioned \
+             {} if this host legitimately serves both an unversioned default endpoint and explicit versioned \
              endpoints side by side on purpose.",
             versioned_examples.first().copied().unwrap_or(""),
             versionless_examples.first().copied().unwrap_or(""),
@@ -108,6 +107,7 @@ pub fn external_version_inconsistent_findings(external_consumes: &[TaggedConsume
             anchor.consume.file,
             anchor.consume.line,
             anchor.source,
+            disable_hint("cross-layer/external-version-inconsistent"),
         );
 
         out.push(Finding {

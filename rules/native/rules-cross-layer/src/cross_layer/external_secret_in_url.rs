@@ -7,7 +7,7 @@
 //! (move the parameter to a header or the request body) lands.
 
 use zzop_core::io::TaggedConsume;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 use super::split_external_key;
 
@@ -74,11 +74,11 @@ pub fn external_secret_in_url_findings(external_consumes: &[TaggedConsume]) -> V
              the URL. Query strings are captured by proxy/CDN/access logs and leak through the `Referer` \
              header and browser history — that's true whether the value is a literal secret or an \
              interpolated `{{}}` one, so both cases are flagged here. Move `{params_list}` to a request header \
-             (e.g. `Authorization`) or the request body instead of a URL query parameter. Disable via rule \
-             config `disabled_rules: [\"cross-layer/external-secret-in-url\"]` if this parameter name is a \
-             false positive for this integration (e.g. a non-secret lookup id that just happens to share a \
-             name like `key`).",
+             (e.g. `Authorization`) or the request body instead of a URL query parameter. {} if this \
+             parameter name is a false positive for this integration (e.g. a non-secret lookup id that just \
+             happens to share a name like `key`).",
             url.method, url.host, url.path, c.source,
+            disable_hint("cross-layer/external-secret-in-url"),
         );
 
         out.push(Finding {

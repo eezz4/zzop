@@ -11,8 +11,8 @@
 
 use serde::{Deserialize, Serialize};
 use zzop_core::{
-    ImportMap, IoFacts, QueryCallSite, ReExport, RouterMountFragment, SourceSymbol,
-    TrpcRouterFragment, WrapperCallFragment, WrapperDefFragment,
+    ControllerPrefixRouteFragment, ImportMap, IoFacts, QueryCallSite, ReExport,
+    RouterMountFragment, SourceSymbol, TrpcRouterFragment, WrapperCallFragment, WrapperDefFragment,
 };
 
 /// One file's Common-IR slice, as produced by parse + per-file projection.
@@ -74,6 +74,12 @@ pub struct FileIrSlice {
     /// def) — mirrors `FileArtifact::wrapper_call_fragments`. Same round-trip reasoning.
     #[serde(default)]
     pub wrapper_call_fragments: Vec<WrapperCallFragment>,
+    /// This file's controller-prefix route fragment (`controller-prefix-ref-v1`) — mirrors
+    /// `FileArtifact::controller_prefix_route_fragments`. Same round-trip reasoning: dropping it on a
+    /// hit would silently drop a `@Controller(RouteKey.Asset)`-shaped controller's routes from every
+    /// subsequent cache-warm run.
+    #[serde(default)]
+    pub controller_prefix_route_fragments: Vec<ControllerPrefixRouteFragment>,
     /// This file's Prisma query-call-site facts (`<clientAccessor>().<model>.<method>(...)`) — mirrors
     /// `FileArtifact::query_call_sites`. Must round-trip through the cache: dropping it on a hit would
     /// silently starve the schema x usage JOIN rules (`soft-delete-bypass`/`orderby-unindexed`/

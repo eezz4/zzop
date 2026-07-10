@@ -249,6 +249,26 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
                 .to_string(),
         );
     }
+    // Config-diagnostics parity with `analyze::assemble` — the envelope path used to skip these, so a
+    // `disabled_rules` typo or a dead suppression/top-level-exclude filter was silently ineffective in
+    // envelope mode only (the "envelope diagnostics asymmetry" gap). `commits` is empty and `git_active`
+    // false: envelope mode never has history, and `build_diagnostics` skips every git-window warning on
+    // that gate, so only the structural coverage-gap + unknown-`disabled_rules` self-reports fire.
+    warnings.extend(crate::analyze::run_diagnostics(
+        file_count,
+        &dep,
+        &all_symbols,
+        &[],
+        config,
+        false,
+    ));
+    let rels: Vec<&str> = loc_by_path.keys().map(String::as_str).collect();
+    warnings.extend(crate::analyze::unmatched_suppression_warnings(
+        config, &rels,
+    ));
+    warnings.extend(crate::analyze::unmatched_global_exclude_warnings(
+        config, &rels,
+    ));
 
     let mut global_findings = Vec::new();
     if is_enabled(&config.rule_config, "circular") {
@@ -258,9 +278,18 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         global_findings.extend(unreachable_findings(&nodes, &dep));
     }
     if is_enabled(&config.rule_config, "dead-candidates") {
-        // No filesystem root (see module doc) -> no way to read package.json-referenced entries, so
-        // this always passes an empty `extra_entries` set.
-        global_findings.extend(dead_candidate_findings(&nodes, &dep, &HashSet::new()));
+        // No filesystem root (see module doc) -> no package.json-referenced entries; the envelope's own
+        // `is_entry`-marked projections ARE the entry set — the Mode A counterpart of the Mode B overlay
+        // union in `analyze::assemble` (same contract marker, same exemption). Before this, Mode A
+        // silently dropped `is_entry` and every convention-loaded entry file (a crate's `lib.rs`, a test
+        // harness file) read as dead — caught by the rust-parser-adapter example's self-analysis.
+        let extra_entries: HashSet<String> = envelope
+            .files
+            .iter()
+            .filter(|f| f.is_entry)
+            .map(|f| f.path.clone())
+            .collect();
+        global_findings.extend(dead_candidate_findings(&nodes, &dep, &extra_entries));
     }
 
     let findings = merge_findings(
@@ -540,9 +569,13 @@ fn synthetic_artifact_from_projection(
         router_mount_fragments: projection.router_mount_fragments.clone(),
         // Wrapper resolution, query-call-site recognition, store-binding recognition, and field-usage-
         // token scanning are all native-TS-source concerns; an external adapter emits final io/router
-        // fragments instead, so a synthetic overlay artifact never carries these.
+        // fragments instead, so a synthetic overlay artifact never carries these. Controller-prefix
+        // route fragments are the same native-TS-only concern (module doc): an external adapter already
+        // resolves its own controller prefixes before emitting `IoProvide`s, so it never has one of
+        // these to carry either.
         wrapper_def_fragments: Vec::new(),
         wrapper_call_fragments: Vec::new(),
+        controller_prefix_route_fragments: Vec::new(),
         query_call_sites: Vec::new(),
         store_bound_models: Vec::new(),
         field_usage_tokens: Vec::new(),
@@ -890,6 +923,84 @@ mod tests {
             .warnings
             .iter()
             .any(|w| w.contains("git collection skipped")));
+    }
+
+    #[test]
+    fn is_entry_projection_is_exempt_from_dead_candidates_in_envelope_mode() {
+        // Mode A parity with the Mode B overlay union in `analyze::assemble`: an `is_entry`-marked
+        // projection with zero fan-in (a crate root / test harness file, loaded by convention) must not
+        // read as dead, while an unmarked zero-fan-in sibling still does.
+        let mut entry = projection("lib.jsp", 5);
+        entry.is_entry = true;
+        let orphan = projection("orphan.jsp", 5);
+        let out = analyze_envelope(&envelope(vec![entry, orphan]), &config());
+        let dead: Vec<&str> = out
+            .findings
+            .iter()
+            .filter(|f| f.rule_id == "dead-candidates")
+            .map(|f| f.file.as_str())
+            .collect();
+        assert_eq!(dead, vec!["orphan.jsp"], "got findings: {:?}", out.findings);
+    }
+
+    // --- Config-diagnostics parity with `assemble` (the envelope-path diagnostics asymmetry) ---
+
+    #[test]
+    fn disabled_rules_typo_self_reports_in_envelope_mode() {
+        let mut cfg = config();
+        cfg.rule_config.disabled_rules = vec!["no-such-rule".to_string()];
+        let out = analyze_envelope(&envelope(vec![projection("a.jsp", 5)]), &cfg);
+        assert!(
+            out.warnings
+                .iter()
+                .any(|w| w.contains("matching no known rule id") && w.contains("no-such-rule")),
+            "got: {:?}",
+            out.warnings
+        );
+    }
+
+    #[test]
+    fn unmatched_suppression_and_global_exclude_warn_in_envelope_mode() {
+        let mut cfg = config();
+        cfg.rule_config.suppressions = vec![zzop_core::Suppression {
+            rule: "circular".to_string(),
+            path: None,
+            glob: Some("*.stories.tsx".to_string()),
+        }];
+        cfg.rule_config.global_excludes = vec![zzop_core::GlobalExclude {
+            path: Some("legacy/".to_string()),
+            glob: None,
+        }];
+        let out = analyze_envelope(&envelope(vec![projection("a.jsp", 5)]), &cfg);
+        // One warning per dead filter: the suppression glob and the top-level exclude path.
+        assert_eq!(
+            out.warnings
+                .iter()
+                .filter(|w| w.contains("matched no files"))
+                .count(),
+            2,
+            "got: {:?}",
+            out.warnings
+        );
+    }
+
+    #[test]
+    fn matched_filters_and_valid_disabled_rules_stay_silent_in_envelope_mode() {
+        let mut cfg = config();
+        cfg.rule_config.disabled_rules = vec!["circular".to_string()];
+        cfg.rule_config.suppressions = vec![zzop_core::Suppression {
+            rule: "circular".to_string(),
+            path: Some("a.jsp".to_string()),
+            glob: None,
+        }];
+        let out = analyze_envelope(&envelope(vec![projection("a.jsp", 5)]), &cfg);
+        assert!(
+            !out.warnings
+                .iter()
+                .any(|w| w.contains("matching no known rule id") || w.contains("matched no files")),
+            "got: {:?}",
+            out.warnings
+        );
     }
 
     #[test]

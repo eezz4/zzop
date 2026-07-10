@@ -10,7 +10,7 @@
 //! isn't deployed surface.
 
 use zzop_core::io::TaggedProvide;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 use super::split_key;
 
@@ -32,10 +32,10 @@ pub fn unconsumed_procedure_findings(unconsumed_provides: &[TaggedProvide]) -> V
                  an unused definition, since a never-called router entry is perfectly well-typed; that gap \
                  is exactly why this rule exists. Confirm no out-of-analysis consumer before deleting the \
                  procedure — dead API surface is both maintenance burden and attack surface, reachable by \
-                 anyone who finds it even with no legitimate caller left. Disable via rule config \
-                 `disabled_rules: [\"cross-layer/unconsumed-procedure\"]` if this source's procedures are \
+                 anyone who finds it even with no legitimate caller left. {} if this source's procedures are \
                  consumed by clients outside static analysis on purpose.",
-                p.source
+                p.source,
+                disable_hint("cross-layer/unconsumed-procedure")
             );
             Some(Finding {
                 rule_id: "cross-layer/unconsumed-procedure".to_string(),

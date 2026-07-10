@@ -22,7 +22,10 @@
 //!    "how to exclude" leg of the problem+fix+exclude finding contract.
 //! 3. **Native message contract** (`native_rule_files_that_build_findings_mention_disabled_rules`) — a
 //!    pragmatic grep-based proxy (native findings are built in code, not read from declarative data — see
-//!    that test's own doc for exactly what this can and cannot prove).
+//!    that test's own doc for exactly what this can and cannot prove). Accepts either a literal
+//!    `disabled_rules` mention OR a call to the shared `zzop_core::finding::disable_hint` builder every
+//!    native message's disable-hint fragment now goes through (see that test's doc for why the OR is load-
+//!    bearing, not incidental).
 //! 4. **Id hygiene** (`dsl_pack_ids_are_unique_across_packs`, `dsl_rule_ids_are_unique_within_each_pack`,
 //!    `no_dsl_id_collides_with_a_native_analysis_id`).
 //! 5. **Catalog sync** (`catalog_totals_match_loaded_rule_and_analysis_counts`,
@@ -55,6 +58,15 @@
 //!     `cross-layer/dangling-mutation` and others converted to this one kebab-case convention) — without a
 //!     machine check, a future rule could silently reintroduce the exact camelCase-vs-kebab-case drift that
 //!     effort just cleaned up.
+//! 11. **Reference validation** (`every_flag_reference_in_shipped_source_names_a_real_cli_or_external_tool_flag`,
+//!     `every_config_context_backtick_token_in_shipped_source_names_a_real_config_path_or_key`) — a message
+//!     audit found user-facing strings recommending config keys/flags that DO NOT EXIST (`--since=all`,
+//!     `--repo=`, `scanners.vocabulary.commitTypePatterns`). These two tests are the machine contract that
+//!     prevents recurrence: every `--flag`-shaped token and every backtick-quoted config-key-shaped token
+//!     sitting near the word "config" in a shipped Rust/JS source file must name a real knob from
+//!     `packages/cli/lib/config-surface.json` — the single vocabulary file this test shares with
+//!     `packages/cli/lib/mapper.js`'s `KNOWN_KEYS`. See each test's own doc for exactly what its pragmatic
+//!     textual-proximity extraction can and cannot prove.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -236,23 +248,37 @@ fn native_rs_files() -> Vec<PathBuf> {
 /// single field this test can statically evaluate the way it can `RuleDef::message`. Instead this is a
 /// pragmatic grep: read every native rule source file, and if the file contains a literal `rule_id: "`
 /// token (i.e. it constructs at least one `Finding` for a hardcoded rule id), assert the SAME file also
-/// contains the literal substring `disabled_rules` somewhere — the convention every native rule module
-/// already follows (see e.g. `rules/native/rules-graph/src/cross_layer/duplicate_route.rs`, which both
-/// puts `disabled_rules: ["cross-layer/duplicate-route"]` in its finding's message text AND asserts
-/// `message.contains("disabled_rules")` in its own `#[cfg(test)]` module).
+/// EITHER contains the literal substring `disabled_rules` somewhere, OR calls the shared
+/// `zzop_core::finding::disable_hint(` builder.
+///
+/// The two-leg OR is not incidental: a 2026-07-10 audit found the disable-hint fragment
+/// (`` `rules: { "<id>": "off" }` (embedders: `disabled_rules`) ``) hand-written at ~34 native message call
+/// sites, drifted at 31 of them, plus one plain-string (non-`format!`) site that shipped a literal `{{`
+/// because a mechanical format!-escaping sweep assumed every site was inside a `format!` call. Every site
+/// was converted to call `disable_hint`, the single builder that fragment now has (see its own doc comment
+/// and unit tests in `packages/core/src/finding.rs`) — so the literal `disabled_rules` string itself moved
+/// OUT of most native rule files and into that one function's `format!` body. A file whose message text is
+/// spliced around `disable_hint`'s output (e.g. `rules/native/rules-http/src/route_shadowing.rs`, whose
+/// sentence reads "...disable {tail}" rather than "...Disable via config...") may carry neither `rule_id: "`
+/// co-located `disabled_rules` text NOR the literal substring at all anymore — only the `disable_hint(` call
+/// site — so a check requiring the literal string alone would now false-positive on every converted file.
+/// The `disabled_rules` leg stays (not just `disable_hint(`) because a file's own `#[cfg(test)]` module
+/// legitimately still asserts `message.contains("disabled_rules")` as a regression pin, and a hand-authored
+/// file that never adopts the helper but still spells out the convention correctly should not be forced to.
 ///
 /// **What this proves**: a file that builds at least one `Finding` via a literal `rule_id: "..."`
-/// assignment also names `disabled_rules` somewhere in its own source — in every rule module audited while
-/// writing this test, that mention lives inside the exact `message`/`hint` string the finding exposes to a
-/// reader, since there is essentially no other reason a rule-authoring file would contain that literal
-/// string.
+/// assignment also EITHER names `disabled_rules` OR calls `disable_hint(` somewhere in its own source — in
+/// every rule module audited while writing this test, that satisfies the "how to exclude" leg of the
+/// finding's message, either directly (pre-sweep sites) or indirectly through the shared builder
+/// (post-sweep sites, whose own `disable_hint` unit tests in `packages/core/src/finding.rs` pin the
+/// `disabled_rules` mention at the one source of truth).
 ///
 /// **What this CANNOT prove** (documented per the task's "keep it pragmatic" instruction, not silently
 /// assumed):
-/// - That the `disabled_rules` mention is actually inside the live `Finding::message` value reaching the
-///   user, as opposed to a doc comment describing the convention or a `#[cfg(test)]`-only assertion. This
-///   is a file-level co-occurrence check, not an AST-level check tying the substring to a specific
-///   `Finding` construction site.
+/// - That the `disabled_rules` mention (or `disable_hint(` call) is actually inside the live
+///   `Finding::message` value reaching the user, as opposed to a doc comment describing the convention or a
+///   `#[cfg(test)]`-only assertion/import. This is a file-level co-occurrence check, not an AST-level check
+///   tying either substring to a specific `Finding` construction site.
 /// - That a rule id built dynamically (a variable, a format! expansion, a shared constructor in a
 ///   different file) is caught at all — only the literal token `rule_id: "` is detected, so a native rule
 ///   authored in an unusual shape can slip past this test silently.
@@ -261,7 +287,7 @@ fn native_rs_files() -> Vec<PathBuf> {
 ///
 /// A failure here is a strong, actionable signal (the flagged file almost certainly ships a finding with no
 /// exclude-hint), but is not a certainty — read the flagged file before assuming the fix is "add one
-/// sentence to a format! string."
+/// sentence to a format! string" or "call disable_hint."
 #[test]
 fn native_rule_files_that_build_findings_mention_disabled_rules() {
     let mut offenders = Vec::new();
@@ -269,16 +295,19 @@ fn native_rule_files_that_build_findings_mention_disabled_rules() {
         let Ok(text) = fs::read_to_string(&path) else {
             continue;
         };
-        if text.contains("rule_id: \"") && !text.contains("disabled_rules") {
+        if text.contains("rule_id: \"")
+            && !text.contains("disabled_rules")
+            && !text.contains("disable_hint(")
+        {
             offenders.push(path.display().to_string());
         }
     }
     assert!(
         offenders.is_empty(),
         "native rule source files construct a Finding (literal `rule_id: \"...\"`) but never mention \
-         `disabled_rules` anywhere in the same file — the finding's message likely omits the \"how to \
-         exclude\" hint every other native rule includes (see this test's own doc comment for exactly what \
-         this check can/cannot prove): {offenders:#?}"
+         `disabled_rules` and never call `disable_hint(` anywhere in the same file — the finding's message \
+         likely omits the \"how to exclude\" hint every other native rule includes (see this test's own doc \
+         comment for exactly what this check can/cannot prove): {offenders:#?}"
     );
 }
 
@@ -951,4 +980,535 @@ fn rule_ids_are_kebab_case() {
          means the cross-layer vocabulary-unification rename's kebab-case convention broke again: \
          {offenders:#?}"
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// 11. Reference validation — a shipped message must never recommend a config key/flag that does not
+//     exist. This is the machine contract for the defect class a message audit found live: `--since=all`,
+//     `--repo=`, and `scanners.vocabulary.commitTypePatterns` were all recommended by real messages despite
+//     none of them being real knobs. Both checks below load
+//     `packages/cli/lib/config-surface.json` — the single vocabulary file also consumed by
+//     `packages/cli/lib/mapper.js`'s `KNOWN_KEYS` (see that file), so the CLI's own runtime and this test
+//     can never disagree about what a valid flag/config key is.
+// ---------------------------------------------------------------------------------------------
+
+/// `packages/cli/lib/config-surface.json`'s path, resolved relative to this crate's own manifest dir (same
+/// "sibling package, read across the tree, never hand-copied" pattern as `catalog_path`/`dsl_dir`/
+/// `native_dir` above).
+fn config_surface_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/cli/lib/config-surface.json")
+}
+
+/// Mirrors `config-surface.json`'s `configKeys` object.
+#[derive(serde::Deserialize)]
+struct ConfigKeysSurface {
+    top: Vec<String>,
+    packs: Vec<String>,
+    git: Vec<String>,
+    report: Vec<String>,
+    tree: Vec<String>,
+    #[serde(rename = "ruleObject")]
+    rule_object: Vec<String>,
+}
+
+/// Mirrors `config-surface.json`'s top-level shape. `#[serde(rename_all = "camelCase")]` maps this
+/// struct's snake_case field names to the file's camelCase keys; the file's own `_docs` field is simply
+/// ignored (serde drops unrecognized fields by default — no `deny_unknown_fields` here on purpose, the
+/// same "an older/newer consumer degrades to ignored" contract `packages/napi/src/api.rs`'s own request
+/// types document).
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigSurface {
+    config_keys: ConfigKeysSurface,
+    config_paths: Vec<String>,
+    cli_flags: Vec<String>,
+    embedder_fields: Vec<String>,
+    external_tool_flags: Vec<String>,
+    allowlisted_tokens: Vec<String>,
+}
+
+/// Loads and parses `config-surface.json`, failing loudly (not silently skipping) on a missing/malformed
+/// file — same "a load error would otherwise hide real data from every test below" reasoning as
+/// `load_all_packs`'s doc above.
+fn load_config_surface() -> ConfigSurface {
+    let path = config_surface_path();
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+    serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("failed to parse {}: {e}", path.display()))
+}
+
+/// Whether `line` is a comment line — a Rust `//`-prefixed line, or a JS `//`/`/*`/`*`-prefixed line
+/// (covers a JS line comment, a block-comment opener, and every continuation line of a `/* ... */` or
+/// JSDoc `/** ... */` block in this codebase's own style, which always starts a continuation line with a
+/// leading `*`). One check serves both scanned languages: a Rust doc comment (`///`/`//!`) already starts
+/// with `//`, so the same predicate correctly treats it as a comment too. Pragmatic line-level check (same
+/// "keep it pragmatic" spirit as this file's other proxies, e.g. `native_rule_files_that_build_findings_...`
+/// above): it does not track true multi-line block-comment START/end state — a `/* ... */` block whose
+/// continuation lines do NOT start with `*` would not be fully skipped — but every block comment in this
+/// codebase's actual style does, so the gap has never mattered in practice. Applied identically for both
+/// contract-11 checks below: a message reaching a REAL reader is a string literal sitting on a CODE line,
+/// never inside a doc comment describing the convention.
+fn is_comment_line(line: &str) -> bool {
+    let t = line.trim_start();
+    t.starts_with("//") || t.starts_with("/*") || t.starts_with('*')
+}
+
+/// CHECK A's own regex: a `--`-prefixed, all-lowercase, hyphen/digit-friendly flag token — deliberately
+/// matches the exact shape a CLI/tool flag is spelled in prose (`--since`, `--depth`, `--unshallow`), not a
+/// general "starts with two dashes" scan (an em dash-adjacent `--` in prose, or a `--` inside a code
+/// comment, is excluded by the comment-line skip above, not by this regex).
+fn flag_reference_regex() -> regex::Regex {
+    regex::Regex::new(r"--[a-z][a-z0-9-]{1,}").expect("static regex")
+}
+
+/// CHECK A extraction: every `--flag`-shaped token appearing on a non-comment line of `text`, in order.
+/// Pure — no vocabulary lookup here, see `unknown_flag_references` for the validation step. Deliberately
+/// line-level (not a single whole-file regex pass): comment-skipping is naturally a per-line decision (see
+/// `is_comment_line`'s doc), and every flag reference this contract cares about is short enough to never
+/// span a line break in practice.
+fn extract_flag_references(text: &str) -> Vec<String> {
+    let re = flag_reference_regex();
+    let mut out = Vec::new();
+    for line in text.lines() {
+        if is_comment_line(line) {
+            continue;
+        }
+        out.extend(re.find_iter(line).map(|m| m.as_str().to_string()));
+    }
+    out
+}
+
+/// CHECK A validation: which of `flags` names neither a real CLI flag nor a real external-tool flag —
+/// i.e. which ones `config-surface.json` does not vouch for. Returns them in the order found (may contain
+/// duplicates — the real-tree test below reports every occurrence, not just distinct offenders, so a
+/// reader can see how many places need fixing).
+fn unknown_flag_references(flags: &[String], vocab: &ConfigSurface) -> Vec<String> {
+    let allowed: BTreeSet<&str> = vocab
+        .cli_flags
+        .iter()
+        .map(String::as_str)
+        .chain(vocab.external_tool_flags.iter().map(String::as_str))
+        .collect();
+    flags
+        .iter()
+        .filter(|f| !allowed.contains(f.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// CHECK B's shape gate: a backtick-quoted token counts as "config-key-shaped" only when it looks like a
+/// bare identifier or a dotted/bracketed path (`git.since`, `trees[].root`, `disabled_rules`) — NOT a JSON
+/// snippet like `` rules: { "circular": "off" } `` (spaces/colons/braces/quotes all fail this shape), which
+/// every native rule's own disable-hint legitimately embeds right next to the word "config". A token this
+/// gate rejects is simply not checked at all (neither accepted nor an offender) — see this contract's
+/// module-doc entry for why that is the intentionally narrow scope, not a gap.
+fn config_key_shape_regex() -> regex::Regex {
+    regex::Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*([.\[\]]+[A-Za-z0-9_\[\]]*)*$")
+        .expect("static regex")
+}
+
+/// CHECK B extraction: every backtick-quoted token sitting on a non-comment line of `text` within 120
+/// bytes of a whole-word (case-insensitive) "config" occurrence — also required to itself be on a
+/// non-comment line, so a rustdoc comment that happens to backtick-reference an ordinary Rust identifier
+/// near its own prose use of "config" (extremely common in this codebase's `///`/`//!` docs — e.g.
+/// `` `EngineConfig` ``, `` `ScoresConfig` ``) is never even considered. Both the "config" occurrences and
+/// the backtick tokens are located in a COMMENT-BLANKED copy of `text` (`is_comment_line`-flagged lines
+/// replaced with spaces of the same length) rather than filtering post-hoc, so byte offsets — and therefore
+/// the ±120 distance itself — stay computed on a single consistent coordinate space that never lets a
+/// "config" mention on one line anchor a match to a backtick token on an unrelated comment line one line
+/// below/above it.
+///
+/// Word-boundary "config" matching (`\bconfig\b`, not a bare substring scan) is deliberate: this codebase's
+/// source is full of identifiers that merely CONTAIN "config" (`EngineConfig`, `ScoresConfig`,
+/// `RuleConfig`, `config.rs` filenames) without naming the word "config" on its own — a substring scan
+/// production-tested against the real tree here turned up 170+ incidental hits from exactly that class
+/// before switching to `\bconfig\b` cut it to the single-digit count this contract's allowlist actually
+/// documents.
+fn extract_config_context_tokens(text: &str) -> Vec<String> {
+    let masked: String = text
+        .lines()
+        .map(|line| {
+            if is_comment_line(line) {
+                " ".repeat(line.len())
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let config_re = regex::Regex::new(r"(?i)\bconfig\b").expect("static regex");
+    let backtick_re = regex::Regex::new(r"`([^`]*)`").expect("static regex");
+
+    let config_positions: Vec<usize> = config_re.find_iter(&masked).map(|m| m.start()).collect();
+    if config_positions.is_empty() {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    for caps in backtick_re.captures_iter(&masked) {
+        let whole = caps.get(0).expect("group 0 always matches");
+        let near = config_positions
+            .iter()
+            .any(|&cpos| cpos.abs_diff(whole.start()) <= 120 || cpos.abs_diff(whole.end()) <= 120);
+        if near {
+            out.push(caps[1].to_string());
+        }
+    }
+    out
+}
+
+/// CHECK B validation: which of `tokens` (as extracted by `extract_config_context_tokens`) names neither a
+/// real config path/key nor an allowlisted/embedder token. A token that is not config-key-shaped at all
+/// (`config_key_shape_regex` rejects it — e.g. a JSON snippet) is silently skipped, not reported: this
+/// contract only judges tokens shaped like a knob a reader could actually go try.
+///
+/// Per-shape rule (mirrors the task's own two-branch contract):
+/// - **Dotted/bracketed** (contains `.` or `[`): valid when the WHOLE token is in `configPaths` or
+///   `allowlistedTokens`, OR its first segment (split on `.`/`[`) is in `embedderFields` — an embedder field
+///   can legitimately be written with its own dotted continuation in a message (none do today, but the
+///   shape is allowed the same way a bare embedder field name is).
+/// - **Single word**: valid when it is a top-level config key, a nested key name from ANY of
+///   `packs`/`git`/`report`/`tree`/`ruleObject` (the nested scopes are flattened into one name set here —
+///   a message says `` `dir` `` or `` `since` `` without also repeating its parent, so there is no unambiguous
+///   way to check a nested key against only its OWN parent's scope from the token text alone), an embedder
+///   field, or an allowlisted token.
+fn unknown_config_context_tokens(tokens: &[String], vocab: &ConfigSurface) -> Vec<String> {
+    let shape = config_key_shape_regex();
+
+    let top: BTreeSet<&str> = vocab.config_keys.top.iter().map(String::as_str).collect();
+    let mut nested: BTreeSet<&str> = BTreeSet::new();
+    for scope in [
+        &vocab.config_keys.packs,
+        &vocab.config_keys.git,
+        &vocab.config_keys.report,
+        &vocab.config_keys.tree,
+        &vocab.config_keys.rule_object,
+    ] {
+        nested.extend(scope.iter().map(String::as_str));
+    }
+    let paths: BTreeSet<&str> = vocab.config_paths.iter().map(String::as_str).collect();
+    let embedder: BTreeSet<&str> = vocab.embedder_fields.iter().map(String::as_str).collect();
+    let allow: BTreeSet<&str> = vocab
+        .allowlisted_tokens
+        .iter()
+        .map(String::as_str)
+        .collect();
+
+    tokens
+        .iter()
+        .filter(|t| {
+            if !shape.is_match(t) {
+                return false; // not config-key-shaped at all — out of scope, not an offense.
+            }
+            let is_dotted = t.contains('.') || t.contains('[');
+            if is_dotted {
+                if paths.contains(t.as_str()) || allow.contains(t.as_str()) {
+                    return false;
+                }
+                let first_seg = t.split(['.', '[']).next().unwrap_or(t.as_str());
+                !embedder.contains(first_seg)
+            } else {
+                !(top.contains(t.as_str())
+                    || nested.contains(t.as_str())
+                    || embedder.contains(t.as_str())
+                    || allow.contains(t.as_str()))
+            }
+        })
+        .cloned()
+        .collect()
+}
+
+/// Every `rules/native/<crate>/src/**/*.rs` file (recursively under each crate's OWN `src/` dir — narrower
+/// than contract 3's `native_rs_files`, which walks all of `rules/native` regardless of subdirectory; today
+/// every `.rs` file under `rules/native` happens to live under a `src/`, so the two agree in practice, but
+/// this contract's scanned-file set is specified as `rules/native/**/src/**/*.rs` and this function honors
+/// that literally so a future non-`src` `.rs` file added elsewhere under a crate — a `build.rs`, a
+/// crate-root `tests/` dir — is not silently swept in).
+fn native_rule_src_rs_files() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = fs::read_dir(native_dir()) else {
+        return out;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let crate_dir = entry.path();
+        if crate_dir.is_dir() {
+            collect_rs_files(&crate_dir.join("src"), &mut out);
+        }
+    }
+    out
+}
+
+/// `packages/engine/src/**/*.rs`, recursively — this crate's own `src/` dir (`CARGO_MANIFEST_DIR` itself,
+/// since `rule_contracts.rs` lives in `packages/engine/tests/`).
+fn engine_src_files() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    collect_rs_files(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut out);
+    out
+}
+
+/// `packages/metrics/src/**/*.rs`, recursively (sibling package, same pattern as `core_src_dir`).
+fn metrics_src_files() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    collect_rs_files(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../metrics/src"),
+        &mut out,
+    );
+    out
+}
+
+/// `packages/cli/lib/*.js` — direct children ONLY (not recursive: `packages/cli/lib` has no subdirectories
+/// today, and the task's own scanned-file set names this one non-recursively, unlike every `.rs` glob
+/// above).
+fn cli_lib_js_files() -> Vec<PathBuf> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/cli/lib");
+    let mut out = Vec::new();
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return out;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("js") {
+            out.push(path);
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The full scanned-file set for contract 11's two real-tree checks: `rules/native/**/src/**/*.rs` +
+/// `packages/engine/src/**/*.rs` + `packages/metrics/src/**/*.rs` + `packages/cli/lib/*.js`, sorted so a
+/// failing assertion's offender list has a stable, diffable order across runs.
+fn reference_validation_scanned_files() -> Vec<PathBuf> {
+    let mut out = native_rule_src_rs_files();
+    out.extend(engine_src_files());
+    out.extend(metrics_src_files());
+    out.extend(cli_lib_js_files());
+    out.sort();
+    out
+}
+
+/// Contract #11, CHECK A — every `--flag`-shaped token on a non-comment line of every scanned file must
+/// name a real CLI flag or a real external tool's flag (`config-surface.json`'s `cliFlags` ∪
+/// `externalToolFlags`). This is the exact machine check that would have caught the shipped `--since=all`/
+/// `--repo=` defects (see `flag_reference_unit_tests` below for those pinned as unit tests).
+///
+/// **What this proves**: every `--flag`-shaped token reachable on a code line of a scanned source file
+/// names a flag `config-surface.json` vouches for.
+/// **What this CANNOT prove** (same "pragmatic proxy, not a semantic engine" caveat as this file's other
+/// grep-based contracts): a flag built dynamically (`format!("--{name}")`) is invisible to this text scan;
+/// a flag inside a STRING that is itself embedded in a doc comment example (as opposed to a real `//`/`/*`
+/// prose line) is not distinguished from a real message — this is a textual proxy over source text, not an
+/// AST-aware "is this reachable from a `Finding::message`" check.
+#[test]
+fn every_flag_reference_in_shipped_source_names_a_real_cli_or_external_tool_flag() {
+    let vocab = load_config_surface();
+    let mut offenders = Vec::new();
+    for path in reference_validation_scanned_files() {
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        for flag in unknown_flag_references(&extract_flag_references(&text), &vocab) {
+            offenders.push(format!("{}: `{flag}`", path.display()));
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "shipped source names a --flag that is not a real CLI flag or a real external tool flag (not in \
+         config-surface.json's cliFlags/externalToolFlags — the exact defect class `--since=all`/`--repo=` \
+         shipped as): {offenders:#?}"
+    );
+}
+
+/// Contract #11, CHECK B — every backtick-quoted, config-key-shaped token sitting within 120 bytes of the
+/// word "config" on a non-comment line of every scanned file must name a real config path/key
+/// (`config-surface.json`'s `configPaths` ∪ `configKeys` ∪ `embedderFields` ∪ `allowlistedTokens`). This is
+/// the exact machine check that would have caught the shipped `scanners.vocabulary.commitTypePatterns`
+/// defect (see `config_context_unit_tests` below for that pinned as a unit test).
+///
+/// **Allowlist entries** (each earned, not padding — see `config-surface.json`'s own `_docs.allowlistedTokens`
+/// for the summary, and this list for the exact source line each was found at):
+/// - `zzop.config.jsonc` — the CLI's own config filename; not currently backtick-quoted anywhere in the
+///   scanned tree (it appears as plain prose, e.g. `packages/metrics/src/diagnostics.rs`), allowlisted
+///   preemptively so a future backtick-quoted mention does not spuriously fail.
+/// - `Authorization` — `rules/native/rules-cross-layer/src/cross_layer/external_secret_in_url.rs`'s
+///   `external-secret-in-url` message recommends moving a secret to an `` `Authorization` `` HTTP header;
+///   that backtick sits ~50 bytes before the SAME message's own "Disable via config `rules: {...}`" clause,
+///   putting it inside the 120-byte window purely by co-location, not because it names a config knob.
+/// - `IoConsume` — `rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs`'s
+///   message names the `` `IoConsume` `` Rust fact type a Mode B adapter would project calls into; same
+///   "shares a sentence with the disable hint" co-location, not a config reference.
+/// - `crossLayer.unresolvedConsumes` — `rules/native/rules-cross-layer/src/cross_layer/unconsumed_endpoint.rs`'s
+///   message points a reader at the `` `crossLayer.unresolvedConsumes` `` OUTPUT field (part of the JSON
+///   `analyzeTrees()` returns, not an input config path) for corroborating evidence; same co-location
+///   pattern.
+///
+/// **What this proves**: every backtick-quoted, identifier/dotted-path-shaped token within 120 bytes of
+/// "config" on a code line of a scanned source file names a real config path/key, embedder field, or
+/// allowlisted non-config token.
+/// **What this CANNOT prove**: a config-key reference with no backticks and no adjacent "config" text is
+/// invisible to this scan (prose references are explicitly out of scope — see the module doc); a
+/// dynamically-built message (`format!("`{key}`")`) is invisible the same way CHECK A's dynamic-flag gap
+/// is.
+#[test]
+fn every_config_context_backtick_token_in_shipped_source_names_a_real_config_path_or_key() {
+    let vocab = load_config_surface();
+    let mut offenders = Vec::new();
+    for path in reference_validation_scanned_files() {
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let tokens = extract_config_context_tokens(&text);
+        for tok in unknown_config_context_tokens(&tokens, &vocab) {
+            offenders.push(format!("{}: `{tok}`", path.display()));
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "shipped source has a backtick-quoted, config-key-shaped token near the word \"config\" that names \
+         no real config path/key (not in config-surface.json's configPaths/configKeys/embedderFields/ \
+         allowlistedTokens — the exact defect class `scanners.vocabulary.commitTypePatterns` shipped as): \
+         {offenders:#?}"
+    );
+}
+
+/// Synthetic, deliberately tiny vocabulary for the CHECK A/B unit tests below — independent of the real
+/// `config-surface.json` (which can grow over time) so these tests stay a fixed, minimal pin of exactly the
+/// three historical defects, never accidentally passing because the real file happens to allowlist
+/// something today.
+fn tiny_synthetic_vocab() -> ConfigSurface {
+    ConfigSurface {
+        config_keys: ConfigKeysSurface {
+            top: vec!["rules".to_string(), "git".to_string()],
+            packs: vec![],
+            git: vec!["since".to_string()],
+            report: vec![],
+            tree: vec![],
+            rule_object: vec![],
+        },
+        config_paths: vec!["git.since".to_string()],
+        cli_flags: vec!["--config".to_string()],
+        embedder_fields: vec!["disabled_rules".to_string()],
+        external_tool_flags: vec!["--unshallow".to_string(), "--depth".to_string()],
+        allowlisted_tokens: vec![],
+    }
+}
+
+#[cfg(test)]
+mod flag_reference_unit_tests {
+    use super::*;
+
+    /// Pins the shipped `--since=all` defect: `--since` is not a real CLI flag (the real flag is
+    /// `--severity`) and not a real external tool flag either — CHECK A must reject it.
+    #[test]
+    fn rejects_the_shipped_since_all_defect() {
+        let vocab = tiny_synthetic_vocab();
+        let flags = extract_flag_references("re-run with `--since=all`");
+        assert_eq!(
+            unknown_flag_references(&flags, &vocab),
+            vec!["--since".to_string()]
+        );
+    }
+
+    /// A real external tool flag (git's own `--unshallow`, the fix for a shallow clone) must be accepted —
+    /// proves CHECK A does not reject every unfamiliar-looking flag, only ones absent from the vocabulary.
+    #[test]
+    fn accepts_a_real_external_git_flag() {
+        let vocab = tiny_synthetic_vocab();
+        let flags = extract_flag_references("git fetch --unshallow");
+        assert!(unknown_flag_references(&flags, &vocab).is_empty());
+    }
+
+    /// Pins the shipped `--repo=<path>` defect: `zzop` has no `--repo` flag (roots/trees are config-only,
+    /// see `packages/cli/bin/zzop.js`'s real flag set) — CHECK A must reject it.
+    #[test]
+    fn rejects_the_shipped_repo_path_defect() {
+        let vocab = tiny_synthetic_vocab();
+        let flags = extract_flag_references("--repo=<path>");
+        assert_eq!(
+            unknown_flag_references(&flags, &vocab),
+            vec!["--repo".to_string()]
+        );
+    }
+
+    /// A flag reference inside a comment line must be invisible to extraction entirely — comments are not
+    /// messages a reader of `zzop`'s OUTPUT ever sees.
+    #[test]
+    fn ignores_a_flag_reference_inside_a_comment_line() {
+        assert!(extract_flag_references("// re-run with --since=all").is_empty());
+        assert!(extract_flag_references("* re-run with --since=all").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod config_context_unit_tests {
+    use super::*;
+
+    /// Pins the shipped `scanners.vocabulary.commitTypePatterns` defect: `scanners` is not a real top-level
+    /// config key (the real top-level keys are `roots`/`trees`/`packs`/`rules`/`exclude`/`git`/`cacheDir`/
+    /// `sizeCap`/`format`/`failOn`/`report`) — CHECK B must reject the whole dotted token on its first
+    /// segment.
+    #[test]
+    fn rejects_the_shipped_commit_type_patterns_defect() {
+        let vocab = tiny_synthetic_vocab();
+        let tokens = extract_config_context_tokens(
+            "add patterns in config under `scanners.vocabulary.commitTypePatterns`",
+        );
+        assert_eq!(
+            unknown_config_context_tokens(&tokens, &vocab),
+            vec!["scanners.vocabulary.commitTypePatterns".to_string()]
+        );
+    }
+
+    /// A JSON-snippet-shaped backtick token (spaces/colons/braces/quotes) is not config-key-shaped at all —
+    /// `rules` itself IS a real top key, but the snippet as a whole must not even reach the shape gate, let
+    /// alone be reported as an offender.
+    #[test]
+    fn a_json_snippet_shaped_token_is_out_of_scope_not_an_offense() {
+        let vocab = tiny_synthetic_vocab();
+        let tokens = extract_config_context_tokens(
+            "in zzop.config.jsonc via `rules: { \"circular\": \"off\" }`",
+        );
+        assert!(unknown_config_context_tokens(&tokens, &vocab).is_empty());
+    }
+
+    /// An embedder-field reference (the "embedders: `disabled_rules`" leg every native rule's disable-hint
+    /// carries) must be accepted.
+    #[test]
+    fn accepts_an_embedder_field_reference() {
+        let vocab = tiny_synthetic_vocab();
+        let tokens =
+            extract_config_context_tokens("disable via config (embedders: `disabled_rules`)");
+        assert!(unknown_config_context_tokens(&tokens, &vocab).is_empty());
+    }
+
+    /// A real dotted config path (`git.since`) must be accepted.
+    #[test]
+    fn accepts_a_real_dotted_config_path() {
+        let vocab = tiny_synthetic_vocab();
+        let tokens =
+            extract_config_context_tokens("configured via `git.since` in your config file");
+        assert!(unknown_config_context_tokens(&tokens, &vocab).is_empty());
+    }
+
+    /// A config-key-shaped backtick token farther than 120 bytes from any "config" occurrence must not even
+    /// be extracted — proves the distance window is enforced, not just the vocabulary lookup.
+    #[test]
+    fn ignores_a_token_outside_the_120_byte_window() {
+        let filler = "x".repeat(200);
+        let text = format!("config {filler} `scanners.vocabulary.commitTypePatterns`");
+        assert!(extract_config_context_tokens(&text).is_empty());
+    }
+
+    /// A config-key-shaped backtick token inside a comment line must be invisible to extraction entirely,
+    /// even when a "config" occurrence sits right next to it on the same comment line — a doc comment is
+    /// not a message a reader of `zzop`'s OUTPUT ever sees.
+    #[test]
+    fn ignores_a_token_inside_a_comment_line() {
+        assert!(extract_config_context_tokens(
+            "// add patterns in config under `scanners.vocabulary.commitTypePatterns`"
+        )
+        .is_empty());
+    }
 }

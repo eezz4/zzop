@@ -14,13 +14,14 @@ pub mod adapters;
 pub mod lang;
 
 pub use adapters::controller_decorators::{
-    extract_controller_guarded_lines, extract_controller_provides,
+    extract_controller_guarded_lines, extract_controller_prefix_route_fragments,
+    extract_controller_provides,
 };
 pub use adapters::db_table_consume::{
     extract_db_table_consumes, extract_query_call_sites, PRISMA_CLIENT_GETTER,
 };
 pub use adapters::egress::{
-    const_map_fragment, extract_http_egress, is_external_url, resolve_raw_path,
+    base_relative_path, const_map_fragment, extract_http_egress, is_external_url, resolve_raw_path,
 };
 pub use adapters::global_prefix::extract_global_prefix_marker;
 pub use adapters::hono_client::extract_hono_client_consumes;
@@ -78,7 +79,22 @@ pub use lang::write_site::{
 ///   sentinel `IoProvide { kind: "nest-global-prefix", ... }`, ridden on the existing `provides` channel
 ///   (no cache-schema bump) so `zzop-engine`'s tree assembly can prepend the global prefix onto every
 ///   `http` provide key and then strip the sentinel before output.
-pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1";
+/// - `base-relative-egress-v1`: a base-relative path literal on a recognized HTTP call
+///   (`axios.get('users/login')` — the `baseURL` idiom) now keys as its root-normalized path
+///   (`GET /users/login`) instead of falling unresolved; see `adapters::egress::base_relative_path`'s
+///   veto list for what still never keys.
+/// - `query-drop-v1`: HTTP CONSUME keys drop any `?...`/`#...` query/fragment suffix
+///   (`core::http_consume_interface_key`) — `axios.get('articles?limit=10')` and
+///   `` axios.get(`articles?${qs}`) `` now key as `GET /articles`, so they can exact-join (or
+///   route-near-miss against) the provide, instead of being structurally unmatchable. Provide keys
+///   are untouched (`?` in a route PATTERN is not a query separator).
+/// - `controller-prefix-ref-v1`: `const_map_fragment` now also folds every top-level (incl. `export`)
+///   `enum`'s string-valued members (`RouteKey.Asset -> "assets"`); AND a `@Controller(RouteKey.Asset)`
+///   dotted member-expression prefix no longer skips the whole controller — its methods are now
+///   projected as `zzop_core::ControllerPrefixRouteFragment`s
+///   (`extract_controller_prefix_route_fragments`), resolved against the merged const map at assemble
+///   time instead of being dropped outright.
+pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1";
 
 use std::collections::{HashMap, HashSet};
 

@@ -367,6 +367,14 @@ fn as_unknown_as_cast_is_still_flagged() {
 }
 
 #[test]
+fn bare_as_unknown_without_a_second_as_is_not_flagged() {
+    // `line_pattern` requires "as unknown" to be immediately followed by another "as" to fire — a lone
+    // `as unknown` widening cast (no double-cast escape hatch) is safe and must not match.
+    let f = as_cast_findings(&[("widen.ts", "const y = x as unknown;\n")]);
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
 fn as_cast_shaped_text_inside_a_full_line_comment_is_not_flagged() {
     let f = as_cast_findings(&[(
         "commented.ts",

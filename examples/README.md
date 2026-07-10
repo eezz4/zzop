@@ -7,9 +7,14 @@ runnable references for each.
 
 ## Mode A — bundle (a full envelope for a new language)
 
-An out-of-process parser for a language the engine has no in-workspace crate for (JSP, Python, ...) emits
-a complete `NormalizedEnvelope` that *replaces* native analysis for that source (`analyzeEnvelope`).
+An out-of-process parser for a language the engine has no in-workspace crate for (Rust, JSP, Python, ...)
+emits a complete `NormalizedEnvelope` that *replaces* native analysis for that source (`analyzeEnvelope`).
 
+- [`rust-parser-adapter/`](rust-parser-adapter/) — a runnable lexical Rust parser: projects a whole
+  Cargo workspace (module-tree `use`/`mod` resolution → dep edges, `pub` items → symbols,
+  cargo-convention entries → `is_entry`) and round-trips it through `analyzeEnvelope`. Worked result:
+  zzop analyzing its own workspace — 191 files, 3878 symbols, 541 import edges,
+  `dead-candidates`/`unreachable` 0 (entries correctly exempt), 6 genuine module-coupling cycles.
 - [`jsp-envelope.example.json`](jsp-envelope.example.json) — a hand-written, crude-parser-shaped JSP
   envelope: symbols with no body spans, one `http` provide + one `db-table` consume, no imports. It
   validates cleanly against the contract and is the fixture behind `zzop-core`'s

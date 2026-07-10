@@ -19,7 +19,9 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 use zzop_core::callgraph::{bfs_reachable, SymbolGraph};
-use zzop_core::{ApiEndpoint, Finding, NonIdempotentKind, Severity, SourceSymbol, WriteSite};
+use zzop_core::{
+    disable_hint, ApiEndpoint, Finding, NonIdempotentKind, Severity, SourceSymbol, WriteSite,
+};
 
 /// Lines above a handler's body start to look back for an `idempotent-ok` marker (shared by both scanners).
 const OK_MARKER_LOOKBACK_LINES: u32 = 4;
@@ -165,8 +167,14 @@ pub fn scan_unsafe_read_endpoint(input: &ScanUnsafeReadEndpointInput) -> Vec<Fin
             "{where_} — GET/HEAD must be safe & idempotent. Move the write behind a mutating method \
              (POST/PUT/PATCH/DELETE), or make this endpoint genuinely read-only. If the write is \
              deliberate and safe to repeat (e.g. a fire-and-forget audit log), mark it with \
-             `// idempotent-ok: <reason>` on the line above the handler, or disable via rule config \
-             `disabled_rules: [\"unsafe-read-endpoint\"]` if this applies more broadly."
+             `// idempotent-ok: <reason>` on the line above the handler, or disable {} if this applies \
+             more broadly.",
+            // `disable_hint` always starts with "Disable " — this site already supplies "disable"
+            // mid-sentence (after "or"), so only the "via config ..." remainder is spliced in, same
+            // technique `rules-schema/src/message.rs`'s `disable_hint_tail` uses.
+            disable_hint("unsafe-read-endpoint")
+                .strip_prefix("Disable ")
+                .expect("disable_hint always starts with \"Disable \"")
         );
         out.push(Finding {
             rule_id: "unsafe-read-endpoint".to_string(),
@@ -316,10 +324,10 @@ fn hint_for(method: &str, path: &str, site: &WriteSite, depth: u32) -> String {
     format!(
         "{method} {path} reaches {} {where_} ({}) — {why}; {contract}. Add an idempotency key or a \
          dedup/uniqueness check before the write, or mark it with `// idempotent-ok: <reason>` above the \
-         handler if a retry is genuinely safe here. Disable via rule config \
-         `disabled_rules: [\"non-idempotent-write\"]` if this applies more broadly.",
+         handler if a retry is genuinely safe here. {} if this applies more broadly.",
         site.sink,
-        kind.as_str()
+        kind.as_str(),
+        disable_hint("non-idempotent-write")
     )
 }
 
@@ -448,6 +456,35 @@ mod tests {
         });
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].data.as_ref().unwrap()["depth"], 0);
+    }
+
+    /// Pins the exact rendered message — regression coverage for the mid-sentence, lowercase-"disable"
+    /// `disable_hint` splice this message went through during the 2026-07-10 dialect-consolidation sweep
+    /// (unlike most native messages, this one reads "...or disable {tail}", not "...Disable via config...").
+    #[test]
+    fn unsafe_read_endpoint_message_is_byte_identical_to_the_pre_sweep_text() {
+        let files = files(&[(
+            "api/h.ts",
+            "export function touch(c: any) { return prisma.ping.create({ data: {} }); }\n",
+        )]);
+        let symbols = with_write_sites(&files, vec![sym("api/h.ts", "touch", 1)]);
+        let out = scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
+            api_endpoints: &[endpoint("GET", "/touch", "touch")],
+            symbols: &symbols,
+            symbol_graph: &Vec::new(),
+            files: &files,
+        });
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].rule_id, "unsafe-read-endpoint");
+        assert_eq!(
+            out[0].message,
+            "GET /touch writes directly (prisma.ping.create) — GET/HEAD must be safe & idempotent. Move \
+             the write behind a mutating method (POST/PUT/PATCH/DELETE), or make this endpoint genuinely \
+             read-only. If the write is deliberate and safe to repeat (e.g. a fire-and-forget audit log), \
+             mark it with `// idempotent-ok: <reason>` on the line above the handler, or disable via \
+             config `rules: { \"unsafe-read-endpoint\": \"off\" }` (embedders: `disabled_rules`) if this \
+             applies more broadly."
+        );
     }
 
     #[test]
@@ -603,6 +640,30 @@ mod tests {
         assert_eq!(data["kind"], "create");
         assert_eq!(data["sink"], "prisma.thing.create");
         assert_eq!(data["depth"], 0);
+    }
+
+    /// Pins the exact rendered message — regression coverage for the `disable_hint` splice
+    /// `hint_for`/`scan_non_idempotent_write` went through during the 2026-07-10 dialect-consolidation sweep.
+    #[test]
+    fn non_idempotent_write_message_is_byte_identical_to_the_pre_sweep_text() {
+        let files = files(&[("api/h.ts", "export function putThing(c: any) { return prisma.thing.create({ data: { id: c.id } }); }\n")]);
+        let symbols = with_write_sites(&files, vec![sym("api/h.ts", "putThing", 1)]);
+        let out = scan_non_idempotent_write(&ScanNonIdempotentWriteInput {
+            api_endpoints: &[endpoint("PUT", "/things/:id", "putThing")],
+            symbols: &symbols,
+            symbol_graph: &Vec::new(),
+            files: &files,
+        });
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].rule_id, "non-idempotent-write");
+        assert_eq!(
+            out[0].message,
+            "PUT /things/:id reaches prisma.thing.create directly (create) — a retry inserts a duplicate \
+             row; PUT must be idempotent. Add an idempotency key or a dedup/uniqueness check before the \
+             write, or mark it with `// idempotent-ok: <reason>` above the handler if a retry is \
+             genuinely safe here. Disable via config `rules: { \"non-idempotent-write\": \"off\" }` \
+             (embedders: `disabled_rules`) if this applies more broadly."
+        );
     }
 
     #[test]

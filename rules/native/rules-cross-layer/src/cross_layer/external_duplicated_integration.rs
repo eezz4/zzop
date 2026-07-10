@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use zzop_core::io::TaggedConsume;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 use super::split_external_key;
 
@@ -68,14 +68,14 @@ pub fn external_duplicated_integration_findings(
              same third-party integration, duplicating auth/retry/failure-mode handling and multiplying the \
              places a vendor-side change (base URL, auth scheme) has to be applied. Centralize this \
              integration behind one client/backend proxy that every source calls through instead of hitting the \
-             vendor directly from each source. Disable via rule config `disabled_rules: \
-             [\"cross-layer/external-duplicated-integration\"]` if these sources are intentionally independent \
+             vendor directly from each source. {} if these sources are intentionally independent \
              deployments that must not share a runtime dependency on one proxy.",
             sources_sorted.len(),
             sources_sorted.join(", "),
             first.file,
             first.line,
             first.source,
+            disable_hint("cross-layer/external-duplicated-integration"),
         );
         out.push(Finding {
             rule_id: "cross-layer/external-duplicated-integration".to_string(),

@@ -54,7 +54,8 @@
       meta-test (<code>packages/engine/tests/rule_contracts.rs</code>) machine-checks that every id listed
       below matches what the engine actually loads at runtime, so the catalog cannot silently drift out of
       sync with the code. Every rule below carries its own inline suppress marker, and every rule and
-      native analysis id can also be turned off per-run via <code>disabledRules</code>.</p>
+      native analysis id can also be turned off per-run — in <code>zzop.config.jsonc</code> via
+      <code>rules: { "&lt;id&gt;": "off" }</code>, or via <code>disabledRules</code> for embedders.</p>
     </div>
 
     <section id="pack-be-db">
@@ -96,7 +97,7 @@
             <tr><td><code>json-parse-no-try</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>json-parse-ok</code></td><td><code>JSON.parse(...)</code> called on apparent external input (<code>req</code>/<code>body</code>/<code>params</code>/<code>query</code>/...) with no surrounding <code>try</code> — malformed input throws instead of producing a handled 4xx.</td></tr>
             <tr><td><code>fetch-no-timeout</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>fetch-timeout-ok</code></td><td>Outbound HTTP call (<code>fetch</code>/<code>axios</code>/<code>got</code>) on a backend-looking path with no timeout/<code>AbortController</code> visible in the same function — a hung upstream hangs the request indefinitely.</td></tr>
             <tr><td><code>process-exit-in-lib</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>process-exit-ok</code></td><td><code>process.exit(...)</code> called inside a function outside <code>scripts/</code>/<code>tools/</code>/<code>bin/</code> — skips cleanup and kills the whole server process, not just the current request.</td></tr>
-            <tr><td><code>body-limit-missing</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>body-limit-ok</code></td><td>Body parser (<code>express.json</code>/<code>urlencoded</code>/<code>bodyParser.*</code>) configured with no explicit <code>limit</code> — unbounded payload size, a payload-size DoS vector.</td></tr>
+            <tr><td><code>body-limit-missing</code></td><td><code>info</code></td><td><code>line-scan</code></td><td><code>body-limit-ok</code></td><td>Body parser (<code>express.json</code>/<code>urlencoded</code>/<code>bodyParser.*</code>) configured with no explicit <code>limit</code> — relies on the implicit 100kb default: too small for some endpoints, unexamined for the rest.</td></tr>
             <tr><td><code>console-in-be</code></td><td><code>info</code></td><td><code>line-scan</code></td><td><code>console-ok</code></td><td><code>console.*</code> call in backend-path source (<code>api/</code>/<code>server/</code>/<code>backend/</code>/<code>be/</code>/<code>routes/</code>/<code>controllers/</code>/<code>services/</code>) — unstructured, synchronous, not queryable.</td></tr>
             <tr><td><code>interval-no-clear</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>interval-ok</code></td><td><code>setInterval(...)</code> with no matching <code>clearInterval(...)</code> anywhere in the file — a leaked timer keeps the process/page alive and re-fires forever.</td></tr>
             <tr><td><code>env-outside-config</code></td><td><code>info</code></td><td><code>line-scan</code></td><td><code>env-access-ok</code></td><td><code>process.env.X</code> accessed outside a config module (files/dirs named <code>config</code>/<code>env</code>/<code>settings</code> exempt) — scatters env parsing/validation instead of centralizing it.</td></tr>
@@ -138,6 +139,7 @@
             <tr><td><code>java-weak-random</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>java-random-ok</code></td><td><code>new Random()</code> used on the same line as a token/session/otp/nonce-shaped identifier — a predictable, non-cryptographic PRNG for a security-sensitive value.</td></tr>
             <tr><td><code>stacktrace-to-response</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>stacktrace-ok</code></td><td>An exception's stack trace/message (<code>printStackTrace()</code>/<code>.getMessage()</code>) produced in a method that also touches the HTTP response — internal class names/paths/SQL fragments can reach the client.</td></tr>
             <tr><td><code>trust-all-tls</code></td><td><code>critical</code></td><td><code>line-scan</code></td><td><code>trust-all-ok</code></td><td>TLS certificate/hostname verification disabled (trust-all <code>X509TrustManager</code>, <code>ALLOW_ALL_HOSTNAME_VERIFIER</code>, or an always-<code>true</code> hostname-verifier lambda) — accepts any certificate for any host, opening a MITM path.</td></tr>
+            <tr><td><code>conn-string-credentials</code></td><td><code>critical</code></td><td><code>line-scan</code></td><td><code>conn-cred-ok</code></td><td>Connection-string URL with a password in the userinfo slot (<code>scheme://user:pass@host</code> — redis/postgres/mongodb/amqp/...) committed to source — repo readers own the datastore and git history preserves it; move to env/secret config AND rotate. Scans test paths too (a committed credential is leaked regardless).</td></tr>
           </tbody>
         </table>
       </div>
@@ -151,7 +153,7 @@
             <tr><th>Rule id</th><th>Severity</th><th>Matcher</th><th>Suppress marker</th><th>Detects</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>no-system-dialogs</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>browser-ok</code></td><td>Blocking system dialog (<code>alert</code>/<code>confirm</code>/<code>prompt</code>) — blocks the main thread, can't be styled/tested.</td></tr>
+            <tr><td><code>no-system-dialogs</code></td><td><code>info</code></td><td><code>line-scan</code></td><td><code>browser-ok</code></td><td>Blocking system dialog (<code>alert</code>/<code>confirm</code>/<code>prompt</code>) — freezes the page/tab (main-thread block), can't be styled or tested.</td></tr>
             <tr><td><code>no-document-write</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>document-write-ok</code></td><td><code>document.write</code>/<code>writeln</code> — breaks HTML parsing post-load, blocked under many CSP/PWA setups.</td></tr>
           </tbody>
         </table>
@@ -221,6 +223,22 @@
       </div>
     </section>
 
+    <section id="pack-redis">
+      <h2><code>redis</code></h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Rule id</th><th>Severity</th><th>Matcher</th><th>Suppress marker</th><th>Detects</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>flushall-in-code</code></td><td><code>critical</code></td><td><code>line-scan</code></td><td><code>redis-flush-ok</code></td><td><code>flushall</code>/<code>flushdb</code> call or quoted command literal reachable from application code — wipes every key in the database/instance; one bug or exposed admin endpoint away from total data loss.</td></tr>
+            <tr><td><code>keys-glob-scan</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>redis-keys-ok</code></td><td><code>KEYS</code> scan (<code>.keys('pattern')</code> with a string argument, or a quoted <code>'KEYS'</code> command) — O(N) walk that blocks the single-threaded server; use the SCAN cursor family or an index set.</td></tr>
+            <tr><td><code>client-no-error-listener</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>redis-error-ok</code></td><td>redis/ioredis client created in a file with no <code>.on('error', ...)</code> anywhere in it — node-redis emits <code>error</code> on an EventEmitter, so an unhandled listener crashes the process on the first connection blip.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section id="pack-security">
       <h2><code>security</code></h2>
       <div class="table-scroll">
@@ -273,7 +291,7 @@
 
     <section id="stub-packs">
       <h2>Stub packs (roadmap)</h2>
-      <p><code>conventions</code>, <code>jsp-security</code>, <code>react</code>, <code>redis</code>, and
+      <p><code>conventions</code>, <code>jsp-security</code>, <code>react</code>, and
       <code>routes</code> load successfully today — each is a valid pack with an empty <code>rules: []</code>
       — but ship no detections yet. Each needs either declaration→use tracking, cross-repo/cross-file joins,
       or JSX/AST structure the DSL can't express; see
@@ -302,7 +320,8 @@
       <code>zzop_engine::analyze_trees</code>'s joined <code>CrossLayerResult</code> (every other row here
       runs per-tree), exposed as <code>crossLayerFindings</code> alongside <code>crossLayer</code> in
       <code>analyzeTrees</code>'s output. None of the 20 honor an inline suppression marker — they are
-      disable-only, via <code>disabledRules</code>.</p>
+      disable-only: <code>rules: { "&lt;id&gt;": "off" }</code> in config, or <code>disabledRules</code>
+      for embedders.</p>
       <div class="table-scroll">
         <table>
           <thead>
@@ -441,6 +460,7 @@
     <a href="#pack-http" class="docs-toc__link">http</a>
     <a href="#pack-java-security" class="docs-toc__link">java-security</a>
     <a href="#pack-perf" class="docs-toc__link">perf</a>
+    <a href="#pack-redis" class="docs-toc__link">redis</a>
     <a href="#pack-security" class="docs-toc__link">security</a>
     <a href="#pack-sql" class="docs-toc__link">sql</a>
     <a href="#pack-typescript" class="docs-toc__link">typescript</a>

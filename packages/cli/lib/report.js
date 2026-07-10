@@ -209,15 +209,33 @@ function disclosureLines(disclosure) {
   return lines;
 }
 
+// The three "provider side is missing from the run" fix directions, in order of likelihood — shared by
+// the single-tree and cross-repo one-sided-IO disclosures. Guidance only (points at existing config and
+// adapter options); `providerScope` names where an in-run provider would live ("this tree" for a
+// single-tree run, "an attached tree" for the cross-repo summary). Deliberately FE/BE-neutral: the
+// serving side can be a backend, a peer service, or a module-federation remote — the recommendation is
+// "attach whichever repo serves these endpoints so both sides are reviewed together", not "add your
+// backend".
+function oneSidedIoFixLines(providerScope) {
+  return [
+    '  - The code serving these endpoints lives in another repository (a backend, a peer service, a module-federation remote — whatever owns them): attach that checkout as another tree and re-run so both sides are reviewed together — `"trees": [{ "root": ".", "sourceId": "consumer" }, { "root": "../provider-repo", "sourceId": "provider" }]`.',
+    `  - The serving code is inside ${providerScope} but its framework is not natively extracted: project its routes with a Mode B overlay adapter (see \`examples/\` in the zzop repository).`,
+    '  - The consumes only target third-party/external APIs: then this state is expected — read "unprovided" as external calls, not as drift.',
+  ];
+}
+
 /**
  * Render one tree's markdown report body (used both for a multi-tree run's per-tree file and for a
  * single-tree run's only file). Deterministic: same inputs -> byte-identical output.
  * @param {string} sourceId
  * @param {string} [root]
  * @param {object} treeOutput  a PerTree `output` (single-tree shape): `{ findings, fileCount, warnings, ir }`
+ * @param {boolean} [singleTreeRun]  true when this tree IS the whole run — gates the one-sided-IO
+ *   guidance, which would be a false alarm on a per-tree file in a multi-tree run (a consume-only FE
+ *   tree is healthy there; the run-level check lives in `buildCrossRepoMarkdown`).
  * @returns {string}
  */
-function buildTreeMarkdown(sourceId, root, treeOutput) {
+function buildTreeMarkdown(sourceId, root, treeOutput, singleTreeRun = false) {
   const findings = Array.isArray(treeOutput.findings) ? treeOutput.findings : [];
   const fileCount = Number(treeOutput.fileCount) || 0;
   const warnings = Array.isArray(treeOutput.warnings) ? treeOutput.warnings : [];
@@ -261,6 +279,15 @@ function buildTreeMarkdown(sourceId, root, treeOutput) {
     lines.push(
       `- Blindness: no IO surface was extracted from this tree (0 provides, 0 consumes across ${covFiles} files), so it is invisible to the cross-layer join — discount any "unconsumed"/"unprovided" verdict that references it. If this tree does call an API, the calls flow through a client the extractor cannot see; project them with a Mode B adapter to restore visibility.`
     );
+  }
+  // One-sided IO — the single-tree analog of the run-level check in `buildCrossRepoMarkdown`. Mutually
+  // exclusive with the joinContributionZero bullet above (this one requires consumes > 0).
+  const covConsumesTotal = covConsumesKeyed + covConsumesUnresolved;
+  if (singleTreeRun && covProvides === 0 && covConsumesTotal > 0) {
+    lines.push(
+      `- One-sided IO (no provides): ${covConsumesTotal} consumes were extracted but 0 provides, so every consume in this run is structurally guaranteed to look unprovided — that usually means the provider side is missing from the run, not that the API drifted. In order of likelihood:`
+    );
+    lines.push(...oneSidedIoFixLines('this tree'));
   }
   lines.push('');
 
@@ -385,6 +412,17 @@ function buildCrossRepoMarkdown(output) {
     }
   }
 
+  // 2b. Run-level one-sided IO: consumes exist somewhere but NO tree provides anything, so the join has
+  // no provider side at all — every consume is structurally guaranteed to land in "unprovided".
+  const totalProvides = censusRows.reduce((n, r) => n + r.ioProvides, 0);
+  const totalConsumes = censusRows.reduce((n, r) => n + r.keyed + r.unresolved, 0);
+  if (totalProvides === 0 && totalConsumes > 0) {
+    lines.push(
+      `- One-sided IO (no provides in any tree): ${totalConsumes} consumes were extracted across all trees but 0 provides, so every consume is structurally guaranteed to land in "unprovided" — that usually means the provider side is missing from the run, not that the API drifted. In order of likelihood:`
+    );
+    lines.push(...oneSidedIoFixLines('an attached tree'));
+  }
+
   // 3. The existing coverage-RULE findings (self-report rules), appended after the above.
   const coverage = crossLayerFindings
     .filter((f) => COVERAGE_RULE_IDS.has(String(f && f.ruleId)))
@@ -435,6 +473,11 @@ function buildCrossRepoMarkdown(output) {
   if (unprovided.length === 0) {
     lines.push('None.');
   } else {
+    // Cause taxonomy before the list — "unprovided" is ambiguous between a missing repo, an extraction
+    // gap, and real drift; an agent reading the list needs that split up front.
+    lines.push(
+      'No attached tree provides these keys. Three causes: (a) the repository serving these endpoints is not part of this run — attach its checkout as another tree so both sides are reviewed together; (b) the serving code is in an attached tree but its routes were not extracted — project them with a Mode B overlay adapter; (c) real spec drift. A cluster sharing one path prefix usually means (a).'
+    );
     for (const c of unprovided) {
       lines.push(`- \`${c.key || c.raw || '(no key)'}\` consumed by \`${c.source}\` (${c.file}:${c.line})`);
     }
@@ -465,6 +508,26 @@ function buildCrossRepoMarkdown(output) {
   lines.push(
     `- Unresolved consumes: ${unresolvedCount}   External consumes: ${externalCount}   Ambiguous consumes: ${ambiguousCount}`
   );
+  // Unresolved consumes get their sites listed (capped), not just counted: several cross-layer
+  // messages point the reader at this bucket ("the join is blind for these"), and a count alone
+  // gives an agent nothing to act on — the raw call-site text is the lead for resolving the
+  // indirection (wrapper, SDK, cross-file constant). Cap is announced, never silent.
+  const UNRESOLVED_LIST_CAP = 20;
+  if (unresolvedCount > 0) {
+    const unresolvedList = crossLayer.unresolvedConsumes
+      .slice()
+      .sort((a, b) => cmpStr(a.source, b.source) || cmpStr(a.file, b.file) || cmpNum(a.line, b.line));
+    for (const c of unresolvedList.slice(0, UNRESOLVED_LIST_CAP)) {
+      const what = c.raw ? `\`${c.raw}\`` : '(no source text captured)';
+      const method = c.method ? ` [${c.method}]` : '';
+      lines.push(`- ${what}${method} (unresolved) — \`${c.source}\` ${c.file}:${c.line}`);
+    }
+    if (unresolvedList.length > UNRESOLVED_LIST_CAP) {
+      lines.push(
+        `- ... and ${unresolvedList.length - UNRESOLVED_LIST_CAP} more unresolved consume site(s) — full list in report.json (\`crossLayer.unresolvedConsumes\`).`
+      );
+    }
+  }
   lines.push('');
 
   const remaining = crossLayerFindings.filter((f) => !COVERAGE_RULE_IDS.has(String(f && f.ruleId)));
@@ -532,7 +595,7 @@ function buildMarkdownReports(output, ctx = {}) {
   const sourceId = safeOutput.sourceId || ctx.sourceId || 'report';
   const root = safeOutput.root != null ? safeOutput.root : ctx.root;
   const filename = `${slugify(sourceId, 0)}.md`;
-  return [{ name: filename, content: buildTreeMarkdown(sourceId, root, safeOutput) }];
+  return [{ name: filename, content: buildTreeMarkdown(sourceId, root, safeOutput, true) }];
 }
 
 module.exports = { buildReports, buildMarkdownReports, DEFAULT_FORMATS, REPORT_FORMATS };

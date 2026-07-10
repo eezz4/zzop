@@ -6,7 +6,7 @@
     {
       "id": "mixed-content-egress",
       "severity": "warning",
-      "message": "Plain-http URL literal — mixed content/MITM risk. Use https. Suppress a vetted case with `// mixed-content-ok`.",
+      "message": "Plain-http `http://` URL literal used from code that may run in an https-served app — browsers block this as mixed content, or otherwise silently downgrade that request to no TLS. Use https, or route through an env-based/configurable base URL for internal service hosts — the private-IP/localhost exclude on this rule does not cover hostnames that resolve internally without a literal private IP, or https-required internal proxies. Suppress a vetted case with `// mixed-content-ok`.",
       "suppress_marker": "mixed-content-ok",
       "matcher": {
         "type": "line-scan",
@@ -51,7 +51,7 @@
     {
       "id": "ws-no-auth",
       "severity": "info",
-      "message": "WebSocket opened/upgraded (`new WebSocket(...)`/`.upgrade(...)`) with no auth material (`token`/`auth`/`session`/`cookie`/`jwt`) in the same function — an unauthenticated realtime channel lets anyone who can reach the socket connect. Attach a token/cookie/session credential when opening or upgrading. Suppress a vetted case with `// ws-auth-ok`.",
+      "message": "WebSocket opened/upgraded (`new WebSocket(...)`/`.upgrade(...)`) with no auth material (`token`/`auth`/`session`/`cookie`/`jwt`) in the same function — an unauthenticated realtime channel lets anyone who can reach the socket connect. The WebSocket API can't set custom headers on the handshake, so instead use a short-lived one-time ticket/token in the WS URL's query string exchanged server-side, rely on same-origin cookies (sent automatically on the upgrade), or authenticate via the first message sent over the socket. Suppress a vetted case with `// ws-auth-ok`.",
       "suppress_marker": "ws-auth-ok",
       "matcher": {
         "type": "method-scan",

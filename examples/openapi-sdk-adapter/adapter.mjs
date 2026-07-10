@@ -41,11 +41,28 @@ if (!specPath || (mode === 'consume' && !feRoot)) {
 }
 
 // operationId -> "METHOD /path", with zzop's http_interface_key normalization ({param} -> {}).
+//
+// The served route is `servers[].url`'s PATH PART + the paths key (OpenAPI's effective-URL rule) —
+// immich, for example, declares `servers: [{"url": "/api"}]` and serves `/api/activities`, while
+// `paths` only says `/activities`. Skipping the base made every emitted key one prefix short of the
+// backend tree's real provides: 0 exact joins, 349 route-near-miss "missing `/api`" findings on the
+// immich pair. A server url with template variables (`{region}.host/v2`) contributes only what is
+// static — if its path part itself is templated, we fall back to no prefix rather than guess.
 const spec = JSON.parse(readFileSync(specPath, 'utf8'));
+const serverUrl = (Array.isArray(spec.servers) && spec.servers[0] && spec.servers[0].url) || '';
+let basePath = '';
+if (serverUrl) {
+  // Relative form ("/api") is already a path; absolute form contributes only its pathname.
+  const rawPath = /^[a-z][a-z0-9+.-]*:\/\//i.test(serverUrl)
+    ? serverUrl.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '')
+    : serverUrl;
+  if (!rawPath.includes('{')) basePath = rawPath.replace(/\/+$/, '');
+}
 const opMap = new Map();
 const HTTP = /^(get|post|put|patch|delete|head|options)$/i;
 for (const [p, methods] of Object.entries(spec.paths || {})) {
-  const norm = p.replace(/\{[^}]+\}/g, '{}').replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+  const norm =
+    `${basePath}${p}`.replace(/\{[^}]+\}/g, '{}').replace(/\/+/g, '/').replace(/\/$/, '') || '/';
   for (const [m, op] of Object.entries(methods)) {
     if (op && op.operationId && HTTP.test(m)) opMap.set(op.operationId, `${m.toUpperCase()} ${norm}`);
   }

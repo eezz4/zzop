@@ -127,9 +127,10 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
     BlindnessClass {
         id: "input-scope-error",
         group: INPUT_CONFIG,
-        summary: "A mistyped or too-narrow root that yields zero (or partial) files is currently absorbed \
-                  as an empty tree without an explicit warning, so a typo can read as a clean/empty repo.",
-        status: DisclosureStatus::NotYetDetected,
+        summary: "A root that does not exist / is not a directory, or that yields zero files, \
+                  self-reports as a leading warning; a too-narrow root that still matches SOME files \
+                  (partial scope) is not detected.",
+        status: DisclosureStatus::Partial,
     },
     BlindnessClass {
         id: "config-error",
@@ -188,7 +189,7 @@ mod tests {
         ("coincidental-match", "asserted"),
         ("config-error", "asserted"),
         ("consume-side-unextracted", "asserted"),
-        ("input-scope-error", "notYetDetected"),
+        ("input-scope-error", "partial"),
         ("key-mismatch-drift", "partial"),
         ("language-unparsed", "partial"),
         ("provide-side-unextracted", "notYetDetected"),

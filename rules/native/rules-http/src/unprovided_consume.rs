@@ -118,8 +118,8 @@ pub fn unprovided_consume_findings(
                      source's provides, not just this one. This finding starts at Info severity: raw-Worker \
                      route extraction (`export default {{ fetch }}`) is not yet covered by this analysis's \
                      provides-extraction, which remains a structural false-positive source until that \
-                     extraction lands. Disable via rule config `disabled_rules: [\"unprovided-consume\"]` \
-                     if intentional (native rules have no inline suppression marker)."
+                     extraction lands. {} if intentional (this rule has no inline suppression marker).",
+                    zzop_core::disable_hint("unprovided-consume")
                 ),
                 data: Some(serde_json::json!({ "key": key })),
             })

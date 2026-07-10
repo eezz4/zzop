@@ -544,11 +544,33 @@ fn find_first_then_create_with_no_unique_guard_is_flagged() {
 }
 
 #[test]
-fn find_first_then_create_inside_transaction_is_not_flagged() {
+fn find_first_then_create_wrapped_only_in_transaction_is_still_flagged() {
+    // A bare `$transaction(...)` wrap is no longer treated as a fix: at the database's default READ
+    // COMMITTED isolation level, two concurrent transactions can both read empty and both insert, so this
+    // still races and must fire. (Previously this was the pack's negative/veto fixture for a `$transaction`
+    // wrap; the veto was removed because it no longer reflects a real fix — see `find-then-create-no-unique`'s
+    // message.)
     let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",
-        "declare const prisma: any;\nexport async function ensureUserSafe(email: string) {\n  await prisma.$transaction(async (tx: any) => {\n    const existing = await tx.user.findFirst({ where: { email } });\n    if (!existing) {\n      await tx.user.create({ data: { email } });\n    }\n  });\n}\n",
+        "declare const prisma: any;\nexport async function ensureUserStillRacy(email: string) {\n  await prisma.$transaction(async (tx: any) => {\n    const existing = await tx.user.findFirst({ where: { email } });\n    if (!existing) {\n      await tx.user.create({ data: { email } });\n    }\n  });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "find-then-create-no-unique");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn find_first_then_create_alongside_a_unique_constraint_backed_upsert_is_not_flagged() {
+    // Veto-mechanism test (same co-occurrence-approximation convention as `sql.rs`'s
+    // `atomic_transaction_wrapped_toggle_is_not_flagged`): the `find` + `.create(` trigger shape is still
+    // present, but a `.upsert(` call present anywhere in the same function is treated as proof the
+    // duplicate-row race has a real fix in place (unlike a bare `$transaction` wrap, which is no longer
+    // accepted as one), so the `absent` veto suppresses the finding.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function ensureUserUpsert(email: string) {\n  const existing = await prisma.user.findFirst({ where: { email } });\n  if (!existing) {\n    await prisma.user.create({ data: { email } });\n  }\n  await prisma.userProfile.upsert({ where: { email }, create: { email }, update: {} });\n}\n",
     );
     let out = scan(&dir);
     assert!(

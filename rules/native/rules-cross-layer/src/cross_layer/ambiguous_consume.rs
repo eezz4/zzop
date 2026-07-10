@@ -8,7 +8,7 @@
 //! the caller cannot know, from source alone, which candidate will actually answer.
 
 use zzop_core::io::AmbiguousConsume;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 /// `candidates` in the emitted `data` are capped to this many entries — the finding cites the total via
 /// `candidateCount`/`candidateSourceCount` even when the list itself is truncated.
@@ -47,11 +47,11 @@ pub fn ambiguous_consume_findings(ambiguous_consumes: &[AmbiguousConsume]) -> Ve
                  routing (load balancer / service mesh / gateway rule) that this static analysis cannot \
                  observe. Either disambiguate the route (e.g. give each service a distinct key prefix) or \
                  confirm which of the {candidate_count} candidate provider(s) is the intended one and \
-                 document that routing decision. Disable via rule config `disabled_rules: \
-                 [\"cross-layer/ambiguous-consume\"]` if this is an intentional gateway fan-out where any \
+                 document that routing decision. {} if this is an intentional gateway fan-out where any \
                  provider is equally valid (e.g. a stateless health/echo route deliberately duplicated across \
                  replicas behind a shared gateway).",
-                a.source
+                a.source,
+                disable_hint("cross-layer/ambiguous-consume")
             );
 
             Finding {

@@ -7,7 +7,7 @@
 //! absence means no near candidate exists at all — the target may not exist anywhere in this run.
 
 use zzop_core::io::TaggedConsume;
-use zzop_core::{Finding, Severity};
+use zzop_core::{disable_hint, Finding, Severity};
 
 use super::{is_write_method, split_key};
 
@@ -32,10 +32,10 @@ pub fn unprovided_mutation_call_findings(unprovided_consumes: &[TaggedConsume]) 
                  repo may simply be missing from this `analyzeTrees` run, or the route exists but registers \
                  under a non-literal base path (an enum/constant `@Controller(...)` argument, or a \
                  file-routing/dispatch-table framework) this extractor could not resolve — check the provider \
-                 source directly before concluding the route is missing. Disable via rule config \
-                 `disabled_rules: [\"cross-layer/unprovided-mutation-call\"]` if the provider is known to live \
+                 source directly before concluding the route is missing. {} if the provider is known to live \
                  outside this analysis (a repo not included in this run, a third-party service, ...).",
-                c.source
+                c.source,
+                disable_hint("cross-layer/unprovided-mutation-call")
             );
             Some(Finding {
                 rule_id: "cross-layer/unprovided-mutation-call".to_string(),
