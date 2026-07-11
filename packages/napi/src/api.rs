@@ -456,7 +456,7 @@ pub fn analyze_trees_json(config_json: &str) -> Result<String, String> {
     struct MultiAnalyzeOutputView<'a> {
         trees: Vec<TreeEntryView<'a>>,
         cross_layer: &'a zzop_core::CrossLayerResult,
-        /// The 6 `cross-layer/*` native rules run over `cross_layer` (`zzop_engine::analyze_trees`'s own
+        /// The 22 `cross-layer/*` native rules run over `cross_layer` (`zzop_engine::analyze_trees`'s own
         /// `MultiAnalyzeOutput::cross_layer_findings` field — a plain `&'a [Finding]` borrow, same
         /// zero-copy-view convention as every other field on this struct, since `Finding` already derives
         /// `Serialize` in `zzop-core`).
@@ -523,6 +523,43 @@ pub fn analyze_envelope_json(envelope_json: &str, config_json: &str) -> Result<S
 
     serde_json::to_string(&SingleTreeOutputView::of(&output))
         .map_err(|e| format!("zzop-napi: failed to serialize analyzeEnvelope() output: {e}"))
+}
+
+/// A JSON-serializable `{valid, issues}` report — [`validate_envelope_only_json`]'s only output shape.
+#[derive(Serialize)]
+struct ValidateReport {
+    valid: bool,
+    issues: Vec<String>,
+}
+
+/// `validateEnvelopeOnly(envelopeJson)`: runs `zzop_core::validate_envelope` alone — no `configJson`, no
+/// pack loading, no `zzop_engine::analyze_envelope` — and reports the result as a JSON `{"valid": bool,
+/// "issues": ["..."]}`. This is `analyze_envelope_json`'s validation half (see its use of
+/// `zzop_core::validate_envelope` above) split out on its own so an external adapter author gets fast,
+/// offline "is my envelope well-formed" feedback (`zzop adapter validate <path>`) without needing a full
+/// engine run or even a `configJson` at all.
+///
+/// Unlike every other `*_json` function in this module, this one never fails: an unparseable or
+/// semantically invalid envelope still produces an ordinary `{"valid": false, "issues": [...]}` report,
+/// not an `Err` — a validity CHECK cannot itself be "wrong" the way a malformed request can, so there is
+/// nothing here for `addon.rs`'s `catch` to turn into a JS `Error` except an actual panic.
+pub fn validate_envelope_only_json(envelope_json: &str) -> String {
+    let report = match zzop_core::validate_envelope(envelope_json) {
+        Ok(_) => ValidateReport {
+            valid: true,
+            issues: Vec::new(),
+        },
+        Err(issues) => ValidateReport {
+            valid: false,
+            issues,
+        },
+    };
+
+    serde_json::to_string(&report).unwrap_or_else(|e| {
+        format!(
+            r#"{{"valid":false,"issues":["zzop-napi: failed to serialize validate report: {e}"]}}"#
+        )
+    })
 }
 
 /// `version()`: this crate's own Cargo version plus every parser's
@@ -1208,6 +1245,40 @@ mod tests {
     fn analyze_envelope_json_rejects_invalid_config_json() {
         let err = analyze_envelope_json(&tiny_envelope_json(), "not json").unwrap_err();
         assert!(err.contains("invalid analyzeEnvelope() config JSON"));
+    }
+
+    #[test]
+    fn validate_envelope_only_json_reports_valid_for_a_well_formed_envelope() {
+        let out = validate_envelope_only_json(&tiny_envelope_json());
+        let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        assert_eq!(value["valid"], true);
+        assert_eq!(value["issues"].as_array().expect("issues array").len(), 0);
+    }
+
+    #[test]
+    fn validate_envelope_only_json_lists_issues_for_a_broken_envelope() {
+        let bad = tiny_envelope_json().replace("zzop-normalized-ast", "bogus-format");
+        let out = validate_envelope_only_json(&bad);
+        let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        assert_eq!(value["valid"], false);
+        let issues = value["issues"].as_array().expect("issues array");
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.as_str().unwrap().contains("unknown format")),
+            "expected an 'unknown format' issue, got: {value}"
+        );
+    }
+
+    #[test]
+    fn validate_envelope_only_json_never_fails_on_unparseable_input() {
+        let out = validate_envelope_only_json("not json");
+        let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        assert_eq!(value["valid"], false);
+        let issues = value["issues"].as_array().expect("issues array");
+        assert!(issues
+            .iter()
+            .any(|i| i.as_str().unwrap().contains("invalid JSON")));
     }
 
     #[test]

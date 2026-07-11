@@ -12,8 +12,17 @@
 //! near-miss target of an unmatched `cross-layer/route-near-miss` consume (`near_miss_targets`, sourced from
 //! `route_near_miss::route_near_miss_results`), the message gains a cross-reference note pointing at that
 //! finding — see `unconsumed_endpoint`'s module doc for the dogfood motivation.
+//!
+//! ## tRPC mount-route suppression
+//! Same exclusion as the sibling `unconsumed_endpoint` (see its module doc): a provide
+//! [`super::is_trpc_mount_route_key`] identifies as a tRPC mount route is excluded here too when ITS OWN
+//! source tree is in `trpc_participating_sources` — a POST-verb tRPC mount (`file_routes`'s
+//! `pages/api/**` fallback-verb convention emits both GET and POST for a default-export handler) would
+//! otherwise ALSO fire this write-verb rule for the exact same tone-noise site. Per-tree, not run-global:
+//! see `unconsumed_endpoint`'s module doc for why a run-global edge count would misattribute suppression
+//! across trees.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use zzop_core::io::TaggedProvide;
 use zzop_core::{disable_hint, Finding, Severity};
@@ -24,10 +33,15 @@ use super::{is_write_method, split_key};
 pub fn unconsumed_mutation_endpoint_findings(
     unconsumed_provides: &[TaggedProvide],
     near_miss_targets: &BTreeMap<(String, String, u32), NearMissTargetRef>,
+    trpc_participating_sources: &BTreeSet<String>,
 ) -> Vec<Finding> {
     let mut out: Vec<Finding> = unconsumed_provides
         .iter()
         .filter(|p| p.provide.kind == "http" && !zzop_core::is_test_file(&p.provide.file))
+        .filter(|p| {
+            !(trpc_participating_sources.contains(&p.source)
+                && super::is_trpc_mount_route_key(&p.provide.key))
+        })
         .filter_map(|p| {
             let (method, _path) = split_key(&p.provide.key)?;
             if !is_write_method(method) {
@@ -117,6 +131,14 @@ mod tests {
         BTreeMap::new()
     }
 
+    fn no_trpc() -> BTreeSet<String> {
+        BTreeSet::new()
+    }
+
+    fn trpc_sources(sources: &[&str]) -> BTreeSet<String> {
+        sources.iter().map(|s| s.to_string()).collect()
+    }
+
     #[test]
     fn dead_write_endpoint_is_flagged_with_method_and_source() {
         let out = unconsumed_mutation_endpoint_findings(
@@ -129,6 +151,7 @@ mod tests {
                 Some("deleteUser"),
             )],
             &no_near_miss(),
+            &no_trpc(),
         );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].rule_id, "cross-layer/unconsumed-mutation-endpoint");
@@ -157,6 +180,7 @@ mod tests {
                 None,
             )],
             &no_near_miss(),
+            &no_trpc(),
         );
         assert!(out.is_empty());
     }
@@ -173,6 +197,7 @@ mod tests {
                 None,
             )],
             &no_near_miss(),
+            &no_trpc(),
         );
         assert!(out.is_empty());
     }
@@ -189,6 +214,7 @@ mod tests {
                 None,
             )],
             &no_near_miss(),
+            &no_trpc(),
         );
         assert!(out.is_empty());
     }
@@ -202,6 +228,7 @@ mod tests {
                 unconsumed_provide("http", "PATCH /c", "be", "a.java", 2, None),
             ],
             &no_near_miss(),
+            &no_trpc(),
         );
         let sites: Vec<(&str, u32)> = out.iter().map(|f| (f.file.as_str(), f.line)).collect();
         assert_eq!(sites, vec![("a.java", 2), ("a.java", 9), ("z.java", 1)]);
@@ -228,6 +255,7 @@ mod tests {
                 Some("deleteUser"),
             )],
             &targets,
+            &no_trpc(),
         );
         assert_eq!(out.len(), 1);
         assert!(out[0].message.contains("2 unmatched http consume(s)"));
@@ -251,6 +279,7 @@ mod tests {
                 Some("deleteUser"),
             )],
             &no_near_miss(),
+            &no_trpc(),
         );
         assert_eq!(out.len(), 1);
         assert!(!out[0].message.contains("near-miss"));
@@ -260,5 +289,60 @@ mod tests {
             .unwrap()
             .get("nearMissConsumeCount")
             .is_none());
+    }
+
+    #[test]
+    fn trpc_mount_route_write_verb_is_suppressed_when_its_own_tree_has_a_trpc_edge() {
+        // `file_routes`'s pages/api fallback-verb convention emits POST too for a default-export
+        // handler — the write-verb rule must suppress the tRPC mount site exactly like its sibling.
+        let out = unconsumed_mutation_endpoint_findings(
+            &[unconsumed_provide(
+                "http",
+                "POST /api/trpc/{}",
+                "web",
+                "pages/api/trpc/[trpc].ts",
+                3,
+                Some("default"),
+            )],
+            &no_near_miss(),
+            &trpc_sources(&["web"]),
+        );
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn trpc_mount_route_write_verb_is_still_reported_when_no_tree_has_a_trpc_edge() {
+        let out = unconsumed_mutation_endpoint_findings(
+            &[unconsumed_provide(
+                "http",
+                "POST /api/trpc/{}",
+                "web",
+                "pages/api/trpc/[trpc].ts",
+                3,
+                Some("default"),
+            )],
+            &no_near_miss(),
+            &no_trpc(),
+        );
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn trpc_mount_route_write_verb_is_still_reported_when_only_a_different_tree_has_trpc_edges() {
+        // Class A regression: mirrors `unconsumed_endpoint`'s equivalent test — a run-global edge count
+        // would wrongly suppress tree "web"'s own write-verb mount route based on tree "api"'s edges.
+        let out = unconsumed_mutation_endpoint_findings(
+            &[unconsumed_provide(
+                "http",
+                "POST /api/trpc/{}",
+                "web",
+                "pages/api/trpc/[trpc].ts",
+                3,
+                Some("default"),
+            )],
+            &no_near_miss(),
+            &trpc_sources(&["api"]),
+        );
+        assert_eq!(out.len(), 1);
     }
 }

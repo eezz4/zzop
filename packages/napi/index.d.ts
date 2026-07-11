@@ -109,6 +109,14 @@ export function analyzeTrees(configJson: string): string;
  */
 export function analyzeEnvelope(envelopeJson: string, configJson: string): string;
 
+/**
+ * Fast offline `{valid, issues}` check for a `NormalizedAstEnvelope` against the v1 Normalized AST
+ * contract — `zzop_core::validate_envelope` alone, no `configJson` and no engine analysis. Never throws
+ * on an invalid envelope: an unparseable/semantically-invalid envelope still returns an ordinary
+ * `'{"valid":false,"issues":[...]}'` JSON string, never an `Err`.
+ */
+export function validateEnvelopeOnly(envelopeJson: string): string;
+
 /** This addon's crate version plus every parser's `PARSER_FINGERPRINT` (diagnostics). */
 export function version(): string;
 
@@ -116,6 +124,7 @@ declare const _default: {
   analyze: typeof analyze;
   analyzeTrees: typeof analyzeTrees;
   analyzeEnvelope: typeof analyzeEnvelope;
+  validateEnvelopeOnly: typeof validateEnvelopeOnly;
   version: typeof version;
 };
 export default _default;

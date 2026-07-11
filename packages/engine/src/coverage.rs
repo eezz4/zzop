@@ -30,6 +30,11 @@ pub struct CoverageCensus {
     /// structurally weak. Renderers turn this bool into the human "blind/dark" label (kernel stays fact-
     /// only). A pure UI library with no io legitimately trips this too — that over-disclosure is
     /// intentional (disclosure-only, never suppresses findings).
+    ///
+    /// EXACT zero is deliberate and must NOT be "unified" with `framework_silence`'s near-zero floor
+    /// (a pinned policy-value divergence, see that module's tests): this is an unconditional structural
+    /// ASSERTION (always true when it fires), while the tripwires are heuristic self-reports that may
+    /// fire at 1-2 extracted facts. Widening this to near-zero would turn the assertion into a heuristic.
     pub join_contribution_zero: bool,
 }
 

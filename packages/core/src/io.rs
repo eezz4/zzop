@@ -356,6 +356,17 @@ fn id_key(kind: &str, key: &str) -> String {
     format!("{kind} {key}")
 }
 
+/// The verb-shaped-NAME vocabulary: every place a cross-layer HTTP verb is inferred from an
+/// identifier's NAME — a member callee (`axios.get`, Angular `this.http.get`), a computed-member
+/// string literal (`axios['post']`), a hono `$get`-style terminal, an Express-style `.get(path, h)`
+/// registration, a Spring `@GetMapping` annotation — draws from this ONE set (single definition;
+/// per-vocabulary spellings stay at their call sites but are pinned to this const by tests, so a verb
+/// added here is added everywhere deliberately, never by drift). Deliberately NOT a filter on keys
+/// overall: extractors that read the verb from an EXPLICIT attribute (`fetch(url, { method: 'HEAD' })`,
+/// Spring `method = RequestMethod.HEAD`) pass their literal through verbatim — an explicit spelling is
+/// a visible fact, while a name-shaped match outside this set would be a guess.
+pub const HTTP_KEY_VERBS: &[&str] = &["GET", "POST", "PUT", "DELETE", "PATCH"];
+
 /// The canonical `http` interface key both sides must produce so the join is exact.
 /// Path params (`{x}` or `:x`) -> `{}`; duplicate slashes collapsed; trailing slash dropped; method upper-cased.
 /// Keeping this in core (not per-adapter) guarantees an FE-emitted key and a BE-emitted key are byte-identical.

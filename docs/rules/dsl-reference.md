@@ -173,6 +173,10 @@ the exclusion.
 - Matches `// <marker>` or `// <marker>: <reason>` — the marker text is regex-escaped before compiling
   (`//\s*{escaped-marker}\b`), so a marker containing regex metacharacters (`n+1-ok`'s `+`) matches
   literally, not as regex syntax.
+- For a file whose extension is `.sql` (case-insensitive), a `--`-comment naming the marker suppresses
+  identically (`-- <marker>` or `-- <marker>: <reason>`), same lookback window and escaping rules. This is
+  gated to `.sql` files only: `--` is a line comment in SQL but not in JS/TS (`--x` is a decrement there),
+  so no other extension's suppression behavior changes.
 
 ## Schema version policy
 

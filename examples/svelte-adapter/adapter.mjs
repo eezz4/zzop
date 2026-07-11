@@ -14,8 +14,9 @@
 // fed to the engine via `adapterOverlays` (Mode B).
 //
 // USAGE:  node adapter.mjs --root <webRoot> [--lib-alias '$lib=src/lib']  > overlay.json
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { walk, EnvelopeBuilder } from '../adapter-kit/index.js';
 
 function arg(name, def) {
   const i = process.argv.indexOf(`--${name}`);
@@ -30,20 +31,6 @@ const [aliasName, aliasTarget] = arg('lib-alias', '$lib=src/lib').split('=');
 
 // SvelteKit framework entry conventions: loaded by filename, never imported.
 const ENTRY_RE = /(^|\/)(hooks\.(client|server)|\+(page|layout|server|error)(\.(server|client))?)\.(ts|js|svelte)$/;
-
-function walk(dir, out = []) {
-  for (const e of readdirSync(dir)) {
-    const abs = path.join(dir, e);
-    const st = statSync(abs);
-    if (st.isDirectory()) {
-      if (e === 'node_modules' || e === '.git' || e === '.svelte-kit') continue;
-      walk(abs, out);
-    } else if (/\.(svelte|ts|js)$/.test(e) && !/\.(spec|test|d)\.[tj]s$/.test(e)) {
-      out.push(abs);
-    }
-  }
-  return out;
-}
 
 // Extract <script>...</script> bodies from a .svelte file (both default + context="module").
 function svelteScript(text) {
@@ -98,14 +85,14 @@ function resolveSpecifier(spec, importerRel) {
   return rel;
 }
 
-const files = [];
+const builder = new EnvelopeBuilder({ parser: 'svelte-adapter', source: 'web' });
+let fileCount = 0;
 let edgeCount = 0;
 let entryCount = 0;
-for (const abs of walk(webRoot)) {
-  const rel = path.relative(webRoot, abs).replace(/\\/g, '/');
+for (const rel of walk(webRoot, { include: ['svelte', 'ts', 'js'], excludeFile: /\.(spec|test|d)\.[tj]s$/, skipDirs: ['.svelte-kit'] })) {
   const isSvelte = rel.endsWith('.svelte');
   const isEntry = ENTRY_RE.test('/' + rel);
-  const text = readFileSync(abs, 'utf8');
+  const text = readFileSync(path.join(webRoot, rel), 'utf8');
   const code = isSvelte ? svelteScript(text) : text;
 
   const imports = {};
@@ -122,18 +109,13 @@ for (const abs of walk(webRoot)) {
   if (isEntry) entryCount++;
 
   if (Object.keys(imports).length > 0 || isEntry) {
-    files.push({
-      path: rel,
-      loc: text.split('\n').length,
-      imports,
-      is_entry: isEntry,
-    });
+    builder.addFile(rel, { loc: text.split('\n').length, imports });
+    if (isEntry) builder.markEntry(rel);
+    fileCount++;
   }
 }
 
 process.stderr.write(
-  `[svelte-adapter] ${files.length} projections, ${edgeCount} dep edges from .svelte, ${entryCount} SvelteKit entries\n`
+  `[svelte-adapter] ${fileCount} projections, ${edgeCount} dep edges from .svelte, ${entryCount} SvelteKit entries\n`
 );
-process.stdout.write(
-  JSON.stringify({ format: 'zzop-normalized-ast', version: 1, parser: 'svelte-adapter', source: 'web', files })
-);
+process.stdout.write(JSON.stringify(builder.toEnvelope()));

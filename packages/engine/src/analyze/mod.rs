@@ -578,6 +578,19 @@ pub(crate) fn assemble(
         warnings.push(w);
     }
 
+    // S4 — http-client import tripwire (consume side): an http-CLIENT package import present while
+    // extracted `http` consumes stay near-zero — the consume-side dual of S2. Additive to S1-S3 above;
+    // any subset may fire together. `http_consumes_count` counts ALL extracted `http`-kind consume
+    // records — keyed AND unresolved — per `client_library_import_warning`'s own doc on why. Pure map
+    // lookup over `package_import_files`, no disk IO, so unconditional.
+    let http_consumes_count = io_consumes.iter().filter(|c| c.kind == "http").count();
+    if let Some(w) = crate::framework_silence::client_library_import_warning(
+        &package_import_files,
+        http_consumes_count,
+    ) {
+        warnings.push(w);
+    }
+
     // S3 — committed-spec io-silence tripwire (consume side): a committed OpenAPI/Swagger spec present
     // while this tree's io stays near-zero in BOTH directions (the generated-client blind spot). The
     // `IO_NEAR_ZERO_FLOOR` precheck here mirrors the function's own internal gate (which fires only

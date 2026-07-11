@@ -10,3 +10,4 @@
 | [rules/dsl-reference.md](rules/dsl-reference.md)     | What is the exact JSON schema for a `rules/dsl/*.json` pack — every matcher field, suppress-marker semantics, schema-version policy, finding shape?         |
 | [rules/authoring-guide.md](rules/authoring-guide.md) | How do I write and ship a new DSL rule pack — placement, a worked example, performance pitfalls, the testing/fidelity bar, and when to write a native rule instead? |
 | [rules/catalog.md](rules/catalog.md)                 | What rules ship today — every DSL pack's rules and every native analysis id, with what each one detects?                                                    |
+| [adapters/README.md](adapters/README.md)             | I'm writing a non-Rust adapter — how do I prove my HTTP interface-key normalization is byte-identical to the engine's, so cross-layer joins don't silently fail? |

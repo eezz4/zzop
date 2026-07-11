@@ -39,8 +39,9 @@
 // (`import * as sdk`) and re-exports are not followed. `type`-only imports are excluded. Call
 // detection is lexical (`name(` / `.name(`), good enough given the operationId gate. The spec file
 // must be JSON — YAML specs need a one-time conversion first (see README).
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { walk, normalizeProvideKey, EnvelopeBuilder } from '../adapter-kit/index.js';
 
 function arg(name, def) {
   const i = process.argv.indexOf(`--${name}`);
@@ -81,10 +82,9 @@ if (serverUrl) {
 const opMap = new Map();
 const HTTP = /^(get|post|put|patch|delete|head|options)$/i;
 for (const [p, methods] of Object.entries(spec.paths || {})) {
-  const norm =
-    `${basePath}${p}`.replace(/\{[^}]+\}/g, '{}').replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+  const rawPath = `${basePath}${p}`;
   for (const [m, op] of Object.entries(methods)) {
-    if (op && op.operationId && HTTP.test(m)) opMap.set(op.operationId, `${m.toUpperCase()} ${norm}`);
+    if (op && op.operationId && HTTP.test(m)) opMap.set(op.operationId, normalizeProvideKey(m, rawPath));
   }
 }
 
@@ -109,32 +109,15 @@ const ambiguousMemberNames = [...memberNameMap.entries()]
   .filter(([, v]) => v === 'AMBIGUOUS')
   .map(([k]) => k);
 
-function envelope(files) {
-  return { format: 'zzop-normalized-ast', version: 1, parser: 'openapi-sdk-adapter', source, files };
-}
-
 if (mode === 'provide') {
   // Every spec operation as an IoProvide — use this when you have the OpenAPI spec but not the
   // backend tree itself (otherwise zzop extracts provides natively from the BE framework).
-  const provides = [...opMap.values()].map((key) => ({ kind: 'http', key, file: provideFile, line: 1 }));
-  process.stderr.write(`[openapi-sdk-adapter] provide: ${provides.length} operations\n`);
-  process.stdout.write(JSON.stringify(envelope([{ path: provideFile, loc: 1, io: { provides, consumes: [] } }])));
+  const builder = new EnvelopeBuilder({ parser: 'openapi-sdk-adapter', source });
+  builder.addFile(provideFile, { loc: 1 });
+  for (const key of opMap.values()) builder.addProvide(provideFile, { kind: 'http', key, line: 1 });
+  process.stderr.write(`[openapi-sdk-adapter] provide: ${opMap.size} operations\n`);
+  process.stdout.write(JSON.stringify(builder.toEnvelope()));
   process.exit(0);
-}
-
-// mode === 'consume': scan FE files for SDK-imported operationId call sites.
-function walk(dir, out = []) {
-  for (const e of readdirSync(dir)) {
-    const abs = path.join(dir, e);
-    const st = statSync(abs);
-    if (st.isDirectory()) {
-      if (e === 'node_modules' || e === '.git') continue;
-      walk(abs, out);
-    } else if (/\.(ts|tsx|js|jsx|mjs|svelte|vue)$/.test(e) && !/\.(spec|test)\.[tj]sx?$/.test(e)) {
-      out.push(abs);
-    }
-  }
-  return out;
 }
 
 // Value (non-type) local names imported from the SDK specifier.
@@ -164,21 +147,21 @@ const gateSpecifier = memberCalls && !sdkGiven ? null : sdkSpecifier;
 // directly before `getArticles` in that string, so it never matches.
 const memberCallRe = /\.([A-Za-z_$][\w$]*)\s*\(/g;
 
-const files = [];
+const builder = new EnvelopeBuilder({ parser: 'openapi-sdk-adapter', source });
+let fileCount = 0;
 let calls = 0;
 const ops = new Set();
-for (const abs of walk(feRoot)) {
-  const text = readFileSync(abs, 'utf8');
+for (const rel of walk(feRoot, { include: ['ts', 'tsx', 'js', 'jsx', 'mjs', 'svelte', 'vue'], excludeFile: /\.(spec|test)\.[tj]sx?$/ })) {
+  const text = readFileSync(path.join(feRoot, rel), 'utf8');
   if (gateSpecifier && !text.includes(gateSpecifier)) continue;
   const callable = [...sdkValueImports(text, sdkSpecifier)].filter((n) => opMap.has(n));
   if (!callable.length && !memberCalls) continue;
-  const rel = path.relative(feRoot, abs).replace(/\\/g, '/');
   const lines = text.split('\n');
   const consumes = [];
   for (let i = 0; i < lines.length; i++) {
     for (const name of callable) {
       if (new RegExp(`(^|[^.\\w$])${name}\\s*\\(`).test(lines[i])) {
-        consumes.push({ kind: 'http', key: opMap.get(name), file: rel, line: i + 1 });
+        consumes.push({ key: opMap.get(name), line: i + 1 });
         calls++;
         ops.add(name);
       }
@@ -191,19 +174,23 @@ for (const abs of walk(feRoot)) {
         const opId = memberNameMap.get(mm[1]);
         if (!opId || opId === 'AMBIGUOUS' || seenOnLine.has(opId)) continue;
         seenOnLine.add(opId);
-        consumes.push({ kind: 'http', key: opMap.get(opId), file: rel, line: i + 1 });
+        consumes.push({ key: opMap.get(opId), line: i + 1 });
         calls++;
         ops.add(opId);
       }
     }
   }
-  if (consumes.length) files.push({ path: rel, loc: lines.length, io: { provides: [], consumes } });
+  if (consumes.length) {
+    builder.addFile(rel, { loc: lines.length });
+    for (const c of consumes) builder.addConsume(rel, { kind: 'http', key: c.key, line: c.line });
+    fileCount++;
+  }
 }
 const memberSummary = memberCalls
   ? `; member-calls: ${ambiguousMemberNames.length} ambiguous name(s) skipped` +
     (ambiguousMemberNames.length ? ` (${ambiguousMemberNames.join(', ')})` : '')
   : '';
 process.stderr.write(
-  `[openapi-sdk-adapter] consume: ${files.length} files, ${calls} call sites, ${ops.size}/${opMap.size} operations resolved${memberSummary}\n`
+  `[openapi-sdk-adapter] consume: ${fileCount} files, ${calls} call sites, ${ops.size}/${opMap.size} operations resolved${memberSummary}\n`
 );
-process.stdout.write(JSON.stringify(envelope(files)));
+process.stdout.write(JSON.stringify(builder.toEnvelope()));

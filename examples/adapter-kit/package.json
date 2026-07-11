@@ -1,0 +1,15 @@
+{
+  "name": "zzop-adapter-kit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared boilerplate for zzop external-parser / adapter-overlay producers: deterministic file walking, NormalizedEnvelope assembly, and byte-exact HTTP key normalization matching zzop_core. Lives under examples/ deliberately — this is a reference kit to copy/import from within this repo, not an npm-published package.",
+  "type": "module",
+  "main": "index.js",
+  "exports": "./index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  }
+}

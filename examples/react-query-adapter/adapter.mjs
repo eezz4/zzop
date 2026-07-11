@@ -31,8 +31,9 @@
 // (`useQuery({ queryKey: ['/x'], queryFn })`) is not matched. The emitted HTTP method is a flag
 // (default `GET`) applied uniformly — react-query itself has no verb in the call site; the verb is
 // whatever the app's default `queryFn` uses, which is app-specific and must be supplied by the caller.
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { walk, EnvelopeBuilder, resolveConsumeKey } from '../adapter-kit/index.js';
 
 function arg(name, def) {
   const i = process.argv.indexOf(`--${name}`);
@@ -70,45 +71,13 @@ function collapseTemplate(text) {
   return text.replace(/\$\{[^}]*\}/g, '{}');
 }
 
-// Normalize a raw queryKey literal into a zzop http-consume-interface-key path
-// (`zzop_core::http_consume_interface_key` semantics — see packages/core/src/io.rs).
-// Returns `null` for anything that should be skipped rather than guessed.
-function normalize(literal) {
-  // Skip conditions are checked on the literal BEFORE the leading-slash is auto-prepended below —
-  // prepending first would make every case start with `/`, so "starts with {" (leading interpolation)
-  // could never fire after the fact.
-  if (/:\/\//.test(literal) || /\s/.test(literal)) return null; // external URL or non-path text
-  if (literal.startsWith('.')) return null; // relative, not a route
-  if (literal.startsWith('{')) return null; // leading interpolation — path itself is dynamic
-  let p = literal.split(/[?#]/)[0]; // drop query/fragment suffix
-  if (!p) return null; // empty after stripping query/fragment
-  if (!p.startsWith('/')) p = `/${p}`; // root-normalize (queryKey literals are often host-relative, no leading slash)
-  p = p.replace(/\/+/g, '/'); // collapse duplicate slashes
-  if (p.length > 1) p = p.replace(/\/$/, ''); // drop trailing slash, keep bare "/"
-  return p;
-}
-
-function walk(dir, out = []) {
-  for (const e of readdirSync(dir)) {
-    const abs = path.join(dir, e);
-    const st = statSync(abs);
-    if (st.isDirectory()) {
-      if (e === 'node_modules' || e === '.git' || e === 'cypress') continue;
-      walk(abs, out);
-    } else if (/\.(ts|tsx|js|jsx|mjs)$/.test(e) && !/\.(spec|test)\.[tj]sx?$/.test(e)) {
-      out.push(abs);
-    }
-  }
-  return out;
-}
-
-const files = [];
+const builder = new EnvelopeBuilder({ parser: 'react-query-adapter/1', source });
+let fileCount = 0;
 let calls = 0;
 let skipped = 0;
-for (const abs of walk(feRoot)) {
-  const text = readFileSync(abs, 'utf8');
+for (const rel of walk(feRoot, { include: ['ts', 'tsx', 'js', 'jsx', 'mjs'], excludeFile: /\.(spec|test)\.[tj]sx?$/, skipDirs: ['cypress'] })) {
+  const text = readFileSync(path.join(feRoot, rel), 'utf8');
   if (!hooks.some((h) => text.includes(h))) continue;
-  const rel = path.relative(feRoot, abs).replace(/\\/g, '/');
   const lines = text.split('\n');
   const consumes = [];
   for (let i = 0; i < lines.length; i++) {
@@ -117,19 +86,28 @@ for (const abs of walk(feRoot)) {
     calls++;
     const quote = m[1];
     const raw = quote === '`' ? collapseTemplate(m[2]) : m[2];
-    const key = normalize(raw);
+    // Delegated to adapter-kit's `resolveConsumeKey` — the same internal/external/base-relative
+    // dispatch `parser/parser-typescript/src/adapters/egress.rs`'s `consume_key_for` uses: an
+    // `http(s)://` literal keys VERBATIM as an external consume (never dropped — it still joins
+    // `crossLayer.externalConsumes`), and a `:param` colon segment collapses to `{}` exactly like a
+    // `{param}` template placeholder (`normalizeProvideKey`'s `RE_PARAM`). Returns the full
+    // `"METHOD key"` string, or `null` when the literal clears no resolvable shape (reported via
+    // `skipped`, never guessed).
+    const key = resolveConsumeKey(method, raw);
     if (key === null) {
       skipped++;
       continue;
     }
-    consumes.push({ kind: 'http', key: `${method} ${key}`, file: rel, line: i + 1 });
+    consumes.push({ key, line: i + 1 });
   }
-  if (consumes.length) files.push({ path: rel, loc: lines.length, io: { provides: [], consumes } });
+  if (consumes.length) {
+    builder.addFile(rel, { loc: lines.length });
+    for (const c of consumes) builder.addConsume(rel, { kind: 'http', key: c.key, line: c.line });
+    fileCount++;
+  }
 }
 
 process.stderr.write(
-  `[react-query-adapter] ${files.length} file(s), ${calls} hook call site(s) matched, ${calls - skipped} keyed, ${skipped} skipped\n`
+  `[react-query-adapter] ${fileCount} file(s), ${calls} hook call site(s) matched, ${calls - skipped} keyed, ${skipped} skipped\n`
 );
-process.stdout.write(
-  JSON.stringify({ format: 'zzop-normalized-ast', version: 1, parser: 'react-query-adapter/1', source, files })
-);
+process.stdout.write(JSON.stringify(builder.toEnvelope()));

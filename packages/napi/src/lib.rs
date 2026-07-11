@@ -25,4 +25,7 @@
 mod addon;
 mod api;
 
-pub use api::{analyze_envelope_json, analyze_json, analyze_trees_json, version_string};
+pub use api::{
+    analyze_envelope_json, analyze_json, analyze_trees_json, validate_envelope_only_json,
+    version_string,
+};

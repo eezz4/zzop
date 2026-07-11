@@ -175,5 +175,9 @@ module.exports = {
   analyze,
   analyzeTrees,
   analyzeEnvelope,
+  // Pure pass-through, no default-injection needed: unlike `analyze`/`analyzeTrees`/`analyzeEnvelope`
+  // this call takes no `configJson` at all (see `packages/napi/src/api.rs`'s `validate_envelope_only_json`
+  // doc), so there is no `packsDir`/`git` default to apply.
+  validateEnvelopeOnly: native.validateEnvelopeOnly,
   version: native.version,
 };

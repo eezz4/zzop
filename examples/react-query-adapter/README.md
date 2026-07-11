@@ -136,5 +136,9 @@ limitations rather than bugs:
 - The emitted HTTP method is a flag applied uniformly to every matched call (default `GET`) — react-query
   carries no verb at the call site; the verb is whatever the app's shared `queryFn` actually does, which
   is app-specific and outside what a lexical scan of the call site can determine.
-- A leading-interpolation literal (`` `${base}/foo` ``) or a literal containing `://` or whitespace is
-  skipped, never guessed, per zzop's "only emit from visible literals" convention.
+- A leading-interpolation literal (`` `${base}/foo` ``), a document-relative (`./`/`../`) literal, or a
+  query-only literal (`?page=2`) is skipped, never guessed, per zzop's "only emit from visible literals"
+  convention (the same veto list `parser/parser-typescript/src/adapters/egress.rs`'s `base_relative_path`
+  applies natively — see `adapter-kit/lib/keys.js`'s `resolveConsumeKey`, which this adapter now
+  delegates to). An `http(s)://` literal is NOT skipped — it keys verbatim as an external consume,
+  exactly like a native `fetch('https://...')` call site.

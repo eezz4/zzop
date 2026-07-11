@@ -31,11 +31,13 @@
 //
 // LIMITATIONS (intentional — a real adapter can go further): the wrapper binding must be named (default
 // `requests`/`agent`/`api`/`http`/`client`); only a first-argument STRING literal path is keyed (a path
-// built in a variable, concatenated, or with a leading `${...}` host is skipped — never guessed); template
-// `${...}` and `:param` segments normalize to `{}` (zzop's own route-param key), query strings are dropped;
-// call detection is lexical and single-line.
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+// built in a variable or concatenated is skipped — never guessed); template `${...}` and `:param`
+// segments normalize to `{}` (zzop's own route-param key), a `?query`/`#fragment` suffix is dropped;
+// call detection is lexical and single-line. A path with no leading `/` resolves as base-relative (the
+// axios/ky `baseURL` idiom) the same way native egress extraction does — see `resolveConsumeKey`.
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { walk, EnvelopeBuilder, resolveConsumeKey } from '../adapter-kit/index.js';
 
 function arg(name, def) {
   const i = process.argv.indexOf(`--${name}`);
@@ -65,51 +67,52 @@ const callRe = new RegExp(
   `(?:^|[^.\\w$])(${wrapperAlt})\\.(${verbAlt})\\s*\\(\\s*(['"\`])((?:\\\\.|(?!\\3).)*)\\3`
 );
 
-// Normalize a raw path literal into a zzop http-interface key path: drop the query string, template
-// `${...}` and `:param` -> `{}`, collapse `//`, trim a trailing `/`.
-function normPath(raw) {
-  let p = raw.split('?')[0];
-  p = p.replace(/\$\{[^}]*\}/g, '{}').replace(/:[A-Za-z_$][\w$]*/g, '{}');
-  p = p.replace(/\/+/g, '/').replace(/\/$/, '');
-  return p || '/';
+// Collapse a JS template literal's `${...}` interpolations to zzop's own `{}` route-param placeholder
+// BEFORE handing the literal to adapter-kit's `resolveConsumeKey`. The kit's normalization
+// (`normalizeProvideKey`'s `RE_PARAM`) mirrors `zzop_core::http_interface_key`, which only ever sees a
+// `{param}`/`:param`-SHAPED route pattern — never raw JS template syntax; the native extractor already
+// collapses `${...}` at the AST level before keying. Non-greedy, no nesting — same documented limitation
+// as the react-query adapter's own `collapseTemplate`.
+function collapseTemplate(raw) {
+  return raw.replace(/\$\{[^}]*\}/g, '{}');
 }
 
-function walk(dir, out = []) {
-  for (const e of readdirSync(dir)) {
-    const abs = path.join(dir, e);
-    const st = statSync(abs);
-    if (st.isDirectory()) {
-      if (e === 'node_modules' || e === '.git') continue;
-      walk(abs, out);
-    } else if (/\.(ts|tsx|js|jsx|mjs)$/.test(e) && !/\.(spec|test)\.[tj]sx?$/.test(e)) {
-      out.push(abs);
-    }
-  }
-  return out;
-}
-
-const files = [];
+const builder = new EnvelopeBuilder({ parser: 'wrapper-adapter', source });
+let fileCount = 0;
 let calls = 0;
-for (const abs of walk(feRoot)) {
-  const text = readFileSync(abs, 'utf8');
+let skipped = 0;
+for (const rel of walk(feRoot, { include: ['ts', 'tsx', 'js', 'jsx', 'mjs'], excludeFile: /\.(spec|test)\.[tj]sx?$/ })) {
+  const text = readFileSync(path.join(feRoot, rel), 'utf8');
   if (!wrappers.some((w) => text.includes(`${w}.`))) continue;
-  const rel = path.relative(feRoot, abs).replace(/\\/g, '/');
   const lines = text.split('\n');
   const consumes = [];
   for (let i = 0; i < lines.length; i++) {
     const m = callRe.exec(lines[i]);
     if (!m) continue;
-    const rawPath = m[4];
-    // Only a literal path rooted at `/` is a route we can key. A `${API_ROOT}${url}`-style argument
-    // (host built at the call site) or a non-path string is left for native egress / a richer adapter.
-    if (!rawPath.startsWith('/')) continue;
-    consumes.push({ kind: 'http', key: `${VERB[m[2]]} ${normPath(rawPath)}`, file: rel, line: i + 1 });
     calls++;
+    const rawPath = collapseTemplate(m[4]);
+    // Delegated to adapter-kit's `resolveConsumeKey` — the same internal/external/base-relative
+    // dispatch `parser/parser-typescript/src/adapters/egress.rs`'s `consume_key_for` uses: a leading
+    // `/` keys directly, `http(s)://` keys verbatim as an external consume, a bare `path/like/this`
+    // resolves as base-relative (the axios/ky `baseURL` idiom — previously skipped entirely here), and
+    // a `?query`/`#fragment` suffix drops on either resolved path. Returns the full `"METHOD key"`
+    // string, or `null` when the literal clears no resolvable shape (reported via `skipped`, never
+    // guessed).
+    const key = resolveConsumeKey(VERB[m[2]], rawPath);
+    if (key === null) {
+      skipped++;
+      continue;
+    }
+    consumes.push({ key, line: i + 1 });
   }
-  if (consumes.length) files.push({ path: rel, loc: lines.length, io: { provides: [], consumes } });
+  if (consumes.length) {
+    builder.addFile(rel, { loc: lines.length });
+    for (const c of consumes) builder.addConsume(rel, { kind: 'http', key: c.key, line: c.line });
+    fileCount++;
+  }
 }
 
-process.stderr.write(`[wrapper-adapter] ${files.length} file(s), ${calls} wrapper call site(s) keyed\n`);
-process.stdout.write(
-  JSON.stringify({ format: 'zzop-normalized-ast', version: 1, parser: 'wrapper-adapter', source, files })
+process.stderr.write(
+  `[wrapper-adapter] ${fileCount} file(s), ${calls} wrapper call site(s) matched, ${calls - skipped} keyed, ${skipped} skipped\n`
 );
+process.stdout.write(JSON.stringify(builder.toEnvelope()));

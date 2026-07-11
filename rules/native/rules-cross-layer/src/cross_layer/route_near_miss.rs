@@ -124,6 +124,22 @@ pub struct NearMissTargetRef {
     pub count: u32,
 }
 
+/// One `prefix`-dimension route-near-miss, exposed as typed data so `prefix_drift` can aggregate these
+/// without re-running the match (single source of truth — see `RouteNearMissOutput::prefix_records`).
+#[derive(Debug, Clone)]
+pub struct PrefixNearMissRecord {
+    pub consume_source: String,
+    pub consume_key: String, // e.g. "GET /articles"
+    pub consume_file: String,
+    pub consume_line: u32,
+    pub provide_source: String,
+    pub provide_key: String, // e.g. "GET /api/articles"
+    pub prefix: String,      // e.g. "/api"
+    /// true = the consume is MISSING the prefix the provide has (consume shorter); false = the consume
+    /// carries an EXTRA prefix the provide lacks.
+    pub consume_missing_prefix: bool,
+}
+
 /// `route_near_miss_results`'s return: the findings (byte-identical to `route_near_miss_findings`'s output)
 /// plus the provide-site -> near-miss cross-reference `targets` map that lets the sibling unconsumed-* rules
 /// annotate a dead-looking provide that is actually a live near-miss target. `targets` is keyed on the
@@ -133,6 +149,9 @@ pub struct NearMissTargetRef {
 pub struct RouteNearMissOutput {
     pub findings: Vec<Finding>,
     pub targets: BTreeMap<(String, String, u32), NearMissTargetRef>,
+    /// Every `prefix`-dimension near-miss this run found, typed (not re-derived from `findings`'s `data`
+    /// JSON) so `prefix_drift` can aggregate them directly — see `PrefixNearMissRecord`.
+    pub prefix_records: Vec<PrefixNearMissRecord>,
 }
 
 /// Does the actual candidate-selection work for `cross-layer/route-near-miss`, single-sourced so the
@@ -144,6 +163,7 @@ pub fn route_near_miss_results(
 ) -> RouteNearMissOutput {
     let mut out = Vec::new();
     let mut targets: BTreeMap<(String, String, u32), NearMissTargetRef> = BTreeMap::new();
+    let mut prefix_records: Vec<PrefixNearMissRecord> = Vec::new();
     for c in unprovided_consumes
         .iter()
         .filter(|c| c.consume.kind == "http")
@@ -229,7 +249,18 @@ pub fn route_near_miss_results(
                 let prefix_segments = prefix_dimension_match(&consume_segs, &first_provide_segs)
                     .expect("first was selected as a prefix-dimension candidate");
                 let prefix_str = format!("/{}", prefix_segments.join("/"));
-                if consume_segs.len() < first_provide_segs.len() {
+                let consume_missing_prefix = consume_segs.len() < first_provide_segs.len();
+                prefix_records.push(PrefixNearMissRecord {
+                    consume_source: c.source.clone(),
+                    consume_key: format!("{method} {path}"),
+                    consume_file: c.consume.file.clone(),
+                    consume_line: c.consume.line,
+                    provide_source: first.source.clone(),
+                    provide_key: first.key.clone(),
+                    prefix: prefix_str.clone(),
+                    consume_missing_prefix,
+                });
+                if consume_missing_prefix {
                     format!(
                         "differs only by a missing path prefix (`{prefix_str}`) — the consume is missing a \
                          leading segment the provide has"
@@ -274,6 +305,7 @@ pub fn route_near_miss_results(
     RouteNearMissOutput {
         findings: out,
         targets,
+        prefix_records,
     }
 }
 
@@ -644,5 +676,48 @@ mod tests {
         assert_eq!(target.consume_file, "Z.tsx");
         assert_eq!(target.consume_line, 10);
         assert_eq!(target.count, 2);
+    }
+
+    #[test]
+    fn prefix_records_capture_the_prefix_dimension_details() {
+        // The canonical `GET /articles` vs `GET /api/articles` case: the prefix-dimension result must be
+        // captured as typed data too, not just embedded in the finding's message/data JSON.
+        let unprovided_consumes = vec![consume(
+            "http",
+            Some("GET /articles"),
+            "fe-react",
+            "Api.tsx",
+            10,
+        )];
+        let provides = vec![provide(
+            "GET /api/articles",
+            "be-nest",
+            "articles.controller.ts",
+            22,
+        )];
+        let result = route_near_miss_results(&unprovided_consumes, &provides);
+        assert_eq!(result.prefix_records.len(), 1);
+        let record = &result.prefix_records[0];
+        assert_eq!(record.prefix, "/api");
+        assert!(record.consume_missing_prefix);
+        assert_eq!(record.consume_key, "GET /articles");
+        assert_eq!(record.provide_key, "GET /api/articles");
+
+        // Case-dimension inputs must produce EMPTY prefix_records — only the prefix dimension populates it.
+        let case_consumes = vec![consume(
+            "http",
+            Some("GET /api/Articles"),
+            "fe-react",
+            "Api.tsx",
+            10,
+        )];
+        let case_provides = vec![provide(
+            "GET /api/articles",
+            "be-nest",
+            "articles.controller.ts",
+            22,
+        )];
+        let case_result = route_near_miss_results(&case_consumes, &case_provides);
+        assert!(case_result.prefix_records.is_empty());
     }
 }

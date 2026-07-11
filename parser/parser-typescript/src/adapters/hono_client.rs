@@ -432,16 +432,15 @@ fn collect_chain(
     }
 }
 
-/// The hono/client terminal -> CONSUME verb table.
+/// The hono/client terminal -> CONSUME verb mapping: `$` + a lowercase spelling of a
+/// `zzop_core::HTTP_KEY_VERBS` verb (T1: the verb set lives in core; the `$` prefix is this
+/// vocabulary's own spelling rule).
 fn terminal_verb(name: &str) -> Option<&'static str> {
-    match name {
-        "$get" => Some("GET"),
-        "$post" => Some("POST"),
-        "$put" => Some("PUT"),
-        "$patch" => Some("PATCH"),
-        "$delete" => Some("DELETE"),
-        _ => None,
-    }
+    let bare = name.strip_prefix('$')?;
+    zzop_core::HTTP_KEY_VERBS
+        .iter()
+        .find(|v| v.to_ascii_lowercase() == bare)
+        .copied()
 }
 
 /// Strip wrappers between an expression and its real value: `... as const`, `(...)`, `... satisfies T`, `...!`.

@@ -65,7 +65,9 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
         group: EXTRACTION_BLIND,
         summary: "A tree whose egress was not extracted contributes no consumes, so another tree's routes \
                   look dead. Asserted as `coverage.joinContributionZero` when a tree analyzed files but \
-                  produced zero io.",
+                  produced zero io. Also detected self-report: a recognized http-client package import \
+                  (axios, @angular/common/http, ...) while extracted `http` consumes stay near-zero (<3) \
+                  self-reports the likely wrapper/DI call-idiom gap on the consume side.",
         status: DisclosureStatus::Asserted,
     },
     BlindnessClass {
@@ -74,7 +76,10 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
         summary: "A tree whose routes were not extracted makes a real caller look like it hits a \
                   nonexistent API (false drift). Detected self-report: a server-framework package \
                   (express, koa, fastify, ...) imported anywhere in the tree while extracted `http` \
-                  provides stay near-zero (<3) self-reports the likely method-call registration gap. \
+                  provides stay near-zero (<3) self-reports the likely method-call registration gap, and \
+                  the controller-decorator idiom tripwire fires the same way at near-zero (<3) provides, \
+                  not just exact zero (a Spring-BE tree that keeps 2 lexically-extracted provides after \
+                  losing most of its routes to a parser limit would silence an exact-zero-only gate). \
                   Not detected: proportional under-extraction on a tree already recognized as SOME \
                   provides (a framework partially, not wholly, unsupported).",
         status: DisclosureStatus::Partial,

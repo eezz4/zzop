@@ -333,7 +333,7 @@ test('buildMarkdownReports: per-tree file renders the Blindness bullet when join
   const web = files.find((f) => f.name === 'web.md').content;
   assert.match(
     web,
-    /- Blindness: no IO surface was extracted from this tree \(0 provides, 0 consumes across 2 files\), so it is invisible to the cross-layer join — discount any "unconsumed"\/"unprovided" verdict that references it\. If this tree does call an API, the calls flow through a client the extractor cannot see; project them with a Mode B adapter to restore visibility\./
+    /- Blindness: no IO surface was extracted from this tree \(0 provides, 0 consumes across 2 files\), so it is invisible to the cross-layer join — discount any "unconsumed"\/"unprovided" verdict that references it\. If this tree does call an API, the calls flow through a client the extractor cannot see; project them with a Mode B adapter and attach it via the `overlays: \["\.\/my-adapter\/envelope\.json"\]` config key to restore visibility\./
   );
 });
 
@@ -563,7 +563,7 @@ test('buildMarkdownReports: unprovided consumes section carries the cause-taxono
   const [crossRepo] = buildMarkdownReports(multiTreeOutput());
   assert.match(
     crossRepo.content,
-    /## Unprovided consumes \(1\)\nNo attached tree provides these keys\. Three causes: \(a\) the repository serving these endpoints is not part of this run — attach its checkout as another tree so both sides are reviewed together; \(b\) the serving code is in an attached tree but its routes were not extracted — project them with a Mode B overlay adapter; \(c\) real spec drift\. A cluster sharing one path prefix usually means \(a\)\./
+    /## Unprovided consumes \(1\)\nNo attached tree provides these keys\. Three causes: \(a\) the repository serving these endpoints is not part of this run — attach its checkout as another tree so both sides are reviewed together; \(b\) the serving code is in an attached tree but its routes were not extracted — project them with a Mode B overlay adapter and attach it via the `overlays: \["\.\/my-adapter\/envelope\.json"\]` config key; \(c\) real spec drift\. A cluster sharing one path prefix usually means \(a\)\./
   );
 
   const output = multiTreeOutput();

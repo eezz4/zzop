@@ -11,9 +11,11 @@
 //!   named `value = "/x"` / `path = "/x"` attribute — this extractor takes the FIRST quoted string in the
 //!   argument list regardless of which attribute name it followed.
 //! - `@RequestMapping` at method level additionally requires an explicit `method = RequestMethod.X` (or any
-//!   bare `RequestMethod.X` token) naming exactly one verb. With no `method` attribute the annotation is
-//!   AMBIGUOUS — Spring itself would map every verb — and is silently skipped rather than guess-emitting
-//!   all five (report nothing resolvable rather than force-match).
+//!   bare `RequestMethod.X` token), or the statically-imported form `method = POST` (bare token accepted
+//!   only when it is exactly a `RequestMethod` enum constant name — dogfood round 14's UsersApi idiom),
+//!   naming exactly one verb. With no `method` attribute the annotation is AMBIGUOUS — Spring itself would
+//!   map every verb — and is silently skipped rather than guess-emitting all five (report nothing
+//!   resolvable rather than force-match).
 //! - `@RequestMapping` at CLASS level prefixes every method-level path via plain string concatenation;
 //!   `http_interface_key`'s slash-collapse normalization makes the join exact regardless of leading/trailing
 //!   slashes on either side.
@@ -41,7 +43,9 @@ use zzop_core::{http_interface_key, IoProvide, SourceSymbol, SourceSymbolKind};
 
 use crate::parse_method_spans;
 
-/// Method-level mapping annotation name -> the HTTP verb it implies.
+/// Method-level mapping annotation name -> the HTTP verb it implies. The verb column is pinned to
+/// `zzop_core::HTTP_KEY_VERBS` by a test (the annotation spelling `Get` can't literally share the
+/// core const, so the pin is what keeps this vocabulary from drifting off the core verb set).
 const METHOD_ANNOTATIONS: &[(&str, &str)] = &[
     ("GetMapping", "GET"),
     ("PostMapping", "POST"),
@@ -230,14 +234,32 @@ pub(crate) fn first_quoted_string(args: &str) -> Option<String> {
     quoted_string_re().captures(args).map(|c| c[1].to_string())
 }
 
+/// `RequestMethod` enum constant names — the only tokens a bare (statically-imported) `method = POST`
+/// attribute may legally carry. The exact-set membership check is what keeps the bare-token branch below
+/// on the never-guess side: `method = SOME_CONSTANT` with a name outside this set stays ambiguous.
+/// Deliberately WIDER than `zzop_core::HTTP_KEY_VERBS` (a pinned divergence, see tests): this mirrors
+/// Spring's own enum, and an explicit `method = HEAD` attribute is a visible fact worth providing even
+/// though no name-shaped consume vocabulary mints HEAD keys — verb-set membership here answers "is this
+/// token Spring's enum", not "is this a cross-layer keying verb".
+const REQUEST_METHOD_NAMES: &[&str] = &[
+    "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE",
+];
+
 /// The verb named by a `RequestMethod.X` token anywhere in `args` (Spring's `method = RequestMethod.GET`
 /// attribute, or the bare enum token — this extractor does not require the `method =` prefix itself, only
 /// the unambiguous `RequestMethod.X` shape, since nothing else in a `@RequestMapping` argument list carries
-/// that literal token). `None` when no such token is present — the ambiguous, ANY-verb case (see module doc).
+/// that literal token), OR by a statically-imported bare constant in the `method = POST` shape
+/// (`import static ...RequestMethod.POST;` — dogfood round 14's UsersApi idiom), accepted only when the
+/// bare token is exactly one of `REQUEST_METHOD_NAMES` so an arbitrary constant reference never resolves.
+/// `None` when neither shape is present — the ambiguous, ANY-verb case (see module doc).
 fn request_method_verb(args: &str) -> Option<String> {
-    request_method_re()
+    if let Some(c) = request_method_re().captures(args) {
+        return Some(c[1].to_uppercase());
+    }
+    bare_method_attr_re()
         .captures(args)
-        .map(|c| c[1].to_uppercase())
+        .map(|c| c[1].to_string())
+        .filter(|v| REQUEST_METHOD_NAMES.contains(&v.as_str()))
 }
 
 fn annotation_re() -> &'static Regex {
@@ -258,6 +280,13 @@ fn quoted_string_re() -> &'static Regex {
 fn request_method_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"\bRequestMethod\s*\.\s*([A-Za-z]+)").unwrap())
+}
+
+/// A bare `method = TOKEN` attribute (no `RequestMethod.` qualifier — the static-import idiom). The
+/// captured TOKEN is only trusted after `REQUEST_METHOD_NAMES` membership (see `request_method_verb`).
+fn bare_method_attr_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\bmethod\s*=\s*([A-Z]+)\b").unwrap())
 }
 
 #[cfg(test)]
@@ -343,6 +372,63 @@ mod tests {
         assert_eq!(keys(&out), vec!["POST /x"]);
     }
 
+    // --- policy-value pins (rule-quality: T2 pin tests are the cross-boundary substitute for a
+    // shared constant) ---
+
+    #[test]
+    fn method_annotation_verbs_are_pinned_to_the_core_verb_set() {
+        // The `{Verb}Mapping` spelling can't literally share `zzop_core::HTTP_KEY_VERBS`, so this pin
+        // is what makes a verb added to the core set an everywhere-at-once decision instead of drift.
+        let table: std::collections::BTreeSet<&str> =
+            METHOD_ANNOTATIONS.iter().map(|(_, verb)| *verb).collect();
+        let core: std::collections::BTreeSet<&str> =
+            zzop_core::HTTP_KEY_VERBS.iter().copied().collect();
+        assert_eq!(
+            table, core,
+            "METHOD_ANNOTATIONS' verb column drifted from zzop_core::HTTP_KEY_VERBS — change both \
+             deliberately or neither"
+        );
+    }
+
+    #[test]
+    fn bare_request_method_names_are_a_deliberate_superset_of_the_core_verb_set() {
+        // Divergence pin: REQUEST_METHOD_NAMES mirrors Spring's OWN enum (8 names — an explicit
+        // `method = HEAD` is a visible fact), deliberately wider than the 5-verb core keying set.
+        // If this fails, either the core set grew past Spring's enum (decide how Java maps it) or
+        // someone "unified" the two sets — both must be deliberate decisions.
+        for verb in zzop_core::HTTP_KEY_VERBS {
+            assert!(
+                REQUEST_METHOD_NAMES.contains(verb),
+                "core keying verb {verb} missing from Spring's RequestMethod name set"
+            );
+        }
+        assert_eq!(
+            REQUEST_METHOD_NAMES.len(),
+            8,
+            "REQUEST_METHOD_NAMES must stay exactly Spring's RequestMethod enum, not drift toward \
+             the core keying set"
+        );
+    }
+
+    #[test]
+    fn request_mapping_with_a_statically_imported_bare_method_constant_resolves() {
+        // `import static ...RequestMethod.POST;` then `method = POST` — round 14's UsersApi idiom.
+        let src = "@RestController\nclass C {\n  @RequestMapping(path = \"/users\", method = POST)\n  void register() {}\n}\n";
+        let out = extract_http_provides("C.java", src);
+        assert_eq!(keys(&out), vec!["POST /users"]);
+    }
+
+    #[test]
+    fn a_bare_method_token_outside_the_request_method_enum_stays_ambiguous() {
+        // An arbitrary ALL-CAPS constant is NOT a RequestMethod name — never guessed into a verb.
+        let src = "@RestController\nclass C {\n  @RequestMapping(path = \"/x\", method = CUSTOM)\n  void x() {}\n}\n";
+        let out = extract_http_provides("C.java", src);
+        assert!(
+            out.is_empty(),
+            "a non-RequestMethod bare token must stay ambiguous, got: {out:?}"
+        );
+    }
+
     #[test]
     fn request_mapping_without_a_method_attribute_is_skipped_not_guessed() {
         let src = "@RestController\nclass C {\n  @RequestMapping(\"/x\")\n  void x() {}\n}\n";
@@ -387,6 +473,52 @@ mod tests {
     #[test]
     fn empty_file_yields_no_provides() {
         assert!(extract_http_provides("E.java", "").is_empty());
+    }
+
+    // --- nested-paren parameter-list annotations no longer drop the route (v3 regression) ---
+
+    #[test]
+    fn user_controller_shape_with_annotated_and_header_params_yields_get_and_put_user() {
+        let src = concat!(
+            "@RestController\n",
+            "@RequestMapping(path = \"/user\")\n",
+            "class UserController {\n\n",
+            "    @GetMapping\n",
+            "    User currentUser(@AuthenticationPrincipal User u, @RequestHeader(value = \"Authorization\") String h) {\n",
+            "        return null;\n    }\n\n",
+            "    @PutMapping\n",
+            "    User updateUser(@AuthenticationPrincipal User u, @RequestHeader(value = \"Authorization\") String h) {\n",
+            "        return null;\n    }\n}\n",
+        );
+        let out = extract_http_provides("UserController.java", src);
+        let mut got = keys(&out);
+        got.sort();
+        assert_eq!(got, vec!["GET /user", "PUT /user"]);
+    }
+
+    #[test]
+    fn articles_api_shape_with_request_param_default_value_params_yields_all_three_routes() {
+        let src = concat!(
+            "@RestController\n",
+            "@RequestMapping(path = \"/articles\")\n",
+            "class ArticlesApi {\n\n",
+            "    @PostMapping\n",
+            "    Article create(@Valid @RequestBody ArticleCreateRequest req) {\n",
+            "        return null;\n    }\n\n",
+            "    @GetMapping(path = \"feed\")\n",
+            "    List<Article> feed(@RequestParam(value = \"offset\", defaultValue = \"0\") int offset) {\n",
+            "        return null;\n    }\n\n",
+            "    @GetMapping\n",
+            "    List<Article> list(@RequestParam(value = \"offset\", defaultValue = \"0\") int offset) {\n",
+            "        return null;\n    }\n}\n",
+        );
+        let out = extract_http_provides("ArticlesApi.java", src);
+        let mut got = keys(&out);
+        got.sort();
+        assert_eq!(
+            got,
+            vec!["GET /articles", "GET /articles/feed", "POST /articles"]
+        );
     }
 
     // --- a multi-method controller class shape, end to end ---

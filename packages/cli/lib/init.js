@@ -29,7 +29,9 @@ const CONFIG_TEMPLATE = `{
   // hidden by the other apps' signals, so it looks like "only part of the repo ran".
   // Split apps into "trees" above so each app's coverage/blindness is reported per
   // tree — that is where the "this tree is IO-blind; inject a Mode B adapter to
-  // restore visibility" guidance surfaces.
+  // restore visibility" guidance surfaces. Attach a Mode B adapter's output via the
+  // "overlays" config key (top level, or per-tree as "trees[i].overlays") — an array
+  // of paths to overlay envelope JSON files, e.g. "overlays": ["./my-adapter/envelope.json"].
 
   // ── Global exclude (all rules) ─────────────────────────────────────────────
   // Path globs/substrings dropped from EVERY rule's findings at once (files are

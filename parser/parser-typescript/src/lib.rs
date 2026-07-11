@@ -94,7 +94,11 @@ pub use lang::write_site::{
 ///   projected as `zzop_core::ControllerPrefixRouteFragment`s
 ///   (`extract_controller_prefix_route_fragments`), resolved against the merged const map at assemble
 ///   time instead of being dropped outright.
-pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2";
+/// - `angular-httpclient-v1`: HTTP egress now recognizes Angular's dependency-injected `HttpClient`
+///   call shape (`this.<name>.get/post/put/delete/patch(url)` / `<name>.get/...(url)`), gated per-file
+///   on an `@angular/common/http` import plus a proven HttpClient receiver (constructor param property,
+///   class property, or `inject(HttpClient)`) — see `adapters::egress` module doc.
+pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2+angular-httpclient-v1+str-concat-url-v1";
 
 use std::collections::{HashMap, HashSet};
 

@@ -1,7 +1,12 @@
 'use strict';
 
-// PURE config -> native-request mapper. No I/O, no native calls, no process access — everything here is
-// a deterministic function of its `config` argument so it can be unit-tested without the native addon.
+const fs = require('node:fs');
+const path = require('node:path');
+
+// PURE config -> native-request mapper. No native calls, no other process access — everything here is a
+// deterministic function of its `config` argument (plus, for `overlays`, the filesystem — see the
+// "Adapter overlays" section below for the one deliberate exception) so it can be unit-tested without the
+// native addon.
 // The merge model (layered precedence: bundled packs, then extra pack dirs, then disabled rules,
 // then per-rule severity/exclude overrides) is documented in this package's README.
 
@@ -109,6 +114,126 @@ function isPlainObject(value) {
 // Next.js dynamic-segment paths like `app/[locale]/` are matched as substrings, not char classes.
 function isGlobPattern(value) {
   return /[*?{}]/.test(value);
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Adapter overlays — closes the loop for the napi `adapterOverlays` request field
+// (`packages/napi/src/api.rs`'s `AnalyzeRequest::adapter_overlays`, itself per-tree). Config key
+// `overlays: ["path/to/envelope.json", ...]` names Mode-B overlay envelope FILES (partial
+// `NormalizedEnvelope` JSON); the CLI reads and parses each one and inlines the parsed object into the
+// request's `adapterOverlays` array — the napi layer has no notion of "a path to an overlay file", only
+// inline objects.
+//
+// This is the one place this module is not I/O-free: reading these files is unavoidable disk access.
+// Every other function here stays a pure function of its arguments; only the two helpers below touch `fs`.
+//
+// Path resolution base: deliberately NOT the config file's directory. No other path-ish config key in
+// this file is ever resolved relative to the config file's directory — `configToRequest` is called with
+// just the parsed `config` object and never receives the config file's own path (see `config.js`'s
+// `loadConfig`, whose caller keeps the resolved path to itself); `cacheDir`/`packsDir`/`root(s)` all pass
+// through as literal strings for the native engine to resolve against ITS OWN process cwd. So an overlay
+// path is instead resolved relative to the TREE'S OWN root — the one directory this mapper already has in
+// hand for each tree, and the most sensible anchor for "a file describing (or living near) this source
+// tree".
+//
+// Read/parse failures are NEVER fatal: this mirrors the "narrowed scope self-reports in warnings, never
+// silently" contract `collectConfigWarnings` already implements for unknown config keys (see its own doc
+// comment below) — a missing/invalid overlay file drops just that one overlay and is reported through the
+// exact same warnings channel, never a ConfigError/process exit.
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * Validate a config `overlays` array's SHAPE (must be an array of non-empty strings). Throws ConfigError
+ * on a shape violation — unlike a per-file read/parse failure (handled by `resolveOverlaysForRoot`, which
+ * never throws), a wrong-typed `overlays` value is a config-authoring mistake like any other mistyped
+ * array field in this file (see `packs.extraDirs`/`exclude` above).
+ *
+ * @param {*} value
+ * @param {string} label  e.g. "overlays" or "trees[0].overlays", for the error message
+ */
+function validateOverlaysArray(value, label) {
+  if (!Array.isArray(value)) {
+    throw new ConfigError(`${label} must be an array of file paths.`);
+  }
+  for (const entry of value) {
+    if (typeof entry !== 'string' || entry === '') {
+      throw new ConfigError(`${label} entries must be non-empty strings (paths to overlay JSON files).`);
+    }
+  }
+}
+
+/**
+ * Read and parse every overlay path (shared/top-level paths plus this tree's own), resolved relative to
+ * `root`, into `NormalizedEnvelope`-shaped objects ready to inline as `adapterOverlays`. Never throws: a
+ * file that cannot be read or does not parse as JSON is dropped, with a human-readable warning describing
+ * which path and why. The engine independently re-validates each surviving envelope's SHAPE and
+ * soft-skips an invalid one with its own warning (see `packages/napi/src/api.rs`'s
+ * `adapter_overlays` doc), so this function only needs to guarantee well-formed JSON, not a well-formed
+ * envelope.
+ *
+ * @param {string} root  the tree's root directory (resolution base for relative overlay paths)
+ * @param {string[]} [sharedPaths]  top-level `overlays` config paths (apply to every tree)
+ * @param {string[]} [treePaths]  this tree's own `trees[i].overlays` config paths
+ * @returns {{ overlays: object[], warnings: string[] }}
+ */
+function resolveOverlaysForRoot(root, sharedPaths, treePaths) {
+  const paths = [...(sharedPaths || []), ...(treePaths || [])];
+  const overlays = [];
+  const warnings = [];
+  for (const overlayPath of paths) {
+    const resolved = path.resolve(root, overlayPath);
+    let raw;
+    try {
+      raw = fs.readFileSync(resolved, 'utf8');
+    } catch (err) {
+      warnings.push(
+        `overlay "${overlayPath}" for tree "${root}" (resolved to ${resolved}) could not be read: ` +
+          `${err && err.message}. This overlay is skipped.`
+      );
+      continue;
+    }
+    try {
+      overlays.push(JSON.parse(raw));
+    } catch (err) {
+      warnings.push(
+        `overlay "${overlayPath}" for tree "${root}" (resolved to ${resolved}) is not valid JSON: ` +
+          `${err && err.message}. This overlay is skipped.`
+      );
+    }
+  }
+  return { overlays, warnings };
+}
+
+/**
+ * Best-effort overlay-loading warnings for `collectConfigWarnings` — attempts to resolve/read/parse every
+ * overlay this config WOULD load (mirroring `configToRequest`'s tree derivation) purely to surface
+ * read/parse failures through the warnings channel. Never throws: a config whose `trees`/`roots` shape is
+ * itself invalid is silently skipped here (`configToRequest` raises the real ConfigError for that; this
+ * function's only job is overlay diagnostics).
+ *
+ * @param {object} config
+ * @returns {string[]}
+ */
+function collectOverlayWarnings(config) {
+  const warnings = [];
+  if (!isPlainObject(config)) return warnings;
+
+  const sharedPaths = Array.isArray(config.overlays) ? config.overlays : [];
+
+  if (Array.isArray(config.trees)) {
+    for (const tree of config.trees) {
+      if (!isPlainObject(tree) || typeof tree.root !== 'string' || tree.root === '') continue;
+      const treePaths = Array.isArray(tree.overlays) ? tree.overlays : [];
+      warnings.push(...resolveOverlaysForRoot(tree.root, sharedPaths, treePaths).warnings);
+    }
+  } else {
+    const roots = Array.isArray(config.roots) ? config.roots : config.roots === undefined ? ['.'] : [];
+    for (const root of roots) {
+      if (typeof root !== 'string' || root === '') continue;
+      warnings.push(...resolveOverlaysForRoot(root, sharedPaths, undefined).warnings);
+    }
+  }
+  return warnings;
 }
 
 /**
@@ -292,6 +417,7 @@ function collectConfigWarnings(config) {
       if (isPlainObject(entry)) check(entry, KNOWN_KEYS.ruleObject, `rules.${ruleId}.`);
     }
   }
+  warnings.push(...collectOverlayWarnings(config));
   return warnings;
 }
 
@@ -310,6 +436,25 @@ function configToRequest(config) {
 
   const shared = buildSharedOptions(config);
 
+  // --- overlays: top-level `overlays` applies to every tree; `trees[i].overlays` adds to that tree only.
+  // See the "Adapter overlays" section above for the resolution-base rationale (tree root, not config
+  // file dir) and the never-fatal read/parse contract (failures surface via `collectConfigWarnings`, not
+  // here — this function silently drops what it cannot load rather than duplicating the warning). ---
+  if (config.overlays !== undefined) {
+    validateOverlaysArray(config.overlays, 'overlays');
+  }
+  const sharedOverlayPaths = Array.isArray(config.overlays) ? config.overlays : [];
+
+  // Attach any resolved overlays to a tree-request object, in place, only when non-empty — mirrors this
+  // file's "omitted key falls through to the napi/engine default" convention (see `packsDir` above).
+  const attachOverlays = (treeRequest, root, treePaths) => {
+    const { overlays } = resolveOverlaysForRoot(root, sharedOverlayPaths, treePaths);
+    if (overlays.length > 0) {
+      treeRequest.adapterOverlays = overlays;
+    }
+    return treeRequest;
+  };
+
   // --- determine tree layout: explicit trees, or roots (default ["."]). ---
   let trees;
   if (config.trees !== undefined) {
@@ -320,10 +465,13 @@ function configToRequest(config) {
       if (!isPlainObject(tree) || typeof tree.root !== 'string' || tree.root === '') {
         throw new ConfigError(`trees[${i}] must be an object with a non-empty "root" string.`);
       }
+      if (tree.overlays !== undefined) {
+        validateOverlaysArray(tree.overlays, `trees[${i}].overlays`);
+      }
       // Default sourceId to the tree's root so distinct trees get distinct sources: the cross-source
       // rules (shared-db-table, cross-tree route shadowing, ...) only fire with >= 2 distinct sourceIds.
       const sourceId = tree.sourceId !== undefined ? tree.sourceId : tree.root;
-      return { root: tree.root, sourceId, ...shared };
+      return attachOverlays({ root: tree.root, sourceId, ...shared }, tree.root, tree.overlays);
     });
   } else {
     let roots = config.roots;
@@ -342,8 +490,8 @@ function configToRequest(config) {
     // a single root needs no source tag (it takes the single-source `analyze` path below).
     trees =
       roots.length > 1
-        ? roots.map((root) => ({ root, sourceId: root, ...shared }))
-        : roots.map((root) => ({ root, ...shared }));
+        ? roots.map((root) => attachOverlays({ root, sourceId: root, ...shared }, root, undefined))
+        : roots.map((root) => attachOverlays({ root, ...shared }, root, undefined));
   }
 
   if (trees.length === 1 && config.trees === undefined) {

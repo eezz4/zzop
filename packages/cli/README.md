@@ -34,7 +34,9 @@ zzop           # analyzes using that config and prints a report
 | Command | Description |
 | --- | --- |
 | `zzop init [--force]` | Write an annotated `zzop.config.jsonc` to the current directory. |
+| `zzop init adapter --mode <a\|b> --kind <consume\|provide> [--force]` | Scaffold a self-contained starter adapter into `./zzop-adapter/` (`main.mjs`, bundled `lib/keys.mjs` + `lib/envelope.mjs`, `README.md`). `--mode a` = full envelope (replaces native analysis for the tree); `--mode b` = io-only overlay (merged via the `overlays` config key). `--kind` selects which side's extraction TODOs are stubbed in. Refuses to overwrite an existing `zzop-adapter/` without `--force`. See [docs/adapters/README.md](../../docs/adapters/README.md). |
 | `zzop [run] [options]` | Load the config, analyze, and print. This is the default command. |
+| `zzop adapter validate <envelope.json>` | Check an adapter envelope offline: structural validation against the v1 envelope contract plus lint hints (unnormalized `http` keys, host-carrying provide keys, duplicate provides, absolute file paths). Exits non-zero if the envelope is structurally invalid; hints never affect the exit code. Attach a valid overlay envelope to a run via the `overlays` config key. |
 
 ### `run` options
 
@@ -46,6 +48,7 @@ zzop           # analyzes using that config and prints a report
 | `--out <dir>` | Override the report base directory (default `./zzop-reports`; equivalent to config `report.dir`). Each run writes to `<dir>/zzop.<epoch>/`, a fresh subdir per run so runs accumulate. |
 | `-a, --all` | Expand info-level findings. By default they are folded to a per-rule count so warnings/errors stay visible. |
 | `--severity <critical\|warning\|info\|off>` | Only display findings at or above this severity (default `off` = show all). This is a display filter only — the exit code is always computed from the unfiltered findings and the config's `failOn`, never from `--severity`. |
+| `--debug-io` | After the normal output, dump every cross-layer join bucket (`edges`, `unconsumedProvides`, `unprovidedConsumes`, `unresolvedConsumes`, `externalConsumes`, `ambiguousConsumes`) as deterministic plain text, one section per bucket and one line per entry — the join-debug surface for troubleshooting an adapter/overlay. A no-op single-tree run still prints every section, each at count 0. |
 | `-h, --help` | Show help. |
 | `--version` | Show the CLI and engine versions. |
 

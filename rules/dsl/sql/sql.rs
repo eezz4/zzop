@@ -15,7 +15,9 @@
 //! detection (needs AST-structural object-literal traversal) — both beyond the DSL's four matcher shapes.
 //!
 //! Every rule's `// <marker>-ok:` suppression case is covered below, using the fixed "finding's own line
-//! OR the single line directly above" window (`MARKER_LOOKBACK_LINES`).
+//! OR the single line directly above" window (`MARKER_LOOKBACK_LINES`). `destructive-migration` also
+//! recognizes a `--`-comment marker in `.sql` files specifically (`dsl.rs::is_sql_file`), since real
+//! migrations of this pack's target class are commonly raw `.sql`, not `.ts`/`.js`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1061,19 +1063,18 @@ fn drop_table_outside_a_migration_path_is_not_flagged() {
 }
 
 #[test]
-fn sql_destructive_migration_ok_marker_suppresses_the_finding() {
+fn sql_destructive_migration_dash_dash_ok_marker_in_a_sql_migration_file_suppresses_the_finding() {
+    // `.sql` files use `--` line comments, not `//`, so the marker recognizer accepts a `--`-comment
+    // marker for `.sql` files specifically (see `dsl.rs::is_sql_file`/`compile_marker_sql`) — this is
+    // what lets a migration DROP be suppressed inline instead of only tree-wide via `disabled_rules`.
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "migrations/003_drop_reviewed.sql",
         "-- sql-destructive-migration-ok: reviewed in PR #482, table fully migrated off\nDROP TABLE legacy_orders;\n",
     );
-    // Note: the suppress-marker window only recognizes a `//`-style comment; this SQL file's `--` comment
-    // does not suppress it, so the finding still fires here — the marker mechanism is JS/TS-comment-shaped
-    // by design (see dsl-reference.md's suppress-marker semantics), not SQL-comment-aware.
     let out = scan(&dir);
-    assert_eq!(
-        hits(&out, "destructive-migration").len(),
-        1,
+    assert!(
+        hits(&out, "destructive-migration").is_empty(),
         "{:?}",
         out.findings
     );
@@ -1089,6 +1090,75 @@ fn sql_destructive_migration_ok_marker_in_a_js_migration_file_suppresses_the_fin
     let out = scan(&dir);
     assert!(
         hits(&out, "destructive-migration").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn sql_destructive_migration_dash_dash_marker_text_in_a_js_migration_file_does_not_suppress() {
+    // The `--`-comment recognizer is gated to `.sql` files only: `--` is not a comment in JS/TS (`--x` is
+    // a decrement there), so the same marker text in a `.js` migration file must NOT suppress the finding
+    // — only the `//` form (covered above) works there.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/005_drop_reviewed.js",
+        "-- sql-destructive-migration-ok: reviewed in PR #482, table fully migrated off\nexports.up = (knex) => knex.raw(\"DROP TABLE legacy_orders\");\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "destructive-migration").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn sql_destructive_migration_dash_dash_marker_above_the_drop_line_in_sql_also_suppresses() {
+    // Same 1-line lookback window as the `//` form: the marker on the line directly above the DROP still
+    // suppresses it, not just a marker on the DROP line itself.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/006_drop_reviewed.sql",
+        "-- sql-destructive-migration-ok: reviewed in PR #499\nDROP TABLE stale_sessions;\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "destructive-migration").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn sql_destructive_migration_unmarked_drop_in_sql_still_fires() {
+    // Baseline: a `.sql` migration DROP with no marker at all must still fire at info — the `--`-marker
+    // gate only suppresses when the marker text is actually present, never silences `.sql` files broadly.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/007_drop_unreviewed.sql",
+        "DROP TABLE unreviewed_orders;\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "destructive-migration");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].severity, zzop_core::Severity::Info);
+}
+
+#[test]
+fn sql_destructive_migration_unrelated_dash_dash_marker_text_does_not_suppress() {
+    // A `--`-comment that names a DIFFERENT marker must not suppress — mirrors
+    // `unrelated_marker_text_does_not_suppress` in `packages/core/src/dsl.rs` for the `//` form.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/008_drop_unrelated.sql",
+        "-- some-other-marker-ok: not this rule\nDROP TABLE other_orders;\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "destructive-migration").len(),
+        1,
         "{:?}",
         out.findings
     );

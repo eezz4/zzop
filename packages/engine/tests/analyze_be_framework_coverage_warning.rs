@@ -1,9 +1,10 @@
-//! End-to-end coverage for `zzop_engine::framework_silence`'s three coverage self-reports, wired into
+//! End-to-end coverage for `zzop_engine::framework_silence`'s four coverage self-reports, wired into
 //! `analyze_tree`'s `AnalyzeOutput::warnings`:
 //! - S1 (`controller_silence_warning`): a tree whose files carry controller-decorator-shaped lines in 3+
-//!   distinct files, yet extract ZERO `http` provides tree-wide. Guards against an unrecognized
+//!   distinct files, yet extract NEAR-ZERO (<3) `http` provides tree-wide. Guards against an unrecognized
 //!   controller-decorator convention (e.g. a framework using `@RestController` under a different package
-//!   name, the way n8n's own `@n8n/decorators` does) failing silently.
+//!   name, the way n8n's own `@n8n/decorators` does) failing silently — including round 14's shape, where
+//!   a Spring-BE tree still had a couple of lexically-extracted provides after losing most of its routes.
 //! - S2 (`server_framework_import_warning`): a server-framework package (koa, fastify, ...) is imported
 //!   while extracted `http` provides stay near-zero — closes the METHOD-CALL registration idiom gap S1's
 //!   decorator regex cannot see (dogfood round 9's be-express class; Koa is used here rather than Express
@@ -12,6 +13,9 @@
 //! - S3 (`committed_spec_io_silence_warning`): a committed OpenAPI/Swagger spec sits in the tree while
 //!   this tree's io stays near-zero in both directions — the generated-client blind spot (round 9's
 //!   fe-vue class).
+//! - S4 (`client_library_import_warning`): an http-client package (axios, `@angular/common/http`, ...) is
+//!   imported while extracted `http` consumes stay near-zero — the consume-side dual of S2 (round 14's
+//!   Angular-FE class: ~15 real `HttpClient` call sites, 0 extracted consumes).
 //!
 //! Each covers the NEXT unknown framework/idiom at least getting a warning instead of silent
 //! cross-layer-join darkness.
@@ -63,9 +67,10 @@ fn config() -> EngineConfig {
     }
 }
 
-const WARNING_SUBSTRING: &str = "route decorators/annotations but no http routes were extracted";
+const WARNING_SUBSTRING: &str = "route decorators/annotations but only";
 const S2_WARNING_SUBSTRING: &str = "server-framework package(s) imported but only";
 const S3_WARNING_SUBSTRING: &str = "committed OpenAPI/Swagger spec exists at";
+const S4_WARNING_SUBSTRING: &str = "http-client package(s) imported but only";
 
 /// 3 files carrying an invented `@FastController`/`@FastGet` decorator shape — structurally identical
 /// (class-level gate + method-level verb) to Nest's own idiom, but under decorator NAMES that
@@ -181,6 +186,83 @@ fn committed_openapi_spec_tree() -> TempDir {
     dir.write(
         "src/App.vue",
         "<template>\n  <div>hi</div>\n</template>\n<script setup>\nconst greeting = 'hi';\n</script>\n",
+    );
+    dir
+}
+
+/// Round 14's actual failure shape for S1: 2 real NestJS controllers (each contributing 1 extracted
+/// `http` provide, so `http_provides_count` is 2 — near-zero, still below `MIN_PROVIDES_FLOOR`) plus a
+/// third file carrying the same unrecognized `@FastController`/`@FastGet` decorator shape
+/// `unrecognized_framework_tree` uses, so `MIN_FILES` (3) worth of decorator-matching files is cleared
+/// too. An exact-zero gate would have silently passed over this tree (2 > 0); the near-zero gate must not.
+fn near_zero_provides_with_three_decorator_files_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-coverage-s1-near-zero");
+    dir.write(
+        "src/users/users.controller.ts",
+        concat!(
+            "import { Controller, Get } from '@nestjs/common';\n\n",
+            "@Controller('api/users')\n",
+            "export class UsersController {\n",
+            "  @Get()\n",
+            "  findAll() { return []; }\n",
+            "}\n",
+        ),
+    );
+    dir.write(
+        "src/orders/orders.controller.ts",
+        concat!(
+            "import { Controller, Get } from '@nestjs/common';\n\n",
+            "@Controller('api/orders')\n",
+            "export class OrdersController {\n",
+            "  @Get()\n",
+            "  findAll() { return []; }\n",
+            "}\n",
+        ),
+    );
+    dir.write(
+        "src/items.controller.ts",
+        "@FastController('/items')\nexport class ItemsController {\n  @FastGet('/')\n  findAll() { return []; }\n}\n",
+    );
+    dir
+}
+
+/// The healthy counterpart of the fixture above: 3 real NestJS controllers across 3 decorator-matching
+/// files, clearing `MIN_PROVIDES_FLOOR` (3 extracted provides) — proves S1's near-zero gate still goes
+/// silent once provides clear the floor, even with `MIN_FILES`-worth of decorator-shaped files present.
+fn healthy_provides_across_three_decorator_files_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-coverage-s1-healthy");
+    dir.write(
+        "src/users/users.controller.ts",
+        concat!(
+            "import { Controller, Get } from '@nestjs/common';\n\n",
+            "@Controller('api/users')\n",
+            "export class UsersController {\n",
+            "  @Get()\n",
+            "  findAll() { return []; }\n",
+            "}\n",
+        ),
+    );
+    dir.write(
+        "src/orders/orders.controller.ts",
+        concat!(
+            "import { Controller, Get } from '@nestjs/common';\n\n",
+            "@Controller('api/orders')\n",
+            "export class OrdersController {\n",
+            "  @Get()\n",
+            "  findAll() { return []; }\n",
+            "}\n",
+        ),
+    );
+    dir.write(
+        "src/items/items.controller.ts",
+        concat!(
+            "import { Controller, Get } from '@nestjs/common';\n\n",
+            "@Controller('api/items')\n",
+            "export class ItemsController {\n",
+            "  @Get()\n",
+            "  findAll() { return []; }\n",
+            "}\n",
+        ),
     );
     dir
 }
@@ -309,6 +391,127 @@ fn a_pure_fe_angular_tree_never_fires_the_s3_warning() {
             .iter()
             .any(|w| w.contains(S3_WARNING_SUBSTRING)),
         "a tree with no committed spec file must never get the S3 warning, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn near_zero_provides_with_three_decorator_files_still_fires_the_s1_warning() {
+    // Round 14's actual failure shape: 2 real extracted provides (not zero) across a tree that also
+    // clears MIN_FILES worth of decorator-matching files — the near-zero gate must still fire here, where
+    // the old exact-zero gate would have silently passed it over.
+    let dir = near_zero_provides_with_three_decorator_files_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains(WARNING_SUBSTRING) && w.contains("only 2 http route")),
+        "expected the S1 near-zero warning naming 2 extracted routes, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn three_decorator_files_with_three_extracted_provides_never_fires_the_s1_warning() {
+    let dir = healthy_provides_across_three_decorator_files_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        !out.warnings.iter().any(|w| w.contains(WARNING_SUBSTRING)),
+        "a tree whose extracted http provides clear MIN_PROVIDES_FLOOR must never get the S1 warning, \
+even with 3+ decorator-matching files, got: {:?}",
+        out.warnings
+    );
+}
+
+/// Round 14's Angular-FE consume-side shape: `axios` is imported and genuinely used, but through an
+/// `axios.create()` instance stored in a variable and called via that variable (`api.get(...)`) — the
+/// egress extractor's http-call matcher requires the call-site's member-expression object to be the bare
+/// identifier `axios` (or `ky`) itself (`zzop_parser_typescript::adapters::egress::match_http_call`), so
+/// neither the `axios.create(...)` call (not an http verb) nor the `api.get(...)` call (object is `api`,
+/// not `axios`) is recognized; this tree's real `http`-consumes count is genuinely zero.
+fn axios_wrapped_instance_zero_consumes_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-coverage-axios-wrapped");
+    dir.write(
+        "src/api.ts",
+        concat!(
+            "import axios from 'axios';\n\n",
+            "const api = axios.create({ baseURL: 'https://api.example.com' });\n\n",
+            "export async function fetchUsers() {\n",
+            "  const res = await api.get('/users');\n",
+            "  return res.data;\n",
+            "}\n",
+        ),
+    );
+    dir
+}
+
+/// Round 14's actual Angular-FE fixture shape: `@angular/common/http`'s `HttpClient` injected and called
+/// through `this.http.get(...)`. The same batch that added S4 also taught `extract_http_egress` this exact
+/// DI shape (`angular-httpclient-v1`), so this tree now yields ONE extracted consume, not zero — which is
+/// precisely S4's near-zero band (1 < MIN_PROVIDES_FLOOR): the e2e exercises the warning co-existing with
+/// a partially-sighted extractor, while the axios fixture above stays the fully-blind (0-consume) case.
+fn angular_http_client_near_zero_consumes_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-coverage-angular-http-client");
+    dir.write(
+        "src/users.service.ts",
+        concat!(
+            "import { Injectable } from '@angular/core';\n",
+            "import { HttpClient } from '@angular/common/http';\n\n",
+            "@Injectable({ providedIn: 'root' })\n",
+            "export class UsersService {\n",
+            "  constructor(private http: HttpClient) {}\n\n",
+            "  getUsers() {\n",
+            "    return this.http.get('/api/users');\n",
+            "  }\n",
+            "}\n",
+        ),
+    );
+    dir
+}
+
+#[test]
+fn axios_import_with_zero_extracted_consumes_fires_the_s4_warning() {
+    let dir = axios_wrapped_instance_zero_consumes_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains(S4_WARNING_SUBSTRING) && w.contains("axios")),
+        "expected the S4 http-client-import warning naming axios, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn angular_http_client_import_with_near_zero_extracted_consumes_fires_the_s4_warning() {
+    let dir = angular_http_client_near_zero_consumes_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains(S4_WARNING_SUBSTRING) && w.contains("@angular/common/http")),
+        "expected the S4 http-client-import warning naming @angular/common/http, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn a_real_nest_tree_never_fires_the_s4_warning() {
+    // `real_nest_tree` imports no http-client package at all (`@nestjs/common` is a server framework, in
+    // `SERVER_FRAMEWORK_SPECIFIERS`, not `HTTP_CLIENT_SPECIFIERS`), so S4 must stay silent regardless of
+    // this tree's near-zero consume count.
+    let dir = real_nest_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains(S4_WARNING_SUBSTRING)),
+        "a tree with no http-client package import must never get the S4 warning, got: {:?}",
         out.warnings
     );
 }

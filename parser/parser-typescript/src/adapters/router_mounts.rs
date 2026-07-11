@@ -349,7 +349,12 @@ impl FragmentBuilder<'_> {
             return None;
         };
         match method.sym.as_str() {
-            verb @ ("get" | "post" | "put" | "patch" | "delete") => {
+            // Lowercase spelling of a `zzop_core::HTTP_KEY_VERBS` verb (T1: the verb set lives in
+            // core) — the `.get(path, handler)` registration vocabulary.
+            verb if zzop_core::HTTP_KEY_VERBS
+                .iter()
+                .any(|v| v.to_ascii_lowercase() == verb) =>
+            {
                 // A route registration always carries a handler argument; a single-argument call
                 // (e.g. Express's `app.get('view engine')`) is a config getter, not a route.
                 if call.args.len() < 2 {

@@ -51,3 +51,13 @@ pub fn analyze_envelope(envelope_json: String, config_json: String) -> Result<St
 pub fn version() -> String {
     crate::api::version_string()
 }
+
+/// `validateEnvelopeOnly(envelopeJson: string) -> string` — fast offline `{valid, issues}` check for a
+/// Normalized AST envelope, no `configJson` and no engine analysis. See
+/// `crate::api::validate_envelope_only_json`; unlike the other exports here it never itself returns
+/// `Err` (an invalid envelope is a normal `{"valid": false, ...}` report), so `catch` only guards against
+/// an actual panic.
+#[napi(js_name = "validateEnvelopeOnly")]
+pub fn validate_envelope_only(envelope_json: String) -> Result<String> {
+    catch(move || Ok(crate::api::validate_envelope_only_json(&envelope_json)))
+}

@@ -45,6 +45,7 @@ mod framework_silence;
 mod io;
 mod pipeline;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use zzop_core::{
@@ -287,7 +288,7 @@ pub struct MultiAnalyzeOutput {
     /// `(root, config.source_id, output)` for each input tree, in the same order as `trees`.
     pub trees: Vec<(PathBuf, String, AnalyzeOutput)>,
     pub cross_layer: zzop_core::CrossLayerResult,
-    /// The 20 `cross-layer/*` native rules run over `cross_layer` — see `compute_cross_layer_findings`'s
+    /// The 22 `cross-layer/*` native rules run over `cross_layer` — see `compute_cross_layer_findings`'s
     /// doc for the gating/derivation/sort contract. Always populated: even a single-tree `analyze_trees`
     /// call runs these (most find nothing, since e.g. `shared-db-table`/`duplicate-route` need 2+
     /// distinct source trees to ever fire).
@@ -338,8 +339,65 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
                 })
         })
         .collect();
-    let cross_layer_findings =
-        compute_cross_layer_findings(&source_ios, &cross_layer, trees, &package_imports);
+    // Per-tree, not run-global: a source tree "participates" in a `trpc`-kind edge when it appears on
+    // EITHER side (`from.source` or `to.source` — a tree can be the router-defining provider, the caller,
+    // or occasionally both for a same-tree edge). `trpc_edge_counts_by_source` counts each edge once per
+    // distinct participating source (a same-tree edge, `from.source == to.source`, counts once for that
+    // source, not twice). A run-global count here would let tree A's trpc edges suppress/misattribute a
+    // literal `/trpc/`-segment route that tree B provides on its own, unrelated deployment — see
+    // `zzop_rules_cross_layer::is_trpc_mount_route_key`'s doc.
+    let mut trpc_edge_counts_by_source: BTreeMap<String, usize> = BTreeMap::new();
+    for e in cross_layer.edges.iter().filter(|e| e.kind == "trpc") {
+        let mut participants: Vec<&str> = vec![e.from.source.as_str()];
+        if e.to.source != e.from.source {
+            participants.push(e.to.source.as_str());
+        }
+        for source in participants {
+            *trpc_edge_counts_by_source
+                .entry(source.to_string())
+                .or_insert(0) += 1;
+        }
+    }
+    let trpc_participating_sources: BTreeSet<String> =
+        trpc_edge_counts_by_source.keys().cloned().collect();
+    let cross_layer_findings = compute_cross_layer_findings(
+        &source_ios,
+        &cross_layer,
+        trees,
+        &package_imports,
+        &trpc_participating_sources,
+    );
+
+    // tRPC mount-route suppression disclosure — `unconsumed-endpoint`/`unconsumed-mutation-endpoint`
+    // (inside `compute_cross_layer_findings` above) silently excluded any http provide identified as a
+    // tRPC mount route whose OWN source tree is in `trpc_participating_sources`; per `output-philosophy.md`
+    // §0/§1 (no silent suppression), that exclusion must surface somewhere — pushed onto the OWNING source
+    // tree's own `AnalyzeOutput::warnings`, the same per-tree engine self-report channel every other
+    // silent-failure disclosure in this crate uses. See
+    // `zzop_rules_cross_layer::trpc_mount_route_suppression_notes`'s doc for the message shape and dogfood
+    // motivation (round 9). Gated on the SAME rule-enable union the suppression itself runs under: with
+    // both unconsumed rules disabled, no finding was suppressed, so a note would disclose a suppression
+    // that never happened (a phantom disclosure).
+    let disclosure_gate = RuleConfig {
+        disabled_rules: trees
+            .iter()
+            .flat_map(|(_, c)| c.rule_config.disabled_rules.iter().cloned())
+            .collect(),
+        ..RuleConfig::default()
+    };
+    if zzop_core::is_enabled(&disclosure_gate, "cross-layer/unconsumed-endpoint")
+        || zzop_core::is_enabled(&disclosure_gate, "cross-layer/unconsumed-mutation-endpoint")
+    {
+        for (source, note) in zzop_rules_cross_layer::trpc_mount_route_suppression_notes(
+            &cross_layer.unconsumed_provides,
+            &trpc_edge_counts_by_source,
+        ) {
+            if let Some((_, _, output)) = outputs.iter_mut().find(|(_, s, _)| *s == source) {
+                output.warnings.push(note);
+            }
+        }
+    }
+
     MultiAnalyzeOutput {
         trees: outputs,
         cross_layer,
@@ -347,7 +405,7 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
     }
 }
 
-/// Runs the 20 `cross-layer/*` native rules (`zzop_rules_cross_layer::cross_layer`) over `cross_layer` and
+/// Runs the 22 `cross-layer/*` native rules (`zzop_rules_cross_layer::cross_layer`) over `cross_layer` and
 /// returns their merged, sorted findings.
 ///
 /// ## disabledRules gating: union, exclude-only
@@ -369,6 +427,7 @@ fn compute_cross_layer_findings(
     cross_layer: &zzop_core::CrossLayerResult,
     trees: &[(PathBuf, EngineConfig)],
     package_imports: &[zzop_rules_cross_layer::PackageImportSite],
+    trpc_participating_sources: &BTreeSet<String>,
 ) -> Vec<Finding> {
     let mut disabled_union: Vec<String> = Vec::new();
     for (_, config) in trees {
@@ -402,7 +461,7 @@ fn compute_cross_layer_findings(
         })
         .collect();
 
-    let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(21);
+    let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(22);
 
     // `route_near_miss_results` is called ONCE here (ahead of its own position in `sources` order below) so
     // both `unconsumed-endpoint` and `unconsumed-mutation-endpoint` can annotate a provide that is also a
@@ -430,6 +489,7 @@ fn compute_cross_layer_findings(
             &cross_layer.unconsumed_provides,
             &cross_layer.unresolved_consumes,
             &near_miss_targets,
+            trpc_participating_sources,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/method-mismatch") {
@@ -451,7 +511,25 @@ fn compute_cross_layer_findings(
         ));
     }
     if let Some(result) = route_near_miss_result {
-        sources.push(result.findings);
+        // `cross-layer/prefix-drift` aggregates route-near-miss's `prefix_records`: when 3+ consumes share
+        // one missing/extra base prefix (`/api`, ...) against the same target tree, one aggregate finding
+        // replaces those per-route near-misses — subsumed via `retain_non_subsumed`. This is a replacement,
+        // not silent suppression: the aggregate enumerates every folded route (`output-philosophy.md` §0/§1).
+        // Structurally derived from route-near-miss's records, so it can only run inside this branch (route-
+        // near-miss enabled); disabling prefix-drift alone leaves the per-route near-misses intact.
+        if zzop_core::is_enabled(&gate, "cross-layer/prefix-drift") {
+            let prefix_drift =
+                zzop_rules_cross_layer::prefix_drift_findings(&result.prefix_records);
+            sources.push(zzop_rules_cross_layer::retain_non_subsumed(
+                result.findings,
+                &prefix_drift.subsumed,
+            ));
+            if !prefix_drift.findings.is_empty() {
+                sources.push(prefix_drift.findings);
+            }
+        } else {
+            sources.push(result.findings);
+        }
     }
     if zzop_core::is_enabled(&gate, "cross-layer/shared-db-table") {
         sources.push(zzop_rules_cross_layer::shared_db_table_findings(
@@ -511,6 +589,7 @@ fn compute_cross_layer_findings(
             zzop_rules_cross_layer::unconsumed_mutation_endpoint_findings(
                 &cross_layer.unconsumed_provides,
                 &near_miss_targets,
+                trpc_participating_sources,
             ),
         );
     }

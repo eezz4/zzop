@@ -1,0 +1,206 @@
+[
+  {
+    "side": "provide",
+    "method": "GET",
+    "path": "users",
+    "key": "GET /users"
+  },
+  {
+    "side": "provide",
+    "method": "GET",
+    "path": "/users",
+    "key": "GET /users"
+  },
+  {
+    "side": "provide",
+    "method": "GET",
+    "path": "//users//profile",
+    "key": "GET /users/profile"
+  },
+  {
+    "side": "provide",
+    "method": "GET",
+    "path": "/users/",
+    "key": "GET /users"
+  },
+  {
+    "side": "provide",
+    "method": "GET",
+    "path": "/users/{id}",
+    "key": "GET /users/{}"
+  },
+  {
+    "side": "provide",
+    "method": "GET",
+    "path": "/users/:id",
+    "key": "GET /users/{}"
+  },
+  {
+    "side": "provide",
+    "method": "GET",
+    "path": "/users/{id}/posts/:postId",
+    "key": "GET /users/{}/posts/{}"
+  },
+  {
+    "side": "provide",
+    "method": "get",
+    "path": "/users",
+    "key": "GET /users"
+  },
+  {
+    "side": "provide",
+    "method": "Get",
+    "path": "/users",
+    "key": "GET /users"
+  },
+  {
+    "side": "provide",
+    "method": "GET",
+    "path": "",
+    "key": "GET /"
+  },
+  {
+    "side": "provide",
+    "method": "GET",
+    "path": "/",
+    "key": "GET /"
+  },
+  {
+    "side": "provide",
+    "method": "GET",
+    "path": "{id}",
+    "key": "GET /{}"
+  },
+  {
+    "side": "provide",
+    "method": "GET",
+    "path": ":id",
+    "key": "GET /{}"
+  },
+  {
+    "side": "provide",
+    "method": "GET",
+    "path": "///",
+    "key": "GET /"
+  },
+  {
+    "side": "provide",
+    "method": "GET",
+    "path": "/search?q={}",
+    "key": "GET /search?q={}"
+  },
+  {
+    "side": "provide",
+    "method": "POST",
+    "path": "/users",
+    "key": "POST /users"
+  },
+  {
+    "side": "provide",
+    "method": "PUT",
+    "path": "/users/{id}",
+    "key": "PUT /users/{}"
+  },
+  {
+    "side": "provide",
+    "method": "DELETE",
+    "path": "/users/{id}",
+    "key": "DELETE /users/{}"
+  },
+  {
+    "side": "provide",
+    "method": "PATCH",
+    "path": "/users/{id}",
+    "key": "PATCH /users/{}"
+  },
+  {
+    "side": "consume",
+    "method": "GET",
+    "path": "users",
+    "key": "GET /users"
+  },
+  {
+    "side": "consume",
+    "method": "GET",
+    "path": "/users?page=2",
+    "key": "GET /users"
+  },
+  {
+    "side": "consume",
+    "method": "POST",
+    "path": "articles?limit=10",
+    "key": "POST /articles"
+  },
+  {
+    "side": "consume",
+    "method": "GET",
+    "path": "/users#section",
+    "key": "GET /users"
+  },
+  {
+    "side": "consume",
+    "method": "GET",
+    "path": "/users/{id}?include=posts",
+    "key": "GET /users/{}"
+  },
+  {
+    "side": "consume",
+    "method": "PATCH",
+    "path": "/users/{id}/posts/:postId?sort=desc",
+    "key": "PATCH /users/{}/posts/{}"
+  },
+  {
+    "side": "consume",
+    "method": "get",
+    "path": "/users/:id",
+    "key": "GET /users/{}"
+  },
+  {
+    "side": "consume",
+    "method": "GET",
+    "path": "//api//users//",
+    "key": "GET /api/users"
+  },
+  {
+    "side": "consume",
+    "method": "DELETE",
+    "path": "/users/{id}#frag?stillquery",
+    "key": "DELETE /users/{}"
+  },
+  {
+    "side": "consume",
+    "method": "GET",
+    "path": "",
+    "key": "GET /"
+  },
+  {
+    "side": "consume",
+    "method": "GET",
+    "path": "/",
+    "key": "GET /"
+  },
+  {
+    "side": "consume",
+    "method": "GET",
+    "path": "?page=2",
+    "key": "GET /"
+  },
+  {
+    "side": "consume",
+    "method": "GET",
+    "path": "/users/{id}#",
+    "key": "GET /users/{}"
+  },
+  {
+    "side": "consume",
+    "method": "GET",
+    "path": "/users/{id}?",
+    "key": "GET /users/{}"
+  },
+  {
+    "side": "consume",
+    "method": "GET",
+    "path": "/Users/Profile",
+    "key": "GET /Users/Profile"
+  }
+]

@@ -14,8 +14,18 @@
 //! disconnected FE/BE pair with a drifted base prefix produces one `unconsumed-endpoint` finding PER route
 //! plus one `route-near-miss` finding per drifted consume, describing the same underlying drift from two
 //! sides without ever pointing at each other.
+//!
+//! ## tRPC mount-route suppression
+//! A provide [`super::is_trpc_mount_route_key`] identifies as a tRPC mount route (a literal `trpc` path
+//! segment, e.g. `/api/trpc/{}`) is excluded here when ITS OWN source tree is in `trpc_participating_sources`
+//! (a tree with 1+ `trpc`-kind edge on either side): dogfood round 9 found a fully-joined tRPC starter's
+//! only findings were its own GET/POST mount routes — the mount route IS the transport the `trpc`-kind
+//! edges flow through, so "unconsumed" is tone noise, not signal. Per-tree, not run-global: a route in a
+//! tree with zero tRPC edges of its own is never suppressed, even when some OTHER tree in the run has
+//! tRPC edges. The suppression is never silent — `super::trpc_mount_route_suppression_notes` (called by
+//! `zzop_engine::analyze_trees`) discloses it on the owning tree's `warnings` channel instead.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use zzop_core::io::{TaggedConsume, TaggedProvide};
 use zzop_core::{disable_hint, Finding, Severity};
@@ -26,6 +36,7 @@ pub fn unconsumed_endpoint_findings(
     unconsumed_provides: &[TaggedProvide],
     unresolved_consumes: &[TaggedConsume],
     near_miss_targets: &BTreeMap<(String, String, u32), NearMissTargetRef>,
+    trpc_participating_sources: &BTreeSet<String>,
 ) -> Vec<Finding> {
     let unresolved_http = unresolved_consumes
         .iter()
@@ -35,6 +46,10 @@ pub fn unconsumed_endpoint_findings(
     let mut out: Vec<Finding> = unconsumed_provides
         .iter()
         .filter(|p| p.provide.kind == "http" && !zzop_core::is_test_file(&p.provide.file))
+        .filter(|p| {
+            !(trpc_participating_sources.contains(&p.source)
+                && super::is_trpc_mount_route_key(&p.provide.key))
+        })
         .map(|p| {
             let key = &p.provide.key;
             let near_miss = near_miss_targets.get(&(
@@ -135,12 +150,21 @@ mod tests {
         BTreeMap::new()
     }
 
+    fn no_trpc() -> BTreeSet<String> {
+        BTreeSet::new()
+    }
+
+    fn trpc_sources(sources: &[&str]) -> BTreeSet<String> {
+        sources.iter().map(|s| s.to_string()).collect()
+    }
+
     #[test]
     fn dead_http_provide_is_flagged_with_source_and_anchor() {
         let out = unconsumed_endpoint_findings(
             &[dead("GET /orphan", "be", "Api.java", 12)],
             &[],
             &no_near_miss(),
+            &no_trpc(),
         );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].rule_id, "cross-layer/unconsumed-endpoint");
@@ -164,6 +188,7 @@ mod tests {
             )],
             &[],
             &no_near_miss(),
+            &no_trpc(),
         );
         assert!(out.is_empty());
     }
@@ -174,13 +199,14 @@ mod tests {
             &[dead_kind("db-table", "table:users", "db", "schema.sql", 1)],
             &[],
             &no_near_miss(),
+            &no_trpc(),
         );
         assert!(out.is_empty());
     }
 
     #[test]
     fn no_unconsumed_provides_is_empty() {
-        assert!(unconsumed_endpoint_findings(&[], &[], &no_near_miss()).is_empty());
+        assert!(unconsumed_endpoint_findings(&[], &[], &no_near_miss(), &no_trpc()).is_empty());
     }
 
     #[test]
@@ -193,6 +219,7 @@ mod tests {
                 unresolved("queue", "fe"), // not http — must not inflate the count
             ],
             &no_near_miss(),
+            &no_trpc(),
         );
         assert_eq!(out.len(), 1);
         assert!(out[0].message.contains("2 unresolved"));
@@ -208,6 +235,7 @@ mod tests {
             ],
             &[],
             &no_near_miss(),
+            &no_trpc(),
         );
         let sites: Vec<(&str, u32)> = out.iter().map(|f| (f.file.as_str(), f.line)).collect();
         assert_eq!(sites, vec![("a.java", 2), ("a.java", 9), ("z.java", 1)]);
@@ -228,6 +256,7 @@ mod tests {
             &[dead("GET /orphan", "be", "Api.java", 12)],
             &[],
             &targets,
+            &no_trpc(),
         );
         assert_eq!(out.len(), 1);
         assert!(out[0].message.contains("3 unmatched http consume(s)"));
@@ -245,6 +274,7 @@ mod tests {
             &[dead("GET /orphan", "be", "Api.java", 12)],
             &[],
             &no_near_miss(),
+            &no_trpc(),
         );
         assert_eq!(out.len(), 1);
         assert!(!out[0].message.contains("near-miss"));
@@ -254,5 +284,75 @@ mod tests {
             .unwrap()
             .get("nearMissConsumeCount")
             .is_none());
+    }
+
+    #[test]
+    fn trpc_mount_route_is_suppressed_when_its_own_tree_has_a_trpc_edge() {
+        let out = unconsumed_endpoint_findings(
+            &[dead(
+                "GET /api/trpc/{}",
+                "web",
+                "pages/api/trpc/[trpc].ts",
+                3,
+            )],
+            &[],
+            &no_near_miss(),
+            &trpc_sources(&["web"]),
+        );
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn trpc_mount_route_is_still_reported_when_no_tree_has_a_trpc_edge() {
+        let out = unconsumed_endpoint_findings(
+            &[dead(
+                "GET /api/trpc/{}",
+                "web",
+                "pages/api/trpc/[trpc].ts",
+                3,
+            )],
+            &[],
+            &no_near_miss(),
+            &no_trpc(),
+        );
+        assert_eq!(out.len(), 1);
+        assert!(out[0].message.contains("GET /api/trpc/{}"));
+    }
+
+    #[test]
+    fn trpc_mount_route_is_still_reported_when_only_a_different_tree_has_trpc_edges() {
+        // Class A regression: a run-global `trpc_edge_count` gate would suppress tree "web"'s literal
+        // trpc-segment route purely because tree "api" has trpc edges — the mount-IS-transport
+        // justification only holds for the tree whose OWN edges flow through the route.
+        let out = unconsumed_endpoint_findings(
+            &[dead(
+                "GET /api/trpc/{}",
+                "web",
+                "pages/api/trpc/[trpc].ts",
+                3,
+            )],
+            &[],
+            &no_near_miss(),
+            &trpc_sources(&["api"]),
+        );
+        assert_eq!(out.len(), 1);
+        assert!(out[0].message.contains("GET /api/trpc/{}"));
+    }
+
+    #[test]
+    fn a_route_that_merely_contains_but_does_not_carry_a_trpc_segment_is_not_suppressed() {
+        // "trpcish" is not the literal segment `trpc` — must not false-positive on substring match.
+        let out = unconsumed_endpoint_findings(
+            &[dead(
+                "GET /api/trpcish/status",
+                "web",
+                "pages/api/trpcish/status.ts",
+                3,
+            )],
+            &[],
+            &no_near_miss(),
+            &trpc_sources(&["web"]),
+        );
+        assert_eq!(out.len(), 1);
     }
 }

@@ -30,10 +30,12 @@
 //! class/interface/enum/record's `line` AND `body_start` are both the declaration-start line, not the
 //! (possibly later) line its opening `{` sits on.
 //!
-//! ## Known lexical-approximation limits (documented, not fixed — v1 scope)
-//! - Nested parens inside an annotation's own argument list that sits INSIDE a method's parameter list
-//!   (`foo(@Size(min=1) String x)`) defeats the args-has-no-parens assumption; that header will not
-//!   classify as a method (silently skipped, not mis-attributed).
+//! ## Known lexical-approximation limits (documented, not fixed — v3 scope)
+//! - ONE level of paren nesting inside a method's parameter list (an annotation's own argument list sitting
+//!   INSIDE the parameter list, e.g. `foo(@RequestParam(value = "x") String x)`) now classifies correctly
+//!   (v3). TWO OR MORE levels of nesting (an annotation argument that itself contains a parenthesized group,
+//!   e.g. `foo(@Size(groups = {Marker.class}, message = f("x")) String x)`) still defeats the argument
+//!   scanner; that header will not classify as a method (silently skipped, not mis-attributed).
 //! - `new Foo(...) { ... }` (anonymous class body) classifies as a `Function` named `Foo`, not a `Class` —
 //!   harmless for `Matcher::MethodScan`, just not the semantically precise kind.
 //! - Java text blocks (`"""..."""`, Java 15+) are treated as a sequence of ordinary string literals — enough
@@ -51,9 +53,12 @@ pub use provides::extract_http_provides;
 /// Cache key ingredient for `zzop-cache`, mirroring `zzop_parser_prisma::PARSER_FINGERPRINT`'s scheme — bump
 /// the trailing `/vN` counter whenever `parse_method_spans`'s projection logic changes its `SourceSymbol`
 /// output for the same source text, or the per-file projection grows a new fact type (v2: added
-/// `provides::extract_http_provides`), so a pre-existing cache entry from before that fact type existed is
-/// never served stale for an unchanged `.java` file.
-pub const PARSER_FINGERPRINT: &str = "java-lexical/v2";
+/// `provides::extract_http_provides`; v3: method headers whose parameter list carries one-level nested
+/// parens — annotation argument lists, e.g. `@RequestParam(value = "x") String x` — now classify, changing
+/// `SourceSymbol` output for previously-skipped sources; also under v3, `provides` resolves the
+/// statically-imported bare `method = POST` `@RequestMapping` attribute), so a pre-existing cache entry
+/// from before that fact type existed is never served stale for an unchanged `.java` file.
+pub const PARSER_FINGERPRINT: &str = "java-lexical/v3";
 
 /// Control-flow keywords that are syntactically shaped like a call (`KEYWORD (...)`) and so can fool the
 /// method-name regex below into capturing the keyword itself as a "method name" — see module doc.
@@ -228,12 +233,18 @@ fn class_re() -> &'static regex::Regex {
 
 /// End-anchored, dot-all: `IDENT(args)` optionally followed by a `throws ...` clause, with an arbitrary
 /// (lazy) prefix — see module doc for why this correctly finds the LAST such shape in the header (the
-/// argument list that actually reaches the end) even when annotations/earlier calls also contain parens.
+/// argument list that actually reaches the end) even when annotations/earlier calls also contain parens. The
+/// argument list itself allows ONE level of paren nesting (`[^()]|\([^()]*\)`, repeated) so a parameter-list
+/// annotation with its own argument list — `@RequestParam(value = "x") String x` — is still part of a single
+/// balanced `(args)` group; TWO+ levels of nesting still fall outside this shape (see module doc's "Known
+/// lexical-approximation limits").
 fn method_re() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
-        regex::Regex::new(r"(?s)^.*?\b([A-Za-z_$][\w$]*)\s*\([^()]*\)\s*(?:throws\s+[^{}]*)?$")
-            .unwrap()
+        regex::Regex::new(
+            r"(?s)^.*?\b([A-Za-z_$][\w$]*)\s*\((?:[^()]|\([^()]*\))*\)\s*(?:throws\s+[^{}]*)?$",
+        )
+        .unwrap()
     })
 }
 
@@ -389,6 +400,70 @@ mod tests {
         let run = find(&symbols, "run");
         assert_eq!(run.kind, SourceSymbolKind::Function);
         assert_eq!(run.body_start, Some(3));
+    }
+
+    // --- nested parens inside parameter-list annotations (v3) ---
+
+    #[test]
+    fn a_parameter_annotated_with_a_parenthesized_argument_list_still_classifies_as_a_method() {
+        let src = "class C {\n  void feed(@RequestParam(value = \"offset\", defaultValue = \"0\") int offset) {\n    int x = 1;\n  }\n}\n";
+        let symbols = parse_method_spans("Feed.java", src);
+        let feed = find(&symbols, "feed");
+        assert_eq!(feed.kind, SourceSymbolKind::Function);
+        assert_eq!(feed.body_start, Some(2));
+        assert_eq!(feed.body_end, Some(4));
+    }
+
+    #[test]
+    fn a_method_mixing_bare_and_parenthesized_parameter_annotations_still_classifies() {
+        let src = "class C {\n  void update(@Valid @RequestBody X x, @AuthenticationPrincipal User u, @RequestHeader(value = \"Authorization\") String h) {\n    int y = 1;\n  }\n}\n";
+        let symbols = parse_method_spans("Update.java", src);
+        let update = find(&symbols, "update");
+        assert_eq!(update.kind, SourceSymbolKind::Function);
+        assert_eq!(update.body_start, Some(2));
+        assert_eq!(update.body_end, Some(4));
+    }
+
+    #[test]
+    fn control_flow_headers_with_nested_call_parens_still_emit_no_symbol() {
+        // `while (m.find())`, `switch (calc(x))` and `catch (Exception e)` are exactly the single-level-
+        // nesting shape the v3 relaxation now newly matches at the regex level — CONTROL_KEYWORDS must still
+        // reject them. `if (foo(bar()))` and the `for` header go two levels deep (still beyond v3) and so
+        // additionally fail to match at all.
+        let src = concat!(
+            "class C {\n",
+            "  void run() {\n",
+            "    if (foo(bar())) { x(); }\n",
+            "    while (m.find()) { y(); }\n",
+            "    for (Map.Entry<K,V> e : map.entrySet()) { z(); }\n",
+            "    switch (calc(x)) { default: break; }\n",
+            "    try { w(); } catch (Exception e) { v(); }\n",
+            "  }\n",
+            "}\n",
+        );
+        let symbols = parse_method_spans("Ctrl.java", src);
+        // Only the class and the enclosing `run` method are real symbols.
+        assert_eq!(
+            names_and_kinds(&symbols),
+            vec![
+                ("run", SourceSymbolKind::Function),
+                ("C", SourceSymbolKind::Class)
+            ]
+        );
+    }
+
+    #[test]
+    fn two_level_nested_parens_in_a_parameter_list_still_silently_skips() {
+        // @Size's own argument list contains a further nested paren (`f("x")`) — TWO levels of nesting
+        // inside the method's parameter list, still beyond this v3 one-level fix (see module doc).
+        let src = "class C {\n  void broken(@Size(message = f(\"x\")) String s) {\n    int z = 1;\n  }\n}\n";
+        let symbols = parse_method_spans("Broken.java", src);
+        assert!(
+            symbols.iter().all(|s| s.name != "broken"),
+            "a two-level-nested parameter-list annotation must still be silently skipped, got: {symbols:?}"
+        );
+        // The class itself is still recognized — only the method header fails to classify.
+        assert!(symbols.iter().any(|s| s.name == "C"));
     }
 
     // --- negative-shape guards (scanJavaCmdInjection.test.ts's other fixtures) ---

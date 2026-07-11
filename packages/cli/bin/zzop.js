@@ -22,12 +22,27 @@ const {
 } = require('../lib/format');
 const { buildReports } = require('../lib/report');
 const { CONFIG_TEMPLATE } = require('../lib/init');
+const { lintEnvelope } = require('../lib/validate');
+const { buildAdapterScaffold, ADAPTER_MODE_VALUES, ADAPTER_KIND_VALUES } = require('../lib/adapter-templates');
+const { renderDebugIo } = require('../lib/debug-io');
+
+// Default scaffold directory for `zzop init adapter` — sibling to DEFAULT_CONFIG_FILENAME, mirrors how
+// `zzop init` always writes to a fixed, unconfigurable target in the current directory.
+const DEFAULT_ADAPTER_DIR = 'zzop-adapter';
 
 const USAGE = `zzop — zero-config multi-language SAST/architecture analysis
 
 Usage:
   zzop init [--force]              Write an annotated ${DEFAULT_CONFIG_FILENAME} to the current directory.
+  zzop init adapter --mode <a|b> --kind <consume|provide> [--force]
+                                    Scaffold a self-contained starter adapter in ./${DEFAULT_ADAPTER_DIR}/.
+                                    --mode a = full envelope (replaces native analysis for the tree);
+                                    --mode b = io-only overlay (merged via the overlays config key).
+                                    --kind selects which side's extraction TODOs are stubbed in. See
+                                    docs/adapters/README.md.
   zzop [run] [options]             Analyze using the config file (default command).
+  zzop adapter validate <path>     Offline check of an external-parser envelope (docs/NORMALIZED_AST.md)
+                                    against the v1 contract, plus semantic hints. No config/root needed.
 
 Options (run):
   --config <path>                  Config file to use (default ./${DEFAULT_CONFIG_FILENAME}).
@@ -40,6 +55,10 @@ Options (run):
   -a, --all                        Expand info-level findings (folded to per-rule counts by default).
   --severity <critical|warning|info|off>
                                     Only display findings at/above this severity (default: off = show all).
+  --debug-io                       After the normal output, dump every cross-layer join bucket (edges,
+                                    unconsumedProvides, unprovidedConsumes, unresolvedConsumes,
+                                    externalConsumes, ambiguousConsumes) as deterministic plain text —
+                                    the join-debug surface for troubleshooting an adapter/overlay.
   -h, --help                       Show this help.
   --version                        Show the CLI and engine versions.
 `;
@@ -68,6 +87,14 @@ function parseArgs(argv) {
     all: false,
     out: null,
     severity: null,
+    debugIo: false,
+    // `adapter validate <path>` only:
+    subcommand: null,
+    envelopePath: null,
+    // `init adapter --mode <a|b> --kind <consume|provide>` only:
+    initSubcommand: null,
+    mode: null,
+    kind: null,
   };
   const rest = [];
   // Scoped flags seen, for the command/flag cross-check below: `{ flag, scope }`.
@@ -123,6 +150,32 @@ function parseArgs(argv) {
         }
         scoped.push({ flag: arg, scope: 'run' });
         break;
+      case '--debug-io':
+        opts.debugIo = true;
+        scoped.push({ flag: arg, scope: 'run' });
+        break;
+      case '--mode':
+        opts.mode = argv[++i];
+        if (opts.mode === undefined) throw new ConfigError('--mode requires <a|b>.');
+        if (!ADAPTER_MODE_VALUES.includes(opts.mode)) {
+          throw new ConfigError(
+            `Invalid mode "${opts.mode}". Expected one of: ${ADAPTER_MODE_VALUES.join(', ')}.`
+          );
+        }
+        // Scoped to `init adapter` specifically, not just `init` — see the cross-check below, which
+        // special-cases this scope value (a bare `zzop init --mode a` is rejected too).
+        scoped.push({ flag: arg, scope: 'init-adapter' });
+        break;
+      case '--kind':
+        opts.kind = argv[++i];
+        if (opts.kind === undefined) throw new ConfigError('--kind requires <consume|provide>.');
+        if (!ADAPTER_KIND_VALUES.includes(opts.kind)) {
+          throw new ConfigError(
+            `Invalid kind "${opts.kind}". Expected one of: ${ADAPTER_KIND_VALUES.join(', ')}.`
+          );
+        }
+        scoped.push({ flag: arg, scope: 'init-adapter' });
+        break;
       default:
         if (arg.startsWith('-')) {
           throw new ConfigError(`Unknown option "${arg}". Run \`zzop --help\`.`);
@@ -132,20 +185,82 @@ function parseArgs(argv) {
   }
 
   opts.command = rest[0] || 'run';
-  if (rest.length > 1) {
+  if (opts.command === 'adapter') {
+    // `zzop adapter validate <path>` — a second positional (subcommand) plus a third (the envelope
+    // path), unlike every other command's single positional. Stashed here regardless of validity so
+    // `--help`/`--version` can still read `opts.command` before the escape-hatch-gated checks below run.
+    opts.subcommand = rest[1];
+    opts.envelopePath = rest[2];
+  } else if (opts.command === 'init') {
+    // `zzop init adapter --mode <a|b> --kind <consume|provide>` — a second positional (`adapter`),
+    // unlike bare `init`'s zero positionals. Stashed regardless of validity, same escape-hatch reasoning
+    // as `adapter`'s subcommand above.
+    opts.initSubcommand = rest[1];
+    if (rest.length > 2) {
+      throw new ConfigError(`Unexpected argument "${rest[2]}". Run \`zzop --help\`.`);
+    }
+  } else if (rest.length > 1) {
     throw new ConfigError(`Unexpected argument "${rest[1]}". Run \`zzop --help\`.`);
   }
 
   // Reject a flag used with the wrong command (e.g. `zzop init --all`, `zzop run --force`). Skipped when
   // `--help`/`--version` is present (both are global escape hatches that short-circuit the command) and
-  // for an unknown command (main() reports that more specifically). Only `init` and `run` scope flags.
-  if (!opts.help && !opts.version && (opts.command === 'init' || opts.command === 'run')) {
+  // for an unknown command (main() reports that more specifically). `adapter` scopes no flags of its
+  // own, so EVERY scoped flag is invalid there (`scope !== 'adapter'` always holds) — including it here
+  // rejects e.g. `zzop adapter validate x.json --json` instead of silently ignoring the flag. `--mode`/
+  // `--kind` carry the synthetic scope `init-adapter` instead of `init` — they are valid only under
+  // `zzop init adapter`, not bare `zzop init`, so they get their own branch here rather than reusing the
+  // command-name-equality check every other scope uses.
+  if (
+    !opts.help &&
+    !opts.version &&
+    (opts.command === 'init' || opts.command === 'run' || opts.command === 'adapter')
+  ) {
     for (const { flag, scope } of scoped) {
+      if (scope === 'init-adapter') {
+        if (opts.command !== 'init' || opts.initSubcommand !== 'adapter') {
+          throw new ConfigError(`"${flag}" is only valid with \`zzop init adapter\`. Run \`zzop --help\`.`);
+        }
+        continue;
+      }
       if (scope !== opts.command) {
         throw new ConfigError(
           `"${flag}" is not valid for the \`${opts.command}\` command. Run \`zzop --help\`.`
         );
       }
+    }
+  }
+
+  // `adapter` positional-shape checks (its scoped-flag rejection is handled by the shared cross-check
+  // above); same help/version escape hatch.
+  if (!opts.help && !opts.version && opts.command === 'adapter') {
+    if (rest.length > 3) {
+      throw new ConfigError(`Unexpected argument "${rest[3]}". Run \`zzop --help\`.`);
+    }
+    if (opts.subcommand !== 'validate') {
+      throw new ConfigError(
+        `Unknown "adapter" subcommand "${opts.subcommand || ''}" — only "adapter validate <path>" is supported. Run \`zzop --help\`.`
+      );
+    }
+    if (!opts.envelopePath) {
+      throw new ConfigError('"zzop adapter validate" requires a <envelope.json> path argument.');
+    }
+  }
+
+  // `init adapter` positional-shape + required-flags checks (its scoped-flag rejection is handled by the
+  // shared cross-check above); same help/version escape hatch. A bare `zzop init` (no `initSubcommand`)
+  // skips this block entirely.
+  if (!opts.help && !opts.version && opts.command === 'init' && opts.initSubcommand != null) {
+    if (opts.initSubcommand !== 'adapter') {
+      throw new ConfigError(
+        `Unknown "init" subcommand "${opts.initSubcommand}" — only "init adapter" is supported. Run \`zzop --help\`.`
+      );
+    }
+    const missing = [];
+    if (!opts.mode) missing.push('--mode <a|b>');
+    if (!opts.kind) missing.push('--kind <consume|provide>');
+    if (missing.length > 0) {
+      throw new ConfigError(`"zzop init adapter" requires ${missing.join(' and ')}.`);
     }
   }
   return opts;
@@ -159,6 +274,112 @@ function runInit(opts) {
   fs.writeFileSync(target, CONFIG_TEMPLATE, 'utf8');
   process.stdout.write(`Wrote ${path.relative(process.cwd(), target) || DEFAULT_CONFIG_FILENAME}\n`);
   process.exit(0);
+}
+
+/**
+ * `zzop init adapter --mode <a|b> --kind <consume|provide> [--force]` — scaffolds a self-contained
+ * starter adapter into `./${DEFAULT_ADAPTER_DIR}/` (main.mjs, lib/keys.mjs, lib/envelope.mjs, README.md;
+ * see lib/adapter-templates/index.js). Refuses to overwrite an existing target directory without
+ * `--force`, mirroring `runInit`'s existing-config refusal above.
+ * @param {object} opts  parsed CLI opts (`mode`, `kind`, `force`)
+ */
+function runInitAdapter(opts) {
+  const targetDir = path.resolve(process.cwd(), DEFAULT_ADAPTER_DIR);
+  if (fs.existsSync(targetDir) && !opts.force) {
+    fail(`${DEFAULT_ADAPTER_DIR}/ already exists. Use --force to overwrite.`, 2);
+  }
+
+  const files = buildAdapterScaffold({ mode: opts.mode, kind: opts.kind });
+  for (const f of files) {
+    const dest = path.join(targetDir, f.name);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, f.content, 'utf8');
+  }
+  const rel = path.relative(process.cwd(), targetDir) || DEFAULT_ADAPTER_DIR;
+  process.stdout.write(`Wrote ${files.length} file${files.length === 1 ? '' : 's'} to ${rel}/\n`);
+  process.exit(0);
+}
+
+/**
+ * Renders `zzop adapter validate <path>`'s combined report: the native structural verdict
+ * (`report.valid`/`report.issues`, from `zzop_core::validate_envelope` via `validateEnvelopeOnly`) plus
+ * this package's own offline semantic `hints` (`lib/validate.js`'s `lintEnvelope`). Hints are advisory —
+ * they never appear as "Issues" and never affect the exit code, only `report.valid` does.
+ *
+ * @param {string} filePath  the path as given on the command line (echoed back, not resolved)
+ * @param {{valid: boolean, issues: string[]}} report  parsed `validateEnvelopeOnly` output
+ * @param {string[]} hints  `lintEnvelope` output
+ * @returns {string}
+ */
+function formatValidateReport(filePath, report, hints) {
+  const issues = Array.isArray(report.issues) ? report.issues : [];
+  const lines = [report.valid ? `${filePath}: valid` : `${filePath}: INVALID`];
+  if (issues.length) {
+    lines.push('Issues:');
+    for (const issue of issues) lines.push(`  - ${issue}`);
+  }
+  if (hints.length) {
+    lines.push('Hints:');
+    for (const hint of hints) lines.push(`  - ${hint}`);
+  }
+  if (!issues.length && !hints.length) {
+    lines.push('No issues or hints.');
+  }
+  return lines.join('\n');
+}
+
+function runAdapterValidate(opts) {
+  const resolvedPath = path.resolve(process.cwd(), opts.envelopePath);
+  let raw;
+  try {
+    raw = fs.readFileSync(resolvedPath, 'utf8');
+  } catch (err) {
+    fail(`Failed to read "${opts.envelopePath}": ${err && err.message}`, 2);
+    return;
+  }
+
+  // Load the native engine lazily, same as `runAnalyze` — `zzop adapter validate` should still fail with
+  // a clear message (not a stack trace) if the addon isn't installed/built.
+  let native;
+  try {
+    native = require('@zzop/native');
+  } catch (err) {
+    fail(
+      `Failed to load the @zzop/native engine: ${err && err.message}\n` +
+        `Ensure @zzop/native is installed for this platform (it is a dependency of zzop).`,
+      2
+    );
+    return;
+  }
+
+  let reportJson;
+  try {
+    reportJson = native.validateEnvelopeOnly(raw);
+  } catch (err) {
+    fail(`Envelope validation failed: ${err && err.message}`, 2);
+    return;
+  }
+
+  let report;
+  try {
+    report = JSON.parse(reportJson);
+  } catch (err) {
+    fail(`Engine returned malformed JSON: ${err && err.message}`, 2);
+    return;
+  }
+
+  // Semantic hints (`lib/validate.js`, pure JS, no native call) run alongside the native structural
+  // check. They need a parsed envelope OBJECT, not the raw string; when `raw` itself isn't valid JSON
+  // there is nothing to lint — the native `issues` list already reports "invalid JSON" for that case.
+  let hints = [];
+  try {
+    hints = lintEnvelope(JSON.parse(raw));
+  } catch {
+    /* raw isn't valid JSON — nothing to lint; native's issues already cover this. */
+  }
+
+  process.stdout.write(`${formatValidateReport(opts.envelopePath, report, hints)}\n`);
+  process.exit(report.valid ? 0 : 1);
 }
 
 function resolveFormat(opts, config) {
@@ -223,6 +444,15 @@ function runAnalyze(opts) {
     process.stdout.write(
       `${formatPretty(output, { color, showAllInfo: opts.all, minSeverity: opts.severity })}\n`
     );
+  }
+
+  // `--debug-io`: the join-debug surface, printed AFTER the normal output (never instead of it) and
+  // regardless of `--format`/`--severity` — those are display filters over findings, not over the
+  // cross-layer join data this dumps. `output.crossLayer` only exists on a multi-tree (`analyzeTrees`)
+  // output; `renderDebugIo` treats an absent/empty one as "every bucket is empty" rather than throwing,
+  // so this is safe on a single-tree run too.
+  if (opts.debugIo) {
+    process.stdout.write(`${renderDebugIo(output && output.crossLayer)}\n`);
   }
 
   writeReports(opts, config, output, method, request);
@@ -319,9 +549,15 @@ function main() {
 
   try {
     if (opts.command === 'init') {
-      runInit(opts);
+      if (opts.initSubcommand === 'adapter') {
+        runInitAdapter(opts);
+      } else {
+        runInit(opts);
+      }
     } else if (opts.command === 'run') {
       runAnalyze(opts);
+    } else if (opts.command === 'adapter') {
+      runAdapterValidate(opts);
     } else {
       fail(`Unknown command "${opts.command}". Run \`zzop --help\`.`, 2);
     }

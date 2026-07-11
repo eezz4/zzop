@@ -38,10 +38,12 @@ teaching the engine the wrapper's shape:
 2. Lexically match `<wrapper>.<verb>(<pathLiteral>)` call sites, where `<wrapper>` is a configurable
    binding name (default `requests`/`agent`/`api`/`http`/`client`) and `<verb>` is an HTTP verb method
    (`get`/`post`/`put`/`patch`/`delete`/`del`/`head`; `del` → `DELETE`).
-3. Key each call site as `"METHOD /path"`, normalizing the path exactly the way zzop keys routes so the
-   consume can join a native provide: template `${...}` and `:param` segments → `{}`, query strings
-   dropped. Only a first-argument **string literal rooted at `/`** is keyed — a path built from a
-   variable, or a wrapper-internal `` `${API_ROOT}${url}` `` host expression, is left alone (never guessed).
+3. Key each call site as `"METHOD /path"`, normalizing the path exactly the way zzop keys routes (via
+   adapter-kit's `resolveConsumeKey`) so the consume can join a native provide: template `${...}` and
+   `:param` segments → `{}`, `?query`/`#fragment` dropped, and a bare literal with no leading `/`
+   resolves as base-relative (the axios/ky `baseURL` idiom). Only a first-argument **string literal** is
+   keyed — a path built from a variable, or a wrapper-internal `` `${API_ROOT}${url}` `` host expression,
+   is left alone (never guessed).
 4. Emit each call site as an `IoConsume` fact, grouped per file into a Normalized-AST envelope.
 5. Feed that envelope to zzop via the **`adapterOverlays`** config field
    ([Mode B overlay](../../docs/NORMALIZED_AST.md)), which the engine merges on top of native analysis.
@@ -97,10 +99,14 @@ as consumed. The silence is gone, with zero wrapper-specific code in the engine.
   and prepend it.
 - The wrapper binding must be a named identifier from the default/`--wrapper` list; a wrapper reached
   through a differently-named local or a member chain (`this.api.get(...)`) is not matched.
-- Only a first-argument string-literal path rooted at `/` is keyed. A path stored in a variable, built by
-  concatenation, or whose literal starts with a `${...}` host expression is skipped (reported by nothing —
-  a richer adapter could resolve one-hop constants, like the FastAPI example does).
+- Only a first-argument STRING literal path is keyed. A path stored in a variable, built by
+  concatenation, or whose literal starts with a `${...}` host expression is skipped (reported via the
+  adapter's stderr `skipped` count — a richer adapter could resolve one-hop constants, like the FastAPI
+  example does). A literal with no leading `/` (a bare `path/like/this`) is NOT skipped — it resolves as
+  base-relative (the axios/ky `baseURL` idiom) via adapter-kit's `resolveConsumeKey`, the same as native
+  egress extraction.
 - Call detection is lexical and single-line; a call split across lines, or a verb method that is not an
   HTTP verb name, is not seen.
-- Path normalization mirrors zzop's route key (`${...}`/`:param` → `{}`, query dropped) but does not model
-  matrix params or optional segments.
+- Path normalization mirrors zzop's route key exactly (`${...}`/`:param` → `{}`, `?query`/`#fragment`
+  dropped, via adapter-kit's `resolveConsumeKey`/`normalizeConsumeKey`) but does not model matrix params
+  or optional segments.

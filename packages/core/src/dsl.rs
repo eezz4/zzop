@@ -217,7 +217,10 @@ pub struct RuleDef {
     /// Inline ok-marker suppression, applied uniformly to `LineScan` and `MethodScan` findings. A finding
     /// is suppressed when its own line, or the line directly above it (`MARKER_LOOKBACK_LINES`), contains a
     /// `//`-comment naming this marker (`// n+1-ok` or `// n+1-ok: reason` both suppress `suppress_marker:
-    /// "n+1-ok"`).
+    /// "n+1-ok"`). For a file whose extension is `.sql` (case-insensitive, see `is_sql_file`), a `--`-comment
+    /// naming the marker suppresses identically (`-- n+1-ok`) — `--` is a line comment in SQL but not in
+    /// JS/TS (`--x` is a decrement there), so this recognition is gated to `.sql` files only and never
+    /// changes behavior for any other extension.
     #[serde(default)]
     pub suppress_marker: Option<String>,
 }
@@ -558,6 +561,15 @@ fn eval_line_scan(
         },
         None => None,
     };
+    // SQL-comment counterpart of `marker_re`, only ever consulted below when `is_sql_file(&f.rel)` — see
+    // `compile_marker_sql`'s doc.
+    let marker_re_sql = match &rule.suppress_marker {
+        Some(marker) => match compile_marker_sql(marker) {
+            Some(r) => Some(r),
+            None => return,
+        },
+        None => None,
+    };
     // `any` (labeled alternatives) takes precedence, else `line_pattern` (single). Neither -> invalid DSL -> skip.
     let matcher = match (&m.any, &m.line_pattern) {
         (Some(alts), _) => {
@@ -604,6 +616,7 @@ fn eval_line_scan(
             continue; // ANY match anywhere in the file skips it (require_file_absent)
         }
         let lines: Vec<&str> = f.text.lines().collect();
+        let is_sql = is_sql_file(&f.rel);
         for (i, line) in lines.iter().enumerate() {
             if m.skip_comment_lines {
                 let t = line.trim_start();
@@ -635,6 +648,13 @@ fn eval_line_scan(
                     continue;
                 }
             }
+            if is_sql {
+                if let Some(re) = &marker_re_sql {
+                    if marker_suppresses(re, &lines, i) {
+                        continue;
+                    }
+                }
+            }
             let snippet: String = line.trim().chars().take(m.snippet_max).collect();
             let data = if label.is_empty() {
                 serde_json::json!({ "snippet": snippet })
@@ -657,6 +677,22 @@ fn eval_line_scan(
 /// so metacharacters like `n+1-ok`'s `+` match literally), optionally followed by `:` and free text.
 fn compile_marker(marker: &str) -> Option<regex::Regex> {
     regex::Regex::new(&format!(r"//\s*{}\b", regex::escape(marker))).ok()
+}
+
+/// Builds the SQL-comment counterpart of `compile_marker` — matches a `--` comment naming the marker,
+/// same escaping/suffix rules. Only ever consulted for `.sql` files (see `is_sql_file`); `--` is not a
+/// comment marker in JS/TS (`--x` is a decrement there), so this regex must never be applied outside SQL.
+fn compile_marker_sql(marker: &str) -> Option<regex::Regex> {
+    regex::Regex::new(&format!(r"--\s*{}\b", regex::escape(marker))).ok()
+}
+
+/// Whether `--`-comment suppress markers should be recognized for this file — gated on the `.sql`
+/// extension (case-insensitive) so `//`-only recognition stays byte-identical for every other extension.
+fn is_sql_file(rel: &str) -> bool {
+    std::path::Path::new(rel)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("sql"))
 }
 
 /// Compiles `require_file_all`. `None` when any pattern fails to compile, skipping the whole rule.
@@ -727,6 +763,15 @@ fn eval_method_scan(
         },
         None => None,
     };
+    // SQL-comment counterpart of `marker_re`, only ever consulted below when `is_sql_file(&f.rel)` — see
+    // `compile_marker_sql`'s doc.
+    let marker_re_sql = match &rule.suppress_marker {
+        Some(marker) => match compile_marker_sql(marker) {
+            Some(r) => Some(r),
+            None => return,
+        },
+        None => None,
+    };
     let Some(require_all) = compile_require_all(&m.require_file_all) else {
         return;
     };
@@ -762,6 +807,7 @@ fn eval_method_scan(
             continue;
         }
         let lines: Vec<&str> = f.text.lines().collect();
+        let is_sql = is_sql_file(&f.rel);
         // Innermost-span priority: when spans overlap (a class symbol's span contains its methods' spans),
         // drop any symbol whose span strictly contains another candidate span — avoids double-counting.
         let spans: Vec<(usize, u32, u32)> = f
@@ -833,6 +879,13 @@ fn eval_method_scan(
             if let Some(re) = &marker_re {
                 if marker_suppresses(re, &lines, start_idx + i) {
                     continue;
+                }
+            }
+            if is_sql {
+                if let Some(re) = &marker_re_sql {
+                    if marker_suppresses(re, &lines, start_idx + i) {
+                        continue;
+                    }
                 }
             }
             let snippet: String = line.trim().chars().take(m.snippet_max).collect();
@@ -1926,6 +1979,106 @@ mod tests {
     #[test]
     fn no_marker_at_all_does_not_suppress() {
         let f = scan_pack(&marker_line_pack(), "f.ts", "const x = y as Foo;\n", vec![]);
+        assert_eq!(f.len(), 1, "{f:?}");
+    }
+
+    // --- `--`-comment marker recognition, gated to `.sql` files (destructive-migration ergonomics) ---
+
+    fn marker_line_pack_sql() -> RulePackDef {
+        rule_pack(
+            r#"{"id":"r","severity":"info","message":"m","suppress_marker":"as-ok","matcher":{"type":"line-scan","file_pattern":"\\.sql$","line_pattern":"\\bas\\b"}}"#,
+        )
+    }
+
+    #[test]
+    fn dash_dash_marker_on_the_same_line_suppresses_line_scan_finding_in_a_sql_file() {
+        let f = scan_pack(
+            &marker_line_pack_sql(),
+            "f.sql",
+            "SELECT id as x; -- as-ok: guaranteed by caller\n",
+            vec![],
+        );
+        assert!(f.is_empty(), "{f:?}");
+    }
+
+    #[test]
+    fn dash_dash_marker_on_the_line_above_suppresses_line_scan_finding_in_a_sql_file() {
+        let f = scan_pack(
+            &marker_line_pack_sql(),
+            "f.sql",
+            "-- as-ok: guaranteed by caller\nSELECT id as x;\n",
+            vec![],
+        );
+        assert!(f.is_empty(), "{f:?}");
+    }
+
+    #[test]
+    fn dash_dash_marker_is_not_recognized_outside_a_sql_file() {
+        // Same rule, same marker text, but a `.ts` file — `--` is not a comment there (`--x` is a
+        // decrement), so the `--`-marker recognizer must never activate for it.
+        let pack = rule_pack(
+            r#"{"id":"r","severity":"info","message":"m","suppress_marker":"as-ok","matcher":{"type":"line-scan","file_pattern":"\\.(ts|sql)$","line_pattern":"\\bas\\b"}}"#,
+        );
+        let f = scan_pack(
+            &pack,
+            "f.ts",
+            "const x = y as Foo; -- as-ok: nope\n",
+            vec![],
+        );
+        assert_eq!(f.len(), 1, "{f:?}");
+    }
+
+    #[test]
+    fn slash_slash_marker_still_suppresses_in_a_sql_file() {
+        // The `--` recognizer is additive: a `.sql` file's `//`-form marker (unusual, but not forbidden)
+        // still suppresses too.
+        let f = scan_pack(
+            &marker_line_pack_sql(),
+            "f.sql",
+            "SELECT id as x; // as-ok: guaranteed by caller\n",
+            vec![],
+        );
+        assert!(f.is_empty(), "{f:?}");
+    }
+
+    #[test]
+    fn dash_dash_unrelated_marker_text_does_not_suppress_in_a_sql_file() {
+        let f = scan_pack(
+            &marker_line_pack_sql(),
+            "f.sql",
+            "SELECT id as x; -- unrelated-ok\n",
+            vec![],
+        );
+        assert_eq!(f.len(), 1, "{f:?}");
+    }
+
+    fn marker_method_pack_sql() -> RulePackDef {
+        rule_pack(
+            r#"{"id":"r","severity":"warning","message":"m","suppress_marker":"n+1-ok","matcher":{"type":"method-scan","file_pattern":"\\.sql$","patterns":[{"pattern":"\\bfor\\s*\\(","label":"loop"},{"pattern":"\\bfindOne\\(","label":"call"}],"trigger":"call"}}"#,
+        )
+    }
+
+    #[test]
+    fn dash_dash_marker_suppresses_method_scan_finding_in_a_sql_file() {
+        let src = "async function f(ids) {\n  for (const id of ids) {\n    -- n+1-ok: batched elsewhere\n    await t.findOne(id);\n  }\n}\n";
+        let f = scan_pack(
+            &marker_method_pack_sql(),
+            "f.sql",
+            src,
+            vec![method("f", 1, 5)],
+        );
+        assert!(f.is_empty(), "{f:?}");
+    }
+
+    #[test]
+    fn dash_dash_marker_absent_leaves_method_scan_finding_intact_in_a_sql_file() {
+        let src = "async function f(ids) {\n  for (const id of ids) {\n    await t.findOne(id);\n  }\n}\n";
+        let f = scan_pack(
+            &marker_method_pack_sql(),
+            "f.sql",
+            src,
+            vec![method("f", 1, 4)],
+        );
         assert_eq!(f.len(), 1, "{f:?}");
     }
 

@@ -219,7 +219,7 @@ function disclosureLines(disclosure) {
 function oneSidedIoFixLines(providerScope) {
   return [
     '  - The code serving these endpoints lives in another repository (a backend, a peer service, a module-federation remote — whatever owns them): attach that checkout as another tree and re-run so both sides are reviewed together — `"trees": [{ "root": ".", "sourceId": "consumer" }, { "root": "../provider-repo", "sourceId": "provider" }]`.',
-    `  - The serving code is inside ${providerScope} but its framework is not natively extracted: project its routes with a Mode B overlay adapter (see \`examples/\` in the zzop repository).`,
+    `  - The serving code is inside ${providerScope} but its framework is not natively extracted: project its routes with a Mode B overlay adapter and attach it via the \`overlays: ["./my-adapter/envelope.json"]\` config key (see \`examples/\` in the zzop repository).`,
     '  - The consumes only target third-party/external APIs: then this state is expected — read "unprovided" as external calls, not as drift.',
   ];
 }
@@ -277,7 +277,7 @@ function buildTreeMarkdown(sourceId, root, treeOutput, singleTreeRun = false) {
   );
   if (cov.joinContributionZero) {
     lines.push(
-      `- Blindness: no IO surface was extracted from this tree (0 provides, 0 consumes across ${covFiles} files), so it is invisible to the cross-layer join — discount any "unconsumed"/"unprovided" verdict that references it. If this tree does call an API, the calls flow through a client the extractor cannot see; project them with a Mode B adapter to restore visibility.`
+      `- Blindness: no IO surface was extracted from this tree (0 provides, 0 consumes across ${covFiles} files), so it is invisible to the cross-layer join — discount any "unconsumed"/"unprovided" verdict that references it. If this tree does call an API, the calls flow through a client the extractor cannot see; project them with a Mode B adapter and attach it via the \`overlays: ["./my-adapter/envelope.json"]\` config key to restore visibility.`
     );
   }
   // One-sided IO — the single-tree analog of the run-level check in `buildCrossRepoMarkdown`. Mutually
@@ -476,7 +476,7 @@ function buildCrossRepoMarkdown(output) {
     // Cause taxonomy before the list — "unprovided" is ambiguous between a missing repo, an extraction
     // gap, and real drift; an agent reading the list needs that split up front.
     lines.push(
-      'No attached tree provides these keys. Three causes: (a) the repository serving these endpoints is not part of this run — attach its checkout as another tree so both sides are reviewed together; (b) the serving code is in an attached tree but its routes were not extracted — project them with a Mode B overlay adapter; (c) real spec drift. A cluster sharing one path prefix usually means (a).'
+      'No attached tree provides these keys. Three causes: (a) the repository serving these endpoints is not part of this run — attach its checkout as another tree so both sides are reviewed together; (b) the serving code is in an attached tree but its routes were not extracted — project them with a Mode B overlay adapter and attach it via the `overlays: ["./my-adapter/envelope.json"]` config key; (c) real spec drift. A cluster sharing one path prefix usually means (a).'
     );
     for (const c of unprovided) {
       lines.push(`- \`${c.key || c.raw || '(no key)'}\` consumed by \`${c.source}\` (${c.file}:${c.line})`);

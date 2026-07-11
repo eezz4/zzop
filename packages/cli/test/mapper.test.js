@@ -2,8 +2,42 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
-const { configToRequest, normalizeSeverity, severityRank, ConfigError, OFF } = require('../lib/mapper');
+const {
+  configToRequest,
+  collectConfigWarnings,
+  normalizeSeverity,
+  severityRank,
+  ConfigError,
+  OFF,
+} = require('../lib/mapper');
+
+// Isolated scratch dir for the overlay-file tests below (the only mapper tests that touch disk — overlay
+// loading is this module's one deliberate I/O exception, see mapper.js's own module doc). One dir per test
+// run, cleaned up at the end via a process-exit hook so a crashed run doesn't need manual cleanup either.
+const overlayScratchDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zzop-mapper-overlay-test-'));
+process.on('exit', () => {
+  fs.rmSync(overlayScratchDir, { recursive: true, force: true });
+});
+
+const VALID_OVERLAY = {
+  format: 'zzop-normalized-ast',
+  version: 1,
+  parser: 'test-adapter/1',
+  source: 'legacy',
+  files: [
+    {
+      path: 'a.ts',
+      loc: 10,
+      io: { provides: [{ kind: 'http', key: 'GET /foo', file: 'a.ts', line: 1 }], consumes: [] },
+    },
+  ],
+};
+fs.writeFileSync(path.join(overlayScratchDir, 'valid.json'), JSON.stringify(VALID_OVERLAY));
+fs.writeFileSync(path.join(overlayScratchDir, 'not-json.json'), '{ this is not json');
 
 test('normalizeSeverity maps friendly names to engine severities', () => {
   assert.equal(normalizeSeverity('warn'), 'warning');
@@ -255,4 +289,88 @@ test('invalid shapes throw ConfigError', () => {
     ConfigError
   );
   assert.throws(() => configToRequest({ packs: { extraDirs: 'x' } }), ConfigError);
+});
+
+test('top-level overlays -> adapterOverlays on the single-tree request, resolved relative to the root', () => {
+  const { method, request } = configToRequest({
+    roots: [overlayScratchDir],
+    overlays: ['valid.json'],
+  });
+  assert.equal(method, 'analyze');
+  assert.deepEqual(request.adapterOverlays, [VALID_OVERLAY]);
+});
+
+test('trees[i].overlays -> adapterOverlays on that tree only; top-level overlays apply to every tree', () => {
+  const { method, request } = configToRequest({
+    trees: [
+      { root: overlayScratchDir, sourceId: 'with-overlay', overlays: ['valid.json'] },
+      { root: overlayScratchDir, sourceId: 'without-overlay' },
+    ],
+  });
+  assert.equal(method, 'analyzeTrees');
+  assert.deepEqual(request.trees[0].adapterOverlays, [VALID_OVERLAY]);
+  assert.ok(!('adapterOverlays' in request.trees[1]));
+});
+
+test('top-level overlays broadcast to every tree when trees[] is used, resolved per-tree', () => {
+  const { request } = configToRequest({
+    trees: [{ root: overlayScratchDir, sourceId: 'a' }],
+    overlays: ['valid.json'],
+  });
+  assert.deepEqual(request.trees[0].adapterOverlays, [VALID_OVERLAY]);
+});
+
+test('overlays: not an array, or non-string entries -> ConfigError (shape, not a read failure)', () => {
+  assert.throws(() => configToRequest({ roots: ['.'], overlays: 'valid.json' }), ConfigError);
+  assert.throws(() => configToRequest({ roots: ['.'], overlays: [123] }), ConfigError);
+  assert.throws(
+    () => configToRequest({ trees: [{ root: '.', overlays: 'x' }] }),
+    ConfigError
+  );
+});
+
+test('missing/unparseable overlay file: dropped from the request, never aborts', () => {
+  const { request } = configToRequest({
+    roots: [overlayScratchDir],
+    overlays: ['valid.json', 'does-not-exist.json', 'not-json.json'],
+  });
+  // Only the valid overlay survives; the other two are silently skipped (see collectConfigWarnings test
+  // below for where their diagnostics surface).
+  assert.deepEqual(request.adapterOverlays, [VALID_OVERLAY]);
+});
+
+test('overlays that are all missing/unparseable -> adapterOverlays omitted entirely (no empty array)', () => {
+  const { request } = configToRequest({
+    roots: [overlayScratchDir],
+    overlays: ['does-not-exist.json', 'not-json.json'],
+  });
+  assert.ok(!('adapterOverlays' in request));
+});
+
+test('collectConfigWarnings reports a missing overlay file, naming the path', () => {
+  const warnings = collectConfigWarnings({ roots: [overlayScratchDir], overlays: ['does-not-exist.json'] });
+  assert.ok(
+    warnings.some((w) => /does-not-exist\.json/.test(w) && /could not be read/.test(w)),
+    `expected a "could not be read" warning naming the path, got: ${JSON.stringify(warnings)}`
+  );
+});
+
+test('collectConfigWarnings reports an unparseable overlay file, naming the path', () => {
+  const warnings = collectConfigWarnings({ roots: [overlayScratchDir], overlays: ['not-json.json'] });
+  assert.ok(
+    warnings.some((w) => /not-json\.json/.test(w) && /not valid JSON/.test(w)),
+    `expected a "not valid JSON" warning naming the path, got: ${JSON.stringify(warnings)}`
+  );
+});
+
+test('collectConfigWarnings stays silent when every overlay loads cleanly', () => {
+  const warnings = collectConfigWarnings({ roots: [overlayScratchDir], overlays: ['valid.json'] });
+  assert.deepEqual(warnings, []);
+});
+
+test('collectConfigWarnings covers trees[i].overlays too, naming the tree', () => {
+  const warnings = collectConfigWarnings({
+    trees: [{ root: overlayScratchDir, sourceId: 'a', overlays: ['does-not-exist.json'] }],
+  });
+  assert.ok(warnings.some((w) => /does-not-exist\.json/.test(w)));
 });

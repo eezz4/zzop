@@ -34,6 +34,22 @@ jobs:
       - name: CLI README ↔ --help sync guard
         run: bash scripts/check-cli-readme-sync.sh
 
+  drift-guards:
+    # Two mechanical drift guards. Both need `fetch-depth: 0` (unlike the other guard jobs above,
+    # which only read the working tree): the fingerprint guard diffs against the PR base / previous
+    # commit, which a shallow (depth-1) checkout would not have fetched.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: parser fingerprint bump guard
+        env:
+          FINGERPRINT_DIFF_RANGE: ${{ github.event_name == 'pull_request' && format('origin/{0}...HEAD', github.base_ref) || 'HEAD~1...HEAD' }}
+        run: bash scripts/check-parser-fingerprint-bump.sh
+      - name: policy-value census guard
+        run: bash scripts/check-policy-census.sh
+
   test:
     runs-on: ubuntu-latest
     steps:

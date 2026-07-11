@@ -80,3 +80,61 @@ test('--severity is run-scoped and rejected on init', () => {
     (e) => e instanceof ConfigError && /not valid for the `init`/.test(e.message)
   );
 });
+
+test('adapter validate <path> parses the subcommand and path', () => {
+  const opts = parseArgs(['adapter', 'validate', 'envelope.json']);
+  assert.equal(opts.command, 'adapter');
+  assert.equal(opts.subcommand, 'validate');
+  assert.equal(opts.envelopePath, 'envelope.json');
+});
+
+test('adapter validate requires a path argument', () => {
+  assert.throws(
+    () => parseArgs(['adapter', 'validate']),
+    (e) => e instanceof ConfigError && /requires a <envelope\.json> path argument/.test(e.message)
+  );
+});
+
+test('adapter requires the "validate" subcommand', () => {
+  assert.throws(
+    () => parseArgs(['adapter']),
+    (e) => e instanceof ConfigError && /Unknown "adapter" subcommand ""/.test(e.message)
+  );
+  assert.throws(
+    () => parseArgs(['adapter', 'bogus', 'envelope.json']),
+    (e) => e instanceof ConfigError && /Unknown "adapter" subcommand "bogus"/.test(e.message)
+  );
+});
+
+test('adapter validate rejects a run-scoped flag instead of silently ignoring it', () => {
+  assert.throws(
+    () => parseArgs(['adapter', 'validate', 'envelope.json', '--json']),
+    (e) => e instanceof ConfigError && /not valid for the `adapter` command/.test(e.message)
+  );
+});
+
+test('adapter validate rejects a trailing extra argument', () => {
+  assert.throws(
+    () => parseArgs(['adapter', 'validate', 'envelope.json', 'extra']),
+    (e) => e instanceof ConfigError && /Unexpected argument "extra"/.test(e.message)
+  );
+});
+
+test('--help bypasses adapter subcommand/path validation', () => {
+  const opts = parseArgs(['adapter', '--help']);
+  assert.equal(opts.help, true);
+  assert.equal(opts.command, 'adapter');
+});
+
+test('--debug-io parses under run (explicit or default command) and defaults to false', () => {
+  assert.equal(parseArgs([]).debugIo, false);
+  assert.equal(parseArgs(['--debug-io']).debugIo, true);
+  assert.equal(parseArgs(['run', '--debug-io']).debugIo, true);
+});
+
+test('--debug-io is run-scoped and rejected on init', () => {
+  assert.throws(
+    () => parseArgs(['init', '--debug-io']),
+    (e) => e instanceof ConfigError && /not valid for the `init`/.test(e.message)
+  );
+});

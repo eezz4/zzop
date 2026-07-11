@@ -346,14 +346,14 @@
       <code>rules/native/rules-http</code> owns <code>duplicate-route</code>,
       <code>unsafe-read-endpoint</code>/<code>non-idempotent-write</code>, <code>route-shadowing</code>,
       <code>mutating-route-no-auth</code>, <code>unprovided-consume</code> (single-tree HTTP/route rules).
-      <code>rules/native/rules-cross-layer</code> owns the 20 <code>cross-layer/*</code> ids (multi-tree
+      <code>rules/native/rules-cross-layer</code> owns the 22 <code>cross-layer/*</code> ids (multi-tree
       cross-layer join rules). <code>rules/native/rules-schema</code> owns
       <code>schema-structural</code>, <code>schema-usage</code>, <code>soft-delete-bypass</code>,
       <code>orderby-unindexed</code>, <code>enum-string-drift</code>. <code>packages/metrics</code> owns
       <code>seams</code>, <code>criticality</code>, <code>scores</code>, <code>health</code>,
       <code>recommendations</code> — score computations, not findings-producing rules, that ride the same
       toggle/gating surface. <code>zzop_engine::register_all_native</code> composes all five.</p>
-      <p>The 20 <code>cross-layer/*</code> ids are the multi-tree exception: they run over
+      <p>The 22 <code>cross-layer/*</code> ids are the multi-tree exception: they run over
       <code>zzop_engine::analyze_trees</code>'s joined <code>CrossLayerResult</code> (every other row here
       runs per-tree), exposed as <code>crossLayerFindings</code> alongside <code>crossLayer</code> in
       <code>analyzeTrees</code>'s output. None of the 20 honor an inline suppression marker — they are
@@ -390,6 +390,7 @@
             <tr><td><code>cross-layer/version-skew</code></td><td><code>warning</code></td><td>A <code>crossLayer.unprovidedConsumes</code> <code>http</code> consume whose key differs from a provide only in one version-shaped path segment (<code>/v1/</code> vs <code>/v2/</code>) (<code>rules/native/rules-cross-layer/src/cross_layer/version_skew.rs</code>).</td></tr>
             <tr><td><code>cross-layer/path-near-miss</code></td><td><code>info</code></td><td>A <code>crossLayer.unprovidedConsumes</code> <code>http</code> consume whose key matches a provide once <code>{}</code> parameter positions are allowed to differ, but is otherwise segment-identical — strict elsewhere (a plural/typo literal difference does not count) (<code>rules/native/rules-cross-layer/src/cross_layer/path_near_miss.rs</code>).</td></tr>
             <tr><td><code>cross-layer/route-near-miss</code></td><td><code>info</code></td><td>A <code>crossLayer.unprovidedConsumes</code> <code>http</code> consume whose key differs from a same-method provide by exactly one structural dimension — <code>case</code> (letter casing) or <code>prefix</code> (an all-literal 1-2 segment leading base path added/removed, e.g. <code>/api</code>) — disjoint from <code>path-near-miss</code>'s same-count parameter-generalization case (<code>rules/native/rules-cross-layer/src/cross_layer/route_near_miss.rs</code>).</td></tr>
+            <tr><td><code>cross-layer/prefix-drift</code></td><td><code>info</code></td><td>An aggregate over <code>route-near-miss</code>: when 3+ <code>http</code> consumes from one tree all near-miss providers in another tree by the SAME missing/extra base path prefix (e.g. every FE call omits the <code>/api</code> a NestJS <code>setGlobalPrefix</code> adds), reports ONE finding naming the single likely base-path/gateway/baseURL cause and enumerating every folded route, instead of N near-identical per-route findings. The subsumed per-route <code>route-near-miss</code> findings are replaced (not silently dropped). Derived from <code>route-near-miss</code>, so it only fires when that rule is enabled (<code>rules/native/rules-cross-layer/src/cross_layer/prefix_drift.rs</code>).</td></tr>
             <tr><td><code>cross-layer/shared-db-table</code></td><td><code>warning</code></td><td>The same <code>db-table</code> key CONSUMED (not provided) by 2+ distinct source trees — evidence of a naming collision or a genuinely shared database; message says to verify which (<code>rules/native/rules-cross-layer/src/cross_layer/shared_db_table.rs</code>).</td></tr>
             <tr><td><code>cross-layer/duplicate-route</code></td><td><code>warning</code></td><td>The same <code>http</code> <code>(method, path)</code> key PROVIDED by 2+ DISTINCT source trees — the cross-tree counterpart to <code>duplicate-route</code> above (<code>rules/native/rules-cross-layer/src/cross_layer/duplicate_route.rs</code>).</td></tr>
             <tr><td><code>cross-layer/external-shadow-internal</code></td><td><code>warning</code></td><td>A <code>crossLayer.externalConsumes</code> consume (absolute URL) whose normalized method+path matches a route an analyzed tree provides — the caller hardcodes one environment's host instead of the relative/proxied path (<code>rules/native/rules-cross-layer/src/cross_layer/external_shadow_internal.rs</code>).</td></tr>

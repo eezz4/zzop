@@ -1,11 +1,14 @@
-//! Coverage self-report: three lexical, extractor-independent tripwires that flag when a tree LOOKS like
+//! Coverage self-report: four lexical, extractor-independent tripwires that flag when a tree LOOKS like
 //! it carries a framework surface zzop cannot see, so cross-layer joins would otherwise go silently dark
 //! with NO honesty channel firing at all (the gap dogfood round 9 found: a whole vue<->express pair went
 //! ~totally blind and nothing in `warnings` said so).
 //!
 //! - S1 [`controller_silence_warning`]: DECORATOR-style controller idioms (Nest-, `@n8n/decorators`-, and
 //!   Spring-style — the shapes `zzop_parser_typescript::adapters::controller_decorators` currently
-//!   teaches) matched lexically, gated on EXACTLY zero extracted `http` provides.
+//!   teaches) matched lexically, gated on NEAR-zero (not exact-zero) extracted `http` provides. Round 14's
+//!   Angular-FE x Spring-BE pair lost 17/19 routes to a parser limit but still had 2 lexically-extracted
+//!   provides tree-wide, which silenced an exact-zero gate; S1 now shares S2's `MIN_PROVIDES_FLOOR`
+//!   near-zero floor rather than gating on exactly zero.
 //! - S2 [`server_framework_import_warning`]: a server-framework PACKAGE IMPORT (express, koa, fastify,
 //!   ...) present while extracted `http` provides stay near-zero. Closes the METHOD-CALL registration
 //!   idiom S1's decorator regex structurally cannot see — round 9's be-express tree registered routes as
@@ -15,8 +18,12 @@
 //!   this tree's io stays near-zero in BOTH directions (provides AND keyed consumes). Round 9's fe-vue
 //!   tree talked to its backend through a client generated FROM `src/services/openapi.yml`, so the
 //!   consume extractor (which reads call-site literals, not generated SDK internals) saw nothing.
+//! - S4 [`client_library_import_warning`]: an http-CLIENT PACKAGE IMPORT (axios, `@angular/common/http`,
+//!   ...) present while extracted `http` consumes stay near-zero — the consume-side dual of S2, closing
+//!   the gap that round 14's Angular-FE tree exposed: ~15 real `HttpClient` call sites, 0 extracted
+//!   consumes, and no consume-side honesty channel at all until now.
 //!
-//! All three are per-tree self-report `warnings: Vec<String>` strings (not `Finding`s — no rule id, no
+//! All four are per-tree self-report `warnings: Vec<String>` strings (not `Finding`s — no rule id, no
 //! catalog sync needed); over-disclosure is safe, silence is fatal (the coverage-disclosure decision doc's
 //! governing principle) — each function is additive and may fire independently of the others.
 
@@ -27,6 +34,11 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
+/// DELIBERATELY independent of the parsers' own controller/decorator vocabularies (a pinned
+/// policy-value divergence, not an oversight): this tripwire exists to catch EXTRACTOR blindness, so
+/// sharing the extractor's vocabulary would blind it to exactly the gaps it guards — an idiom the
+/// extractor's vocab misses must still look "controller-shaped" to this independent regex for the
+/// self-report to fire. Do not unify with `controller_decorators`/`provides` vocab.
 fn controller_decorator_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -37,9 +49,29 @@ fn controller_decorator_re() -> &'static Regex {
 const MIN_FILES: usize = 3;
 const MAX_SAMPLES: usize = 3;
 
+/// Near-zero (not exact-zero) floor shared by S1's `http_provides_count` gate, S2's `http_provides_count`
+/// gate, S3's `io_provides`/`io_consumes_keyed` gates, and S4's `http_consumes_count` gate. Round 9's blind
+/// be-express tree still had 1 extracted `http` provide — an exact-zero gate misses it entirely — and
+/// round 14's blind Spring-BE tree (17/19 routes lost to a parser limit) still had 2 lexically-extracted
+/// provides tree-wide, silencing S1's own original exact-zero gate the identical way. A near-zero floor
+/// still fires on both while a real micro-BE with 1-2 genuinely-extracted routes (or a real micro-FE with
+/// 1-2 genuinely-extracted consumes) gets a gracefully-worded disclosure it can read and ignore, rather
+/// than silence.
+const MIN_PROVIDES_FLOOR: usize = 3;
+
 /// Returns a ready-to-push `warnings` entry if `candidate_rels` show a controller-decorator-looking line
-/// in at least `MIN_FILES` distinct files while `http_provides_count` is exactly zero. Cheap on the
-/// success path: skips the disk re-read entirely when `http_provides_count > 0`.
+/// in at least `MIN_FILES` distinct files while `http_provides_count` sits below `MIN_PROVIDES_FLOOR` —
+/// NEAR-zero, not exact-zero. Round 14's Angular-FE x Spring-BE pair lost 17/19 routes to a parser limit
+/// but still had 2 lexically-extracted provides tree-wide; an exact-zero gate silently passes right over
+/// that tree — the identical failure shape S2's `MIN_PROVIDES_FLOOR` near-zero floor was built to catch,
+/// so S1 now shares it rather than gating on exactly zero. Cheap on the success path: skips the disk
+/// re-read entirely once `http_provides_count >= MIN_PROVIDES_FLOOR`.
+///
+/// Mild FP surface (accepted): `MIN_FILES`+ files matching the decorator regex while provides stay below
+/// the floor can over-fire on, e.g., a tree with a MapStruct `@Mapping` mapper cluster (the regex's
+/// `Mapping` alternative matches `@Mapping` too) alongside a genuinely tiny (1-2 route) controller.
+/// Accepted under the coverage self-report's governing principle: over-disclosure is safe, silence is
+/// fatal.
 ///
 /// Determinism: relies on `candidate_rels` already being sorted/deduped by the caller
 /// (`analyze::assemble`) — this function performs no re-sort, so an unsorted input would yield a
@@ -49,7 +81,7 @@ pub fn controller_silence_warning(
     candidate_rels: &[String],
     http_provides_count: usize,
 ) -> Option<String> {
-    if http_provides_count > 0 {
+    if http_provides_count >= MIN_PROVIDES_FLOOR {
         return None;
     }
     let re = controller_decorator_re();
@@ -71,10 +103,10 @@ pub fn controller_silence_warning(
         sample_str.push_str(&format!(", +{} more", matched.len() - MAX_SAMPLES));
     }
     Some(format!(
-        "{} file(s) carry controller-style route decorators/annotations but no http routes were extracted \
-— the framework's registration idiom may be unsupported; cross-layer joins will be silent for this tree \
-(e.g. {sample_str}) — project this tree's routes with a Mode B overlay adapter (see the adapter examples) \
-to restore cross-layer visibility.",
+        "{} file(s) carry controller-style route decorators/annotations but only {http_provides_count} \
+http route(s) were extracted tree-wide — the framework's registration idiom may be unsupported; \
+cross-layer joins will be silent for this tree (e.g. {sample_str}) — project this tree's routes with a \
+Mode B overlay adapter (see the adapter examples) to restore cross-layer visibility.",
         matched.len()
     ))
 }
@@ -97,13 +129,6 @@ const SERVER_FRAMEWORK_SPECIFIERS: &[&str] = &[
     "hono",
     "@trpc/server",
 ];
-
-/// Near-zero (not exact-zero) floor shared by S2's `http_provides_count` gate and S3's `io_provides`/
-/// `io_consumes_keyed` gates. Round 9's blind be-express tree still had 1 extracted `http` provide — an
-/// exact-zero gate misses it entirely. A near-zero floor still fires there while a real micro-BE with 1-2
-/// genuinely-extracted routes gets a gracefully-worded disclosure it can read and ignore, rather than
-/// silence.
-const MIN_PROVIDES_FLOOR: usize = 3;
 
 /// Whether `specifier` names one of `SERVER_FRAMEWORK_SPECIFIERS`, exact-segment matched: the specifier
 /// itself equals the vocab entry, or is a subpath import of it (`"express/lib/router"` still counts as
@@ -242,10 +267,113 @@ examples for its generated class-method client support) to restore cross-layer v
     None
 }
 
+// --- S4: http-client import tripwire (consume side) --------------------------------------------------
+
+/// HTTP-CLIENT package specifiers whose presence says this tree CALLS OUT over http, so near-zero
+/// extracted consumes signals consume-extractor blindness (wrapper indirection, an unrecognized DI idiom,
+/// or a generated SDK with no committed spec to anchor `committed_spec_io_silence_warning` on).
+/// Deliberately client libraries ONLY — the dual of S2's server-only list: a server-framework import says
+/// nothing about whether THIS tree calls OUT over http, so including one here would false-positive on an
+/// ordinary BE tree. `fetch`-global and `undici` usage are deliberately absent: `fetch` is a global, not a
+/// module specifier, so there is no import to anchor on, and a bare `undici` presence is ambiguous with its
+/// common role as a runtime polyfill rather than a deliberate direct dependency.
+const HTTP_CLIENT_SPECIFIERS: &[&str] = &[
+    "axios",
+    "ky",
+    "got",
+    "superagent",
+    "ofetch",
+    "redaxios",
+    "wretch",
+    "node-fetch",
+    "@angular/common/http",
+];
+
+/// Whether `specifier` names one of `HTTP_CLIENT_SPECIFIERS`, exact-segment matched the same way
+/// `is_server_framework_specifier` matches `SERVER_FRAMEWORK_SPECIFIERS`: the specifier itself equals the
+/// vocab entry, or is a subpath import of it (`"@angular/common/http/testing"` still counts as
+/// `@angular/common/http` — a testing-only import still implies the client is present in the tree).
+/// Deliberately NOT a substring match, so a lookalike specifier (e.g. `"axios-mock-adapter"`) never
+/// matches.
+fn is_http_client_specifier(specifier: &str) -> bool {
+    HTTP_CLIENT_SPECIFIERS
+        .iter()
+        .any(|vocab| specifier == *vocab || specifier.starts_with(&format!("{vocab}/")))
+}
+
+/// Returns a ready-to-push `warnings` entry when at least one http-client package (see
+/// `HTTP_CLIENT_SPECIFIERS`) is imported anywhere in the tree while `http_consumes_count` sits below
+/// `MIN_PROVIDES_FLOOR`. Pure map lookup — no disk IO, so this is cheap on every tree regardless of
+/// outcome.
+///
+/// Gate substrate: `http_consumes_count` must be ALL extracted `http`-kind consume records — keyed AND
+/// unresolved both, not just the keyed subset. An unresolved record still proves the extractor SAW the
+/// call site (it just could not resolve the target key); blindness is when the extractor saw
+/// (near-)nothing at all. Counting only keyed consumes here would conflate "saw it, could not join it" (a
+/// resolution gap, already its own disclosure class) with "never saw it" (this tripwire's actual target).
+///
+/// Determinism: `package_import_files` is a `BTreeMap<specifier, BTreeSet<importing file>>` (both levels
+/// already sorted), so iteration order and the first-example-file pick are both deterministic without any
+/// extra sort here — same convention as `server_framework_import_warning`.
+pub fn client_library_import_warning(
+    package_import_files: &BTreeMap<String, BTreeSet<String>>,
+    http_consumes_count: usize,
+) -> Option<String> {
+    if http_consumes_count >= MIN_PROVIDES_FLOOR {
+        return None;
+    }
+    let mut matched: Vec<(&str, usize, &str)> = Vec::new();
+    for (specifier, files) in package_import_files {
+        if !is_http_client_specifier(specifier) {
+            continue;
+        }
+        let Some(example) = files.iter().next() else {
+            continue;
+        };
+        matched.push((specifier.as_str(), files.len(), example.as_str()));
+    }
+    if matched.is_empty() {
+        return None;
+    }
+    let spec_list = matched
+        .iter()
+        .map(|(specifier, count, example)| format!("{specifier} ({count} file(s), e.g. {example})"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!(
+        "http-client package(s) imported but only {http_consumes_count} http consume site(s) were \
+extracted tree-wide: {spec_list} — the call idiom may be a wrapper or DI pattern this extraction pass does \
+not recognize; cross-layer joins will be near-silent from this tree's consume side — project this tree's \
+consumes with a Mode B overlay adapter (see the adapter examples) to restore cross-layer visibility."
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// Policy-value divergence pin: `coverage::CoverageCensus::join_contribution_zero` asserts on
+    /// EXACT zero (an unconditional structural fact — files > 0 with literally no io either way),
+    /// while the S1/S2/S4 tripwires here gate on this near-zero floor, because a heuristic
+    /// self-report must still fire at 1-2 extracted facts (round 9's be-express: 1 provide; round
+    /// 14's be-spring: 2) where the census assertion is already structurally false. Unifying the two
+    /// would either weaken the assertion into a heuristic or re-open the exact-zero silence hole —
+    /// change this relationship deliberately, never by drift (if the floor value itself changes,
+    /// update this pin AND the rationale in both module docs in the same commit).
+    #[test]
+    fn the_near_zero_floor_diverges_from_the_census_exact_zero_assertion_deliberately() {
+        assert_eq!(
+            MIN_PROVIDES_FLOOR, 3,
+            "MIN_PROVIDES_FLOOR changed — re-justify the round-9/round-14 near-zero rationale and \
+             the deliberate divergence from coverage::join_contribution_zero's exact-zero assertion"
+        );
+        assert_eq!(
+            IO_NEAR_ZERO_FLOOR, MIN_PROVIDES_FLOOR,
+            "IO_NEAR_ZERO_FLOOR is documented as an alias of MIN_PROVIDES_FLOOR — if they must \
+             diverge, update both docs and this pin deliberately"
+        );
+    }
 
     struct TempDir(std::path::PathBuf);
 
@@ -302,25 +430,51 @@ mod tests {
         let rels = vec!["a.ts".to_string(), "b.ts".to_string(), "c.ts".to_string()];
         let warning = controller_silence_warning(dir.path(), &rels, 0);
         assert!(
-            warning
-                .as_deref()
-                .is_some_and(|w| w
-                    .contains("route decorators/annotations but no http routes were extracted")),
+            warning.as_deref().is_some_and(|w| w.contains(
+                "route decorators/annotations but only 0 http route(s) were extracted tree-wide"
+            )),
             "got: {warning:?}"
         );
     }
 
     #[test]
-    fn nonzero_http_provides_short_circuits_without_even_reading_files() {
+    fn three_or_more_matching_files_with_near_zero_provides_still_warns() {
+        // Round 14's failure shape: a tree that DID extract some provides (here 2, still below
+        // `MIN_PROVIDES_FLOOR`) must still warn — the whole point of the near-zero (not exact-zero) gate.
+        let dir = TempDir::new("zzop-coverage-warn-near-zero");
+        dir.write(
+            "a.ts",
+            "@FastController('/a')\nclass A {\n  @FastGet('/x')\n  x() {}\n}\n",
+        );
+        dir.write(
+            "b.ts",
+            "@FastController('/b')\nclass B {\n  @FastGet('/y')\n  y() {}\n}\n",
+        );
+        dir.write(
+            "c.ts",
+            "@FastController('/c')\nclass C {\n  @FastGet('/z')\n  z() {}\n}\n",
+        );
+        let rels = vec!["a.ts".to_string(), "b.ts".to_string(), "c.ts".to_string()];
+        let warning = controller_silence_warning(dir.path(), &rels, 2);
+        assert!(
+            warning.as_deref().is_some_and(|w| w.contains(
+                "route decorators/annotations but only 2 http route(s) were extracted tree-wide"
+            )),
+            "got: {warning:?}"
+        );
+    }
+
+    #[test]
+    fn provides_at_the_floor_short_circuits_without_even_reading_files() {
         // Paths don't exist on disk; if this ever performed a real read it would silently skip
         // unreadable files rather than panic, so this just verifies the cheap short-circuit path
-        // returns `None`.
+        // returns `None` once `http_provides_count` clears `MIN_PROVIDES_FLOOR`.
         let rels = vec![
             "does/not/exist/a.ts".to_string(),
             "does/not/exist/b.ts".to_string(),
             "does/not/exist/c.ts".to_string(),
         ];
-        let warning = controller_silence_warning(Path::new("."), &rels, 1);
+        let warning = controller_silence_warning(Path::new("."), &rels, MIN_PROVIDES_FLOOR);
         assert!(warning.is_none());
     }
 
@@ -412,6 +566,16 @@ mod tests {
     }
 
     #[test]
+    fn server_framework_and_client_library_vocab_stay_disjoint() {
+        // S2's server-only list and S4's client-only list must never cross-fire: express never trips S4,
+        // and axios never trips S2 (the reverse direction is already covered by
+        // `http_client_libraries_are_not_server_frameworks` above).
+        let map = package_import_files(&[("express", &["src/app.ts"])]);
+        let warning = client_library_import_warning(&map, 0);
+        assert!(warning.is_none(), "got: {warning:?}");
+    }
+
+    #[test]
     fn a_lookalike_specifier_does_not_match_via_substring() {
         // "expressive" must not match the "express" vocab entry (not a whole-segment match).
         let map = package_import_files(&[("expressive", &["src/x.ts"])]);
@@ -450,7 +614,7 @@ mod tests {
         // The spec path doesn't exist on disk; if this ever performed a real read on the healthy-provides
         // path it would silently skip an unreadable file rather than panic, so this just verifies the
         // cheap short-circuit (gate before disk IO) returns `None` — same style as
-        // `nonzero_http_provides_short_circuits_without_even_reading_files` above.
+        // `provides_at_the_floor_short_circuits_without_even_reading_files` above.
         let rels = vec!["does/not/exist/openapi.yml".to_string()];
         let warning = committed_spec_io_silence_warning(Path::new("."), &rels, 3, 0);
         assert!(warning.is_none());
@@ -482,5 +646,76 @@ mod tests {
         let rels = vec!["src/config.yml".to_string()];
         let warning = committed_spec_io_silence_warning(dir.path(), &rels, 0, 0);
         assert!(warning.is_none(), "got: {warning:?}");
+    }
+
+    // --- S4 -----------------------------------------------------------------------------------------
+
+    #[test]
+    fn angular_http_client_import_with_zero_consumes_warns() {
+        let map = package_import_files(&[("@angular/common/http", &["src/api.service.ts"])]);
+        let warning = client_library_import_warning(&map, 0);
+        assert!(
+            warning.as_deref().is_some_and(
+                |w| w.contains("@angular/common/http") && w.contains("src/api.service.ts")
+            ),
+            "got: {warning:?}"
+        );
+    }
+
+    #[test]
+    fn angular_http_client_import_with_near_zero_consumes_still_warns() {
+        // Round 14's actual shape: some consumes extracted (2), still below `MIN_PROVIDES_FLOOR`.
+        let map = package_import_files(&[("@angular/common/http", &["src/api.service.ts"])]);
+        let warning = client_library_import_warning(&map, 2);
+        assert!(
+            warning
+                .as_deref()
+                .is_some_and(|w| w.contains("@angular/common/http")),
+            "got: {warning:?}"
+        );
+    }
+
+    #[test]
+    fn axios_import_with_near_zero_consumes_warns() {
+        let map = package_import_files(&[("axios", &["src/api.ts"])]);
+        let warning = client_library_import_warning(&map, 1);
+        assert!(
+            warning
+                .as_deref()
+                .is_some_and(|w| w.contains("axios") && w.contains("src/api.ts")),
+            "got: {warning:?}"
+        );
+    }
+
+    #[test]
+    fn healthy_consumes_count_short_circuits_even_with_a_client_import() {
+        let map = package_import_files(&[("axios", &["src/api.ts"])]);
+        let warning = client_library_import_warning(&map, 3);
+        assert!(warning.is_none(), "got: {warning:?}");
+    }
+
+    #[test]
+    fn no_http_client_import_never_warns() {
+        let map = package_import_files(&[("react", &["src/App.tsx"]), ("lodash", &["src/x.ts"])]);
+        let warning = client_library_import_warning(&map, 0);
+        assert!(warning.is_none(), "got: {warning:?}");
+    }
+
+    #[test]
+    fn a_client_lookalike_specifier_does_not_match_via_substring() {
+        // "axios-mock-adapter" must not match the "axios" vocab entry (not a whole-segment match).
+        let map = package_import_files(&[("axios-mock-adapter", &["src/x.test.ts"])]);
+        let warning = client_library_import_warning(&map, 0);
+        assert!(warning.is_none(), "got: {warning:?}");
+    }
+
+    #[test]
+    fn a_subpath_import_of_a_http_client_still_matches() {
+        // "@angular/common/http/testing" is a subpath of the "@angular/common/http" vocab entry and
+        // matches by the same prefix rule `is_server_framework_specifier` uses — a testing-only import
+        // still implies the client is present in the tree, which is the intended (accepted) behavior.
+        let map = package_import_files(&[("@angular/common/http/testing", &["src/api.spec.ts"])]);
+        let warning = client_library_import_warning(&map, 0);
+        assert!(warning.is_some(), "got: {warning:?}");
     }
 }

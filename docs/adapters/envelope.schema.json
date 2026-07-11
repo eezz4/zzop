@@ -1,0 +1,271 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://zzop.dev/schema/envelope.v1.json",
+  "title": "zzop NormalizedEnvelope v1",
+  "description": "External-parser / adapter-overlay envelope contract (docs/NORMALIZED_AST.md; packages/core/src/normalized.rs). Field names, required-ness, and nullability below mirror the Rust serde types field-for-field — a field is 'required' here exactly when its Rust struct field has no #[serde(default)], and 'nullable' exactly when its Rust type is Option<T> deserialized without #[serde(default)] (present key, value may be null) as opposed to omittable-and-defaulting.",
+  "$comment": "TOLERANCE CONTRACT: additionalProperties is true at every object level in this schema. The engine ignores fields it does not recognize (with a warning) — it never hard-fails on an unknown field, the same philosophy as zzop's config surface (see docs/adapters/README.md's 'Envelope schema & versioning policy'). A producer emitting a field ahead of this schema, or omitting any field marked optional below, still produces a valid v1 envelope. Only a BREAKING change (removing, renaming, or re-typing a REQUIRED field) needs a new envelope `version`; additive fields never do.",
+  "type": "object",
+  "required": ["format", "version", "parser", "source", "files"],
+  "additionalProperties": true,
+  "properties": {
+    "format": {
+      "const": "zzop-normalized-ast",
+      "description": "Must be exactly this string — zzop_core::validate_envelope rejects any other value."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Contract version. This schema documents v1; a consumer rejects version > SUPPORTED_NORMALIZED_AST_VERSION."
+    },
+    "parser": {
+      "type": "string",
+      "minLength": 1,
+      "description": "\"<parser id>/<impl version>\" — doubles as the cache fingerprint segment; bump the impl version whenever the projection changes for identical input."
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Tree/source id — the cross-layer join's per-tree tag."
+    },
+    "files": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/fileProjection" }
+    }
+  },
+  "definitions": {
+    "fileProjection": {
+      "type": "object",
+      "required": ["path", "loc"],
+      "additionalProperties": true,
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "description": "Relative, forward-slash path." },
+        "loc": { "type": "integer", "minimum": 0, "description": "Raw physical line count (text.split('\\n').length semantics)." },
+        "symbols": { "type": "array", "default": [], "items": { "$ref": "#/definitions/sourceSymbol" } },
+        "imports": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": { "$ref": "#/definitions/importBinding" },
+          "description": "localName -> ImportBinding."
+        },
+        "re_exports": { "type": "array", "default": [], "items": { "$ref": "#/definitions/reExport" } },
+        "dynamic_imports": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" },
+          "description": "This file's dynamic import() specifiers."
+        },
+        "used_names": { "type": "array", "default": [], "items": { "type": "string" } },
+        "const_map_fragment": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": { "type": "string" },
+          "description": "identifier -> literal string value, for this file's top-level const string bindings."
+        },
+        "trpc_router_fragments": { "type": "array", "default": [], "items": { "$ref": "#/definitions/trpcRouterFragment" } },
+        "router_mount_fragments": { "type": "array", "default": [], "items": { "$ref": "#/definitions/routerMountFragment" } },
+        "io": { "$ref": "#/definitions/ioFacts", "default": { "provides": [], "consumes": [] } },
+        "degraded": {
+          "type": "boolean",
+          "default": false,
+          "description": "The parser could not fully process this file (size cap, syntax failure); loc must still be present."
+        },
+        "is_entry": {
+          "type": "boolean",
+          "default": false,
+          "description": "Framework/runtime entry loaded by convention rather than imported (e.g. SvelteKit hooks.*/+page, a .vue route) — exempts the file from dead-candidates/unreachable. Meaningful only in Mode B (adapter overlay) composition; Mode A (analyzeEnvelope) does not read this field."
+        }
+      }
+    },
+    "sourceSymbol": {
+      "type": "object",
+      "required": ["id", "file", "name", "kind", "line", "exported"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "description": "\"features/x/useFoo.ts#useFoo\" — file + name combination id." },
+        "file": { "type": "string", "description": "Normalized relative path." },
+        "name": { "type": "string" },
+        "kind": {
+          "type": "string",
+          "enum": ["function", "class", "const", "type", "interface"],
+          "$comment": "Wire form is lowercase (SourceSymbolKind's #[serde(rename_all = \"lowercase\")], packages/core/src/ir.rs)."
+        },
+        "line": { "type": "integer", "minimum": 1, "description": "Declaration start line (1-based)." },
+        "exported": { "type": "boolean" },
+        "is_default": {
+          "type": "boolean",
+          "default": false,
+          "description": "export default function — also matchable via the file#default key. Canonical wire name is camelCase isDefault (SourceSymbol is #[serde(rename_all = \"camelCase\")]); this snake_case spelling is the frozen-v1 input alias and stays accepted."
+        },
+        "body_start": {
+          "type": ["integer", "null"],
+          "description": "Body line range start (1-based, inclusive) for functions/classes; absent/null for type/interface or a parser that cannot produce spans (those files silently skip method-scan DSL rules — never an error)."
+        },
+        "body_end": { "type": ["integer", "null"] },
+        "writeSites": {
+          "type": "array",
+          "default": [],
+          "items": { "$ref": "#/definitions/writeSite" },
+          "description": "Pre-computed store-write sites within this symbol's body span, in source order. Optional producer-side; almost never populated by a non-TS adapter. IMPORTANT: unlike is_default/body_start/body_end this field has NO frozen snake_case alias — writeSites (camelCase) is the ONLY accepted name; a write_sites key is silently dropped by the tolerant reader."
+        }
+      }
+    },
+    "writeSite": {
+      "type": "object",
+      "required": ["file", "line", "sink"],
+      "additionalProperties": true,
+      "properties": {
+        "file": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "sink": { "type": "string", "description": "Short human-readable label (\"prisma.user.update\", or the first few tokens of a raw-SQL statement)." },
+        "kind": {
+          "type": ["string", "null"],
+          "description": "Set only when the write also qualifies as non-idempotent (create/atomic-accumulate/counter); kebab-case NonIdempotentKind wire form."
+        }
+      }
+    },
+    "importBinding": {
+      "type": "object",
+      "required": ["specifier", "original"],
+      "additionalProperties": true,
+      "properties": {
+        "specifier": { "type": "string", "description": "Verbatim specifier from the import \"...\" statement (\"@/features/x\", \"./foo\")." },
+        "original": { "type": "string", "description": "Original exported name: default import = \"default\", namespace = \"*\"." },
+        "deferred": { "type": "boolean", "default": false, "description": "A CommonJS require() nested in a function body — a lazy import." },
+        "type_only": { "type": "boolean", "default": false, "description": "import type ... — erased by TS at compile time." }
+      }
+    },
+    "reExport": {
+      "type": "object",
+      "required": ["specifier", "original", "local_alias"],
+      "additionalProperties": true,
+      "properties": {
+        "specifier": { "type": "string", "description": "Specifier from export ... from \"...\"." },
+        "original": { "type": "string", "description": "Original name in the source. star = \"*\"." },
+        "local_alias": { "type": "string", "description": "Name exposed in the current file. export { A as B } = B, star = \"*\"." },
+        "type_only": { "type": "boolean", "default": false }
+      }
+    },
+    "ioFacts": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "provides": { "type": "array", "default": [], "items": { "$ref": "#/definitions/ioProvide" } },
+        "consumes": { "type": "array", "default": [], "items": { "$ref": "#/definitions/ioConsume" } }
+      }
+    },
+    "ioProvide": {
+      "type": "object",
+      "required": ["kind", "key", "file", "line"],
+      "additionalProperties": true,
+      "properties": {
+        "kind": { "type": "string", "description": "The boundary an interface crosses (\"http\", \"db-table\", ...). Open-ended — an adapter may introduce its own kind." },
+        "key": { "type": "string", "description": "Adapter-normalized interface identity, e.g. \"GET /users/{}\". Must be byte-identical to what the consuming side computes for the exact join to succeed — see lib/keys.js in examples/adapter-kit." },
+        "file": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "symbol": { "type": ["string", "null"], "description": "Handler/owner symbol id (e.g. the controller method) for richer edges. Omittable, or explicit null." }
+      }
+    },
+    "ioConsume": {
+      "type": "object",
+      "required": ["kind", "key", "file", "line"],
+      "additionalProperties": true,
+      "properties": {
+        "kind": { "type": "string" },
+        "key": {
+          "type": ["string", "null"],
+          "description": "null when the adapter could not statically resolve a dynamic target — reported, never force-matched (this key IS a required JSON key; its VALUE may be null)."
+        },
+        "file": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "raw": { "type": ["string", "null"], "description": "The raw expression text as written at the call site. Set whenever key is null; kept (not cleared) when late cross-file resolution fills key in afterwards, as provenance. Omittable, or explicit null." },
+        "method": { "type": ["string", "null"], "description": "HTTP method of the call site, kept for late re-resolution. Only meaningful when key is null. Omittable, or explicit null." }
+      }
+    },
+    "trpcRouterFragment": {
+      "type": "object",
+      "required": ["name", "entries"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string", "description": "The identifier this router binding is exported as." },
+        "entries": { "type": "array", "items": { "$ref": "#/definitions/trpcRouterEntry" } }
+      }
+    },
+    "trpcRouterEntry": {
+      "description": "Externally-tagged Rust enum (TrpcRouterEntry, packages/core/src/fragments.rs) — exactly one of Leaf/Ref/Nested present per entry, e.g. { \"Leaf\": { \"key\": \"getUser\", \"verb\": \"QUERY\", \"line\": 12 } }.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "Leaf": {
+          "type": "object",
+          "required": ["key", "verb", "line"],
+          "additionalProperties": true,
+          "properties": {
+            "key": { "type": "string" },
+            "verb": { "type": "string", "enum": ["QUERY", "MUTATION", "SUBSCRIPTION"] },
+            "line": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "Ref": {
+          "type": "object",
+          "required": ["key", "ident", "specifier"],
+          "additionalProperties": true,
+          "properties": {
+            "key": { "type": "string" },
+            "ident": { "type": "string" },
+            "specifier": { "type": ["string", "null"], "description": "Set when ident is imported; null for a same-file binding." }
+          }
+        },
+        "Nested": {
+          "type": "object",
+          "required": ["key", "entries"],
+          "additionalProperties": true,
+          "properties": {
+            "key": { "type": "string" },
+            "entries": { "type": "array", "items": { "$ref": "#/definitions/trpcRouterEntry" } }
+          }
+        }
+      }
+    },
+    "routerMountFragment": {
+      "type": "object",
+      "required": ["name", "entries"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string", "description": "Identifier the router is bound to; \"default\" for an unbound export default chain." },
+        "entries": { "type": "array", "items": { "$ref": "#/definitions/routerMountEntry" } }
+      }
+    },
+    "routerMountEntry": {
+      "description": "Externally-tagged Rust enum (RouterMountEntry, packages/core/src/fragments.rs) — exactly one of Verb/Mount present per entry.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "Verb": {
+          "type": "object",
+          "required": ["method", "path", "handler", "line"],
+          "additionalProperties": true,
+          "properties": {
+            "method": { "type": "string", "description": "UPPERCASE HTTP method." },
+            "path": { "type": "string", "description": "Verbatim string-literal first argument; :param normalized later by the key normalizer, not here." },
+            "handler": { "type": ["string", "null"], "description": "Last argument's name, if identifiable." },
+            "line": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "Mount": {
+          "type": "object",
+          "required": ["prefix", "ident", "specifier"],
+          "additionalProperties": true,
+          "properties": {
+            "prefix": { "type": "string" },
+            "ident": { "type": "string" },
+            "specifier": { "type": ["string", "null"], "description": "null = the mounted router is a same-file (local) binding." }
+          }
+        }
+      }
+    }
+  }
+}

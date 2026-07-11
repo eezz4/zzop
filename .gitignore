@@ -7,6 +7,10 @@
 # .claude/context/plans/benchmark-corpus-2026-07.md)
 /benchmark
 
+# Local dogfood corpus checkouts (cloned OSS repos with embedded .git — never shipped;
+# re-acquisition commands live in the internal context docs)
+/테스트
+
 # zzop report output (runtime artifact; --out / report.dir)
 zzop-report.*/
 /zzop-reports/

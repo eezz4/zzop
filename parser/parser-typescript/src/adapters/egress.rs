@@ -13,7 +13,10 @@
 //! family (`oazapfts.fetchJson/fetchText/fetchBlob(url, opts)`, receiver matched tightly, method read
 //! from `opts.method` or from an `oazapfts.json/form(...)` wrapper), and a computed member callee on
 //! `axios`/`ky` (`axios['post'](url)`, `axios[favorited ? 'delete' : 'post'](url)`) whose bracket
-//! expression is a recognized-verb string literal or a ternary with two such literal arms. oazapfts
+//! expression is a recognized-verb string literal or a ternary with two such literal arms, and
+//! Angular's `this.<name>.get/post/put/delete/patch(url)` / `<name>.get/...(url)` where `<name>` must be
+//! HttpClient-typed (constructor param property or class property) or `inject(HttpClient)`-initialized
+//! in a file that itself imports `@angular/common/http` (see `angular-httpclient-v1` below). oazapfts
 //! codegen also appends a query-string suffix via a trailing template interpolation starting with
 //! `QS.` (`` `/activities${QS.query(...)}` ``) — dropped entirely rather than turned into a `{}`
 //! placeholder.
@@ -25,13 +28,34 @@
 //! inventing values that aren't written down). Template fan-out is capped at 2 conditional-literal
 //! interpolations (≤4 variants); a 3rd+ interpolation of that shape falls back to `{}` for ALL of them
 //! in that template, keeping output bounded and deterministic.
+//!
+//! `angular-httpclient-v1`: Angular's dependency-injected `HttpClient` idiom — `this.<name>.get/post/
+//! put/delete/patch(url)` or `<name>.get/...(url)` — is recognized only when `<name>` is a proven
+//! HttpClient receiver in THIS file: a constructor parameter property typed `HttpClient`, a class
+//! property typed `HttpClient`, or a class property/local `const`/`let` initialized with
+//! `inject(HttpClient)`, gated on the file itself importing (any specifier) from
+//! `@angular/common/http` — never guessed from the bare name `http` alone. Over-approximation WITHIN a
+//! gated file is accepted: resolution is per-file, not per-class, so two same-named-but-differently-typed
+//! receivers in one gated file both match. `request(method, url)` is out of scope for v1.
+//!
+//! `str-concat-url-v1`: binary `+` string concatenation (`'/profiles/' + username`, `'/profiles/' +
+//! username + '/follow'`) is the isomorphic counterpart to template-literal resolution. The
+//! left-associative `+` chain is flattened into its operands; the whole chain is rejected (unresolved)
+//! if any operator in it is not `+` (a `-`/`??`/`||` chain is never guessed) or if NO operand is a direct
+//! string literal (a fully-dynamic `base + path` stays unresolved, same as today). Each operand maps to
+//! the same `TplPiece` vocabulary as template resolution: a string literal or resolved const is `Fixed`;
+//! a ternary with two string-literal arms is a `Slot` (cartesian fan-out, capped at 2 slots — same
+//! bounded-output rule as `cond-literal-fanout-v1`); anything else falls back to the old `{}`
+//! placeholder.
 
 use std::collections::{HashMap, HashSet};
 
 use swc_core::common::{SourceMap, SourceMapper, Spanned};
 use swc_core::ecma::ast::{
-    CallExpr, Callee, Decl, Expr, ExprOrSpread, Lit, MemberProp, ModuleDecl, ModuleItem, ObjectLit,
-    Pat, Prop, PropName, PropOrSpread, Stmt, Tpl, TsEnumMemberId,
+    BinaryOp, CallExpr, Callee, ClassProp, Constructor, Decl, Expr, ExprOrSpread, Lit, MemberProp,
+    Module, ModuleDecl, ModuleItem, ObjectLit, ParamOrTsParamProp, Pat, Prop, PropName,
+    PropOrSpread, Stmt, Tpl, TsEntityName, TsEnumMemberId, TsParamPropParam, TsType, TsTypeAnn,
+    VarDecl, VarDeclKind,
 };
 use swc_core::ecma::visit::{Visit, VisitWith};
 use zzop_core::{http_consume_interface_key, IoConsume};
@@ -45,10 +69,12 @@ pub fn extract_http_egress(files: &[(String, String)]) -> Vec<IoConsume> {
             continue;
         };
         let cm_ref: &SourceMap = &cm;
+        let angular_receivers = angular_http_client_receivers(&module);
         let mut c = EgressCollector {
             cm: cm_ref,
             file: rel,
             consts: &consts,
+            angular_receivers: &angular_receivers,
             out: Vec::new(),
         };
         module.visit_with(&mut c);
@@ -61,12 +87,15 @@ struct EgressCollector<'a> {
     cm: &'a SourceMap,
     file: &'a str,
     consts: &'a HashMap<String, String>,
+    angular_receivers: &'a HashSet<String>,
     out: Vec<IoConsume>,
 }
 
 impl Visit for EgressCollector<'_> {
     fn visit_call_expr(&mut self, call: &CallExpr) {
-        if let Some(hc) = match_http_call(call) {
+        if let Some(hc) =
+            match_http_call(call).or_else(|| match_angular_http_call(call, self.angular_receivers))
+        {
             let url_variants = resolve_url_variants(hc.arg, self.consts, self.cm);
             let line = crate::line_of(self.cm, call.span.lo);
             if url_variants.is_empty() {
@@ -254,8 +283,154 @@ fn match_http_call(call: &CallExpr) -> Option<HttpCall<'_>> {
     }
 }
 
+/// Whether `m` is a lowercase spelling of a `zzop_core::HTTP_KEY_VERBS` verb — the member-callee /
+/// computed-member vocabulary (T1: the verb SET lives in core; the exact-lowercase comparison is this
+/// vocabulary's own spelling rule, so `axios.GET(...)` — not a real client API — stays unrecognized).
 fn is_http_method(m: &str) -> bool {
-    matches!(m, "get" | "post" | "put" | "delete" | "patch")
+    zzop_core::HTTP_KEY_VERBS
+        .iter()
+        .any(|v| v.to_ascii_lowercase() == m)
+}
+
+/// Angular HttpClient call matcher (`angular-httpclient-v1`) — `this.<name>.<verb>(url, ...)` or
+/// `<name>.<verb>(url, ...)` where `<name>` is a proven HttpClient receiver (see module doc). Sibling to
+/// [`match_http_call`], never called when `receivers` is empty (the file didn't import
+/// `@angular/common/http`, or nothing in it resolved as an HttpClient receiver).
+fn match_angular_http_call<'a>(
+    call: &'a CallExpr,
+    receivers: &HashSet<String>,
+) -> Option<HttpCall<'a>> {
+    if receivers.is_empty() {
+        return None;
+    }
+    let arg = &*call.args.first()?.expr;
+    let Callee::Expr(callee) = &call.callee else {
+        return None;
+    };
+    let Expr::Member(outer) = &**callee else {
+        return None;
+    };
+    let MemberProp::Ident(verb_ident) = &outer.prop else {
+        return None;
+    };
+    let verb = verb_ident.sym.to_string();
+    if !is_http_method(&verb) {
+        return None;
+    }
+    let receiver_name = match &*outer.obj {
+        // `this.<name>.<verb>(...)`
+        Expr::Member(inner) => {
+            if !matches!(&*inner.obj, Expr::This(_)) {
+                return None;
+            }
+            let MemberProp::Ident(name_ident) = &inner.prop else {
+                return None;
+            };
+            name_ident.sym.to_string()
+        }
+        // `<name>.<verb>(...)` — a field-inject or local-const-inject receiver referenced bare.
+        Expr::Ident(id) => id.sym.to_string(),
+        _ => return None,
+    };
+    if !receivers.contains(&receiver_name) {
+        return None;
+    }
+    Some(HttpCall {
+        methods: vec![verb],
+        arg,
+    })
+}
+
+/// True when the file imports (any specifier) from `@angular/common/http` — the hard per-file evidence
+/// gate for [`match_angular_http_call`]; see module doc (`angular-httpclient-v1`).
+fn has_angular_http_client_import(module: &Module) -> bool {
+    module.body.iter().any(|item| {
+        matches!(
+            item,
+            ModuleItem::ModuleDecl(ModuleDecl::Import(imp))
+                if imp.src.value.as_str() == Some("@angular/common/http")
+        )
+    })
+}
+
+/// This file's set of proven Angular HttpClient receiver names — empty unless the file imports
+/// `@angular/common/http` (module doc). Three shapes contribute: a constructor parameter property typed
+/// `HttpClient`, a class property typed `HttpClient` or initialized with `inject(HttpClient)`, and a
+/// top-level or function-local `const`/`let` initialized with `inject(HttpClient)`. Resolution walks the
+/// WHOLE tree (not just top-level), so a nested method-local `inject(HttpClient)` const is found too.
+fn angular_http_client_receivers(module: &Module) -> HashSet<String> {
+    if !has_angular_http_client_import(module) {
+        return HashSet::new();
+    }
+    let mut c = HttpClientReceiverCollector {
+        names: HashSet::new(),
+    };
+    module.visit_with(&mut c);
+    c.names
+}
+
+struct HttpClientReceiverCollector {
+    names: HashSet<String>,
+}
+
+impl Visit for HttpClientReceiverCollector {
+    fn visit_constructor(&mut self, n: &Constructor) {
+        for p in &n.params {
+            if let ParamOrTsParamProp::TsParamProp(tpp) = p {
+                if let TsParamPropParam::Ident(bi) = &tpp.param {
+                    if is_http_client_type(bi.type_ann.as_deref()) {
+                        self.names.insert(bi.id.sym.to_string());
+                    }
+                }
+            }
+        }
+        n.visit_children_with(self);
+    }
+
+    fn visit_class_prop(&mut self, n: &ClassProp) {
+        if let PropName::Ident(key) = &n.key {
+            let is_http_client = is_http_client_type(n.type_ann.as_deref())
+                || n.value.as_deref().is_some_and(is_inject_http_client_call);
+            if is_http_client {
+                self.names.insert(key.sym.to_string());
+            }
+        }
+        n.visit_children_with(self);
+    }
+
+    fn visit_var_decl(&mut self, n: &VarDecl) {
+        if matches!(n.kind, VarDeclKind::Const | VarDeclKind::Let) {
+            for d in &n.decls {
+                if let (Pat::Ident(bi), Some(init)) = (&d.name, d.init.as_deref()) {
+                    if is_inject_http_client_call(init) {
+                        self.names.insert(bi.id.sym.to_string());
+                    }
+                }
+            }
+        }
+        n.visit_children_with(self);
+    }
+}
+
+/// `: HttpClient` type annotation — a single-identifier `TsTypeRef` named exactly `HttpClient`.
+fn is_http_client_type(ann: Option<&TsTypeAnn>) -> bool {
+    let Some(ann) = ann else { return false };
+    matches!(&*ann.type_ann, TsType::TsTypeRef(tr) if matches!(&tr.type_name, TsEntityName::Ident(id) if id.sym == "HttpClient"))
+}
+
+/// `inject(HttpClient)` — callee identifier `inject`, exactly one argument, that argument the bare
+/// identifier `HttpClient`.
+fn is_inject_http_client_call(e: &Expr) -> bool {
+    let Expr::Call(call) = e else { return false };
+    let Callee::Expr(callee) = &call.callee else {
+        return false;
+    };
+    let Expr::Ident(id) = &**callee else {
+        return false;
+    };
+    id.sym == "inject"
+        && call.args.len() == 1
+        && matches!(&*call.args[0].expr, Expr::Ident(arg) if arg.sym == "HttpClient")
 }
 
 /// Resolve a computed member-access bracket expression (`axios[<expr>](url)`) to one or two HTTP
@@ -343,7 +518,8 @@ fn method_from_options(opts: Option<&ExprOrSpread>) -> Option<String> {
 /// fans out to one variant per arm (cons first, then alt), deduped preserving first-seen order — visible
 /// literal enumeration, not a guess (`cond-literal-fanout-v1`); any other ternary shape is unresolved
 /// (empty vec), same as today's non-literal shapes. See [`resolve_template_variants`] for the template
-/// literal case, which fans out per-interpolation with its own cap.
+/// literal case, which fans out per-interpolation with its own cap, and [`resolve_concat_variants`] for
+/// the binary `+` string-concatenation case (`str-concat-url-v1`).
 fn resolve_url_variants(
     arg: &Expr,
     consts: &HashMap<String, String>,
@@ -369,8 +545,124 @@ fn resolve_url_variants(
             .cloned()
             .into_iter()
             .collect(),
+        Expr::Bin(_) => resolve_concat_variants(arg, consts, cm),
         _ => Vec::new(),
     }
+}
+
+/// `+` string-concatenation -> URL variants (`str-concat-url-v1`), the isomorphic counterpart to
+/// [`resolve_template_variants`] for binary `+` instead of a template literal. Flattens the
+/// left-associative chain, rejects it (empty vec) if any operator isn't `+` or if no operand is a direct
+/// string literal, then maps each operand to a [`TplPiece`] and assembles variants with
+/// [`assemble_concat_variants`]. See the module doc for the full rule.
+fn resolve_concat_variants(
+    arg: &Expr,
+    consts: &HashMap<String, String>,
+    cm: &SourceMap,
+) -> Vec<String> {
+    let Some(operands) = flatten_add_chain(arg) else {
+        return Vec::new();
+    };
+    let has_literal_operand = operands
+        .iter()
+        .any(|o| matches!(unwrap_expr(o), Expr::Lit(Lit::Str(_))));
+    if !has_literal_operand {
+        return Vec::new();
+    }
+    let pieces: Vec<TplPiece> = operands
+        .iter()
+        .map(|o| concat_operand_piece(o, consts, cm))
+        .collect();
+    assemble_concat_variants(&pieces)
+}
+
+/// Flatten a left-associative `+` chain (`a + b + c` parses as `Bin{Bin{a,b},c}`) into its ordered
+/// operands, or `None` if any operator in the chain is not `+` — never guessed for `-`, `??`, `||`, etc.
+/// A wrapper (`(...)`, `as const`, ...) around the chain or one of its sub-chains is stripped via
+/// [`unwrap_expr`] before matching.
+fn flatten_add_chain(expr: &Expr) -> Option<Vec<&Expr>> {
+    match unwrap_expr(expr) {
+        Expr::Bin(b) => {
+            if b.op != BinaryOp::Add {
+                return None;
+            }
+            let mut operands = flatten_add_chain(&b.left)?;
+            operands.push(&b.right);
+            Some(operands)
+        }
+        other => Some(vec![other]),
+    }
+}
+
+/// Map one `+`-chain operand to a [`TplPiece`]: a string literal is `Fixed`; an identifier/member that
+/// resolves in `consts` (same lookup as `resolve_url_variants`'s own `Expr::Ident|Member` arm) is
+/// `Fixed`; a ternary with BOTH arms string literals is the fan-out `Slot`; anything else (an unresolved
+/// identifier, a call, a nested non-string expression) is the old `Fixed("{}")` placeholder.
+fn concat_operand_piece(
+    operand: &Expr,
+    consts: &HashMap<String, String>,
+    cm: &SourceMap,
+) -> TplPiece {
+    match unwrap_expr(operand) {
+        Expr::Lit(Lit::Str(s)) => TplPiece::Fixed(s.value.as_str().unwrap_or_default().to_string()),
+        e @ (Expr::Ident(_) | Expr::Member(_)) => match consts.get(&expr_text(e, cm)) {
+            Some(v) => TplPiece::Fixed(v.clone()),
+            None => TplPiece::Fixed("{}".to_string()),
+        },
+        Expr::Cond(c) => {
+            if let (Expr::Lit(Lit::Str(cons)), Expr::Lit(Lit::Str(alt))) = (&*c.cons, &*c.alt) {
+                TplPiece::Slot(
+                    cons.value.as_str().unwrap_or_default().to_string(),
+                    alt.value.as_str().unwrap_or_default().to_string(),
+                )
+            } else {
+                TplPiece::Fixed("{}".to_string())
+            }
+        }
+        _ => TplPiece::Fixed("{}".to_string()),
+    }
+}
+
+/// Assemble a `+`-chain's pieces into URL variants: concatenate `Fixed` pieces inline, cartesian-product
+/// `Slot` pieces, capped at 2 slots (a 3rd+ slot forces every slot in THIS chain back to fixed `"{}"`,
+/// same bounded-output rule as [`resolve_template_variants`]), then dedup preserving first-seen order.
+/// Standalone from `resolve_template_variants`'s assembly loop — deliberately NOT shared, so that loop's
+/// existing tests stay byte-identical (see module doc / task notes): a concat chain has no quasis, so
+/// pieces are just concatenated in sequence rather than interleaved with quasi text.
+fn assemble_concat_variants(pieces: &[TplPiece]) -> Vec<String> {
+    let slot_count = pieces
+        .iter()
+        .filter(|p| matches!(p, TplPiece::Slot(_, _)))
+        .count();
+    let mut variants = vec![String::new()];
+    for p in pieces {
+        match p {
+            TplPiece::Fixed(s) => {
+                for v in variants.iter_mut() {
+                    v.push_str(s);
+                }
+            }
+            TplPiece::Slot(cons, alt) => {
+                if slot_count > 2 {
+                    for v in variants.iter_mut() {
+                        v.push_str("{}");
+                    }
+                } else {
+                    let mut next = Vec::with_capacity(variants.len() * 2);
+                    for v in &variants {
+                        let mut a = v.clone();
+                        a.push_str(cons);
+                        next.push(a);
+                        let mut b = v.clone();
+                        b.push_str(alt);
+                        next.push(b);
+                    }
+                    variants = next;
+                }
+            }
+        }
+    }
+    dedup_preserve_order(variants)
 }
 
 /// One piece of a template literal between two quasis: either fixed text (the old `"{}"` placeholder,
@@ -512,6 +804,12 @@ pub fn const_map_fragment(rel: &str, text: &str) -> HashMap<String, String> {
         if let Some(Decl::Var(v)) = decl {
             for d in &v.decls {
                 if let (Pat::Ident(bi), Some(init)) = (&d.name, &d.init) {
+                    // Object literals and (below) string enums only — dotted, namespaced keys
+                    // (`RouteKey.Asset`). A bare `const path = "/x"` is deliberately NOT captured: this map
+                    // is project-wide and scope-insensitive (last-write-wins), so a bare common name
+                    // (`path`, `url`, `base`) could shadow a same-named function parameter and mis-key an
+                    // unrelated `axios.get(path)` — a guess dressed as a visible fact. `str-concat-url-v1`
+                    // resolves the visible LITERAL operands of a concat, not bare-const-prefix indirection.
                     if let Expr::Object(obj) = unwrap_expr(init) {
                         flatten(bi.id.sym.as_ref(), obj, &mut map);
                     }
@@ -976,6 +1274,161 @@ mod tests {
             r#"other.fetchJson("/activities", { ...opts });"#,
         )]));
         assert!(out.is_empty());
+    }
+
+    // --- Angular HttpClient injection (`angular-httpclient-v1`) ---
+
+    #[test]
+    fn angular_constructor_param_property_http_client_is_recognized() {
+        let out = extract_http_egress(&files(&[(
+            "article.service.ts",
+            concat!(
+                "import { HttpClient } from '@angular/common/http';\n",
+                "export class ArticleService {\n",
+                "  constructor(private readonly http: HttpClient) {}\n",
+                "  getArticles() {\n",
+                "    this.http.get<{a: string}>('/articles');\n",
+                "    this.http.post('/users', {});\n",
+                "    this.http.delete(`/articles/${slug}`);\n",
+                "  }\n",
+                "}\n",
+            ),
+        )]));
+        assert_eq!(
+            keys(&out),
+            vec![
+                Some("GET /articles".to_string()),
+                Some("POST /users".to_string()),
+                Some("DELETE /articles/{}".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn angular_field_inject_http_client_is_recognized() {
+        let out = extract_http_egress(&files(&[(
+            "article.service.ts",
+            concat!(
+                "import { HttpClient } from '@angular/common/http';\n",
+                "import { inject } from '@angular/core';\n",
+                "export class ArticleService {\n",
+                "  private http = inject(HttpClient);\n",
+                "  getArticles() {\n",
+                "    return this.http.get('/articles');\n",
+                "  }\n",
+                "}\n",
+            ),
+        )]));
+        assert_eq!(keys(&out), vec![Some("GET /articles".to_string())]);
+    }
+
+    #[test]
+    fn angular_local_const_inject_http_client_is_recognized() {
+        let out = extract_http_egress(&files(&[(
+            "a.ts",
+            concat!(
+                "import { HttpClient } from '@angular/common/http';\n",
+                "import { inject } from '@angular/core';\n",
+                "function useArticles() {\n",
+                "  const http = inject(HttpClient);\n",
+                "  return http.get('/x');\n",
+                "}\n",
+            ),
+        )]));
+        assert_eq!(keys(&out), vec![Some("GET /x".to_string())]);
+    }
+
+    #[test]
+    fn angular_shape_without_the_import_is_not_recognized() {
+        // Same shape, no `@angular/common/http` import anywhere in the file — never guessed.
+        let out = extract_http_egress(&files(&[(
+            "a.ts",
+            "export class ArticleService {\n  constructor(private readonly http) {}\n  x() { this.http.get('/x'); }\n}\n",
+        )]));
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn angular_gated_file_but_non_http_client_typed_receiver_is_not_recognized() {
+        let out = extract_http_egress(&files(&[(
+            "a.ts",
+            concat!(
+                "import { HttpClient } from '@angular/common/http';\n",
+                "export class AuthService {\n",
+                "  constructor(private readonly http: HttpClient, private readonly jwtService: JwtService) {}\n",
+                "  x() {\n",
+                "    this.jwtService.get('/x');\n",
+                "  }\n",
+                "}\n",
+            ),
+        )]));
+        assert!(out.is_empty());
+    }
+
+    // --- `+` string-concatenation URLs (`str-concat-url-v1`) ---
+
+    #[test]
+    fn str_concat_literal_plus_variable_keys_as_param() {
+        let out = extract_http_egress(&files(&[("a.tsx", "axios.get('/profiles/' + username)")]));
+        assert_eq!(out[0].key.as_deref(), Some("GET /profiles/{}"));
+    }
+
+    #[test]
+    fn str_concat_three_way_with_trailing_literal() {
+        let out = extract_http_egress(&files(&[(
+            "a.tsx",
+            "axios.post('/profiles/' + username + '/follow', body)",
+        )]));
+        assert_eq!(out[0].key.as_deref(), Some("POST /profiles/{}/follow"));
+    }
+
+    #[test]
+    fn str_concat_with_conditional_literal_fans_out() {
+        let out = extract_http_egress(&files(&[(
+            "a.tsx",
+            "axios.get('/articles' + (feed ? '/feed' : ''))",
+        )]));
+        assert_eq!(
+            keys(&out),
+            vec![
+                Some("GET /articles/feed".to_string()),
+                Some("GET /articles".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn str_concat_with_no_string_literal_is_unresolved() {
+        let out = extract_http_egress(&files(&[("a.tsx", "axios.get(base + path)")]));
+        assert_eq!(out.len(), 1);
+        assert!(out[0].key.is_none());
+        assert_eq!(out[0].raw.as_deref(), Some("base + path"));
+    }
+
+    #[test]
+    fn str_concat_non_plus_operator_is_unresolved() {
+        let out = extract_http_egress(&files(&[(
+            "a.tsx",
+            "axios.get('/a' - x); axios.get('/b' ?? y);",
+        )]));
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|c| c.key.is_none()));
+    }
+
+    #[test]
+    fn str_concat_bare_const_prefix_stays_unresolved() {
+        // A bare `const BASE = '/api'; axios.get(BASE + '/users')` is deliberately NOT resolved: a bare
+        // undotted const is not captured by `const_map_fragment` (project-wide scope-insensitive lookup
+        // would let a common name shadow a function param and mis-key — never-guess). BASE -> `{}`, so the
+        // concat is leading-`{}` -> unresolved. The `+ '/users'` literal is real but a base it can't anchor
+        // to stays dynamic. (str-concat-url-v1 resolves the visible LITERAL operands, not const-prefix
+        // indirection — cross-layer-resolution.md.)
+        let out = extract_http_egress(&files(&[(
+            "a.tsx",
+            "const BASE = '/api'; axios.get(BASE + '/users')",
+        )]));
+        assert_eq!(out.len(), 1);
+        assert!(out[0].key.is_none());
     }
 
     // --- const_map_fragment / resolve_raw_path (late cross-file consume resolution substrate) ---
