@@ -642,3 +642,568 @@ fn nplus1_loop_in_an_api_test_fixture_path_is_not_flagged() {
     let out = scan(&dir);
     assert!(hits(&out, "nplus1").is_empty(), "{:?}", out.findings);
 }
+
+// --- sql-delete-no-where (critical: complete-literal anchor, never-guess) ---
+
+#[test]
+fn delete_from_closed_literal_with_no_where_is_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "db.ts",
+        "export async function purge(db: any) {\n  return db.query(\"DELETE FROM users\");\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "sql-delete-no-where");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 2);
+}
+
+#[test]
+fn delete_from_with_where_clause_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "db.ts",
+        "export async function purge(db: any) {\n  return db.query(\"DELETE FROM users WHERE id = ?\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sql-delete-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn delete_from_template_interpolation_is_not_flagged() {
+    // `${where}` proves the literal isn't provably closed with no WHERE arriving from elsewhere.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "db.ts",
+        "export async function purge(db: any, where: string) {\n  return db.query(`DELETE FROM users ${where}`);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sql-delete-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn delete_from_string_concatenation_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "db.ts",
+        "export async function purge(db: any, cond: string) {\n  return db.query(\"DELETE FROM users\" + cond);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sql-delete-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn delete_from_backtick_concatenation_is_not_flagged() {
+    // Review calibration pin: the concat veto must cover the BACKTICK quote class and BOTH concat
+    // directions — `` `DELETE FROM users` + cond `` and `cond + "DELETE FROM users"` each carry the
+    // WHERE (or its absence) in the concatenated expression, so the closed-literal proof fails and
+    // the critical rule must stay silent (never-guess).
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "db.ts",
+        "export async function purge(db: any, cond: string) {\n  return db.query(`DELETE FROM users` + cond);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sql-delete-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn delete_from_prefix_concatenation_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "db.ts",
+        "export async function purge(db: any, cond: string) {\n  return db.query(cond + \"DELETE FROM users\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sql-delete-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn sql_delete_no_where_ok_marker_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "db.ts",
+        "export async function purge(db: any) {\n  // sql-delete-no-where-ok: admin-only reset endpoint, reviewed\n  return db.query(\"DELETE FROM users\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sql-delete-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn delete_from_no_where_in_a_test_fixture_path_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "tests/db.ts",
+        "export async function purge(db: any) {\n  return db.query(\"DELETE FROM users\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sql-delete-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn delete_from_no_where_in_a_migration_path_is_destructive_migration_turf_not_critical() {
+    // Real-corpus calibration (immich, 564 files): the only sql-delete-no-where hit was a migration
+    // backfill (src/schema/migrations/...-AddAssetEditSequence.ts). A whole-table DELETE in a committed
+    // migration is a deliberate, reviewed one-time write — critical firing there is severity inflation,
+    // so migration paths are excluded from the critical rule and covered by `destructive-migration`
+    // (info, disclosure-only) instead.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/schema/migrations/1769105700133-AddAssetEditSequence.ts",
+        "export async function up(queryRunner: any) {\n  await queryRunner.query(`DELETE FROM asset_edit_sequence`);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sql-delete-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+    let h = hits(&out, "destructive-migration");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].severity, zzop_core::Severity::Info);
+    assert_eq!(
+        h[0].data
+            .as_ref()
+            .and_then(|d| d.get("label"))
+            .and_then(|l| l.as_str()),
+        Some("delete-no-where"),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- sql-update-no-where (critical: complete-literal anchor, never-guess) ---
+
+#[test]
+fn update_set_closed_literal_with_no_where_is_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "db.ts",
+        "export async function activateAll(db: any) {\n  return db.query(\"UPDATE users SET active = 1\");\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "sql-update-no-where");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 2);
+}
+
+#[test]
+fn update_set_with_where_clause_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "db.ts",
+        "export async function activate(db: any) {\n  return db.query(\"UPDATE users SET active = 1 WHERE id = ?\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sql-update-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn update_set_template_interpolation_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "db.ts",
+        "export async function activate(db: any, where: string) {\n  return db.query(`UPDATE users SET active = 1 ${where}`);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sql-update-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn update_set_string_concatenation_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "db.ts",
+        "export async function activateAll(db: any, cond: string) {\n  return db.query(\"UPDATE users SET active = 1\" + cond);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sql-update-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn sql_update_no_where_ok_marker_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "db.ts",
+        "export async function activateAll(db: any) {\n  // sql-update-no-where-ok: admin-only bulk reactivation, reviewed\n  return db.query(\"UPDATE users SET active = 1\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sql-update-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn update_set_no_where_in_a_test_fixture_path_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "tests/db.ts",
+        "export async function activateAll(db: any) {\n  return db.query(\"UPDATE users SET active = 1\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sql-update-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn update_set_no_where_in_a_migration_path_is_destructive_migration_turf_not_critical() {
+    // Same calibration as the DELETE sibling above (immich hit:
+    // src/schema/migrations/...-PartnerCreateId.ts) — a whole-table UPDATE backfill in a committed
+    // migration is deliberate, so it routes to `destructive-migration` at info, not critical.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/schema/migrations/1750107668827-PartnerCreateId.ts",
+        "export async function up(queryRunner: any) {\n  await queryRunner.query(`UPDATE partner SET \"createId\" = \"updateId\"`);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sql-update-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+    let h = hits(&out, "destructive-migration");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].severity, zzop_core::Severity::Info);
+    assert_eq!(
+        h[0].data
+            .as_ref()
+            .and_then(|d| d.get("label"))
+            .and_then(|l| l.as_str()),
+        Some("update-no-where"),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- truncate-in-app-code / destructive-migration (same TRUNCATE line routed by path) ---
+
+#[test]
+fn truncate_in_app_code_is_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/cleanup.ts",
+        "export async function reset(db: any) {\n  return db.exec(`TRUNCATE TABLE users`);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "truncate-in-app-code");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert!(
+        hits(&out, "destructive-migration").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn truncate_in_a_migration_sql_file_fires_destructive_migration_not_truncate_in_app_code() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write("migrations/001_init.sql", "TRUNCATE TABLE users;\n");
+    let out = scan(&dir);
+    let h = hits(&out, "destructive-migration");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert!(
+        hits(&out, "truncate-in-app-code").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn truncate_in_a_ts_migration_file_is_excluded_from_truncate_in_app_code() {
+    // Same quoted-literal shape as the app-code positive, but under migrations/ — the file_exclude_pattern's
+    // migration-path alternative (not just an extension mismatch) is what silences this one.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/001_init.ts",
+        "export async function up(db: any) {\n  return db.exec(`TRUNCATE TABLE users`);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "truncate-in-app-code").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn truncate_in_app_code_in_a_test_fixture_path_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "tests/cleanup.ts",
+        "export async function reset(db: any) {\n  return db.exec(`TRUNCATE TABLE users`);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "truncate-in-app-code").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn sql_truncate_app_ok_marker_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/cleanup.ts",
+        "export async function reset(db: any) {\n  // sql-truncate-app-ok: dedicated nightly cache-reset job\n  return db.exec(`TRUNCATE TABLE users`);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "truncate-in-app-code").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- destructive-migration (info: migration paths only) ---
+// Severity calibration (real corpus): immich's migration history alone produced 93 deliberate DROP hits —
+// at warning that floods the baseline and breaks a failOn:warn gate on a healthy repo. Info is
+// disclosure-only: this rule's value is review-time attention on NEW migrations, not archaeology of old
+// ones. It also absorbs the closed-literal whole-table DELETE/UPDATE shapes the critical rules exclude
+// from migration paths (see the two `..._is_destructive_migration_turf_not_critical` fixtures above).
+
+#[test]
+fn drop_table_in_a_migration_file_is_flagged_at_info() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/002_drop_legacy.sql",
+        "DROP TABLE legacy_orders;\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "destructive-migration");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].severity, zzop_core::Severity::Info);
+    assert_eq!(
+        h[0].data
+            .as_ref()
+            .and_then(|d| d.get("label"))
+            .and_then(|l| l.as_str()),
+        Some("drop-or-truncate"),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn drop_column_in_a_typeorm_migration_ts_file_is_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/1690000000000-DropLegacyColumn.ts",
+        "export class DropLegacyColumn1690000000000 {\n  async up(queryRunner: any) {\n    await queryRunner.query(\"DROP TABLE legacy_column\");\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "destructive-migration").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn drop_table_outside_a_migration_path_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/schema.ts",
+        "// raw admin script, not a migration\nconst sql = \"DROP TABLE legacy_orders\";\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "destructive-migration").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn sql_destructive_migration_ok_marker_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/003_drop_reviewed.sql",
+        "-- sql-destructive-migration-ok: reviewed in PR #482, table fully migrated off\nDROP TABLE legacy_orders;\n",
+    );
+    // Note: the suppress-marker window only recognizes a `//`-style comment; this SQL file's `--` comment
+    // does not suppress it, so the finding still fires here — the marker mechanism is JS/TS-comment-shaped
+    // by design (see dsl-reference.md's suppress-marker semantics), not SQL-comment-aware.
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "destructive-migration").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn sql_destructive_migration_ok_marker_in_a_js_migration_file_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/004_drop_reviewed.js",
+        "// sql-destructive-migration-ok: reviewed in PR #482, table fully migrated off\nexports.up = (knex) => knex.raw(\"DROP TABLE legacy_orders\");\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "destructive-migration").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn where_scoped_delete_in_a_migration_is_not_flagged() {
+    // The absorbed DELETE/UPDATE alternatives carry the same never-guess discipline as the critical
+    // rules: a WHERE-scoped statement is a filtered subset, not a whole-table write, and stays silent.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/005_cleanup.ts",
+        "export async function up(queryRunner: any) {\n  await queryRunner.query(`DELETE FROM sessions WHERE expired = true`);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "destructive-migration").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- select-star ---
+
+#[test]
+fn select_star_from_is_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write("q.ts", "export const q = \"SELECT * FROM users\";\n");
+    let out = scan(&dir);
+    let h = hits(&out, "select-star");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn select_count_star_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write("q.ts", "export const q = \"SELECT COUNT(*) FROM users\";\n");
+    let out = scan(&dir);
+    assert!(hits(&out, "select-star").is_empty(), "{:?}", out.findings);
+}
+
+#[test]
+fn select_star_from_in_a_test_fixture_path_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write("tests/q.ts", "export const q = \"SELECT * FROM users\";\n");
+    let out = scan(&dir);
+    assert!(hits(&out, "select-star").is_empty(), "{:?}", out.findings);
+}
+
+#[test]
+fn sql_select_star_ok_marker_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "q.ts",
+        "// sql-select-star-ok: internal debug dump, columns intentionally unbounded\nexport const q = \"SELECT * FROM users\";\n",
+    );
+    let out = scan(&dir);
+    assert!(hits(&out, "select-star").is_empty(), "{:?}", out.findings);
+}
+
+// --- like-leading-wildcard ---
+
+#[test]
+fn like_leading_wildcard_is_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "search.ts",
+        "export const q = \"SELECT id FROM users WHERE name LIKE '%term'\";\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "like-leading-wildcard");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn like_trailing_only_wildcard_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "search.ts",
+        "export const q = \"SELECT id FROM users WHERE name LIKE 'term%'\";\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "like-leading-wildcard").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn like_leading_wildcard_in_a_test_fixture_path_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "tests/search.ts",
+        "export const q = \"SELECT id FROM users WHERE name LIKE '%term'\";\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "like-leading-wildcard").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn sql_like_leading_wildcard_ok_marker_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "search.ts",
+        "// sql-like-leading-wildcard-ok: tiny fixed lookup table, offline batch job\nexport const q = \"SELECT id FROM users WHERE name LIKE '%term'\";\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "like-leading-wildcard").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}

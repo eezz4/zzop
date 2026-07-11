@@ -8,22 +8,29 @@
 //!
 //! The fragment SHAPE (`Verb`, `Mount`) is framework-agnostic; only the RECOGNIZER is
 //! framework-specific. Hono (`new Hono()`, `.route()`) and Express (`express()` /
-//! `express.Router()`, `.use()` as mount) are independent vocabularies feeding the same types
-//! through the same compose pass — a new framework costs vocabulary only. Name-dependence stays
-//! confined to the recognizer gate, same precision discipline as `trpc_router.rs`'s factory gate:
-//! `.get(...)` alone is far too common (axios, Map, cache clients) to act on without a structural
-//! router signal.
+//! `express.Router()` / an import-gated bare `Router()`, `.use()` as mount) are independent
+//! vocabularies feeding the same types through the same compose pass — a new framework costs
+//! vocabulary only. Name-dependence stays confined to the recognizer gate, same precision
+//! discipline as `trpc_router.rs`'s factory gate: `.get(...)` alone is far too common (axios, Map,
+//! cache clients) to act on without a structural router signal — likewise a bare `Router()` call
+//! is only trusted once this file's `ImportMap` confirms the callee resolves to the imported name
+//! `Router` from module specifier `'express'` (see `is_express_router_import_call`); this is what
+//! lets `import { Router } from 'express'; const router = Router();` — the canonical
+//! controller-file idiom in Express codebases (e.g. gothinkster's node-express-realworld,
+//! dogfood round 9) — join the same Express vocabulary as `express.Router()`.
 //!
 //! Recognition is swc-AST-based, so chained builders — including ones spanning several router
 //! hops in a large real-world monorepo — are first-class, unlike a line-anchored regex.
 //!
 //! ## Implementation notes
 //! - Two passes: pass 1 (`ReceiverCollector`) finds every receiver identifier — bound to
-//!   `new Hono(...)` (bare or chain root), typed `: Hono`, or configured by name. Pass 2
-//!   (`FragmentBuilder`) walks again in source order, classifying each var-decl chain, statement,
-//!   and `export default` chain onto the right fragment.
+//!   `new Hono(...)` (bare or chain root), typed `: Hono`, an import-gated `Router()` call, or
+//!   configured by name. Pass 2 (`FragmentBuilder`) walks again in source order, classifying each
+//!   var-decl chain, statement, and `export default` chain onto the right fragment.
 //! - `walk_chain` recurses a call chain down to its root; recursing before pushing the current
-//!   call naturally yields calls in source order.
+//!   call naturally yields calls in source order. It takes the file's `ImportMap` so the
+//!   import-gated `Router()` chain root (`is_express_router_import_call`) can be recognized at
+//!   any depth — bare receiver, chain root (`Router().use(a).use(b)`), or `export default`.
 //! - `Verb::line` uses the `.get`/`.post`/... identifier's own span, not the call's: swc gives a
 //!   chained call the same start position as the chain's root, which would misreport the line on
 //!   a multi-line chain otherwise.
@@ -43,19 +50,27 @@ use zzop_core::{ImportMap, RouterMountEntry, RouterMountFragment};
 ///
 /// Recognizer spec (Hono vocabulary + Express vocabulary + configured names):
 /// - **Receivers**: an identifier bound to `new Hono(...)` (bare or chain root, any generics); a
-///   function parameter typed `: Hono`; an identifier bound to `express()` or `express.Router()`
-///   (tracked as EXPRESS vocabulary — matters only for the `.use` mount rule below); any
-///   identifier in `router_names` (config allowlist, vocabulary-agnostic); or
-///   `export default new Hono()...` with no binding → fragment name `"default"`.
+///   function parameter typed `: Hono`; an identifier bound to `express()`, `express.Router()`,
+///   or a bare `Router()` call whose callee resolves via this file's `ImportMap` to the imported
+///   name `Router` from module specifier `'express'` (aliases like `import { Router as R } from
+///   'express'` included; a `Router()` call with no such import is NOT a receiver — never
+///   bare-name-matched) — all tracked as EXPRESS vocabulary, which matters for the `.use` mount
+///   rules below; any identifier in `router_names` (config allowlist, vocabulary-agnostic); or
+///   `export default new Hono()...` / `export default express()...` / `export default Router()...`
+///   chains with no binding → fragment name `"default"`.
 /// - **Entries** collected from both chained calls and separate statements (`recv.get('/a', h);`)
 ///   where `recv` is a receiver.
 /// - `.get|post|put|patch|delete(pathLit, ...)` → `Verb` (method uppercased), requiring ≥2
 ///   arguments. A non-string-literal path skips just that entry. `.all`/`.on`/other members are
 ///   ignored; `.use` is ignored unless the receiver is Express vocabulary.
-/// - `.route(prefixLit, identArg)` → `Mount` (any receiver). `.use(prefixLit, identArg)` →
-///   `Mount` only for an Express-vocabulary receiver. Non-literal prefix, a single argument, or a
-///   non-identifier second arg skips the entry. `specifier` resolves from this file's imports
-///   when `identArg`'s name is an imported binding.
+/// - `.route(prefixLit, identArg)` → `Mount` (any receiver). For an Express-vocabulary receiver,
+///   `.use(prefixLit, identArg)` → `Mount` with that prefix, and `.use(identArg)` (exactly one
+///   identifier argument) → `Mount` with prefix `"/"` (a prefix-less "mount at root", e.g.
+///   `Router().use(subRouter)` in a `routes.ts`-style aggregation file). A non-identifier single
+///   argument (`app.use(cors())`, `app.use(bodyParser.json())`, `app.use(express.static(...))`)
+///   is SKIPPED, not mistaken for a mount. Non-literal prefix or a non-identifier second arg (in
+///   the 2-argument form) also skips the entry. `specifier` resolves from this file's imports
+///   when `identArg`'s name is an imported binding — same mechanism `.route` already uses.
 /// - A receiver with zero surviving entries produces no fragment. Output order: fragments in
 ///   first-appearance order, entries in source order.
 pub fn extract_router_mount_fragments(
@@ -72,6 +87,7 @@ pub fn extract_router_mount_fragments(
     let mut rc = ReceiverCollector {
         names: HashSet::new(),
         express_names: HashSet::new(),
+        imports: &imports,
     };
     module.visit_with(&mut rc);
     receivers.extend(rc.names.iter().cloned());
@@ -93,8 +109,9 @@ pub fn extract_router_mount_fragments(
 enum ChainRoot {
     /// Rooted at `new Hono(...)` (any generics) — a var-decl init or `export default` expression.
     NewHono,
-    /// Rooted at `express()` or `express.Router()` — kept separate from `NewHono` since the two
-    /// vocabularies diverge on the `.use` mount rule.
+    /// Rooted at `express()`, `express.Router()`, or an import-gated bare `Router()` call (see
+    /// `is_express_router_import_call`) — kept separate from `NewHono` since the two vocabularies
+    /// diverge on the `.use` mount rule.
     ExpressInit,
     /// Rooted at a bare identifier — an existing (possibly receiver) reference.
     Ident(String),
@@ -105,12 +122,14 @@ enum ChainRoot {
 /// Walks a member-call chain (`x.a(...).b(...)`) down to its root, collecting each call link in
 /// source order. swc nests an earlier chain step inside the next call's `callee.obj`, so
 /// recursing into the receiver before pushing the current call yields calls in source order.
-fn walk_chain<'e>(expr: &'e Expr, calls: &mut Vec<&'e CallExpr>) -> ChainRoot {
+/// `imports` gates the import-only `Router()` receiver shape (see `is_express_router_import_call`).
+fn walk_chain<'e>(expr: &'e Expr, calls: &mut Vec<&'e CallExpr>, imports: &ImportMap) -> ChainRoot {
     match unwrap_expr(expr) {
         Expr::Call(call) => {
-            // `express()`/`express.Router()` are the chain's root, not a link — checked first so
-            // neither gets pushed onto `calls` and neither recurses further.
-            if is_express_call(call) {
+            // `express()`/`express.Router()`/an import-gated `Router()` are the chain's root, not
+            // a link — checked first so neither gets pushed onto `calls` and neither recurses
+            // further.
+            if is_express_call(call) || is_express_router_import_call(call, imports) {
                 return ChainRoot::ExpressInit;
             }
             let Callee::Expr(callee) = &call.callee else {
@@ -119,7 +138,7 @@ fn walk_chain<'e>(expr: &'e Expr, calls: &mut Vec<&'e CallExpr>) -> ChainRoot {
             let Expr::Member(m) = unwrap_expr(callee) else {
                 return ChainRoot::Other;
             };
-            let root = walk_chain(&m.obj, calls);
+            let root = walk_chain(&m.obj, calls, imports);
             calls.push(call);
             root
         }
@@ -156,19 +175,39 @@ fn is_express_call(call: &CallExpr) -> bool {
     }
 }
 
-/// Pass 1: collects every receiver identifier. `express_names` is the subset recognized via
-/// Express shapes, kept separate since only Express vocabulary gets the `.use` mount rule;
-/// `names` still contains every Express receiver too.
-struct ReceiverCollector {
-    names: HashSet<String>,
-    express_names: HashSet<String>,
+/// A bare `Router(...)` call whose callee identifier resolves, via this file's `ImportMap`, to
+/// the imported name `Router` from module specifier `'express'` — the named-import Express
+/// idiom (`import { Router } from 'express'; const router = Router();`), including aliases
+/// (`import { Router as R } from 'express'`). Gated on the import map — a bare `Router()` with no
+/// such import never matches, same precision discipline as the rest of this recognizer (`Router`
+/// alone is far too generic a name to trust without a structural/import signal).
+fn is_express_router_import_call(call: &CallExpr, imports: &ImportMap) -> bool {
+    let Callee::Expr(callee) = &call.callee else {
+        return false;
+    };
+    let Expr::Ident(id) = unwrap_expr(callee) else {
+        return false;
+    };
+    imports
+        .get(id.sym.as_str())
+        .is_some_and(|b| b.original == "Router" && b.specifier == "express")
 }
 
-impl Visit for ReceiverCollector {
+/// Pass 1: collects every receiver identifier. `express_names` is the subset recognized via
+/// Express shapes, kept separate since only Express vocabulary gets the `.use` mount rule;
+/// `names` still contains every Express receiver too. `imports` gates the import-only `Router()`
+/// receiver shape.
+struct ReceiverCollector<'a> {
+    names: HashSet<String>,
+    express_names: HashSet<String>,
+    imports: &'a ImportMap,
+}
+
+impl Visit for ReceiverCollector<'_> {
     fn visit_var_declarator(&mut self, d: &VarDeclarator) {
         if let (Pat::Ident(bi), Some(init)) = (&d.name, &d.init) {
             let mut calls = Vec::new();
-            match walk_chain(init, &mut calls) {
+            match walk_chain(init, &mut calls, self.imports) {
                 ChainRoot::NewHono => {
                     self.names.insert(bi.id.sym.to_string());
                 }
@@ -217,7 +256,7 @@ impl Visit for FragmentBuilder<'_> {
         if let (Pat::Ident(bi), Some(init)) = (&d.name, &d.init) {
             let mut calls = Vec::new();
             if matches!(
-                walk_chain(init, &mut calls),
+                walk_chain(init, &mut calls, self.imports),
                 ChainRoot::NewHono | ChainRoot::ExpressInit
             ) {
                 let name = bi.id.sym.to_string();
@@ -230,7 +269,7 @@ impl Visit for FragmentBuilder<'_> {
 
     fn visit_expr_stmt(&mut self, n: &ExprStmt) {
         let mut calls = Vec::new();
-        if let ChainRoot::Ident(name) = walk_chain(&n.expr, &mut calls) {
+        if let ChainRoot::Ident(name) = walk_chain(&n.expr, &mut calls, self.imports) {
             if self.receivers.contains(&name) {
                 self.push_entries(&name, &calls);
                 return;
@@ -241,8 +280,13 @@ impl Visit for FragmentBuilder<'_> {
 
     fn visit_export_default_expr(&mut self, n: &ExportDefaultExpr) {
         let mut calls = Vec::new();
-        match walk_chain(&n.expr, &mut calls) {
-            ChainRoot::NewHono => self.push_entries("default", &calls),
+        match walk_chain(&n.expr, &mut calls, self.imports) {
+            // `is_express` is supplied directly here (not looked up in `express_receivers` by
+            // name) because `"default"` is a synthesized fragment name, never a real identifier
+            // pass 1 could have registered — looking it up would always miss and silently drop
+            // `export default Router().use('/api', api)`'s `.use` mount.
+            ChainRoot::NewHono => self.push_entries_as("default", &calls, false),
+            ChainRoot::ExpressInit => self.push_entries_as("default", &calls, true),
             ChainRoot::Ident(name) if self.receivers.contains(&name) => {
                 self.push_entries(&name, &calls);
             }
@@ -267,9 +311,19 @@ impl FragmentBuilder<'_> {
     }
 
     /// Classifies `calls` and appends survivors onto `name`'s fragment — created only if at least
-    /// one entry survives.
+    /// one entry survives. Express-vocabulary status is looked up from `express_receivers` by
+    /// `name`; see `push_entries_as` for the synthesized-name case where that lookup can't work.
     fn push_entries(&mut self, name: &str, calls: &[&CallExpr]) {
         let is_express = self.express_receivers.contains(name);
+        self.push_entries_as(name, calls, is_express);
+    }
+
+    /// Same as `push_entries`, but `is_express` is supplied directly instead of looked up by
+    /// `name` — needed for the synthesized `"default"` fragment name (a fresh
+    /// `export default Router()...`/`export default express()...`/`export default new Hono()...`
+    /// expression with no binding), which pass 1 never registers in `express_receivers` since it
+    /// isn't a real identifier.
+    fn push_entries_as(&mut self, name: &str, calls: &[&CallExpr], is_express: bool) {
         let entries: Vec<RouterMountEntry> = calls
             .iter()
             .filter_map(|c| self.classify_call(c, is_express))
@@ -334,7 +388,29 @@ impl FragmentBuilder<'_> {
             // second arg that is actually middleware (e.g. `app.use('/api', logger)`) still
             // mints a `Mount` that fails to resolve at compose — an accepted cost of this
             // recognizer's existing conservatism.
+            //
+            // A single-argument `.use(ident)` is the routes.ts aggregation idiom
+            // (`Router().use(controllerA).use(controllerB)`) — a prefix-less mount at "/", which
+            // `join_prefix` in the compose pass treats as a pure passthrough (no double slash). A
+            // single non-identifier argument (`app.use(cors())`, `app.use(express.static(...))`)
+            // is middleware, not a mount, and is skipped. A BARE-identifier middleware arg
+            // (`app.use(helmet)`, `app.use(errorHandler)`) still mints a Mount that fails to
+            // resolve at compose (middleware modules are not router fragments) — the same
+            // accepted conservatism cost as the two-arg middleware case above.
             "use" if is_express => {
+                if call.args.len() == 1 {
+                    let arg = call.args.first()?;
+                    let Expr::Ident(id) = unwrap_expr(&arg.expr) else {
+                        return None;
+                    };
+                    let ident = id.sym.to_string();
+                    let specifier = self.imports.get(&ident).map(|b| b.specifier.clone());
+                    return Some(RouterMountEntry::Mount {
+                        prefix: "/".to_string(),
+                        ident,
+                        specifier,
+                    });
+                }
                 let prefix = string_lit_arg(call.args.first())?;
                 let ident_arg = call.args.get(1)?;
                 let Expr::Ident(id) = unwrap_expr(&ident_arg.expr) else {
@@ -401,7 +477,9 @@ mod tests {
     //! resolution, `router_names` config, typed `: Hono` params, the "no structural signal"
     //! precision guard, non-literal path/prefix skip, ignored `.all`/`.use`, determinism, and the
     //! Express vocabulary (bare/chained receivers, `.use` mounts, the ≥2-arg verb guard, and
-    //! Hono's `.use` never mounting).
+    //! Hono's `.use` never mounting) — plus the named-import `Router()` vocabulary (bare/aliased
+    //! import gate, no-import non-recognition, single-arg `.use` prefix-less mount, non-identifier
+    //! single-arg `.use` skip, and `Router()` as a chain root incl. `export default`).
     use super::*;
 
     fn frag<'a>(out: &'a [RouterMountFragment], name: &str) -> &'a RouterMountFragment {
@@ -746,6 +824,136 @@ mod tests {
         let src = "router.get('/a', h);\n";
         let out = extract_router_mount_fragments("r.ts", src, &[]);
         assert!(out.is_empty(), "no vocabulary leak: {out:?}");
+    }
+
+    // --- Express named-import `Router()` vocabulary (dogfood round 9 gaps A/B/C) ---
+
+    #[test]
+    fn named_import_router_controller_recognizes_verbs_with_middleware_arg() {
+        // The gothinkster node-express-realworld controller idiom: a bare `Router()` receiver
+        // from a named `import { Router } from 'express'`, verb registrations carrying a
+        // middleware argument between the path and the handler.
+        let src = concat!(
+            "import { Router } from 'express';\n",
+            "const router = Router();\n",
+            "router.get('/articles', auth.optional, listArticles);\n",
+            "router.post('/articles', auth.required, createArticle);\n",
+            "export default router;\n"
+        );
+        let out = extract_router_mount_fragments("articleController.ts", src, &[]);
+        assert_eq!(
+            frag(&out, "router").entries,
+            vec![
+                RouterMountEntry::Verb {
+                    method: "GET".into(),
+                    path: "/articles".into(),
+                    handler: Some("listArticles".into()),
+                    line: 3,
+                },
+                RouterMountEntry::Verb {
+                    method: "POST".into(),
+                    path: "/articles".into(),
+                    handler: Some("createArticle".into()),
+                    line: 4,
+                },
+            ]
+        );
+        assert!(
+            out.iter().all(|f| f.name != "default"),
+            "named binding must win over a synthesized \"default\" fragment: {out:?}"
+        );
+    }
+
+    #[test]
+    fn aliased_router_import_is_recognized_bare_router_without_import_is_not() {
+        let aliased = concat!(
+            "import { Router as R } from 'express';\n",
+            "const r = R();\n",
+            "r.get('/x', h);\n"
+        );
+        let out = extract_router_mount_fragments("r.ts", aliased, &[]);
+        assert_eq!(
+            frag(&out, "r").entries,
+            vec![RouterMountEntry::Verb {
+                method: "GET".into(),
+                path: "/x".into(),
+                handler: Some("h".into()),
+                line: 3,
+            }],
+            "an aliased `Router as R` import must still gate `R()` as an Express receiver: {out:?}"
+        );
+
+        let bare = "const router = Router();\nrouter.get('/x', h);\n";
+        let out2 = extract_router_mount_fragments("r.ts", bare, &[]);
+        assert!(
+            out2.is_empty(),
+            "a bare `Router()` with no express import must not be recognized: {out2:?}"
+        );
+    }
+
+    #[test]
+    fn routes_aggregation_single_arg_use_mounts_at_root_default_export_mounts_prefix() {
+        // The RealWorld `routes.ts` aggregation shape: `Router()` as a chain root bound to a var
+        // (`.use(ident)` mounts each controller at "/"), and `Router()` as a chain root under
+        // `export default` (`.use(prefixLit, ident)` mounts the aggregated router under a prefix).
+        let src = concat!(
+            "import { Router } from 'express';\n",
+            "import a from './controllers/a';\n",
+            "import b from './controllers/b';\n",
+            "const api = Router().use(a).use(b);\n",
+            "export default Router().use('/api', api);\n"
+        );
+        let out = extract_router_mount_fragments("routes.ts", src, &[]);
+        assert_eq!(
+            frag(&out, "api").entries,
+            vec![
+                RouterMountEntry::Mount {
+                    prefix: "/".into(),
+                    ident: "a".into(),
+                    specifier: Some("./controllers/a".into()),
+                },
+                RouterMountEntry::Mount {
+                    prefix: "/".into(),
+                    ident: "b".into(),
+                    specifier: Some("./controllers/b".into()),
+                },
+            ]
+        );
+        assert_eq!(
+            frag(&out, "default").entries,
+            vec![RouterMountEntry::Mount {
+                prefix: "/api".into(),
+                ident: "api".into(),
+                specifier: None,
+            }],
+            "export default Router().use('/api', api) must mount \"api\" under \"/api\": {out:?}"
+        );
+    }
+
+    #[test]
+    fn non_identifier_single_arg_use_calls_are_skipped_not_mistaken_for_mounts() {
+        let src = concat!(
+            "import { Router } from 'express';\n",
+            "import express from 'express';\n",
+            "import cors from 'cors';\n",
+            "import bodyParser from 'body-parser';\n",
+            "const app = Router();\n",
+            "app.use(cors());\n",
+            "app.use(bodyParser.json());\n",
+            "app.use(express.static('/public'));\n",
+            "app.get('/ok', h);\n"
+        );
+        let out = extract_router_mount_fragments("app.ts", src, &[]);
+        assert_eq!(
+            frag(&out, "app").entries,
+            vec![RouterMountEntry::Verb {
+                method: "GET".into(),
+                path: "/ok".into(),
+                handler: Some("h".into()),
+                line: 9,
+            }],
+            "cors()/bodyParser.json()/express.static(...) must not mint a Mount: {out:?}"
+        );
     }
 
     #[test]

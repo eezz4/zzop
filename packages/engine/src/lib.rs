@@ -138,13 +138,25 @@ impl Default for EngineConfig {
 }
 
 /// Git-history collection options for `EngineConfig::git` — a thin mirror of `zzop_git::CollectOptions`.
-/// `zzop_metrics::default_commit_type_patterns()` is always used for the commit-type vocabulary.
+/// `zzop_metrics::default_commit_type_patterns()` is used for the commit-type vocabulary UNLESS
+/// `commit_type_patterns` supplies a custom table (see that field's doc).
 #[derive(Debug, Clone)]
 pub struct GitOptions {
     /// `git log --since=<since>`; `None` = full history.
     pub since: Option<String>,
     /// Window, in days, for each `FileNode`'s `recent_*` fields.
     pub recent_days: u32,
+    /// Custom commit-type classifier table (regex source, TAG pairs, in match order) — the config-file
+    /// wire path for `git.commitTypePatterns` (napi `GitOptionsRequest::commit_type_patterns`). When
+    /// `Some` and non-empty, this REPLACES `zzop_metrics::default_commit_type_patterns()` entirely (same
+    /// "later table wins whole, not merged" semantics the default table's own REVERT-first ordering
+    /// depends on) — match order is array order. `None`, or `Some(vec![])`, falls back to the default
+    /// table. See `analyze::diagnostics::collect_git` for where this is applied, and
+    /// `zzop_git::tags::CommitClassifiers::compile`'s doc for what happens to a pattern that fails to
+    /// compile as a regex (skipped, never a panic; `collect_git` additionally surfaces a `warnings` entry
+    /// naming any such pattern, since a silently-inert custom pattern is exactly the narrowed-scope
+    /// degradation this codebase's self-report contract exists for).
+    pub commit_type_patterns: Option<Vec<(String, String)>>,
 }
 
 impl Default for GitOptions {
@@ -152,6 +164,7 @@ impl Default for GitOptions {
         GitOptions {
             since: None,
             recent_days: 30,
+            commit_type_patterns: None,
         }
     }
 }
@@ -390,10 +403,33 @@ fn compute_cross_layer_findings(
         .collect();
 
     let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(21);
+
+    // `route_near_miss_results` is called ONCE here (ahead of its own position in `sources` order below) so
+    // both `unconsumed-endpoint` and `unconsumed-mutation-endpoint` can annotate a provide that is also a
+    // near-miss target — see `zzop_rules_cross_layer::route_near_miss`'s module doc. Disabled ->
+    // `near_miss_targets` stays empty (there is no near-miss finding to point at, so no annotation), and the
+    // findings themselves are still only pushed into `sources` at their original position, under the same
+    // `is_enabled` gate as before.
+    let route_near_miss_result = if zzop_core::is_enabled(&gate, "cross-layer/route-near-miss") {
+        Some(
+            zzop_rules_cross_layer::cross_layer::route_near_miss::route_near_miss_results(
+                &cross_layer.unprovided_consumes,
+                &http_provides,
+            ),
+        )
+    } else {
+        None
+    };
+    let near_miss_targets = route_near_miss_result
+        .as_ref()
+        .map(|r| r.targets.clone())
+        .unwrap_or_default();
+
     if zzop_core::is_enabled(&gate, "cross-layer/unconsumed-endpoint") {
         sources.push(zzop_rules_cross_layer::unconsumed_endpoint_findings(
             &cross_layer.unconsumed_provides,
             &cross_layer.unresolved_consumes,
+            &near_miss_targets,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/method-mismatch") {
@@ -414,11 +450,8 @@ fn compute_cross_layer_findings(
             &http_provides,
         ));
     }
-    if zzop_core::is_enabled(&gate, "cross-layer/route-near-miss") {
-        sources.push(zzop_rules_cross_layer::route_near_miss_findings(
-            &cross_layer.unprovided_consumes,
-            &http_provides,
-        ));
+    if let Some(result) = route_near_miss_result {
+        sources.push(result.findings);
     }
     if zzop_core::is_enabled(&gate, "cross-layer/shared-db-table") {
         sources.push(zzop_rules_cross_layer::shared_db_table_findings(
@@ -477,6 +510,7 @@ fn compute_cross_layer_findings(
         sources.push(
             zzop_rules_cross_layer::unconsumed_mutation_endpoint_findings(
                 &cross_layer.unconsumed_provides,
+                &near_miss_targets,
             ),
         );
     }

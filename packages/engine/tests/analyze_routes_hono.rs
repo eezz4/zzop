@@ -14,6 +14,13 @@
 //! `duplicate-route` is native, not a DSL rule, so its findings carry the plain rule id
 //! `"duplicate-route"` (no pack prefix) and require no `packs` to be loaded (same convention as
 //! `tests/pack_fullstack.rs`'s own `duplicate-route` coverage).
+//!
+//! `express_named_import_router_composes_across_controller_routes_and_main` exercises the same
+//! `compose_router_mount_provides` pass through the OTHER vocabulary (Express, not Hono) — the
+//! `router_mounts` module doc's "a new framework costs vocabulary only" claim, proven end-to-end:
+//! a three-file tree in the gothinkster node-express-realworld shape (controller + `routes.ts`
+//! aggregation + `main.ts`) composing a full `GET /api/articles` across a root-mount hop, a
+//! `/api` prefix hop, and the verb path (dogfood round 9's zero-provide finding on that repo).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -152,4 +159,47 @@ fn distinct_routes_on_local_hono_instances_are_not_flagged() {
     assert_eq!(provides.len(), 2, "{:?}", provides);
 
     assert!(duplicate_route_hits(&out).is_empty(), "{:?}", out.findings);
+}
+
+#[test]
+fn express_named_import_router_composes_across_controller_routes_and_main() {
+    // controller.ts: an import-gated bare `Router()` receiver (named `import { Router }`), a verb
+    // registration with a middleware arg between path and handler, exported default (no binding).
+    let dir = TempDir::new("zzop-routes-express");
+    dir.write(
+        "src/controllers/articles.controller.ts",
+        "import { Router } from \"express\";\nconst articlesController = Router();\narticlesController.get(\"/articles\", auth.optional, listArticles);\nexport default articlesController;\n",
+    );
+    // routes.ts: the RealWorld aggregation shape — `Router().use(ident)` (single-arg, prefix-less
+    // mount at "/") for each controller, then `export default Router().use('/api', api)` mounts
+    // the aggregate under a prefix.
+    dir.write(
+        "src/routes.ts",
+        "import { Router } from \"express\";\nimport articlesController from \"./controllers/articles.controller\";\nconst api = Router().use(articlesController);\nexport default Router().use(\"/api\", api);\n",
+    );
+    // main.ts: `app.use(routes)` — single-arg mount of the whole aggregated router at the app root.
+    dir.write(
+        "src/main.ts",
+        "import express from \"express\";\nimport routes from \"./routes\";\nconst app = express();\napp.use(routes);\n",
+    );
+    let out = scan(&dir);
+
+    let provides = &out
+        .ir
+        .ir
+        .io
+        .as_ref()
+        .expect("expected aggregated io facts")
+        .provides;
+    let hits: Vec<_> = provides
+        .iter()
+        .filter(|p| p.key == "GET /api/articles")
+        .collect();
+    assert_eq!(
+        hits.len(),
+        1,
+        "expected the root-mount + /api hop + verb path to join into one provide: {:?}",
+        provides
+    );
+    assert_eq!(hits[0].symbol.as_deref(), Some("listArticles"));
 }

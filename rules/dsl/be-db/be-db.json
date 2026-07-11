@@ -166,6 +166,75 @@
         "trigger": "empty-catch",
         "snippet_max": 160
       }
+    },
+    {
+      "id": "multi-write-no-tx",
+      "severity": "warning",
+      "message": "Two independent write calls from different verb families — `create`/`createMany`/`insert` and `update`/`updateMany`/`delete`/`deleteMany`/`upsert` — appear in the same function with no transaction wrapping either. This is a co-occurrence heuristic, not proof the two writes depend on each other, but when they do: a failure between the two calls leaves partial state, since the first write already committed and nothing rolls it back if the second throws. Wrap both writes in `$transaction(...)` (or an explicit `BEGIN`/`COMMIT` transaction), or replace the pair with a single write. Suppress a vetted case (e.g. two genuinely independent writes) with `// multi-write-tx-ok`.",
+      "suppress_marker": "multi-write-tx-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\b(?:prisma|db|tx|client|repo(?:sitory|sitories)?s?)\\.(?:\\w+\\.)?(?:create|createMany|insert)\\s*\\(", "label": "create-write" },
+          { "pattern": "\\b(?:prisma|db|tx|client|repo(?:sitory|sitories)?s?)\\.(?:\\w+\\.)?(?:update|updateMany|delete|deleteMany|upsert)\\s*\\(", "label": "mutate-write" }
+        ],
+        "trigger": "mutate-write",
+        "absent": [
+          { "pattern": "\\$transaction\\s*\\(", "label": "prisma-tx" },
+          { "pattern": "\\btransaction\\s*\\(", "label": "bare-tx-call" },
+          { "pattern": "(?i)(['\"`]BEGIN['\"`]|\\bBEGIN\\s+TRANSACTION\\b)", "label": "sql-begin" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "non-atomic-counter-update",
+      "severity": "warning",
+      "message": "A read (`findUnique`/`findFirst`/`findOne`/`findById`) is followed, elsewhere in the same function, by an update that recomputes a field as `<ident> + 1`/`<ident> - 1` — read-then-arithmetic-update is not atomic: two concurrent requests can both read the same starting value and both write the same incremented result, silently losing one of the two increments. This is a co-occurrence heuristic, not proof — any `field: value + 1`-shaped object entry in the same function trips it, even one unrelated to the read (e.g. a `take: cursor + 1` pagination bound). Use the ORM's atomic increment/decrement (e.g. Prisma's `{ increment: 1 }`/`{ decrement: 1 }`), a DB-side `$inc`, or a `SELECT ... FOR UPDATE` row lock instead of read-then-write arithmetic. Suppress a vetted case with `// atomic-counter-ok`.",
+      "suppress_marker": "atomic-counter-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\.(?:findUnique|findFirst|findOne|findById)\\s*\\(", "label": "read" },
+          { "pattern": "\\b[A-Za-z_$][\\w$]*\\s*:\\s*[\\w.]+\\s*[+\\-]\\s*1\\b", "label": "arith-update" }
+        ],
+        "trigger": "arith-update",
+        "absent": [
+          { "pattern": "\\bincrement\\s*:", "label": "atomic-increment" },
+          { "pattern": "\\bdecrement\\s*:", "label": "atomic-decrement" },
+          { "pattern": "\\$inc\\b", "label": "mongo-inc" },
+          { "pattern": "(?i)\\bFOR\\s+UPDATE\\b", "label": "row-lock" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "connection-no-release",
+      "severity": "warning",
+      "message": "A connection acquired via `pool.connect(`/`getConnection(`/`acquireConnection(` is never released (`.release(`/`.destroy(`/`.end(`) or returned (`return conn`/`connection`/`client`) anywhere in this function — under load, each unreleased connection stays checked out of the pool, and once the pool is exhausted every later request stalls waiting for one to free up. Release it in a `finally` block, use a `using`/`await using` declaration (recognized, does not fire), or use the pool's single-shot query shortcut instead of a manual acquire/release pair. Note the limitation: this only sees the current function's own body — a release happening inside a helper function called from here is invisible to this check and still fires; verify before refactoring, or suppress a vetted case with `// connection-release-ok`.",
+      "suppress_marker": "connection-release-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\b(?:pool\\.connect|getConnection|acquireConnection)\\s*\\(", "label": "acquire" }
+        ],
+        "trigger": "acquire",
+        "absent": [
+          { "pattern": "\\.(?:release|destroy|end)\\s*\\(", "label": "released" },
+          { "pattern": "return\\s+(?:conn|connection|client)\\b", "label": "returned" },
+          { "pattern": "\\b(?:await\\s+)?using\\s+[A-Za-z_$]", "label": "using-declaration" }
+        ],
+        "snippet_max": 160
+      }
     }
   ]
 }

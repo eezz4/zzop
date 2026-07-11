@@ -82,6 +82,24 @@ pub struct AnalyzeRequest {
 pub struct GitOptionsRequest {
     pub since: Option<String>,
     pub recent_days: Option<u32>,
+    /// Custom commit-type classifier table — the napi exposure of config `git.commitTypePatterns`.
+    /// REPLACES `zzop_metrics::default_commit_type_patterns()` entirely when present and non-empty (match
+    /// order = array order); absent or an empty array falls back to the default table. See
+    /// `zzop_engine::GitOptions::commit_type_patterns`'s doc for the full contract, including how an
+    /// invalid regex is handled (skipped, surfaced as a `warnings` entry, never a panic).
+    pub commit_type_patterns: Option<Vec<CommitTypePatternRequest>>,
+}
+
+/// One `git.commitTypePatterns` config-file entry: `{ pattern: <regex>, tag: <TAG> }`. A dedicated struct
+/// (rather than accepting a raw 2-element JSON array over the wire) keeps the shape self-describing for a
+/// config-file author; `build_engine_config` flattens the list into the `(String, String)` tuple pairs
+/// `zzop_engine::GitOptions::commit_type_patterns` / `zzop_git::CollectOptions::commit_type_patterns` use
+/// internally.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitTypePatternRequest {
+    pub pattern: String,
+    pub tag: String,
 }
 
 /// `analyzeTrees`'s request shape: `{trees: AnalyzeRequest[]}` — one `EngineConfig` per tree, joined by
@@ -189,6 +207,12 @@ fn build_engine_config(req: &AnalyzeRequest, warnings: &mut Vec<String>) -> Engi
         recent_days: g
             .recent_days
             .unwrap_or_else(|| GitOptions::default().recent_days),
+        commit_type_patterns: g.commit_type_patterns.as_ref().map(|patterns| {
+            patterns
+                .iter()
+                .map(|p| (p.pattern.clone(), p.tag.clone()))
+                .collect()
+        }),
     });
     // Overlays flow to `analyze_tree`'s unconditional `apply_adapter_overlays` merge; no cache-key
     // impact (applied post-cache, re-applied every run regardless of hit/miss).
@@ -897,6 +921,63 @@ mod tests {
             config.adapter_overlays[0].files[0].io.provides[0].key, "GET /foo",
             "expected the overlay's io.provides entry to survive the round trip"
         );
+    }
+
+    #[test]
+    fn analyze_request_git_commit_type_patterns_flow_into_engine_config() {
+        // Plumbing-only, same spirit as `analyze_request_adapter_overlays_flow_into_engine_config`: proves
+        // the napi-facing `git.commitTypePatterns` JSON field deserializes into
+        // `GitOptionsRequest::commit_type_patterns` and survives `build_engine_config` into
+        // `EngineConfig::git`'s `GitOptions::commit_type_patterns` unchanged, as `(String, String)` tuple
+        // pairs. The end-to-end tagging behavior (a custom table actually reclassifying a commit) is
+        // covered by `packages/engine/tests/analyze_git.rs`'s git-fixture tests instead.
+        let config_json = r#"{
+            "root": "unused",
+            "sourceId": "t",
+            "git": {
+                "commitTypePatterns": [
+                    { "pattern": "^\\s*corrige\\b", "tag": "FIX" },
+                    { "pattern": "^\\s*nouveau\\b", "tag": "FEAT" }
+                ]
+            }
+        }"#;
+        let req: AnalyzeRequest =
+            serde_json::from_str(config_json).expect("valid AnalyzeRequest JSON");
+        let git_req = req.git.as_ref().expect("expected git to deserialize");
+        let patterns = git_req
+            .commit_type_patterns
+            .as_ref()
+            .expect("expected commitTypePatterns to deserialize");
+        assert_eq!(patterns.len(), 2);
+        assert_eq!(patterns[0].pattern, "^\\s*corrige\\b");
+        assert_eq!(patterns[0].tag, "FIX");
+
+        let mut warnings = Vec::new();
+        let config = build_engine_config(&req, &mut warnings);
+        let git_cfg = config.git.expect("expected EngineConfig::git to be Some");
+        assert_eq!(
+            git_cfg.commit_type_patterns,
+            Some(vec![
+                ("^\\s*corrige\\b".to_string(), "FIX".to_string()),
+                ("^\\s*nouveau\\b".to_string(), "FEAT".to_string()),
+            ])
+        );
+    }
+
+    #[test]
+    fn analyze_request_git_without_commit_type_patterns_leaves_it_none() {
+        // Absence must round-trip to `None` (falls back to the default table downstream), not an empty
+        // `Some(vec![])` that would also be treated as "fall back" but is a different wire shape to pin.
+        let config_json = r#"{"root": "unused", "sourceId": "t", "git": {}}"#;
+        let req: AnalyzeRequest =
+            serde_json::from_str(config_json).expect("valid AnalyzeRequest JSON");
+        let git_req = req.git.as_ref().expect("expected git to deserialize");
+        assert!(git_req.commit_type_patterns.is_none());
+
+        let mut warnings = Vec::new();
+        let config = build_engine_config(&req, &mut warnings);
+        let git_cfg = config.git.expect("expected EngineConfig::git to be Some");
+        assert!(git_cfg.commit_type_patterns.is_none());
     }
 
     #[test]

@@ -13,14 +13,32 @@
 // via the `adapterOverlays` field (see docs/NORMALIZED_AST.md).
 //
 // USAGE
-//   node adapter.mjs --mode consume --root <feRoot> --spec <openapi.json> [--sdk <import-specifier>]
+//   node adapter.mjs --mode consume --root <feRoot> --spec <openapi.json> [--sdk <import-specifier>] [--member-calls]
 //   node adapter.mjs --mode provide --spec <openapi.json> [--source <id>] [--file <rel>]
 // Writes the overlay envelope JSON to stdout; a one-line summary to stderr.
 //
+// --member-calls (default OFF, preserves prior behavior exactly): also match a call site when the
+// operation name appears in MEMBER position (`.name(`) — e.g. `api.articles.getArticles(...)`,
+// `this.api.getArticles(...)`. This is what a generated CLASS-METHOD client looks like
+// (swagger-typescript-api, some openapi-generator targets): call sites are never a named import of
+// the operationId, so the default named-import scan sees nothing at all. The safety rationale is
+// unchanged: a member name only resolves if it (or its lowerFirst transform, see below) is also a
+// spec operationId — lexical matching stays safe because that gate is still in force.
+//
+// --sdk in member mode: the existing `--sdk` substring gate (skip files that don't mention the
+// specifier, before doing any regex work) still applies if you pass `--sdk`, and it works for ANY
+// substring — an npm specifier (`@immich/sdk`) or a local/relative one (`src/services`) equally,
+// since the check has always been a plain `text.includes(...)`, not an import-statement parse. If
+// `--member-calls` is on and `--sdk` is NOT passed, the gate is skipped entirely (every walked file
+// is scanned) — member calls don't depend on finding an import of the operation name, so there is
+// nothing correct to gate on by default. Passing `--sdk` in member mode is still recommended for
+// precision/perf when you know the local specifier.
+//
 // LIMITATIONS (intentional — a real adapter can go further): named-import call sites only
-// (`import { getUser } from '<sdk>'`); namespace imports (`import * as sdk`) and re-exports are not
-// followed. `type`-only imports are excluded. Call detection is lexical (`name(`), good enough given
-// the operationId gate.
+// (`import { getUser } from '<sdk>'`) unless `--member-calls` is on; namespace imports
+// (`import * as sdk`) and re-exports are not followed. `type`-only imports are excluded. Call
+// detection is lexical (`name(` / `.name(`), good enough given the operationId gate. The spec file
+// must be JSON — YAML specs need a one-time conversion first (see README).
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 
@@ -33,6 +51,8 @@ const mode = arg('mode', 'consume');
 const specPath = arg('spec');
 const feRoot = arg('root');
 const sdkSpecifier = arg('sdk', '@immich/sdk');
+const sdkGiven = process.argv.includes('--sdk');
+const memberCalls = process.argv.includes('--member-calls');
 const source = arg('source', 'api');
 const provideFile = arg('file', 'openapi.spec');
 if (!specPath || (mode === 'consume' && !feRoot)) {
@@ -67,6 +87,27 @@ for (const [p, methods] of Object.entries(spec.paths || {})) {
     if (op && op.operationId && HTTP.test(m)) opMap.set(op.operationId, `${m.toUpperCase()} ${norm}`);
   }
 }
+
+// --member-calls name resolution: mainstream class-based generators (verified against
+// swagger-typescript-api on fe-vue's committed api.ts, 19/19 operations) name each method by
+// lower-casing only the operationId's first character — `GetArticles` -> `getArticles`, `Login` ->
+// `login`. We accept both the raw operationId and this lowerFirst transform as valid member names.
+// A candidate name is NEVER guessed past that: if two distinct operationIds collide on the same
+// candidate (raw or transformed), that name is marked ambiguous and every call site using it is
+// skipped, counted in the stderr summary instead of silently picked.
+const memberNameMap = new Map(); // member name -> operationId | 'AMBIGUOUS'
+if (memberCalls) {
+  for (const opId of opMap.keys()) {
+    const candidates = new Set([opId, opId.charAt(0).toLowerCase() + opId.slice(1)]);
+    for (const cand of candidates) {
+      if (!memberNameMap.has(cand)) memberNameMap.set(cand, opId);
+      else if (memberNameMap.get(cand) !== opId) memberNameMap.set(cand, 'AMBIGUOUS');
+    }
+  }
+}
+const ambiguousMemberNames = [...memberNameMap.entries()]
+  .filter(([, v]) => v === 'AMBIGUOUS')
+  .map(([k]) => k);
 
 function envelope(files) {
   return { format: 'zzop-normalized-ast', version: 1, parser: 'openapi-sdk-adapter', source, files };
@@ -114,14 +155,23 @@ function sdkValueImports(text, specifier) {
   return names;
 }
 
+// The `--sdk` substring gate is skipped only when `--member-calls` is on AND `--sdk` was not passed
+// at all — see the USAGE comment above for the rationale.
+const gateSpecifier = memberCalls && !sdkGiven ? null : sdkSpecifier;
+// Member-call scan: any `.identifier(` in a line, looked up against memberNameMap. Requiring the
+// literal `.` immediately before the identifier (and `(` immediately after, whitespace aside) is
+// what makes this safe against substring false-positives like `regetArticles(` — there is no `.`
+// directly before `getArticles` in that string, so it never matches.
+const memberCallRe = /\.([A-Za-z_$][\w$]*)\s*\(/g;
+
 const files = [];
 let calls = 0;
 const ops = new Set();
 for (const abs of walk(feRoot)) {
   const text = readFileSync(abs, 'utf8');
-  if (!text.includes(sdkSpecifier)) continue;
+  if (gateSpecifier && !text.includes(gateSpecifier)) continue;
   const callable = [...sdkValueImports(text, sdkSpecifier)].filter((n) => opMap.has(n));
-  if (!callable.length) continue;
+  if (!callable.length && !memberCalls) continue;
   const rel = path.relative(feRoot, abs).replace(/\\/g, '/');
   const lines = text.split('\n');
   const consumes = [];
@@ -133,10 +183,27 @@ for (const abs of walk(feRoot)) {
         ops.add(name);
       }
     }
+    if (memberCalls) {
+      memberCallRe.lastIndex = 0;
+      const seenOnLine = new Set();
+      let mm;
+      while ((mm = memberCallRe.exec(lines[i]))) {
+        const opId = memberNameMap.get(mm[1]);
+        if (!opId || opId === 'AMBIGUOUS' || seenOnLine.has(opId)) continue;
+        seenOnLine.add(opId);
+        consumes.push({ kind: 'http', key: opMap.get(opId), file: rel, line: i + 1 });
+        calls++;
+        ops.add(opId);
+      }
+    }
   }
   if (consumes.length) files.push({ path: rel, loc: lines.length, io: { provides: [], consumes } });
 }
+const memberSummary = memberCalls
+  ? `; member-calls: ${ambiguousMemberNames.length} ambiguous name(s) skipped` +
+    (ambiguousMemberNames.length ? ` (${ambiguousMemberNames.join(', ')})` : '')
+  : '';
 process.stderr.write(
-  `[openapi-sdk-adapter] consume: ${files.length} files, ${calls} call sites, ${ops.size}/${opMap.size} operations resolved\n`
+  `[openapi-sdk-adapter] consume: ${files.length} files, ${calls} call sites, ${ops.size}/${opMap.size} operations resolved${memberSummary}\n`
 );
 process.stdout.write(JSON.stringify(envelope(files)));

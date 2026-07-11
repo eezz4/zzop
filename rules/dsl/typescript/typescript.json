@@ -67,6 +67,140 @@
         ],
         "snippet_max": 160
       }
+    },
+    {
+      "id": "float-equality",
+      "severity": "warning",
+      "message": "A decimal-fraction or negative-exponent numeric literal compared with `==`/`===`/`!=`/`!==` — IEEE754 floats don't represent most decimal fractions exactly, so equality on a computed value is unreliable even against an exactly-written literal (`0.1 + 0.2 !== 0.3`; SonarQube's S1244 flags all float equality for the same reason). Use an epsilon comparison (`Math.abs(a - b) < eps`), integer minor units, or a decimal library instead. Money-named comparisons (`price`/`amount`/`balance`/`fee`/`cost`) are covered separately by `be-db/float-money-compare` and are not double-flagged here. Suppress a vetted case with `// float-eq-ok`.",
+      "suppress_marker": "float-eq-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "[=!]==?\\s*-?(?:\\d+\\.\\d+|\\d+(?:\\.\\d+)?[eE]-\\d+)", "label": "literal-right" },
+          { "pattern": "-?(?:\\d+\\.\\d+|\\d+(?:\\.\\d+)?[eE]-\\d+)\\s*[=!]==?", "label": "literal-left" }
+        ],
+        "exclude_pattern": "(?i)\\b(price|amount|balance|fee|cost)\\w*\\s*[=!]==?|[=!]==?\\s*\\w*(price|amount|balance|fee|cost)\\b",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "always-false-comparison",
+      "severity": "warning",
+      "message": "A constant-result comparison: `x === NaN`/`x == NaN` is always false and `x !== NaN`/`x != NaN` is always true (NaN never equals anything, including itself — use `Number.isNaN(x)`), and strict `x === []`/`x === {}` compares object identity against a freshly-allocated literal, so it is always false (`!==` always true — use `.length === 0` / `Object.keys(x).length === 0`). Loose `x == []` is deliberately NOT matched (coercion can make it true — `0 == []` is true). Core ESLint's `use-isnan` covers the NaN half when ESLint is configured — zzop's value here is catching it with zero lint config. Suppress a vetted case with `// always-false-ok`.",
+      "suppress_marker": "always-false-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "[=!]==?\\s*NaN\\b|\\bNaN\\s*[=!]==?", "label": "nan" },
+          { "pattern": "[=!]==\\s*\\[\\s*\\]|\\[\\s*\\]\\s*[=!]==", "label": "empty-array" },
+          { "pattern": "[=!]==\\s*\\{\\s*\\}|\\{\\s*\\}\\s*[=!]==", "label": "empty-object" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "numeric-string-comparison",
+      "severity": "warning",
+      "message": "A numeric-looking string literal compared with `<`/`>`/`<=`/`>=` — string comparison is lexicographic, not numeric (`'10' < '9'` is `true`; `'10.0.0' < '9.0.0'` is `true`). Convert both sides with `Number(...)` first, or use a semver library for version strings. Suppress a vetted case with `// numeric-string-cmp-ok`.",
+      "suppress_marker": "numeric-string-cmp-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "\\s[<>]=?\\s+['\"]\\d+(\\.\\d+)*['\"]", "label": "operator-then-string" },
+          { "pattern": "['\"]\\d+(\\.\\d+)*['\"]\\s+[<>]=?\\s", "label": "string-then-operator-spaced" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "tofixed-arithmetic",
+      "severity": "warning",
+      "message": ".toFixed() returns a STRING — using its result in `-`/`*`/`/`/`%` arithmetic silently coerces back to a number and loses the rounding/formatting intent (string concatenation via `+` is a separate, usually-intentional display case and is NOT flagged here). Do the arithmetic first and call `.toFixed()` last, for display only, or wrap in `Number(x.toFixed(2))` if re-quantizing is genuinely intended. Suppress a vetted case with `// tofixed-arith-ok`.",
+      "suppress_marker": "tofixed-arith-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "toFixed",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "\\.toFixed\\s*\\(\\s*\\d*\\s*\\)\\s*[-*/%]", "label": "arithmetic-after-tofixed" },
+          { "pattern": "[-*/%]\\s*[\\w.$]+\\.toFixed\\s*\\(\\s*\\d*\\s*\\)", "label": "arithmetic-before-tofixed" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "date-pitfalls",
+      "severity": "info",
+      "message": "A timezone/epoch pitfall in `Date` handling: a date-only ISO string (`new Date('2024-01-15')`) parses as UTC midnight while the slash form (`new Date('2024/01/15')`) parses in local time — the two disagree by a day near timezone boundaries; a 10-digit literal passed to `new Date(...)` is a UNIX-SECONDS timestamp, but `Date` expects milliseconds and silently yields a 1970 date; and adding `86400000`ms (or `24*60*60*1000`) to a `Date`/`getTime()`/`.now()` value assumes every day is exactly 24 hours, which breaks across DST transitions (23/25-hour days). All three are correct in UTC-only systems — use a date library's `addDays`, or UTC-only arithmetic, when they aren't. Suppress a vetted case with `// date-pitfall-ok`.",
+      "suppress_marker": "date-pitfall-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "new\\s+Date\\s*\\(\\s*['\"]\\d{4}-\\d{2}-\\d{2}['\"]\\s*\\)", "label": "date-only-iso" },
+          { "pattern": "new\\s+Date\\s*\\(\\s*1[0-9]{9}\\s*\\)", "label": "seconds-epoch" },
+          { "pattern": "(?:86400000|86_400_000|24\\s*\\*\\s*60\\s*\\*\\s*60\\s*\\*\\s*1000).*(?:Date|getTime|now\\s*\\()|(?:Date|getTime|now\\s*\\().*(?:86400000|86_400_000|24\\s*\\*\\s*60\\s*\\*\\s*60\\s*\\*\\s*1000)", "label": "day-ms-arithmetic" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "foreach-async-callback",
+      "severity": "warning",
+      "message": "`.forEach(async ...)` — `forEach` ignores the promises its callback returns: the loop call itself resolves before any callback body finishes, callback errors become unhandled promise rejections, and there is no way to await completion. Use a `for...of` loop with `await`, or `Promise.all(items.map(async ...))` if the iterations are independent. `.map(async ...)` is a related but different defect (an unawaited array of promises) covered separately by `be-reliability/await-in-map`. Suppress a vetted case with `// foreach-async-ok`.",
+      "suppress_marker": "foreach-async-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "forEach",
+        "skip_comment_lines": true,
+        "line_pattern": "\\.forEach\\s*\\(\\s*async\\b",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "promise-async-executor",
+      "severity": "warning",
+      "message": "`new Promise(async (resolve, reject) => ...)` — an async executor function's own thrown errors/rejections are swallowed, because the `Promise` constructor never observes the promise the async executor itself returns; it also usually signals a redundant wrapper, since the async function already returns a promise. Core ESLint's `no-async-promise-executor` already covers this when configured — zzop's value here is catching it with zero lint config. Suppress a vetted case with `// promise-async-exec-ok`.",
+      "suppress_marker": "promise-async-exec-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "Promise",
+        "skip_comment_lines": true,
+        "line_pattern": "new\\s+Promise\\s*\\(\\s*async\\b",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "parseint-no-radix",
+      "severity": "info",
+      "message": "`parseInt(...)` called with a single argument — the radix parameter documents intent and guards against legacy surprises (`'0x10'` auto-parses as hex; old engines treated a leading-zero string as octal). Pass an explicit radix, e.g. `parseInt(x, 10)`. This scan only looks at the literal argument span up to the closing `)`; a nested call (`parseInt(getVal())`) is not flagged — a documented miss rather than a guess. Core ESLint's `radix` rule covers this too but is not in its `recommended` config. Suppress a vetted case with `// parseint-radix-ok`.",
+      "suppress_marker": "parseint-radix-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "parseInt",
+        "skip_comment_lines": true,
+        "line_pattern": "\\b(?:Number\\.)?parseInt\\s*\\(\\s*[^,()]+\\)",
+        "snippet_max": 160
+      }
     }
   ]
 }

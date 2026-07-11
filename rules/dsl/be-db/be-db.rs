@@ -770,3 +770,294 @@ fn take_sourced_from_req_query_in_a_test_fixture_path_is_not_flagged() {
         out.findings
     );
 }
+
+// --- multi-write-no-tx ---
+
+#[test]
+fn create_then_update_with_no_transaction_in_same_function_is_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function checkoutAndArchive(id: string) {\n  await prisma.order.create({ data: { id } });\n  await prisma.order.update({ where: { id }, data: { archived: true } });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "multi-write-no-tx");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4);
+}
+
+#[test]
+fn create_then_update_wrapped_in_prisma_transaction_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function checkoutAndArchiveTx(id: string) {\n  await prisma.$transaction(async (tx: any) => {\n    await tx.order.create({ data: { id } });\n    await tx.order.update({ where: { id }, data: { archived: true } });\n  });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "multi-write-no-tx").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn create_then_update_wrapped_in_a_bare_transaction_call_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\ndeclare function transaction(fn: () => Promise<void>): Promise<void>;\nexport async function checkoutAndArchiveBareTx(id: string) {\n  await transaction(async () => {\n    await prisma.order.create({ data: { id } });\n    await prisma.order.update({ where: { id }, data: { archived: true } });\n  });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "multi-write-no-tx").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn create_then_update_guarded_by_a_quoted_begin_literal_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const db: any;\nexport async function checkoutAndArchiveBegin(id: string) {\n  await db.query(\"BEGIN\");\n  await db.order.create({ data: { id } });\n  await db.order.update({ where: { id }, data: { archived: true } });\n  await db.query(\"COMMIT\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "multi-write-no-tx").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn only_one_write_family_present_is_not_flagged() {
+    // The co-occurrence requirement: `mutate-write` alone, with no `create-write` anywhere in the file,
+    // never satisfies the whole-file necessary-condition pre-skip, let alone the per-span check.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function archiveOnly(id: string) {\n  await prisma.order.update({ where: { id }, data: { archived: true } });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "multi-write-no-tx").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn multi_write_tx_ok_marker_directly_above_the_mutate_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function checkoutAndArchiveMarked(id: string) {\n  await prisma.order.create({ data: { id } });\n  // multi-write-tx-ok: archive failure is acceptable, the order is already recorded\n  await prisma.order.update({ where: { id }, data: { archived: true } });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "multi-write-no-tx").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- non-atomic-counter-update ---
+
+#[test]
+fn find_unique_then_arithmetic_update_is_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function incrementViews(id: string) {\n  const post = await prisma.post.findUnique({ where: { id } });\n  await prisma.post.update({ where: { id }, data: { views: post.views + 1 } });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "non-atomic-counter-update");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4);
+}
+
+#[test]
+fn atomic_increment_guard_is_not_flagged() {
+    // Veto-mechanism test: an unrelated arithmetic-shaped expression still satisfies the `arith-update`
+    // co-occurrence trigger, but the real update uses Prisma's atomic `{ increment: 1 }`, so the
+    // `atomic-increment` absent guard suppresses the finding.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function incrementViewsAtomicGuard(id: string) {\n  const post = await prisma.post.findUnique({ where: { id } });\n  const preview = { views: post.views + 1 };\n  await prisma.post.update({ where: { id }, data: { views: { increment: 1 } } });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "non-atomic-counter-update").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn atomic_decrement_guard_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function decrementStockAtomicGuard(id: string) {\n  const item = await prisma.item.findFirst({ where: { id } });\n  const preview = { stock: item.stock - 1 };\n  await prisma.item.update({ where: { id }, data: { stock: { decrement: 1 } } });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "non-atomic-counter-update").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn mongo_style_inc_guard_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const collection: any;\nexport async function incrementCounterMongo(id: string) {\n  const doc = await collection.findOne({ id });\n  const preview = { count: doc.count + 1 };\n  await collection.updateOne({ id }, { $inc: { count: 1 } });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "non-atomic-counter-update").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn select_for_update_row_lock_guard_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const db: any;\nexport async function incrementBalanceRowLock(id: string) {\n  const row = await db.findFirst({ where: { id } });\n  const preview = { balance: row.balance + 1 };\n  await db.query(\"SELECT * FROM accounts WHERE id = $1 FOR UPDATE\", [id]);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "non-atomic-counter-update").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn atomic_counter_ok_marker_directly_above_the_arithmetic_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function incrementViewsMarked(id: string) {\n  const post = await prisma.post.findUnique({ where: { id } });\n  // atomic-counter-ok: single-writer batch job, no concurrent access possible\n  await prisma.post.update({ where: { id }, data: { views: post.views + 1 } });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "non-atomic-counter-update").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- connection-no-release ---
+
+#[test]
+fn pool_connect_with_no_release_anywhere_in_function_is_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const pool: any;\nexport async function runQuery(sql: string) {\n  const conn = await pool.connect();\n  await conn.query(sql);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "connection-no-release");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 3);
+}
+
+#[test]
+fn get_connection_with_no_release_anywhere_in_function_is_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const pool: any;\nexport async function runQueryGetConnection(sql: string) {\n  const conn = await pool.getConnection();\n  await conn.query(sql);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "connection-no-release");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn pool_connect_released_in_finally_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const pool: any;\nexport async function runQueryReleased(sql: string) {\n  const conn = await pool.connect();\n  try {\n    await conn.query(sql);\n  } finally {\n    conn.release();\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "connection-no-release").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn pool_connect_returned_to_caller_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const pool: any;\nexport async function acquireConnectionForCaller() {\n  const conn = await pool.connect();\n  return conn;\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "connection-no-release").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn pool_connect_bound_via_await_using_declaration_is_not_flagged() {
+    // Review calibration pin: TS explicit resource management (`using` / `await using`,
+    // Symbol.dispose) releases on scope exit — the message promises this shape is recognized.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const pool: any;\nexport async function withManagedConnection() {\n  await using conn = await pool.connect();\n  await conn.query('SELECT 1');\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "connection-no-release").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn pool_connect_released_only_inside_a_helper_function_is_still_flagged() {
+    // Documents the message's own honest limitation: `MethodScan`'s `absent` veto only sees text inside
+    // THIS function's own span. `releaseConn(conn)` is a bare identifier call, not `.release(`/`.destroy(`/
+    // `.end(`, so it never satisfies the `released` veto even though the connection genuinely is released,
+    // one call away, inside `releaseConn`. This is a real false positive the message warns readers about
+    // ("verify before refactoring") rather than a bug — pinned here so the claim can't silently drift.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const pool: any;\ndeclare function releaseConn(conn: any): void;\nexport async function runQueryHelperRelease(sql: string) {\n  const conn = await pool.connect();\n  await conn.query(sql);\n  releaseConn(conn);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "connection-no-release");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn connection_release_ok_marker_directly_above_the_acquire_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const pool: any;\nexport async function runQueryMarked(sql: string) {\n  // connection-release-ok: pooled test harness connection, released by the test teardown hook\n  const conn = await pool.connect();\n  await conn.query(sql);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "connection-no-release").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}

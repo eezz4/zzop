@@ -125,7 +125,17 @@ annotated copy; the reference below summarizes each option.
   "exclude": ["**/*.stories.tsx", "legacy/"],
 
   // Enables git-history-derived signals. Omit to use engine defaults.
+  // "recentDays" windows the recent-activity fields (default 30).
+  // "commitTypePatterns" teaches a non-English/non-conventional commit convention: an array of
+  // { "pattern": "<regex>", "tag": "FIX"|"FEAT"|... }, checked in array order (earlier entries win,
+  // mirroring the built-in REVERT-before-FIX ordering). When present and non-empty it REPLACES the
+  // default FIX/FEAT/REVERT/.../STYLE table entirely; a pattern that fails to compile as a regex is
+  // skipped (matches nothing) and reported as a warning, never a crash. Omit for the default table.
   "git": { "recentDays": 30 },
+  // "git": {
+  //   "recentDays": 30,
+  //   "commitTypePatterns": [{ "pattern": "^\\s*corrige\\b", "tag": "FIX" }]
+  // },
 
   // Analysis cache directory (omit to disable caching).
   "cacheDir": ".zzop-cache",
@@ -164,6 +174,15 @@ Config severities are normalized to the engine's three levels:
 | `error`, `critical`, `high` | `critical` |
 
 `failOn` uses the same names (plus `off` to never fail). Ordering: `info` < `warning` < `critical`.
+
+On a multi-tree run (`roots` with 2+ entries, or `trees`), `failOn` also gates the cross-layer findings —
+the `cross-layer/*` rules run over the join between trees (`duplicate-route`, `route-shadowing`,
+`unprovided-mutation-call`, `external-secret-in-url`, and others; see
+[docs/rules/catalog.md](../../docs/rules/catalog.md)). Most are `warning`-tier, so they fail CI under the
+default `failOn: "warn"` exactly like a per-tree finding does; a handful of `info`-tier self-reports
+(`unconsumed-endpoint`, `route-near-miss`, the coverage/blindness notes) never do under the default. In the
+pretty terminal report, cross-layer findings print in their own "Cross-layer findings:" section after the
+per-tree file groups, since the same relative file path can exist in two different trees.
 
 ## Examples
 

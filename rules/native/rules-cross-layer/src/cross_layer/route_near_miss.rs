@@ -19,6 +19,8 @@
 //! `GET /{orgId}/{repoId}`) — those are distinct endpoints, not near-misses — so arity was mostly-FP even at
 //! Info.
 
+use std::collections::BTreeMap;
+
 use zzop_core::io::TaggedConsume;
 use zzop_core::{disable_hint, Finding, Severity};
 
@@ -111,11 +113,37 @@ fn provide_path_segs(p: &HttpProvideSite) -> Option<(&str, Vec<&str>)> {
     Some((pmethod, path_segments(ppath)))
 }
 
-pub fn route_near_miss_findings(
+/// The cross-reference data `unconsumed_endpoint`/`unconsumed_mutation_endpoint` attach to a provide that is
+/// ALSO the chosen near-miss target of one or more unprovided consumes — see `RouteNearMissOutput`.
+/// `consume_file`/`consume_line` anchor the FIRST such consume in input order (stable regardless of how many
+/// consumes name the same provide); `count` is the total.
+#[derive(Debug, Clone)]
+pub struct NearMissTargetRef {
+    pub consume_file: String,
+    pub consume_line: u32,
+    pub count: u32,
+}
+
+/// `route_near_miss_results`'s return: the findings (byte-identical to `route_near_miss_findings`'s output)
+/// plus the provide-site -> near-miss cross-reference `targets` map that lets the sibling unconsumed-* rules
+/// annotate a dead-looking provide that is actually a live near-miss target. `targets` is keyed on the
+/// CHOSEN `first` candidate of each finding only — the `extra` (`otherNearMissCount`) candidates near it are
+/// NOT keys, since only `first` is what the finding's message actually names as "the" near-miss provide.
+/// `BTreeMap` keyed by `(source, file, line)` for deterministic iteration order.
+pub struct RouteNearMissOutput {
+    pub findings: Vec<Finding>,
+    pub targets: BTreeMap<(String, String, u32), NearMissTargetRef>,
+}
+
+/// Does the actual candidate-selection work for `cross-layer/route-near-miss`, single-sourced so the
+/// findings and the near-miss cross-reference map (`targets`) can never drift apart — see
+/// `RouteNearMissOutput`.
+pub fn route_near_miss_results(
     unprovided_consumes: &[TaggedConsume],
     all_provides: &[HttpProvideSite],
-) -> Vec<Finding> {
+) -> RouteNearMissOutput {
     let mut out = Vec::new();
+    let mut targets: BTreeMap<(String, String, u32), NearMissTargetRef> = BTreeMap::new();
     for c in unprovided_consumes
         .iter()
         .filter(|c| c.consume.kind == "http")
@@ -170,6 +198,18 @@ pub fn route_near_miss_findings(
         });
         let first = candidates[0];
         let extra = candidates.len() - 1;
+
+        // Record the cross-reference: the FIRST consume (input order) to choose this provide as its
+        // near-miss target anchors `consume_file`/`consume_line`; every later consume choosing the same
+        // provide only bumps `count`.
+        targets
+            .entry((first.source.clone(), first.file.clone(), first.line))
+            .and_modify(|t| t.count += 1)
+            .or_insert(NearMissTargetRef {
+                consume_file: c.consume.file.clone(),
+                consume_line: c.consume.line,
+                count: 1,
+            });
         let extra_note = if extra > 0 {
             format!(" (and {extra} other near-miss route(s))")
         } else {
@@ -231,7 +271,19 @@ pub fn route_near_miss_findings(
         });
     }
     out.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
-    out
+    RouteNearMissOutput {
+        findings: out,
+        targets,
+    }
+}
+
+/// Thin wrapper over `route_near_miss_results` for callers that only need the findings (existing unit tests,
+/// and any caller not threading the near-miss cross-reference into the unconsumed-* rules).
+pub fn route_near_miss_findings(
+    unprovided_consumes: &[TaggedConsume],
+    all_provides: &[HttpProvideSite],
+) -> Vec<Finding> {
+    route_near_miss_results(unprovided_consumes, all_provides).findings
 }
 
 #[cfg(test)]
@@ -533,5 +585,64 @@ mod tests {
             out.iter().map(|f| &f.message).collect::<Vec<_>>(),
             out2.iter().map(|f| &f.message).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn results_targets_map_records_the_chosen_provide_with_first_consume_ref() {
+        let unprovided_consumes = vec![consume(
+            "http",
+            Some("GET /articles"),
+            "fe-react",
+            "Api.tsx",
+            10,
+        )];
+        let provides = vec![provide(
+            "GET /api/articles",
+            "be-nest",
+            "articles.controller.ts",
+            22,
+        )];
+        let result = route_near_miss_results(&unprovided_consumes, &provides);
+        assert_eq!(result.findings.len(), 1);
+        let target = result
+            .targets
+            .get(&(
+                "be-nest".to_string(),
+                "articles.controller.ts".to_string(),
+                22,
+            ))
+            .expect("chosen provide site must be recorded in targets");
+        assert_eq!(target.consume_file, "Api.tsx");
+        assert_eq!(target.consume_line, 10);
+        assert_eq!(target.count, 1);
+    }
+
+    #[test]
+    fn results_targets_map_counts_multiple_consumes_naming_the_same_provide_and_keeps_the_first() {
+        // Two consumes both near-miss the same provide — count must be 2, and the recorded consume ref must
+        // stay the FIRST one (input order), even though the second one has an earlier file/line lexically.
+        let unprovided_consumes = vec![
+            consume("http", Some("GET /articles"), "fe-react", "Z.tsx", 10),
+            consume("http", Some("GET /articles"), "fe-react", "A.tsx", 1),
+        ];
+        let provides = vec![provide(
+            "GET /api/articles",
+            "be-nest",
+            "articles.controller.ts",
+            22,
+        )];
+        let result = route_near_miss_results(&unprovided_consumes, &provides);
+        assert_eq!(result.findings.len(), 2);
+        let target = result
+            .targets
+            .get(&(
+                "be-nest".to_string(),
+                "articles.controller.ts".to_string(),
+                22,
+            ))
+            .expect("chosen provide site must be recorded in targets");
+        assert_eq!(target.consume_file, "Z.tsx");
+        assert_eq!(target.consume_line, 10);
+        assert_eq!(target.count, 2);
     }
 }

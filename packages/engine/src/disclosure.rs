@@ -72,8 +72,12 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
         id: "provide-side-unextracted",
         group: EXTRACTION_BLIND,
         summary: "A tree whose routes were not extracted makes a real caller look like it hits a \
-                  nonexistent API (false drift). zzop does not yet flag a provider tree as under-extracted.",
-        status: DisclosureStatus::NotYetDetected,
+                  nonexistent API (false drift). Detected self-report: a server-framework package \
+                  (express, koa, fastify, ...) imported anywhere in the tree while extracted `http` \
+                  provides stay near-zero (<3) self-reports the likely method-call registration gap. \
+                  Not detected: proportional under-extraction on a tree already recognized as SOME \
+                  provides (a framework partially, not wholly, unsupported).",
+        status: DisclosureStatus::Partial,
     },
     BlindnessClass {
         id: "language-unparsed",
@@ -104,6 +108,18 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
         summary: "A consume and a provide that differ only by letter case or a path prefix are matched as \
                   a near-miss; drift from a captured base-URL prefix or other normalization is not, so a \
                   key artifact can still read as real spec drift.",
+        status: DisclosureStatus::Partial,
+    },
+    BlindnessClass {
+        id: "generated-client-unrecognized",
+        group: EXTRACTION_BLIND,
+        summary: "A tree that talks to its backend through a GENERATED client (SDK class/methods built \
+                  from a committed OpenAPI/Swagger spec) makes its call sites invisible to the \
+                  literal-call-site consume extractor, so a real caller can look like it never calls out. \
+                  Detected self-report: a committed OpenAPI/Swagger spec file present in the tree while \
+                  this tree's io stays near-zero (<3) in BOTH provides and keyed consumes. Not detected: a \
+                  generated client whose backing spec is NOT committed in-tree (e.g. fetched at build \
+                  time), which leaves no spec file for the self-report to anchor on.",
         status: DisclosureStatus::Partial,
     },
     // B. Analysis dark — a channel is empty so a number is meaningless, yet a number is printed.
@@ -189,10 +205,11 @@ mod tests {
         ("coincidental-match", "asserted"),
         ("config-error", "asserted"),
         ("consume-side-unextracted", "asserted"),
+        ("generated-client-unrecognized", "partial"),
         ("input-scope-error", "partial"),
         ("key-mismatch-drift", "partial"),
         ("language-unparsed", "partial"),
-        ("provide-side-unextracted", "notYetDetected"),
+        ("provide-side-unextracted", "partial"),
         ("resolution-gap", "asserted"),
         ("silent-truncation", "partial"),
         ("stale-cache", "partial"),

@@ -55,6 +55,23 @@ test('multi-tree output is flattened into sarif results', () => {
   assert.equal(JSON.parse(sarif.content).runs[0].results.length, 2);
 });
 
+test('multi-tree crossLayerFindings are included in sarif results (not just per-tree findings)', () => {
+  const trees = {
+    trees: [
+      { root: './api', sourceId: 'api', output: { fileCount: 1, findings: [{ ruleId: 'x', severity: 'warning', file: 'api/h.ts', line: 1, message: 'm' }] } },
+    ],
+    crossLayer: {},
+    crossLayerFindings: [
+      { ruleId: 'cross-layer/duplicate-route', severity: 'warning', file: 'a.ts', line: 3, message: 'dup route' },
+    ],
+  };
+  const [sarif] = buildReports(trees, { formats: ['sarif'] });
+  const doc = JSON.parse(sarif.content);
+  assert.equal(doc.runs[0].results.length, 2);
+  assert.ok(doc.runs[0].results.some((r) => r.ruleId === 'cross-layer/duplicate-route'));
+  assert.deepEqual(doc.runs[0].tool.driver.rules.map((r) => r.id), ['cross-layer/duplicate-route', 'x']);
+});
+
 test('unknown format throws', () => {
   assert.throws(() => buildReports(output, { formats: ['pdf'] }), /Unknown report format/);
 });

@@ -127,7 +127,9 @@ pub use external_shadow_internal::external_shadow_internal_findings;
 pub use external_version_inconsistent::external_version_inconsistent_findings;
 pub use method_mismatch::method_mismatch_findings;
 pub use path_near_miss::path_near_miss_findings;
-pub use route_near_miss::route_near_miss_findings;
+pub use route_near_miss::{
+    route_near_miss_findings, route_near_miss_results, NearMissTargetRef, RouteNearMissOutput,
+};
 pub use sdk_import_no_visible_consume::sdk_import_no_visible_consume_findings;
 pub use shared_db_table::shared_db_table_findings;
 pub use unconsumed_endpoint::unconsumed_endpoint_findings;

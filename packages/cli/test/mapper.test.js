@@ -193,6 +193,18 @@ test('pass-through git/cacheDir/sizeCap', () => {
   assert.equal(request.sizeCap, 500000);
 });
 
+test('git.commitTypePatterns passes through verbatim (no mapper transform) and is a known key', () => {
+  const commitTypePatterns = [
+    { pattern: '^\\s*corrige\\b', tag: 'FIX' },
+    { pattern: '^\\s*nouveau\\b', tag: 'FEAT' },
+  ];
+  const { request } = configToRequest({ roots: ['.'], git: { commitTypePatterns } });
+  assert.deepEqual(request.git, { commitTypePatterns });
+
+  const { collectConfigWarnings } = require('../lib/mapper');
+  assert.deepEqual(collectConfigWarnings({ git: { commitTypePatterns } }), []);
+});
+
 test('shared options replicate across every tree', () => {
   const { request } = configToRequest({
     roots: ['./a', './b'],

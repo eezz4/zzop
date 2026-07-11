@@ -163,6 +163,111 @@
         ],
         "snippet_max": 160
       }
+    },
+    {
+      "id": "sql-delete-no-where",
+      "severity": "critical",
+      "message": "A CLOSED string literal contains `DELETE FROM <table>` with nothing else before the closing quote — the entire SQL statement is one complete literal with no interpolation, so there is provably no WHERE clause arriving from anywhere else, and this deletes every row in the table. Any sign the statement isn't fully closed right here — a `${...}` placeholder, a `'`/`\"` string-concatenation `+`, or a trailing `?` bound-parameter tail — means we can't prove a WHERE is missing, so the rule stays silent rather than guess (never-guess). Migration paths are out of this rule's scope: a whole-table write in a committed migration is a deliberate one-time backfill, covered at disclosure severity by `sql/destructive-migration` instead. Add a WHERE clause, or if a full-table delete is genuinely intended, make it explicit (e.g. a dedicated `truncateTable()`/`deleteAll()` helper) and suppress with `// sql-delete-no-where-ok`.",
+      "suppress_marker": "sql-delete-no-where-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|(^|/)(migrations?|migrate|db/migrations?)/)",
+        "require_file": "(?i)DELETE\\s+FROM",
+        "skip_comment_lines": true,
+        "line_pattern": "(?i)[\"'`]\\s*DELETE\\s+FROM\\s+[A-Za-z_\"`.][\\w\"`.]*\\s*;?\\s*[\"'`]",
+        "exclude_pattern": "(?i)WHERE|\\$\\{|\\+\\s*[\"'`]|[\"'`]\\s*\\+",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "sql-update-no-where",
+      "severity": "critical",
+      "message": "A CLOSED string literal contains `UPDATE <table> SET <assignments>` with nothing else before the closing quote — same discipline as `sql/sql-delete-no-where`: the entire statement is one complete literal with no interpolation, so there is provably no WHERE clause arriving from anywhere else, and this updates every row in the table. Any sign the statement isn't fully closed right here — a `${...}` placeholder, a `'`/`\"` string-concatenation `+` — means we can't prove a WHERE is missing, so the rule stays silent rather than guess (never-guess). Migration paths are out of this rule's scope: a whole-table write in a committed migration is a deliberate one-time backfill, covered at disclosure severity by `sql/destructive-migration` instead. Add a WHERE clause, or if a full-table update is genuinely intended, make it explicit and suppress with `// sql-update-no-where-ok`.",
+      "suppress_marker": "sql-update-no-where-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|(^|/)(migrations?|migrate|db/migrations?)/)",
+        "require_file": "(?i)UPDATE\\s+[\\w\"`.]+\\s+SET",
+        "skip_comment_lines": true,
+        "line_pattern": "(?i)[\"'`]\\s*UPDATE\\s+[\\w\"`.]+\\s+SET\\s+[^\"'`]*[\"'`]",
+        "exclude_pattern": "(?i)WHERE|\\$\\{|\\+\\s*[\"'`]|[\"'`]\\s*\\+",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "truncate-in-app-code",
+      "severity": "critical",
+      "message": "A syntax-anchored `TRUNCATE [TABLE] <table>` string literal appears in application code (not a migration) — the SQL analog of `redis/flushall-in-code`: TRUNCATE wipes every row in the table and, on most engines, cannot be rolled back once committed. Move destructive schema/data operations into a migration script outside the served codebase, or if this is a genuinely intentional runtime reset (e.g. a dedicated cache-reset job), suppress with `// sql-truncate-app-ok`.",
+      "suppress_marker": "sql-truncate-app-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|(^|/)(migrations?|migrate|db/migrations?)/)",
+        "require_file": "(?i)TRUNCATE",
+        "skip_comment_lines": true,
+        "line_pattern": "(?i)[\"'`]\\s*TRUNCATE\\s+(TABLE\\s+)?[\\w\"`.]+",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "destructive-migration",
+      "severity": "info",
+      "message": "A destructive statement in a migration file: `DROP TABLE`/`DROP COLUMN`/`TRUNCATE [TABLE]`, or a closed-string-literal whole-table `DELETE FROM <table>` / `UPDATE <table> SET` with no WHERE (the same complete-literal shapes `sql/sql-delete-no-where`/`sql/sql-update-no-where` flag in app code — in a migration they are a deliberate one-time backfill, so they surface here at disclosure severity instead). Committed destructive migrations are usually deliberate, so this is info-level review-time disclosure, not a CI gate — its value is attention on NEW migrations at review, not archaeology of old ones. Verify the object name against the PR/ticket, back the data up first, and prefer a two-phase pattern (deprecate/stop-reading in one release, drop in a later one) over a same-release drop when the table might still be read. Suppress a vetted, reviewed migration with `// sql-destructive-migration-ok`.",
+      "suppress_marker": "sql-destructive-migration-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)(^|/)(migrations?|migrate)/.*\\.(sql|ts|js|mjs)$",
+        "require_file": "(?i)(DROP|TRUNCATE|DELETE\\s+FROM|UPDATE\\s+[\\w\"`.]+\\s+SET)",
+        "skip_comment_lines": true,
+        "any": [
+          {
+            "pattern": "(?i)\\b(DROP\\s+(TABLE|COLUMN)\\s+[\\w\"`.]+|TRUNCATE\\s+(TABLE\\s+)?[\\w\"`.]+)\\b",
+            "label": "drop-or-truncate"
+          },
+          {
+            "pattern": "(?i)[\"'`]\\s*DELETE\\s+FROM\\s+[A-Za-z_\"`.][\\w\"`.]*\\s*;?\\s*[\"'`]",
+            "label": "delete-no-where"
+          },
+          {
+            "pattern": "(?i)[\"'`]\\s*UPDATE\\s+[\\w\"`.]+\\s+SET\\s+[^\"'`]*[\"'`]",
+            "label": "update-no-where"
+          }
+        ],
+        "exclude_pattern": "(?i)WHERE|\\$\\{|\\+\\s*[\"'`]|[\"'`]\\s*\\+",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "select-star",
+      "severity": "info",
+      "message": "`SELECT * FROM` inside a string literal — over-fetching every column couples the caller to the table's exact shape (a later `ALTER TABLE ADD COLUMN` silently changes what this query returns) and pulls columns nobody reads across the wire. List the columns you actually use instead. Suppress a vetted case with `// sql-select-star-ok`.",
+      "suppress_marker": "sql-select-star-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "(?i)SELECT\\s+\\*\\s+FROM",
+        "skip_comment_lines": true,
+        "line_pattern": "(?i)[\"'`][^\"'`]*SELECT\\s+\\*\\s+FROM\\b",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "like-leading-wildcard",
+      "severity": "info",
+      "message": "A `LIKE` pattern with a leading `%` wildcard (e.g. `LIKE '%term'`) can't use a standard B-tree index prefix — the engine falls back to a full table/index scan on every call. If this needs to stay a substring/suffix search, reach for full-text search or a reversed-column index; a trailing-only wildcard (`LIKE 'term%'`) stays index-friendly. Suppress a vetted case (small table, offline query) with `// sql-like-leading-wildcard-ok`.",
+      "suppress_marker": "sql-like-leading-wildcard-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "(?i)LIKE\\s+['\"`]%",
+        "skip_comment_lines": true,
+        "line_pattern": "(?i)LIKE\\s+['\"`]%",
+        "snippet_max": 160
+      }
     }
   ]
 }

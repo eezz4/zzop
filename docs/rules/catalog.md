@@ -6,11 +6,11 @@ Everything the engine ships today, read directly from `rules/dsl/**/*.json` and
 semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 [authoring-guide.md](authoring-guide.md).
 
-**Totals** (machine-checked by `packages/engine/tests/rule_contracts.rs`'s `catalog_totals_match_loaded_rule_and_analysis_counts`): 16 DSL packs, 75 DSL rules, 41 native analysis ids. 12 packs ship rules; 4 are stub packs (see "Stub packs" below).
+**Totals** (machine-checked by `packages/engine/tests/rule_contracts.rs`'s `catalog_totals_match_loaded_rule_and_analysis_counts`): 16 DSL packs, 112 DSL rules, 41 native analysis ids. 12 packs ship rules; 4 are stub packs (see "Stub packs" below).
 
 ## DSL packs (`rules/dsl/<pack>/<pack>.json`)
 
-### `be-db` (9 rules)
+### `be-db` (12 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
@@ -23,6 +23,9 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `find-then-create-no-unique` | warning | method-scan | `find-create-ok` | A `findFirst`/`findOne`/`findUnique` read followed by `.create(` in the same function with no `connectOrCreate`/`upsert`/`ON CONFLICT` anywhere — check-then-act race, concurrent requests can create duplicate rows (a bare `$transaction` does not close it). |
 | `float-money-compare` | info | line-scan | `money-ok` | A money-named identifier (`price`/`amount`/`balance`/`fee`/`cost`) compared with `==`/`===` against a float literal — IEEE754 rounding makes strict equality on monetary values unreliable. |
 | `empty-catch-on-write` | warning | method-scan | `empty-catch-ok` | A DB write (`create`/`update`/`delete`/`upsert`/`updateMany`/`deleteMany`) in the same function as an empty `catch {}` — write failure is silently discarded. |
+| `multi-write-no-tx` | warning | method-scan | `multi-write-tx-ok` | A create-family write (`create`/`createMany`/`insert`) and a mutate-family write (`update`/`delete`/`upsert`/...) in the same function with no `$transaction(`/SQL `BEGIN` — a failure between the two leaves partial state (co-occurrence heuristic; independent writes suppress with the marker). |
+| `non-atomic-counter-update` | warning | method-scan | `atomic-counter-ok` | A `findUnique`/`findFirst`/`findOne`/`findById` read plus a `field: value +/- 1` arithmetic update in the same function with no atomic `increment:`/`decrement:`/`$inc`/`FOR UPDATE` — a read-modify-write counter that loses updates under concurrency. |
+| `connection-no-release` | warning | method-scan | `connection-release-ok` | `pool.connect(`/`getConnection(`/`acquireConnection(` with no `.release(`/`.destroy(`/`.end(`, no `return conn`, and no `using`/`await using` declaration in the same function — a connection leak under load (release in a callee still fires; verify before refactoring). |
 
 ### `be-reliability` (13 rules)
 
@@ -42,7 +45,7 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `interval-no-clear` | warning | line-scan | `interval-ok` | `setInterval(...)` with no matching `clearInterval(...)` anywhere in the file — a leaked timer keeps the process/page alive and re-fires forever. |
 | `env-outside-config` | info | line-scan | `env-access-ok` | `process.env.X` accessed outside a config module (files/dirs named `config`/`env`/`settings` exempt) — scatters env parsing/validation instead of centralizing it. |
 
-### `be-security` (26 rules)
+### `be-security` (38 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
@@ -72,13 +75,32 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `stacktrace-to-response` | warning | method-scan | `stacktrace-ok` | An exception's stack trace/message (`printStackTrace()`/`.getMessage()`) produced in a method that also touches the HTTP response — internal class names/paths/SQL fragments can reach the client. |
 | `trust-all-tls` | critical | line-scan | `trust-all-ok` | TLS certificate/hostname verification disabled (trust-all `X509TrustManager`, `ALLOW_ALL_HOSTNAME_VERIFIER`, or an always-`true` hostname-verifier lambda) — accepts any certificate for any host, opening a MITM path. |
 | `conn-string-credentials` | critical | line-scan | `conn-cred-ok` | Connection-string URL with a password in the userinfo slot (`scheme://user:pass@host` — redis/postgres/mongodb/amqp/...) committed to source — repo readers own the datastore and git history preserves it; move to env/secret config AND rotate. Scans test paths too (a committed credential is leaked regardless). |
+| `private-key-committed` | critical | line-scan | `private-key-ok` | A PEM private-key header (`-----BEGIN [RSA/EC/DSA/OPENSSH/...] PRIVATE KEY-----`) committed to source — the key is compromised the moment the repo is shared; rotate it and move it to a secret store. Scans test paths too. |
+| `vendor-token-committed` | critical | line-scan | `vendor-token-ok` | A format-identified LIVE vendor credential (Stripe `sk_live_`/`rk_live_`, GitHub `ghp_`/`gho_`, Slack `xox[bpars]-`, Google `AIza...`) committed to source — rotate immediately; committed means leaked. Test-mode keys (`sk_test_`) deliberately do not fire. Scans test paths too. |
+| `jwt-none-algorithm` | critical | line-scan | `jwt-none-ok` | `algorithm(s): 'none'` in a JWT-adjacent file — alg=none turns signature verification off entirely; no legitimate production use. |
+| `shell-exec-interpolation` | critical | line-scan | `shell-exec-ok` | `exec`/`execSync` whose command string carries a `${...}` interpolation or `+`-concat — a dynamic segment inside a shell line is command injection; use `execFile`/`spawn` with an argv array (those APIs deliberately do not fire). |
+| `jwt-sign-literal-secret` | critical | line-scan | `jwt-secret-ok` | `jwt.sign(payload, '<string literal>')` — a positional committed signing secret lets anyone forge tokens (the `hardcoded-secret` rule needs a `key: value` shape, so this positional form was uncovered); placeholder-word and interpolation shapes are vetoed. Scans test paths too. |
+| `jwt-verify-bypass` | warning | line-scan | `jwt-verify-ok` | `ignoreExpiration: true` or `verify: false` in a JWT-library-adjacent file — token validation partially disabled. |
+| `sendfile-from-request` | warning | line-scan | `sendfile-ok` | `sendFile(`/`download(` handed a `req.params/query/body` value directly — path traversal via a file-serving API (`path-traversal` covers the fs+path.join shape; this covers the serving APIs). A `path.basename(...)`-wrapped arg does not fire. |
+| `cors-reflected-origin-credentials` | warning | line-scan | `cors-reflect-ok` | `credentials: true` together with `origin: true` (reflect-any-origin) or `origin: req.headers...` on one line — any site can make credentialed requests (`cors-wildcard`/`cors-credentials-wildcard` cover the literal `'*'`; this covers reflection, which those matchers miss). Multi-line option objects are a documented miss. |
+| `template-unescaped-output` | warning | line-scan | `template-unescaped-ok` | Template-engine unescaped-output syntax (EJS `<%- %>`, Handlebars `{{{ }}}`, Mustache `{{& }}`) — server-rendered stored/reflected XSS if any interpolated value is user-influenced; use the escaped form or a vetted sanitizer. Scoped to `.ejs/.hbs/.mustache/.njk` template extensions (Pug `!=` is deliberately uncovered — indistinguishable from the inequality operator). |
+| `html-response-from-request` | warning | method-scan | `html-response-ok` | A `res.send/write/end` of HTML-shaped content in the same function as `req.query/params/body/headers` with no sanitizer — reflected XSS (co-occurrence heuristic; the res.send-HTML sink `security/taint-flow` does not list). |
+| `dangerous-html-concat` | warning | line-scan | `html-concat-ok` | An HTML tag string literal concatenated with a variable (`"<div>" + userVar`) in a response-context file — an injection sink if the variable is user-influenced; use an auto-escaping template engine or sanitizer. |
+| `csp-disabled` | warning | line-scan | `csp-disabled-ok` | Content-Security-Policy turned off or wide-open (`contentSecurityPolicy: false`, `unsafe-inline`, `default-src *`) — removes the browser's last-line XSS mitigation; keep a restrictive policy. |
 
-### `browser` (2 rules)
+### `browser` (9 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
 | `no-system-dialogs` | info | line-scan | `browser-ok` | Blocking system dialog (`alert`/`confirm`/`prompt`) — freezes the page/tab (main-thread block), can't be styled or tested. |
 | `no-document-write` | warning | line-scan | `document-write-ok` | `document.write`/`writeln` — breaks HTML parsing post-load, blocked under many CSP/PWA setups. |
+| `postmessage-wildcard` | warning | line-scan | `postmessage-target-ok` | `postMessage(..., '*')` — a wildcard targetOrigin broadcasts the payload to whatever origin currently holds the window (opener/embedder swaps included); pass the intended origin literal. |
+| `unsafe-html-sink` | warning | line-scan | `unsafe-html-ok` | A non-literal value assigned to `innerHTML`/`outerHTML`, passed to `insertAdjacentHTML`, or set as `dangerouslySetInnerHTML`'s `__html` — the standalone XSS sink check (`security/taint-flow` fires on these sinks only with a request-derived source in the same `.ts/.tsx` function; this rule needs no source — component props/state are the common carrier — and covers `.js/.jsx`). Plain string-literal assignments stay silent. |
+| `javascript-url` | warning | line-scan | `javascript-url-ok` | A literal `javascript:` scheme URL in an `href`/`src` attribute, DOM property assignment, or `setAttribute` — executes arbitrary script on click/load; validate the scheme against an http(s) allowlist. Catches the literal form only (a dynamic href is a separate, harder class). |
+| `location-assign-dynamic` | warning | line-scan | `location-assign-ok` | A non-literal assigned to `location`/`location.href` or passed to `location.assign/replace` — client-side open-redirect / DOM-XSS navigation sink (`be-security/open-redirect` covers the server `res.redirect(req.*)` side). Literal/absolute-path targets and `const location = useLocation()` stay silent. |
+| `jquery-html-sink` | warning | line-scan | `jquery-html-ok` | A non-literal passed to jQuery `.html()`/`.append()`/`.prepend()`/... in a jQuery file — the same HTML-injection surface as `innerHTML`; use `.text()` for plain text or sanitize. |
+| `vue-v-html` | warning | line-scan | `vue-v-html-ok` | Vue's `v-html` directive renders raw HTML — XSS if the bound value is user-influenced (the Vue analog of `dangerouslySetInnerHTML`); prefer `{{ }}` interpolation or sanitize. |
+| `unsanitized-markdown-html` | warning | method-scan | `markdown-html-ok` | A markdown renderer (`marked`/`markdown-it`/`remark`/...) whose output reaches an HTML sink in the same function with no sanitizer — markdown renderers emit raw HTML by default; run output through DOMPurify/sanitize-html. (`.vue` SFCs are not span-projected today, so same-file `<script>`/`<template>` co-occurrence does not fire — `.ts/.tsx/.js/.jsx` does.) |
 
 ### `fullstack` (4 rules)
 
@@ -119,13 +141,14 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `keys-glob-scan` | warning | line-scan | `redis-keys-ok` | `KEYS` scan (`.keys('pattern')` with a string argument, or a quoted `'KEYS'` command) — O(N) walk that blocks the single-threaded server; use the SCAN cursor family or an index set. |
 | `client-no-error-listener` | warning | line-scan | `redis-error-ok` | redis/ioredis client created in a file with no `.on('error', ...)` anywhere in it — node-redis emits `error` on an EventEmitter, so an unhandled listener crashes the process on the first connection blip. |
 
-### `security` (1 rule)
+### `security` (2 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
 | `taint-flow` | critical | method-scan | `taint-ok` | A tainted-source access and a dangerous sink call in the same function body (coarse v1 co-occurrence, not real dataflow — see the rule's own `message` for the three documented precision limits). |
+| `eval-dynamic-code` | warning | line-scan | `eval-dynamic-ok` | `eval(` with a non-literal argument, or any `new Function(` — constructing code from strings at runtime defeats CSP and every static analyzer (`taint-flow` covers eval+request-source in `.ts/.tsx`; this rule is source-free and `.js`-inclusive). |
 
-### `sql` (6 rules)
+### `sql` (12 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
@@ -135,8 +158,14 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `app-side-aggregation-reduce` | info | method-scan | `app-agg-ok` | A `findMany()`/`prepare(...).all()` result is reduced in application code (`.reduce(...)`). |
 | `app-side-aggregation-filter-length` | info | method-scan | `app-agg-filter-ok` | A `findMany()`/`prepare(...).all()` result is counted via `.filter(...).length`. |
 | `race-condition-toctou` | warning | method-scan | `toctou-ok` | A read (`findOne`/`findById`/`findUnique`) feeds a branch that calls `create`/`upsert`/`insert` — TOCTOU race under concurrent requests. |
+| `sql-delete-no-where` | critical | line-scan | `sql-delete-no-where-ok` | A closed SQL string literal `DELETE FROM <table>` with no `WHERE` in application code — a whole-table delete. Fires only when the entire statement is one closed literal with no interpolation/concat, so the missing `WHERE` is statically provable; migration paths are `destructive-migration`'s turf at disclosure severity. |
+| `sql-update-no-where` | critical | line-scan | `sql-update-no-where-ok` | A closed SQL string literal `UPDATE <table> SET ...` with no `WHERE` in application code — a whole-table update; same closed-literal proof discipline and migration-path handoff as `sql-delete-no-where`. |
+| `truncate-in-app-code` | critical | line-scan | `sql-truncate-app-ok` | A quote-anchored `TRUNCATE [TABLE] <table>` reachable from application code (migration paths excluded) — a full-table wipe one call away, the SQL analog of `redis/flushall-in-code`. |
+| `destructive-migration` | info | line-scan | `sql-destructive-migration-ok` | `DROP TABLE`/`DROP COLUMN`/`TRUNCATE` — plus closed-literal whole-table `DELETE FROM`/`UPDATE ... SET` — inside a migration path. Info/non-gating by design: migrations are usually deliberate; the value is review-time attention on NEW migrations, with a two-phase (deprecate, then drop) recommendation. |
+| `select-star` | info | line-scan | `sql-select-star-ok` | `SELECT * FROM` inside a string literal — over-fetch plus silent schema-drift coupling; select explicit columns (`SELECT COUNT(*)` does not fire). |
+| `like-leading-wildcard` | info | line-scan | `sql-like-leading-wildcard-ok` | A `LIKE` pattern literal starting with `%` — the leading wildcard defeats index use, forcing a full scan on every call. |
 
-### `typescript` (4 rules)
+### `typescript` (12 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
@@ -144,6 +173,14 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `as-cast` | info | line-scan | `as-ok` | Flags only `as any` and `as unknown as X` (hard escapes), not every `as` cast (import-alias `as` excluded via `exclude_pattern`). |
 | `unhandled-promise-use-effect` | warning | line-scan | `unhandled-promise-ok` | `useEffect` callback declared `async` — React drops the returned Promise, no cleanup possible. |
 | `async-handler-no-try` | warning | method-scan | `async-handler-ok` | An `on<Event>={async ...}` JSX handler has an `await` but no `try`/`catch`. |
+| `float-equality` | warning | line-scan | `float-eq-ok` | A decimal-fraction/exponent numeric literal compared with `==`/`===`/`!=`/`!==` (either order) — IEEE754 equality on computed floats is unreliable (`0.1 + 0.2 !== 0.3`); use an epsilon comparison, integer minor units, or a decimal library. Money-named identifiers are `be-db/float-money-compare`'s turf (no double-fire). |
+| `always-false-comparison` | warning | line-scan | `always-false-ok` | A constant-result comparison: `NaN` on either side of `==`/`===`/`!=`/`!==` (never equal to anything — use `Number.isNaN`), and strict `=== []` / `=== {}` (reference-compares a fresh literal — use `.length === 0` / `Object.keys`). Loose `== []` is deliberately out of scope (coercion can make it true). The NaN half overlaps ESLint's `use-isnan` — zzop's value is zero-config coverage. |
+| `numeric-string-comparison` | warning | line-scan | `numeric-string-cmp-ok` | A numeric-looking string literal on either side of `<`/`>`/`<=`/`>=` — string comparison is lexicographic (`'10' < '9'` is true; `'10.0.0' < '9.0.0'` is true); convert with `Number(...)` or use a semver library. Generic type arguments (`Extract<T, '1'>`) do not fire. |
+| `tofixed-arithmetic` | warning | line-scan | `tofixed-arith-ok` | `.toFixed()` returns a STRING — using the result in `-`/`*`/`/`/`%` arithmetic silently coerces it back, losing the rounding intent; do arithmetic first, format last (`+`-concat for display is deliberately out of scope). |
+| `date-pitfalls` | info | line-scan | `date-pitfall-ok` | Three date footguns: a date-only ISO string (`new Date('2024-01-15')` parses as UTC midnight, the slash form as local — off-by-one-day across timezones), a 10-digit epoch literal (UNIX seconds where Date wants milliseconds — yields a 1970 date), and `86400000`/`24*60*60*1000` day arithmetic (breaks across DST's 23/25-hour days). Context-dependent (fine in UTC-only systems) — hence info. |
+| `foreach-async-callback` | warning | line-scan | `foreach-async-ok` | `.forEach(async ...)` ignores the returned promises entirely — the loop "completes" before any callback runs and errors become unhandled rejections; use `for...of` with `await`, or `Promise.all(items.map(async ...))` (`be-reliability/await-in-map` covers the `.map(async` sibling). |
+| `promise-async-executor` | warning | line-scan | `promise-async-exec-ok` | `new Promise(async ...)` — the Promise constructor never observes the async executor's returned promise, so its rejections are swallowed; usually a redundant wrapper (overlaps ESLint's `no-async-promise-executor` — zzop's value is zero-config coverage). |
+| `parseint-no-radix` | info | line-scan | `parseint-radix-ok` | Single-argument `parseInt` — the radix parameter documents intent and guards hex/legacy-octal parsing surprises; write `parseInt(x, 10)`. Nested-call arguments are a documented miss (never guessed). |
 
 ### Stub packs (0 rules — roadmap)
 

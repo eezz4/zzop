@@ -6,13 +6,26 @@
 //! Provider sites in test-path files (`zzop_core::is_test_file`) are skipped — a route registered
 //! in a test fixture is not deployed surface. A dead route provided by 2+ trees ALSO fires one warning
 //! `cross-layer/duplicate-route` finding for the same key — intentional overlap, different questions.
+//!
+//! ## Near-miss cross-reference
+//! When a provide here is ALSO the chosen near-miss target of an unmatched `cross-layer/route-near-miss`
+//! consume (`near_miss_targets`, sourced from `route_near_miss::route_near_miss_results`), the message gains
+//! a cross-reference note: dogfood round 8 found this to be the common case, not the exception — a
+//! disconnected FE/BE pair with a drifted base prefix produces one `unconsumed-endpoint` finding PER route
+//! plus one `route-near-miss` finding per drifted consume, describing the same underlying drift from two
+//! sides without ever pointing at each other.
+
+use std::collections::BTreeMap;
 
 use zzop_core::io::{TaggedConsume, TaggedProvide};
 use zzop_core::{disable_hint, Finding, Severity};
 
+use super::route_near_miss::NearMissTargetRef;
+
 pub fn unconsumed_endpoint_findings(
     unconsumed_provides: &[TaggedProvide],
     unresolved_consumes: &[TaggedConsume],
+    near_miss_targets: &BTreeMap<(String, String, u32), NearMissTargetRef>,
 ) -> Vec<Finding> {
     let unresolved_http = unresolved_consumes
         .iter()
@@ -24,28 +37,49 @@ pub fn unconsumed_endpoint_findings(
         .filter(|p| p.provide.kind == "http" && !zzop_core::is_test_file(&p.provide.file))
         .map(|p| {
             let key = &p.provide.key;
+            let near_miss = near_miss_targets.get(&(
+                p.source.clone(),
+                p.provide.file.clone(),
+                p.provide.line,
+            ));
+            let near_miss_note = if let Some(t) = near_miss {
+                format!(
+                    " However, {} unmatched http consume(s) in this run name this route as their closest \
+                     near-miss candidate (see the `cross-layer/route-near-miss` finding at {}:{}) — the route \
+                     may actually be called through a drifted or base-relative path rather than being dead.",
+                    t.count, t.consume_file, t.consume_line
+                )
+            } else {
+                String::new()
+            };
             let message = format!(
                 "endpoint `{key}` (source `{}`) is not called by any source in this analysis. This may be \
                  genuinely dead route code, or it may be consumed by a caller this analysis cannot see — a \
                  repo not included in this `analyzeTrees` run, a mobile/native/third-party client, or one of \
                  the {unresolved_http} unresolved dynamic-URL http consume(s) this run could not statically \
                  match to a key (see `crossLayer.unresolvedConsumes`). Confirm with real traffic/access logs before \
-                 removing the route. {} if provider-only endpoints (webhook targets, health probes, \
+                 removing the route.{near_miss_note} {} if provider-only endpoints (webhook targets, health probes, \
                  endpoints consumed only outside this analysis) are expected in your stack.",
                 p.source,
                 disable_hint("cross-layer/unconsumed-endpoint")
             );
+            let mut data = serde_json::json!({
+                "key": key,
+                "source": p.source,
+                "unresolvedHttpConsumeCount": unresolved_http,
+            });
+            if let Some(t) = near_miss {
+                data["nearMissConsumeCount"] = serde_json::json!(t.count);
+                data["nearMissConsumeExample"] =
+                    serde_json::json!(format!("{}:{}", t.consume_file, t.consume_line));
+            }
             Finding {
                 rule_id: "cross-layer/unconsumed-endpoint".to_string(),
                 severity: Severity::Info,
                 file: p.provide.file.clone(),
                 line: p.provide.line,
                 message,
-                data: Some(serde_json::json!({
-                    "key": key,
-                    "source": p.source,
-                    "unresolvedHttpConsumeCount": unresolved_http,
-                })),
+                data: Some(data),
             }
         })
         .collect();
@@ -97,9 +131,17 @@ mod tests {
         }
     }
 
+    fn no_near_miss() -> BTreeMap<(String, String, u32), NearMissTargetRef> {
+        BTreeMap::new()
+    }
+
     #[test]
     fn dead_http_provide_is_flagged_with_source_and_anchor() {
-        let out = unconsumed_endpoint_findings(&[dead("GET /orphan", "be", "Api.java", 12)], &[]);
+        let out = unconsumed_endpoint_findings(
+            &[dead("GET /orphan", "be", "Api.java", 12)],
+            &[],
+            &no_near_miss(),
+        );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].rule_id, "cross-layer/unconsumed-endpoint");
         assert_eq!(out[0].severity, Severity::Info);
@@ -108,6 +150,7 @@ mod tests {
         assert!(out[0].message.contains("GET /orphan"));
         assert!(out[0].message.contains("source `be`"));
         assert!(out[0].message.contains("disabled_rules"));
+        assert!(!out[0].message.contains("near-miss"));
     }
 
     #[test]
@@ -120,6 +163,7 @@ mod tests {
                 125,
             )],
             &[],
+            &no_near_miss(),
         );
         assert!(out.is_empty());
     }
@@ -129,13 +173,14 @@ mod tests {
         let out = unconsumed_endpoint_findings(
             &[dead_kind("db-table", "table:users", "db", "schema.sql", 1)],
             &[],
+            &no_near_miss(),
         );
         assert!(out.is_empty());
     }
 
     #[test]
     fn no_unconsumed_provides_is_empty() {
-        assert!(unconsumed_endpoint_findings(&[], &[]).is_empty());
+        assert!(unconsumed_endpoint_findings(&[], &[], &no_near_miss()).is_empty());
     }
 
     #[test]
@@ -147,6 +192,7 @@ mod tests {
                 unresolved("http", "fe"),
                 unresolved("queue", "fe"), // not http — must not inflate the count
             ],
+            &no_near_miss(),
         );
         assert_eq!(out.len(), 1);
         assert!(out[0].message.contains("2 unresolved"));
@@ -161,8 +207,52 @@ mod tests {
                 dead("GET /c", "be", "a.java", 2),
             ],
             &[],
+            &no_near_miss(),
         );
         let sites: Vec<(&str, u32)> = out.iter().map(|f| (f.file.as_str(), f.line)).collect();
         assert_eq!(sites, vec![("a.java", 2), ("a.java", 9), ("z.java", 1)]);
+    }
+
+    #[test]
+    fn near_miss_cross_reference_note_fires_when_the_provide_is_a_near_miss_target() {
+        let mut targets = BTreeMap::new();
+        targets.insert(
+            ("be".to_string(), "Api.java".to_string(), 12),
+            NearMissTargetRef {
+                consume_file: "Api.tsx".to_string(),
+                consume_line: 7,
+                count: 3,
+            },
+        );
+        let out = unconsumed_endpoint_findings(
+            &[dead("GET /orphan", "be", "Api.java", 12)],
+            &[],
+            &targets,
+        );
+        assert_eq!(out.len(), 1);
+        assert!(out[0].message.contains("3 unmatched http consume(s)"));
+        assert!(out[0]
+            .message
+            .contains("cross-layer/route-near-miss` finding at Api.tsx:7"));
+        let data = out[0].data.as_ref().unwrap();
+        assert_eq!(data["nearMissConsumeCount"], 3);
+        assert_eq!(data["nearMissConsumeExample"], "Api.tsx:7");
+    }
+
+    #[test]
+    fn near_miss_cross_reference_note_is_absent_when_the_provide_is_not_a_near_miss_target() {
+        let out = unconsumed_endpoint_findings(
+            &[dead("GET /orphan", "be", "Api.java", 12)],
+            &[],
+            &no_near_miss(),
+        );
+        assert_eq!(out.len(), 1);
+        assert!(!out[0].message.contains("near-miss"));
+        assert!(out[0]
+            .data
+            .as_ref()
+            .unwrap()
+            .get("nearMissConsumeCount")
+            .is_none());
     }
 }

@@ -18,7 +18,7 @@ fn main() {
         std::process::exit(2);
     }
 
-    let trees: Vec<(PathBuf, EngineConfig)> = roots
+    let mut trees: Vec<(PathBuf, EngineConfig)> = roots
         .iter()
         .map(|root| {
             let source_id = root
@@ -34,6 +34,36 @@ fn main() {
             )
         })
         .collect();
+
+    // ZZOP_OVERLAYS="sourceId=path.json;sourceId2=path2.json": load a Mode B adapter-overlay envelope
+    // onto the matching tree's `EngineConfig::adapter_overlays`, for before/after measurement of an
+    // out-of-tree adapter (e.g. examples/react-query-adapter) without wiring a dedicated harness per
+    // adapter. This is measurement tooling, not a production path — a bad entry fails loud (exit 2)
+    // rather than silently running the "before" numbers under an "after" label.
+    if let Ok(spec) = std::env::var("ZZOP_OVERLAYS") {
+        for entry in spec.split(';').filter(|s| !s.is_empty()) {
+            let Some((source_id, path)) = entry.split_once('=') else {
+                eprintln!("ZZOP_OVERLAYS: malformed entry {entry:?} (want sourceId=path.json)");
+                std::process::exit(2);
+            };
+            let Some((_, cfg)) = trees.iter_mut().find(|(_, c)| c.source_id == source_id) else {
+                eprintln!(
+                    "ZZOP_OVERLAYS: unknown sourceId {source_id:?} (no tree with that source_id)"
+                );
+                std::process::exit(2);
+            };
+            let text = std::fs::read_to_string(path).unwrap_or_else(|e| {
+                eprintln!("ZZOP_OVERLAYS: cannot read {path:?}: {e}");
+                std::process::exit(2);
+            });
+            let envelope: zzop_core::NormalizedEnvelope = serde_json::from_str(&text)
+                .unwrap_or_else(|e| {
+                    eprintln!("ZZOP_OVERLAYS: cannot parse {path:?} as NormalizedEnvelope: {e}");
+                    std::process::exit(2);
+                });
+            cfg.adapter_overlays.push(envelope);
+        }
+    }
 
     let out = analyze_trees(&trees);
 
@@ -55,6 +85,53 @@ fn main() {
         cl.external_consumes.len(),
         cl.ambiguous_consumes.len()
     );
+
+    // ZZOP_DUMP_BUCKETS=1: print every entry of the non-edge buckets (file:line + key/raw), for
+    // classifying WHICH call sites landed where during corpus measurement. Off by default.
+    if std::env::var("ZZOP_DUMP_BUCKETS").is_ok_and(|v| v == "1") {
+        // Coverage/self-report findings live in the PER-TREE findings, not crossLayerFindings —
+        // dump them too so a "both trees blind, zero cross findings" run shows whether the
+        // honesty channels fired at all.
+        for (_, source, tree_out) in &out.trees {
+            for w in &tree_out.warnings {
+                println!("bucket tree-warning ({source}): {w}");
+            }
+            for f in tree_out
+                .findings
+                .iter()
+                .filter(|f| f.rule_id.starts_with("coverage") || f.rule_id.contains("unresolved"))
+            {
+                println!(
+                    "bucket tree-coverage ({source}): {} @ {}:{}",
+                    f.rule_id, f.file, f.line
+                );
+            }
+        }
+        for e in &cl.edges {
+            println!(
+                "bucket edges: {} {}:{} ({}) -> {}:{} ({})",
+                e.key, e.from.file, e.from.line, e.from.source, e.to.file, e.to.line, e.to.source
+            );
+        }
+        for (name, consumes) in [
+            ("unprovidedConsumes", &cl.unprovided_consumes),
+            ("unresolvedConsumes", &cl.unresolved_consumes),
+            ("externalConsumes", &cl.external_consumes),
+        ] {
+            for c in consumes {
+                println!(
+                    "bucket {name}: {}:{} key={:?} raw={:?} (source {})",
+                    c.consume.file, c.consume.line, c.consume.key, c.consume.raw, c.source
+                );
+            }
+        }
+        for p in &cl.unconsumed_provides {
+            println!(
+                "bucket unconsumedProvides: {}:{} key={} (source {})",
+                p.provide.file, p.provide.line, p.provide.key, p.source
+            );
+        }
+    }
 
     let mut by_rule: BTreeMap<&str, Vec<&zzop_core::Finding>> = BTreeMap::new();
     for f in &out.cross_layer_findings {

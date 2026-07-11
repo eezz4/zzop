@@ -407,6 +407,149 @@ fn git_and_packs_both_set_produces_no_capability_notes() {
     );
 }
 
+/// Builds a real git repo with one commit whose subject only a custom (non-English) commit-type pattern
+/// would classify — the default English FIX/FEAT/... table would leave it untagged entirely.
+fn git_fixture_repo_with_a_french_fix_commit() -> TempDir {
+    let dir = TempDir::new("zzop-engine-custom-commit-type-fixture");
+    run_git(dir.path(), &["init", "-q"]);
+    run_git(dir.path(), &["config", "user.email", "test@example.com"]);
+    run_git(dir.path(), &["config", "user.name", "Test User"]);
+
+    fs::write(
+        dir.path().join("a.ts"),
+        "export function a() { return 1; }\n",
+    )
+    .unwrap();
+    run_git(dir.path(), &["add", "a.ts"]);
+    run_git(
+        dir.path(),
+        &["commit", "-q", "-m", "corrige le bug de fuseau horaire"],
+    );
+
+    dir
+}
+
+#[test]
+fn custom_commit_type_patterns_replace_the_default_table_end_to_end() {
+    if !git_available() {
+        eprintln!("skipping custom_commit_type_patterns_replace_the_default_table_end_to_end: git not on PATH");
+        return;
+    }
+    let dir = git_fixture_repo_with_a_french_fix_commit();
+    let cfg = EngineConfig {
+        source_id: "fixture".to_string(),
+        git: Some(GitOptions {
+            commit_type_patterns: Some(vec![(r"^\s*corrige\b".to_string(), "FIX".to_string())]),
+            ..GitOptions::default()
+        }),
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &cfg);
+    let a = out
+        .nodes
+        .iter()
+        .find(|n| n.path == "a.ts")
+        .expect("expected a node for a.ts");
+    assert_eq!(
+        a.tag_counts.get("FIX").copied(),
+        Some(1),
+        "custom pattern should classify the French commit as FIX: {:?}",
+        a.tag_counts
+    );
+
+    // Sanity: the default (English-only) table would NOT classify this commit at all, proving the custom
+    // table really replaced it rather than merely adding to it.
+    let default_cfg = EngineConfig {
+        source_id: "fixture".to_string(),
+        ..config_with_git()
+    };
+    let default_out = analyze_tree(dir.path(), &default_cfg);
+    let default_a = default_out
+        .nodes
+        .iter()
+        .find(|n| n.path == "a.ts")
+        .expect("expected a node for a.ts");
+    assert!(
+        default_a.tag_counts.is_empty(),
+        "expected the default English table to leave the French commit untagged: {:?}",
+        default_a.tag_counts
+    );
+}
+
+#[test]
+fn empty_custom_commit_type_patterns_falls_back_to_the_default_table() {
+    if !git_available() {
+        eprintln!("skipping empty_custom_commit_type_patterns_falls_back_to_the_default_table: git not on PATH");
+        return;
+    }
+    // A conventional-commits subject with NO bracket tag: only the default keyword table can classify
+    // it, so this fixture actually pins the empty-vec -> default-table fallback (a bracket-tagged
+    // fixture would classify via the bracket grammar regardless and mask a broken fallback).
+    let dir = TempDir::new("zzop-engine-empty-commit-type-fixture");
+    run_git(dir.path(), &["init", "-q"]);
+    run_git(dir.path(), &["config", "user.email", "test@example.com"]);
+    run_git(dir.path(), &["config", "user.name", "Test User"]);
+    fs::write(
+        dir.path().join("a.ts"),
+        "export function a() { return 1; }\n",
+    )
+    .unwrap();
+    run_git(dir.path(), &["add", "a.ts"]);
+    run_git(
+        dir.path(),
+        &["commit", "-q", "-m", "fix: correct the timezone bug"],
+    );
+
+    let cfg = EngineConfig {
+        source_id: "fixture".to_string(),
+        git: Some(GitOptions {
+            commit_type_patterns: Some(Vec::new()),
+            ..GitOptions::default()
+        }),
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &cfg);
+    let a = out
+        .nodes
+        .iter()
+        .find(|n| n.path == "a.ts")
+        .expect("expected a node for a.ts");
+    assert_eq!(
+        a.tag_counts.get("FIX").copied(),
+        Some(1),
+        "an empty custom table must fall back to the default keyword table: {:?}",
+        a.tag_counts
+    );
+}
+
+#[test]
+fn invalid_custom_commit_type_pattern_is_skipped_with_a_warning_not_a_panic() {
+    if !git_available() {
+        eprintln!("skipping invalid_custom_commit_type_pattern_is_skipped_with_a_warning_not_a_panic: git not on PATH");
+        return;
+    }
+    let dir = git_fixture_repo();
+    let cfg = EngineConfig {
+        source_id: "fixture".to_string(),
+        git: Some(GitOptions {
+            // An unbalanced character class — fails to compile as a regex.
+            commit_type_patterns: Some(vec![("[unclosed".to_string(), "FIX".to_string())]),
+            ..GitOptions::default()
+        }),
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &cfg);
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains("git.commitTypePatterns") && w.contains("[unclosed")),
+        "expected an invalid-pattern warning naming git.commitTypePatterns and the bad pattern: {:?}",
+        out.warnings
+    );
+    // Never panics: the run completes and still has nodes for the fixture's files.
+    assert!(out.nodes.iter().any(|n| n.path == "a.ts"));
+}
+
 #[test]
 fn git_enabled_on_a_non_git_root_degrades_to_a_warning_without_panicking() {
     let dir = TempDir::new("zzop-engine-not-a-repo-fixture");

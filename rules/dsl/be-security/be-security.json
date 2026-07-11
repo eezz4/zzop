@@ -462,6 +462,214 @@
         "exclude_pattern": "(?i)(://[^\\s\"'@]*(\\$\\{|\\{\\{|<|process\\.env)[^\\s\"'@]*@|:[^@\\s\"'/]*(passwd|pwd|changeme|example|dummy|sample|placeholder|mock|fake)[^@\\s\"'/]*@|:(password|pass|secret|test|user|username|x+|\\*+)@|:(postgres(ql)?|mysql|mongo(db)?|redis|maria(db)?|mssql|oracle|rabbitmq|guest|root|admin)[0-9]*@|@(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|::1)([:/\\s\"'`]|$))",
         "snippet_max": 160
       }
+    },
+    {
+      "id": "private-key-committed",
+      "severity": "critical",
+      "message": "A PEM-format private key (`-----BEGIN ... PRIVATE KEY-----`) is committed to source — the PEM header is unambiguous, so unlike a heuristic secret-shaped literal there's no plausible non-key reading of this text. The moment this repo is shared (a fork, a clone, a public push) the key is compromised, and git history keeps it even after the file is later removed. Rotate the key immediately and move it to a secret store (a vault, KMS, or CI secret) instead — an actual PEM header sitting in a test fixture is still a committed key, so this rule scans test paths too, not just application code. Suppress a vetted case (e.g. a throwaway key generated only for a test, never used against a real service) with `// private-key-ok`.",
+      "suppress_marker": "private-key-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|json|ya?ml|env|pem)$",
+        "skip_comment_lines": true,
+        "line_pattern": "-----BEGIN\\s+(RSA\\s+|EC\\s+|DSA\\s+|OPENSSH\\s+|ENCRYPTED\\s+|PGP\\s+)?PRIVATE\\s+KEY-----",
+        "exclude_pattern": "\\$\\{|\\{\\{",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "vendor-token-committed",
+      "severity": "critical",
+      "message": "A live-mode vendor credential appears in its recognized production-token format — Stripe `sk_live_`/`rk_live_`, a GitHub `ghp_`/`gho_` personal access token, a Slack `xox[bpars]-` token, or a Google API key (`AIza...`). Format alone identifies these as production secrets, and a committed credential is a leaked credential the instant the repo is shared, regardless of later git-history cleanup. Deliberately NOT matched: Stripe `sk_test_...` — a test-mode key is not a production credential, so flagging it would be noise, not signal. Rotate the credential through the vendor's own key-rotation/revocation flow immediately, then move the replacement into env/secret storage. Suppress a vetted case with `// vendor-token-ok`.",
+      "suppress_marker": "vendor-token-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|json|ya?ml|env|pem)$",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "\\bsk_live_[A-Za-z0-9]{10,}\\b", "label": "stripe-live" },
+          { "pattern": "\\brk_live_[A-Za-z0-9]{10,}\\b", "label": "stripe-live" },
+          { "pattern": "\\bghp_[A-Za-z0-9]{36}\\b", "label": "github-pat" },
+          { "pattern": "\\bgho_[A-Za-z0-9]{36}\\b", "label": "github-pat" },
+          { "pattern": "\\bxox[bpars]-[A-Za-z0-9-]{10,}\\b", "label": "slack" },
+          { "pattern": "\\bAIza[0-9A-Za-z_\\-]{35}\\b", "label": "google-api" }
+        ],
+        "exclude_pattern": "\\$\\{|\\{\\{|process\\.env",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "jwt-none-algorithm",
+      "severity": "critical",
+      "message": "`algorithm(s): 'none'` appears in a JWT-related file — `alg: none` turns signature verification off entirely, so a caller can mint an arbitrary token that validates with any payload it wants. There is no legitimate production use of this algorithm. Remove `none` from the allowed/signing algorithm list and use a real algorithm (`HS256`/`RS256`/...), pinning `algorithms` explicitly on the verifying side too so a future token can't downgrade itself. Suppress a vetted case (e.g. a local test harness that intentionally exercises the none-alg attack) with `// jwt-none-ok`.",
+      "suppress_marker": "jwt-none-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "(?i)jwt|jose|jsonwebtoken",
+        "skip_comment_lines": true,
+        "line_pattern": "(?i)algorithms?\\s*:\\s*\\[?\\s*['\"]none['\"]",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "shell-exec-interpolation",
+      "severity": "critical",
+      "message": "A dynamic segment (a template-literal `${...}` or a string-concatenation `+`) is spliced directly into `exec`/`execSync`'s shell-command-string argument — the shell interprets that whole string, so any dynamic part reaching it is command injection, whether or not this rule can prove it's request-derived (see boundary note below). Use `execFile`/`spawn` with an argv array instead — arguments passed as separate array elements are never shell-interpreted, which is exactly why this rule does not fire on `execFile`/`spawn` calls. Matched shapes are child_process-scoped: a bare/destructured `exec(...)`/`execSync(...)` call, or a `child_process.`/`childProcess.`/`cp.` member call, in a file that mentions `child_process` at all — a RegExp's own `pattern.exec(...)` (or any other dotted receiver) does not fire. Boundary: `security/taint-flow` also flags `exec`/`execSync` as a sink, but only when a request-derived source co-occurs in the same `.ts`/`.tsx` function; this rule needs no source, fires on the interpolation shape alone, and also covers plain `.js` files — treat the two as complementary, not redundant. Suppress a vetted case with `// shell-exec-ok`.",
+      "suppress_marker": "shell-exec-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "child_process",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "(?:(?:^|[^.\\w$])exec(?:Sync)?|\\b(?:child_process|childProcess|cp)\\.exec(?:Sync)?)\\s*\\(\\s*`[^`]*\\$\\{", "label": "template-interpolation" },
+          { "pattern": "(?:(?:^|[^.\\w$])exec(?:Sync)?|\\b(?:child_process|childProcess|cp)\\.exec(?:Sync)?)\\s*\\(\\s*['\"][^'\"]*['\"]\\s*\\+", "label": "string-concat" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "jwt-sign-literal-secret",
+      "severity": "critical",
+      "message": "`jwt.sign(payload, \"...\")` is called with a positional string-literal signing secret — anyone who reads this line can forge a validly-signed token for any payload they want. This is a distinct shape from `hardcoded-secret`: that rule's `assignment` pattern needs a `key: value`/`key = value` shape, so a positional literal passed straight as `jwt.sign`'s second argument is uncovered by it — this rule closes that gap. Move the signing secret into an environment variable or secrets manager, and rotate the exposed key (it's already leaked via git history and any forks/clones that pulled it). Suppress a vetted case with `// jwt-secret-ok`.",
+      "suppress_marker": "jwt-secret-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "skip_comment_lines": true,
+        "line_pattern": "jwt\\.sign\\s*\\(.*,\\s*['\"][A-Za-z0-9+/_\\-]{8,}['\"]\\s*[,)]",
+        "exclude_pattern": "\\$\\{|\\{\\{|process\\.env|(?i:(^|[-_\"'`])(mock|test|fake|dummy|sample|placeholder|example|wrong|invalid|valid)([-_\"'`]|\\d|(?-i:[A-Z])|$))|[\"'][A-Z][A-Z0-9]*(_[A-Z0-9]+)+[\"']|[\"'][a-z]+(_[a-z]+)+[\"']|[\"'][a-z]+(-[a-z]+)+[\"']|[\"'][A-Z][a-z]+(?:[A-Z][a-z]+)+[\"']",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "jwt-verify-bypass",
+      "severity": "warning",
+      "message": "`ignoreExpiration: true` or `verify: false` appears in a file that imports a JWT library (`jsonwebtoken`/`jose`/a `jwt` specifier) — either option turns off a check `jwt.verify` exists to perform: `ignoreExpiration: true` accepts an expired token, `verify: false` accepts one with no signature check at all (an outright auth bypass). The require-file gate on a JWT-library import is load-bearing here: bare `verify: false` also appears in plenty of unrelated configs (bundlers, linters, ...), and without the gate this rule would fire on those too. Remove the option (or set it to the safe default) so `jwt.verify` performs its normal checks. Suppress a vetted case with `// jwt-verify-ok`.",
+      "suppress_marker": "jwt-verify-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "(?i)jsonwebtoken|jose|jwt",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "ignoreExpiration\\s*:\\s*true", "label": "ignore-expiration" },
+          { "pattern": "verify\\s*:\\s*false", "label": "verify-disabled" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "sendfile-from-request",
+      "severity": "warning",
+      "message": "`sendFile`/`download` is called with a `req.params`/`req.query`/`req.body`-derived path — the sibling `path-traversal` rule catches `fs`/`path.join` reads built from request input in the same shape, but does not cover Express's file-serving APIs (`res.sendFile`/`res.download`) directly, so this rule fills that gap. An unvalidated `..` segment lets an attacker read arbitrary files off disk via path traversal. Reject `..` segments, or resolve the path and confirm it stays under the intended base directory, before passing it in. v1 is kept honest rather than clever: a same-line `path.basename(...)` call vetoes the finding by simple textual co-presence, not by proving it actually wraps the request-derived argument — a real sanitizer elsewhere in the function is not detected. Suppress a vetted case with `// sendfile-ok`.",
+      "suppress_marker": "sendfile-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "line_pattern": "\\b(?:sendFile|download)\\s*\\(\\s*[^)]*\\breq\\.(?:params|query|body)",
+        "exclude_pattern": "path\\.basename\\s*\\(",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "cors-reflected-origin-credentials",
+      "severity": "warning",
+      "message": "`credentials: true` co-occurs on one line with `origin: true` (cors()'s reflect-any-origin mode) or `origin: req.headers...` (manually echoing the request's Origin header) — either shape treats any origin as trusted while allowing cookies/credentials, which is the actual exploitable CORS misconfiguration (unlike a literal `'*'`, which browsers reject alongside credentials). Sibling boundary: `cors-wildcard`/`cors-credentials-wildcard` cover the literal `'*'` shape; this rule covers the REFLECTION shape those two miss. Return a specific allow-listed origin instead of reflecting the request's origin. Known limitation, not desired behavior: this is a single-line co-occurrence check, so a multi-line CORS options object (each key on its own line) is missed — see the pinned fixture documenting this gap. Suppress a vetted case with `// cors-reflect-ok`.",
+      "suppress_marker": "cors-reflect-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "credentials\\s*:\\s*true.*origin\\s*:\\s*(?:true\\b|req\\.headers)", "label": "credentials-then-origin" },
+          { "pattern": "origin\\s*:\\s*(?:true\\b|req\\.headers).*credentials\\s*:\\s*true", "label": "origin-then-credentials" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "template-unescaped-output",
+      "severity": "warning",
+      "message": "This line uses a template-engine syntax that emits UNescaped HTML: EJS `<%- %>`, Handlebars `{{{ }}}` triple-stache, or Mustache `{{& }}` — if any interpolated value is user-influenced, this is reflected/stored server-side XSS. Use the escaped output form instead (EJS `<%= %>`, Handlebars/Mustache `{{ }}`), or route the value through a vetted sanitizer when intentional raw HTML is actually required. Sibling boundary: `browser/unsafe-html-sink` catches the client-side DOM-sink half of this class (`innerHTML` assignment in browser code); this rule catches the server-side template-engine half that produces the HTML in the first place — complementary, not overlapping. Scoped to template file extensions only (`.ejs`/`.hbs`/`.handlebars`/`.mustache`/`.njk`/`.nunjucks`), since these tokens only mean \"unescaped output\" inside a template file. (Pug's buffered `!= expr` form is deliberately NOT covered: it is lexically indistinguishable from Pug/Nunjucks's loose-inequality operator `!=`, so flagging it would false-fire on every `a != b` conditional — a never-guess omission, not an oversight.) Suppress a vetted case with `// template-unescaped-ok` — but note `//` is not a comment in EJS/Handlebars/Mustache/Nunjucks, so an inline marker there renders as literal page output; prefer disabling the rule via config (`rules: { \"be-security/template-unescaped-output\": \"off\" }`) for template files where inline suppression isn't clean.",
+      "suppress_marker": "template-unescaped-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ejs|hbs|handlebars|mustache|njk|nunjucks)$",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "<%-\\s*[^%]", "label": "ejs-raw" },
+          { "pattern": "\\{\\{\\{\\s*[^}]", "label": "handlebars-triple" },
+          { "pattern": "\\{\\{&\\s*[^}]", "label": "mustache-amp" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "html-response-from-request",
+      "severity": "warning",
+      "message": "A `res.send`/`res.write`/`res.end` call co-occurs with request input (`req.query`/`req.params`/`req.body`/`req.headers`) AND an HTML-shaped marker (a literal opening tag like `<div>`/`<html>`, or a `Content-Type: text/html` header) in the same function, with no sanitizer call anywhere in it — this is a co-occurrence heuristic, not a proof that the request value actually reaches the HTML output (same honesty as `be-reliability/multi-write-no-tx`'s documented approximation): it flags the shape, not a traced data flow. Escape/sanitize request-derived values before splicing them into HTML, set an explicit `application/json` content type for pure API responses, or use a template engine with auto-escaping instead of building markup by hand. Sibling boundary: `security/taint-flow` also does source+sink co-occurrence for `.ts`/`.tsx`, but its sink list does not include `res.send`/`res.write`/`res.end` — this rule covers exactly the class taint-flow misses, and also runs on plain `.js`/`.cjs`/`.mjs` files taint-flow doesn't scan. Suppress a vetted case with `// html-response-ok`.",
+      "suppress_marker": "html-response-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\bres\\.(?:send|write|end)\\s*\\(", "label": "html-send" },
+          { "pattern": "\\b(?:req\\.(?:query|params|body|headers)|request\\.(?:query|params|body))\\b", "label": "req-input" },
+          { "pattern": "(['\"`]\\s*<(?:!doctype|html|div|span|p|a|script|body|table|h[1-6])\\b)|(?i:content-type.*text/html)", "label": "html-marker" }
+        ],
+        "trigger": "html-send",
+        "absent": [
+          { "pattern": "\\b(?:escape|sanitize|encodeURI|escapeHtml|DOMPurify|xss)\\b", "label": "sanitizer" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "dangerous-html-concat",
+      "severity": "warning",
+      "message": "A string literal that opens or closes an HTML tag (`\"<div>\"`, `\"</span>\"`, ...) is concatenated with a non-literal (`+ someVar` / `someVar +`) in a file that also mentions a `res`/`response`/content-type-`text/html` server-response context — building HTML by concatenating a variable into tag markup is an injection sink if that variable is user-influenced. Use a template engine with auto-escaping, or a sanitizer, instead of hand-assembling markup. Kept `warning` and deployed-surface-excluded because this is shape-only and FP-prone (logging strings, test fixtures, non-response string building all read the same way to a regex) — the `require_file` gate on a response/content-type mention is there specifically to bias this toward real server-response context rather than firing on every HTML-shaped concatenation in the repo. Sibling boundary: `html-response-from-request` needs the request-input+HTML-marker co-occurrence inside one function; this rule needs neither — it fires on the concatenation shape alone, so treat the two as complementary. Suppress a vetted case with `// html-concat-ok`.",
+      "suppress_marker": "html-concat-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "(?i)(res\\.|response\\.|content-type|text/html)",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "['\"`]<[a-zA-Z][^'\"`]*['\"`]\\s*\\+\\s*[A-Za-z_$]", "label": "open-tag-concat" },
+          { "pattern": "[A-Za-z0-9_$\\]\\)]\\s*\\+\\s*['\"`][^'\"`]*<[^'\"`]*>['\"`]", "label": "close-tag-concat" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "csp-disabled",
+      "severity": "warning",
+      "message": "Content-Security-Policy is explicitly turned off or weakened: Helmet's `contentSecurityPolicy: false`, a `Content-Security-Policy` header value containing `unsafe-inline`, or a `default-src` directive containing a wildcard `*` — CSP is the browser's last line of defense against XSS once a payload has already been injected, so disabling/weakening it removes a mitigation that has nothing to do with whether the injection itself is possible. Keep a restrictive policy: enable Helmet's default CSP (or a hand-configured one) instead of `false`, drop `unsafe-inline` in favor of nonces/hashes, and scope `default-src`/`script-src` to specific allow-listed origins instead of `*`. Kept at `warning` because this is a mitigation-ABSENCE rule (defense-in-depth), not proof of an exploitable injection by itself. Suppress a vetted case with `// csp-disabled-ok`.",
+      "suppress_marker": "csp-disabled-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "(?i)helmet|content-security-policy|contentSecurityPolicy",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "contentSecurityPolicy\\s*:\\s*false", "label": "helmet-csp-false" },
+          { "pattern": "(?i)content-security-policy['\"]?\\s*[:,].*unsafe-inline", "label": "csp-unsafe-inline" },
+          { "pattern": "(?i)default-src[^'\"]*\\*", "label": "csp-wildcard" }
+        ],
+        "snippet_max": 160
+      }
     }
   ]
 }

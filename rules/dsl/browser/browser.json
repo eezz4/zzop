@@ -33,6 +33,130 @@
         "line_pattern": "(?:^|[^.\\w$])document\\.(?:write|writeln)\\s*\\(",
         "snippet_max": 160
       }
+    },
+    {
+      "id": "postmessage-wildcard",
+      "severity": "warning",
+      "message": "A `postMessage(..., '*')` call sends the payload to whatever origin currently holds the window at delivery time — an opener swap, an embedding iframe/parent change, or a same-window navigation to a different origin all qualify, so a `'*'` targetOrigin does not authenticate the recipient and can leak the payload to an attacker-controlled origin. Pass the exact intended origin (a literal `https://...` string, or a validated same-origin check) instead of `'*'`. Suppress a vetted case (e.g. a genuinely non-sensitive broadcast payload) with `// postmessage-target-ok`.",
+      "suppress_marker": "postmessage-target-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "postMessage\\s*\\(",
+        "skip_comment_lines": true,
+        "line_pattern": "postMessage\\s*\\([^)]*,\\s*['\"]\\*['\"]",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "unsafe-html-sink",
+      "severity": "warning",
+      "message": "A `.innerHTML`/`.outerHTML` assignment, `insertAdjacentHTML(...)` call, or JSX `dangerouslySetInnerHTML` prop whose value is not a plain no-interpolation string literal — this is the classic DOM XSS sink: whatever ends up in that string is parsed and executed as HTML/script by the browser. Use `textContent` for plain text, or a vetted HTML-sanitizer library (e.g. DOMPurify) if HTML must genuinely be inserted — never assign unsanitized dynamic content into an HTML sink. Note: `security/taint-flow` already covers these same sinks, but only when a request-derived source (body/query/params/headers) co-occurs in the SAME function, and only in `.ts`/`.tsx` files; this rule needs no such source — component props/state passed down through the tree are the far more common XSS carrier in FE code — and it also covers `.js`/`.jsx`. Suppress a vetted case (value is provably sanitized upstream) with `// unsafe-html-ok`.",
+      "suppress_marker": "unsafe-html-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "innerHTML|outerHTML|insertAdjacentHTML|dangerouslySetInnerHTML",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "\\.(?:innerHTML|outerHTML)\\s*[+]?=\\s*[^\\s'\"`=]", "label": "innerhtml-assign" },
+          { "pattern": "\\.(?:innerHTML|outerHTML)\\s*[+]?=\\s*`[^`]*\\$\\{", "label": "innerhtml-template" },
+          { "pattern": "\\binsertAdjacentHTML\\s*\\(\\s*['\"][^'\"]+['\"]\\s*,\\s*[^'\"`)\\s]", "label": "insert-adjacent" },
+          { "pattern": "\\bdangerouslySetInnerHTML\\s*=\\s*\\{\\{\\s*__html\\s*:\\s*[^'\"`}\\s]", "label": "dangerously-set" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "javascript-url",
+      "severity": "warning",
+      "message": "A `javascript:` scheme URL executes arbitrary script the moment the link is clicked or the resource is loaded — the browser treats everything after the scheme as code, not a navigation target. Never construct a link/image/script target from a `javascript:` scheme; if the target must be dynamic, validate the scheme against an http(s) allowlist before using it. Note most bundlers/linters miss this. Scope limit: this rule only catches the LITERAL `javascript:` form written directly in source (`href=\"javascript:...\"`, `.href = 'javascript:...'`, `setAttribute('href', 'javascript:...')`); a dynamic `href={someUrl}`/`.href = someUrl` whose value only turns out to be a `javascript:` URL at runtime is a different, harder taint-tracking class this rule does not attempt — see `location-assign-dynamic` for the closest DSL approximation of a dynamic-value sink. Suppress a vetted case with `// javascript-url-ok`.",
+      "suppress_marker": "javascript-url-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "(?i)javascript:",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "(?i)(?:^|[^.\\w])(?:href|src)\\s*=\\s*['\"]javascript:", "label": "jsx-href-literal" },
+          { "pattern": "(?i)\\.(?:href|src)\\s*=\\s*['\"]javascript:", "label": "href-assign" },
+          { "pattern": "(?i)setAttribute\\s*\\(\\s*['\"](?:href|src|xlink:href)['\"]\\s*,\\s*['\"]javascript:", "label": "setattr-js" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "location-assign-dynamic",
+      "severity": "warning",
+      "message": "A navigation sink (`location`/`location.href` assignment, or `location.assign(...)`/`location.replace(...)`) whose value is not a plain literal — an open-redirect or DOM-XSS surface if that value is influenced by the URL, a query param, or any other untrusted input, since the browser will navigate to (or in some cases parse-and-execute) whatever string ends up there. Validate the target against an allowlist (a known set of paths, or a same-origin check) before navigating. Boundary note: `be-security/open-redirect` covers the SERVER-side sink (`res.redirect(req.*)`); this rule covers the CLIENT-side navigation sink instead — the two never overlap. A literal URL string (`location.href = '/login'`, `location.href = \"https://x.com\"`) stays silent, as does a bare `const location = ...` declaration (e.g. React Router's `useLocation()` result). A `base + '/path'` concat where a string path-literal (`+ '/...'`) is appended is also vetoed: prepending a base pins the origin/path, so the trailing dynamic segment is a path component, not a scheme/origin sink (the common `getBaseUrl() + '/admin/' + filename` idiom) — but a query-suffix concat (`base + '?next=' + q`) or a bare dynamic value (`location.href = returnUrl`) still fires, since neither pins the destination. Also receiver-aware like `no-document-write`: only the bare global `location`/`window.location` is flagged, so an arbitrary domain object's own `.location` field (`user.location = ...`, `job.location.assign(...)`) is never matched. Suppress a vetted case with `// location-assign-ok`.",
+      "suppress_marker": "location-assign-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "\\blocation\\b",
+        "skip_comment_lines": true,
+        "exclude_pattern": "^\\s*(?:export\\s+)?(?:const|let|var)\\s+location\\b|\\+\\s*['\"`]/",
+        "any": [
+          { "pattern": "(?:^|[^.\\w])(?:window\\.)?location(?:\\.href)?\\s*=\\s*[^'\"`/\\s=]", "label": "location-href" },
+          { "pattern": "(?:^|[^.\\w])(?:window\\.)?location\\.(?:assign|replace)\\s*\\(\\s*[^'\"`/]", "label": "location-assign-call" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "jquery-html-sink",
+      "severity": "warning",
+      "message": "A jQuery HTML-insertion method (`.html()`, `.append()`, `.prepend()`, `.after()`, `.before()`, `.wrapAll()`) called with a non-literal argument — the same DOM-XSS surface as `.innerHTML`, since jQuery parses a string argument to these methods as HTML and inserts it. Use `.text()` for plain text, or sanitize the string first (e.g. DOMPurify) if HTML must genuinely be inserted. Boundary note: distinct from `unsafe-html-sink`, which covers the native `.innerHTML`/`.outerHTML`/`insertAdjacentHTML`/`dangerouslySetInnerHTML` sinks, not jQuery's own API surface. Gated on the file mentioning `jquery` or a `$(` call so a same-named method on an unrelated object (e.g. a custom `.append()`) doesn't fire in a non-jQuery codebase. Known imprecision: a DOM-element/jQuery-object argument (e.g. `.append($('<div>'))`) is lexically indistinguishable from an HTML string argument, so it also fires there — accepted as the FP-safe subset's price of admission, kept as a warning rather than critical. Suppress a vetted case with `// jquery-html-ok`.",
+      "suppress_marker": "jquery-html-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "(?i)jquery|\\$\\(",
+        "skip_comment_lines": true,
+        "line_pattern": "\\.(?:html|append|prepend|after|before|wrapAll)\\s*\\(\\s*[^'\"`)\\s]",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "vue-v-html",
+      "severity": "warning",
+      "message": "Vue's `v-html` directive renders its bound expression as raw HTML — the Vue analog of React's `dangerouslySetInnerHTML` — so it is XSS if the bound value is influenced by user input (a route param, API response, user-submitted content, etc.). Prefer `{{ }}` text interpolation, or sanitize the value (e.g. DOMPurify) before binding it. Suppress a vetted case with `// vue-v-html-ok`.",
+      "suppress_marker": "vue-v-html-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx|vue)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "v-html",
+        "skip_comment_lines": true,
+        "line_pattern": "v-html\\s*=",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "unsanitized-markdown-html",
+      "severity": "warning",
+      "message": "A markdown-to-HTML render call (`marked`, `markdown-it`, `md.render`, `remark`, `showdown`) whose output reaches an HTML sink (`innerHTML`/`outerHTML`/`dangerouslySetInnerHTML`/`v-html`) in the same function/component with no sanitizer (`DOMPurify`/`sanitize`/`sanitizeHtml`/`xss`) anywhere in that same span — markdown renderers emit raw HTML by default, so piping their output straight into an HTML sink is stored XSS (a real corpus shape: `marked(article.body)` rendered via a sibling `v-html`). Run the output through DOMPurify/sanitize-html, or enable the renderer's own sanitize option if it has one. This is method-scan (co-occurrence within one function/component span): if the render call and the HTML sink live in different spans (e.g. render happens in a composable, the sink in the consuming component) this rule will not co-fire. It also cannot see across `.vue` single-file components today — this engine has no symbol/span parser for `.vue` yet (see `docs/rules/dsl-reference.md`'s method-scan doc), so the exact fe-vue corpus shape (`marked()` in `<script>`, `v-html` in the same file's `<template>`) is NOT caught by this rule despite `.vue` being in its file pattern for forward-compatibility; only same-file `.ts`/`.tsx`/`.js`/`.jsx` co-occurrence is caught. Suppress a vetted case with `// markdown-html-ok`.",
+      "suppress_marker": "markdown-html-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx|vue)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\b(?:marked|markdownit|md\\.render|remark|showdown)\\s*\\(", "label": "md-render" },
+          { "pattern": "\\b(?:innerHTML|outerHTML|dangerouslySetInnerHTML|v-html)\\b", "label": "html-sink" }
+        ],
+        "trigger": "md-render",
+        "absent": [
+          { "pattern": "\\b(?:DOMPurify|sanitize|sanitizeHtml|xss)\\b", "label": "sanitized" }
+        ],
+        "snippet_max": 160
+      }
     }
   ]
 }

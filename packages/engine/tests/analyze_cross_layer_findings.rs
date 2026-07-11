@@ -93,6 +93,31 @@ fn be2_tree() -> TempDir {
     dir
 }
 
+/// FE tree for the near-miss cross-reference case: consumes `/articles`, missing the `/api` base prefix the
+/// BE actually registers — an unprovided consume that near-misses `GET /api/articles` on the `prefix`
+/// dimension.
+fn near_miss_fe_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-xlf-nearmiss-fe");
+    dir.write(
+        "src/Api.tsx",
+        "export function list() { return fetch(\"/articles\"); }\n",
+    );
+    dir
+}
+
+/// BE tree for the near-miss cross-reference case: provides `GET /api/articles` only. Nobody in this
+/// fixture calls it under its actual registered path, so this route is simultaneously an
+/// `unconsumed-endpoint` finding AND the `route-near-miss` target of the FE's drifted consume — the
+/// dogfood-round-8 scenario the cross-reference note exists for.
+fn near_miss_be_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-xlf-nearmiss-be");
+    dir.write(
+        "routes/articles.controller.ts",
+        "const articlesRoutes = new Hono();\narticlesRoutes.get(\"/api/articles\", api.list);\n",
+    );
+    dir
+}
+
 fn config(source_id: &str) -> EngineConfig {
     EngineConfig {
         source_id: source_id.to_string(),
@@ -222,4 +247,37 @@ fn disabling_a_cross_layer_rule_in_only_one_tree_drops_it_from_the_union() {
     // Sibling rules untouched by the disable — still present.
     assert!(!find(&out.cross_layer_findings, "cross-layer/version-skew").is_empty());
     assert!(!find(&out.cross_layer_findings, "cross-layer/duplicate-route").is_empty());
+}
+
+/// Dogfood round 8: a route-near-miss target that is also an unconsumed provide must carry a cross-reference
+/// note back to the `cross-layer/route-near-miss` finding, so agent-facing output stops calling the same
+/// route both "not called by any source" and "did you mean this route" without ever linking the two.
+#[test]
+fn unconsumed_endpoint_cross_references_its_route_near_miss_finding() {
+    let fe = near_miss_fe_tree();
+    let be = near_miss_be_tree();
+    let trees = vec![
+        (fe.path().to_path_buf(), config("fe")),
+        (be.path().to_path_buf(), config("be")),
+    ];
+    let out = analyze_trees(&trees);
+
+    let near_miss = find(&out.cross_layer_findings, "cross-layer/route-near-miss");
+    assert_eq!(near_miss.len(), 1, "{:?}", near_miss);
+    assert!(near_miss[0].message.contains("GET /api/articles"));
+
+    let unconsumed = find(&out.cross_layer_findings, "cross-layer/unconsumed-endpoint");
+    assert_eq!(unconsumed.len(), 1, "{:?}", unconsumed);
+    assert!(
+        unconsumed[0]
+            .message
+            .contains("cross-layer/route-near-miss"),
+        "expected the unconsumed-endpoint finding to cross-reference route-near-miss: {}",
+        unconsumed[0].message
+    );
+    assert!(unconsumed[0].message.contains("src/Api.tsx"));
+
+    let data = unconsumed[0].data.as_ref().unwrap();
+    assert_eq!(data["nearMissConsumeCount"], 1);
+    assert_eq!(data["nearMissConsumeExample"], "src/Api.tsx:1");
 }

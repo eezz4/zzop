@@ -1,10 +1,20 @@
-//! End-to-end coverage for the BE-framework coverage self-report (`zzop_engine::coverage`,
-//! `controller_silence_warning`): a tree whose files carry controller-decorator-shaped lines in 3+ distinct
-//! files, yet extract ZERO `http` provides tree-wide, gets an `AnalyzeOutput::warnings` entry naming the
-//! gap. Guards against an unrecognized controller-decorator convention (e.g. a framework using
-//! `@RestController` under a different package name, the way n8n's own `@n8n/decorators` does) failing
-//! silently instead of surfacing a coverage warning — the NEXT unknown framework at least gets a warning
-//! instead of silent cross-layer-join darkness.
+//! End-to-end coverage for `zzop_engine::framework_silence`'s three coverage self-reports, wired into
+//! `analyze_tree`'s `AnalyzeOutput::warnings`:
+//! - S1 (`controller_silence_warning`): a tree whose files carry controller-decorator-shaped lines in 3+
+//!   distinct files, yet extract ZERO `http` provides tree-wide. Guards against an unrecognized
+//!   controller-decorator convention (e.g. a framework using `@RestController` under a different package
+//!   name, the way n8n's own `@n8n/decorators` does) failing silently.
+//! - S2 (`server_framework_import_warning`): a server-framework package (koa, fastify, ...) is imported
+//!   while extracted `http` provides stay near-zero — closes the METHOD-CALL registration idiom gap S1's
+//!   decorator regex cannot see (dogfood round 9's be-express class; Koa is used here rather than Express
+//!   because Express itself now has a dedicated router-mount extractor post-round-9-fix, per
+//!   `parser-typescript`'s `router_mounts` module doc).
+//! - S3 (`committed_spec_io_silence_warning`): a committed OpenAPI/Swagger spec sits in the tree while
+//!   this tree's io stays near-zero in both directions — the generated-client blind spot (round 9's
+//!   fe-vue class).
+//!
+//! Each covers the NEXT unknown framework/idiom at least getting a warning instead of silent
+//! cross-layer-join darkness.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -54,6 +64,8 @@ fn config() -> EngineConfig {
 }
 
 const WARNING_SUBSTRING: &str = "route decorators/annotations but no http routes were extracted";
+const S2_WARNING_SUBSTRING: &str = "server-framework package(s) imported but only";
+const S3_WARNING_SUBSTRING: &str = "committed OpenAPI/Swagger spec exists at";
 
 /// 3 files carrying an invented `@FastController`/`@FastGet` decorator shape — structurally identical
 /// (class-level gate + method-level verb) to Nest's own idiom, but under decorator NAMES that
@@ -120,6 +132,59 @@ fn angular_fe_tree() -> TempDir {
     dir
 }
 
+/// A NestJS-shaped BE tree with 3 recognized routes (clears `MIN_PROVIDES_FLOOR`) — unlike `real_nest_tree`
+/// (deliberately just 1 route, itself still below the floor and so a legitimate S2 near-zero disclosure
+/// target), this fixture exists solely to prove S2 goes silent once a tree's extracted `http` provides are
+/// no longer near-zero, even though `@nestjs/common` is still imported.
+fn healthy_nest_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-coverage-healthy-nest");
+    dir.write(
+        "src/users/users.controller.ts",
+        concat!(
+            "import { Controller, Get, Post, Param } from '@nestjs/common';\n\n",
+            "@Controller('api/users')\n",
+            "export class UsersController {\n",
+            "  @Get(':id')\n",
+            "  findOne(@Param('id') id: string) {\n    return id;\n  }\n",
+            "  @Get()\n",
+            "  findAll() {\n    return [];\n  }\n",
+            "  @Post()\n",
+            "  create() {\n    return {};\n  }\n",
+            "}\n",
+        ),
+    );
+    dir
+}
+
+/// Koa, imported and used, but with no route-registration shape any native extractor recognizes (Koa is
+/// not in `router_mounts`' Hono/Express vocabulary, nor a decorator framework) — this tree's real
+/// `http`-provides count is genuinely zero, and the S2 tripwire should name the `koa` import.
+fn koa_import_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-coverage-koa");
+    dir.write(
+        "src/app.ts",
+        "import Koa from 'koa';\n\nconst app = new Koa();\napp.use(async (ctx) => {\n  ctx.body = 'ok';\n});\napp.listen(3000);\n",
+    );
+    dir
+}
+
+/// A committed OpenAPI spec with no other io-bearing file in the tree — mirrors dogfood round 9's
+/// fe-vue class (a generated client built from `src/services/openapi.yml`, whose call sites the
+/// literal-call-site consume extractor cannot see), so io stays near-zero in both directions and the S3
+/// tripwire should name the spec file.
+fn committed_openapi_spec_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-coverage-openapi-spec");
+    dir.write(
+        "src/services/openapi.yml",
+        "openapi: 3.0.0\ninfo:\n  title: Example\npaths:\n  /users:\n    get:\n      summary: list users\n",
+    );
+    dir.write(
+        "src/App.vue",
+        "<template>\n  <div>hi</div>\n</template>\n<script setup>\nconst greeting = 'hi';\n</script>\n",
+    );
+    dir
+}
+
 #[test]
 fn unrecognized_controller_decorator_shape_with_zero_http_provides_warns() {
     let dir = unrecognized_framework_tree();
@@ -172,4 +237,78 @@ fn two_runs_over_the_unrecognized_framework_tree_produce_identical_warnings() {
     let out1 = analyze_tree(dir.path(), &cfg);
     let out2 = analyze_tree(dir.path(), &cfg);
     assert_eq!(out1.warnings, out2.warnings);
+}
+
+#[test]
+fn koa_import_with_zero_http_provides_fires_the_s2_warning() {
+    let dir = koa_import_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains(S2_WARNING_SUBSTRING) && w.contains("koa")),
+        "expected the S2 server-framework-import warning naming koa, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn a_real_nest_tree_with_only_one_extracted_route_still_fires_the_s2_warning() {
+    // `real_nest_tree` imports `@nestjs/common` (in `SERVER_FRAMEWORK_SPECIFIERS`) and extracts a real
+    // http provide via the decorator extractor — but only 1, still below `MIN_PROVIDES_FLOOR`, so S2's
+    // near-zero (not exact-zero) gate is correct to still fire: a 1-route BE genuinely gets a
+    // gracefully-worded disclosure, per `MIN_PROVIDES_FLOOR`'s own doc.
+    let dir = real_nest_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains(S2_WARNING_SUBSTRING)),
+        "expected the S2 warning on a near-zero (1-route) provides tree, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn a_nest_tree_with_three_or_more_routes_never_fires_the_s2_warning() {
+    let dir = healthy_nest_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        !out.warnings.iter().any(|w| w.contains(S2_WARNING_SUBSTRING)),
+        "a tree whose extracted http provides clear MIN_PROVIDES_FLOOR must never get the S2 warning, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn committed_openapi_spec_with_near_zero_io_fires_the_s3_warning() {
+    let dir = committed_openapi_spec_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains(S3_WARNING_SUBSTRING) && w.contains("openapi.yml")),
+        "expected the S3 committed-spec warning naming openapi.yml, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn a_pure_fe_angular_tree_never_fires_the_s3_warning() {
+    // No committed openapi/swagger spec file anywhere in this tree, so S3 must stay silent regardless of
+    // the tree's io levels.
+    let dir = angular_fe_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains(S3_WARNING_SUBSTRING)),
+        "a tree with no committed spec file must never get the S3 warning, got: {:?}",
+        out.warnings
+    );
 }

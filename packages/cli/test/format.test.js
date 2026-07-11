@@ -64,6 +64,48 @@ test('collectFindings: tolerates empty/garbage', () => {
   assert.deepEqual(collectFindings({}), { findings: [], fileCount: 0 });
 });
 
+test('collectFindings: multi-tree appends crossLayerFindings, tagged crossLayer (not sourceId/root)', () => {
+  const output = {
+    trees: [
+      {
+        root: './api',
+        sourceId: 'api',
+        output: { fileCount: 2, findings: [{ ruleId: 'x', severity: 'warning', file: 'api/h.ts', line: 1 }] },
+      },
+    ],
+    crossLayer: {},
+    crossLayerFindings: [
+      { ruleId: 'cross-layer/duplicate-route', severity: 'warning', file: 'a.ts', line: 3, message: 'dup' },
+      { ruleId: 'cross-layer/unconsumed-endpoint', severity: 'info', file: 'b.ts', line: 9, message: 'dead' },
+    ],
+  };
+  const { findings, fileCount } = collectFindings(output);
+  assert.equal(findings.length, 3);
+  assert.equal(fileCount, 2);
+  const crossLayer = findings.filter((f) => f.ruleId.startsWith('cross-layer/'));
+  assert.equal(crossLayer.length, 2);
+  for (const f of crossLayer) {
+    assert.equal(f.crossLayer, true);
+    assert.ok(!('sourceId' in f));
+    assert.ok(!('root' in f));
+  }
+  const perTree = findings.find((f) => f.ruleId === 'x');
+  assert.equal(perTree.sourceId, 'api');
+  assert.ok(!perTree.crossLayer);
+});
+
+test('collectFindings: multi-tree output with no crossLayerFindings field is unaffected', () => {
+  const { findings } = collectFindings(treesOutput);
+  assert.equal(findings.length, 2);
+  assert.ok(findings.every((f) => !f.crossLayer));
+});
+
+test('collectFindings: single-tree shape never picks up crossLayerFindings (no such field exists there)', () => {
+  const { findings } = collectFindings({ ...singleOutput, crossLayerFindings: [{ ruleId: 'bogus' }] });
+  assert.equal(findings.length, 3);
+  assert.ok(findings.every((f) => !f.crossLayer));
+});
+
 test('groupByFile sorts files and orders within a file by line then ruleId', () => {
   const { findings } = collectFindings(singleOutput);
   const groups = groupByFile(findings);
@@ -139,6 +181,48 @@ test('formatPretty on empty findings says so', () => {
   assert.match(out, /0 findings in 1 file/);
 });
 
+test('formatPretty: multi-tree crossLayerFindings render in their own labeled section, not mixed into per-file groups', () => {
+  const output = {
+    trees: [
+      {
+        root: './api',
+        sourceId: 'api',
+        output: { fileCount: 1, findings: [{ ruleId: 'x', severity: 'warning', file: 'shared.ts', line: 1, message: 'per-tree' }] },
+      },
+    ],
+    crossLayer: {},
+    crossLayerFindings: [
+      { ruleId: 'cross-layer/duplicate-route', severity: 'warning', file: 'shared.ts', line: 3, message: 'dup route' },
+    ],
+  };
+  const out = formatPretty(output, { color: false });
+  assert.match(out, /per-tree/);
+  assert.match(out, /Cross-layer findings:/);
+  assert.match(out, /dup route/);
+  // The cross-layer section comes after the per-file groups.
+  assert.ok(out.indexOf('per-tree') < out.indexOf('Cross-layer findings:'));
+  assert.match(out, /2 findings in 1 file/);
+});
+
+test('formatPretty: info-tier crossLayerFindings fold into the same info block as per-tree info findings', () => {
+  const output = {
+    trees: [{ root: './api', sourceId: 'api', output: { fileCount: 1, findings: [] } }],
+    crossLayer: {},
+    crossLayerFindings: [
+      { ruleId: 'cross-layer/unconsumed-endpoint', severity: 'info', file: 'a.ts', line: 1, message: 'dead route' },
+    ],
+  };
+  const out = formatPretty(output, { color: false });
+  assert.match(out, /1 finding folded/);
+  assert.doesNotMatch(out, /Cross-layer findings:/);
+  assert.doesNotMatch(out, /dead route/);
+});
+
+test('formatPretty: no crossLayerFindings section when the field is absent/empty', () => {
+  const out = formatPretty(treesOutput, { color: false });
+  assert.doesNotMatch(out, /Cross-layer findings:/);
+});
+
 test('collectWarnings gathers engine warnings, tagging multi-tree entries by source', () => {
   assert.deepEqual(collectWarnings({ warnings: ['a', 'b'] }), ['a', 'b']);
   assert.deepEqual(
@@ -174,6 +258,30 @@ test('computeExitCode: failOn off always 0', () => {
 
 test('computeExitCode: empty findings -> 0', () => {
   assert.equal(computeExitCode([], 'warn'), 0);
+});
+
+test('exit code integration: a warning-tier crossLayerFinding gates the default failOn:warn', () => {
+  const output = {
+    trees: [{ root: './api', sourceId: 'api', output: { fileCount: 1, findings: [] } }],
+    crossLayer: {},
+    crossLayerFindings: [
+      { ruleId: 'cross-layer/duplicate-route', severity: 'warning', file: 'a.ts', line: 1, message: 'dup' },
+    ],
+  };
+  const { findings } = collectFindings(output);
+  assert.equal(computeExitCode(findings, 'warn'), 1);
+});
+
+test('exit code integration: an info-tier crossLayerFinding does NOT gate the default failOn:warn', () => {
+  const output = {
+    trees: [{ root: './api', sourceId: 'api', output: { fileCount: 1, findings: [] } }],
+    crossLayer: {},
+    crossLayerFindings: [
+      { ruleId: 'cross-layer/unconsumed-endpoint', severity: 'info', file: 'a.ts', line: 1, message: 'dead' },
+    ],
+  };
+  const { findings } = collectFindings(output);
+  assert.equal(computeExitCode(findings, 'warn'), 0);
 });
 
 // --- --severity display filter ------------------------------------------------------------------------

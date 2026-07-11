@@ -417,3 +417,590 @@ fn as_cast_inside_a_test_fixture_path_is_not_flagged() {
     )]);
     assert!(f.is_empty(), "{f:?}");
 }
+
+// --- float-equality / always-false-comparison / numeric-string-comparison / tofixed-arithmetic /
+// date-pitfalls / foreach-async-callback / promise-async-executor / parseint-no-radix ---
+//
+// These 8 rules are plain-JS correctness bugs, not TS-type-system bugs, so unlike the 4 rules above they
+// use the broadened `file_pattern` `(?i)\.(ts|tsx|js|jsx|mjs|cjs)$` — every fixture file below uses a
+// `.js`/`.ts` mix on purpose to exercise that breadth.
+
+/// Loads both the `typescript` and `be-db` packs together, for the `float-equality` /
+/// `float-money-compare` dual-pack boundary fixture below (be-db.json ships in the same `dsl/` tree).
+fn typescript_and_be_db_packs() -> Vec<RulePackDef> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("dsl");
+    let result = load_dsl_packs(&dir);
+    assert!(
+        result.errors.is_empty(),
+        "pack load errors: {:?}",
+        result.errors
+    );
+    let mut packs: Vec<RulePackDef> = result
+        .packs
+        .into_iter()
+        .map(|(_, pack)| pack)
+        .filter(|p| p.id == "typescript" || p.id == "be-db")
+        .collect();
+    assert_eq!(packs.len(), 2, "{packs:?}");
+    packs.sort_by(|a, b| a.id.cmp(&b.id));
+    packs
+}
+
+fn analyze_with_packs(files: &[(&str, &str)], packs: Vec<RulePackDef>) -> Vec<Finding> {
+    let dir = TempDir::new("zzop-typescript-be-db-pack");
+    for (rel, content) in files {
+        dir.write(rel, content);
+    }
+    let cfg = EngineConfig {
+        source_id: "fixture".to_string(),
+        packs,
+        ..EngineConfig::default()
+    };
+    analyze_tree(dir.path(), &cfg).findings
+}
+
+fn rule_findings(files: &[(&str, &str)], rule: &str) -> Vec<Finding> {
+    analyze(files)
+        .into_iter()
+        .filter(|f| f.rule_id == format!("typescript/{rule}"))
+        .collect()
+}
+
+// --- float-equality ---
+
+#[test]
+fn float_literal_on_the_right_of_strict_equality_is_flagged() {
+    let f = rule_findings(
+        &[(
+            "calc.ts",
+            "export function isDone(ratio: number) {\n  return ratio === 0.1;\n}\n",
+        )],
+        "float-equality",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn float_literal_on_the_left_of_loose_inequality_is_flagged() {
+    let f = rule_findings(
+        &[(
+            "calc.js",
+            "export function notComplete(ratio) {\n  return 0.3 != ratio;\n}\n",
+        )],
+        "float-equality",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn negative_exponent_float_literal_comparison_is_flagged() {
+    let f = rule_findings(
+        &[(
+            "calc.ts",
+            "export function tiny(x: number) {\n  return x === 5e-9;\n}\n",
+        )],
+        "float-equality",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn integer_literal_strict_equality_is_not_flagged() {
+    let f = rule_findings(
+        &[(
+            "calc.ts",
+            "export function isThree(x: number) {\n  return x === 3;\n}\n",
+        )],
+        "float-equality",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn money_named_float_comparison_fires_only_float_money_compare_not_float_equality() {
+    // Boundary: be-db/float-money-compare already owns money-named-identifier-vs-float-literal — this
+    // dual-pack fixture proves `price === 19.99` fires exactly one finding total (from be-db), and a
+    // non-money-named comparison (`ratio === 0.1`) fires exactly one finding total (from typescript).
+    let files: &[(&str, &str)] = &[(
+        "money.ts",
+        "export function isBasicPlan(price: number, ratio: number) {\n  const a = price === 19.99;\n  const b = ratio === 0.1;\n  return a || b;\n}\n",
+    )];
+    let f = analyze_with_packs(files, typescript_and_be_db_packs());
+
+    let money_line = 2u32;
+    let ratio_line = 3u32;
+
+    let on_money_line: Vec<&Finding> = f.iter().filter(|x| x.line == money_line).collect();
+    assert_eq!(on_money_line.len(), 1, "{f:?}");
+    assert_eq!(
+        on_money_line[0].rule_id, "be-db/float-money-compare",
+        "{f:?}"
+    );
+
+    let on_ratio_line: Vec<&Finding> = f.iter().filter(|x| x.line == ratio_line).collect();
+    assert_eq!(on_ratio_line.len(), 1, "{f:?}");
+    assert_eq!(
+        on_ratio_line[0].rule_id, "typescript/float-equality",
+        "{f:?}"
+    );
+}
+
+#[test]
+fn float_eq_ok_marker_suppresses_the_finding() {
+    let f = rule_findings(
+        &[(
+            "calc.ts",
+            "export function isDone(ratio: number) {\n  return ratio === 0.1; // float-eq-ok: tolerance checked elsewhere\n}\n",
+        )],
+        "float-equality",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+// --- always-false-comparison ---
+
+#[test]
+fn nan_strict_equality_is_flagged() {
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "export function isBad(x: number) {\n  return x === NaN;\n}\n",
+        )],
+        "always-false-comparison",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn number_is_nan_call_is_not_flagged() {
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "export function isBad(x: number) {\n  return Number.isNaN(x);\n}\n",
+        )],
+        "always-false-comparison",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn empty_array_reference_equality_is_flagged() {
+    let f = rule_findings(
+        &[(
+            "v.js",
+            "export function isEmpty(items) {\n  return items === [];\n}\n",
+        )],
+        "always-false-comparison",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn empty_object_reference_equality_reverse_form_is_flagged() {
+    let f = rule_findings(
+        &[(
+            "v.js",
+            "export function isEmptyConfig(config) {\n  return {} === config;\n}\n",
+        )],
+        "always-false-comparison",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn ordinary_function_body_braces_do_not_false_positive_the_empty_object_reverse_form() {
+    // The empty-object reverse pattern (`{}` immediately before an operator) does not collide with a
+    // function's closing brace: an operator never immediately follows a block's `}` on the same line in
+    // ordinary code.
+    let f = rule_findings(
+        &[(
+            "v.js",
+            "function noop() {}\nexport function check(x) {\n  return x === noop();\n}\n",
+        )],
+        "always-false-comparison",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn loose_equality_with_empty_array_is_not_flagged() {
+    // Review honesty pin: loose `x == []` is deliberately OUT of scope — coercion can make it true
+    // (`0 == []` is true, `'' == []` is true), so the "constant result" claim only holds for strict
+    // `===`/`!==` on the array/object labels. NaN keeps loose coverage (NaN never loose-equals anything).
+    let f = rule_findings(
+        &[("v.js", "export function check(x) {\n  return x == [];\n}\n")],
+        "always-false-comparison",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn always_false_ok_marker_suppresses_the_finding() {
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "export function isBad(x: number) {\n  // always-false-ok: legacy guard, dead code path\n  return x === NaN;\n}\n",
+        )],
+        "always-false-comparison",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+// --- numeric-string-comparison ---
+
+#[test]
+fn numeric_string_on_the_right_of_less_than_is_flagged() {
+    let f = rule_findings(
+        &[("v.js", "export function cmp(x) {\n  return x < '9';\n}\n")],
+        "numeric-string-comparison",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn numeric_string_on_the_left_spaced_greater_than_is_flagged() {
+    let f = rule_findings(
+        &[("v.js", "export function cmp(x) {\n  return '10' > x;\n}\n")],
+        "numeric-string-comparison",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn generic_type_argument_string_literal_before_closing_bracket_is_not_flagged() {
+    // `Extract<T, '1'>` — the `<` before the generic's type param is not followed by a quote, and the
+    // `'1'>` closing shape has no whitespace before the `>`, so the (deliberately spaced) reverse pattern
+    // does not match either.
+    let f = rule_findings(
+        &[("v.ts", "type A = Extract<T, '1'>;\nexport type { A };\n")],
+        "numeric-string-comparison",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn single_arg_generic_numeric_string_literal_is_not_flagged() {
+    // Review blocking pin: `useState<'0' | '1'>('0')` — the generic bracket `<` sits directly against
+    // the identifier with no space, so the forward pattern's required leading whitespace excludes it.
+    let f = rule_findings(
+        &[(
+            "v.tsx",
+            "export function useToggle() {\n  const s = useState<'0' | '1'>('0');\n  return s;\n}\n",
+        )],
+        "numeric-string-comparison",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn arrow_function_returning_numeric_string_is_not_flagged() {
+    // Review blocking pin: the `>` of `=>` is preceded by `=`, not whitespace, so the forward
+    // pattern's leading-whitespace requirement excludes arrow returns like `() => '10'`.
+    let f = rule_findings(
+        &[(
+            "v.js",
+            "export const version = () => '10';\nexport const zero = (x) => '0';\n",
+        )],
+        "numeric-string-comparison",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn numeric_string_cmp_ok_marker_suppresses_the_finding() {
+    let f = rule_findings(
+        &[(
+            "v.js",
+            "export function cmp(x) {\n  return x < '9'; // numeric-string-cmp-ok: x is itself a formatted string here\n}\n",
+        )],
+        "numeric-string-comparison",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+// --- tofixed-arithmetic ---
+
+#[test]
+fn arithmetic_after_tofixed_result_is_flagged() {
+    let f = rule_findings(
+        &[(
+            "v.js",
+            "export function delta(total) {\n  return total.toFixed(2) - 1;\n}\n",
+        )],
+        "tofixed-arithmetic",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn arithmetic_before_tofixed_result_is_flagged() {
+    let f = rule_findings(
+        &[(
+            "v.js",
+            "export function delta(total) {\n  return 1 - total.toFixed(2);\n}\n",
+        )],
+        "tofixed-arithmetic",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn arithmetic_inside_parens_then_tofixed_is_not_flagged() {
+    // Calibration pin (immich server, 10 corpus FPs before the fix): `(finish - start).toFixed(2)` is
+    // the CORRECT idiom this rule's own fix guidance recommends — arithmetic first, format last. The
+    // before-form's operand class must not include `)`/`]`, or the match crosses the closing paren and
+    // flags the good shape.
+    let f = rule_findings(
+        &[(
+            "v.js",
+            "export function duration(finish, start) {\n  return (finish - start).toFixed(2);\n}\n",
+        )],
+        "tofixed-arithmetic",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn string_concatenation_with_tofixed_is_not_flagged() {
+    // Scope boundary: `+` is deliberately excluded (display formatting is the common, intended case).
+    let f = rule_findings(
+        &[(
+            "v.js",
+            "export function label(n) {\n  return \"a\" + n.toFixed(2);\n}\n",
+        )],
+        "tofixed-arithmetic",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn tofixed_arith_ok_marker_suppresses_the_finding() {
+    let f = rule_findings(
+        &[(
+            "v.js",
+            "export function delta(total) {\n  return total.toFixed(2) - 1; // tofixed-arith-ok: re-quantized intentionally\n}\n",
+        )],
+        "tofixed-arithmetic",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+// --- date-pitfalls ---
+
+#[test]
+fn date_only_iso_string_is_flagged() {
+    let f = rule_findings(
+        &[("v.ts", "export const d = new Date('2024-01-15');\n")],
+        "date-pitfalls",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 1);
+}
+
+#[test]
+fn ten_digit_seconds_epoch_is_flagged() {
+    let f = rule_findings(
+        &[("v.ts", "export const d = new Date(1700000000);\n")],
+        "date-pitfalls",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 1);
+}
+
+#[test]
+fn day_ms_literal_alongside_gettime_is_flagged() {
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "export function tomorrow(d: Date) {\n  return new Date(d.getTime() + 86400000);\n}\n",
+        )],
+        "date-pitfalls",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn day_ms_literal_with_no_date_context_on_the_line_is_not_flagged() {
+    let f = rule_findings(
+        &[("v.ts", "export const cacheTtlMs = 86400000;\n")],
+        "date-pitfalls",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn milliseconds_epoch_thirteen_digits_is_not_flagged() {
+    let f = rule_findings(
+        &[("v.ts", "export const d = new Date(1700000000000);\n")],
+        "date-pitfalls",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn date_pitfall_ok_marker_suppresses_the_finding() {
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "// date-pitfall-ok: server is UTC-only, epoch is confirmed seconds\nexport const d = new Date(1700000000);\n",
+        )],
+        "date-pitfalls",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+// --- foreach-async-callback ---
+
+#[test]
+fn foreach_async_callback_is_flagged() {
+    let f = rule_findings(
+        &[(
+            "v.js",
+            "export async function run(items) {\n  items.forEach(async (item) => {\n    await save(item);\n  });\n}\n",
+        )],
+        "foreach-async-callback",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn map_async_callback_does_not_fire_the_foreach_rule() {
+    // Sibling boundary: `.map(async ...)` is a different defect owned by be-reliability/await-in-map.
+    let f = rule_findings(
+        &[(
+            "v.js",
+            "export async function run(items) {\n  return items.map(async (item) => {\n    return save(item);\n  });\n}\n",
+        )],
+        "foreach-async-callback",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn foreach_async_ok_marker_suppresses_the_finding() {
+    let f = rule_findings(
+        &[(
+            "v.js",
+            "export async function run(items) {\n  items.forEach(async (item) => { // foreach-async-ok: fire-and-forget by design\n    await save(item);\n  });\n}\n",
+        )],
+        "foreach-async-callback",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+// --- promise-async-executor ---
+
+#[test]
+fn async_promise_executor_is_flagged() {
+    let f = rule_findings(
+        &[(
+            "v.js",
+            "export function wrap() {\n  return new Promise(async (resolve, reject) => {\n    resolve(await load());\n  });\n}\n",
+        )],
+        "promise-async-executor",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn synchronous_promise_executor_is_not_flagged() {
+    let f = rule_findings(
+        &[(
+            "v.js",
+            "export function wrap() {\n  return new Promise((resolve, reject) => {\n    load().then(resolve, reject);\n  });\n}\n",
+        )],
+        "promise-async-executor",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn promise_async_exec_ok_marker_suppresses_the_finding() {
+    let f = rule_findings(
+        &[(
+            "v.js",
+            "export function wrap() {\n  // promise-async-exec-ok: rejections are handled by the caller's catch\n  return new Promise(async (resolve) => { resolve(await load()); });\n}\n",
+        )],
+        "promise-async-executor",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+// --- parseint-no-radix ---
+
+#[test]
+fn single_argument_parseint_is_flagged() {
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "export function toNum(s: string) {\n  return parseInt(s);\n}\n",
+        )],
+        "parseint-no-radix",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn number_dot_parseint_single_argument_is_flagged() {
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "export function toNum(s: string) {\n  return Number.parseInt(s);\n}\n",
+        )],
+        "parseint-no-radix",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn parseint_with_explicit_radix_is_not_flagged() {
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "export function toNum(s: string) {\n  return parseInt(s, 10);\n}\n",
+        )],
+        "parseint-no-radix",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn parseint_wrapping_a_nested_call_is_a_documented_miss_not_flagged() {
+    // Documented limitation (never-guess): the single-argument span `[^,()]+` cannot cross a nested call's
+    // own parentheses, so `parseInt(getVal())` is silently not flagged rather than guessed at.
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "declare function getVal(): string;\nexport function toNum() {\n  return parseInt(getVal());\n}\n",
+        )],
+        "parseint-no-radix",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn parseint_radix_ok_marker_suppresses_the_finding() {
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "export function toNum(s: string) {\n  return parseInt(s); // parseint-radix-ok: always base-10 caller-controlled input\n}\n",
+        )],
+        "parseint-no-radix",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}

@@ -554,8 +554,9 @@ pub(crate) fn assemble(
     });
 
     // BE-framework coverage self-report (`crate::framework_silence`): flags a tree that looks like it
-    // has a backend but produced zero `http` provides — an unsupported/unrecognized framework signal.
-    // Computed here, while `io_provides`/`ts_paths`/`java_rels` are still in scope.
+    // has a backend but produced zero `http` provides — an unsupported/unrecognized framework signal
+    // (S1). Computed here, while `io_provides`/`io_consumes`/`ts_paths`/`java_rels`/`package_import_files`
+    // are still in scope.
     let http_count = io_provides.iter().filter(|p| p.kind == "http").count();
     let mut candidate_rels: Vec<String> = ts_paths.iter().cloned().collect();
     candidate_rels.extend(java_rels.iter().cloned());
@@ -565,6 +566,40 @@ pub(crate) fn assemble(
         crate::framework_silence::controller_silence_warning(root, &candidate_rels, http_count)
     {
         warnings.push(w);
+    }
+
+    // S2 — server-framework import tripwire (provide side): a server-framework package import present
+    // while extracted `http` provides stay near-zero (closes the method-call registration idiom S1's
+    // decorator regex cannot see). Additive to S1 above; both may fire. Pure map lookup over
+    // `package_import_files` (already a sorted `BTreeMap`/`BTreeSet`) — no disk IO, so unconditional.
+    if let Some(w) =
+        crate::framework_silence::server_framework_import_warning(&package_import_files, http_count)
+    {
+        warnings.push(w);
+    }
+
+    // S3 — committed-spec io-silence tripwire (consume side): a committed OpenAPI/Swagger spec present
+    // while this tree's io stays near-zero in BOTH directions (the generated-client blind spot). The
+    // `IO_NEAR_ZERO_FLOOR` precheck here mirrors the function's own internal gate (which fires only
+    // when BOTH directions are near-zero), done here too so the sorted-walked-rel-list build below
+    // (`loc_by_path.keys()` — same source as `file_count`, per that field's own doc) is skipped
+    // entirely on any tree with healthy io in either direction (a pure BE with real provides or a
+    // pure FE with keyed consumes never pays it).
+    let io_provides_count = io_provides.len();
+    let io_consumes_keyed_count = io_consumes.iter().filter(|c| c.key.is_some()).count();
+    if io_provides_count < crate::framework_silence::IO_NEAR_ZERO_FLOOR
+        && io_consumes_keyed_count < crate::framework_silence::IO_NEAR_ZERO_FLOOR
+    {
+        let mut all_walked_rels: Vec<String> = loc_by_path.keys().cloned().collect();
+        all_walked_rels.sort();
+        if let Some(w) = crate::framework_silence::committed_spec_io_silence_warning(
+            root,
+            &all_walked_rels,
+            io_provides_count,
+            io_consumes_keyed_count,
+        ) {
+            warnings.push(w);
+        }
     }
 
     let io = if io_provides.is_empty() && io_consumes.is_empty() {

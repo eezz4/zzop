@@ -1,4 +1,4 @@
-//! End-to-end tests for `rules/dsl/be-security/be-security.json` (8 backend-security rules), exercised via
+//! End-to-end tests for `rules/dsl/be-security/be-security.json` (38 backend-security rules), exercised via
 //! `zzop_engine::analyze_tree` so `Matcher::MethodScan` rules run against real parser-derived
 //! `SourceSymbol` body spans (TypeScript via swc), not hand-built spans. Each rule below has at least
 //! one positive fixture (asserting finding count AND line number) and one realistic negative
@@ -1873,4 +1873,1327 @@ fn hardcoded_secret_in_a_test_fixture_path_is_still_flagged() {
         "{:?}",
         out.findings
     );
+}
+
+// --- private-key-committed ---
+
+#[test]
+fn rsa_private_key_pem_header_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "config/keys.ts",
+        "export const key = `-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAx1n...\n-----END RSA PRIVATE KEY-----`;\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "private-key-committed");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 1);
+}
+
+#[test]
+fn unlabeled_pkcs8_private_key_pem_header_is_flagged() {
+    // The `(RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?` prefix group is optional — a bare PKCS8
+    // "PRIVATE KEY" header (no algorithm prefix) must still fire.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "secrets/id_rsa.pem",
+        "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQ...\n-----END PRIVATE KEY-----\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "private-key-committed");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 1);
+}
+
+#[test]
+fn openssh_private_key_header_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "deploy/config.yaml",
+        "sshKey: |\n  -----BEGIN OPENSSH PRIVATE KEY-----\n  b3BlbnNzaC1rZXktdjEAAAAA...\n  -----END OPENSSH PRIVATE KEY-----\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "private-key-committed");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 2);
+}
+
+#[test]
+fn private_key_committed_in_a_test_fixture_path_is_still_flagged() {
+    // Repo-content rule: an actual PEM header in a test fixture is still a committed key.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "src/__tests__/fixtures.test.ts",
+        "export const testKey = `-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAx1n...\n-----END RSA PRIVATE KEY-----`;\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "private-key-committed").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn private_key_header_generated_via_template_interpolation_is_not_flagged() {
+    // exclude_pattern claim: an interpolation shape (`${`/`{{`) ON THE HEADER LINE itself reads as a
+    // key-template generator, not a literal committed key.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "scripts/keygen-template.ts",
+        "export const header = `-----BEGIN ${keyType} PRIVATE KEY-----`;\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "private-key-committed").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn private_key_ok_marker_above_the_header_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "config/keys.ts",
+        "// private-key-ok: throwaway key generated only for this test, never used against a real service\nexport const key = `-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAx1n...\n-----END RSA PRIVATE KEY-----`;\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "private-key-committed").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn non_pem_looking_dashes_are_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "docs/notes.ts",
+        "export const divider = \"----- a plain divider, not a key -----\";\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "private-key-committed").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- vendor-token-committed ---
+//
+// These fixtures must carry live vendor-token SHAPES by design (that is what the rule detects),
+// but GitHub push-protection scans raw source text for those same shapes. So each Stripe token is
+// assembled from split literals via `concat!` — no contiguous `sk_live_`/`rk_live_`/`sk_test_`
+// string ever appears in this file, while the rule still analyzes the full reassembled token in the
+// synthetic file content. Bodies are obviously-synthetic (not real keys).
+const STRIPE_LIVE: &str = concat!("sk_li", "ve_FAKEexampleonly0notarealkey01");
+const STRIPE_RK: &str = concat!("rk_li", "ve_FAKEexampleonly0notarealkey01");
+const STRIPE_TEST: &str = concat!("sk_te", "st_FAKEexampleonly0notarealkey01");
+const GH_PAT: &str = concat!("gh", "p_abcdefghij1234567890ABCDEFGHIJ123456");
+const GH_OAUTH: &str = concat!("gh", "o_abcdefghij1234567890ABCDEFGHIJ123456");
+const SLACK_BOT: &str = concat!("xo", "xb-1234567890-abcdEFGH1234");
+const GOOGLE_API: &str = concat!("AI", "zaabcdefghij1234567890ABCDEFGHIJ12345");
+
+#[test]
+fn stripe_live_secret_key_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/billing.ts",
+        &format!("export const stripeKey = \"{STRIPE_LIVE}\";\n"),
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "vendor-token-committed");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 1);
+}
+
+#[test]
+fn stripe_live_restricted_key_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/billing.ts",
+        &format!("export const stripeRestrictedKey = \"{STRIPE_RK}\";\n"),
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "vendor-token-committed").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn stripe_test_secret_key_is_deliberately_not_flagged() {
+    // Documented claim: sk_test_ is a test-mode key, not a production credential, and is
+    // deliberately NOT matched.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/billing.ts",
+        &format!("export const stripeKey = \"{STRIPE_TEST}\";\n"),
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "vendor-token-committed").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn github_personal_access_token_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "scripts/deploy.ts",
+        &format!("export const ghToken = \"{GH_PAT}\";\n"),
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "vendor-token-committed");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 1);
+}
+
+#[test]
+fn github_oauth_token_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "scripts/deploy.ts",
+        &format!("export const ghToken = \"{GH_OAUTH}\";\n"),
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "vendor-token-committed").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn slack_bot_token_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "integrations/slack.ts",
+        &format!("export const slackToken = \"{SLACK_BOT}\";\n"),
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "vendor-token-committed");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 1);
+}
+
+#[test]
+fn google_api_key_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "config/maps.ts",
+        &format!("export const mapsKey = \"{GOOGLE_API}\";\n"),
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "vendor-token-committed");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 1);
+}
+
+#[test]
+fn stripe_live_key_read_from_process_env_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/billing.ts",
+        &format!("export const stripeKey = process.env.STRIPE_KEY || \"{STRIPE_LIVE}\";\n"),
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "vendor-token-committed").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn vendor_token_committed_in_a_test_fixture_path_is_still_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/__tests__/billing.test.ts",
+        &format!("export const stripeKey = \"{STRIPE_LIVE}\";\n"),
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "vendor-token-committed").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn vendor_token_ok_marker_above_the_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/billing.ts",
+        &format!("// vendor-token-ok: rotated dummy value kept only for a format-parsing regression test\nexport const stripeKey = \"{STRIPE_LIVE}\";\n"),
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "vendor-token-committed").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- jwt-none-algorithm ---
+
+#[test]
+fn algorithms_array_containing_none_in_a_jwt_file_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "import jwt from \"jsonwebtoken\";\nexport function verify(token: string) {\n  return jwt.verify(token, \"\", { algorithms: [\"none\"] });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "jwt-none-algorithm");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 3);
+}
+
+#[test]
+fn bare_algorithm_none_in_a_jwt_file_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "import jwt from \"jsonwebtoken\";\nexport const opts = { algorithm: 'none' };\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "jwt-none-algorithm").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn algorithms_hs256_in_a_jwt_file_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "import jwt from \"jsonwebtoken\";\nexport function verify(token: string) {\n  return jwt.verify(token, \"secret\", { algorithms: [\"HS256\"] });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "jwt-none-algorithm").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn algorithm_none_with_no_jwt_library_gate_present_is_not_flagged() {
+    // require_file gate claim: without a jwt/jose/jsonwebtoken token anywhere in the file, an
+    // unrelated `algorithm: 'none'`-shaped config is not opted into this rule.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "config/compression.ts",
+        "export const opts = { algorithm: 'none' };\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "jwt-none-algorithm").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn jwt_none_ok_marker_above_the_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "import jwt from \"jsonwebtoken\";\nexport function verify(token: string) {\n  // jwt-none-ok: local attack-simulation test harness, never runs against a real service\n  return jwt.verify(token, \"\", { algorithms: [\"none\"] });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "jwt-none-algorithm").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- shell-exec-interpolation ---
+
+#[test]
+fn exec_with_template_literal_interpolation_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/tools.ts",
+        "import { exec } from \"child_process\";\nexport function run(name: string) {\n  exec(`ls ${name}`);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "shell-exec-interpolation");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 3);
+}
+
+#[test]
+fn exec_sync_with_string_concatenation_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/tools.js",
+        "const { execSync } = require(\"child_process\");\nfunction run(name) {\n  execSync(\"ls \" + name);\n}\nmodule.exports = { run };\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "shell-exec-interpolation");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 3);
+}
+
+#[test]
+fn cp_member_exec_with_template_interpolation_is_flagged() {
+    // Member form: only the known child_process receiver aliases (`child_process`/`childProcess`/
+    // `cp`) fire — the allowlist is what keeps RegExp's `.exec(` out (see the regexp fixture below).
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/tools.ts",
+        "import * as cp from \"child_process\";\nexport function run(name: string) {\n  cp.exec(`ls ${name}`);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "shell-exec-interpolation");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 3);
+}
+
+#[test]
+fn regexp_exec_with_dynamic_arg_is_not_flagged() {
+    // Reviewer-verified FP shape: `pattern.exec(...)` is RegExp.prototype.exec, not a shell — a
+    // plain `\b(?:exec|execSync)` boundary is satisfied at the `.`->`e` transition, so the matcher
+    // instead requires a non-dot/word char before a bare `exec` (dot-guard idiom) and allows member
+    // calls only on the known child_process receiver aliases. The file mentions child_process on
+    // purpose, so this pins the dot-guard itself, not just the require_file gate.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/version.ts",
+        "import { execFile } from \"child_process\";\ndeclare const pattern: RegExp;\ndeclare const version: string;\ndeclare const x: string;\nexport const m1 = pattern.exec(`v${version}`);\nexport const m2 = pattern.exec(\"pre\" + x);\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "shell-exec-interpolation").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn bare_exec_interpolation_without_a_child_process_mention_is_gate_skipped() {
+    // require_file gate claim: a file that never mentions `child_process` cannot be shelling out
+    // through it, so a same-named local `exec` helper with an interpolated arg stays silent.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/query.ts",
+        "declare function exec(q: string): unknown;\nexport function run(table: string) {\n  return exec(`analyze ${table}`);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "shell-exec-interpolation").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn exec_with_a_fixed_string_literal_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/tools.ts",
+        "import { exec } from \"child_process\";\nexport function cleanup() {\n  exec(\"rm -rf /tmp/cache\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "shell-exec-interpolation").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn exec_file_with_argv_array_and_interpolated_arg_is_not_flagged() {
+    // Documented boundary: execFile/spawn (argv-array APIs) are deliberately not matched, even
+    // when one of their array elements is itself interpolated.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/tools.ts",
+        "import { execFile } from \"child_process\";\nexport function run(name: string) {\n  execFile(\"ls\", [`${name}`]);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "shell-exec-interpolation").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn spawn_with_argv_array_and_interpolated_arg_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/tools.ts",
+        "import { spawn } from \"child_process\";\nexport function run(name: string) {\n  spawn(\"ls\", [`${name}`]);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "shell-exec-interpolation").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn shell_exec_ok_marker_above_the_call_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/tools.ts",
+        "import { exec } from \"child_process\";\nexport function run(name: string) {\n  // shell-exec-ok: name is validated against an internal allow-list above\n  exec(`ls ${name}`);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "shell-exec-interpolation").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- jwt-sign-literal-secret ---
+
+#[test]
+fn jwt_sign_with_a_positional_literal_secret_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "declare const jwt: any;\ndeclare const payload: any;\nexport function issue() {\n  return jwt.sign(payload, \"abcd1234efgh5678\");\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "jwt-sign-literal-secret");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4);
+}
+
+#[test]
+fn jwt_sign_with_a_multi_key_payload_and_literal_secret_is_flagged() {
+    // Reviewer-verified miss shape under the old `[^,]*` pattern: a multi-key payload object puts
+    // commas BEFORE the secret argument, so binding to the FIRST comma missed the literal entirely.
+    // The greedy `.*` now reaches the last comma before a closing-position literal.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "declare const jwt: any;\ndeclare const u: any;\nexport function issue() {\n  return jwt.sign({ userId: u.id, role: u.role }, \"hardcoded1234\");\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "jwt-sign-literal-secret");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4);
+}
+
+#[test]
+fn jwt_sign_with_a_quoted_property_key_and_variable_secret_is_not_flagged() {
+    // The `\s*[,)]` tail binds the literal to an ARGUMENT position — a quoted alnum property key
+    // inside the payload object is followed by `:`, so it can't satisfy the tail and must not fire.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "declare const jwt: any;\ndeclare const v: any;\ndeclare const opts: any;\nexport function issue() {\n  return jwt.sign({ \"role12345\": v }, opts);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "jwt-sign-literal-secret").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn jwt_sign_with_secret_read_from_process_env_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "declare const jwt: any;\ndeclare const payload: any;\nexport function issue() {\n  return jwt.sign(payload, process.env.JWT_SECRET);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "jwt-sign-literal-secret").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn jwt_sign_with_a_variable_secret_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "declare const jwt: any;\ndeclare const payload: any;\ndeclare const secretKey: string;\nexport function issue() {\n  return jwt.sign(payload, secretKey);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "jwt-sign-literal-secret").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn jwt_sign_with_a_mock_prefixed_literal_secret_is_not_flagged() {
+    // Reuses hardcoded-secret's placeholder-word veto family.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "declare const jwt: any;\ndeclare const payload: any;\nexport function issue() {\n  return jwt.sign(payload, \"mock-abcd1234\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "jwt-sign-literal-secret").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn jwt_sign_boundary_positional_literal_is_uncovered_by_hardcoded_secret() {
+    // Boundary claim: hardcoded-secret's assignment pattern needs a `key: value`/`key = value`
+    // shape, so this positional `jwt.sign(payload, "literal")` form does not trip it — only
+    // jwt-sign-literal-secret catches it.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "declare const jwt: any;\ndeclare const payload: any;\nexport function issue() {\n  return jwt.sign(payload, \"abcd1234efgh5678\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "hardcoded-secret").is_empty(),
+        "{:?}",
+        out.findings
+    );
+    assert_eq!(
+        hits(&out, "jwt-sign-literal-secret").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn jwt_sign_literal_secret_in_a_test_fixture_path_is_still_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/__tests__/auth.test.ts",
+        "declare const jwt: any;\ndeclare const payload: any;\nexport function issue() {\n  return jwt.sign(payload, \"abcd1234efgh5678\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "jwt-sign-literal-secret").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn jwt_secret_ok_marker_above_the_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "declare const jwt: any;\ndeclare const payload: any;\nexport function issue() {\n  // jwt-secret-ok: rotated test-only fixture key, not a real credential\n  return jwt.sign(payload, \"abcd1234efgh5678\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "jwt-sign-literal-secret").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- jwt-verify-bypass ---
+
+#[test]
+fn ignore_expiration_true_in_a_jsonwebtoken_file_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "import jwt from \"jsonwebtoken\";\nexport function verify(token: string) {\n  return jwt.verify(token, \"secret\", { ignoreExpiration: true });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "jwt-verify-bypass");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 3);
+}
+
+#[test]
+fn verify_false_in_a_jsonwebtoken_file_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "import jwt from \"jsonwebtoken\";\nexport const opts = { verify: false };\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "jwt-verify-bypass").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn verify_true_in_a_jsonwebtoken_file_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "import jwt from \"jsonwebtoken\";\nexport function verify(token: string) {\n  return jwt.verify(token, \"secret\", { ignoreExpiration: false });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "jwt-verify-bypass").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn verify_false_with_no_jwt_library_gate_present_is_not_flagged() {
+    // require_file gate claim: bare `verify: false` shows up in unrelated (e.g. bundler-ish)
+    // configs too — pinned negative in a webpack-shaped file with no jsonwebtoken/jose/jwt token
+    // anywhere in it.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "webpack.extra.config.ts",
+        "export const moduleRules = { verify: false, cache: true };\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "jwt-verify-bypass").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn jwt_verify_ok_marker_above_the_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "import jwt from \"jsonwebtoken\";\nexport function verify(token: string) {\n  // jwt-verify-ok: dedicated expired-token regression test, not production code\n  return jwt.verify(token, \"secret\", { ignoreExpiration: true });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "jwt-verify-bypass").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- sendfile-from-request ---
+
+#[test]
+fn send_file_of_a_request_derived_path_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/files.ts",
+        "declare const res: any;\nexport function download(req: any) {\n  res.sendFile(req.params.filename);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "sendfile-from-request");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 3);
+}
+
+#[test]
+fn download_of_a_request_derived_path_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/files.ts",
+        "declare const res: any;\nexport function getFile(req: any) {\n  res.download(req.query.path);\n}\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "sendfile-from-request").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn send_file_of_a_fixed_path_with_no_request_input_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/files.ts",
+        "declare const res: any;\nexport function downloadReport() {\n  res.sendFile(\"/reports/summary.pdf\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sendfile-from-request").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn send_file_wrapped_in_path_basename_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/files.ts",
+        "declare const res: any;\ndeclare const path: any;\nexport function download(req: any) {\n  res.sendFile(path.basename(req.params.filename));\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sendfile-from-request").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn sendfile_ok_marker_above_the_call_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/files.ts",
+        "declare const res: any;\nexport function download(req: any) {\n  // sendfile-ok: filename validated against an internal allow-list above\n  res.sendFile(req.params.filename);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sendfile-from-request").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- cors-reflected-origin-credentials ---
+
+#[test]
+fn credentials_true_then_origin_true_on_one_line_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/cors.ts",
+        "export const corsOptions = { credentials: true, origin: true };\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "cors-reflected-origin-credentials");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 1);
+}
+
+#[test]
+fn origin_true_then_credentials_true_on_one_line_is_flagged() {
+    // Same co-occurrence, reversed key order — both orders must fire.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/cors.ts",
+        "export const corsOptions = { origin: true, credentials: true };\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "cors-reflected-origin-credentials").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn origin_reflecting_request_headers_with_credentials_true_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/cors.ts",
+        "declare const req: any;\nexport const corsOptions = { origin: req.headers.origin, credentials: true };\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "cors-reflected-origin-credentials").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn credentials_true_with_a_specific_allowlisted_origin_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/cors.ts",
+        "export const corsOptions = { credentials: true, origin: 'https://example.com' };\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "cors-reflected-origin-credentials").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn multiline_cors_options_object_is_a_documented_limitation_and_not_flagged() {
+    // Documented, deliberate limitation (not desired behavior): the matcher is single-line
+    // co-occurrence, so splitting `origin`/`credentials` across separate lines evades it even
+    // though the resulting configuration is exactly as vulnerable as the single-line shape above.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/cors.ts",
+        "export const corsOptions = {\n  origin: true,\n  credentials: true,\n};\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "cors-reflected-origin-credentials").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn cors_reflect_ok_marker_above_the_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/cors.ts",
+        "// cors-reflect-ok: internal-only service mesh endpoint, never exposed publicly\nexport const corsOptions = { credentials: true, origin: true };\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "cors-reflected-origin-credentials").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- template-unescaped-output ---
+
+fn label_of(f: &zzop_core::Finding) -> Option<&str> {
+    f.data
+        .as_ref()
+        .and_then(|d| d.get("label"))
+        .and_then(|v| v.as_str())
+}
+
+#[test]
+fn ejs_raw_output_tag_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write("views/item.ejs", "<div>\n<%- widgetHtml %>\n</div>\n");
+    let out = scan(&dir);
+    let h = hits(&out, "template-unescaped-output");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 2);
+    assert_eq!(label_of(h[0]), Some("ejs-raw"));
+}
+
+#[test]
+fn ejs_escaped_output_tag_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write("views/item.ejs", "<div>\n<%= user.name %>\n</div>\n");
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "template-unescaped-output").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn handlebars_triple_stache_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write("views/item.hbs", "<div>\n{{{ rawHtml }}}\n</div>\n");
+    let out = scan(&dir);
+    let h = hits(&out, "template-unescaped-output");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 2);
+    assert_eq!(label_of(h[0]), Some("handlebars-triple"));
+}
+
+#[test]
+fn handlebars_double_stache_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write("views/item.hbs", "<div>\n{{ name }}\n</div>\n");
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "template-unescaped-output").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn mustache_amp_unescaped_form_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write("views/item.mustache", "<div>\n{{& rawHtml}}\n</div>\n");
+    let out = scan(&dir);
+    let h = hits(&out, "template-unescaped-output");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(label_of(h[0]), Some("mustache-amp"));
+}
+
+#[test]
+fn loose_inequality_operator_in_a_template_file_is_not_flagged() {
+    // The Pug buffered-unescaped `!= expr` label was deliberately DROPPED (never-guess): it is
+    // lexically indistinguishable from the loose-inequality operator `!=`, which appears in Pug and
+    // Nunjucks conditionals (`{% if role != "guest" %}`). This pins that a covered template file
+    // containing a bare `!=` operator produces NO finding — the whole point of dropping the label.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "views/page.njk",
+        "{% if role != \"guest\" %}\n  <p>admin</p>\n{% endif %}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "template-unescaped-output").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn unescaped_template_syntax_in_a_ts_file_is_not_flagged() {
+    // Rule is deliberately extension-scoped to template files only: a token like `{{{` is a
+    // legitimate JS/TS syntax fragment, so a non-template file must stay silent no matter what it
+    // contains.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/util.ts",
+        "export function f() {\n  return {{{ a: 1 }};\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "template-unescaped-output").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn template_unescaped_ok_marker_above_the_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "views/item.ejs",
+        "// template-unescaped-ok: widgetHtml is sanitized upstream via DOMPurify\n<%- widgetHtml %>\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "template-unescaped-output").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- html-response-from-request ---
+
+#[test]
+fn res_send_with_req_query_and_html_tag_literal_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/greet.ts",
+        "declare const res: any;\ndeclare const req: any;\nexport function greet() {\n  const name = req.query.name;\n  res.send('<div>' + name + '</div>');\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "html-response-from-request");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 5);
+}
+
+#[test]
+fn res_write_with_req_body_and_content_type_html_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/report.ts",
+        "declare const res: any;\ndeclare const req: any;\nexport function report() {\n  res.setHeader('Content-Type', 'text/html');\n  const title = req.body.title;\n  res.write(title);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "html-response-from-request");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 6);
+}
+
+#[test]
+fn res_send_with_json_body_and_no_html_marker_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/data.ts",
+        "declare const res: any;\ndeclare const req: any;\nexport function data() {\n  const id = req.params.id;\n  res.send({ id });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "html-response-from-request").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn res_send_with_html_tag_but_no_request_input_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/static.ts",
+        "declare const res: any;\nexport function landing() {\n  res.send('<div>welcome</div>');\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "html-response-from-request").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn res_send_with_sanitizer_present_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/greet.ts",
+        "declare const res: any;\ndeclare const req: any;\ndeclare function escapeHtml(s: string): string;\nexport function greet() {\n  const name = req.query.name;\n  res.send('<div>' + escapeHtml(name) + '</div>');\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "html-response-from-request").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn html_response_from_request_in_a_test_fixture_path_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "tests/greet.ts",
+        "declare const res: any;\ndeclare const req: any;\nexport function greet() {\n  const name = req.query.name;\n  res.send('<div>' + name + '</div>');\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "html-response-from-request").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn html_response_ok_marker_above_the_call_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/greet.ts",
+        "declare const res: any;\ndeclare const req: any;\nexport function greet() {\n  const name = req.query.name;\n  // html-response-ok: name is allow-listed to alpha chars upstream\n  res.send('<div>' + name + '</div>');\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "html-response-from-request").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- dangerous-html-concat ---
+
+#[test]
+fn opening_tag_literal_concatenated_with_a_variable_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/render.ts",
+        "declare const res: any;\ndeclare const name: string;\nexport function render() {\n  res.send('<div>' + name);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "dangerous-html-concat");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4);
+    assert_eq!(label_of(h[0]), Some("open-tag-concat"));
+}
+
+#[test]
+fn variable_concatenated_with_a_closing_tag_literal_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/render.ts",
+        "declare const res: any;\ndeclare const name: string;\nexport function render() {\n  res.send(name + '</div>');\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "dangerous-html-concat");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(label_of(h[0]), Some("close-tag-concat"));
+}
+
+#[test]
+fn pure_literal_html_concatenation_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/render.ts",
+        "declare const res: any;\nexport function render() {\n  res.send('<div>' + '</div>');\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "dangerous-html-concat").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn non_html_concatenation_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/query.ts",
+        "declare const res: any;\ndeclare const col: string;\nexport function build() {\n  res.send('SELECT ' + col);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "dangerous-html-concat").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn variable_concatenated_with_a_non_tag_string_ending_in_gt_is_not_flagged() {
+    // close-tag-concat tightening: the trailing literal must contain actual tag markup (a `<`
+    // before its `>`), so a benign arrow/annotation string that merely ENDS in `>` (`'arrow ->'`)
+    // is not mistaken for a closing HTML tag.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/log.ts",
+        "declare const res: any;\ndeclare const msg: string;\nexport function render() {\n  res.send(msg + 'arrow -> text');\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "dangerous-html-concat").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn html_tag_concatenation_with_no_response_context_gate_present_is_not_flagged() {
+    // require_file gate claim: without any res./response./content-type mention anywhere in the
+    // file, the concatenation shape alone stays silent (e.g. a CLI/log-formatting helper).
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "cli/format.ts",
+        "declare const name: string;\nexport function format() {\n  return '<div>' + name;\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "dangerous-html-concat").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn html_concat_in_a_test_fixture_path_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "tests/render.ts",
+        "declare const res: any;\ndeclare const name: string;\nexport function render() {\n  res.send('<div>' + name);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "dangerous-html-concat").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn html_concat_ok_marker_above_the_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/render.ts",
+        "declare const res: any;\ndeclare const name: string;\nexport function render() {\n  // html-concat-ok: name is escaped via a wrapper the regex can't see\n  res.send('<div>' + name);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "dangerous-html-concat").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- csp-disabled ---
+
+#[test]
+fn helmet_content_security_policy_false_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/app.ts",
+        "declare const helmet: any;\ndeclare const app: any;\napp.use(helmet({\n  contentSecurityPolicy: false,\n}));\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "csp-disabled");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4);
+    assert_eq!(label_of(h[0]), Some("helmet-csp-false"));
+}
+
+#[test]
+fn csp_header_with_unsafe_inline_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/app.ts",
+        "declare const res: any;\nres.setHeader('Content-Security-Policy', \"default-src 'self' 'unsafe-inline'\");\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "csp-disabled");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(label_of(h[0]), Some("csp-unsafe-inline"));
+}
+
+#[test]
+fn csp_default_src_wildcard_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/app.ts",
+        "declare const res: any;\nres.setHeader('Content-Security-Policy', \"default-src *\");\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "csp-disabled");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(label_of(h[0]), Some("csp-wildcard"));
+}
+
+#[test]
+fn helmet_content_security_policy_enabled_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/app.ts",
+        "declare const helmet: any;\ndeclare const app: any;\napp.use(helmet({\n  contentSecurityPolicy: true,\n}));\n",
+    );
+    let out = scan(&dir);
+    assert!(hits(&out, "csp-disabled").is_empty(), "{:?}", out.findings);
+}
+
+#[test]
+fn csp_wildcard_with_no_helmet_gate_present_is_not_flagged() {
+    // require_file gate claim: the `csp-wildcard` label's own trigger text (`default-src *`)
+    // does not itself contain "helmet"/"content-security-policy"/"contentSecurityPolicy", so it's
+    // the one label where the gate is a real, non-tautological constraint — a file that never
+    // mentions helmet or CSP anywhere stays silent even though the directive shape matches.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/flags.ts",
+        "export const unrelatedConfig = {\n  defaultSrcNote: 'default-src * everywhere',\n};\n",
+    );
+    let out = scan(&dir);
+    assert!(hits(&out, "csp-disabled").is_empty(), "{:?}", out.findings);
+}
+
+#[test]
+fn csp_disabled_in_a_test_fixture_path_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "tests/app.ts",
+        "declare const helmet: any;\ndeclare const app: any;\napp.use(helmet({\n  contentSecurityPolicy: false,\n}));\n",
+    );
+    let out = scan(&dir);
+    assert!(hits(&out, "csp-disabled").is_empty(), "{:?}", out.findings);
+}
+
+#[test]
+fn csp_disabled_ok_marker_above_the_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/app.ts",
+        "declare const helmet: any;\ndeclare const app: any;\napp.use(helmet({\n  // csp-disabled-ok: CSP is enforced at the CDN edge instead\n  contentSecurityPolicy: false,\n}));\n",
+    );
+    let out = scan(&dir);
+    assert!(hits(&out, "csp-disabled").is_empty(), "{:?}", out.findings);
 }

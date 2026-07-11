@@ -24,6 +24,24 @@
         ],
         "snippet_max": 160
       }
+    },
+    {
+      "id": "eval-dynamic-code",
+      "severity": "warning",
+      "message": "`eval(...)` called with a non-literal argument, or `new Function(...)` used at all (even with only literal arguments — constructing a function from a string at runtime still defeats CSP's `script-src` and is invisible to every static analyzer downstream, so it is a code smell worth surfacing regardless) — building and executing code from a runtime string is one of the highest-risk sinks in JS: if any part of that string can be influenced by user input, it's arbitrary code execution. Avoid dynamic code construction; use a plain function/lookup table/JSON.parse instead. Note: `security/taint-flow` already covers `eval` when a request-derived source co-occurs in the same function, `.ts`/`.tsx` only; this rule is source-free (fires on the construct itself, not just a proven-tainted case) and also covers `.js`/`.jsx`/`.mjs`/`.cjs`. Suppress a vetted case (e.g. a sandboxed plugin-eval with no user-controlled input) with `// eval-dynamic-ok`.",
+      "suppress_marker": "eval-dynamic-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "\\beval\\s*\\(|\\bnew\\s+Function\\s*\\(",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "\\beval\\s*\\(\\s*[^'\"`)\\s]", "label": "eval-nonliteral" },
+          { "pattern": "\\bnew\\s+Function\\s*\\(\\s*[^)]", "label": "new-function" }
+        ],
+        "snippet_max": 160
+      }
     }
   ]
 }

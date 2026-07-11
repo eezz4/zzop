@@ -1,7 +1,11 @@
-//! Exercises `rules/dsl/security/security.json`'s `taint-flow` rule end-to-end via
-//! `zzop_engine::analyze_tree` against real swc-parsed TypeScript/TSX fixtures. `taint-flow` is an
+//! Exercises `rules/dsl/security/security.json`'s `taint-flow` and `eval-dynamic-code` rules end-to-end
+//! via `zzop_engine::analyze_tree` against real swc-parsed TypeScript/TSX fixtures. `taint-flow` is an
 //! explicitly coarse approximation (source+sink co-occurrence within a method-scan span, no real
 //! per-variable dataflow) — see the rule's `message` for the full list of precision limits.
+//!
+//! `eval-dynamic-code` is source-free and js-inclusive (unlike `taint-flow`, which needs a request-derived
+//! source in the same function and only looks at `.ts`/`.tsx`): `eval(...)` with a non-literal argument
+//! (`eval-nonliteral`) or any `new Function(...)` call, literal args included (`new-function`).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -202,4 +206,131 @@ fn source_into_sink_inside_a_test_fixture_path_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(hits(&out, "taint-flow").is_empty(), "{:?}", out.findings);
+}
+
+// --- eval-dynamic-code ---
+
+#[test]
+fn eval_with_a_variable_argument_is_flagged_eval_nonliteral() {
+    let dir = TempDir::new("zzop-security");
+    dir.write(
+        "run.ts",
+        "declare const userInput: string;\nexport function run() {\n  eval(userInput);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "eval-dynamic-code");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 3);
+    assert_eq!(
+        h[0].data
+            .as_ref()
+            .and_then(|d| d.get("label"))
+            .and_then(|v| v.as_str()),
+        Some("eval-nonliteral")
+    );
+}
+
+#[test]
+fn eval_with_a_literal_argument_is_not_flagged() {
+    let dir = TempDir::new("zzop-security");
+    dir.write(
+        "run2.ts",
+        "export function run() {\n  eval(\"2 + 2\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "eval-dynamic-code").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn new_function_with_a_variable_argument_is_flagged_new_function() {
+    let dir = TempDir::new("zzop-security");
+    dir.write(
+        "build.ts",
+        "declare const code: string;\nexport function build() {\n  const fn = new Function(code);\n  return fn;\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "eval-dynamic-code");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(
+        h[0].data
+            .as_ref()
+            .and_then(|d| d.get("label"))
+            .and_then(|v| v.as_str()),
+        Some("new-function")
+    );
+}
+
+#[test]
+fn new_function_with_only_literal_arguments_is_still_flagged() {
+    // Boundary pin: `new Function(...)` is flagged regardless of literal args — constructing a function
+    // from a string at runtime defeats CSP and every static analyzer even when the body is a fixed literal.
+    let dir = TempDir::new("zzop-security");
+    dir.write(
+        "build2.ts",
+        "export function build() {\n  const fn = new Function(\"a\", \"return a * 2\");\n  return fn;\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "eval-dynamic-code");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn plain_js_file_eval_with_a_variable_is_flagged() {
+    let dir = TempDir::new("zzop-security");
+    dir.write(
+        "run.js",
+        "function run(userInput) {\n  eval(userInput);\n}\nmodule.exports = { run };\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "eval-dynamic-code");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn eval_mentioned_only_in_a_comment_is_not_flagged() {
+    let dir = TempDir::new("zzop-security");
+    dir.write(
+        "run3.ts",
+        "declare const userInput: string;\nexport function run() {\n  // eval(userInput); -- old implementation, removed\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "eval-dynamic-code").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn eval_dynamic_ok_marker_above_the_call_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-security");
+    dir.write(
+        "sandboxed.ts",
+        "declare const pluginCode: string;\nexport function run() {\n  // eval-dynamic-ok: sandboxed plugin worker, no user-controlled input\n  eval(pluginCode);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "eval-dynamic-code").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn eval_dynamic_code_inside_a_test_fixture_path_is_not_flagged() {
+    let dir = TempDir::new("zzop-security");
+    dir.write(
+        "src/__tests__/run.ts",
+        "declare const userInput: string;\nexport function run() {\n  eval(userInput);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "eval-dynamic-code").is_empty(),
+        "{:?}",
+        out.findings
+    );
 }

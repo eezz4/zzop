@@ -1,10 +1,12 @@
 //! Default commit-type classifier table — analysis vocabulary (regex source, TAG pairs) used by this
 //! crate's own score channels (`scores::fix_ratio`, `recommendations`'s FIX-hotspot gate) and by
-//! `zzop_engine::analyze::collect_git` as the default `zzop_git::CollectOptions::commit_type_patterns`
-//! override. Lives here rather than in `zzop-git`: that crate owns collection plus the injectable
-//! classification *mechanism* only, not the domain vocabulary for what a "FIX" commit looks like.
-//! `zzop-git` keeps its own small test-only copy of this table so it need not depend on this crate —
-//! see `zzop_git::tags`'s test module doc for why the content is intentionally duplicated there.
+//! `zzop_engine::analyze::collect_git` as the DEFAULT `zzop_git::CollectOptions::commit_type_patterns`
+//! override — used unless a config `git.commitTypePatterns` table (`GitOptions::commit_type_patterns`)
+//! replaces it whole for a given run. Lives here rather than in `zzop-git`: that
+//! crate owns collection plus the injectable classification *mechanism* only, not the domain vocabulary
+//! for what a "FIX" commit looks like. `zzop-git` keeps its own small test-only copy of this table so it
+//! need not depend on this crate — see `zzop_git::tags`'s test module doc for why the content is
+//! intentionally duplicated there.
 
 /// Default commit-type classifier table (regex source, TAG), in match order. REVERT is checked before
 /// FIX/FEAT so a reverted change is not miscounted as the change it reverts — see

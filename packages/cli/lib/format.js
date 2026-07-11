@@ -29,8 +29,17 @@ function paint(text, code, color) {
 /**
  * Collect findings from a native output object into a flat array, regardless of whether it came from
  * `analyze()` (top-level `findings`, `fileCount`) or `analyzeTrees()` (`{ trees: [{ root, sourceId,
- * output }], crossLayer }`). Each finding is returned as-is (ruleId/severity/file/line/message), with a
- * `sourceId`/`root` tag added when it came from a multi-tree run.
+ * output }], crossLayer, crossLayerFindings }`). Each finding is returned as-is
+ * (ruleId/severity/file/line/message), with a `sourceId`/`root` tag added when it came from a per-tree
+ * `findings` array in a multi-tree run.
+ *
+ * A multi-tree run's top-level `crossLayerFindings` (the `cross-layer/*` native rules run over the join —
+ * duplicate-route, route-shadowing, unprovided-mutation-call, external-secret-in-url, ...) are appended too,
+ * tagged `crossLayer: true` instead of a `sourceId`/`root`: a cross-layer finding is a joint-analysis output
+ * that can span two trees, so attributing it to one side would be misleading. This is what feeds
+ * `formatPretty`/`sarifDoc`/`computeExitCode` — previously these findings were silently dropped from all
+ * three (only `trees[].output.findings` was collected), so a cross-layer drift signal never showed up in the
+ * terminal, never reached SARIF, and never gated `failOn`.
  *
  * @param {object} output  parsed native output
  * @returns {{ findings: object[], fileCount: number }}
@@ -52,10 +61,15 @@ function collectFindings(output) {
         findings.push({ ...f, sourceId: tree.sourceId, root: tree.root });
       }
     }
+    if (Array.isArray(output.crossLayerFindings)) {
+      for (const f of output.crossLayerFindings) {
+        findings.push({ ...f, crossLayer: true });
+      }
+    }
     return { findings, fileCount };
   }
 
-  // Single-tree shape.
+  // Single-tree shape (analyze()/analyzeEnvelope() — no crossLayerFindings field exists here).
   const findings = Array.isArray(output.findings) ? output.findings : [];
   const fileCount = Number(output.fileCount) || 0;
   return { findings, fileCount };
@@ -169,10 +183,30 @@ function groupByFile(findings) {
 }
 
 /**
+ * Render one finding as its terminal line: `  <severity>  <line>  <message>  <ruleId>`. Shared by the
+ * per-file groups and the cross-layer section below so both stay byte-for-byte consistent.
+ * @param {object} f
+ * @param {boolean} color
+ * @returns {string}
+ */
+function renderFindingLine(f, color) {
+  const sevRaw = String(f.severity || 'info');
+  const sev = paint(sevRaw.padEnd(8), SEVERITY_COLOR[sevRaw] || '', color);
+  const loc = paint(`${f.line != null ? f.line : '?'}`, ANSI.dim, color);
+  const rule = paint(String(f.ruleId || ''), ANSI.dim, color);
+  return `  ${sev} ${loc}  ${f.message || ''}  ${rule}`;
+}
+
+/**
  * Pretty terminal report: critical/warning findings grouped by file, then a summary footer. Info-level
  * findings are FOLDED into a per-rule count block by default so a flood of hygiene-tier signals can't bury
  * actionable warnings; pass `showAllInfo` (the CLI's `--all`) to expand them inline like everything else.
  * The footer always tallies every finding, folded or not.
+ *
+ * Cross-layer findings (tagged `crossLayer: true` by `collectFindings`) are rendered in their own
+ * "Cross-layer findings:" section AFTER the per-file groups, not mixed into them: the same relative file
+ * path can legitimately exist in two different trees in a multi-tree run, so grouping a two-tree join
+ * finding under a bare file header (already used by that OTHER tree's own findings) would misattribute it.
  *
  * @param {object} output  parsed native output
  * @param {{ color?: boolean, showAllInfo?: boolean, minSeverity?: 'critical'|'warning'|'info'|'off'|null }} [opts]
@@ -198,18 +232,27 @@ function formatPretty(output, opts = {}) {
   const visible = showAllInfo ? findings : elevated;
   const lines = [];
 
-  if (visible.length === 0) {
+  const perTreeVisible = visible.filter((f) => !f.crossLayer);
+  const crossLayerVisible = visible.filter((f) => f.crossLayer);
+
+  if (perTreeVisible.length === 0 && crossLayerVisible.length === 0) {
     lines.push(paint('No warnings or errors.', ANSI.dim, color));
     lines.push('');
   } else {
-    for (const [file, list] of groupByFile(visible)) {
+    for (const [file, list] of groupByFile(perTreeVisible)) {
       lines.push(paint(file, ANSI.bold, color));
       for (const f of list) {
-        const sevRaw = String(f.severity || 'info');
-        const sev = paint(sevRaw.padEnd(8), SEVERITY_COLOR[sevRaw] || '', color);
-        const loc = paint(`${f.line != null ? f.line : '?'}`, ANSI.dim, color);
-        const rule = paint(String(f.ruleId || ''), ANSI.dim, color);
-        lines.push(`  ${sev} ${loc}  ${f.message || ''}  ${rule}`);
+        lines.push(renderFindingLine(f, color));
+      }
+      lines.push('');
+    }
+    if (crossLayerVisible.length > 0) {
+      lines.push(paint('Cross-layer findings:', ANSI.bold, color));
+      for (const [file, list] of groupByFile(crossLayerVisible)) {
+        lines.push(`  ${paint(file, ANSI.dim, color)}`);
+        for (const f of list) {
+          lines.push(renderFindingLine(f, color));
+        }
       }
       lines.push('');
     }

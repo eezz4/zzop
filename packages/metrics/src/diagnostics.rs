@@ -157,7 +157,7 @@ pub fn build_diagnostics(i: DiagnosticsInput) -> AnalysisDiagnostics {
 
         if git.total_changes > 0 && git.tagged_changes == 0 {
             warnings.push(format!(
-                "0 of {} file-changes classified by commit type — the commit-message convention was not recognized (recognized forms: a `[FIX]`-style bracket prefix, or a `fix:`/`fixed:`/`bugfix:`/`hotfix:` keyword prefix at the subject start). Custom commit-type patterns are not yet configurable — there is no config key for teaching this a different convention today. Until commit subjects match one of the recognized forms, bug-prone, FIX hotspots, versioning-candidate, fixRatio stay disabled.",
+                "0 of {} file-changes classified by commit type — the commit-message convention was not recognized (recognized forms: a `[FIX]`-style bracket prefix, or a `fix:`/`fixed:`/`bugfix:`/`hotfix:` keyword prefix at the subject start). If this repo uses a different convention, teach it via `git.commitTypePatterns` in zzop.config.jsonc (a `[{{ pattern, tag }}, ...]` table that replaces the default vocabulary). Until commit subjects match one of the recognized forms or a custom table, bug-prone, FIX hotspots, versioning-candidate, fixRatio stay disabled.",
                 git.total_changes
             ));
         }
