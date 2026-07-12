@@ -41,7 +41,8 @@ the linker is an exact join on normalized keys, never AST matching).
   "trpc_router_fragments": [ <TrpcRouterFragment> ],
   "router_mount_fragments": [ <RouterMountFragment> ],
   "degraded": false,
-  "is_entry": false
+  "is_entry": false,
+  "loop_spans": [[10, 14]]
 }
 ```
 
@@ -102,6 +103,12 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
   package.json manifest entry. Meaningful in Mode B (adapter overlays, below): every `is_entry: true`
   file's `path` across all configured overlays is unioned into the `dead-candidates` analysis's exempt
   set. Mode A (`analyze_envelope`) does not read this field.
+- `loop_spans` — OPTIONAL (`#[serde(default)]`; camelCase `loopSpans` also accepted on input). `[[startLine,
+  endLine], ...]`, 1-based and inclusive. Each pair is either a loop statement's whole span (`for`/
+  `for-in`/`for-of`/`while`/`do-while`, header line included) or an array-iteration callback argument's
+  span (`.map`/`.forEach`/`.filter`/... — the callback only, never the whole call). Feeds
+  `MethodScan::trigger_in_loop`; absent means no structural loop facts for this file, and that matcher
+  silently skips it (graceful degrade, same convention as `symbols`' `body_start`/`body_end`).
 
 ## Delivery
 

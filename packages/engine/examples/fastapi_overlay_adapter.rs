@@ -209,6 +209,7 @@ fn build_overlay(scan_root: &Path, scan_prefix: &str) -> NormalizedEnvelope {
             io: IoFacts::default(),
             degraded: false,
             is_entry: false,
+            loop_spans: Vec::new(),
         });
     }
 

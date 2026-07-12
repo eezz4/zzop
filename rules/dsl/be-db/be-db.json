@@ -47,7 +47,7 @@
     {
       "id": "client-per-request",
       "severity": "warning",
-      "message": "`new PrismaClient()` constructed inside a function that looks like a request handler (references `req`/`res`/`ctx`/`request`/`reply`) — a fresh client per request exhausts the database connection pool under load. Hoist a single client to a module-level singleton instead. Suppress a vetted case with `// prisma-client-ok`.",
+      "message": "`new PrismaClient()` constructed inside a function that looks like a request handler (a `req.`/`request.` member access, or a response-API call like `res.status(...)`/`res.send(...)` — deliberately NOT `res.json(`/`res.text(`, which a fetch `Response` also has, so a handler whose only response evidence is a bare `res.json(x)` is accepted as a miss rather than risking fetch-response false positives) — a fresh client per request exhausts the database connection pool under load. Hoist a single client to a module-level singleton instead. Suppress a vetted case with `// prisma-client-ok`.",
       "suppress_marker": "prisma-client-ok",
       "matcher": {
         "type": "method-scan",
@@ -56,7 +56,7 @@
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\bnew\\s+PrismaClient\\s*\\(", "label": "new-client" },
-          { "pattern": "\\b(?:req|res|ctx|request|reply)\\b", "label": "handler-context" }
+          { "pattern": "\\breq\\.[a-zA-Z_$]|\\brequest\\.(?:params|query|body|headers|method)\\b|\\bres\\.(?:status|send|setHeader|sendFile|redirect|render|writeHead|end)\\s*\\(|\\breply\\.[a-zA-Z_$][\\w$]*\\s*\\(|\\bctx\\.(?:req|request|params|query|body|status|throw|set)\\b", "label": "handler-context" }
         ],
         "trigger": "new-client",
         "snippet_max": 160
@@ -114,7 +114,7 @@
     {
       "id": "find-then-create-no-unique",
       "severity": "warning",
-      "message": "A `findFirst`/`findOne`/`findUnique` read followed by `.create(` with no `connectOrCreate` or `upsert` — a check-then-act race lets two concurrent requests both pass and create a duplicate row. Add a unique constraint and replace the check-then-act with an upsert/`connectOrCreate`; wrapping the read+write in a `$transaction` alone does NOT close this race at the database's default READ COMMITTED isolation level — two concurrent transactions can both read empty and both insert. Suppress a vetted case with `// find-create-ok`.",
+      "message": "A `findFirst`/`findOne`/`findUnique` read and a `.create(` call both appear in the same function with no `connectOrCreate` or `upsert` — this is a co-occurrence heuristic, not proof the read precedes the create, but when it's a check-then-act shape: two concurrent requests can both pass the check and both create a duplicate row. Add a unique constraint and replace the check-then-act with an upsert/`connectOrCreate`; wrapping the read+write in a `$transaction` alone does NOT close this race at the database's default READ COMMITTED isolation level — two concurrent transactions can both read empty and both insert. Suppress a vetted case with `// find-create-ok`.",
       "suppress_marker": "find-create-ok",
       "matcher": {
         "type": "method-scan",
@@ -193,7 +193,7 @@
     {
       "id": "non-atomic-counter-update",
       "severity": "warning",
-      "message": "A read (`findUnique`/`findFirst`/`findOne`/`findById`) is followed, elsewhere in the same function, by an update that recomputes a field as `<ident> + 1`/`<ident> - 1` — read-then-arithmetic-update is not atomic: two concurrent requests can both read the same starting value and both write the same incremented result, silently losing one of the two increments. This is a co-occurrence heuristic, not proof — any `field: value + 1`-shaped object entry in the same function trips it, even one unrelated to the read (e.g. a `take: cursor + 1` pagination bound). Use the ORM's atomic increment/decrement (e.g. Prisma's `{ increment: 1 }`/`{ decrement: 1 }`), a DB-side `$inc`, or a `SELECT ... FOR UPDATE` row lock instead of read-then-write arithmetic. Suppress a vetted case with `// atomic-counter-ok`.",
+      "message": "A read (`findUnique`/`findFirst`/`findOne`/`findById`) and an update that recomputes a field as `<ident> + 1`/`<ident> - 1` both appear in the same function — this is a co-occurrence heuristic, not proof of order, but when the update genuinely follows the read: read-then-arithmetic-update is not atomic, and two concurrent requests can both read the same starting value and both write the same incremented result, silently losing one of the two increments. Any `field: value + 1`-shaped object entry in the same function trips it, even one unrelated to the read (e.g. a `take: cursor + 1` pagination bound). Use the ORM's atomic increment/decrement (e.g. Prisma's `{ increment: 1 }`/`{ decrement: 1 }`), a DB-side `$inc`, or a `SELECT ... FOR UPDATE` row lock instead of read-then-write arithmetic. Suppress a vetted case with `// atomic-counter-ok`.",
       "suppress_marker": "atomic-counter-ok",
       "matcher": {
         "type": "method-scan",

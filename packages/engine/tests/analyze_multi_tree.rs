@@ -94,6 +94,7 @@ fn projection(path: &str, loc: u32) -> FileProjection {
         io: IoFacts::default(),
         degraded: false,
         is_entry: false,
+        loop_spans: Vec::new(),
     }
 }
 

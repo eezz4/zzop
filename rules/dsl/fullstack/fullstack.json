@@ -34,7 +34,7 @@
     {
       "id": "get-with-body",
       "severity": "warning",
-      "message": "A GET request carrying a body (`method: 'get'` alongside `body:` in the same function) — servers/proxies may silently drop the body on a GET, so data the caller thinks it's sending never arrives. Use POST (or another body-bearing method) or move the data to query params. Suppress a vetted case with `// get-body-ok`.",
+      "message": "A GET request carrying a body (a VALUE-position `method: 'get'` alongside `body:` in the same function) — servers/proxies may silently drop the body on a GET, so data the caller thinks it's sending never arrives. Use POST (or another body-bearing method) or move the data to query params. A TypeScript type-position `method: \"GET\" | \"POST\"` union (the common generic request-wrapper signature) is deliberately NOT matched — there the method is a parameter, not a committed GET, so the wrapper's conditional `body:` is fine. Suppress a vetted case with `// get-body-ok`.",
       "suppress_marker": "get-body-ok",
       "matcher": {
         "type": "method-scan",
@@ -42,7 +42,7 @@
         "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
-          { "pattern": "(?i)method\\s*:\\s*['\"]get['\"]", "label": "get-method" },
+          { "pattern": "(?i)method\\s*:\\s*['\"]get['\"]\\s*(?:[,})]|$)", "label": "get-method" },
           { "pattern": "\\bbody\\s*:", "label": "body" }
         ],
         "trigger": "body"

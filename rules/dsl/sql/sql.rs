@@ -240,6 +240,33 @@ fn file_outside_domains_or_api_paths_is_excluded() {
     assert!(hits(&out, "nplus1").is_empty());
 }
 
+// --- structural span-based containment: trigger_in_loop (rewritten from text co-occurrence) ---
+
+#[test]
+fn await_store_finduniq_inside_for_of_loop_is_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "domains/user/routes/createUserHandlers.ts",
+        "declare const userStore: any;\ndeclare const users: any[];\nexport async function f() {\n  for (const u of users) {\n    await userStore.findUnique({ where: { id: u.id } });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(hits(&out, "nplus1").len(), 1, "{:?}", out.findings);
+}
+
+/// Adapter shape (mirrors `perf/api-in-loop`'s REDDIT-shape negative): one `findMany`, then the result
+/// array is TRANSFORMED via `.map()` — the `await ... findMany(` line is not textually inside the map
+/// callback's own span, so the trigger never satisfies inside a loop span and the rule stays silent.
+#[test]
+fn findmany_then_result_array_map_transform_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "api/listUsers.ts",
+        "declare const userStore: any;\nexport async function f() {\n  const results = await userStore.findMany({ where: { active: true } });\n  return results.map((u: any) => ({ id: u.id, name: u.name }));\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(hits(&out, "nplus1").is_empty(), "{:?}", out.findings);
+}
+
 // --- count-in-loop ---
 
 #[test]
@@ -284,6 +311,20 @@ fn store_count_outside_loop_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(hits(&out, "count-in-loop").is_empty());
+}
+
+/// `.count()` called once, after a `findMany()`, with no loop anywhere in the function — same
+/// no-loop-spans-at-all shape as `store_count_outside_loop_is_not_flagged` above, but exercising the
+/// findMany-then-single-count adapter pattern specifically.
+#[test]
+fn count_call_outside_loop_after_findmany_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "summary.ts",
+        "declare const postLikeStore: any;\nexport async function f() {\n  const rows = await postLikeStore.findMany();\n  const total = await postLikeStore.count();\n  return { rows, total };\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(hits(&out, "count-in-loop").is_empty(), "{:?}", out.findings);
 }
 
 // --- app-side-aggregation ---
@@ -997,6 +1038,62 @@ fn sql_truncate_app_ok_marker_suppresses_the_finding() {
     let out = scan(&dir);
     assert!(
         hits(&out, "truncate-in-app-code").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn jsx_truncate_boolean_prop_is_not_flagged() {
+    // Class fix (mono-hub 0.10.0 FP): a JSX boolean prop `truncate` sits after the CLOSING quote of
+    // a sibling attribute (`size="sm" truncate style=...`). The rule now requires a CLOSED string
+    // literal (a quote after the table name, like its `sql-delete-no-where` siblings), so `truncate`
+    // as prose outside any quoted SQL string no longer fires.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/ui/Row.tsx",
+        "export const Row = () => <MonoText size=\"sm\" truncate style={{ flex: 1 }}>hi</MonoText>;\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "truncate-in-app-code").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn tailwind_truncate_class_name_is_not_flagged() {
+    // Same class fix, broader surface than the review noted: Tailwind's `truncate` text-overflow
+    // utility opens the className string (`"truncate w-full"`), so the quote IS adjacent to
+    // TRUNCATE — only the closed-literal requirement (no closing quote right after a table name)
+    // keeps this from firing across every React frontend.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/ui/Card.tsx",
+        "export const Card = () => <div className=\"truncate w-full text-sm\">x</div>;\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "truncate-in-app-code").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn truncate_bare_table_without_the_table_keyword_is_still_flagged() {
+    // The closed-literal tightening must not lose the bare `TRUNCATE <table>` form (valid on
+    // Postgres/MySQL) — the `(TABLE\s+)?` group stays optional.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/cleanup.ts",
+        "export async function reset(db: any) {\n  return db.exec(`TRUNCATE sessions`);\n}\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "truncate-in-app-code").len(),
+        1,
         "{:?}",
         out.findings
     );

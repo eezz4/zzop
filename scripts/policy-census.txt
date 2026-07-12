@@ -22,6 +22,7 @@ parser/parser-typescript/src/adapters/controller_decorators.rs:CONTROLLER_CLASS_
 parser/parser-typescript/src/lang/resolve.rs:RESOLVE_EXTS
 parser/parser-typescript/src/lang/write_site.rs:DEFAULT_WRITE_METHODS
 parser/parser-typescript/src/lang/write_site.rs:WRITE_LABEL_TOKEN_COUNT
+parser/parser-typescript/src/lib.rs:ARRAY_ITERATION_METHODS
 rules/native/rules-cross-layer/src/cross_layer/ambiguous_consume.rs:MAX_CANDIDATES
 rules/native/rules-cross-layer/src/cross_layer/external_host_fanout.rs:FANOUT_MIN_FILES
 rules/native/rules-cross-layer/src/cross_layer/external_secret_in_url.rs:SECRET_PARAM_NAMES

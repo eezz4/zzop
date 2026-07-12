@@ -252,3 +252,102 @@ fn fetch_in_a_bounded_retry_loop_is_not_flagged() {
     );
     assert!(f.is_empty(), "{f:?}");
 }
+
+#[test]
+fn fetch_in_a_for_of_retry_loop_mentioning_backoff_is_not_flagged() {
+    // Same retry-guard veto, but on a for-of loop (rather than the traditional-for shape above) — the
+    // veto is keyed off the function body mentioning retry/backoff vocabulary, not the loop's own shape.
+    let f = scan(
+        "svc.ts",
+        "declare const urls: string[];\nexport async function f() {\n  const backoff = 100;\n  for (const url of urls) {\n    const r = await fetch(url);\n    console.log(r, backoff);\n  }\n}\n",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+// --- structural span-based containment: trigger_in_loop (rewritten from text co-occurrence) ---
+
+#[test]
+fn fetch_inside_promise_all_map_callback_is_flagged() {
+    let f = scan(
+        "svc.ts",
+        "declare const ids: string[];\ndeclare function url(id: string): string;\nexport async function f() {\n  await Promise.all(ids.map(async (id) => fetch(url(id))));\n}\n",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 4);
+    assert!(snippet(&f[0]).contains("fetch"));
+}
+
+#[test]
+fn fetch_in_while_loop_condition_header_is_flagged() {
+    // The loop-span header line is included by design (a call in the condition runs once per
+    // iteration too), so a network call directly in a `while (...)` condition is in-span.
+    let f = scan(
+        "svc.ts",
+        "declare const next: any;\nexport async function f() {\n  while (await fetch(next).then((r: any) => r.ok)) {\n    console.log(\"looping\");\n  }\n}\n",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 3);
+}
+
+/// REDDIT-shape data adapter: one fetch, then the JSON response is TRANSFORMED via `.map()` over a
+/// multi-line destructuring callback. The fetch line is not textually inside the map callback's span, so
+/// the trigger never satisfies inside a loop span and the rule stays silent — the universal false-positive
+/// shape (11/11 on the mono-hub corpus) this rewrite targets.
+#[test]
+fn single_fetch_then_response_array_map_transform_reddit_shape_is_not_flagged() {
+    let f = scan(
+        "svc.ts",
+        "declare const url: string;\nexport async function f() {\n  const res = await fetch(url);\n  const json = await res.json();\n  return json.data.children.map(({ data }: any) => ({\n    id: data.id,\n    title: data.title,\n  }));\n}\n",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+/// Stream-read shape: one fetch, then a `while` loop reads the response stream — the loop body mentions
+/// `reader.read()`, not a network-pattern call, so the trigger pattern never matches inside the loop span
+/// at all (and the one `fetch` call site itself sits outside every loop span).
+#[test]
+fn single_fetch_then_stream_read_while_loop_is_not_flagged() {
+    let f = scan(
+        "svc.ts",
+        "declare const url: string;\ndeclare const reader: any;\nexport async function f() {\n  await fetch(url);\n  while (true) {\n    const { done, value } = await reader.read();\n    if (done) break;\n    console.log(value);\n  }\n}\n",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+/// Regex-exec shape: one fetch, then a `while ((match = pattern.exec(xml)) !== null)` loop parses the
+/// response text — same defect class as the stream-read shape above.
+#[test]
+fn single_fetch_then_regex_exec_while_loop_is_not_flagged() {
+    let f = scan(
+        "svc.ts",
+        "declare const xml: string;\ndeclare const pattern: RegExp;\nexport async function f() {\n  const res = await fetch(\"/api/data\");\n  let match: RegExpExecArray | null;\n  while ((match = pattern.exec(xml)) !== null) {\n    console.log(match, res);\n  }\n}\n",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+/// BOUNDARY FINDING (documented deviation, not forced green): `(await fetch(url)).items.map(x => x.id)`
+/// all on ONE line. Byte-wise the fetch is in the RECEIVER, outside the `.map()` callback's own span, so
+/// this "should" be silent by the same logic as the multi-line REDDIT-shape negative above. But
+/// `MethodScan::trigger_in_loop`'s containment check is LINE-based (`SourceFile::loop_spans` stores
+/// 1-based line numbers, not byte offsets — see `extract_loop_spans`'s doc), and the one-liner's map
+/// callback span is `(line, line)` for that single line. Since the fetch call and the callback share that
+/// same line number, the trigger's line falls "within" the callback span and the rule FIRES — a real
+/// false positive on the single-line receiver shape that the line-granularity containment check cannot
+/// distinguish from genuine in-callback placement. Multi-line receiver shapes (see
+/// `extract_loop_spans_map_callback_excludes_receiver_line` in parser-typescript) are unaffected because
+/// the receiver's line differs from the callback's line range.
+#[test]
+fn single_line_receiver_fetch_before_map_callback_is_a_known_line_granularity_false_positive() {
+    let f = scan(
+        "svc.ts",
+        "export async function f(url: string) {\n  return (await fetch(url)).items.map((x: any) => x.id);\n}\n",
+    );
+    assert_eq!(
+        f.len(),
+        1,
+        "documented boundary finding: single-line receiver+callback share a line number under \
+         line-granularity containment, so this fires instead of staying silent; if this assertion \
+         ever flips to empty, the containment check has gained column/byte precision and this test \
+         (and its doc comment) should be updated to assert silence instead — {f:?}"
+    );
+}

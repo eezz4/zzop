@@ -90,6 +90,16 @@ pub struct FileProjection {
     pub router_mount_fragments: Vec<crate::RouterMountFragment>,
     #[serde(default)]
     pub io: IoFacts,
+    /// Per-file loop-body line spans (1-based, inclusive) — external-parser counterpart of
+    /// `zzop_core::dsl::SourceFile::loop_spans` (see that field's doc for the exact span contract: each
+    /// loop statement's full span, plus array-iteration callback ARGUMENT spans only, never the whole
+    /// call). OPTIONAL (`#[serde(default)]`; absent = empty = `MethodScan::trigger_in_loop` silently
+    /// skips this file, same graceful-degrade policy as `symbols`/`io`). Serialized snake_case
+    /// (`loop_spans`), consistent with `FileProjection`'s other fields — this struct has no
+    /// `rename_all`, so `SourceSymbol`'s dual-casing convention (a `rename_all = "camelCase"` type)
+    /// does not apply here; `loopSpans` is still tolerated on INPUT for camelCase emitters.
+    #[serde(default, alias = "loopSpans")]
+    pub loop_spans: Vec<(u32, u32)>,
     /// The parser could not fully process this file (size cap, syntax failure) — `loc` must still be
     /// present regardless.
     #[serde(default)]
@@ -291,6 +301,7 @@ mod tests {
                 io: IoFacts::default(),
                 degraded: false,
                 is_entry: false,
+                loop_spans: vec![],
             }],
         };
         let json = serde_json::to_string(&envelope).unwrap();
@@ -367,6 +378,7 @@ mod tests {
                     io: IoFacts::default(),
                     degraded: false,
                     is_entry: false,
+                    loop_spans: vec![],
                 },
                 FileProjection {
                     path: "a.ext".to_string(),
@@ -382,6 +394,7 @@ mod tests {
                     io: IoFacts::default(),
                     degraded: false,
                     is_entry: false,
+                    loop_spans: vec![],
                 },
             ],
         };

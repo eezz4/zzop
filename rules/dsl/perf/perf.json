@@ -6,7 +6,7 @@
     {
       "id": "api-in-loop",
       "severity": "warning",
-      "message": "Network call made inside a loop (for/for-of/for-in/while/do, or an Array forEach/map/filter/reduce callback) — fires one request per iteration, the HTTP analogue of N+1 (rate-limit / serial-latency risk). Batch via a bulk endpoint, or gather inputs and issue one request (or a bounded Promise.all). Suppress a vetted case with `// api-in-loop-ok`.",
+      "message": "Network call made structurally inside a for/for-of/for-in/while/do-while statement or an Array forEach/map/filter/reduce callback — verified against the parser's projected loop spans (the call's line falls within a loop statement's span, or within an array-iteration callback's own span), not merely co-occurring with loop syntax somewhere in the same function — so it fires one request per iteration, the HTTP analogue of N+1 (rate-limit / serial-latency risk). Batch via a bulk endpoint, or gather inputs and issue one request (or a bounded Promise.all). A file with no projected loop spans is silently skipped by this rule — for the `.ts`/`.tsx` files this rule scans, that realistically means a degraded parse (oversized file or syntax failure), the same graceful-degrade policy method-scan already applies to missing symbol spans. Suppress a vetted case with `// api-in-loop-ok`.",
       "suppress_marker": "api-in-loop-ok",
       "matcher": {
         "type": "method-scan",
@@ -16,15 +16,12 @@
         "skip_comment_lines": true,
         "patterns": [
           {
-            "pattern": "(?i)\\bfor\\s*(?:\\(|await\\b)|\\bwhile\\s*\\(|\\bdo\\s*\\{|\\.(?:forEach|map|filter|reduce)\\s*\\(",
-            "label": "loop"
-          },
-          {
             "pattern": "(?i)\\b(?:fetch|\\$fetch|ofetch|got|ky|superagent|undici|wretch|axios)\\s*\\(|\\b(?:axios|http|https|httpClient|httpService|apiClient|api|client|fetcher|xhr|conn|session|agent|http2|net)\\.(?:get|post|put|patch|delete|head|options|request|fetch|send|query)\\s*\\(",
             "label": "network"
           }
         ],
         "trigger": "network",
+        "trigger_in_loop": true,
         "absent": [
           {
             "pattern": "(?i)\\bretr(?:y|ies)\\b|\\bbackoff\\b|\\battempts?\\b",

@@ -1982,6 +1982,44 @@ fn non_pem_looking_dashes_are_not_flagged() {
     );
 }
 
+#[test]
+fn pem_header_mentioned_in_prose_without_a_key_body_is_not_flagged() {
+    // Class fix (mono-hub 0.10.0 FP): an i18n/doc string that merely NAMES the PEM header — no
+    // base64 key material accompanies it — is a non-key reading, so the header substring alone
+    // must not fire. The line_pattern requires either the header at end-of-line (a dedicated key
+    // line) or a base64 body after it; a header wrapped in a prose sentence satisfies neither.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "src/i18n/en.json",
+        "{\n  \"guide\": \"Running keygen produces a `-----BEGIN PRIVATE KEY-----` block within a few seconds.\"\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "private-key-committed").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn single_line_json_embedded_private_key_with_base64_body_is_flagged() {
+    // The complement of the prose fixture: a real key committed as a single JSON string (header,
+    // an escaped `\n`, then the base64 body all on one physical line) must still fire — the
+    // base64-body alternative of the line_pattern is what catches it.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "config/secrets.json",
+        "{ \"privateKey\": \"-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSj\\n-----END PRIVATE KEY-----\" }\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "private-key-committed").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
 // --- vendor-token-committed ---
 //
 // These fixtures must carry live vendor-token SHAPES by design (that is what the rule detects),

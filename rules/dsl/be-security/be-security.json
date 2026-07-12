@@ -194,7 +194,7 @@
     {
       "id": "path-traversal",
       "severity": "warning",
-      "message": "A filesystem call (`fs`/`fsp.*`, `readFile`/`writeFile`) reads a `path.join(...)` path derived from request input — an unvalidated `..` segment lets an attacker escape the intended directory (path traversal). Reject `..` segments, or verify the resolved path stays under the base directory. Suppress a vetted case with `// traversal-ok`.",
+      "message": "A filesystem call (`fs`/`fsp.*`, `readFile`/`writeFile`), request input (`req.params`/`req.query`/`req.body`), and a `path.join(...)` call all appear in the same function — this is a co-occurrence heuristic, not proof the request-derived value actually flows into the joined path, but when it does: an unvalidated `..` segment lets an attacker escape the intended directory (path traversal). Reject `..` segments, or verify the resolved path stays under the base directory. Suppress a vetted case with `// traversal-ok`.",
       "suppress_marker": "traversal-ok",
       "matcher": {
         "type": "method-scan",
@@ -466,13 +466,13 @@
     {
       "id": "private-key-committed",
       "severity": "critical",
-      "message": "A PEM-format private key (`-----BEGIN ... PRIVATE KEY-----`) is committed to source — the PEM header is unambiguous, so unlike a heuristic secret-shaped literal there's no plausible non-key reading of this text. The moment this repo is shared (a fork, a clone, a public push) the key is compromised, and git history keeps it even after the file is later removed. Rotate the key immediately and move it to a secret store (a vault, KMS, or CI secret) instead — an actual PEM header sitting in a test fixture is still a committed key, so this rule scans test paths too, not just application code. Suppress a vetted case (e.g. a throwaway key generated only for a test, never used against a real service) with `// private-key-ok`.",
+      "message": "A PEM-format private key (a `-----BEGIN ... PRIVATE KEY-----` header carrying its base64 key body, or a header alone on a dedicated key line) is committed to source — header-plus-key-material is unambiguous, so unlike a heuristic secret-shaped literal there's no plausible non-key reading of this text (a prose mention of the header in docs/i18n strings, with no base64 body accompanying it, does NOT fire). The moment this repo is shared (a fork, a clone, a public push) the key is compromised, and git history keeps it even after the file is later removed. Rotate the key immediately and move it to a secret store (a vault, KMS, or CI secret) instead — an actual PEM header sitting in a test fixture is still a committed key, so this rule scans test paths too, not just application code. Suppress a vetted case (e.g. a throwaway key generated only for a test, never used against a real service) with `// private-key-ok`.",
       "suppress_marker": "private-key-ok",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|json|ya?ml|env|pem)$",
         "skip_comment_lines": true,
-        "line_pattern": "-----BEGIN\\s+(RSA\\s+|EC\\s+|DSA\\s+|OPENSSH\\s+|ENCRYPTED\\s+|PGP\\s+)?PRIVATE\\s+KEY-----",
+        "line_pattern": "-----BEGIN\\s+(RSA\\s+|EC\\s+|DSA\\s+|OPENSSH\\s+|ENCRYPTED\\s+|PGP\\s+)?PRIVATE\\s+KEY-----(?:\\s*[\"'`]?\\s*$|[\\s\"'`\\\\]*[A-Za-z0-9+/]{20,})",
         "exclude_pattern": "\\$\\{|\\{\\{",
         "snippet_max": 160
       }

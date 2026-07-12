@@ -98,4 +98,12 @@ pub struct FileIrSlice {
     /// usage evidence, same reasoning as `query_call_sites` above.
     #[serde(default)]
     pub field_usage_tokens: Vec<String>,
+    /// This file's loop-body line spans (`zzop_parser_typescript::extract_loop_spans`) — mirrors
+    /// `FileArtifact::loop_spans` / `zzop_core::dsl::SourceFile::loop_spans`. Must round-trip through the
+    /// cache: dropping it on a hit would silently starve `Matcher::MethodScan::trigger_in_loop` of loop
+    /// evidence for this file on every subsequent cache-warm run, same reasoning as `query_call_sites`
+    /// above. `#[serde(default)]` so a pre-existing cache entry (written before this field existed)
+    /// still deserializes, just with an empty vec rather than a hard cache-format break.
+    #[serde(default)]
+    pub loop_spans: Vec<(u32, u32)>,
 }

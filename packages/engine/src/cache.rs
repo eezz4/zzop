@@ -70,7 +70,11 @@ use crate::{CacheStats, EngineConfig};
 /// `v16` -> `v17`: `FileIrSlice` gains `controller_prefix_route_fragments`
 /// (`controller-prefix-ref-v1`) — a stale entry defaulting it to empty would silently drop a
 /// `@Controller(RouteKey.Asset)`-shaped controller's routes on every warm run instead of projecting them.
-pub const CACHE_SCHEMA_VERSION: &str = "zzop-cache-v17";
+///
+/// `v17` -> `v18`: `FileIrSlice` gains `loop_spans` (`loop-spans-v1`) — a stale entry defaulting it to
+/// empty would silently starve `Matcher::MethodScan::trigger_in_loop` of loop evidence for this file on
+/// every warm run instead of projecting it.
+pub const CACHE_SCHEMA_VERSION: &str = "zzop-cache-v18";
 
 /// Fingerprint for files that never reach a structural parser crate in the fused pass: no `Language` match
 /// (`dispatch::dispatch` returned `None` — unrecognized extension), or the size-cap lexical fallback
@@ -97,7 +101,11 @@ fn schema_structural_fingerprint() -> String {
 /// `{pack:?}` above, but a pure-Rust interpreter semantics change (matcher evaluation, suppress-marker
 /// window, ...) alters findings for byte-identical source AND identical pack content — invisible to the
 /// key without this token. Bump the trailing counter on any such change.
-const DSL_INTERPRETER_FINGERPRINT: &str = "dsl-interpreter-v3";
+///
+/// `v3` -> `v4`: `MethodScan` gains `trigger_in_loop` — a structural containment gate against
+/// `SourceFile::loop_spans` that changes which trigger occurrences a rule fires on for byte-identical
+/// source and pack content.
+const DSL_INTERPRETER_FINGERPRINT: &str = "dsl-interpreter-v4";
 
 /// Opens the on-disk cache at `config.cache_dir`, if set. Never panics: an open failure (bad permissions,
 /// path collides with a plain file, disk full while writing the schema-version marker, ...) degrades to

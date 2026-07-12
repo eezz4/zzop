@@ -49,6 +49,15 @@ pub struct SourceFile {
     /// Per-file IO facts (`Matcher::IoScan`'s substrate), projected alongside `symbols`. `None` when the
     /// parser has no IO adapter / falls back lexically — io-scan rules silently skip such files.
     pub io: Option<IoFacts>,
+    /// Per-file loop-body line spans (1-based, inclusive), projected alongside `symbols`: each
+    /// `for`/`for-of`/`for-in`/`while`/`do-while` statement's full span (header line included — a call in
+    /// the loop CONDITION runs once per iteration too), plus the span of the callback ARGUMENT of an
+    /// array-iteration call (`.map`/`.forEach`/`.filter`/`.reduce`/...) — the callback only, not the whole
+    /// call expression, so a receiver like `(await fetch(u)).items.map(...)` does not put the one-shot
+    /// `fetch` "inside" the loop. Consumed by `MethodScan::trigger_in_loop`. Empty when the parser has no
+    /// support / falls back lexically — structural rules silently skip such files (graceful degrade,
+    /// same policy as `symbols`).
+    pub loop_spans: Vec<(u32, u32)>,
 }
 
 /// A file is "minified/generated" iff EITHER prong holds:
@@ -312,6 +321,16 @@ pub struct MethodScan {
     pub patterns: Vec<LabeledPattern>,
     /// `patterns[].label` whose first match (top-down) supplies the finding's line + snippet.
     pub trigger: String,
+    /// Structural containment gate on the trigger pattern: when `true`, a trigger-pattern line match
+    /// only counts (for both satisfaction and the finding's line) if it falls within one of the file's
+    /// `SourceFile::loop_spans` — i.e. the call is textually INSIDE a loop statement or an
+    /// array-iteration callback body, not merely co-occurring with loop tokens somewhere in the same
+    /// function (the co-occurrence approximation behind the mono-hub 11/11 api-in-loop FP class).
+    /// Non-trigger patterns are unaffected. A file with no projected loop spans (external parser,
+    /// lexical fallback) can never satisfy the trigger, so the rule is silent there — graceful degrade,
+    /// same policy as method-scan on a file with no symbol spans.
+    #[serde(default)]
+    pub trigger_in_loop: bool,
     /// After every `patterns` entry is satisfied, the finding is vetoed if ANY of these also matches a
     /// line in the SAME span — e.g. a try/catch guarding a TOCTOU race, or a `$transaction(...)` wrapper.
     #[serde(default)]
@@ -860,6 +879,22 @@ fn eval_method_scan(
                 }
                 for (pi, (re, _)) in patterns.iter().enumerate() {
                     if !satisfied[pi] && re.is_match(line) {
+                        if pi == trigger_idx && m.trigger_in_loop {
+                            // Structural containment gate: this trigger match only counts if the
+                            // line is textually inside a loop statement or array-iteration
+                            // callback body — see `MethodScan::trigger_in_loop` and
+                            // `SourceFile::loop_spans` docs. A match outside every loop span is a
+                            // plain co-occurrence and neither satisfies the trigger nor can supply
+                            // the finding's line.
+                            let abs_line = body_start + i as u32;
+                            if !f
+                                .loop_spans
+                                .iter()
+                                .any(|&(s, e)| s <= abs_line && abs_line <= e)
+                            {
+                                continue;
+                            }
+                        }
                         satisfied[pi] = true;
                         if pi == trigger_idx && trigger_hit.is_none() {
                             trigger_hit = Some((i, line));
@@ -1050,6 +1085,7 @@ mod tests {
 
     fn scan(src: &str, rel: &str) -> Vec<Finding> {
         let files = vec![SourceFile {
+            loop_spans: Vec::new(),
             rel: rel.into(),
             text: src.into(),
             symbols: vec![],
@@ -1081,6 +1117,7 @@ mod tests {
 
     fn scan_methods(src: &str, symbols: Vec<SourceSymbol>) -> Vec<Finding> {
         let files = vec![SourceFile {
+            loop_spans: Vec::new(),
             rel: "C.java".into(),
             text: src.into(),
             symbols,
@@ -1295,6 +1332,7 @@ mod tests {
 
     fn scan_symbols(rel: &str, symbols: Vec<SourceSymbol>, matcher_json: &str) -> Vec<Finding> {
         let files = vec![SourceFile {
+            loop_spans: Vec::new(),
             rel: rel.into(),
             text: String::new(),
             symbols,
@@ -1378,6 +1416,7 @@ mod tests {
 
     fn scan_io(rel: &str, io: IoFacts, matcher_json: &str) -> Vec<Finding> {
         let files = vec![SourceFile {
+            loop_spans: Vec::new(),
             rel: rel.into(),
             text: String::new(),
             symbols: vec![],
@@ -1487,6 +1526,7 @@ mod tests {
     #[test]
     fn io_scan_skips_files_with_no_io_projection() {
         let files = vec![SourceFile {
+            loop_spans: Vec::new(),
             rel: "f.ts".into(),
             text: String::new(),
             symbols: vec![],
@@ -1556,6 +1596,7 @@ mod tests {
     #[test]
     fn http_conventions_flags_unversioned_provided_endpoint() {
         let files = vec![SourceFile {
+            loop_spans: Vec::new(),
             rel: "routes/authRoutes.ts".into(),
             text: String::new(),
             symbols: vec![],
@@ -1577,6 +1618,7 @@ mod tests {
     #[test]
     fn http_conventions_does_not_flag_versioned_endpoint() {
         let files = vec![SourceFile {
+            loop_spans: Vec::new(),
             rel: "routes/authRoutes.ts".into(),
             text: String::new(),
             symbols: vec![],
@@ -1598,6 +1640,7 @@ mod tests {
     #[test]
     fn http_conventions_flags_unversioned_fetch_and_unresolved_dynamic_fetch() {
         let files = vec![SourceFile {
+            loop_spans: Vec::new(),
             rel: "src/api/client.ts".into(),
             text: String::new(),
             symbols: vec![],
@@ -1627,6 +1670,7 @@ mod tests {
     #[test]
     fn http_conventions_flags_exported_handler_with_bad_naming() {
         let files = vec![SourceFile {
+            loop_spans: Vec::new(),
             rel: "routes/authRoutes.ts".into(),
             text: String::new(),
             symbols: vec![
@@ -1658,6 +1702,7 @@ mod tests {
     fn prefilter_matches_unoptimized_findings_across_java_security_pack() {
         let files = vec![
             SourceFile {
+                loop_spans: Vec::new(),
                 rel: "C.java".into(),
                 text: r#"Query q = em.createQuery("SELECT u FROM User u WHERE u.login = '" + login + "'");"#
                     .into(),
@@ -1665,18 +1710,21 @@ mod tests {
                 io: None,
             },
             SourceFile {
+                loop_spans: Vec::new(),
                 rel: "D.java".into(),
                 text: "MessageDigest md = MessageDigest.getInstance(\"MD5\");\nCipher.getInstance(\"DES/CBC/PKCS5Padding\");\n// legacy DigestUtils.md5DigestAsHex\n".into(),
                 symbols: vec![],
                 io: None,
             },
             SourceFile {
+                loop_spans: Vec::new(),
                 rel: "E.java".into(),
                 text: "public class E { void noop() { System.out.println(\"nothing interesting\"); } }".into(),
                 symbols: vec![],
                 io: None,
             },
             SourceFile {
+                loop_spans: Vec::new(),
                 rel: "F.java".into(),
                 text: "public class F {\n  void run() {\n    String[] cmd = { \"sh\", \"-c\", \"ping \" + host };\n    Runtime.getRuntime().exec(cmd);\n  }\n}".into(),
                 symbols: vec![method("run", 2, 5)],
@@ -1719,6 +1767,7 @@ mod tests {
         let files = vec![
             // RegexSet candidate (contains "foo") but require_file ("NEEDLE") is absent -> must stay skipped.
             SourceFile {
+                loop_spans: Vec::new(),
                 rel: "a.txt".into(),
                 text: "foo bar".into(),
                 symbols: vec![],
@@ -1726,6 +1775,7 @@ mod tests {
             },
             // RegexSet candidate AND require_file present -> must be flagged.
             SourceFile {
+                loop_spans: Vec::new(),
                 rel: "b.txt".into(),
                 text: "foo NEEDLE".into(),
                 symbols: vec![],
@@ -1749,6 +1799,7 @@ mod tests {
     fn eval_pack_profiled_findings_match_eval_pack_exactly() {
         let files = vec![
             SourceFile {
+                loop_spans: Vec::new(),
                 rel: "C.java".into(),
                 text: r#"Query q = em.createQuery("SELECT u FROM User u WHERE u.login = '" + login + "'");"#
                     .into(),
@@ -1756,6 +1807,7 @@ mod tests {
                 io: None,
             },
             SourceFile {
+                loop_spans: Vec::new(),
                 rel: "D.java".into(),
                 text: "MessageDigest.getInstance(\"MD5\");\n".into(),
                 symbols: vec![],
@@ -1817,6 +1869,7 @@ mod tests {
         symbols: Vec<SourceSymbol>,
     ) -> Vec<Finding> {
         let files = vec![SourceFile {
+            loop_spans: Vec::new(),
             rel: rel.into(),
             text: src.into(),
             symbols,
@@ -2306,6 +2359,136 @@ mod tests {
             "f.ts",
             src,
             vec![method("handler", 1, 3)],
+        );
+        assert!(f.is_empty(), "{f:?}");
+    }
+
+    // --- MethodScan `trigger_in_loop` (structural containment gate, see field doc) ---
+
+    /// Like `scan_pack`, but also lets a test hand-supply `SourceFile::loop_spans` — needed only for the
+    /// `trigger_in_loop` tests below, every other `scan_pack` caller has no use for a non-empty vec.
+    fn scan_pack_loops(
+        pack: &RulePackDef,
+        rel: &str,
+        src: &str,
+        symbols: Vec<SourceSymbol>,
+        loop_spans: Vec<(u32, u32)>,
+    ) -> Vec<Finding> {
+        let files = vec![SourceFile {
+            loop_spans,
+            rel: rel.into(),
+            text: src.into(),
+            symbols,
+            io: None,
+        }];
+        let ctx = RuleContext {
+            files: &files,
+            ir: None,
+        };
+        eval_pack(pack, &ctx)
+    }
+
+    fn trigger_in_loop_pack() -> RulePackDef {
+        rule_pack(
+            r#"{"id":"r","severity":"warning","message":"Network call issued inside a loop","suppress_marker":"fetch-ok","matcher":{"type":"method-scan","file_pattern":"\\.ts$","patterns":[{"pattern":"\\bfetch\\s*\\(","label":"network"}],"trigger":"network","trigger_in_loop":true}}"#,
+        )
+    }
+
+    #[test]
+    fn trigger_in_loop_fires_for_a_trigger_line_inside_a_loop_span() {
+        let src = "function f(ids) {\n  for (const id of ids) {\n    fetch(url(id));\n  }\n}\n";
+        let f = scan_pack_loops(
+            &trigger_in_loop_pack(),
+            "f.ts",
+            src,
+            vec![method("f", 1, 5)],
+            vec![(2, 4)], // the for-loop's own span, header line included per `loop_spans` doc
+        );
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert_eq!(f[0].line, 3);
+    }
+
+    #[test]
+    fn trigger_in_loop_ignores_a_trigger_outside_the_loop_span_even_with_a_sibling_loop_span_in_the_same_body(
+    ) {
+        // Mono-hub REDDIT shape: a one-shot `fetch` sits earlier in the body, and a `.map` callback span
+        // exists elsewhere in the same body but never itself contains a `fetch`. Plain co-occurrence (the
+        // pre-`trigger_in_loop` approximation) would have fired on this; the containment gate must not.
+        let src = "async function f(items) {\n  const data = fetch(url);\n  const a = 1;\n  const b = 2;\n  const result = items.map(function (item) {\n    return item.id;\n  });\n  return { data, result };\n}\n";
+        let f = scan_pack_loops(
+            &trigger_in_loop_pack(),
+            "f.ts",
+            src,
+            vec![method("f", 1, 9)],
+            vec![(5, 7)], // the `.map` callback body span — does not contain line 2's `fetch`
+        );
+        assert!(f.is_empty(), "{f:?}");
+    }
+
+    #[test]
+    fn trigger_in_loop_with_no_loop_spans_never_fires() {
+        // Graceful degrade: a file with no projected loop spans (external parser / lexical fallback) can
+        // never satisfy the trigger, mirroring method-scan's skip of files with no symbol spans.
+        let src = "function f(ids) {\n  for (const id of ids) {\n    fetch(url(id));\n  }\n}\n";
+        let f = scan_pack_loops(
+            &trigger_in_loop_pack(),
+            "f.ts",
+            src,
+            vec![method("f", 1, 5)],
+            vec![],
+        );
+        assert!(f.is_empty(), "{f:?}");
+    }
+
+    #[test]
+    fn trigger_in_loop_fires_for_a_single_line_loop_span() {
+        let src = "function f(x) {\n  while (x) fetch(url);\n}\n";
+        let f = scan_pack_loops(
+            &trigger_in_loop_pack(),
+            "f.ts",
+            src,
+            vec![method("f", 1, 3)],
+            vec![(2, 2)], // start == end: a loop whose header and body share one line
+        );
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert_eq!(f[0].line, 2);
+    }
+
+    #[test]
+    fn trigger_in_loop_uses_the_second_match_when_the_first_is_outside_the_loop_span() {
+        let src = "async function f(ids) {\n  fetch(warmup);\n  for (const id of ids) {\n    fetch(url(id));\n  }\n}\n";
+        let f = scan_pack_loops(
+            &trigger_in_loop_pack(),
+            "f.ts",
+            src,
+            vec![method("f", 1, 6)],
+            vec![(3, 5)],
+        );
+        assert_eq!(f.len(), 1, "{f:?}");
+        // The out-of-loop match on line 2 neither satisfies the trigger nor supplies the finding's line.
+        assert_eq!(f[0].line, 4);
+    }
+
+    #[test]
+    fn trigger_in_loop_absent_defaults_to_false_and_plain_cooccurrence_still_fires() {
+        let pack = rule_pack(
+            r#"{"id":"r","severity":"warning","message":"m","matcher":{"type":"method-scan","file_pattern":"\\.ts$","patterns":[{"pattern":"\\bfetch\\s*\\(","label":"network"}],"trigger":"network"}}"#,
+        );
+        let src = "function f() {\n  fetch(url);\n}\n";
+        let f = scan_pack_loops(&pack, "f.ts", src, vec![method("f", 1, 3)], vec![]);
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert_eq!(f[0].line, 2);
+    }
+
+    #[test]
+    fn trigger_in_loop_suppress_marker_above_the_in_loop_trigger_suppresses() {
+        let src = "async function f(ids) {\n  for (const id of ids) {\n    // fetch-ok: batched via queue\n    fetch(url(id));\n  }\n}\n";
+        let f = scan_pack_loops(
+            &trigger_in_loop_pack(),
+            "f.ts",
+            src,
+            vec![method("f", 1, 6)],
+            vec![(2, 5)],
         );
         assert!(f.is_empty(), "{f:?}");
     }

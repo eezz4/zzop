@@ -98,19 +98,23 @@ pub use lang::write_site::{
 ///   call shape (`this.<name>.get/post/put/delete/patch(url)` / `<name>.get/...(url)`), gated per-file
 ///   on an `@angular/common/http` import plus a proven HttpClient receiver (constructor param property,
 ///   class property, or `inject(HttpClient)`) — see `adapters::egress` module doc.
-pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2+angular-httpclient-v1+str-concat-url-v1";
+/// - `loop-spans-v1`: `extract_loop_spans` — per-file loop-body line spans (`zzop_core::dsl::
+///   SourceFile::loop_spans`), feeding `MethodScan::trigger_in_loop`: every `for`/`for-in`/`for-of`
+///   (incl. `for await`)/`while`/`do-while` statement's whole span, plus the callback-argument-only span
+///   of a recognized array-iteration call (see [`ARRAY_ITERATION_METHODS`]).
+pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2+angular-httpclient-v1+str-concat-url-v1+loop-spans-v1";
 
 use std::collections::{HashMap, HashSet};
 
 use swc_core::common::{sync::Lrc, BytePos, FileName, Globals, SourceMap, Spanned, GLOBALS};
 use swc_core::ecma::ast::{
     ArrowExpr, AssignExpr, AssignOp, AssignTarget, BlockStmtOrExpr, CallExpr, Callee, Class,
-    ClassMember, ClassMethod, Constructor, Decl, DefaultDecl, EsVersion, ExportSpecifier, Expr,
-    FnDecl, FnExpr, Function, GetterProp, Ident, ImportDecl, ImportSpecifier, Lit, MemberExpr,
-    MemberProp, MethodProp, Module, ModuleDecl, ModuleExportName, ModuleItem, NamedExport,
-    ObjectLit, ObjectPatProp, Pat, PrivateMethod, Prop, PropName, PropOrSpread, SetterProp,
-    SimpleAssignTarget, Stmt, TsEnumDecl, TsEnumMember, TsInterfaceDecl, TsTypeAliasDecl,
-    VarDeclarator,
+    ClassMember, ClassMethod, Constructor, Decl, DefaultDecl, DoWhileStmt, EsVersion,
+    ExportSpecifier, Expr, FnDecl, FnExpr, ForInStmt, ForOfStmt, ForStmt, Function, GetterProp,
+    Ident, ImportDecl, ImportSpecifier, Lit, MemberExpr, MemberProp, MethodProp, Module,
+    ModuleDecl, ModuleExportName, ModuleItem, NamedExport, ObjectLit, ObjectPatProp, Pat,
+    PrivateMethod, Prop, PropName, PropOrSpread, SetterProp, SimpleAssignTarget, Stmt, TsEnumDecl,
+    TsEnumMember, TsInterfaceDecl, TsTypeAliasDecl, VarDeclarator, WhileStmt,
 };
 use swc_core::ecma::parser::{parse_file_as_module, Syntax, TsSyntax};
 use swc_core::ecma::visit::{Visit, VisitWith};
@@ -434,6 +438,106 @@ impl Visit for DynImportCollector {
             }
         }
         call.visit_children_with(self); // recurse into nested calls (lazy(() => import()))
+    }
+}
+
+/// POLICY VOCABULARY — array-iteration callback methods whose first function-shaped argument runs once
+/// per element (`Array.prototype` iteration methods only; `Map`/`Set`/`for...in` etc. are out of scope).
+/// Consumed by [`extract_loop_spans`] to project the callback-argument span as a loop body, alongside
+/// real `for`/`while`/`do-while` statement spans, feeding `MethodScan::trigger_in_loop`. Deliberately a
+/// plain identifier-property vocabulary (no receiver-type proof, same "syntactic, not type-checked"
+/// tradeoff every other adapter in this crate makes) — a same-named method on an unrelated type (a
+/// custom `.map()` on a non-array object) is a false positive this vocabulary accepts.
+pub const ARRAY_ITERATION_METHODS: &[&str] = &[
+    "map",
+    "forEach",
+    "filter",
+    "reduce",
+    "reduceRight",
+    "flatMap",
+    "some",
+    "every",
+    "find",
+    "findIndex",
+];
+
+/// Projects per-file loop-body line spans (1-based, inclusive) — see `zzop_core::dsl::SourceFile::
+/// loop_spans`'s doc comment for the exact contract this mirrors. Two span sources, both emitted in
+/// source order via a single recursive walk (nested loops/callbacks freely overlap; consumers do
+/// any-span containment):
+/// - Every `for`/`for-in`/`for-of` (incl. `for await`)/`while`/`do-while` statement's WHOLE span (header
+///   line included — a call in the loop condition runs once per iteration too).
+/// - The callback-ARGUMENT-ONLY span of a recognized array-iteration call (an [`ARRAY_ITERATION_METHODS`]
+///   member-call whose first argument is an `Arrow`/`Function` expression) — never the whole call
+///   expression, so a one-shot call on the RECEIVER (`(await fetch(u)).items.map(...)`) is not
+///   misclassified as loop-body.
+pub fn extract_loop_spans(file: &str, source: &str) -> Vec<(u32, u32)> {
+    let Some((cm, module)) = parse_with_cm(file, source) else {
+        return Vec::new();
+    };
+    let mut collector = LoopSpanCollector {
+        cm: &cm,
+        out: Vec::new(),
+    };
+    module.visit_with(&mut collector);
+    collector.out
+}
+
+struct LoopSpanCollector<'a> {
+    cm: &'a SourceMap,
+    out: Vec<(u32, u32)>,
+}
+
+impl LoopSpanCollector<'_> {
+    fn push_span(&mut self, span: swc_core::common::Span) {
+        self.out
+            .push((line_of(self.cm, span.lo), line_of(self.cm, span.hi)));
+    }
+}
+
+impl Visit for LoopSpanCollector<'_> {
+    fn visit_for_stmt(&mut self, n: &ForStmt) {
+        self.push_span(n.span);
+        n.visit_children_with(self);
+    }
+
+    fn visit_for_in_stmt(&mut self, n: &ForInStmt) {
+        self.push_span(n.span);
+        n.visit_children_with(self);
+    }
+
+    fn visit_for_of_stmt(&mut self, n: &ForOfStmt) {
+        self.push_span(n.span); // covers `for await (...)` too — is_await doesn't change the span.
+        n.visit_children_with(self);
+    }
+
+    fn visit_while_stmt(&mut self, n: &WhileStmt) {
+        self.push_span(n.span);
+        n.visit_children_with(self);
+    }
+
+    fn visit_do_while_stmt(&mut self, n: &DoWhileStmt) {
+        self.push_span(n.span);
+        n.visit_children_with(self);
+    }
+
+    fn visit_call_expr(&mut self, call: &CallExpr) {
+        if let Callee::Expr(callee) = &call.callee {
+            if let Expr::Member(m) = &**callee {
+                if let MemberProp::Ident(name) = &m.prop {
+                    if ARRAY_ITERATION_METHODS.contains(&name.sym.as_str()) {
+                        if let Some(first) = call.args.first() {
+                            match &*first.expr {
+                                Expr::Arrow(a) => self.push_span(a.span),
+                                Expr::Fn(f) => self.push_span(f.function.span),
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        call.visit_children_with(self); // recurse: nested loops/callbacks, and the receiver expression.
     }
 }
 
@@ -2205,5 +2309,51 @@ export default connect(null, null)(Header);
         assert!(ir.ir.symbols.iter().any(|s| s.name == "foo"));
         assert!(ir.ir.symbols.iter().any(|s| s.name == "x"));
         assert_eq!(ir.ir.loc["a.ts"], 3); // trailing-newline artifact, see count_loc's doc
+    }
+
+    // --- extract_loop_spans ---
+
+    #[test]
+    fn extract_loop_spans_for_while_do_while_include_header() {
+        let src = "for (let i = 0; i < 10; i++) {\n  doThing();\n}\nwhile (cond()) {\n  step();\n}\ndo {\n  step();\n} while (cond());\n";
+        let spans = extract_loop_spans("f.ts", src);
+        assert_eq!(spans, vec![(1, 3), (4, 6), (7, 9)]);
+    }
+
+    #[test]
+    fn extract_loop_spans_for_of_await() {
+        let src = "async function f() {\n  for await (const x of gen()) {\n    use(x);\n  }\n}\n";
+        let spans = extract_loop_spans("f.ts", src);
+        assert_eq!(spans, vec![(2, 4)]);
+    }
+
+    /// The receiver `(await fetch(u))` is a one-shot call on an earlier line — it must not be swept into
+    /// the loop span; only the callback argument's own span counts.
+    #[test]
+    fn extract_loop_spans_map_callback_excludes_receiver_line() {
+        let src = "const items = (await fetch(u))\n  .items.map((x) => {\n    use(x);\n  });\n";
+        let spans = extract_loop_spans("f.ts", src);
+        assert_eq!(spans, vec![(2, 4)]);
+    }
+
+    #[test]
+    fn extract_loop_spans_single_line_arrow_callback_has_equal_start_end() {
+        let src = "arr.forEach(x => use(x));\n";
+        let spans = extract_loop_spans("f.ts", src);
+        assert_eq!(spans, vec![(1, 1)]);
+    }
+
+    #[test]
+    fn extract_loop_spans_nested_loops_emit_both_in_source_order() {
+        let src =
+            "for (const i of outer()) {\n  for (const j of inner()) {\n    use(i, j);\n  }\n}\n";
+        let spans = extract_loop_spans("f.ts", src);
+        assert_eq!(spans, vec![(1, 5), (2, 4)]);
+    }
+
+    #[test]
+    fn extract_loop_spans_no_loops_or_callbacks_yields_empty() {
+        let src = "export function f(x: number): number {\n  return x + 1;\n}\n";
+        assert!(extract_loop_spans("f.ts", src).is_empty());
     }
 }

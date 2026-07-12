@@ -26,16 +26,16 @@
     {
       "id": "sync-fs-in-handler",
       "severity": "warning",
-      "message": "Synchronous fs/child_process call (`readFileSync`, `execSync`, etc.) alongside request-handler context (`req`/`res`/`ctx`) — a blocking call on the request path stalls Node's event loop for every concurrent request. Use the async `fs.promises`/`child_process` APIs, or move CPU-heavy work to a worker thread. Suppress a vetted case with `// sync-io-ok`.",
+      "message": "Synchronous fs/child_process call (`readFileSync`, `execSync`, etc.) alongside request-handler evidence (a `req.`/`request.` member access, or a response-API call like `res.status(...)`/`res.send(...)` — deliberately NOT `res.json(`/`res.text(`, which a fetch `Response` also has, so a handler whose only response evidence is a bare `res.json(x)` is accepted as a miss rather than risking fetch-response false positives) — a blocking call on the request path stalls Node's event loop for every concurrent request. Use the async `fs.promises`/`child_process` APIs, or move CPU-heavy work to a worker thread. Suppress a vetted case with `// sync-io-ok`.",
       "suppress_marker": "sync-io-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|scripts?|tools|bin)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\b(readFileSync|writeFileSync|appendFileSync|execSync|spawnSync|readdirSync|statSync)\\s*\\(", "label": "sync-call" },
-          { "pattern": "\\b(req|res|ctx|request|reply)\\b", "label": "handler-context" }
+          { "pattern": "\\breq\\.[a-zA-Z_$]|\\brequest\\.(?:params|query|body|headers|method)\\b|\\bres\\.(?:status|send|setHeader|sendFile|redirect|render|writeHead|end)\\s*\\(|\\breply\\.[a-zA-Z_$][\\w$]*\\s*\\(|\\bctx\\.(?:req|request|params|query|body|status|throw|set)\\b", "label": "handler-context" }
         ],
         "trigger": "sync-call"
       }

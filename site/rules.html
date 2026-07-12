@@ -269,7 +269,7 @@
             <tr><th>Rule id</th><th>Severity</th><th>Matcher</th><th>Suppress marker</th><th>Detects</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>taint-flow</code></td><td><code>critical</code></td><td><code>method-scan</code></td><td><code>taint-ok</code></td><td>A tainted-source access and a dangerous sink call in the same function body (coarse v1 co-occurrence, not real dataflow — see the rule's own <code>message</code> for the three documented precision limits).</td></tr>
+            <tr><td><code>taint-flow</code></td><td><code>warning</code></td><td><code>method-scan</code></td><td><code>taint-ok</code></td><td>A tainted-source access and a dangerous sink call in the same function body (coarse v1 co-occurrence, not real dataflow — see the rule's own <code>message</code> for the three documented precision limits). Capped at <code>warning</code>, not <code>critical</code>: co-occurrence approximates dataflow, it doesn't prove it.</td></tr>
             <tr><td><code>eval-dynamic-code</code></td><td><code>warning</code></td><td><code>line-scan</code></td><td><code>eval-dynamic-ok</code></td><td><code>eval(</code> with a non-literal argument, or any <code>new Function(</code> — constructing code from strings at runtime defeats CSP and every static analyzer (<code>taint-flow</code> covers eval+request-source in <code>.ts/.tsx</code>; this rule is source-free and <code>.js</code>-inclusive).</td></tr>
           </tbody>
         </table>

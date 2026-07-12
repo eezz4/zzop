@@ -183,6 +183,12 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         // Per-file DSL pass — symbol-scan/io-scan only (see module doc). `text` is empty since an
         // envelope carries no source lines.
         let source_file = SourceFile {
+            // Plumbed straight from the producer's projection (empty when absent, via `#[serde(default)]`
+            // on `FileProjection::loop_spans`) — currently inert in envelope mode regardless, since
+            // `envelope_rule_pack` only keeps `SymbolScan`/`IoScan` matchers (see module doc: method-scan
+            // rules never run without source text), but this field should carry the real fact rather than
+            // a hardcoded placeholder.
+            loop_spans: file.loop_spans.clone(),
             rel: file.path.clone(),
             text: String::new(),
             symbols: file.symbols.clone(),
@@ -579,6 +585,10 @@ fn synthetic_artifact_from_projection(
         query_call_sites: Vec::new(),
         store_bound_models: Vec::new(),
         field_usage_tokens: Vec::new(),
+        // Plumbed straight from the projection (empty when absent) — same "carry the real fact, never a
+        // placeholder" reasoning as the Mode A `SourceFile` above, even though no DSL rule pass runs over
+        // a synthetic overlay artifact today (`findings: Vec::new()` above).
+        loop_spans: projection.loop_spans.clone(),
     }
 }
 
@@ -660,6 +670,7 @@ mod tests {
             io: IoFacts::default(),
             degraded: false,
             is_entry: false,
+            loop_spans: Vec::new(),
         }
     }
 

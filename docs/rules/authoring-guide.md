@@ -241,3 +241,23 @@ through before it ships:
    `dangerous_bare_words_are_syntax_anchored_not_bare_prose_matches` test (see that test's own doc comment
    for the curated word list and exactly what the check can/cannot prove) — this is the fix that shipped for
    `perf/api-in-loop` (bare `\bdo\b`) and `java-security/sql-taint` (bare `UPDATE`).
+6. **What is the nearest benign lookalike, and is it pinned as a negative fixture?** Before shipping,
+   name the most common INNOCENT code that matches the same surface shape the rule keys on, and pin it
+   as a negative test in the pack's `.rs` — not a synthetic near-miss, but the real-world idiom a scan
+   of an ordinary repo will actually hit. Field-audit examples of rules that shipped without this and
+   fired on their lookalike immediately: `sql/truncate-in-app-code` (SQL `TRUNCATE` vs a JSX `truncate`
+   boolean prop AND Tailwind's `truncate` utility class), `be-security/private-key-committed` (a PEM
+   header carrying a key vs a doc/i18n sentence merely *naming* the header),
+   `be-reliability/sync-fs-in-handler` (Express's `res` vs `const res = await fetch(...)`), and
+   `perf/api-in-loop` (a request-per-iteration loop vs the universal single-fetch-then-`.map()`
+   response transform). A positive fixture proves the rule CAN fire; only the benign-lookalike negative
+   proves it knows when NOT to.
+7. **Does the claim need structure the matcher doesn't have?** `line-scan`/`method-scan` see text
+   co-occurrence within a span — they cannot see containment (X *inside* a loop), order (X *then* Y), or
+   dataflow (X *flows into* Y). If the rule's value depends on such a relation, either (a) use a
+   structural fact the parser projects (e.g. `MethodScan::trigger_in_loop` over `loop_spans`, the fix
+   that replaced `perf/api-in-loop`/`sql/nplus1`/`sql/count-in-loop`'s loop-token co-occurrence after a
+   field audit found 11/11 false positives), or (b) keep the co-occurrence matcher but make the message
+   SAY co-occurrence, in the `be-db/multi-write-no-tx` house style ("This is a co-occurrence heuristic,
+   not proof ..."), and cap severity at `warning` — `critical` is reserved for matchers that PROVE their
+   claim (a closed literal, an unambiguous token). Never ship a structural claim on a textual matcher.

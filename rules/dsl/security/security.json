@@ -5,8 +5,8 @@
   "rules": [
     {
       "id": "taint-flow",
-      "severity": "critical",
-      "message": "A tainted-source access (request body/query/params/headers, `searchParams`, `process.argv`) and a dangerous sink (`eval`, `new Function`, `exec`/`spawn`, raw SQL, `dangerouslySetInnerHTML`, `.innerHTML`) both appear in the same function — this is a coarse v1 check (source+sink co-occurrence, not real dataflow), so confirm the value is actually tainted here. For a SQL sink, parameterize the query (prepared/parameterized statement API) — never escape or interpolate the tainted value into the SQL string. For a shell/process-exec sink, use `execFile`/`spawn` with an args array, not a shell-string `exec()` with string concatenation. For a DOM/HTML sink, use `textContent` (not `innerHTML`) for plain text, or a vetted HTML-sanitizer library if HTML must be inserted — never raw `innerHTML` with tainted input. Suppress a vetted case with `// taint-ok`.",
+      "severity": "warning",
+      "message": "A tainted-source access (request body/query/params/headers, `searchParams`, `process.argv`) and a dangerous sink (`eval`, `new Function`, `exec`/`spawn`, raw SQL, `dangerouslySetInnerHTML`, `.innerHTML`) both appear in the same function — this is a coarse v1 check (source+sink co-occurrence, not real dataflow), so confirm the value is actually tainted here. Kept at `warning`, not `critical`: co-occurrence is an approximation of dataflow, not proof of it, and `critical` is reserved for matchers that can prove their claim — treat a hit as a lead to confirm, not a confirmed exploit. For a SQL sink, parameterize the query (prepared/parameterized statement API) — never escape or interpolate the tainted value into the SQL string. For a shell/process-exec sink, use `execFile`/`spawn` with an args array, not a shell-string `exec()` with string concatenation. For a DOM/HTML sink, use `textContent` (not `innerHTML`) for plain text, or a vetted HTML-sanitizer library if HTML must be inserted — never raw `innerHTML` with tainted input. Suppress a vetted case with `// taint-ok`.",
       "suppress_marker": "taint-ok",
       "matcher": {
         "type": "method-scan",

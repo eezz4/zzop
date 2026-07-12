@@ -435,6 +435,34 @@ fn get_request_with_body_in_the_same_function_is_flagged() {
 }
 
 #[test]
+fn generic_request_wrapper_with_type_union_method_is_not_flagged() {
+    // Corpus-derived FP pin (mono-hub, 3 identical hits): a generic wrapper's signature
+    // `method: "GET" | "POST"` is a TYPE-position union — the method is a parameter, not a
+    // committed GET — and its `body:` is the conditional passthrough. The value-position anchor
+    // (`[,})]` or end-of-line after the literal, never a union `|`) is what keeps this silent.
+    let dir = TempDir::new("zzop-fullstack");
+    dir.write(
+        "src/lib/api.ts",
+        "async function request<T>(method: \"GET\" | \"POST\", path: string, opts: any = {}): Promise<T> {\n  const res = await fetch(base + path, {\n    method,\n    body: opts.body ? JSON.stringify(opts.body) : undefined,\n  });\n  return res.json();\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(hits(&out, "get-with-body").is_empty(), "{:?}", out.findings);
+}
+
+#[test]
+fn value_position_get_at_end_of_line_still_fires() {
+    // The value-position anchor accepts end-of-line too, not just a trailing comma/brace — a
+    // `method: 'GET'` line with the comma on the next line (unusual but valid) must still count.
+    let dir = TempDir::new("zzop-fullstack");
+    dir.write(
+        "src/client.ts",
+        "export function load() {\n  return fetch(url, {\n    method: 'GET'\n    ,\n    body: JSON.stringify(data),\n  });\n}\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(hits(&out, "get-with-body").len(), 1, "{:?}", out.findings);
+}
+
+#[test]
 fn get_request_without_body_is_not_flagged() {
     let dir = TempDir::new("zzop-fullstack");
     dir.write(

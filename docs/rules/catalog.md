@@ -145,7 +145,7 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
-| `taint-flow` | critical | method-scan | `taint-ok` | A tainted-source access and a dangerous sink call in the same function body (coarse v1 co-occurrence, not real dataflow — see the rule's own `message` for the three documented precision limits). |
+| `taint-flow` | warning | method-scan | `taint-ok` | A tainted-source access and a dangerous sink call in the same function body (coarse v1 co-occurrence, not real dataflow — see the rule's own `message` for the three documented precision limits). Capped at `warning`, not `critical`: co-occurrence approximates dataflow, it doesn't prove it. |
 | `eval-dynamic-code` | warning | line-scan | `eval-dynamic-ok` | `eval(` with a non-literal argument, or any `new Function(` — constructing code from strings at runtime defeats CSP and every static analyzer (`taint-flow` covers eval+request-source in `.ts/.tsx`; this rule is source-free and `.js`-inclusive). |
 
 ### `sql` (12 rules)

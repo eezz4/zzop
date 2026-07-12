@@ -100,6 +100,12 @@ pub(crate) struct FileArtifact {
     /// `language`/`degraded` — the removed `scan_field_usage` was a raw-text regex scan, never an AST
     /// parse, so it never cared whether swc could parse the file.
     pub field_usage_tokens: Vec<String>,
+    /// Per-file loop-body line spans (`zzop_parser_typescript::extract_loop_spans`) — feeds
+    /// `zzop_core::dsl::SourceFile::loop_spans`, `Matcher::MethodScan::trigger_in_loop`'s substrate. An
+    /// AST-derived projection (unlike `field_usage_tokens`/`store_bound_models` above), so it follows the
+    /// `symbols`-style convention: real spans only for a well-formed, non-degraded TypeScript file; empty
+    /// for non-TypeScript, degraded, oversized, or dispatch-`None` files (graceful degrade, never guessed).
+    pub loop_spans: Vec<(u32, u32)>,
 }
 
 /// Runs the fused per-file pass over every file under `root` (skipping `config.dispatch.skip_dirs`) and
@@ -334,6 +340,7 @@ fn process_file(
                 query_call_sites: Vec::new(),
                 store_bound_models: Vec::new(),
                 field_usage_tokens: Vec::new(),
+                loop_spans: Vec::new(),
             };
         }
     };
@@ -369,6 +376,7 @@ fn process_file(
                 &text,
                 &ir.symbols,
                 ir.io.clone(),
+                &ir.loop_spans,
                 config.profile_rules,
             );
             if schema_findings_eligible(language, ir.degraded) {
@@ -410,6 +418,7 @@ fn process_file(
             query_call_sites: artifact.query_call_sites.clone(),
             store_bound_models: artifact.store_bound_models.clone(),
             field_usage_tokens: artifact.field_usage_tokens.clone(),
+            loop_spans: artifact.loop_spans.clone(),
         };
         let _ = cache.put_ir(key, &ir_slice);
         let _ = cache.put_findings(key, &artifact.findings);
@@ -449,6 +458,7 @@ fn artifact_from_ir(
         query_call_sites: ir.query_call_sites,
         store_bound_models: ir.store_bound_models,
         field_usage_tokens: ir.field_usage_tokens,
+        loop_spans: ir.loop_spans,
     }
 }
 
@@ -470,7 +480,7 @@ fn compute_fresh_artifact(
         // replace — they run here too, unaffected by the size cap.
         let loc = lexical_loc(text);
         let (findings, rule_timings, minified_or_generated) =
-            eval_packs(packs, rel, text, &[], None, config.profile_rules);
+            eval_packs(packs, rel, text, &[], None, &[], config.profile_rules);
         return FileArtifact {
             rel: rel.to_string(),
             symbols: Vec::new(),
@@ -491,6 +501,7 @@ fn compute_fresh_artifact(
             wrapper_call_fragments: Vec::new(),
             controller_prefix_route_fragments: Vec::new(),
             query_call_sites: Vec::new(),
+            loop_spans: Vec::new(),
             store_bound_models: zzop_parser_typescript::extract_store_bound_models(rel, text),
             field_usage_tokens: sorted_field_usage_tokens(rel, text),
         };
@@ -584,14 +595,30 @@ fn compute_fresh_artifact(
         }
         _ => Vec::new(),
     };
+    // Loop-body line spans (`loop-spans-v1`): AST-derived, so it follows the `symbols`-style
+    // TypeScript-only/non-degraded gate above (never the `store_bound_models`/`field_usage_tokens`
+    // regex-scan gate below) — `MethodScan::trigger_in_loop`'s substrate.
+    let loop_spans = match language {
+        Some(Language::TypeScript) if !degraded => {
+            zzop_parser_typescript::extract_loop_spans(rel, text)
+        }
+        _ => Vec::new(),
+    };
     // Store-binding and field-usage-token facts are both raw-text regex scans, never an AST parse, so —
     // like the removed `scan_store_map`/`scan_field_usage` filesystem walks they replace — they run
     // unconditionally on `rel`/`text` here regardless of `language`/`degraded`; each gates its own
     // applicability internally (the store-file convention, the `.ts`/`.tsx` extension, respectively).
     let store_bound_models = zzop_parser_typescript::extract_store_bound_models(rel, text);
     let field_usage_tokens = sorted_field_usage_tokens(rel, text);
-    let (mut findings, rule_timings, minified_or_generated) =
-        eval_packs(packs, rel, text, &symbols, io.clone(), config.profile_rules);
+    let (mut findings, rule_timings, minified_or_generated) = eval_packs(
+        packs,
+        rel,
+        text,
+        &symbols,
+        io.clone(),
+        &loop_spans,
+        config.profile_rules,
+    );
     if schema_findings_eligible(language, degraded) {
         findings.extend(schema_findings(&config.rule_config, rel, text));
     }
@@ -617,6 +644,7 @@ fn compute_fresh_artifact(
         query_call_sites,
         store_bound_models,
         field_usage_tokens,
+        loop_spans,
     }
 }
 
@@ -746,12 +774,14 @@ fn eval_packs(
     text: &str,
     symbols: &[SourceSymbol],
     io: Option<IoFacts>,
+    loop_spans: &[(u32, u32)],
     profile: bool,
 ) -> (Vec<zzop_core::Finding>, Vec<RuleTiming>, bool) {
     if zzop_core::dsl::is_minified_or_generated(text) {
         return (Vec::new(), Vec::new(), true);
     }
     let file = SourceFile {
+        loop_spans: loop_spans.to_vec(),
         rel: rel.to_string(),
         text: text.to_string(),
         symbols: symbols.to_vec(),

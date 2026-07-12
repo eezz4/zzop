@@ -24,7 +24,7 @@
     {
       "id": "nplus1",
       "severity": "warning",
-      "message": "await on a store/ORM call (`Repository`/`Store`/`prisma`/`db`/`orm`/`tx`/`trx`) inside a loop or array-iteration callback — N+1 query pattern. Batch the fetch (e.g. `findMany` with an `in` filter) instead of one call per item. Suppress a vetted case with `// n+1-ok`.",
+      "message": "await on a store/ORM call (`Repository`/`Store`/`prisma`/`db`/`orm`/`tx`/`trx`) verified structurally inside a for/for-of/for-in/while/do-while statement or an array-iteration callback — checked against the parser's projected loop spans, not merely co-occurring with loop syntax somewhere in the same function — N+1 query pattern. Batch the fetch (e.g. `findMany` with an `in` filter) instead of one call per item. Suppress a vetted case with `// n+1-ok`.",
       "suppress_marker": "n+1-ok",
       "matcher": {
         "type": "method-scan",
@@ -34,22 +34,19 @@
         "skip_comment_lines": true,
         "patterns": [
           {
-            "pattern": "\\bfor\\s*\\(|\\.(?:forEach|map|filter|reduce)\\s*\\(",
-            "label": "loop"
-          },
-          {
             "pattern": "\\bawait\\s+(?:[\\w$]+\\.)*(?:[\\w$]*(?:Store|Repository)[\\w$]*|prisma|db|orm|tx|trx)(?:\\.[\\w$]+)*\\s*\\(",
             "label": "store-call"
           }
         ],
         "trigger": "store-call",
+        "trigger_in_loop": true,
         "snippet_max": 160
       }
     },
     {
       "id": "count-in-loop",
       "severity": "warning",
-      "message": "`store.count()`/`prisma.<model>.count()` called inside a loop or array-iteration callback — one count() per entity (N calls). Use a single GROUP BY query or a denormalized counter column. Suppress a vetted case with `// count-in-loop-ok`.",
+      "message": "`store.count()`/`prisma.<model>.count()` called structurally inside a for/for-of/for-in/while/do-while statement or an array-iteration callback — checked against the parser's projected loop spans, not merely co-occurring with loop syntax somewhere in the same function — one count() per entity (N calls). Use a single GROUP BY query or a denormalized counter column. Suppress a vetted case with `// count-in-loop-ok`.",
       "suppress_marker": "count-in-loop-ok",
       "matcher": {
         "type": "method-scan",
@@ -59,15 +56,12 @@
         "skip_comment_lines": true,
         "patterns": [
           {
-            "pattern": "\\bfor\\s*\\(|\\bwhile\\s*\\(|\\bdo\\s*\\{|\\.(?:forEach|map|filter|reduce)\\s*\\(",
-            "label": "loop"
-          },
-          {
             "pattern": "\\b(?:[\\w$]*(?:Store|Repository)[\\w$]*|prisma)(?:\\.[\\w$]+)*\\.count\\s*\\(",
             "label": "count-call"
           }
         ],
         "trigger": "count-call",
+        "trigger_in_loop": true,
         "snippet_max": 160
       }
     },
@@ -128,7 +122,7 @@
     {
       "id": "race-condition-toctou",
       "severity": "warning",
-      "message": "A read (`findOne`/`findById`/`findUnique`) feeds a branch that calls `create`/`upsert`/`insert` (get-or-create/toggle) — TOCTOU race: concurrent requests can both pass the check and both write (duplicate row / unique-constraint violation). Add a unique constraint and replace the check-then-act with an upsert; wrapping it in a `$transaction` alone does NOT close this race at the database's default READ COMMITTED isolation level — two concurrent transactions can both read empty and both insert. If you must keep the read+write shape, use `SELECT ... FOR UPDATE` or serializable isolation instead. Suppress a vetted case with `// toctou-ok`.",
+      "message": "A read (`findOne`/`findById`/`findUnique`) and a `create`/`upsert`/`insert` write both appear in the same function — this is a co-occurrence heuristic, not proof the read feeds a branch that reaches the write, but when it's a get-or-create/toggle shape: concurrent requests can both pass the check and both write (duplicate row / unique-constraint violation) — a TOCTOU race. Add a unique constraint and replace the check-then-act with an upsert; wrapping it in a `$transaction` alone does NOT close this race at the database's default READ COMMITTED isolation level — two concurrent transactions can both read empty and both insert. If you must keep the read+write shape, use `SELECT ... FOR UPDATE` or serializable isolation instead. Suppress a vetted case with `// toctou-ok`.",
       "suppress_marker": "toctou-ok",
       "matcher": {
         "type": "method-scan",
@@ -207,7 +201,7 @@
         "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|(^|/)(migrations?|migrate|db/migrations?)/)",
         "require_file": "(?i)TRUNCATE",
         "skip_comment_lines": true,
-        "line_pattern": "(?i)[\"'`]\\s*TRUNCATE\\s+(TABLE\\s+)?[\\w\"`.]+",
+        "line_pattern": "(?i)[\"'`]\\s*TRUNCATE\\s+(TABLE\\s+)?[\\w\"`.]+\\s*;?\\s*[\"'`]",
         "snippet_max": 160
       }
     },

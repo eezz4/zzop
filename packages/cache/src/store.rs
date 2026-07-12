@@ -317,6 +317,7 @@ mod tests {
             query_call_sites: Vec::new(),
             store_bound_models: Vec::new(),
             field_usage_tokens: Vec::new(),
+            loop_spans: Vec::new(),
         }
     }
 
@@ -368,6 +369,26 @@ mod tests {
         assert!(
             got.minified_or_generated,
             "the minified_or_generated flag must round-trip as true"
+        );
+    }
+
+    #[test]
+    fn roundtrip_preserves_loop_spans() {
+        // `FileIrSlice::loop_spans` (added alongside `zzop-cache-v18`) must survive a put/get round trip —
+        // isolated the same way `roundtrip_preserves_the_minified_flag` isolates its own field, so a
+        // regression that quietly drops/mis-serializes just this field fails here specifically.
+        let dir = scratch_dir("roundtrip-loop-spans");
+        let cache = AnalysisCache::open(&dir, "v1").unwrap();
+        let k = key("content", "ts+swc1+logic1", "pack@1");
+        let mut ir = sample_ir(10);
+        ir.loop_spans = vec![(2, 4), (7, 7)];
+
+        cache.put_ir(&k, &ir).unwrap();
+        let got = cache.get_ir(&k).expect("expected IR hit after put");
+        assert_eq!(
+            got.loop_spans,
+            vec![(2, 4), (7, 7)],
+            "loop_spans must round-trip exactly"
         );
     }
 

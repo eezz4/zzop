@@ -277,7 +277,7 @@ fn new_prisma_client_inside_request_handler_is_flagged() {
     let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/handler.ts",
-        "declare class PrismaClient { user: any; }\nexport async function handleRequest(req: any, res: any) {\n  const prisma = new PrismaClient();\n  const users = await prisma.user.findMany();\n  res.json(users);\n}\n",
+        "declare class PrismaClient { user: any; }\nexport async function handleRequest(req: any, res: any) {\n  const prisma = new PrismaClient();\n  const users = await prisma.user.findMany();\n  res.status(200).json(users);\n}\n",
     );
     let out = scan(&dir);
     let h = hits(&out, "client-per-request");
@@ -306,7 +306,47 @@ fn prisma_client_ok_marker_directly_above_the_new_client_line_suppresses_the_fin
     let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/handler.ts",
-        "declare class PrismaClient { user: any; }\nexport async function handleAdminRequest(req: any, res: any) {\n  // prisma-client-ok: cold-start admin tool, single-invocation script\n  const prisma = new PrismaClient();\n  const users = await prisma.user.findMany();\n  res.json(users);\n}\n",
+        "declare class PrismaClient { user: any; }\nexport async function handleAdminRequest(req: any, res: any) {\n  // prisma-client-ok: cold-start admin tool, single-invocation script\n  const prisma = new PrismaClient();\n  const users = await prisma.user.findMany();\n  res.status(200).json(users);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "client-per-request").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn fetch_response_variable_named_res_is_not_handler_context_evidence() {
+    // Field FP fix (mono-hub 0.10.0): a bare `res` identifier bound to a fetch Response satisfied the old
+    // naive handler-context vocabulary (`\b(req|res|ctx|request|reply)\b`), making a `new PrismaClient()`
+    // call inside a plain data-fetching helper look like a request handler. The new evidence requires a
+    // `req.`/`request.` member access or a response-API CALL fetch's own Response shape doesn't have
+    // (`res.json(`/`res.text(` are deliberately excluded — see the rule's message), so this stays silent.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/jobs/refresh.ts",
+        "declare class PrismaClient { user: any; }\nexport async function refresh() {\n  const prisma = new PrismaClient();\n  const res = await fetch(\"https://example.com/data\");\n  const data = await res.json();\n  await prisma.user.create({ data });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "client-per-request").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn handler_with_only_bare_res_json_evidence_is_now_silent_accepted_false_negative() {
+    // Documented limitation (see be-db.json's client-per-request message): `res.json(x)` alone no longer
+    // counts as handler-context evidence — deliberately excluded because a fetch `Response` also has
+    // `.json()`, the same false-positive class the vocabulary swap above fixes. A handler whose ONLY
+    // evidence is `res.json(...)` (no `req.`/`request.` member access, no other response-API call) is now an
+    // accepted false negative — pinned here so the tradeoff can't silently drift.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/handler.ts",
+        "declare class PrismaClient { user: any; }\nexport async function handleRequest(req: any, res: any) {\n  const prisma = new PrismaClient();\n  const users = await prisma.user.findMany();\n  res.json(users);\n}\n",
     );
     let out = scan(&dir);
     assert!(
