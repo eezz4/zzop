@@ -21,8 +21,11 @@
 //! of an asset-directory allowlist, since some frameworks strip the `public/` prefix from served asset URLs.
 //! Tradeoff: an API route living outside any `/api`-ish segment is missed by this veto too.
 //!
-//! A related structural gap: the raw-Worker `export default { fetch }` pattern's provides are not yet
-//! extracted. Severity starts at [`Severity::Info`] to absorb both gaps.
+//! A related residual gap: raw-Worker manual dispatch (`export default { fetch }` comparing
+//! `url.pathname` against literals) IS extracted by the parser's evidence-gated `pathname_dispatch`
+//! adapter, but shapes outside its never-guess gate (dynamic/`startsWith` paths, const-indirected
+//! literals, functions without Request evidence) remain invisible on the provide side. Severity
+//! starts at [`Severity::Info`] to absorb both this residue and the extension-veto tradeoff above.
 //!
 //! ## Localhost absolute-URL veto
 //! An absolute-URL `fetch()` call to `localhost`/`127.0.0.1` (a dev-mode self-reference to this app) is
@@ -115,10 +118,11 @@ pub fn unprovided_consume_findings(
                      class for pure front-end sources). If you're analyzing a split FE/BE repo pair, prefer \
                      the multi-source `analyze_trees` cross-layer join \
                      (`MultiAnalyzeOutput::cross_layer.unprovided_consumes`), which matches consumes against every \
-                     source's provides, not just this one. This finding starts at Info severity: raw-Worker \
-                     route extraction (`export default {{ fetch }}`) is not yet covered by this analysis's \
-                     provides-extraction, which remains a structural false-positive source until that \
-                     extraction lands. {} if intentional (this rule has no inline suppression marker).",
+                     source's provides, not just this one. This finding starts at Info severity: provide \
+                     extraction is evidence-gated, so route shapes it cannot prove (dynamic or \
+                     `startsWith` path matching, const-indirected path literals, raw-Worker dispatch \
+                     outside the `pathname_dispatch` adapter's Request-evidence gate) remain a \
+                     structural false-positive source. {} if intentional (this rule has no inline suppression marker).",
                     zzop_core::disable_hint("unprovided-consume")
                 ),
                 data: Some(serde_json::json!({ "key": key })),

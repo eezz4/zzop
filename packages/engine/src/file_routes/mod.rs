@@ -341,6 +341,51 @@ mod tests {
         assert!(out.is_empty());
     }
 
+    /// Policy-value equality pin (T2): `PAGES_API_FALLBACK_VERBS` here and
+    /// `zzop_parser_typescript::PATHNAME_DISPATCH_FALLBACK_VERBS` encode the same policy decision
+    /// (the verb set assumed for a handler that names no method) but live on opposite sides of a
+    /// crate boundary where symbol sharing is impossible. This pin forces a deliberate change on
+    /// either side to be re-justified against the other rather than silently drifting apart.
+    #[test]
+    fn pathname_dispatch_fallback_verbs_pin() {
+        assert_eq!(
+            PAGES_API_FALLBACK_VERBS,
+            zzop_parser_typescript::PATHNAME_DISPATCH_FALLBACK_VERBS,
+            "PAGES_API_FALLBACK_VERBS and PATHNAME_DISPATCH_FALLBACK_VERBS must stay in lockstep \
+             (policy-value equality pin, T2)"
+        );
+    }
+
+    /// Policy-value set-equality pin (T2): `HTTP_VERB_EXPORTS` (which export NAMES count as verb
+    /// handlers in file-convention routing — deliberately omits HEAD/OPTIONS, see its doc) and
+    /// core's `HTTP_KEY_VERBS` (the name-inferred verb keying vocabulary) are DIFFERENT policy
+    /// domains that today hold the same 5-verb set. If either grows or shrinks deliberately
+    /// (e.g. core learns HEAD), this pin forces the divergence to be decided rather than drift.
+    #[test]
+    fn http_verb_exports_matches_core_key_verbs_set() {
+        let mut exports: Vec<&str> = HTTP_VERB_EXPORTS.to_vec();
+        let mut core: Vec<&str> = zzop_core::HTTP_KEY_VERBS.to_vec();
+        exports.sort_unstable();
+        core.sort_unstable();
+        assert_eq!(
+            exports, core,
+            "HTTP_VERB_EXPORTS and zzop_core::HTTP_KEY_VERBS hold the same verb set today; a \
+             deliberate change to either must be re-justified here (policy set-equality pin, T2)"
+        );
+    }
+
+    /// Policy-value subset pin (T2): the no-method fallback verbs must always be drawn from the
+    /// core verb vocabulary — a fallback verb core cannot key would mint unjoinable provides.
+    #[test]
+    fn pages_api_fallback_verbs_are_a_subset_of_core_key_verbs() {
+        for v in PAGES_API_FALLBACK_VERBS {
+            assert!(
+                zzop_core::HTTP_KEY_VERBS.contains(&v),
+                "fallback verb {v} is not in zzop_core::HTTP_KEY_VERBS (policy subset pin, T2)"
+            );
+        }
+    }
+
     #[test]
     fn remix_default_expr_page_is_caught_by_lexical_fallback() {
         // `export default memo(Page)` produces no `parse_symbols` default symbol — the re-read

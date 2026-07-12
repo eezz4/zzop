@@ -1,0 +1,7 @@
+# Byte-exact fixtures: two local gates compare these files byte-for-byte against
+# generated output (`key_normalization_fixture` in packages/core, `check-policy-census.sh`).
+# Their committed blobs are LF; without pinning, Windows autocrlf checks the working tree
+# out as CRLF and both gates false-fail locally while Linux CI stays green. Pin instead of
+# repo-wide `* text=auto` to keep this a targeted fix (no mass renormalization).
+scripts/policy-census.txt text eol=lf
+docs/adapters/*.fixture.json text eol=lf

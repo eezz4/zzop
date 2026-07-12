@@ -68,7 +68,10 @@ pub(crate) fn late_resolve_cross_file_consumes(
             // the verbatim host-carrying key so `link_cross_layer_io`'s `"://"` gate still routes it
             // to the `external` bucket; a base-relative path literal (`users/login` — the axios
             // `baseURL` idiom) keys as its root-normalized form, mirroring the egress extractor's own
-            // gating; anything else stays unresolved.
+            // gating; anything else stays unresolved. Deliberately NO base-carrier head-drop bucket
+            // here (unlike `consume_key_for`'s 4-bucket dispatch): `resolve_raw_path` only accepts
+            // dotted-const chains whose resolved values are source string literals, so a `{}`-headed
+            // assembled variant can never reach this mirror — the omission is structural, not drift.
             if path.starts_with('/') {
                 consume.key = Some(http_consume_interface_key(method, &path));
             } else if zzop_parser_typescript::is_external_url(&path) {
@@ -453,8 +456,6 @@ pub(crate) fn resolve_wrapper_consumes(
     resolve: impl Fn(&str, &str) -> Option<String>,
     io_consumes: &mut Vec<IoConsume>,
 ) {
-    const VERBS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
-
     let mut defs: HashMap<(String, String), &zzop_core::WrapperDefFragment> = HashMap::new();
     for (file, frags) in &def_pairs {
         for def in frags {
@@ -483,7 +484,8 @@ pub(crate) fn resolve_wrapper_consumes(
                     .get(idx as usize)
                     .and_then(|a| a.clone())
                     .map(|m| m.to_ascii_uppercase())
-                    .filter(|m| VERBS.contains(&m.as_str())),
+                    // Verb vocabulary is the core T1 single source, not a local copy (policy census).
+                    .filter(|m| zzop_core::HTTP_KEY_VERBS.contains(&m.as_str())),
                 (None, None) => None,
             };
             let Some(method) = method else { continue };

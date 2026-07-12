@@ -17,7 +17,11 @@ feed the exact same shape in through the Normalized AST protocol; see
 
 HTTP `provides` are composed from two sources, merged together: **code-registered** routes
 (decorator-based — NestJS-style controllers; router-mount calls — Hono and Express, including
-cross-file mounts composed from router fragments) and **file-convention** routes inferred from the
+cross-file mounts composed from router fragments; manual pathname dispatch — framework-less
+Workers/Node servers comparing `url.pathname` against literals, evidence-gated on URL provenance
+plus a Request-typed or -named parameter, with declared Durable-Object class bodies excluded —
+see the adapter's own doc for the exact gates and accepted limits) and **file-convention** routes
+inferred from the
 tree's own layout (Next.js `pages/api` and the app router, Remix flat routes, Medusa-style `src/api`).
 tRPC procedures are similarly composed from cross-file router fragments into `(verb, dotted.path)` keys.
 

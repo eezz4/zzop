@@ -26,6 +26,9 @@ pub use adapters::egress::{
 pub use adapters::global_prefix::extract_global_prefix_marker;
 pub use adapters::hono_client::extract_hono_client_consumes;
 pub use adapters::next_pages_api::{scan_pages_api_handler, PagesApiHandlerScan};
+pub use adapters::pathname_dispatch::{
+    extract_pathname_dispatch_provides, PATHNAME_DISPATCH_FALLBACK_VERBS,
+};
 pub use adapters::router_mounts::extract_router_mount_fragments;
 pub use adapters::store_binding::extract_store_bound_models;
 pub use adapters::trpc_consume::extract_trpc_consumes;
@@ -102,7 +105,17 @@ pub use lang::write_site::{
 ///   SourceFile::loop_spans`), feeding `MethodScan::trigger_in_loop`: every `for`/`for-in`/`for-of`
 ///   (incl. `for await`)/`while`/`do-while` statement's whole span, plus the callback-argument-only span
 ///   of a recognized array-iteration call (see [`ARRAY_ITERATION_METHODS`]).
-pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2+angular-httpclient-v1+str-concat-url-v1+loop-spans-v1";
+/// - `pathname-dispatch-v1`: `extract_pathname_dispatch_provides` — manual pathname-dispatch route
+///   PROVIDES (`if (url.pathname === "/x")` chains / `switch (url.pathname)`) from framework-less
+///   servers (raw Cloudflare Workers, Node `http.createServer`, ...), evidence-gated on URL
+///   provenance plus a Request-typed/named parameter in the same function, with Durable-Object
+///   class bodies vetoed — see `adapters::pathname_dispatch` module doc.
+/// - `base-carrier-drop-v1`: a consume URL variant with exactly one leading dynamic piece followed
+///   by a `/`-headed literal (`` `${BASE_URL}/me/x` ``, `BASE + '/x'`) now keys as its visible
+///   path (`GET /me/x`) instead of falling unresolved — the opaque base is dropped, never valued.
+///   `{}{}`-heads, non-`/` suffixes (invisible segment boundary), and post-drop `//` (host
+///   carrier) still refuse to key — see `adapters::egress`'s `consume_key_for`.
+pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2+angular-httpclient-v1+str-concat-url-v1+loop-spans-v1+pathname-dispatch-v1+base-carrier-drop-v1";
 
 use std::collections::{HashMap, HashSet};
 

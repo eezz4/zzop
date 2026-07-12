@@ -48,6 +48,17 @@ test('resolveConsumeKey: base-relative resolves via baseRelativePath then normal
   assert.equal(baseRelativePath('users/login'), '/users/login');
 });
 
+test('resolveConsumeKey: base-carrier head-drop keys the visible path, parity with native', () => {
+  // Mirrors `consume_key_for`'s 4th bucket (base-carrier-drop-v1): a single opaque `{}` head
+  // followed by a `/`-headed literal keys as the visible path — the base is dropped, never valued.
+  assert.equal(resolveConsumeKey('get', '{}/me/achievements'), 'GET /me/achievements');
+  assert.equal(resolveConsumeKey('get', '{}/articles?limit=10'), 'GET /articles');
+  // Refusals stay null: dynamic-dynamic head, non-`/` suffix, protocol-relative host carrier.
+  for (const literal of ['{}{}', '{}users', '{}//example.com/x']) {
+    assert.equal(resolveConsumeKey('get', literal), null, `expected null for ${JSON.stringify(literal)}`);
+  }
+});
+
 test('resolveConsumeKey: vetoed literals resolve to null, never guessed', () => {
   for (const literal of ['', './relative', '{base}/x', '?page=2', 'has space/x']) {
     assert.equal(resolveConsumeKey('get', literal), null, `expected null for ${JSON.stringify(literal)}`);

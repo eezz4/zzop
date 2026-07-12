@@ -261,6 +261,9 @@ them yet; the placeholder `rules/native/rules-architecture` crate was removed si
 Other detections not yet shipped in either layer: cognitive/nested-loop complexity
 scoring, precise `taint-flow` dataflow (the current `security/taint-flow` is a documented coarse v1
 co-occurrence check), an auth-state-machine analysis, additional cross-file HTTP graph checks (API
-churn, frontend/backend spec drift), a JSX/React structural rule pack, env/i18n sync checks, and
-worker-route extraction. Each needs either a whole-graph join the DSL can't express or real AST/JSX
+churn, frontend/backend spec drift), a JSX/React structural rule pack, and env/i18n sync checks. Each
+needs either a whole-graph join the DSL can't express or real AST/JSX
 shape — see [authoring-guide.md#when-a-rule-does-not-fit-the-dsl](authoring-guide.md#when-a-rule-does-not-fit-the-dsl).
+(Raw-Worker route extraction — manual `url.pathname` dispatch in framework-less Workers/Node servers —
+shipped as the parser's `pathname-dispatch` provide vocabulary, so those routes now feed the cross-layer
+join like any framework's.)

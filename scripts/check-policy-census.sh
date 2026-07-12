@@ -6,12 +6,15 @@
 # T1/T2/T3, or "not policy") every time a *new* policy-shaped constant is introduced, by failing CI
 # until the committed snapshot (scripts/policy-census.txt) is regenerated to include it.
 #
-# Regex is intentionally narrow: `^\s*(pub )?const NAME: (&[&str]|usize|u32|i32|f64) = ...`. This
-# is tighter than "every const" on purpose — it's scoped to the shapes that actually carry policy
+# Regex is intentionally narrow: `^\s*(pub[(vis)] )?const NAME: (&[&str]|[&str; N]|usize|u32|i32|f64) = ...`.
+# This is tighter than "every const" on purpose — it's scoped to the shapes that actually carry policy
 # (string-list vocabularies and small numeric thresholds), which keeps the initial census under
-# ~200 lines. If a future sweep needs to widen the type list, re-run --update and re-check the line
-# count; if it balloons, narrow back down to just `&[&str]` + `usize` (the two shapes that have
-# actually carried policy so far) and note that here.
+# ~200 lines. Two closed blind spots (both 2026-07-13, v0.12.0 release audit): `[&str; N]` fixed
+# arrays (HTTP_VERB_EXPORTS / PAGES_API_FALLBACK_VERBS / compose VERBS carried verb policy invisibly
+# in that form) and scoped visibility (`pub(crate)`/`pub(super)`/`pub(in ...)` const — the audit's
+# own WRITE_HTTP_METHODS unification escaped a `(pub )?`-only pattern on the visibility axis).
+# If a future sweep needs to widen the type list further, re-run --update and re-check the line
+# count; if it balloons, narrow back down and note that here.
 #
 # No deps beyond grep/sed/sort/comm.
 set -euo pipefail
@@ -25,7 +28,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 census_file="scripts/policy-census.txt"
-pattern='^[[:space:]]*(pub )?const [A-Z_][A-Z0-9_]*: (&\[&str\]|usize|u32|i32|f64)'
+pattern='^[[:space:]]*(pub(\((crate|super|in [^)]+)\))? )?const [A-Z_][A-Z0-9_]*: (&\[&str\]|\[&str;[[:space:]]*[0-9]+\]|usize|u32|i32|f64)'
 
 dirs=()
 for d in packages/engine/src packages/core/src parser/*/src rules/native/*/src; do
@@ -33,7 +36,7 @@ for d in packages/engine/src packages/core/src parser/*/src rules/native/*/src; 
 done
 
 current="$(grep -rnE "$pattern" "${dirs[@]}" 2>/dev/null \
-  | sed -E 's/^([^:]+):[0-9]+:[[:space:]]*(pub )?const ([A-Z_][A-Z0-9_]*):.*/\1:\3/' \
+  | sed -E 's/^([^:]+):[0-9]+:[[:space:]]*(pub(\((crate|super|in [^)]+)\))? )?const ([A-Z_][A-Z0-9_]*):.*/\1:\5/' \
   | sort -u)"
 
 if [ "${1:-}" = "--update" ]; then

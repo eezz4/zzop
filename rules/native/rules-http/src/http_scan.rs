@@ -27,7 +27,9 @@ use zzop_core::{
 const OK_MARKER_LOOKBACK_LINES: u32 = 4;
 
 const SAFE_METHODS: [&str; 2] = ["GET", "HEAD"];
-const WRITE_HTTP_METHODS: [&str; 4] = ["PUT", "DELETE", "POST", "PATCH"];
+/// The crate's single write-verb vocabulary (T1): `mutating_route_no_auth` imports this same
+/// symbol — same meaning ("HTTP methods that mutate"), so no per-rule copy (policy census).
+pub(crate) const WRITE_HTTP_METHODS: [&str; 4] = ["PUT", "DELETE", "POST", "PATCH"];
 
 fn ok_marker_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();

@@ -414,8 +414,10 @@
       them yet), cognitive/nested-loop complexity scoring, precise <code>taint-flow</code> dataflow (today's
       <code>security/taint-flow</code> is a documented coarse v1 co-occurrence check), an auth-state-machine
       analysis, additional cross-file HTTP graph checks (API churn, frontend/backend spec drift), a
-      JSX/React structural rule pack, env/i18n sync checks, and worker-route extraction — each needs either
-      a whole-graph join the DSL can't express or real AST/JSX shape.</p>
+      JSX/React structural rule pack, and env/i18n sync checks — each needs either
+      a whole-graph join the DSL can't express or real AST/JSX shape. (Raw-Worker route extraction —
+      manual <code>url.pathname</code> dispatch in framework-less Workers/Node servers — shipped as the
+      parser's <code>pathname-dispatch</code> provide vocabulary.)</p>
     </section>
 
     <section id="matchers">

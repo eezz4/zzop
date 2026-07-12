@@ -88,7 +88,7 @@ const AUTH_ACQUISITION_CONDITIONAL_PATTERN: &str =
 /// Auth-family gate for the conditional exemption tier — see module doc.
 const AUTH_FAMILY_PATH_PATTERN: &str = r"(?i)/(auth|login|signin|signup|session|oauth)(/|$)";
 
-const MUTATING_METHODS: [&str; 4] = ["POST", "PUT", "PATCH", "DELETE"];
+use crate::http_scan::WRITE_HTTP_METHODS;
 
 /// Input for [`scan_mutating_route_no_auth`]. Takes `io_provides` directly (not the `ApiEndpoint` shape
 /// `http_scan`'s two rules take) so the emitted `Finding` can anchor on the route's own registration
@@ -128,7 +128,7 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
                 return false;
             };
             // The auth-acquisition surface itself is exempt — see module doc.
-            MUTATING_METHODS.contains(&method) && !is_auth_acquisition_exempt(path)
+            WRITE_HTTP_METHODS.contains(&method) && !is_auth_acquisition_exempt(path)
         })
         .collect();
     if mutating.is_empty() {

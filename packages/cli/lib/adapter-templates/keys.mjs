@@ -94,8 +94,10 @@ export function baseRelativePath(url) {
 /**
  * The full consume-side key resolution an adapter needs for one call-site URL: internal (leading
  * `/`) keys directly via `normalizeConsumeKey`; external (`http(s)://`) keys verbatim — never run
- * through normalization, which would mangle the origin; base-relative resolves via
- * `baseRelativePath` first; anything else is unresolved (`null`) — reported, never guessed.
+ * through normalization, which would mangle the origin; a single opaque `{}` head followed by a
+ * `/`-headed literal drops the head and keys the visible path (base-carrier head-drop — the base
+ * is dropped, never valued); base-relative resolves via `baseRelativePath`; anything else is
+ * unresolved (`null`) — reported, never guessed.
  *
  * Ported from `consume_key_for` in `parser/parser-typescript/src/adapters/egress.rs`.
  */
@@ -105,6 +107,9 @@ export function resolveConsumeKey(method, url) {
   }
   if (isExternalUrl(url)) {
     return `${method.toUpperCase()} ${url}`;
+  }
+  if (url.startsWith('{}/') && !url.startsWith('{}//')) {
+    return normalizeConsumeKey(method, url.slice(2));
   }
   const rooted = baseRelativePath(url);
   return rooted === null ? null : normalizeConsumeKey(method, rooted);

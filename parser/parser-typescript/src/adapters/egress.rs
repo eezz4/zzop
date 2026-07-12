@@ -164,11 +164,25 @@ impl Visit for EgressCollector<'_> {
 /// `http_interface_key`, which would mangle the origin) so `link_cross_layer_io`'s `"://"` gate routes
 /// them external. A base-relative literal (`users/login` — the axios `baseURL` idiom) keys as its
 /// root-normalized path; see `base_relative_path`'s doc for the exact veto list.
+///
+/// Fourth bucket, checked after the three above: **base-carrier head-drop**. A template/concat that
+/// assembles to a single leading `{}` immediately followed by a `/`-headed literal (`"{}/me/achievements"`
+/// from `` fetch(`${BASE_URL}/me/achievements`) ``) has an opaque, cross-file-invisible base carried by
+/// that one interpolation slot — mirroring the base-relative decision above, the base is DROPPED, never
+/// valued, and the visible `/`-headed literal keys the call. This is a narrow near-miss prefix class: it
+/// only fires when exactly one `{}` leads and what follows starts with `/` but not `//` (a second `{}`
+/// right after the head, a non-`/` literal suffix, or a `//` post-drop head all stay unresolved — see
+/// `base_relative_path`'s doc for why those shapes are never-guess residue).
 fn consume_key_for(method: &str, url: &str) -> Option<String> {
     if url.starts_with('/') {
         Some(http_consume_interface_key(method, url))
     } else if is_external(url) {
         Some(format!("{} {}", method.to_uppercase(), url))
+    } else if let Some(rest) = url
+        .strip_prefix("{}")
+        .filter(|rest| rest.starts_with('/') && !rest.starts_with("//"))
+    {
+        Some(http_consume_interface_key(method, rest))
     } else {
         base_relative_path(url).map(|rooted| http_consume_interface_key(method, &rooted))
     }
@@ -198,7 +212,11 @@ pub fn is_external_url(u: &str) -> bool {
 /// template (`{}`-headed — the base itself is the expression), a document-relative `./`/`../` path, a
 /// query-only URL (`?page=2` — "same path, new query", which names no path at all), any
 /// scheme-carrying URL (`ws://` etc.; `http(s)://` is already the external branch), or
-/// whitespace-carrying text (not a path).
+/// whitespace-carrying text (not a path). The `{}`-headed veto here is still correct for the general case
+/// (the base itself is an opaque expression with no visible path), but ONE sub-shape of it — exactly one
+/// leading `{}` immediately followed by a `/`-headed literal — is keyed upstream in `consume_key_for`
+/// (base-carrier head-drop) before this function ever sees it; the veto here still catches everything
+/// that shape excludes (`{}{}...`, `{}non-slash`, `{}//host/...`).
 pub fn base_relative_path(u: &str) -> Option<String> {
     if u.is_empty()
         || u.starts_with('/')
@@ -1071,7 +1089,10 @@ mod tests {
     #[test]
     fn base_relative_veto_list_still_never_keys() {
         // Leading-interpolation template (the base itself is the expression), document-relative `./`,
-        // query-only URL, non-http scheme, whitespace — all stay unresolved with raw+method carried.
+        // query-only URL, non-http scheme, whitespace — all stay unresolved with raw+method carried. The
+        // first case, `` `${API_ROOT}${url}` ``, assembles to `"{}{}"` — a SECOND `{}` immediately after
+        // the head, which is dynamic too (no literal path), so `consume_key_for`'s base-carrier head-drop
+        // bucket ("{}"-head + "/"-headed remainder) does not fire here either; it stays unresolved.
         let out = extract_http_egress(&files(&[(
             "v.ts",
             "axios.get(`${API_ROOT}${url}`); axios.get('./users'); axios.get('?page=2'); axios.get('ws://host/ch'); axios.get('not a path');",
@@ -1082,6 +1103,92 @@ mod tests {
             "got: {:?}",
             keys(&out)
         );
+    }
+
+    // --- base-carrier head-drop (`base-carrier-drop-v1`) ---
+
+    #[test]
+    fn base_carrier_head_drop_root_ping_keys_as_get_root() {
+        // Boundary pin (accepted, not an accident): `` fetch(`${API}/`) `` assembles to `"{}/"` and
+        // keys as `GET /` — the least-specific key. Same visible-fact contract as a literal
+        // `fetch("/")` (which also keys `GET /`): the call demonstrably targets the base root.
+        // The base-carries-a-path-prefix risk is the documented head-drop trade-off (near-miss
+        // prefix class absorbs it); vetoing only the root form would be inconsistent with the
+        // literal root-relative case.
+        let out = extract_http_egress(&files(&[("a.tsx", "fetch(`${API}/`)")]));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].key.as_deref(), Some("GET /"));
+    }
+
+    #[test]
+    fn base_carrier_head_drop_keys_the_visible_path_from_a_template() {
+        // The liberation-shaped driving case: `` fetch(`${BASE_URL}/me/achievements`) `` assembles to
+        // `"{}/me/achievements"` — one opaque leading `{}` (the base, invisible cross-file) followed by a
+        // `/`-headed literal. The base is dropped, never valued; the visible literal keys the call.
+        let out = extract_http_egress(&files(&[("a.tsx", "fetch(`${BASE_URL}/me/achievements`)")]));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].key.as_deref(), Some("GET /me/achievements"));
+        assert!(out[0].raw.is_none());
+    }
+
+    #[test]
+    fn base_carrier_head_drop_keeps_inner_interpolation_slots() {
+        // A second `{}` NOT immediately after the head is an ordinary path-param slot, not a second
+        // dynamic base — existing template-param semantics apply past the dropped head.
+        let out = extract_http_egress(&files(&[("a.tsx", "axios.get(`${base}/users/${id}`)")]));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].key.as_deref(), Some("GET /users/{}"));
+    }
+
+    #[test]
+    fn base_carrier_head_drop_still_drops_the_query_suffix() {
+        // Query-drop (`query-drop-v1`) composes with head-drop: the base is dropped AND the query is
+        // dropped, leaving just the route path.
+        let out = extract_http_egress(&files(&[("a.tsx", "fetch(`${B}/articles?limit=10`)")]));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].key.as_deref(), Some("GET /articles"));
+    }
+
+    #[test]
+    fn base_carrier_head_drop_refuses_second_dynamic_head() {
+        // `` `${a}${b}` `` assembles to `"{}{}"` — the piece right after the head is dynamic too (no
+        // literal path at all), so this never-guesses rather than keying on nothing.
+        let out = extract_http_egress(&files(&[("a.tsx", "axios.get(`${a}${b}`)")]));
+        assert_eq!(out.len(), 1);
+        assert!(out[0].key.is_none());
+        assert_eq!(out[0].raw.as_deref(), Some("`${a}${b}`"));
+    }
+
+    #[test]
+    fn base_carrier_head_drop_refuses_non_slash_suffix() {
+        // `` `${base}users` `` assembles to `"{}users"` — a non-`/`-headed literal suffix means the
+        // segment boundary is invisible (could be a mid-segment concat like `base + "users"`), so it never
+        // keys.
+        let out = extract_http_egress(&files(&[("a.tsx", "axios.get(`${base}users`)")]));
+        assert_eq!(out.len(), 1);
+        assert!(out[0].key.is_none());
+        assert_eq!(out[0].raw.as_deref(), Some("`${base}users`"));
+    }
+
+    #[test]
+    fn base_carrier_head_drop_refuses_protocol_relative_host() {
+        // `` `${proto}//example.com/x` `` assembles to `"{}//example.com/x"` — the post-drop `//` means
+        // the next piece is a HOST (protocol-relative URL), not a path, so it never keys as internal.
+        let out = extract_http_egress(&files(&[("a.tsx", "axios.get(`${proto}//example.com/x`)")]));
+        assert_eq!(out.len(), 1);
+        assert!(out[0].key.is_none());
+        assert_eq!(out[0].raw.as_deref(), Some("`${proto}//example.com/x`"));
+    }
+
+    #[test]
+    fn base_carrier_head_drop_does_not_disturb_literal_external_head() {
+        // A literal `https://`-headed template is checked in the external branch BEFORE the head-drop
+        // branch and is unaffected by it — mirrors the pinned expectation in
+        // `absolute_url_becomes_a_host_carrying_key_for_the_external_bucket`.
+        let out = extract_http_egress(&files(&[("a.tsx", "fetch(`https://api.ext.com/${p}`)")]));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].key.as_deref(), Some("GET https://api.ext.com/{}"));
+        assert!(out[0].raw.is_none());
     }
 
     // --- conditional-literal fan-out (`cond-literal-fanout-v1`) ---
@@ -1416,19 +1523,22 @@ mod tests {
     }
 
     #[test]
-    fn str_concat_bare_const_prefix_stays_unresolved() {
-        // A bare `const BASE = '/api'; axios.get(BASE + '/users')` is deliberately NOT resolved: a bare
-        // undotted const is not captured by `const_map_fragment` (project-wide scope-insensitive lookup
-        // would let a common name shadow a function param and mis-key — never-guess). BASE -> `{}`, so the
-        // concat is leading-`{}` -> unresolved. The `+ '/users'` literal is real but a base it can't anchor
-        // to stays dynamic. (str-concat-url-v1 resolves the visible LITERAL operands, not const-prefix
-        // indirection — cross-layer-resolution.md.)
+    fn str_concat_opaque_prefix_now_keys_via_head_drop() {
+        // A bare `const BASE = '/api'; axios.get(BASE + '/users')` still never resolves the VALUE of
+        // BASE: a bare undotted const is not captured by `const_map_fragment` (project-wide
+        // scope-insensitive lookup would let a common name shadow a function param and mis-key —
+        // never-guess). BASE -> `{}`, so the concat assembles to `"{}/users"`. That used to dead-end at
+        // `base_relative_path`'s `{`-veto; now `consume_key_for`'s base-carrier head-drop bucket catches
+        // this exact shape (single leading `{}` + `/`-headed literal) and drops the opaque base rather
+        // than valuing it, keying on the visible `/users` literal. (str-concat-url-v1 resolves the visible
+        // LITERAL operands, not const-prefix indirection — cross-layer-resolution.md; the shadow-risk
+        // revert on BASE's value still stands.)
         let out = extract_http_egress(&files(&[(
             "a.tsx",
             "const BASE = '/api'; axios.get(BASE + '/users')",
         )]));
         assert_eq!(out.len(), 1);
-        assert!(out[0].key.is_none());
+        assert_eq!(out[0].key.as_deref(), Some("GET /users"));
     }
 
     // --- const_map_fragment / resolve_raw_path (late cross-file consume resolution substrate) ---

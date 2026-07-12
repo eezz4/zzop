@@ -101,6 +101,12 @@ pub(crate) fn extract_file_io(rel: &str, text: &str, opts: &IoOptions) -> Option
     provides.extend(zzop_parser_typescript::extract_global_prefix_marker(
         rel, text,
     ));
+    // Manual pathname-dispatch route provides (framework-less Workers/Node servers): like the
+    // controller-decorator adapter, the whole dispatch shape is self-contained in one file's own
+    // AST (the compared path is a literal), so it projects per-file with no fragment to compose.
+    provides.extend(zzop_parser_typescript::extract_pathname_dispatch_provides(
+        rel, text,
+    ));
 
     if provides.is_empty() && consumes.is_empty() {
         None
