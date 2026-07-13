@@ -13,6 +13,8 @@
 pub mod adapters;
 pub mod lang;
 
+pub use adapters::class_shapes::extract_class_shape_fragments;
+pub use adapters::client_base::{extract_client_base_prefix_marker, CLIENT_BASE_PREFIX_KIND};
 pub use adapters::controller_decorators::{
     extract_controller_guarded_lines, extract_controller_prefix_route_fragments,
     extract_controller_provides,
@@ -23,7 +25,7 @@ pub use adapters::db_table_consume::{
 pub use adapters::egress::{
     base_relative_path, const_map_fragment, extract_http_egress, is_external_url, resolve_raw_path,
 };
-pub use adapters::global_prefix::extract_global_prefix_marker;
+pub use adapters::global_prefix::{extract_global_prefix_marker, NEST_GLOBAL_PREFIX_KIND};
 pub use adapters::hono_client::extract_hono_client_consumes;
 pub use adapters::next_pages_api::{scan_pages_api_handler, PagesApiHandlerScan};
 pub use adapters::pathname_dispatch::{
@@ -115,7 +117,18 @@ pub use lang::write_site::{
 ///   path (`GET /me/x`) instead of falling unresolved — the opaque base is dropped, never valued.
 ///   `{}{}`-heads, non-`/` suffixes (invisible segment boundary), and post-drop `//` (host
 ///   carrier) still refuse to key — see `adapters::egress`'s `consume_key_for`.
-pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2+angular-httpclient-v1+str-concat-url-v1+loop-spans-v1+pathname-dispatch-v1+base-carrier-drop-v1";
+/// - `body-shape-v1`: HTTP consume sites additionally carry the statically witnessed request-body
+///   object-literal key shape (`IoConsume::body`), controller `@Body()` params carry their DTO
+///   type ref (`IoProvide::body`), and every class declaration's field shape is emitted as a
+///   `ClassShapeFragment` for assemble-time DTO resolution — `cross-layer/body-field-drift`'s
+///   substrate. See `adapters::class_shapes` / `adapters::egress` / `adapters::controller_decorators`.
+/// - `axios-defaults-base-v1`: egress consumes carry a `client` provenance tag, and a literal
+///   `axios.defaults.baseURL = "..."` assignment emits a sentinel consume whose PATH PART the
+///   engine prepends to that tree's axios-tagged consume keys at assemble time (host deliberately
+///   ignored — deploy config, not contract; same effective-URL stance as the openapi adapter's
+///   `servers[].url` handling). Non-literal base values stay uninterpreted (adapter overlays cover
+///   them) — see `adapters::client_base`.
+pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2+angular-httpclient-v1+str-concat-url-v1+loop-spans-v1+pathname-dispatch-v1+base-carrier-drop-v1+body-shape-v1+axios-defaults-base-v1";
 
 use std::collections::{HashMap, HashSet};
 
@@ -2290,6 +2303,7 @@ export default connect(null, null)(Header);
             source: "be".to_string(),
             io: IoFacts {
                 provides: vec![IoProvide {
+                    body: None,
                     kind: "http".to_string(),
                     key: "GET /authen/getUserInfo".to_string(),
                     file: "CtrlAuthen.java".to_string(),

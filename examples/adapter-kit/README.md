@@ -86,7 +86,7 @@ Mode A envelope simply cannot be analyzed.
 ## Testing
 
 ```sh
-node --test test/
+node --test test/*.test.js
 ```
 
 Three suites: `keys.test.js` (parity-replays the full key-normalization fixture, plus veto-list unit

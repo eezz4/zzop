@@ -58,7 +58,7 @@
     "--mode",
     "--kind"
   ],
-  "embedderFields": ["disabled_rules", "disabledRules", "packsDir"],
+  "embedderFields": ["disabled_rules", "disabledRules", "packsDir", "severityOverrides", "suppressions"],
   "externalToolFlags": ["--depth", "--unshallow"],
   "allowlistedTokens": ["zzop.config.jsonc", "Authorization", "IoConsume", "crossLayer.unresolvedConsumes"]
 }

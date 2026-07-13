@@ -94,6 +94,8 @@ impl Visit for ConsumeCollector<'_> {
     fn visit_call_expr(&mut self, call: &CallExpr) {
         if let Some((verb, path)) = match_trpc_call(call, self.clients) {
             self.out.push(IoConsume {
+                client: None,
+                body: None,
                 kind: "trpc".into(),
                 key: Some(format!("{verb} {path}")),
                 file: self.file.into(),

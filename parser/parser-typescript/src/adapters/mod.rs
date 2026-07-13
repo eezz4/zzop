@@ -7,6 +7,8 @@
 //! identical role once it reaches the engine's assembly pass. See `lang`'s module doc for the
 //! sibling half of this crate's 2-layer layout.
 
+pub mod class_shapes;
+pub mod client_base;
 pub mod controller_decorators;
 pub mod db_table_consume;
 pub mod egress;

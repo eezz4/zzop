@@ -108,6 +108,8 @@ mod tests {
         TaggedConsume {
             source: source.to_string(),
             consume: zzop_core::IoConsume {
+                client: None,
+                body: None,
                 kind: "http".to_string(),
                 key: key.map(str::to_string),
                 file: file.to_string(),

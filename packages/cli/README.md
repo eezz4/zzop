@@ -77,11 +77,21 @@ warnings to **stderr** (stdout stays clean — pretty or JSON):
 
 ### Exit codes
 
+These apply to `zzop [run]` (the default analysis command):
+
 | Code | Meaning |
 | --- | --- |
 | `0` | Ran successfully; no finding at or above `failOn`. |
 | `1` | At least one finding at or above `failOn` (CI gate). |
 | `2` | Config or usage error. |
+
+`failOn` defaults to `warn` when omitted from the config, so a first run on an untuned repo exiting `1` is
+normal and expected — not a tool error. Triage the output, exclude non-deployed surface via `exclude`, and
+keep `failOn` gating in CI from there.
+
+`zzop adapter validate <path>` does not read `failOn` — its `0`/`1` mean the envelope passed/failed
+structural validation instead (see the Commands table above); `2` is still a usage error (bad path,
+malformed JSON).
 
 ## Configuration
 
@@ -110,14 +120,14 @@ annotated copy; the reference below summarizes each option.
 
   "rules": {
     // "off"                        -> disable the rule
-    "no-explicit-any": "off",
+    "typescript/no-explicit-any": "off",
     // "info" | "warn" | "critical" -> override severity
-    "n-plus-one": "warn",
+    "sql/nplus1": "warn",
     // object form -> override severity AND drop findings by file path.
     // Each `exclude` entry is a plain substring, OR a glob if it contains
     // `*`/`?`/`{}` (full-path: `*`/`?` stay within a segment, `**` spans `/`,
     // `{a,b}` alternates). `[...]` stays literal so raw `app/[id]/` paths work.
-    "toctou": { "severity": "warn", "exclude": ["legacy/"] },
+    "sql/race-condition-toctou": { "severity": "warn", "exclude": ["legacy/"] },
     "dead-candidates": { "exclude": ["**/app/**/{page,layout,route}.tsx"] }
   },
 
@@ -127,7 +137,15 @@ annotated copy; the reference below summarizes each option.
   // directories.
   "exclude": ["**/*.stories.tsx", "legacy/"],
 
+  // Attach a Mode B adapter's output: an array of paths to overlay envelope JSON
+  // files. Valid at the top level (applies to every tree) and/or per-tree as
+  // "trees[i].overlays" (adds to that tree only). See
+  // docs/adapters/README.md for the envelope format.
+  // "overlays": ["./my-adapter/envelope.json"],
+
   // Enables git-history-derived signals. Omit to use engine defaults.
+  // "since" windows history collection to a git-log-style time filter (e.g.
+  // "2 weeks ago", "1.year", an ISO date); omitted = full history.
   // "recentDays" windows the recent-activity fields (default 30).
   // "commitTypePatterns" teaches a non-English/non-conventional commit convention: an array of
   // { "pattern": "<regex>", "tag": "FIX"|"FEAT"|... }, checked in array order (earlier entries win,
@@ -136,6 +154,7 @@ annotated copy; the reference below summarizes each option.
   // skipped (matches nothing) and reported as a warning, never a crash. Omit for the default table.
   "git": { "recentDays": 30 },
   // "git": {
+  //   "since": "1.year",
   //   "recentDays": 30,
   //   "commitTypePatterns": [{ "pattern": "^\\s*corrige\\b", "tag": "FIX" }]
   // },
@@ -164,6 +183,17 @@ annotated copy; the reference below summarizes each option.
   "failOn": "warn"
 }
 ```
+
+Rule ids under `rules` follow one format rule: a DSL-pack rule uses its full `pack/rule` id (e.g.
+`typescript/no-explicit-any`, `sql/nplus1`), while a native analysis id is used as-is, with no pack prefix
+(e.g. `dead-candidates`).
+
+A default run writes to disk: the report notice (`Wrote N reports to <dir>`) goes to **stderr**, not
+stdout, so `--format json`/`--json` output on stdout stays parseable even when reports are also being
+written. Two directories appear by default — `zzop-reports/` (persisted reports; `--out`/config
+`report.dir` relocates it, `report.enabled: false` disables it) and `.zzop-cache/` (the analysis cache;
+`zzop init`'s generated config enables it by default, and omitting config `cacheDir` disables caching).
+Add both to `.gitignore`.
 
 ### Severity values
 
@@ -220,8 +250,8 @@ Turn off one noisy rule and downgrade another to info, using a custom pack direc
   "roots": ["."],
   "packs": { "extraDirs": ["./zzop-packs"] },
   "rules": {
-    "n-plus-one": "off",
-    "toctou": "info"
+    "sql/nplus1": "off",
+    "sql/race-condition-toctou": "info"
   }
 }
 ```

@@ -211,6 +211,7 @@ pub(crate) fn compose_file_convention_provides<'a>(
 
 fn provide(verb: &str, url: &str, rel: &str, line: u32, symbol: &str) -> IoProvide {
     IoProvide {
+        body: None,
         kind: "http".into(),
         key: http_interface_key(verb, url),
         file: rel.to_string(),

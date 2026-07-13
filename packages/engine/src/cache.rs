@@ -74,7 +74,17 @@ use crate::{CacheStats, EngineConfig};
 /// `v17` -> `v18`: `FileIrSlice` gains `loop_spans` (`loop-spans-v1`) — a stale entry defaulting it to
 /// empty would silently starve `Matcher::MethodScan::trigger_in_loop` of loop evidence for this file on
 /// every warm run instead of projecting it.
-pub const CACHE_SCHEMA_VERSION: &str = "zzop-cache-v18";
+///
+/// `v18` -> `v19`: `FileIrSlice` gains `class_shape_fragments` and its `io` payload gains the optional
+/// `IoConsume::body`/`IoProvide::body` shapes (`body-shape-v1`) — a stale entry defaulting them to
+/// empty/`None` would silently starve `cross-layer/body-field-drift` of both sides' evidence on every
+/// warm run instead of projecting them.
+///
+/// `v19` -> `v20`: the `io` payload's `IoConsume` gains the optional `client` provenance tag
+/// (`axios-defaults-base-v1`) — a stale entry defaulting it to `None` would silently exempt that
+/// file's axios call sites from the assemble-time `axios.defaults.baseURL` path-prefix seam on
+/// every warm run (client-scoped seams skip untagged consumes rather than guess).
+pub const CACHE_SCHEMA_VERSION: &str = "zzop-cache-v20";
 
 /// Fingerprint for files that never reach a structural parser crate in the fused pass: no `Language` match
 /// (`dispatch::dispatch` returned `None` — unrecognized extension), or the size-cap lexical fallback

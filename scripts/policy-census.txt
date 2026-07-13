@@ -24,6 +24,7 @@ parser/parser-java/src/provides.rs:REQUEST_METHOD_NAMES
 parser/parser-prisma/src/lib.rs:SKIP_DIRS
 parser/parser-typescript/src/adapters/controller_decorators.rs:CONTROLLER_CLASS_GATES
 parser/parser-typescript/src/adapters/db_table_consume.rs:QUERY_METHODS
+parser/parser-typescript/src/adapters/egress.rs:BODY_POSITION_VERBS
 parser/parser-typescript/src/adapters/pathname_dispatch.rs:PATHNAME_DISPATCH_FALLBACK_VERBS
 parser/parser-typescript/src/lang/resolve.rs:RESOLVE_EXTS
 parser/parser-typescript/src/lang/write_site.rs:ATOMIC_OP_KEYS

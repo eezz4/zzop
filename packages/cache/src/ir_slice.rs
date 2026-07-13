@@ -11,7 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 use zzop_core::{
-    ControllerPrefixRouteFragment, ImportMap, IoFacts, QueryCallSite, ReExport,
+    ClassShapeFragment, ControllerPrefixRouteFragment, ImportMap, IoFacts, QueryCallSite, ReExport,
     RouterMountFragment, SourceSymbol, TrpcRouterFragment, WrapperCallFragment, WrapperDefFragment,
 };
 
@@ -80,6 +80,13 @@ pub struct FileIrSlice {
     /// subsequent cache-warm run.
     #[serde(default)]
     pub controller_prefix_route_fragments: Vec<ControllerPrefixRouteFragment>,
+    /// This file's class field-shape fragments (`body-shape-v1`) — mirrors
+    /// `FileArtifact::class_shape_fragments`. Must round-trip through the cache: dropping it on a
+    /// hit would silently starve `IoProvide::body.dto_ref` resolution of this file's DTO class
+    /// declarations on every subsequent cache-warm run, same reasoning as
+    /// `controller_prefix_route_fragments` above.
+    #[serde(default)]
+    pub class_shape_fragments: Vec<ClassShapeFragment>,
     /// This file's Prisma query-call-site facts (`<clientAccessor>().<model>.<method>(...)`) — mirrors
     /// `FileArtifact::query_call_sites`. Must round-trip through the cache: dropping it on a hit would
     /// silently starve the schema x usage JOIN rules (`soft-delete-bypass`/`orderby-unindexed`/

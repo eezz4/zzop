@@ -314,6 +314,7 @@ mod tests {
             wrapper_def_fragments: Vec::new(),
             wrapper_call_fragments: Vec::new(),
             controller_prefix_route_fragments: Vec::new(),
+            class_shape_fragments: Vec::new(),
             query_call_sites: Vec::new(),
             store_bound_models: Vec::new(),
             field_usage_tokens: Vec::new(),

@@ -85,6 +85,7 @@ mod tests {
         TaggedProvide {
             source: source.to_string(),
             provide: IoProvide {
+                body: None,
                 kind: "http".to_string(),
                 key: "GET /health".to_string(),
                 file: file.to_string(),
@@ -105,6 +106,8 @@ mod tests {
         AmbiguousConsume {
             source: source.to_string(),
             consume: IoConsume {
+                client: None,
+                body: None,
                 kind: kind.to_string(),
                 key: key.map(str::to_string),
                 file: file.to_string(),

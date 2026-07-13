@@ -245,6 +245,7 @@ fn emit_class_routes(
             continue;
         }
         provides.push(IoProvide {
+            body: None,
             kind: "http".to_string(),
             key,
             file: row.file.clone(),

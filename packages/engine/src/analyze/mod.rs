@@ -55,7 +55,10 @@ pub(crate) use native_rules::{
     circular_findings, dead_candidate_findings, dep_stats_from_dep, unreachable_findings,
 };
 
-use compose::{apply_and_strip_global_prefix, resolve_wrapper_consumes};
+use compose::{
+    apply_and_strip_global_prefix, apply_client_base_prefixes, resolve_provide_body_refs,
+    resolve_wrapper_consumes,
+};
 use diagnostics::{collect_git, git_not_requested_warning, minified_files_warning};
 use native_rules::{run_callgraph_rules, run_java_provides_project_pass, run_schema_join_rules};
 
@@ -137,6 +140,11 @@ pub(crate) fn assemble(
         String,
         Vec<zzop_core::ControllerPrefixRouteFragment>,
     )> = Vec::new();
+    // `body-shape-v1`'s DTO-resolution substrate (`compose::resolve_provide_body_refs`): each TS file's
+    // own class field-shape fragments, paired with its `rel` — merged tree-wide to resolve a route
+    // provide's `ProvideBodyShape.dto_ref` (the DTO class usually lives in another file than the
+    // controller). Resolved once `io_provides` is final (after every provide-composition pass below).
+    let mut class_shape_pairs: Vec<(String, Vec<zzop_core::ClassShapeFragment>)> = Vec::new();
     // `run_schema_join_rules`' substrate: every file's Prisma query-call-site facts, collected tree-wide
     // then sorted by `(file, line)` below to match the removed filesystem scan's own ordering.
     let mut query_call_sites: Vec<zzop_core::QueryCallSite> = Vec::new();
@@ -211,6 +219,9 @@ pub(crate) fn assemble(
                 artifact.rel.clone(),
                 artifact.controller_prefix_route_fragments,
             ));
+        }
+        if !artifact.class_shape_fragments.is_empty() {
+            class_shape_pairs.push((artifact.rel.clone(), artifact.class_shape_fragments));
         }
         query_call_sites.extend(artifact.query_call_sites);
         bound_models.extend(artifact.store_bound_models);
@@ -341,6 +352,18 @@ pub(crate) fn assemble(
         );
     }
 
+    // Axios `baseURL` path-prefix apply + strip (`axios-defaults-base-v1`) — the CONSUME-side
+    // counterpart of `apply_and_strip_global_prefix` above. MUST run here: after
+    // `late_resolve_cross_file_consumes`, which fills `key` IN PLACE and preserves the `client` tag —
+    // that tag is the load-bearing reason for the ordering (a late-resolved axios consume still gets
+    // the prefix). Sitting after the wrapper-consume join is only "after the last consume-mutating
+    // pass" hygiene: wrapper-emitted consumes carry `client: None` and are DELIBERATELY never
+    // prefixed (custom wrappers stay uninterpreted — overlay territory). Must stay before
+    // `io_consumes` is frozen into `MinimalIr::io` / read by any whole-tree rule
+    // (`unprovided-consume`) or the cross-layer linker.
+    // See `compose::apply_client_base_prefixes`'s own doc for the full placement rationale.
+    apply_client_base_prefixes(&mut io_consumes, &mut warnings);
+
     // File-convention route PROVIDE composition — frameworks whose HTTP surface is the file tree
     // itself (Next.js `pages/api` + app-router `route.ts`, Remix flat routes, Medusa-style
     // `src/api/**/route.ts`). Pure path+symbol logic over `all_symbols`/`loc_by_path`; `pages/api`
@@ -354,6 +377,13 @@ pub(crate) fn assemble(
         );
         io_provides.extend(composed);
     }
+
+    // Request-body DTO resolution (`body-shape-v1`) — MUST run here, after every provide-composition
+    // pass above (controller-prefix, global-prefix, tRPC, router-mount, file-convention routes) has
+    // finished pushing into `io_provides`, so a prefix-ref-composed route's carried-through `body` (see
+    // `compose_controller_prefix_provides`'s doc) gets its `dto_ref` resolved too, not just literal-prefix
+    // routes' own directly-emitted provides.
+    resolve_provide_body_refs(&mut io_provides, class_shape_pairs, &mut warnings);
 
     // `type_only_edges` is the ephemeral noncycle-exclusion set (never cached/serialized — see
     // `circular_from_dep_excluding`'s doc): a pair present here is contributed ONLY by edges excludable

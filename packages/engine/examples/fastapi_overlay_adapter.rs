@@ -196,6 +196,7 @@ fn build_overlay(scan_root: &Path, scan_prefix: &str) -> NormalizedEnvelope {
             .collect();
 
         files.push(FileProjection {
+            class_shape_fragments: Vec::new(),
             path: full_path,
             loc,
             symbols: Vec::new(),

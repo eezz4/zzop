@@ -16,6 +16,22 @@
 # If a future sweep needs to widen the type list further, re-run --update and re-check the line
 # count; if it balloons, narrow back down and note that here.
 #
+# A THIRD blind spot was found and considered, NOT closed (2026-07-13, v0.13.0 release audit): a
+# single `const NAME: &str = "literal"` (no `&[&str]`/array/braces) is still outside the type
+# alternation — this is exactly what let the "nest-global-prefix" sentinel-kind string drift
+# independently across producer/consumer/envelope sites with no shared symbol (C1) before that
+# batch introduced `NEST_GLOBAL_PREFIX_KIND`, mirroring the existing `CLIENT_BASE_PREFIX_KIND`
+# pattern. Measured before deciding: adding bare `&str` to the alternation would pull in ~32-35
+# entries across the census dirs (module-level AND function-local `&str` consts alike — e.g. every
+# `PARSER_FINGERPRINT`, plus incidental non-policy aliasing consts like a local
+# `const SENTINEL_KIND: &str = ...` binding), which balloons well past the "modest" (~25) bar this
+# census was designed to stay under. Decision: single `&str` consts remain OUT of the tracked
+# pattern — the specific sentinel-kind-pair failure mode is considered closed a different way: both
+# `nest-global-prefix` and `client-base-prefix` are now T1-shared single-source consts
+# (`NEST_GLOBAL_PREFIX_KIND` / `CLIENT_BASE_PREFIX_KIND`, each defined once in its producer crate and
+# referenced everywhere else by symbol), so a future rename can no longer silently desync even though
+# the census itself won't catch a NEW instance of the same mistake pattern.
+#
 # No deps beyond grep/sed/sort/comm.
 set -euo pipefail
 

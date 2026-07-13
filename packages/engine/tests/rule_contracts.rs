@@ -14,18 +14,22 @@
 //! summary of what a failing test here means.
 //!
 //! ## Contracts covered
-//! 1. **Marker presence** (`every_dsl_rule_has_a_non_empty_suppress_marker`,
-//!    `suppress_markers_are_unique_within_each_pack`) — every DSL rule has a non-empty `suppress_marker`,
-//!    and no two rules in the same pack share one (co-suppression risk).
+//! 1. **Marker presence + convention** (`every_dsl_rule_has_a_non_empty_suppress_marker`,
+//!    `suppress_markers_are_unique_within_each_pack`,
+//!    `every_suppress_marker_follows_the_dash_ok_naming_convention`) — every DSL rule has a non-empty
+//!    `suppress_marker`, no two rules in the same pack share one (co-suppression risk), and every marker
+//!    keeps the `-ok` suffix shape users learn from the first rule they suppress.
 //! 2. **Message triple** (`every_dsl_rule_message_documents_how_to_exclude_it`) — every DSL rule's
 //!    `message` names its own suppress marker OR the literal `disabled_rules`/`disabledRules` string — the
 //!    "how to exclude" leg of the problem+fix+exclude finding contract.
-//! 3. **Native message contract** (`native_rule_files_that_build_findings_mention_disabled_rules`) — a
+//! 3. **Native message contract** (`native_rule_files_that_build_findings_mention_disabled_rules`,
+//!    `disable_hint_literal_args_are_known_ids_matching_the_files_own_findings`) — a
 //!    pragmatic grep-based proxy (native findings are built in code, not read from declarative data — see
-//!    that test's own doc for exactly what this can and cannot prove). Accepts either a literal
+//!    each test's own doc for exactly what this can and cannot prove). The first accepts either a literal
 //!    `disabled_rules` mention OR a call to the shared `zzop_core::finding::disable_hint` builder every
 //!    native message's disable-hint fragment now goes through (see that test's doc for why the OR is load-
-//!    bearing, not incidental).
+//!    bearing, not incidental); the second proves each literal `disable_hint("<id>")` argument is a real id
+//!    matching what the same file actually emits (a wrong-id hint = a silent config no-op for the user).
 //! 4. **Id hygiene** (`dsl_pack_ids_are_unique_across_packs`, `dsl_rule_ids_are_unique_within_each_pack`,
 //!    `no_dsl_id_collides_with_a_native_analysis_id`).
 //! 5. **Catalog sync** (`catalog_totals_match_loaded_rule_and_analysis_counts`,
@@ -179,6 +183,32 @@ fn suppress_markers_are_unique_within_each_pack() {
     );
 }
 
+/// Every `suppress_marker` ends in `-ok` — the naming convention every one of the shipped markers follows
+/// (a 2026-07-13 uniformity sweep measured 112/112) and the shape the authoring guide's example teaches
+/// (`debug-token-ok`). The convention is load-bearing for users, not cosmetic: someone who has learned
+/// `// <marker>-ok` from one rule will type that shape for the next rule from memory, and a rule whose
+/// marker deviates (`nplus1_allow`, `skip-x`) silently fails to suppress for them. Deviating on purpose is
+/// a policy change: adjust this test in the same commit and say why.
+#[test]
+fn every_suppress_marker_follows_the_dash_ok_naming_convention() {
+    let packs = load_all_packs();
+    let mut offenders = Vec::new();
+    for pack in &packs {
+        for rule in &pack.rules {
+            if let Some(marker) = rule.suppress_marker.as_deref() {
+                if !marker.trim().is_empty() && !marker.ends_with("-ok") {
+                    offenders.push(format!("{}/{}: `{marker}`", pack.id, rule.id));
+                }
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "suppress_marker values deviating from the `-ok` suffix convention every other marker follows: \
+         {offenders:#?}"
+    );
+}
+
 // ---------------------------------------------------------------------------------------------
 // 2. Message triple — problem (the rest of `message`) + fix (the rest of `message`) + exclude (this leg)
 // ---------------------------------------------------------------------------------------------
@@ -308,6 +338,79 @@ fn native_rule_files_that_build_findings_mention_disabled_rules() {
          `disabled_rules` and never call `disable_hint(` anywhere in the same file — the finding's message \
          likely omits the \"how to exclude\" hint every other native rule includes (see this test's own doc \
          comment for exactly what this check can/cannot prove): {offenders:#?}"
+    );
+}
+
+/// Every literal `disable_hint("<id>")` argument in shipped native/engine source (a) names a KNOWN id
+/// (native analysis id or `"<pack>/<rule>"` DSL id) and (b), when the same file also constructs findings
+/// via literal `rule_id: "..."`, matches one of THOSE ids. The test above proves a hint exists; this one
+/// proves the hint is not a lie — a hint naming a stale or copy-pasted-from-another-rule id sends the user
+/// to disable the wrong thing, and the config entry they add becomes a silent no-op (the exact class the
+/// unknown-disabled/override/suppression warnings were built to catch — this seals it at the SOURCE).
+/// Same pragmatic-grep caveats as above: only literal `disable_hint("...")` and `rule_id: "..."` tokens
+/// are seen; a dynamically built hint or id is invisible here. A 2026-07-13 sweep measured 0 violations
+/// across 33 files / 35 literal call shapes; this pins that state.
+#[test]
+fn disable_hint_literal_args_are_known_ids_matching_the_files_own_findings() {
+    fn quoted_after(text: &str, needle: &str) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        let mut rest = text;
+        while let Some(pos) = rest.find(needle) {
+            let after = &rest[pos + needle.len()..];
+            match after.find('"') {
+                Some(end) => {
+                    out.insert(after[..end].to_string());
+                    rest = &after[end..];
+                }
+                None => break,
+            }
+        }
+        out
+    }
+
+    let mut known: BTreeSet<String> = native_metas().iter().map(|m| m.id.clone()).collect();
+    for pack in load_all_packs() {
+        for rule in &pack.rules {
+            known.insert(format!("{}/{}", pack.id, rule.id));
+        }
+    }
+
+    let mut files = native_rs_files();
+    collect_rs_files(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut files,
+    );
+
+    let mut offenders = Vec::new();
+    for path in files {
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let hints = quoted_after(&text, "disable_hint(\"");
+        if hints.is_empty() {
+            continue;
+        }
+        let emitted = quoted_after(&text, "rule_id: \"");
+        for hint in hints {
+            if !known.contains(&hint) {
+                offenders.push(format!(
+                    "{}: disable_hint(\"{hint}\") names no known rule/analysis id",
+                    path.display()
+                ));
+            } else if !emitted.is_empty() && !emitted.contains(&hint) {
+                offenders.push(format!(
+                    "{}: disable_hint(\"{hint}\") but this file's findings carry rule_id {:?}",
+                    path.display(),
+                    emitted.iter().collect::<Vec<_>>()
+                ));
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "disable_hint(...) call sites whose literal id argument is stale, mistyped, or belongs to a \
+         different rule than the file emits — the hint would send users to disable the wrong id (a silent \
+         config no-op): {offenders:#?}"
     );
 }
 

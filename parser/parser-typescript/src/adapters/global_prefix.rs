@@ -21,6 +21,10 @@ use swc_core::ecma::ast::{CallExpr, Callee, Expr, Lit, MemberProp};
 use swc_core::ecma::visit::{Visit, VisitWith};
 use zzop_core::IoProvide;
 
+/// The sentinel `IoProvide::kind` — `zzop-engine`'s tree assembly collects and strips it (never joined,
+/// never output).
+pub const NEST_GLOBAL_PREFIX_KIND: &str = "nest-global-prefix";
+
 /// Scans one TS file's raw source for a `<expr>.setGlobalPrefix(<stringLiteral>)` call and, if found,
 /// returns a sentinel `IoProvide { kind: "nest-global-prefix", key: <the literal, verbatim>, ... }`.
 /// Returns `None` when the file has no such call, the call's argument isn't a plain string literal
@@ -55,7 +59,8 @@ impl Visit for GlobalPrefixCollector<'_> {
         if self.out.is_none() {
             if let Some(key) = match_set_global_prefix(call) {
                 self.out = Some(IoProvide {
-                    kind: "nest-global-prefix".to_string(),
+                    body: None,
+                    kind: NEST_GLOBAL_PREFIX_KIND.to_string(),
                     key,
                     file: self.file.to_string(),
                     line: crate::line_of(self.cm, call.span.lo),

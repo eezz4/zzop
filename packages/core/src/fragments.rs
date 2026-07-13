@@ -140,4 +140,31 @@ pub struct ControllerPrefixRouteFragment {
     pub line: u32,
     /// The route handler method's name.
     pub symbol: Option<String>,
+    /// The handler's `@Body()` request-body contract (`body-shape-v1`), carried through so a
+    /// prefix-ref route's composed `IoProvide` keeps the same body evidence a literal-prefix
+    /// route gets directly — `#[serde(default)]` so pre-existing serialized fragments (and
+    /// producers that don't capture bodies) deserialize as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<crate::io::ProvideBodyShape>,
+}
+
+/// The field shape of one class declaration — the per-file half of request-body DTO resolution
+/// (`IoProvide::body`'s `dto_ref` is looked up against the tree-wide merge of these at assemble
+/// time, mirroring the const-map/controller-prefix pattern: a single-file scan cannot know where
+/// `CreateUserDto` is declared). Emitted for EVERY class declaration, field-less ones included —
+/// a field-less `extends PartialType(X) {}` resolves as "found but incomplete", a more informative
+/// signal than "not found"; classes are cheap to carry (name + field names + flags).
+///
+/// Never-guess at assemble: a `dto_ref` missing from the merged map, or a class name declared
+/// with CONFLICTING shapes in two files, resolves to nothing (the provide keeps `body: None`
+/// semantics by dropping the shape) — one aggregated warning, no guessed fields.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClassShapeFragment {
+    /// The class's declared name (`class CreateUserDto` → `"CreateUserDto"`).
+    pub name: String,
+    /// Property members with statically known names (`PropName::Ident`/`Str`), in source order.
+    pub fields: Vec<crate::io::ProvideBodyField>,
+    /// `false` when the field list may be partial: an `extends` clause, constructor parameter
+    /// properties, an index signature, or a computed property key.
+    pub complete: bool,
 }

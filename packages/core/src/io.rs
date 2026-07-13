@@ -25,6 +25,58 @@ use serde::{Deserialize, Serialize};
 /// The boundary an interface crosses. Open-ended (String) so an adapter may introduce its own kind.
 pub type IoKind = String;
 
+/// The statically witnessed shape of a request-body object literal at an HTTP consume site.
+/// Extraction is evidence-only: keys are recorded exactly as written (dotted paths, depth <= 2 —
+/// one level under each top-level key, which is all the DTO comparison needs), and NOTHING is
+/// inferred about parts the literal does not show. A body passed as an identifier/expression is
+/// not represented at all (`IoConsume::body: None`), never approximated.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConsumeBodyShape {
+    /// Dotted key paths witnessed in the literal (e.g. `"user"`, `"user.email"`). A shorthand
+    /// property (`{ user }`) contributes its key; its children stay unwitnessed.
+    pub keys: Vec<String>,
+    /// Paths whose DIRECT children are exhaustively listed in `keys` — `""` for the top level.
+    /// A level containing a spread, computed key, getter, or non-literal nested value is omitted,
+    /// which suppresses any "missing field" comparison at that level (incomplete evidence stays
+    /// silent). "Extra key" comparisons only need the witnessed key itself, so they survive.
+    pub complete_at: Vec<String>,
+}
+
+/// One declared field of a request-body DTO class (name + whether the contract requires it).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProvideBodyField {
+    pub name: String,
+    /// `true` when the field is `?`-optional or carries an `@IsOptional()` decorator.
+    pub optional: bool,
+}
+
+/// The request-body contract a route handler declares (`@Body() dto: CreateUserDto`).
+/// Emitted by the parser with only `dto_ref` set (the DTO class usually lives in another file);
+/// assemble resolves the ref against the tree-wide merged class-shape map and fills `fields`.
+/// An unresolvable or ambiguous ref drops the whole shape (never guessed).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProvideBodyShape {
+    /// `@Body('user')` sub-key — the DTO describes `body.user`, not the body root. `None` = root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_key: Option<String>,
+    /// Unresolved DTO class name as written in the parameter type annotation. Present on parser
+    /// emit; cleared by assemble once `fields` is materialized (an adapter overlay may instead
+    /// supply `fields` directly and leave this `None`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dto_ref: Option<String>,
+    /// Resolved DTO fields (empty until assemble resolves `dto_ref`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<ProvideBodyField>,
+    /// `false` when the DTO's field list may be partial (an `extends` clause, constructor
+    /// parameter properties, an index signature, or computed keys) — suppresses "extra key"
+    /// claims, since the unseen parent may declare the key.
+    #[serde(default)]
+    pub complete: bool,
+}
+
 /// An ingress a tree PROVIDES. `key` is the adapter-normalized interface identity.
 /// `#[serde(rename_all = "camelCase")]` is a no-op today (every field is one word) — applied for
 /// future-proofing/consistency; this type is shared with `docs/NORMALIZED_AST.md`'s frozen v1 envelope
@@ -40,6 +92,11 @@ pub struct IoProvide {
     /// Handler/owner symbol id (e.g. the controller method) for richer edges.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symbol: Option<String>,
+    /// Request-body contract the handler declares, when statically visible (`@Body()` param with
+    /// a class DTO type). See `ProvideBodyShape` — additive/optional, absent everywhere it does
+    /// not apply, so the frozen v1 envelope contract is untouched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<ProvideBodyShape>,
 }
 
 /// An egress a tree CONSUMES. `key` = None when the adapter could not statically resolve a dynamic target
@@ -63,6 +120,17 @@ pub struct IoConsume {
     /// `key` (late resolution fills `key` but leaves this field in place, like `raw`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub method: Option<String>,
+    /// Statically witnessed request-body literal shape at the call site, when one is visible.
+    /// See `ConsumeBodyShape` — additive/optional, same envelope-compat note as `IoProvide::body`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<ConsumeBodyShape>,
+    /// Which client recognizer produced this consume (`"axios"`, `"ky"`, `"fetch"`, `"$fetch"`,
+    /// `"oazapfts"`, `"angular"`) — provenance for CLIENT-SCOPED normalization seams, e.g. an
+    /// `axios.defaults.baseURL` path prefix must apply to axios call sites only, never to a fetch
+    /// call in the same tree. `None` = producer doesn't tag (older envelopes, non-egress kinds);
+    /// a client-scoped seam then leaves the consume untouched (never guessed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
 }
 
 /// The IO an adapter emits for one tree (alongside MinimalIR dep/symbols/loc). See `IoProvide`'s doc re:
@@ -413,6 +481,7 @@ mod tests {
 
     fn provide(kind: &str, key: &str, file: &str, line: u32, symbol: Option<&str>) -> IoProvide {
         IoProvide {
+            body: None,
             kind: kind.into(),
             key: key.into(),
             file: file.into(),
@@ -428,6 +497,8 @@ mod tests {
         raw: Option<&str>,
     ) -> IoConsume {
         IoConsume {
+            client: None,
+            body: None,
             kind: kind.into(),
             key: key.map(Into::into),
             file: file.into(),

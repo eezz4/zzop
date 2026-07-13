@@ -1431,6 +1431,7 @@ mod tests {
 
     fn io_provide(kind: &str, key: &str, line: u32) -> crate::io::IoProvide {
         crate::io::IoProvide {
+            body: None,
             kind: kind.into(),
             key: key.into(),
             file: "f.ts".into(),
@@ -1441,6 +1442,8 @@ mod tests {
 
     fn io_consume(kind: &str, key: Option<&str>, line: u32) -> crate::io::IoConsume {
         crate::io::IoConsume {
+            client: None,
+            body: None,
             kind: kind.into(),
             key: key.map(Into::into),
             file: "f.ts".into(),

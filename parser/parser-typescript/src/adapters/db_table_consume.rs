@@ -70,6 +70,8 @@ impl Visit for DbTableCollector<'_> {
     fn visit_call_expr(&mut self, call: &CallExpr) {
         if let Some(m) = match_prisma_query_call(call) {
             self.out.push(IoConsume {
+                client: None,
+                body: None,
                 kind: "db-table".into(),
                 key: Some(format!("table:{}", m.accessor)),
                 file: self.file.into(),

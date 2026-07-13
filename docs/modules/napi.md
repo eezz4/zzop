@@ -152,7 +152,7 @@ join result across six buckets (camelCase like everything else), plus a per-edge
   pattern (health checks, `/login`, etc.) that many unrelated services could share, so the match is lower
   confidence than a distinctively-named route; the edge is still emitted.
 
-`crossLayerFindings` is the output of the 20 `cross-layer/*` native rules run over `crossLayer` (see the
+`crossLayerFindings` is the output of the `cross-layer/*` native rules run over `crossLayer` (see the
 "Native analyses" table in [docs/rules/catalog.md](../rules/catalog.md) for the full id list) — sorted the
 same `(severity, file, line, ruleId)` way as every per-tree `findings` array, and gated by the UNION of
 every tree's `disabledRules` (any one tree disabling a cross-layer rule id drops it from this array

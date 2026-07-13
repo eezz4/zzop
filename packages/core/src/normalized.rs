@@ -88,6 +88,11 @@ pub struct FileProjection {
     pub trpc_router_fragments: Vec<crate::TrpcRouterFragment>,
     #[serde(default)]
     pub router_mount_fragments: Vec<crate::RouterMountFragment>,
+    /// Class field-shape fragments (`body-shape-v1`) — the DTO-resolution substrate for
+    /// `IoProvide::body.dto_ref` (see `zzop_core::ClassShapeFragment`). Same optional/graceful
+    /// posture as the other fragment channels: absent = this producer doesn't extract class shapes.
+    #[serde(default)]
+    pub class_shape_fragments: Vec<crate::ClassShapeFragment>,
     #[serde(default)]
     pub io: IoFacts,
     /// Per-file loop-body line spans (1-based, inclusive) — external-parser counterpart of
@@ -273,6 +278,7 @@ mod tests {
             parser: "custom-router/1".to_string(),
             source: "s".to_string(),
             files: vec![FileProjection {
+                class_shape_fragments: Vec::new(),
                 path: "a.ext".to_string(),
                 loc: 10,
                 symbols: vec![],
@@ -365,6 +371,7 @@ mod tests {
             source: "s".to_string(),
             files: vec![
                 FileProjection {
+                    class_shape_fragments: Vec::new(),
                     path: "a.ext".to_string(),
                     loc: 1,
                     symbols: vec![],
@@ -381,6 +388,7 @@ mod tests {
                     loop_spans: vec![],
                 },
                 FileProjection {
+                    class_shape_fragments: Vec::new(),
                     path: "a.ext".to_string(),
                     loc: 2,
                     symbols: vec![],

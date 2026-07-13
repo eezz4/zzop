@@ -34,6 +34,13 @@ jobs:
       - name: CLI README ↔ --help sync guard
         run: bash scripts/check-cli-readme-sync.sh
 
+  docs-rule-ids-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docs rule-id ↔ catalog sync guard
+        run: bash scripts/check-docs-rule-ids.sh
+
   drift-guards:
     # Two mechanical drift guards. Both need `fetch-depth: 0` (unlike the other guard jobs above,
     # which only read the working tree): the fingerprint guard diffs against the PR base / previous
@@ -83,3 +90,9 @@ jobs:
         run: |
           cp target/debug/libzzop_napi.so packages/napi/zzop-napi.node
           node packages/napi/smoke.mjs
+      - name: CLI unit tests
+        # Placed after the smoke step on purpose: the CLI loads the native addon via
+        # packages/napi/index.js, whose ./zzop-napi.node fallback is exactly the file the smoke
+        # step just copied into place. Glob form (not a bare directory) — `node --test test/`
+        # fails on Node v22+.
+        run: node --test packages/cli/test/*.test.js

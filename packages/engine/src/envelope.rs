@@ -43,6 +43,53 @@ use crate::analyze::{
 };
 use crate::{AnalyzeOutput, EngineConfig};
 
+/// True iff `kind` is a reserved, engine-internal `IoProvide` sentinel that only
+/// `zzop_parser_typescript::adapters::global_prefix` (native TS) may produce, and only
+/// `compose::apply_and_strip_global_prefix` (the native `analyze::assemble` pipeline) may consume+strip —
+/// see that pair's docs. A producer feeding this engine any other way (an envelope's `FileProjection`,
+/// Mode A or Mode B) must never emit it: envelope/overlay ingestion never runs that consuming seam, so a
+/// leaked sentinel would either surface raw in output/rules (Mode A) or get re-applied against the WHOLE
+/// native tree by that seam once merged (Mode B) — an external overlay author re-prefixing every native
+/// route by accident. Both `analyze_envelope` (Mode A, above) and `apply_adapter_overlays` (Mode B, below)
+/// call this — kept as one predicate so the two modes can't drift on which kinds are reserved.
+///
+/// Bound to the parser's exported const (not a local literal) so a rename on the emit side cannot
+/// silently desynchronize this check — a leaked sentinel would reach output.
+fn is_reserved_provide_kind(kind: &str) -> bool {
+    kind == zzop_parser_typescript::NEST_GLOBAL_PREFIX_KIND
+}
+
+/// True iff `kind` is the `IoConsume` counterpart of [`is_reserved_provide_kind`] — the client-base-prefix
+/// sentinel only `zzop_parser_typescript::adapters::client_base` may produce and only
+/// `compose::apply_client_base_prefixes` may consume+strip. Same producer-forbidden rationale.
+fn is_reserved_consume_kind(kind: &str) -> bool {
+    kind == zzop_parser_typescript::CLIENT_BASE_PREFIX_KIND
+}
+
+/// Builds the one aggregate "reserved sentinel(s) dropped" warning shared by both modes — `Some` iff
+/// `dropped > 0`. `subject_kind` is the noun phrase (`"envelope"` for Mode A, `"adapter overlay"` for
+/// Mode B) and `subject_id` is that mode's own identifier (`NormalizedEnvelope::parser` in both cases,
+/// since Mode B's overlays ARE `NormalizedEnvelope`s too — an envelope's `source` is not used here since
+/// `parser` is what a producer actually recognizes as "mine"). Centralizing the count->message step here
+/// (rather than duplicating the singular/plural + kind-list text in each call site) is what keeps the two
+/// modes' wording from drifting apart the way `is_reserved_provide_kind`/`is_reserved_consume_kind` keep
+/// them from drifting on WHICH kinds are reserved.
+fn reserved_drop_warning(subject_kind: &str, subject_id: &str, dropped: usize) -> Option<String> {
+    if dropped == 0 {
+        return None;
+    }
+    let entries = if dropped == 1 { "entry" } else { "entries" };
+    // Built from the two producers' own exported consts (not hardcoded literals) so this text can never
+    // drift from the real kinds `is_reserved_provide_kind`/`is_reserved_consume_kind` check — the
+    // rendered string is unchanged from before (both consts equal the literals this format! replaces).
+    let nest_global_prefix_kind = zzop_parser_typescript::NEST_GLOBAL_PREFIX_KIND;
+    let client_base_prefix_kind = zzop_parser_typescript::CLIENT_BASE_PREFIX_KIND;
+    Some(format!(
+        "{subject_kind} '{subject_id}': dropped {dropped} reserved engine-internal io {entries} \
+         (kinds `{nest_global_prefix_kind}`/`{client_base_prefix_kind}` are producer-forbidden)"
+    ))
+}
+
 /// Ingests one `NormalizedEnvelope` (already validated — see `zzop_core::validate_envelope`) and
 /// produces the same `AnalyzeOutput` shape `analyze_tree` does, per this module's doc for which
 /// analyses run and which are skipped in envelope mode. Files are processed in `path`-sorted order
@@ -92,6 +139,10 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         String,
         std::collections::BTreeSet<String>,
     > = std::collections::BTreeMap::new();
+    // Aggregate reserved-sentinel drop count across every file in this envelope — reported as ONE
+    // `warnings` entry below (via `reserved_drop_warning`), not per-file, mirroring `apply_adapter_overlays`'s
+    // own per-overlay aggregation. See the in-loop comment for why these are dropped at all.
+    let mut reserved_dropped = 0usize;
 
     for file in &files {
         loc_by_path.insert(file.path.clone(), file.loc);
@@ -99,8 +150,43 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
             degraded.push(file.path.clone());
         }
         all_symbols.extend(file.symbols.iter().cloned());
-        io_provides.extend(file.io.provides.iter().cloned());
-        io_consumes.extend(file.io.consumes.iter().cloned());
+        // Reserved ENGINE-INTERNAL sentinel kinds are dropped at ingestion: envelope mode never runs
+        // the native assemble seams that consume+strip them (`apply_and_strip_global_prefix`,
+        // `apply_client_base_prefixes`), so an external producer emitting one of these kinds would
+        // otherwise leak a raw sentinel into `MinimalIr::io`/rules instead of getting the native rewrite
+        // semantics. Dropping is still the right degrade, but it is no longer SILENT (opus NOTE,
+        // axios-defaults-base-v1, superseded): a dropped-but-unwarned sentinel left an external-parser
+        // producer with no way to learn its `nest-global-prefix`/`client-base-prefix` entry vanished, the
+        // asymmetry Mode B closed for overlays first (1a70aae) — the count is aggregated above and
+        // reported as one `warnings` entry per envelope below, parallel to that fix. Filters shared with
+        // `apply_adapter_overlays`'s own Mode B filter below (`is_reserved_provide_kind`/
+        // `is_reserved_consume_kind`) so the two modes can't drift on which kinds are reserved.
+        reserved_dropped += file
+            .io
+            .provides
+            .iter()
+            .filter(|p| is_reserved_provide_kind(&p.kind))
+            .count();
+        reserved_dropped += file
+            .io
+            .consumes
+            .iter()
+            .filter(|c| is_reserved_consume_kind(&c.kind))
+            .count();
+        io_provides.extend(
+            file.io
+                .provides
+                .iter()
+                .filter(|p| !is_reserved_provide_kind(&p.kind))
+                .cloned(),
+        );
+        io_consumes.extend(
+            file.io
+                .consumes
+                .iter()
+                .filter(|c| !is_reserved_consume_kind(&c.kind))
+                .cloned(),
+        );
         if !file.trpc_router_fragments.is_empty() {
             trpc_fragment_pairs.push((file.path.clone(), file.trpc_router_fragments.clone()));
         }
@@ -246,6 +332,9 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     ));
 
     let mut warnings = Vec::new();
+    if let Some(w) = reserved_drop_warning("envelope", &envelope.parser, reserved_dropped) {
+        warnings.push(w);
+    }
     if let Some(w) = crate::analyze::zero_packs_warning(config) {
         warnings.push(w);
     }
@@ -397,6 +486,18 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
 ///
 /// `artifacts` is re-sorted by `rel` before returning — `analyze::assemble` relies on that order for
 /// `ir.ir.symbols`'s determinism.
+///
+/// Before either merge branch, every reserved engine-internal sentinel `IoProvide`/`IoConsume` (kinds
+/// `nest-global-prefix`/`client-base-prefix`, see [`is_reserved_provide_kind`]/[`is_reserved_consume_kind`])
+/// is dropped from the projection's `io` — a producer-forbidden pair only the native TS parser may emit
+/// and only the native `analyze::assemble` seams (`apply_and_strip_global_prefix`/
+/// `apply_client_base_prefixes`) may consume+strip. Those seams run later over the WHOLE tree's merged
+/// `io_provides`/`io_consumes`, so an overlay sentinel that survived the merge would get re-applied
+/// project-wide (every native route re-prefixed), not scoped to the overlay's own files. Each overlay with
+/// any drops gets one aggregate `warnings` entry naming its `parser`, the dropped count, and the reserved
+/// kinds (built by [`reserved_drop_warning`], shared with `analyze_envelope`'s Mode A counterpart so the
+/// two modes' wording can't drift) — a partial drop, so (unlike a validation failure) the overlay's other
+/// io/fragments still merge.
 pub(crate) fn apply_adapter_overlays(
     artifacts: &mut Vec<crate::pipeline::FileArtifact>,
     overlays: &[NormalizedEnvelope],
@@ -430,16 +531,50 @@ pub(crate) fn apply_adapter_overlays(
             continue;
         }
 
+        // Reserved engine-internal sentinel kinds (see `is_reserved_provide_kind`/`is_reserved_consume_kind`
+        // above) are producer-forbidden: dropped from every projection's `io` BEFORE the merge/synthetic
+        // branch below, so neither path can hand one to `apply_and_strip_global_prefix`/
+        // `apply_client_base_prefixes` (which run later, inside `analyze::assemble`, over the WHOLE native
+        // tree's `io_provides`/`io_consumes` — an overlay sentinel surviving to there would get
+        // re-interpreted as a real project-wide setting and re-prefix every native route, not just this
+        // overlay's own). Dropped counts are aggregated across the WHOLE overlay (every projection), then
+        // reported as one warning per overlay — a partial drop, not a skip, so processing continues.
+        let mut reserved_dropped = 0usize;
         for projection in &overlay.files {
-            if let Some(artifact) = artifacts.iter_mut().find(|a| a.rel == projection.path) {
-                merge_projection_onto_artifact(artifact, projection);
+            let (cleaned, dropped) = drop_reserved_io(projection);
+            reserved_dropped += dropped;
+            if let Some(artifact) = artifacts.iter_mut().find(|a| a.rel == cleaned.path) {
+                merge_projection_onto_artifact(artifact, &cleaned);
             } else {
-                artifacts.push(synthetic_artifact_from_projection(projection));
+                artifacts.push(synthetic_artifact_from_projection(&cleaned));
             }
+        }
+        if let Some(w) = reserved_drop_warning("adapter overlay", &overlay.parser, reserved_dropped)
+        {
+            warnings.push(w);
         }
     }
 
     artifacts.sort_by(|a, b| a.rel.cmp(&b.rel));
+}
+
+/// Returns a clone of `projection` with every reserved engine-internal `IoProvide`/`IoConsume` entry
+/// dropped from its `io` (see [`is_reserved_provide_kind`]/[`is_reserved_consume_kind`]), plus how many
+/// entries were dropped — the Mode B (`apply_adapter_overlays`) counterpart of Mode A's own ingestion-time
+/// filter in `analyze_envelope` above. Every other field is untouched.
+fn drop_reserved_io(projection: &zzop_core::FileProjection) -> (zzop_core::FileProjection, usize) {
+    let mut cleaned = projection.clone();
+    let before = cleaned.io.provides.len() + cleaned.io.consumes.len();
+    cleaned
+        .io
+        .provides
+        .retain(|p| !is_reserved_provide_kind(&p.kind));
+    cleaned
+        .io
+        .consumes
+        .retain(|c| !is_reserved_consume_kind(&c.kind));
+    let after = cleaned.io.provides.len() + cleaned.io.consumes.len();
+    (cleaned, before - after)
 }
 
 /// Overwrites every `IoProvide`/`IoConsume` in `io`'s `file` field to `path` — the defensive
@@ -510,6 +645,9 @@ fn merge_projection_onto_artifact(
     artifact
         .router_mount_fragments
         .extend(projection.router_mount_fragments.iter().cloned());
+    artifact
+        .class_shape_fragments
+        .extend(projection.class_shape_fragments.iter().cloned());
     for (key, value) in &projection.const_map_fragment {
         artifact
             .const_map_fragment
@@ -582,6 +720,10 @@ fn synthetic_artifact_from_projection(
         wrapper_def_fragments: Vec::new(),
         wrapper_call_fragments: Vec::new(),
         controller_prefix_route_fragments: Vec::new(),
+        // Class shapes ARE plumbed from the projection (unlike the native-TS-only concerns above):
+        // an adapter may emit `IoProvide::body.dto_ref` and rely on the same assemble-time resolver
+        // native controllers use, feeding it shapes for classes its own language declares.
+        class_shape_fragments: projection.class_shape_fragments.clone(),
         query_call_sites: Vec::new(),
         store_bound_models: Vec::new(),
         field_usage_tokens: Vec::new(),
@@ -667,6 +809,7 @@ mod tests {
             const_map_fragment: HashMap::new(),
             trpc_router_fragments: Vec::new(),
             router_mount_fragments: Vec::new(),
+            class_shape_fragments: Vec::new(),
             io: IoFacts::default(),
             degraded: false,
             is_entry: false,
@@ -909,6 +1052,7 @@ mod tests {
     fn io_facts_are_collected_and_surfaced_on_the_common_ir() {
         let mut a = projection("Ctrl.jsp", 20);
         a.io.provides.push(IoProvide {
+            body: None,
             kind: "http".to_string(),
             key: "GET /legacy/user.jsp".to_string(),
             file: "Ctrl.jsp".to_string(),
@@ -1116,6 +1260,132 @@ mod tests {
                 .any(|p| p.kind == "http" && p.key == "POST /api/widgets" && p.file == "sub.jsp"),
             "{:?}",
             provides
+        );
+    }
+
+    // --- Reserved engine-internal sentinel kinds are producer-forbidden in envelopes too (Mode A parity
+    // with the Mode B overlay filter — `apply_adapter_overlays`'s own tests in
+    // `tests/analyze_adapter_overlay.rs` cover the identical contract for overlays) ---
+
+    #[test]
+    fn nest_global_prefix_provide_is_dropped_and_warned_in_envelope_mode() {
+        let mut a = projection("legacy.jsp", 3);
+        a.io.provides.push(IoProvide {
+            body: None,
+            kind: zzop_parser_typescript::NEST_GLOBAL_PREFIX_KIND.to_string(),
+            key: "api".to_string(),
+            file: "legacy.jsp".to_string(),
+            line: 1,
+            symbol: None,
+        });
+        // An ordinary sibling route, so `io` is `Some` and we can also pin it comes through untouched —
+        // envelope mode never runs `apply_and_strip_global_prefix` at all (module doc), so there is no
+        // tree-wide re-prefix step to prove absent here the way the Mode B e2e test does; this instead
+        // pins that the drop itself does not disturb an ordinary sibling provide.
+        a.io.provides.push(IoProvide {
+            body: None,
+            kind: "http".to_string(),
+            key: "GET /widgets".to_string(),
+            file: "legacy.jsp".to_string(),
+            line: 2,
+            symbol: None,
+        });
+        let env = envelope(vec![a]);
+        let out = analyze_envelope(&env, &config());
+
+        let provides = out.ir.ir.io.expect("expected io facts").provides;
+        assert!(
+            !provides
+                .iter()
+                .any(|p| p.kind == zzop_parser_typescript::NEST_GLOBAL_PREFIX_KIND),
+            "{:?}",
+            provides
+        );
+        assert!(
+            provides
+                .iter()
+                .any(|p| p.kind == "http" && p.key == "GET /widgets"),
+            "{:?}",
+            provides
+        );
+        assert!(
+            out.warnings.iter().any(|w| w.contains("test-parser/1")
+                && w.contains("dropped 1 reserved engine-internal io entry")
+                && w.contains("nest-global-prefix")),
+            "{:?}",
+            out.warnings
+        );
+    }
+
+    #[test]
+    fn client_base_prefix_consume_is_dropped_and_warned_in_envelope_mode() {
+        // `IoConsume`-side counterpart of the provide test above: an envelope emitting
+        // `zzop_parser_typescript::CLIENT_BASE_PREFIX_KIND` directly is producer-forbidden the same way.
+        let mut a = projection("legacy.jsp", 2);
+        a.io.consumes.push(IoConsume {
+            kind: zzop_parser_typescript::CLIENT_BASE_PREFIX_KIND.to_string(),
+            key: Some("/api".to_string()),
+            file: "legacy.jsp".to_string(),
+            line: 1,
+            raw: None,
+            method: None,
+            body: None,
+            client: Some("axios".to_string()),
+        });
+        let env = envelope(vec![a]);
+        let out = analyze_envelope(&env, &config());
+
+        let consumes = out.ir.ir.io.map(|io| io.consumes).unwrap_or_default();
+        assert!(
+            !consumes
+                .iter()
+                .any(|c| c.kind == zzop_parser_typescript::CLIENT_BASE_PREFIX_KIND),
+            "{:?}",
+            consumes
+        );
+        assert!(
+            out.warnings.iter().any(|w| w.contains("test-parser/1")
+                && w.contains("dropped 1 reserved engine-internal io entry")
+                && w.contains("client-base-prefix")),
+            "{:?}",
+            out.warnings
+        );
+    }
+
+    #[test]
+    fn ordinary_io_kinds_are_not_dropped_or_warned_in_envelope_mode() {
+        // Control case: an envelope whose `io` carries only ordinary (non-reserved) kinds must pass
+        // through in full, with no drop warning at all — the reserved-kind filter must not have
+        // false-positive reach (mirrors `overlay_with_only_ordinary_io_kinds_merges_with_no_drop_warning`).
+        let mut a = projection("a.jsp", 3);
+        a.io.provides.push(IoProvide {
+            body: None,
+            kind: "http".to_string(),
+            key: "GET /widgets".to_string(),
+            file: "a.jsp".to_string(),
+            line: 2,
+            symbol: None,
+        });
+        a.io.consumes.push(IoConsume {
+            kind: "http".to_string(),
+            key: Some("/widgets".to_string()),
+            file: "a.jsp".to_string(),
+            line: 3,
+            raw: None,
+            method: Some("GET".to_string()),
+            body: None,
+            client: None,
+        });
+        let env = envelope(vec![a]);
+        let out = analyze_envelope(&env, &config());
+
+        let io = out.ir.ir.io.expect("expected io facts");
+        assert_eq!(io.provides.len(), 1);
+        assert_eq!(io.consumes.len(), 1);
+        assert!(
+            !out.warnings.iter().any(|w| w.contains("dropped")),
+            "{:?}",
+            out.warnings
         );
     }
 

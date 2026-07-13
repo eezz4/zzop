@@ -1,4 +1,4 @@
-//! `cross-layer/*` — 22 native rules that run over `zzop_core::CrossLayerResult`, the multi-tree join result
+//! `cross-layer/*` — 23 native rules that run over `zzop_core::CrossLayerResult`, the multi-tree join result
 //! `zzop_engine::analyze_trees` produces (see `packages/core/src/io.rs`'s module doc for the join itself:
 //! exact `(kind, key)` join with an ambiguity gate for keys provided by 2+ distinct source trees, an
 //! external-egress gate for host-carrying consume keys, and a low-confidence tag for generic paths).
@@ -71,6 +71,10 @@
 //! - [`unconsumed_procedure`] (kind="trpc"): a tRPC procedure (composed by the engine from
 //!   router fragments, key `"VERB dotted.path"`) that no analyzed tree calls — the compiler catches calls
 //!   to nonexistent procedures but not unused definitions (`cross-layer/unconsumed-procedure`, info).
+//! - [`body_field_drift`]: `body_field_drift_findings` — a matched `http` edge whose FE-witnessed request-
+//!   body literal (`body-shape-v1`'s `ConsumeBodyShape`) disagrees with the BE handler's resolved DTO
+//!   (`ProvideBodyShape`): a missing required field, an undeclared extra key (only when the DTO's field
+//!   list is complete), or a missing `@Body('subKey')` wrapper (`cross-layer/body-field-drift`, warning).
 //!
 //! ## Suppression
 //! None of these rules honor an inline `// <marker>-ok` suppression comment. Checked against how the
@@ -100,6 +104,7 @@
 //! intentionally co-fires with `unconsumed_endpoint` (same site, severity-split diagnosis).
 
 pub mod ambiguous_consume;
+pub mod body_field_drift;
 pub mod cross_tree_route_shadowing;
 pub mod duplicate_route;
 pub mod external_base_url_drift;
@@ -123,6 +128,7 @@ pub mod unresolved_consume_ratio;
 pub mod version_skew;
 
 pub use ambiguous_consume::ambiguous_consume_findings;
+pub use body_field_drift::body_field_drift_findings;
 pub use cross_tree_route_shadowing::cross_tree_route_shadowing_findings;
 pub use duplicate_route::cross_layer_duplicate_route_findings;
 pub use external_base_url_drift::external_base_url_drift_findings;

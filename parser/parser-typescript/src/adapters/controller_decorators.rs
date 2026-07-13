@@ -74,10 +74,10 @@ use std::collections::HashSet;
 use swc_core::common::SourceMap;
 use swc_core::ecma::ast::{
     ArrayLit, Callee, ClassDecl, ClassMember, ClassMethod, Decorator, Expr, ExprOrSpread, Lit,
-    MemberProp, ObjectLit, Prop, PropName, PropOrSpread, Str,
+    MemberProp, ObjectLit, Param, Pat, Prop, PropName, PropOrSpread, Str, TsEntityName, TsType,
 };
 use swc_core::ecma::visit::{Visit, VisitWith};
-use zzop_core::{http_interface_key, ControllerPrefixRouteFragment, IoProvide};
+use zzop_core::{http_interface_key, ControllerPrefixRouteFragment, IoProvide, ProvideBodyShape};
 
 /// Method-level route-decorator name -> the HTTP verb it implies. `All` is intentionally absent —
 /// see module doc.
@@ -129,12 +129,13 @@ impl Visit for ControllerCollector<'_> {
 
 impl ControllerCollector<'_> {
     fn emit_method(&mut self, prefix: &str, m: &ClassMethod) {
-        let Some((verb, name, line, paths)) = method_route_facts(self.cm, m) else {
+        let Some((verb, name, line, paths, body)) = method_route_facts(self.cm, m) else {
             return;
         };
         for path in paths {
             let full_path = format!("{prefix}/{path}");
             self.out.push(IoProvide {
+                body: body.clone(),
                 kind: "http".to_string(),
                 key: http_interface_key(&verb, &full_path),
                 file: self.file.to_string(),
@@ -195,11 +196,12 @@ impl Visit for ControllerPrefixFragmentCollector<'_> {
 
 impl ControllerPrefixFragmentCollector<'_> {
     fn emit_fragment(&mut self, prefix_ref: &str, m: &ClassMethod) {
-        let Some((verb, name, line, paths)) = method_route_facts(self.cm, m) else {
+        let Some((verb, name, line, paths, body)) = method_route_facts(self.cm, m) else {
             return;
         };
         for path in paths {
             self.out.push(ControllerPrefixRouteFragment {
+                body: body.clone(),
                 prefix_ref: prefix_ref.to_string(),
                 verb: verb.clone(),
                 path,
@@ -389,20 +391,96 @@ fn first_literal_path(expr: &Expr) -> Option<String> {
     }
 }
 
+/// `(verb, handler name, anchor line, resolved path(s), `@Body()` request-body contract)` — see
+/// `method_route_facts`'s doc.
+type MethodRouteFacts = (String, String, u32, Vec<String>, Option<ProvideBodyShape>);
+
 /// One method's route facts, independent of its class's own prefix resolution — shared substrate for
 /// both `ControllerCollector::emit_method` (literal-prefix provides) and
 /// `ControllerPrefixFragmentCollector::emit_fragment` (deferred-prefix fragments): the handler name,
-/// verb, anchor line, and resolved path(s). `None` for the same reasons `method_route`/`method_name`
-/// individually return `None` (no recognizable method key, no recognized route decorator, `@All`, or an
-/// unresolvable path).
-fn method_route_facts(
-    cm: &SourceMap,
-    m: &ClassMethod,
-) -> Option<(String, String, u32, Vec<String>)> {
+/// verb, anchor line, resolved path(s), and (`body-shape-v1`) the `@Body()` request-body contract. The
+/// first four are `None` for the same reasons `method_route`/`method_name` individually return `None`
+/// (no recognizable method key, no recognized route decorator, `@All`, or an unresolvable path); `body`
+/// is independently `None`/`Some` per `method_body_shape`'s own never-guess rules and never vetoes the
+/// rest of the tuple.
+fn method_route_facts(cm: &SourceMap, m: &ClassMethod) -> Option<MethodRouteFacts> {
     let name = method_name(&m.key)?;
     let (verb, decorator, paths) = method_route(&m.function.decorators)?;
     let line = crate::line_of(cm, decorator.span.lo);
-    Some((verb, name, line, paths))
+    let body = method_body_shape(&m.function.params);
+    Some((verb, name, line, paths, body))
+}
+
+/// `body-shape-v1`: resolves a method's `@Body()` request-body contract from its parameter list.
+/// `None` (never-guess) unless EXACTLY ONE parameter carries an `@Body`/`@Body(...)` decorator AND
+/// that one param is fully capturable — a literal-or-absent decorator argument (`body_sub_key`) AND a
+/// plain single-identifier type annotation (`capturable_dto_ref`). Zero `@Body` params, 2+ `@Body`
+/// params, a non-literal decorator argument, or a non-capturable type annotation (qualified name,
+/// generic, array, primitive keyword, missing annotation) all fall through to `None` — this method's
+/// route keeps `body: None` rather than guessing a partial shape.
+fn method_body_shape(params: &[Param]) -> Option<ProvideBodyShape> {
+    let mut found: Option<&Param> = None;
+    for p in params {
+        let has_body = p
+            .decorators
+            .iter()
+            .any(|d| decorator_name(&d.expr).as_deref() == Some("Body"));
+        if has_body {
+            if found.is_some() {
+                return None; // 2+ @Body params on one method -- ambiguous, never guess
+            }
+            found = Some(p);
+        }
+    }
+    let param = found?; // zero @Body params -- nothing to capture
+    let body_decorator = param
+        .decorators
+        .iter()
+        .find(|d| decorator_name(&d.expr).as_deref() == Some("Body"))?;
+    let sub_key = body_sub_key(&body_decorator.expr)?;
+    let dto_ref = capturable_dto_ref(&param.pat)?;
+    Some(ProvideBodyShape {
+        sub_key,
+        dto_ref: Some(dto_ref),
+        fields: Vec::new(),
+        complete: false,
+    })
+}
+
+/// An `@Body(...)` decorator's sub-key, tri-state: `Some(None)` = capturable, whole-body (bare `@Body`
+/// or empty-parens `@Body()`); `Some(Some(key))` = capturable, keyed under `key` (first argument is a
+/// string literal, e.g. `@Body('user')`); `None` = NOT capturable — a non-literal first argument
+/// (`@Body(x)`) — never guess which sub-key it would have resolved to.
+fn body_sub_key(expr: &Expr) -> Option<Option<String>> {
+    let Expr::Call(call) = expr else {
+        return Some(None); // bare `@Body` (not even called)
+    };
+    let Some(arg) = call.args.first() else {
+        return Some(None); // `@Body()` -- whole body
+    };
+    match &*arg.expr {
+        Expr::Lit(Lit::Str(s)) => Some(Some(str_value(s))),
+        _ => None, // non-literal first arg -- never guess
+    }
+}
+
+/// A `@Body()` param's type annotation as a capturable single-identifier DTO ref: `Pat::Ident` whose
+/// type annotation is a plain `TsTypeRef` (`TsEntityName::Ident`, no type params). `None` for a
+/// qualified name (`A.B`), a generic (`Foo<T>`), an array/tuple/primitive-keyword annotation, or a
+/// missing annotation entirely — any of these makes the DTO shape unresolvable from this file alone.
+fn capturable_dto_ref(pat: &Pat) -> Option<String> {
+    let Pat::Ident(bi) = pat else { return None };
+    let ann = bi.type_ann.as_deref()?;
+    let TsType::TsTypeRef(tr) = &*ann.type_ann else {
+        return None;
+    };
+    if tr.type_params.is_some() {
+        return None; // a generic (`Foo<T>`) -- not a plain DTO reference
+    }
+    let TsEntityName::Ident(id) = &tr.type_name else {
+        return None; // a qualified name (`A.B`) -- not a plain DTO reference
+    };
+    Some(id.sym.to_string())
 }
 
 /// Scans one method's decorators for a route-verb decorator (or `@All`) — see module doc for why
@@ -918,5 +996,123 @@ mod tests {
             !guarded.contains(&route_line),
             "GlobalScope/Licensed must not be treated as UseGuards coverage: {guarded:?}"
         );
+    }
+
+    // -- body-shape-v1: `@Body()` request-body contract capture --
+
+    fn body_of<'a>(out: &'a [IoProvide], symbol: &str) -> Option<&'a ProvideBodyShape> {
+        out.iter()
+            .find(|p| p.symbol.as_deref() == Some(symbol))
+            .and_then(|p| p.body.as_ref())
+    }
+
+    #[test]
+    fn body_decorator_with_string_sub_key_and_dto_type_is_captured() {
+        let src = concat!(
+            "@Controller('users')\n",
+            "class C {\n",
+            "  @Post()\n",
+            "  create(@Body('user') u: CreateUserDto) {}\n",
+            "}\n"
+        );
+        let out = extract_controller_provides("c.ts", src);
+        let body = body_of(&out, "create").expect("body must be captured");
+        assert_eq!(body.sub_key.as_deref(), Some("user"));
+        assert_eq!(body.dto_ref.as_deref(), Some("CreateUserDto"));
+        assert!(body.fields.is_empty());
+        assert!(!body.complete);
+    }
+
+    #[test]
+    fn bare_body_decorator_yields_whole_body_sub_key_none() {
+        let src = concat!(
+            "@Controller('users')\n",
+            "class C {\n",
+            "  @Post()\n",
+            "  create(@Body() dto: CreateUserDto) {}\n",
+            "}\n"
+        );
+        let out = extract_controller_provides("c.ts", src);
+        let body = body_of(&out, "create").expect("body must be captured");
+        assert_eq!(body.sub_key, None);
+        assert_eq!(body.dto_ref.as_deref(), Some("CreateUserDto"));
+    }
+
+    #[test]
+    fn body_decorator_with_no_type_annotation_yields_no_body() {
+        let src = concat!(
+            "@Controller('users')\n",
+            "class C {\n",
+            "  @Post()\n",
+            "  create(@Body() dto) {}\n",
+            "}\n"
+        );
+        let out = extract_controller_provides("c.ts", src);
+        assert_eq!(body_of(&out, "create"), None);
+    }
+
+    #[test]
+    fn two_body_decorators_on_one_method_yield_no_body() {
+        let src = concat!(
+            "@Controller('users')\n",
+            "class C {\n",
+            "  @Post()\n",
+            "  create(@Body('a') a: A, @Body('b') b: B) {}\n",
+            "}\n"
+        );
+        let out = extract_controller_provides("c.ts", src);
+        assert_eq!(body_of(&out, "create"), None);
+    }
+
+    #[test]
+    fn non_literal_body_decorator_argument_yields_no_body() {
+        let src = concat!(
+            "@Controller('users')\n",
+            "class C {\n",
+            "  @Post()\n",
+            "  create(@Body(v) dto: CreateUserDto) {}\n",
+            "}\n"
+        );
+        let out = extract_controller_provides("c.ts", src);
+        assert_eq!(body_of(&out, "create"), None);
+    }
+
+    #[test]
+    fn primitive_type_annotation_yields_no_body() {
+        let src = concat!(
+            "@Controller('users')\n",
+            "class C {\n",
+            "  @Post()\n",
+            "  create(@Body('email') e: string) {}\n",
+            "}\n"
+        );
+        let out = extract_controller_provides("c.ts", src);
+        assert_eq!(body_of(&out, "create"), None);
+    }
+
+    #[test]
+    fn non_body_routes_keep_body_none() {
+        let src = "@Controller('items')\nclass C {\n  @Get('a')\n  a() {}\n}\n";
+        let out = extract_controller_provides("c.ts", src);
+        assert_eq!(body_of(&out, "a"), None);
+    }
+
+    #[test]
+    fn prefix_ref_fragment_carries_body_too() {
+        let src = concat!(
+            "@Controller(RouteKey.Asset)\n",
+            "class AssetController {\n",
+            "  @Post()\n",
+            "  create(@Body('user') u: CreateUserDto) {}\n",
+            "}\n"
+        );
+        let frags = extract_controller_prefix_route_fragments("asset.controller.ts", src);
+        let create = frags
+            .iter()
+            .find(|f| f.symbol.as_deref() == Some("create"))
+            .expect("fragment must be emitted");
+        let body = create.body.as_ref().expect("body must be captured");
+        assert_eq!(body.sub_key.as_deref(), Some("user"));
+        assert_eq!(body.dto_ref.as_deref(), Some("CreateUserDto"));
     }
 }

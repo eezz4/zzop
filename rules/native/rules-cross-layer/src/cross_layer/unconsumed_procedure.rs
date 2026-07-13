@@ -73,6 +73,7 @@ mod tests {
         TaggedProvide {
             source: source.to_string(),
             provide: IoProvide {
+                body: None,
                 kind: kind.to_string(),
                 key: key.to_string(),
                 file: file.to_string(),

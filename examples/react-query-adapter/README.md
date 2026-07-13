@@ -94,6 +94,17 @@ Against a react-query-v3-wired RealWorld frontend (7 `useQuery` read call sites 
 | native only (no overlay) | 0 | 12 | 10 | 56 |
 | with the consume overlay | 7 | 19 (+7) | 15 (+5) | 61 (+5) |
 
+> These counts were measured on an engine snapshot before the `cross-layer/prefix-drift` aggregation
+> rule folded groups of `route-near-miss` findings into one finding per root cause, and before later
+> cross-layer join/keying work landed. A spot re-run against the same (uncommitted, external) corpus
+> confirms the shape still holds — the overlay still recovers all 7 reads and still surfaces the missing
+> `/api` prefix — but the exact numbers do not: on a current build the "5 `route-near-miss` findings"
+> column collapses into a single `cross-layer/prefix-drift` finding enumerating the same 5 routes, and
+> both baseline and overlay `crossLayerFindings` totals are substantially lower than shown here (other,
+> unrelated cross-layer resolution improvements changed how many consumes join outright). Treat the
+> table as an illustration of the *effect*, not a reproducible number — re-run the harness yourself
+> (see above) for current counts.
+
 The adapter recovers all 7 previously-invisible reads:
 
 ```

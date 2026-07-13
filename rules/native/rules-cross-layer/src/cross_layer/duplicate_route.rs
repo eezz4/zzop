@@ -102,6 +102,7 @@ mod tests {
         TaggedProvide {
             source: source.to_string(),
             provide: IoProvide {
+                body: None,
                 kind: "http".to_string(),
                 key: key.to_string(),
                 file: file.to_string(),
@@ -137,6 +138,8 @@ mod tests {
             ambiguous_consumes: vec![AmbiguousConsume {
                 source: "gateway".to_string(),
                 consume: IoConsume {
+                    client: None,
+                    body: None,
                     kind: "http".to_string(),
                     key: Some("GET /health".to_string()),
                     file: "gw.ts".to_string(),
@@ -197,6 +200,7 @@ mod tests {
                 TaggedProvide {
                     source: "svc-a".to_string(),
                     provide: IoProvide {
+                        body: None,
                         kind: "db-table".to_string(),
                         key: "table:users".to_string(),
                         file: "a.sql".to_string(),
@@ -207,6 +211,7 @@ mod tests {
                 TaggedProvide {
                     source: "svc-b".to_string(),
                     provide: IoProvide {
+                        body: None,
                         kind: "db-table".to_string(),
                         key: "table:users".to_string(),
                         file: "b.sql".to_string(),

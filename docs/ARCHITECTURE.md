@@ -93,3 +93,36 @@ When analyzing multiple trees together (`analyzeTrees`), each parser's declared 
 `fetch("/users/:id")` joins a backend's registered `GET /users/:id` route. The join is a plain string
 match on the normalized key, never AST matching, which is why even a crude external parser adapter can
 participate as long as its key normalization is correct.
+
+`consumes` resolution also accounts for a literal client-wide base path: when a tree sets
+`axios.defaults.baseURL` to a string literal (e.g. `"/api"`, or an `http(s)://` URL's path part), that
+path is prepended to every axios-tagged consume's key before joining — `GET /users` becomes
+`GET /api/users`. Only the base's path part is used (the host is deploy config, not contract); a
+non-literal base is left uninterpreted (adapter-overlay territory). This shifts which joins/near-misses
+land: pairs where both sides genuinely agree on a prefix like `/api` go from unjoined to fully joined,
+while a pair whose backend does not actually carry that prefix now honestly reports prefix drift instead
+of an accidental key match.
+
+The join itself carries three integrity gates on top of the raw `(kind, key)` match:
+- **Ambiguity**: a consume key provided by 2+ distinct source trees is not auto-linked — it is reported
+  separately with every candidate provider listed, rather than picking a winner. Multiple providers for
+  the same key *within one tree* (e.g. a tree legitimately exposing something twice) are unaffected and
+  still join normally.
+- **External egress**: a consume key carrying a host (containing `://`) is treated as third-party egress
+  and never cross-tree joined, so an unmatched call to someone else's API isn't reported as drift.
+- **Low confidence**: an edge whose key matches an injected "generic path" pattern (e.g. `/health`, which
+  many unrelated services legitimately share) is still emitted, but tagged so a consumer can discount it.
+
+## Sentinel-based tree rewrites
+
+A few cross-cutting facts — a NestJS app's `setGlobalPrefix(...)`, an axios instance's
+`defaults.baseURL` — aren't visible to a per-file extractor, since the declaration and the routes/calls
+it affects usually live in different files. These are carried as engine-internal sentinel `provides`/
+`consumes` entries, collected and applied once at assemble time (prepending the prefix to the affected
+route/consume keys) and then stripped before output. Producers of an external adapter envelope or
+overlay must never emit these sentinel kinds — the engine drops them at ingestion rather than letting
+them leak into `MinimalIr::io` or get double-applied.
+
+Request-body shapes are resolved similarly: a `@Body() dto: SomeDto`-style provide only names its DTO
+class by identifier, so the body's field shape is resolved against a tree-wide class-declaration map at
+assemble time, after the class itself may live in another file.

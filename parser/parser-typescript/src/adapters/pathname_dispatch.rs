@@ -780,6 +780,7 @@ fn emit_routes(
 ) {
     for verb in verbs {
         out.push(IoProvide {
+            body: None,
             kind: "http".to_string(),
             key: http_interface_key(verb, path),
             file: rel.to_string(),

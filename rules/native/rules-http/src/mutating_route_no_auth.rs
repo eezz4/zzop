@@ -235,6 +235,7 @@ mod tests {
 
     fn provide(key: &str, file: &str, line: u32, handler: &str) -> zzop_core::IoProvide {
         zzop_core::IoProvide {
+            body: None,
             kind: "http".to_string(),
             key: key.to_string(),
             file: file.to_string(),
@@ -465,6 +466,7 @@ mod tests {
     #[test]
     fn provide_with_no_symbol_captured_is_skipped() {
         let provides = vec![zzop_core::IoProvide {
+            body: None,
             kind: "http".to_string(),
             key: "POST /anon".to_string(),
             file: "routes/api.ts".to_string(),
@@ -684,6 +686,7 @@ mod tests {
     #[test]
     fn non_http_provides_are_ignored() {
         let provides = vec![zzop_core::IoProvide {
+            body: None,
             kind: "queue".to_string(),
             key: "POST /topic".to_string(),
             file: "routes/api.ts".to_string(),

@@ -60,6 +60,33 @@ pub struct DiagnosticsInput {
     /// check.
     #[serde(default)]
     pub unknown_disabled_rule_ids: Vec<String>,
+    /// `RuleConfig::severity_overrides` entries that matched no known rule id at analysis time —
+    /// `registry::apply_severity_override` does an exact string match of `finding.rule_id` against this
+    /// map, so an unmatched key silently remapped nothing (same "did nothing, no error" contract as
+    /// `unknown_disabled_rule_ids`, over a different config knob). This module stays vocabulary-blind (see
+    /// crate doc) — the caller diffs `severity_overrides` keys against the actual known-id union and passes
+    /// only the leftover, already-unknown entries here. NOTE the known-id union here is narrower than
+    /// `unknown_disabled_rule_ids`'s: a bare pack id is a valid `disabled_rules` entry (it drops the whole
+    /// pack) but can never appear as a finding's `rule_id` (DSL findings are always `"<pack>/<rule>"`), so a
+    /// bare pack id must NOT be treated as "known" here even though it is for `disabled_rules`. Empty (the
+    /// default) when every `severity_overrides` entry matched something, or when the caller has not wired
+    /// this check.
+    #[serde(default)]
+    pub unknown_severity_override_ids: Vec<String>,
+    /// `RuleConfig::suppressions` entries whose `rule` matched no known rule id at analysis time —
+    /// `registry::is_suppressed` does an exact string match of `entry.rule` against a finding's `rule_id`,
+    /// so an unmatched `rule` silently suppressed nothing (same "did nothing, no error" contract as
+    /// `unknown_disabled_rule_ids`/`unknown_severity_override_ids`, over the `suppressions` knob). This
+    /// module stays vocabulary-blind (see crate doc) — the caller diffs `suppressions[].rule` against the
+    /// actual known-id union and passes only the leftover, already-unknown entries here. Same narrower
+    /// known-id union as `unknown_severity_override_ids` (no bare pack id — see that field's doc for why).
+    /// Orthogonal to the unmatched-path/glob-filter warning (`unmatched_suppression_warnings` in
+    /// `zzop-engine`): that one flags a *filter* matching no scanned file, this one flags the *rule id*
+    /// itself matching nothing; a single suppression entry can trigger both independently (a typo'd rule id
+    /// AND a typo'd filter are two separate mistakes on the same entry). Empty (the default) when every
+    /// `suppressions` entry's `rule` matched something, or when the caller has not wired this check.
+    #[serde(default)]
+    pub unknown_suppression_rule_ids: Vec<String>,
 }
 
 /// Extends the counts of `DiagnosticsInput` with warnings. Rust has no struct inheritance, so the input is
@@ -171,7 +198,36 @@ pub fn build_diagnostics(i: DiagnosticsInput) -> AnalysisDiagnostics {
         ids.sort();
         ids.dedup();
         warnings.push(format!(
-            "disabled_rules has {} entry/entries matching no known rule id: {} — these did NOT disable anything (check for a typo; a valid id is a bare pack id, a native analysis id, or a \"<pack>/<rule>\" id).",
+            "disabled rules have {} entry/entries matching no known rule id: {} — these did NOT disable anything (check for a typo; a valid id is a bare pack id, a native analysis id, or a \"<pack>/<rule>\" id; config dialect `rules: {{ \"<id>\": \"off\" }}` for a rule id, or `packs.disabled` for a bare pack id; embedders: `disabledRules`).",
+            ids.len(),
+            ids.join(", ")
+        ));
+    }
+
+    // Same "config entry had NO effect at all" class as `unknown_disabled_rule_ids` above, over
+    // `severity_overrides` instead — see that field's doc and `unknown_severity_override_ids`'s doc for why
+    // the valid-id enumeration named here (no bare pack id) differs from the disabled-rules one.
+    if !i.unknown_severity_override_ids.is_empty() {
+        let mut ids = i.unknown_severity_override_ids.clone();
+        ids.sort();
+        ids.dedup();
+        warnings.push(format!(
+            "severity overrides have {} entry/entries matching no known rule id: {} — these did NOT remap any finding's severity (check for a typo; a valid id is a native analysis id or a \"<pack>/<rule>\" id; config dialect `rules: {{ \"<id>\": \"<severity>\" }}`, embedders: `severityOverrides`).",
+            ids.len(),
+            ids.join(", ")
+        ));
+    }
+
+    // Same "config entry had NO effect at all" class as the two checks above, over `suppressions` instead —
+    // see that field's doc for why this is a distinct failure from `unmatched_suppression_warnings`'s dead
+    // path/glob filter (bad rule id vs. dead file filter; both can fire for the same entry, and that is
+    // correct — they are orthogonal diagnostics over the same config entry).
+    if !i.unknown_suppression_rule_ids.is_empty() {
+        let mut ids = i.unknown_suppression_rule_ids.clone();
+        ids.sort();
+        ids.dedup();
+        warnings.push(format!(
+            "suppressions have {} entry/entries whose rule matches no known rule id: {} — these did NOT suppress anything (check for a typo; a valid id is a native analysis id or a \"<pack>/<rule>\" id; config dialect `rules: {{ \"<id>\": {{ \"exclude\": [...] }} }}`, embedders: `suppressions`).",
             ids.len(),
             ids.join(", ")
         ));
@@ -208,6 +264,8 @@ mod tests {
             total_modules: 100,
             git: Some(healthy_git()),
             unknown_disabled_rule_ids: Vec::new(),
+            unknown_severity_override_ids: Vec::new(),
+            unknown_suppression_rule_ids: Vec::new(),
         }
     }
 
@@ -415,6 +473,8 @@ mod tests {
             total_modules: 0,
             git: None,
             unknown_disabled_rule_ids: Vec::new(),
+            unknown_severity_override_ids: Vec::new(),
+            unknown_suppression_rule_ids: Vec::new(),
         });
         assert!(d.warnings.is_empty());
     }
@@ -432,6 +492,8 @@ mod tests {
             total_modules: 100,
             git: None,
             unknown_disabled_rule_ids: Vec::new(),
+            unknown_severity_override_ids: Vec::new(),
+            unknown_suppression_rule_ids: Vec::new(),
         });
         assert!(!d
             .warnings
@@ -478,6 +540,92 @@ mod tests {
             .iter()
             .find(|w| w.contains("matching no known rule id"))
             .expect("expected an unknown-disabled-rule-id warning");
+        assert!(w.contains("2 entry/entries"));
+        assert!(w.contains("a-pack/typo, z-pack/typo"));
+    }
+
+    #[test]
+    fn warns_when_a_severity_override_entry_matches_no_known_id() {
+        let d = build_diagnostics(DiagnosticsInput {
+            unknown_severity_override_ids: vec!["n-plus-one".to_string()],
+            ..healthy()
+        });
+        let w = d
+            .warnings
+            .iter()
+            .find(|w| w.contains("matching no known rule id") && w.contains("severityOverrides"))
+            .expect("expected an unknown-severity-override-id warning");
+        assert!(w.contains("n-plus-one"));
+        assert!(w.contains("did NOT remap"));
+    }
+
+    #[test]
+    fn does_not_warn_about_unknown_severity_overrides_when_the_list_is_empty() {
+        let d = build_diagnostics(healthy());
+        assert!(!d
+            .warnings
+            .iter()
+            .any(|w| w.contains("severityOverrides") && w.contains("matching no known rule id")));
+    }
+
+    #[test]
+    fn unknown_severity_override_ids_are_sorted_and_deduplicated_in_the_warning() {
+        let d = build_diagnostics(DiagnosticsInput {
+            unknown_severity_override_ids: vec![
+                "z-pack/typo".to_string(),
+                "a-pack/typo".to_string(),
+                "a-pack/typo".to_string(),
+            ],
+            ..healthy()
+        });
+        let w = d
+            .warnings
+            .iter()
+            .find(|w| w.contains("severityOverrides") && w.contains("matching no known rule id"))
+            .expect("expected an unknown-severity-override-id warning");
+        assert!(w.contains("2 entry/entries"));
+        assert!(w.contains("a-pack/typo, z-pack/typo"));
+    }
+
+    #[test]
+    fn warns_when_a_suppression_rule_id_matches_no_known_id() {
+        let d = build_diagnostics(DiagnosticsInput {
+            unknown_suppression_rule_ids: vec!["n-plus-one".to_string()],
+            ..healthy()
+        });
+        let w = d
+            .warnings
+            .iter()
+            .find(|w| w.contains("suppressions have") && w.contains("matches no known rule id"))
+            .expect("expected an unknown-suppression-rule-id warning");
+        assert!(w.contains("n-plus-one"));
+        assert!(w.contains("did NOT suppress anything"));
+    }
+
+    #[test]
+    fn does_not_warn_about_unknown_suppression_rule_ids_when_the_list_is_empty() {
+        let d = build_diagnostics(healthy());
+        assert!(!d
+            .warnings
+            .iter()
+            .any(|w| w.contains("suppressions have") && w.contains("matches no known rule id")));
+    }
+
+    #[test]
+    fn unknown_suppression_rule_ids_are_sorted_and_deduplicated_in_the_warning() {
+        let d = build_diagnostics(DiagnosticsInput {
+            unknown_suppression_rule_ids: vec![
+                "z-pack/typo".to_string(),
+                "a-pack/typo".to_string(),
+                "a-pack/typo".to_string(),
+            ],
+            ..healthy()
+        });
+        let w = d
+            .warnings
+            .iter()
+            .find(|w| w.contains("suppressions have") && w.contains("matches no known rule id"))
+            .expect("expected an unknown-suppression-rule-id warning");
         assert!(w.contains("2 entry/entries"));
         assert!(w.contains("a-pack/typo, z-pack/typo"));
     }

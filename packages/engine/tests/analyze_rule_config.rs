@@ -130,3 +130,165 @@ fn suppressions_drop_a_finding_through_analyze_tree() {
         out.findings
     );
 }
+
+#[test]
+fn unknown_severity_override_id_surfaces_a_self_report_warning() {
+    // A `severity_overrides` key that matches no known native-analysis id / "<pack>/<rule>" id silently
+    // remaps nothing (`registry::apply_severity_override`'s exact-match-on-`finding.rule_id` contract) —
+    // proves the honest-output side: the diagnostics self-report must still tell the user their typo'd key
+    // never remapped a finding (see `zzop_engine::analyze::diagnostics::unknown_severity_override_ids`).
+    let dir = cycle_fixture();
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert("n-plus-one".to_string(), Severity::Critical);
+    let cfg = EngineConfig {
+        rule_config: RuleConfig {
+            severity_overrides: overrides,
+            ..RuleConfig::default()
+        },
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &cfg);
+
+    let matches: Vec<&String> = out
+        .warnings
+        .iter()
+        .filter(|w| w.contains("matching no known rule id") && w.contains("severityOverrides"))
+        .collect();
+    assert_eq!(
+        matches.len(),
+        1,
+        "expected exactly one unknown-severity-override-id self-report, got: {:?}",
+        out.warnings
+    );
+    assert!(matches[0].contains("n-plus-one"));
+}
+
+#[test]
+fn a_real_severity_override_id_does_not_trigger_the_unknown_id_warning() {
+    // Sanity check for the other direction: a real, known id (a native analysis id here) must never be
+    // reported as unknown — the check is a set-membership diff, not a "any severity_overrides entry
+    // present" trigger.
+    let dir = cycle_fixture();
+
+    let mut overrides = BTreeMap::new();
+    overrides.insert("circular".to_string(), Severity::Critical);
+    let cfg = EngineConfig {
+        rule_config: RuleConfig {
+            severity_overrides: overrides,
+            ..RuleConfig::default()
+        },
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &cfg);
+
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("severityOverrides") && w.contains("matching no known rule id")),
+        "a real, known severity_overrides id must not be reported as unknown, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn unknown_suppression_rule_id_surfaces_a_self_report_warning() {
+    // A `suppressions[].rule` that matches no known native-analysis id / "<pack>/<rule>" id silently
+    // suppresses nothing (`registry::is_suppressed`'s exact-match-on-`entry.rule` contract) — proves the
+    // honest-output side: the diagnostics self-report must still tell the user their typo'd rule id never
+    // suppressed a finding (see `zzop_engine::analyze::diagnostics::unknown_suppression_rule_ids`).
+    let dir = cycle_fixture();
+
+    let cfg = EngineConfig {
+        rule_config: RuleConfig {
+            suppressions: vec![Suppression {
+                rule: "n-plus-one".to_string(),
+                path: None,
+                glob: None,
+            }],
+            ..RuleConfig::default()
+        },
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &cfg);
+
+    let matches: Vec<&String> = out
+        .warnings
+        .iter()
+        .filter(|w| w.contains("suppressions have") && w.contains("matches no known rule id"))
+        .collect();
+    assert_eq!(
+        matches.len(),
+        1,
+        "expected exactly one unknown-suppression-rule-id self-report, got: {:?}",
+        out.warnings
+    );
+    assert!(matches[0].contains("n-plus-one"));
+    assert!(matches[0].contains("did NOT suppress anything"));
+}
+
+#[test]
+fn a_real_suppression_rule_id_does_not_trigger_the_unknown_id_warning() {
+    // Sanity check for the other direction: a real, known id (a native analysis id here) must never be
+    // reported as unknown — the check is a set-membership diff, not a "any suppressions entry present"
+    // trigger.
+    let dir = cycle_fixture();
+
+    let cfg = EngineConfig {
+        rule_config: RuleConfig {
+            suppressions: vec![Suppression {
+                rule: "circular".to_string(),
+                path: None,
+                glob: None,
+            }],
+            ..RuleConfig::default()
+        },
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &cfg);
+
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("suppressions have") && w.contains("matches no known rule id")),
+        "a real, known suppressions rule id must not be reported as unknown, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn unknown_suppression_rule_id_and_dead_filter_are_orthogonal_and_both_fire() {
+    // A single `Suppression` entry can carry two independent mistakes at once: a typo'd `rule` (matches no
+    // known rule id) AND a path/glob filter that matches no scanned file. These are checked by two separate
+    // mechanisms (`unknown_suppression_rule_ids` vs. `unmatched_suppression_warnings`) and must both surface
+    // — neither check should suppress the other.
+    let dir = cycle_fixture();
+
+    let cfg = EngineConfig {
+        rule_config: RuleConfig {
+            suppressions: vec![Suppression {
+                rule: "n-plus-one".to_string(),
+                path: Some("nonexistent/dir/".to_string()),
+                glob: None,
+            }],
+            ..RuleConfig::default()
+        },
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &cfg);
+
+    assert!(
+        out.warnings.iter().any(|w| w.contains("suppressions have")
+            && w.contains("matches no known rule id")
+            && w.contains("n-plus-one")),
+        "expected the unknown-rule-id self-report, got: {:?}",
+        out.warnings
+    );
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains("exclude for rule 'n-plus-one'") && w.contains("matched no files")),
+        "expected the dead-filter self-report, got: {:?}",
+        out.warnings
+    );
+}

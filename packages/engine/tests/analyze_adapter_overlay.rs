@@ -31,6 +31,18 @@
 //!   existing native TS file's own path, marked `is_entry: true` — proves `assemble` unions it into
 //!   `dead_candidate_findings`'s `extra_entries` (the overlay counterpart of a package.json manifest
 //!   entry), suppressing a finding that fires with no overlay at all.
+//! - `overlay_nest_global_prefix_provide_is_dropped_and_warned_not_reapplied_tree_wide`: an overlay emits
+//!   a reserved `nest-global-prefix` sentinel `IoProvide` — producer-forbidden (only the native TS parser
+//!   may emit it). Proves `apply_adapter_overlays` drops it before merge (never reaches
+//!   `apply_and_strip_global_prefix`, so it can't re-prefix the WHOLE native tree's routes), pushes one
+//!   aggregate warning naming the overlay's `parser`, and a native controller's own route in the SAME tree
+//!   is untouched.
+//! - `overlay_client_base_prefix_consume_is_dropped_and_warned`: the `IoConsume`-side counterpart — an
+//!   overlay emits `zzop_parser_typescript::CLIENT_BASE_PREFIX_KIND`, proves it is dropped + warned the
+//!   same way.
+//! - `overlay_with_only_ordinary_io_kinds_merges_with_no_drop_warning`: a control case — an overlay whose
+//!   `io` carries only ordinary (non-reserved) kinds merges in full, with no drop warning at all, proving
+//!   the reserved-kind filter has no false-positive reach.
 
 use std::collections::HashMap;
 use std::fs;
@@ -38,8 +50,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use zzop_core::{
-    FileProjection, ImportBinding, IoFacts, IoProvide, NormalizedEnvelope, RouterMountEntry,
-    RouterMountFragment, NORMALIZED_AST_FORMAT,
+    FileProjection, ImportBinding, IoConsume, IoFacts, IoProvide, NormalizedEnvelope,
+    RouterMountEntry, RouterMountFragment, NORMALIZED_AST_FORMAT,
 };
 use zzop_engine::{analyze_tree, EngineConfig};
 
@@ -90,6 +102,7 @@ fn config() -> EngineConfig {
 /// helper uses, so a test only needs to fill in the one or two fields it actually cares about.
 fn projection(path: &str, loc: u32) -> FileProjection {
     FileProjection {
+        class_shape_fragments: Vec::new(),
         path: path.to_string(),
         loc,
         symbols: Vec::new(),
@@ -257,6 +270,7 @@ fn projection_for_an_unknown_rel_still_contributes_its_provide() {
 
     let mut proj = projection("external/legacy.jsp", 5);
     proj.io.provides.push(IoProvide {
+        body: None,
         kind: "http".to_string(),
         key: "GET /legacy/status".to_string(),
         file: "external/legacy.jsp".to_string(),
@@ -431,5 +445,137 @@ fn overlay_import_onto_a_degraded_on_disk_file_gives_a_target_fan_in() {
             .any(|f| f.rule_id == "dead-candidates" && f.file == "src/used.ts"),
         "expected the overlay edge on the degraded .svelte artifact to give src/used.ts fan-in: {:?}",
         out.findings
+    );
+}
+
+// --- Reserved engine-internal sentinel kinds are producer-forbidden in overlays (audit item 2-2) ---
+
+#[test]
+fn overlay_nest_global_prefix_provide_is_dropped_and_warned_not_reapplied_tree_wide() {
+    // Native NestJS controller with its own real route, no `setGlobalPrefix` call anywhere in the tree —
+    // its route must come through completely unprefixed regardless of the overlay below.
+    let dir = TempDir::new("zzop-adapter-overlay");
+    dir.write(
+        "src/user.controller.ts",
+        "@Controller('users')\nclass UserController {\n  @Get('list')\n  list() {}\n}\n",
+    );
+
+    let mut proj = projection("external/legacy.jsp", 3);
+    proj.io.provides.push(IoProvide {
+        body: None,
+        kind: "nest-global-prefix".to_string(),
+        key: "api".to_string(),
+        file: "external/legacy.jsp".to_string(),
+        line: 1,
+        symbol: None,
+    });
+
+    let mut cfg = config();
+    cfg.adapter_overlays = vec![overlay("test-nest-prefix-adapter/1", vec![proj])];
+    let out = analyze_tree(dir.path(), &cfg);
+
+    let provides = out.ir.ir.io.expect("expected io facts").provides;
+    // The reserved sentinel must never reach output — dropped before merge, not just stripped later.
+    assert!(
+        !provides.iter().any(|p| p.kind == "nest-global-prefix"),
+        "{:?}",
+        provides
+    );
+    // The native controller's own route must NOT have been re-prefixed by the overlay's sentinel: had it
+    // survived the merge, `apply_and_strip_global_prefix` would have prepended `/api` to every `http`
+    // provide in the WHOLE tree, including this one.
+    assert!(
+        provides
+            .iter()
+            .any(|p| p.kind == "http" && p.key == "GET /users/list"),
+        "{:?}",
+        provides
+    );
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains("test-nest-prefix-adapter/1")
+                && w.contains("dropped 1 reserved engine-internal io entry")
+                && w.contains("nest-global-prefix")),
+        "{:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn overlay_client_base_prefix_consume_is_dropped_and_warned() {
+    // `IoConsume`-side counterpart of the provide test above: an overlay emitting
+    // `zzop_parser_typescript::CLIENT_BASE_PREFIX_KIND` directly is producer-forbidden the same way.
+    let dir = TempDir::new("zzop-adapter-overlay");
+    dir.write("src/app.ts", "export function noop() { return 1; }\n");
+
+    let mut proj = projection("external/legacy.jsp", 2);
+    proj.io.consumes.push(IoConsume {
+        kind: zzop_parser_typescript::CLIENT_BASE_PREFIX_KIND.to_string(),
+        key: Some("/api".to_string()),
+        file: "external/legacy.jsp".to_string(),
+        line: 1,
+        raw: None,
+        method: None,
+        body: None,
+        client: Some("axios".to_string()),
+    });
+
+    let mut cfg = config();
+    cfg.adapter_overlays = vec![overlay("test-client-base-adapter/1", vec![proj])];
+    let out = analyze_tree(dir.path(), &cfg);
+
+    let consumes = out.ir.ir.io.map(|io| io.consumes).unwrap_or_default();
+    assert!(
+        !consumes
+            .iter()
+            .any(|c| c.kind == zzop_parser_typescript::CLIENT_BASE_PREFIX_KIND),
+        "{:?}",
+        consumes
+    );
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains("test-client-base-adapter/1")
+                && w.contains("dropped 1 reserved engine-internal io entry")
+                && w.contains("client-base-prefix")),
+        "{:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn overlay_with_only_ordinary_io_kinds_merges_with_no_drop_warning() {
+    // Control case: an overlay whose io carries only ordinary (non-reserved) kinds must merge in full,
+    // with no drop warning at all — the reserved-kind filter must not have false-positive reach.
+    let dir = TempDir::new("zzop-adapter-overlay");
+    dir.write("src/app.ts", "export function noop() { return 1; }\n");
+
+    let mut proj = projection("external/legacy.jsp", 4);
+    proj.io.provides.push(IoProvide {
+        body: None,
+        kind: "http".to_string(),
+        key: "GET /legacy/ping".to_string(),
+        file: "external/legacy.jsp".to_string(),
+        line: 2,
+        symbol: None,
+    });
+
+    let mut cfg = config();
+    cfg.adapter_overlays = vec![overlay("test-ordinary-io-adapter/1", vec![proj])];
+    let out = analyze_tree(dir.path(), &cfg);
+
+    let provides = out.ir.ir.io.expect("expected io facts").provides;
+    assert!(
+        provides
+            .iter()
+            .any(|p| p.kind == "http" && p.key == "GET /legacy/ping"),
+        "{:?}",
+        provides
+    );
+    assert!(
+        !out.warnings.iter().any(|w| w.contains("dropped")),
+        "{:?}",
+        out.warnings
     );
 }

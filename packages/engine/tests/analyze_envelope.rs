@@ -59,6 +59,7 @@ impl Drop for TempDir {
 
 fn projection(path: &str, loc: u32) -> FileProjection {
     FileProjection {
+        class_shape_fragments: Vec::new(),
         path: path.to_string(),
         loc,
         symbols: Vec::new(),
@@ -99,6 +100,7 @@ fn envelope_produces_ir_dep_and_native_analyses_deterministically() {
         write_sites: Vec::new(),
     });
     controller.io.provides.push(IoProvide {
+        body: None,
         kind: "http".to_string(),
         key: "GET /legacy/user.jsp".to_string(),
         file: "legacy/UserController.jsp".to_string(),
@@ -173,6 +175,7 @@ fn envelope_be_joins_cross_layer_with_a_ts_parsed_fe() {
     // IoFacts precisely — no symbols/imports needed for the cross-layer join itself).
     let mut controller = projection("legacy/UserController.jsp", 40);
     controller.io.provides.push(IoProvide {
+        body: None,
         kind: "http".to_string(),
         key: "GET /legacy/user.jsp".to_string(),
         file: "legacy/UserController.jsp".to_string(),

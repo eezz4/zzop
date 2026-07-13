@@ -40,6 +40,34 @@ That is the entire parity check — no engine build, no FFI, just string in / st
 
 Get this backwards and every consume with a query string silently stops joining.
 
+## Absolute URLs bypass normalization entirely
+
+A consume key that carries a host (`"://"` present — a call site resolved to an absolute URL, e.g.
+`"GET https://vendor.com/api/users"`) must be preserved **verbatim** — never run through either
+normalizer above. Neither `http_interface_key` nor `http_consume_interface_key` special-cases a
+scheme: feeding one an absolute URL prepends a leading `/` and then collapses the scheme's `//` into a
+single `/`, so `https://vendor.com/api/users` comes out as `/https:/vendor.com/api/users` — the host
+gets corrupted into something that looks like a path segment. `zzop_core::link_cross_layer_io`'s
+`"://"` gate (`packages/core/src/io.rs`) depends on the host surviving intact: it routes a
+host-carrying key to `externalConsumes` — third-party egress, never cross-tree joined, never counted as
+`unprovidedConsumes` — and normalizing the key first breaks that routing (the corrupted key no longer
+contains `"://"`, so it silently falls through to a normal, wrong, join attempt instead).
+
+The native TS parser gets this right by never calling either normalizer on an external URL in the first
+place: `consume_key_for` (`parser/parser-typescript/src/adapters/egress.rs`) checks `is_external(url)`
+(an `http://`/`https://` prefix) BEFORE normalizing, and for that branch keys the consume as
+`format!("{} {}", method.to_uppercase(), url)` — the raw URL, untouched. An external adapter must do
+the same: detect `://` in the resolved target first, and if present, key it as `"<METHOD> <url>"` with
+the URL exactly as resolved, skipping every normalization rule in this document entirely.
+
+(Note: [`key-normalization.fixture.json`](key-normalization.fixture.json) deliberately carries no
+`"://"` row. That fixture pins `http_interface_key`/`http_consume_interface_key`'s own output on a
+`(method, path)` input — and per the rule above, neither function is ever correctly called with an
+absolute URL in the first place, so there is no "correct normalizer output" for such a row to pin; the
+verbatim-preservation behavior itself is pinned instead by `packages/core/src/io.rs`'s
+`host_carrying_consume_key_is_external_never_dangling_even_with_a_matching_internal_provide` test and
+`egress.rs`'s own external-URL extraction tests.)
+
 ## Envelope schema & versioning policy
 
 [`envelope.schema.json`](envelope.schema.json) is a draft-07 JSON Schema for the v1
@@ -48,12 +76,21 @@ types (`packages/core/src/normalized.rs`, `io.rs`, `ir.rs`, `fragments.rs`) — 
 required-ness, and nullability all trace back to whether the Rust field carries `#[serde(default)]`.
 
 The versioning policy is the same tolerance philosophy zzop's config surface already uses: this is
-**v1**, and both the engine and any well-behaved consumer **ignore unknown fields with a warning,
-never a hard fail** — `additionalProperties: true` at every level in the schema reflects that. A
-producer emitting a field ahead of the schema, or omitting any field marked optional, still produces
-a valid envelope. Only a **breaking** change — removing, renaming, or re-typing a *required* field —
-needs a new envelope `version`; additive fields never do. See the schema's own `$comment` for the
-same statement in machine-readable form.
+**v1**, and both the engine and any well-behaved consumer **silently ignore unknown fields — no
+warning, never a hard fail**. Verified against the engine, not just asserted: none of
+`packages/core/src/{normalized,io,ir,fragments}.rs` sets `#[serde(deny_unknown_fields)]` on any
+envelope-related type, and there is no warning code anywhere in `zzop-engine`/`zzop-core` for an
+unrecognized envelope field — an unknown key is simply dropped during deserialization, the same as any
+other serde struct in this codebase without `deny_unknown_fields` (see e.g.
+`packages/napi/src/api.rs`'s or `packages/engine/tests/rule_contracts.rs`'s own doc comments on that
+same convention). The only envelope-related `AnalyzeOutput::warnings` entries that exist today are for
+a whole Mode B overlay failing `validate_envelope`, or for a reserved-sentinel-kind drop (see
+`docs/NORMALIZED_AST.md`'s "Reserved sentinel kinds" section) — neither is about unknown fields.
+`additionalProperties: true` at every level in the schema reflects the "ignored" half of that
+tolerance, not a warning. A producer emitting a field ahead of the schema, or omitting any field
+marked optional, still produces a valid envelope. Only a **breaking** change — removing, renaming, or
+re-typing a *required* field — needs a new envelope `version`; additive fields never do. See the
+schema's own `$comment` for the same statement in machine-readable form.
 
 ## Adapter kit
 

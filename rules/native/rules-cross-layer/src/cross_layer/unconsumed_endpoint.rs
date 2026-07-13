@@ -110,6 +110,7 @@ mod tests {
         TaggedProvide {
             source: source.to_string(),
             provide: zzop_core::IoProvide {
+                body: None,
                 kind: "http".to_string(),
                 key: key.to_string(),
                 file: file.to_string(),
@@ -123,6 +124,7 @@ mod tests {
         TaggedProvide {
             source: source.to_string(),
             provide: zzop_core::IoProvide {
+                body: None,
                 kind: kind.to_string(),
                 key: key.to_string(),
                 file: file.to_string(),
@@ -136,6 +138,8 @@ mod tests {
         TaggedConsume {
             source: source.to_string(),
             consume: zzop_core::IoConsume {
+                client: None,
+                body: None,
                 kind: kind.to_string(),
                 key: None,
                 file: "dyn.ts".to_string(),

@@ -126,6 +126,8 @@ mod tests {
         TaggedConsume {
             source: source.to_string(),
             consume: IoConsume {
+                client: None,
+                body: None,
                 kind: kind.to_string(),
                 key: Some(key.to_string()),
                 file: file.to_string(),
@@ -195,6 +197,8 @@ mod tests {
             ambiguous_consumes: vec![AmbiguousConsume {
                 source: "svc-c".to_string(),
                 consume: IoConsume {
+                    client: None,
+                    body: None,
                     kind: "db-table".to_string(),
                     key: Some("table:orders".to_string()),
                     file: "c.ts".to_string(),
@@ -205,6 +209,7 @@ mod tests {
                 candidates: vec![TaggedProvide {
                     source: "db1".to_string(),
                     provide: zzop_core::IoProvide {
+                        body: None,
                         kind: "db-table".to_string(),
                         key: "table:orders".to_string(),
                         file: "s1.sql".to_string(),

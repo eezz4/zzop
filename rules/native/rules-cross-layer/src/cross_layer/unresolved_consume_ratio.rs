@@ -111,6 +111,8 @@ mod tests {
         TaggedConsume {
             source: source.to_string(),
             consume: IoConsume {
+                client: None,
+                body: None,
                 kind: "http".to_string(),
                 key: None,
                 file: file.to_string(),

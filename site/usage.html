@@ -93,12 +93,12 @@ npx zzop          # analyzes using that config and prints a report</code></pre>
 
   "rules": {
     // "off"                        -> disable the rule
-    "no-explicit-any": "off",
+    "typescript/no-explicit-any": "off",
     // "info" | "warn" | "critical" -> override severity
-    "n-plus-one": "warn",
+    "sql/nplus1": "warn",
     // object form -> override severity AND drop findings by file path. Each
     // "exclude" entry is a plain substring, or a glob if it has * ? or {}.
-    "toctou": { "severity": "warn", "exclude": ["legacy/", "**/*.gen.ts"] }
+    "sql/race-condition-toctou": { "severity": "warn", "exclude": ["legacy/", "**/*.gen.ts"] }
   },
 
   // Enables git-history-derived signals. Omit to use engine defaults.
@@ -113,9 +113,11 @@ npx zzop          # analyzes using that config and prints a report</code></pre>
   // "pretty" or "json"; overridden by --format / --json.
   "format": "pretty",
 
-  // Persist reports to disk in addition to stdout. Each run writes to
-  // <dir>/zzop-report.<epoch>/ so runs accumulate. Same as the --out flag.
-  // "report": { "dir": "zzop-reports", "formats": ["json", "sarif"] },
+  // Reports are written to disk BY DEFAULT, in addition to stdout — markdown,
+  // one file per tree, to ./zzop-reports/zzop.<epoch>/ (a fresh subdir per
+  // run, so runs accumulate). Set "enabled": false to opt out, or override
+  // the directory/formats here. Same directory override as the --out flag.
+  // "report": { "dir": "zzop-reports", "formats": ["md", "json", "sarif"], "enabled": true },
 
   // Exit non-zero when any finding is at or above this severity, or "off".
   "failOn": "warn"
@@ -132,7 +134,7 @@ npx zzop          # analyzes using that config and prints a report</code></pre>
             <tr><td><code>zzop [run]</code></td><td>Load the config, analyze, and print. The default command.</td></tr>
             <tr><td><code>--config &lt;path&gt;</code></td><td>Config file to load (default <code>./zzop.config.jsonc</code>).</td></tr>
             <tr><td><code>--format &lt;pretty|json&gt;</code>, <code>--json</code></td><td>Output format, overriding the config's <code>format</code>.</td></tr>
-            <tr><td><code>--out &lt;dir&gt;</code></td><td>Also write reports to <code>&lt;dir&gt;/zzop-report.&lt;epoch&gt;/</code> — a fresh subdir per run (JSON + SARIF). Same as config <code>report.dir</code>.</td></tr>
+            <tr><td><code>--out &lt;dir&gt;</code></td><td>Override the report base directory (default <code>./zzop-reports</code>; reports are written by default regardless of this flag). Each run writes to <code>&lt;dir&gt;/zzop.&lt;epoch&gt;/</code> — a fresh subdir per run, markdown by default. Same as config <code>report.dir</code>.</td></tr>
             <tr><td><code>-a, --all</code></td><td>Expand info-level findings (folded to per-rule counts by default so warnings stay visible).</td></tr>
             <tr><td><code>--severity &lt;critical|warning|info|off&gt;</code></td><td>Only display findings at or above this severity (default <code>off</code>, show all). Display-only — the exit code still uses the unfiltered findings, so <code>failOn</code> is unaffected.</td></tr>
             <tr><td><code>-h, --help</code> / <code>--version</code></td><td>Show help / the CLI and engine versions.</td></tr>
@@ -140,6 +142,22 @@ npx zzop          # analyzes using that config and prints a report</code></pre>
         </table>
       </div>
       <p>Exit codes: <code>0</code> = ran, no finding at or above <code>failOn</code>; <code>1</code> = at least one finding at or above <code>failOn</code> (CI gate); <code>2</code> = config or usage error.</p>
+    </section>
+
+    <section id="suppressing">
+      <span class="eyebrow eyebrow--sm">Findings</span>
+      <h2>Suppressing &amp; disabling findings</h2>
+      <p>DSL pack rules (the <code>typescript/no-explicit-any</code>, <code>sql/nplus1</code>-style ids) each carry an inline suppress marker — a short comment placed in the flagged code, e.g. <code>// any-ok</code> — that silences just that occurrence; see the <a href="rules.html">rule catalog</a>'s "Suppress marker" column for each rule's exact marker. Native analyses, including every <code>cross-layer/*</code> rule, don't support inline suppression — turn them off entirely via config instead.</p>
+      <div class="code-panel">
+        <div class="code-panel__tab">Disable a native analysis</div>
+        <pre class="code-block"><code>{
+  "rules": {
+    "dead-candidates": "off",
+    "cross-layer/unconsumed-endpoint": "off"
+  }
+}</code></pre>
+      </div>
+      <p>Embedders pass the same ids through <code>disabledRules</code> instead of the <code>rules: { "&lt;id&gt;": "off" }</code> config shape.</p>
     </section>
 
     <section id="embedding">
@@ -154,6 +172,7 @@ npx zzop          # analyzes using that config and prints a report</code></pre>
     <div class="docs-toc__label">On this page</div>
     <a href="#install" class="docs-toc__link">Install &amp; run the CLI</a>
     <a href="#cli-config" class="docs-toc__link">CLI config</a>
+    <a href="#suppressing" class="docs-toc__link">Suppressing &amp; disabling</a>
     <a href="#embedding" class="docs-toc__link">Embedding &rarr; SDK</a>
   </aside>
 

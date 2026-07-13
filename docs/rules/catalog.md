@@ -6,7 +6,7 @@ Everything the engine ships today, read directly from `rules/dsl/**/*.json` and
 semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 [authoring-guide.md](authoring-guide.md).
 
-**Totals** (machine-checked by `packages/engine/tests/rule_contracts.rs`'s `catalog_totals_match_loaded_rule_and_analysis_counts`): 16 DSL packs, 112 DSL rules, 42 native analysis ids. 12 packs ship rules; 4 are stub packs (see "Stub packs" below).
+**Totals** (machine-checked by `packages/engine/tests/rule_contracts.rs`'s `catalog_totals_match_loaded_rule_and_analysis_counts`): 16 DSL packs, 112 DSL rules, 43 native analysis ids. 12 packs ship rules; 4 are stub packs (see "Stub packs" below).
 
 ## DSL packs (`rules/dsl/<pack>/<pack>.json`)
 
@@ -198,14 +198,14 @@ rule-vocabulary-free): `rules/native/rules-graph` owns `circular`, `unreachable`
 `dead-exports` (dependency/dead-code graph rules); `rules/native/rules-http` owns `duplicate-route`,
 `unsafe-read-endpoint`/`non-idempotent-write` (the 2 call-graph scanners), `route-shadowing`,
 `mutating-route-no-auth`, `unprovided-consume` (single-tree HTTP/route rules);
-`rules/native/rules-cross-layer` owns the 22 `cross-layer/*` ids (multi-tree cross-layer join rules);
+`rules/native/rules-cross-layer` owns the 23 `cross-layer/*` ids (multi-tree cross-layer join rules);
 `rules/native/rules-schema` owns `schema-structural`, `schema-usage`, `soft-delete-bypass`,
 `orderby-unindexed`, `enum-string-drift`; `packages/metrics` owns `seams`, `criticality`, `scores`,
 `health`, `recommendations` (score computations, not findings-producing rules — they only ride the same
-toggle/gating surface). `zzop_engine::register_all_native` composes all five. The 20
+toggle/gating surface). `zzop_engine::register_all_native` composes all five. The 23
 `cross-layer/*` ids are the MULTI-TREE exception: they run over `zzop_engine::analyze_trees`'s joined
 `CrossLayerResult` (every other row here runs per-tree), exposed as `crossLayerFindings` alongside
-`crossLayer` in `analyzeTrees`'s output. None of the 20 honor an inline suppression marker (disable-only, via
+`crossLayer` in `analyzeTrees`'s output. None of the 23 honor an inline suppression marker (disable-only, via
 `disabledRules`) — see `rules/native/rules-cross-layer/src/cross_layer/mod.rs`'s module doc.
 
 | Id | Default severity | Detects |
@@ -252,6 +252,7 @@ toggle/gating surface). `zzop_engine::register_all_native` composes all five. Th
 | `cross-layer/unresolved-consume-ratio` | info | A tree whose `http` consumes are majority-unresolved (dynamic URLs, generated SDK clients, wrapper functions) — self-reports that the cross-layer join is mostly blind for that tree instead of staying silent (`rules/native/rules-cross-layer/src/cross_layer/unresolved_consume_ratio.rs`). |
 | `cross-layer/sdk-import-no-visible-consume` | info | A tree importing an SDK-shaped package (`@scope/sdk`, `*-sdk`, `openapi*`, `*api-client*`) from 3+ files, OR an opaque HTTP client library (`superagent`, `got`, `node-fetch`, ...) the egress extractor cannot trace at all, from 1+ files, while having fewer visible `http` consumes than `unresolved-consume-ratio`'s floor — consumption flows through a client the egress extractor cannot see; the not-even-visible half of the blind-spot partition. Rule id kept for compatibility even though scope now covers both classes (`rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs`). |
 | `cross-layer/unconsumed-procedure` | info | A tRPC procedure (kind `trpc`, key `"VERB dotted.path"`, composed at assembly from cross-file router fragments) that no analyzed tree calls — TypeScript's compiler catches calls to nonexistent procedures but not unused definitions. Caveats server-side `createCaller`/SSR consumers this analysis cannot see (`rules/native/rules-cross-layer/src/cross_layer/unconsumed_procedure.rs`). |
+| `cross-layer/body-field-drift` | warning | A matched `http` edge whose FE-witnessed request-body literal (`body-shape-v1`) disagrees with the BE handler's resolved `@Body()` DTO: a required field the DTO declares but the FE literal never sets (only when the FE literal is otherwise exhaustive at that level), an undeclared key the FE sends (only when the DTO's own field list is complete), or a missing `@Body('subKey')` wrapper key entirely. Anchored at the consume, citing the DTO's `file:line`; caveats that this is a witnessed-literals-only comparison — interceptors/transforms can add or strip fields (`rules/native/rules-cross-layer/src/cross_layer/body_field_drift.rs`). |
 
 ### Roadmap
 

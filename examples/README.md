@@ -41,8 +41,11 @@ the framework/SDK knowledge lives only in the adapter.
 - [`react-query-adapter/`](react-query-adapter/) — makes react-query v3's positional-key idiom
   (`useQuery('/tags')`, the route hidden inside a cache key rather than any recognizable HTTP call)
   visible to the cross-layer join. Worked result on a react-vite RealWorld frontend: keyed `GET`
-  consumes 0 → 7, `unprovidedConsumes` 12 → 19 with 5 of those correctly explained by
-  `cross-layer/route-near-miss` as a missing `/api` prefix.
+  consumes 0 → 7, with the missing reads explained as a missing `/api` prefix — originally as
+  per-route `cross-layer/route-near-miss` findings, which current engine builds fold into one
+  grouped `cross-layer/prefix-drift` finding — see that example's README for the
+  measured counts and a note on why they've since moved (engine-version-dependent, not reproducible
+  as originally stated).
 
 Each adapter is a reference, not a product dependency — copy it, point it at your repo, and pipe its
 stdout envelope into your zzop config's `adapterOverlays` array. See each folder's `README.md` for the

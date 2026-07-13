@@ -83,6 +83,10 @@ pub(crate) struct FileArtifact {
     /// controller-prefix composer resolves `prefix_ref` against the same merged const map
     /// `const_map_fragment` feeds, and emits the real `IoProvide`s.
     pub controller_prefix_route_fragments: Vec<zzop_core::ControllerPrefixRouteFragment>,
+    /// Class field-shape fragments (`body-shape-v1`) — `analyze::assemble` merges every file's
+    /// fragments into one tree-wide `name -> shape` map to resolve `IoProvide::body.dto_ref`
+    /// (the request-body DTO class usually lives in another file than the controller).
+    pub class_shape_fragments: Vec<zzop_core::ClassShapeFragment>,
     /// This file's Prisma query-call-site facts (`<clientAccessor>().<model>.<method>(...)`, restricted
     /// to the 4 read-only query methods) — `analyze::assemble`'s substrate for `run_schema_join_rules`,
     /// replacing that pass's own filesystem re-walk (`zzop_rules_schema::join::scan_query_call_sites`,
@@ -337,6 +341,7 @@ fn process_file(
                 wrapper_def_fragments: Vec::new(),
                 wrapper_call_fragments: Vec::new(),
                 controller_prefix_route_fragments: Vec::new(),
+                class_shape_fragments: Vec::new(),
                 query_call_sites: Vec::new(),
                 store_bound_models: Vec::new(),
                 field_usage_tokens: Vec::new(),
@@ -415,6 +420,7 @@ fn process_file(
             wrapper_def_fragments: artifact.wrapper_def_fragments.clone(),
             wrapper_call_fragments: artifact.wrapper_call_fragments.clone(),
             controller_prefix_route_fragments: artifact.controller_prefix_route_fragments.clone(),
+            class_shape_fragments: artifact.class_shape_fragments.clone(),
             query_call_sites: artifact.query_call_sites.clone(),
             store_bound_models: artifact.store_bound_models.clone(),
             field_usage_tokens: artifact.field_usage_tokens.clone(),
@@ -455,6 +461,7 @@ fn artifact_from_ir(
         wrapper_def_fragments: ir.wrapper_def_fragments,
         wrapper_call_fragments: ir.wrapper_call_fragments,
         controller_prefix_route_fragments: ir.controller_prefix_route_fragments,
+        class_shape_fragments: ir.class_shape_fragments,
         query_call_sites: ir.query_call_sites,
         store_bound_models: ir.store_bound_models,
         field_usage_tokens: ir.field_usage_tokens,
@@ -500,6 +507,7 @@ fn compute_fresh_artifact(
             wrapper_def_fragments: Vec::new(),
             wrapper_call_fragments: Vec::new(),
             controller_prefix_route_fragments: Vec::new(),
+            class_shape_fragments: Vec::new(),
             query_call_sites: Vec::new(),
             loop_spans: Vec::new(),
             store_bound_models: zzop_parser_typescript::extract_store_bound_models(rel, text),
@@ -589,6 +597,15 @@ fn compute_fresh_artifact(
         }
         _ => Vec::new(),
     };
+    // Class field-shape fragments (`body-shape-v1`): the DTO-resolution substrate for
+    // `IoProvide::body.dto_ref`, deferred to `analyze`'s assemble-time resolver (same fragment ->
+    // tree-wide-merge pattern as the controller-prefix composer above).
+    let class_shape_fragments = match language {
+        Some(Language::TypeScript) if !degraded => {
+            zzop_parser_typescript::extract_class_shape_fragments(rel, text)
+        }
+        _ => Vec::new(),
+    };
     let query_call_sites = match language {
         Some(Language::TypeScript) if !degraded => {
             zzop_parser_typescript::extract_query_call_sites(rel, text)
@@ -641,6 +658,7 @@ fn compute_fresh_artifact(
         wrapper_def_fragments,
         wrapper_call_fragments,
         controller_prefix_route_fragments,
+        class_shape_fragments,
         query_call_sites,
         store_bound_models,
         field_usage_tokens,

@@ -4,10 +4,15 @@
 [![npm version](https://img.shields.io/npm/v/%40zzop%2Fcli)](https://www.npmjs.com/package/@zzop/cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-A multi-language SAST / architecture-analysis engine, written in Rust. It parses a source tree into a
-language-neutral IR, runs a layered rule system (native whole-graph analyses + declarative JSON rule
-packs) over it, and returns structural findings, dependency/dead-code analysis, and health scores as
-one JSON document.
+zzop is built for an AI agent working in one repo — say the frontend — that needs to verify or
+understand the other side of a contract (the backend) without reading it whole; a human reviewing the
+same cross-repo change is the identical use case. Its core move is a cross-repo join: it parses each
+repo into a language-neutral IR, exact-matches frontend `fetch` calls against backend routes across the
+repo boundary, and names near-misses (a typo'd path segment, a version drift, a method mismatch) instead
+of leaving you to diff two codebases by hand — cutting the read/context cost of confirming the other
+side actually agrees. Alongside that cross-layer join it also runs a SAST-style layered rule system
+(native whole-graph analyses + declarative JSON rule packs) over each repo individually, returning
+structural findings, dependency/dead-code analysis, and health scores as one JSON document.
 
 - Documentation site: <https://eezz4.github.io/zzop/> (source in [`site/`](site/))
 - Documentation (in-repo): [`docs/README.md`](docs/README.md)
@@ -49,7 +54,7 @@ Every finding carries a rule id, severity, and a `file:line` location, e.g.:
       "severity": "warning",
       "file": "src/routes/orders.ts",
       "line": 42,
-      "message": "Query inside a loop — likely N+1. Batch with a single IN (...) query or a join."
+      "message": "await on a store/ORM call (`Repository`/`Store`/`prisma`/`db`/`orm`/`tx`/`trx`) verified structurally inside a for/for-of/for-in/while/do-while statement or an array-iteration callback — checked against the parser's projected loop spans, not merely co-occurring with loop syntax somewhere in the same function — N+1 query pattern. Batch the fetch (e.g. `findMany` with an `in` filter) instead of one call per item. Suppress a vetted case with `// n+1-ok`."
     }
   ],
   "scores":             { /* structural subscores, 0-100 */ },
@@ -74,8 +79,8 @@ route joins — which has no single-tree equivalent.
 ## Versioning & stability
 
 zzop is **pre-1.0 (`0.x`) and unstable** — any release may change behavior, output, rules, or
-defaults without notice, so pin an exact version (`@zzop/cli@0.6.0`, not `^0.6.0`) and re-test
-before upgrading. Semantic Versioning and a maintained changelog begin at `1.0.0`. Full policy:
+defaults without notice, so pin an exact version (not a `^`/`~` range) and re-test before upgrading.
+Semantic Versioning and a maintained changelog begin at `1.0.0`. Full policy:
 [VERSIONING.md](VERSIONING.md).
 
 ## Layout

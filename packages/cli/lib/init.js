@@ -61,9 +61,9 @@ const CONFIG_TEMPLATE = `{
   //                                   path. Each entry is a substring, or a glob if
   //                                   it has *, ?, or {} (e.g. **/app/**/page.tsx).
   "rules": {
-    // "no-explicit-any": "off",
-    // "n-plus-one": "warn",
-    // "toctou": { "severity": "warn", "exclude": ["legacy/"] }
+    // "typescript/no-explicit-any": "off",
+    // "sql/nplus1": "warn",
+    // "sql/race-condition-toctou": { "severity": "warn", "exclude": ["legacy/"] }
   },
 
   // ── Git-derived signals ────────────────────────────────────────────────────

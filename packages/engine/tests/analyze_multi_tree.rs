@@ -81,6 +81,7 @@ fn config(source_id: &str) -> EngineConfig {
 /// cares about.
 fn projection(path: &str, loc: u32) -> FileProjection {
     FileProjection {
+        class_shape_fragments: Vec::new(),
         path: path.to_string(),
         loc,
         symbols: Vec::new(),
@@ -277,6 +278,8 @@ fn overlay_injected_consume_joins_a_native_provide_across_trees() {
     // Overlay: project the SDK call site as a keyed http consume, exactly as the reference adapter would.
     let mut sdk_call = projection("src/page.ts", 2);
     sdk_call.io.consumes.push(IoConsume {
+        client: None,
+        body: None,
         kind: "http".to_string(),
         key: Some("GET /authen/getUserInfo".to_string()),
         file: "src/page.ts".to_string(),

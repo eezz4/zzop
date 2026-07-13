@@ -30,7 +30,7 @@ const { renderDebugIo } = require('../lib/debug-io');
 // `zzop init` always writes to a fixed, unconfigurable target in the current directory.
 const DEFAULT_ADAPTER_DIR = 'zzop-adapter';
 
-const USAGE = `zzop — zero-config multi-language SAST/architecture analysis
+const USAGE = `zzop — multi-language SAST/architecture analysis, one \`zzop init\` away
 
 Usage:
   zzop init [--force]              Write an annotated ${DEFAULT_CONFIG_FILENAME} to the current directory.
@@ -61,6 +61,12 @@ Options (run):
                                     the join-debug surface for troubleshooting an adapter/overlay.
   -h, --help                       Show this help.
   --version                        Show the CLI and engine versions.
+
+Exit codes (zzop [run]):
+  0   No finding at or above failOn (config default: warn).
+  1   At least one finding at or above failOn.
+  2   Config or usage error.
+\`zzop adapter validate\` ignores failOn: 0 = envelope structurally valid, 1 = invalid, 2 = usage error.
 `;
 
 // Valid `--severity` values. Exact match only (no friendly aliases like the config's "warn") — this is a
@@ -518,7 +524,9 @@ function writeReports(opts, config, output, method, request) {
     return;
   }
   const rel = path.relative(process.cwd(), dir) || dir;
-  process.stdout.write(`Wrote ${files.length} report${files.length === 1 ? '' : 's'} to ${rel}\n`);
+  // stderr, not stdout: stdout is the analysis output surface (`--format json` must stay parseable as
+  // pure JSON), and this notice is operational chatter like the warnings above.
+  process.stderr.write(`Wrote ${files.length} report${files.length === 1 ? '' : 's'} to ${rel}\n`);
 }
 
 function main() {

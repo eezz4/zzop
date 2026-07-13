@@ -42,6 +42,7 @@ pub fn register_native_analyses(registry: &mut RuleRegistry) {
         ("cross-layer/unresolved-consume-ratio", Severity::Info),
         ("cross-layer/sdk-import-no-visible-consume", Severity::Info),
         ("cross-layer/unconsumed-procedure", Severity::Info),
+        ("cross-layer/body-field-drift", Severity::Warning),
     ];
     for &(id, default_severity) in analyses {
         register_native_analysis_stub(registry, id, default_severity);
@@ -49,7 +50,7 @@ pub fn register_native_analyses(registry: &mut RuleRegistry) {
 }
 
 pub use cross_layer::{
-    ambiguous_consume_findings, cross_layer_duplicate_route_findings,
+    ambiguous_consume_findings, body_field_drift_findings, cross_layer_duplicate_route_findings,
     cross_tree_route_shadowing_findings, external_base_url_drift_findings,
     external_duplicated_integration_findings, external_host_fanout_findings,
     external_ip_literal_findings, external_secret_in_url_findings,

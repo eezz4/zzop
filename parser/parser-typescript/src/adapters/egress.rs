@@ -58,7 +58,7 @@ use swc_core::ecma::ast::{
     VarDecl, VarDeclKind,
 };
 use swc_core::ecma::visit::{Visit, VisitWith};
-use zzop_core::{http_consume_interface_key, IoConsume};
+use zzop_core::{http_consume_interface_key, ConsumeBodyShape, IoConsume};
 
 /// Extract HTTP egress IoConsume entries across all files (the const map is project-wide).
 pub fn extract_http_egress(files: &[(String, String)]) -> Vec<IoConsume> {
@@ -96,6 +96,10 @@ impl Visit for EgressCollector<'_> {
         if let Some(hc) =
             match_http_call(call).or_else(|| match_angular_http_call(call, self.angular_receivers))
         {
+            // Body-shape evidence is a property of THIS call site (its `args[1]`), independent of which
+            // method/URL variant a given emitted IoConsume ends up carrying — computed once and cloned
+            // into every emit point below (resolved/unresolved/vetoed alike), per `body-shape-v1`.
+            let body = witnessed_body_shape(call, &hc);
             let url_variants = resolve_url_variants(hc.arg, self.consts, self.cm);
             let line = crate::line_of(self.cm, call.span.lo);
             if url_variants.is_empty() {
@@ -106,6 +110,8 @@ impl Visit for EgressCollector<'_> {
                 let raw = expr_text(hc.arg, self.cm);
                 for method in &hc.methods {
                     self.out.push(IoConsume {
+                        client: Some(hc.client.to_string()),
+                        body: body.clone(),
                         kind: "http".into(),
                         key: None,
                         file: self.file.into(),
@@ -128,6 +134,8 @@ impl Visit for EgressCollector<'_> {
                             Some(key) => {
                                 if seen_keys.insert(key.clone()) {
                                     self.out.push(IoConsume {
+                                        client: Some(hc.client.to_string()),
+                                        body: body.clone(),
                                         kind: "http".into(),
                                         key: Some(key),
                                         file: self.file.into(),
@@ -140,6 +148,8 @@ impl Visit for EgressCollector<'_> {
                             None => {
                                 if seen_unresolved_methods.insert(method.clone()) {
                                     self.out.push(IoConsume {
+                                        client: Some(hc.client.to_string()),
+                                        body: body.clone(),
                                         kind: "http".into(),
                                         key: None,
                                         file: self.file.into(),
@@ -236,6 +246,26 @@ struct HttpCall<'a> {
     /// computed member with a two-literal ternary bracket expression (`cond-literal-fanout-v1`).
     methods: Vec<String>,
     arg: &'a Expr,
+    /// How `call.args.get(1)` maps to a request body, for `witnessed_body_shape` — set per matched
+    /// call shape (`body-shape-v1`).
+    body_style: BodyStyle,
+    /// Which client recognizer matched this call site (`axios-defaults-base-v1`) — carried onto every
+    /// `IoConsume` this call site emits as `IoConsume::client`, so a client-scoped normalization seam
+    /// (e.g. `axios.defaults.baseURL`) can tell an axios consume from a fetch/ky one in the same tree.
+    client: &'static str,
+}
+
+/// How the second call argument relates to a request body, at a matched HTTP call site
+/// (`body-shape-v1`). See `witnessed_body_shape`'s doc for how each style is read.
+#[derive(Clone, Copy)]
+enum BodyStyle {
+    /// `args[1]` (if present) IS the body value directly — the axios/ky/Angular-HttpClient idiom.
+    /// Only actually read when every resolved method is a body-position verb (`is_body_position_verb`).
+    DirectArg,
+    /// `args[1]` is an options object; the body lives at its own `body:` property — the bare
+    /// `fetch`/`$fetch`/oazapfts idiom (mirrors how `method_from_options` reads `method:` from the
+    /// same object).
+    OptionsBodyProp,
 }
 
 fn match_http_call(call: &CallExpr) -> Option<HttpCall<'_>> {
@@ -258,11 +288,15 @@ fn match_http_call(call: &CallExpr) -> Option<HttpCall<'_>> {
                         Some(HttpCall {
                             methods: vec![method],
                             arg,
+                            body_style: BodyStyle::OptionsBodyProp,
+                            client: "oazapfts",
                         })
                     } else if (obj == "axios" || obj == "ky") && is_http_method(&name) {
                         Some(HttpCall {
                             methods: vec![name],
                             arg,
+                            body_style: BodyStyle::DirectArg,
+                            client: if obj == "axios" { "axios" } else { "ky" },
                         })
                     } else {
                         None
@@ -275,7 +309,12 @@ fn match_http_call(call: &CallExpr) -> Option<HttpCall<'_>> {
                         return None;
                     }
                     let methods = methods_from_computed_prop(&c.expr)?;
-                    Some(HttpCall { methods, arg })
+                    Some(HttpCall {
+                        methods,
+                        arg,
+                        body_style: BodyStyle::DirectArg,
+                        client: if obj == "axios" { "axios" } else { "ky" },
+                    })
                 }
                 MemberProp::PrivateName(_) => None,
             }
@@ -287,11 +326,15 @@ fn match_http_call(call: &CallExpr) -> Option<HttpCall<'_>> {
                 Some(HttpCall {
                     methods: vec![method],
                     arg,
+                    body_style: BodyStyle::OptionsBodyProp,
+                    client: if n == "fetch" { "fetch" } else { "$fetch" },
                 })
             } else if n == "axios" {
                 Some(HttpCall {
                     methods: vec!["GET".into()],
                     arg,
+                    body_style: BodyStyle::DirectArg,
+                    client: "axios",
                 })
             } else {
                 None
@@ -308,6 +351,25 @@ fn is_http_method(m: &str) -> bool {
     zzop_core::HTTP_KEY_VERBS
         .iter()
         .any(|v| v.to_ascii_lowercase() == m)
+}
+
+/// The body-position HTTP verb set (`body-shape-v1`) — a `BodyStyle::DirectArg` call's `args[1]` is only
+/// treated as a request body when EVERY resolved method is one of these (a `GET`/`DELETE`/`HEAD` verb's
+/// second argument is a config/options object, never a body; a mixed-verb computed-member fanout with
+/// even ONE non-body-position verb rejects the whole site rather than guessing). Uppercase, matching
+/// `zzop_core::HTTP_KEY_VERBS`'s spelling; comparisons uppercase the candidate first since `HttpCall::methods`
+/// mixes lowercase (axios/ky/Angular verb-name spellings) and uppercase (oazapfts/fetch
+/// `method_from_options` output) depending on which matcher produced it.
+///
+/// Do not unify with `zzop_rules_http`'s `WRITE_HTTP_METHODS` (policy inventory T3): that set is a
+/// WRITE-SEMANTICS vocabulary and includes DELETE; this one is an axios/ky/Angular CALL-SIGNATURE
+/// fact (`.delete(url, config)` puts a config object at `args[1]`, never a body), so the DELETE
+/// divergence is the point.
+const BODY_POSITION_VERBS: &[&str] = &["POST", "PUT", "PATCH"];
+
+/// Whether `m` (any case) names a [`BODY_POSITION_VERBS`] member.
+fn is_body_position_verb(m: &str) -> bool {
+    BODY_POSITION_VERBS.contains(&m.to_ascii_uppercase().as_str())
 }
 
 /// Angular HttpClient call matcher (`angular-httpclient-v1`) — `this.<name>.<verb>(url, ...)` or
@@ -356,6 +418,8 @@ fn match_angular_http_call<'a>(
     Some(HttpCall {
         methods: vec![verb],
         arg,
+        body_style: BodyStyle::DirectArg,
+        client: "angular",
     })
 }
 
@@ -528,6 +592,184 @@ fn method_from_options(opts: Option<&ExprOrSpread>) -> Option<String> {
         }
     }
     None
+}
+
+// --- Request-body shape extraction (`body-shape-v1`) ---
+
+/// Extract the statically witnessed request-body shape at a matched HTTP call site, or `None` when no
+/// static object literal is visible at the expected position — evidence-only, never guessed (module doc
+/// / `zzop_core::ConsumeBodyShape`'s doc). Reads `call.args.get(1)` differently depending on `hc.body_style`:
+/// - [`BodyStyle::DirectArg`]: `args[1]` IS the body, gated to sites where EVERY resolved method is a
+///   [`BODY_POSITION_VERBS`] member (a GET/DELETE/HEAD second argument is a config object, never a body;
+///   a mixed-verb fanout with even one non-body-position verb never guesses which arm the object belongs
+///   to, so the whole site yields `None`). A missing `args[1]` (`axios.post(url)`) also yields `None` —
+///   an interceptor may inject a body invisibly; absence is not evidence either way.
+/// - [`BodyStyle::OptionsBodyProp`]: `args[1]` is an options object (or an oazapfts wrapper around one —
+///   same unwrap as [`method_from_options`]); the body lives at that object's own `body:` property, which
+///   may be a direct object literal, `JSON.stringify(<object literal>)`, or anything else (`None`).
+fn witnessed_body_shape(call: &CallExpr, hc: &HttpCall<'_>) -> Option<ConsumeBodyShape> {
+    match hc.body_style {
+        BodyStyle::DirectArg => {
+            if !hc.methods.iter().all(|m| is_body_position_verb(m)) {
+                return None;
+            }
+            let arg = unwrap_expr(&call.args.get(1)?.expr);
+            let Expr::Object(obj) = arg else {
+                return None;
+            };
+            Some(shape_from_object_lit(obj))
+        }
+        BodyStyle::OptionsBodyProp => {
+            let body_expr = unwrap_expr(body_prop_from_options(call.args.get(1))?);
+            match body_expr {
+                Expr::Object(obj) => Some(shape_from_object_lit(obj)),
+                Expr::Call(c) if is_json_stringify_call(c) => {
+                    let inner = unwrap_expr(&c.args.first()?.expr);
+                    let Expr::Object(obj) = inner else {
+                        return None;
+                    };
+                    Some(shape_from_object_lit(obj))
+                }
+                _ => None,
+            }
+        }
+    }
+}
+
+/// Read the `body:` property's value expression from a fetch/axios options object, or from the object
+/// literal wrapped in an `oazapfts.<helper>({ ... })` call — same receiver-matched unwrap pattern as
+/// [`method_from_options`] (module doc: oazapfts-generated-SDK family). Only a literal `body:` key
+/// (ident or string prop name) is read; `...opts` spreads are silently skipped (never guessed).
+fn body_prop_from_options(opts: Option<&ExprOrSpread>) -> Option<&Expr> {
+    let expr = &*opts?.expr;
+    let obj = match expr {
+        Expr::Object(o) => o,
+        Expr::Call(c) => {
+            let Callee::Expr(callee) = &c.callee else {
+                return None;
+            };
+            let Expr::Member(m) = &**callee else {
+                return None;
+            };
+            let (Expr::Ident(obj_id), MemberProp::Ident(_)) = (&*m.obj, &m.prop) else {
+                return None;
+            };
+            if obj_id.sym != "oazapfts" {
+                return None;
+            }
+            let Expr::Object(o) = &*c.args.first()?.expr else {
+                return None;
+            };
+            o
+        }
+        _ => return None,
+    };
+    for prop in &obj.props {
+        if let PropOrSpread::Prop(p) = prop {
+            if let Prop::KeyValue(kv) = &**p {
+                if let Some(name) = prop_name_str(&kv.key) {
+                    if name == "body" {
+                        return Some(&kv.value);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// `JSON.stringify(<expr>)` — callee must be exactly the member `JSON.stringify` (receiver matched
+/// tightly, like [`is_oazapfts_fetch`]'s receiver match, never a bare-name allowlist).
+fn is_json_stringify_call(call: &CallExpr) -> bool {
+    let Callee::Expr(callee) = &call.callee else {
+        return false;
+    };
+    let Expr::Member(m) = &**callee else {
+        return false;
+    };
+    matches!(&*m.obj, Expr::Ident(id) if id.sym == "JSON")
+        && matches!(&m.prop, MemberProp::Ident(name) if name.sym == "stringify")
+}
+
+/// A property name statically readable from a `PropName` — `Ident`/`Str` only; `Computed` (and any
+/// other future variant) returns `None`, which the caller treats as evidence the enclosing level is
+/// incomplete (never guessed).
+fn prop_name_str(name: &PropName) -> Option<String> {
+    match name {
+        PropName::Ident(i) => Some(i.sym.to_string()),
+        PropName::Str(s) => Some(s.value.as_str().unwrap_or_default().to_string()),
+        _ => None,
+    }
+}
+
+/// Walk ONE ObjectLit's own props (never recursing — the caller decides whether/how to descend),
+/// pushing each witnessed key into `keys` (dotted under `prefix` when non-empty, bare otherwise).
+/// Returns whether this level is fully static: `true` iff every prop is a plain `Prop::KeyValue`
+/// (non-computed key) or `Prop::Shorthand` — a spread, computed key, getter, setter, method, or assign
+/// prop makes this level incomplete (its sibling keys are still recorded; only the level's OWN
+/// completeness is affected), per `ConsumeBodyShape::complete_at`'s contract.
+fn collect_level(obj: &ObjectLit, prefix: &str, keys: &mut Vec<String>) -> bool {
+    let mut complete = true;
+    for prop in &obj.props {
+        match prop {
+            PropOrSpread::Spread(_) => complete = false,
+            PropOrSpread::Prop(p) => match &**p {
+                Prop::Shorthand(ident) => keys.push(dotted(prefix, &ident.sym)),
+                Prop::KeyValue(kv) => match prop_name_str(&kv.key) {
+                    Some(name) => keys.push(dotted(prefix, &name)),
+                    None => complete = false, // PropName::Computed
+                },
+                Prop::Getter(_) | Prop::Setter(_) | Prop::Method(_) | Prop::Assign(_) => {
+                    complete = false;
+                }
+            },
+        }
+    }
+    complete
+}
+
+fn dotted(prefix: &str, name: &str) -> String {
+    if prefix.is_empty() {
+        name.to_string()
+    } else {
+        format!("{prefix}.{name}")
+    }
+}
+
+/// Build the statically witnessed [`ConsumeBodyShape`] for a request-body `ObjectLit`, capped at depth 2
+/// (the top level, plus one level under each top-level key whose value is itself an object literal —
+/// see the type's doc). The top level's own completeness feeds `complete_at: [""]`; each depth-1
+/// `KeyValue` whose value is an `ObjectLit` is walked exactly one more level (its keys recorded as
+/// `"parent.child"`), and `"parent"` is added to `complete_at` too when THAT level is fully static. A
+/// depth-2 nested object is recorded as a single key (its own dotted path) and never descended into —
+/// `collect_level` only reads prop NAMES, never recurses on their values — so nothing past depth 2 is
+/// ever produced, and a depth-2 path never enters `complete_at` (only `""` and depth-1 paths can).
+fn shape_from_object_lit(obj: &ObjectLit) -> ConsumeBodyShape {
+    let mut keys = Vec::new();
+    let top_complete = collect_level(obj, "", &mut keys);
+    let mut complete_at = Vec::new();
+    if top_complete {
+        complete_at.push(String::new());
+    }
+    for prop in &obj.props {
+        if let PropOrSpread::Prop(p) = prop {
+            if let Prop::KeyValue(kv) = &**p {
+                if let Some(name) = prop_name_str(&kv.key) {
+                    if let Expr::Object(nested) = unwrap_expr(&kv.value) {
+                        let nested_complete = collect_level(nested, &name, &mut keys);
+                        if nested_complete {
+                            complete_at.push(name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    keys.sort();
+    keys.dedup();
+    complete_at.sort();
+    complete_at.dedup();
+    ConsumeBodyShape { keys, complete_at }
 }
 
 /// Resolve a URL argument to every syntactically-possible path string ("variants"); an empty vec means
@@ -1656,5 +1898,257 @@ mod tests {
         // keys), an identifier with no `.` must still be rejected: the regex requires one `.segment`.
         consts.insert("ControlKey".to_string(), "/should/not/match".to_string());
         assert_eq!(resolve_raw_path("ControlKey", &consts), None);
+    }
+
+    // --- request-body shape extraction (`body-shape-v1`) ---
+
+    #[test]
+    fn body_position_verbs_is_pinned_to_the_exact_set() {
+        // T2 pin (rule-quality policy value inventory): a drift here (an added/removed verb) must fail
+        // this test loudly rather than silently changing which call sites get body evidence.
+        assert_eq!(BODY_POSITION_VERBS, &["POST", "PUT", "PATCH"]);
+    }
+
+    #[test]
+    fn axios_post_nested_object_literal_witnesses_two_level_shape() {
+        let out = extract_http_egress(&files(&[(
+            "a.tsx",
+            "axios.post('/users', { user: { email, password } });",
+        )]));
+        assert_eq!(out.len(), 1);
+        let body = out[0].body.as_ref().expect("body shape expected");
+        assert_eq!(
+            body.keys,
+            vec!["user", "user.email", "user.password"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            body.complete_at,
+            vec!["", "user"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn axios_put_with_identifier_body_is_none() {
+        let out = extract_http_egress(&files(&[("a.tsx", "axios.put('/users/1', payload);")]));
+        assert_eq!(out.len(), 1);
+        assert!(out[0].body.is_none());
+    }
+
+    #[test]
+    fn axios_get_with_options_object_body_is_none() {
+        // GET is not a body-position verb — `args[1]` here is a config object, not a body, regardless
+        // of it being a static object literal.
+        let out = extract_http_egress(&files(&[(
+            "a.tsx",
+            "axios.get('/users', { params: { page: 1 } });",
+        )]));
+        assert_eq!(out.len(), 1);
+        assert!(out[0].body.is_none());
+    }
+
+    #[test]
+    fn missing_second_argument_is_never_a_witnessed_body() {
+        // Absence is not evidence either way (an interceptor may inject a body invisibly).
+        let out = extract_http_egress(&files(&[("a.tsx", "axios.post('/users');")]));
+        assert_eq!(out.len(), 1);
+        assert!(out[0].body.is_none());
+    }
+
+    #[test]
+    fn shorthand_body_prop_witnesses_the_key_without_descending() {
+        let out = extract_http_egress(&files(&[("a.tsx", "axios.post('/users', { user });")]));
+        let body = out[0].body.as_ref().unwrap();
+        assert_eq!(body.keys, vec!["user".to_string()]);
+        assert_eq!(body.complete_at, vec!["".to_string()]);
+    }
+
+    #[test]
+    fn top_level_spread_marks_the_root_incomplete() {
+        let out = extract_http_egress(&files(&[(
+            "a.tsx",
+            "axios.post('/users', { ...defaults, user });",
+        )]));
+        let body = out[0].body.as_ref().unwrap();
+        assert_eq!(body.keys, vec!["user".to_string()]);
+        assert!(
+            !body.complete_at.contains(&"".to_string()),
+            "spread at the top level must suppress the root's completeness: {body:?}"
+        );
+    }
+
+    #[test]
+    fn empty_object_literal_body_is_a_witnessed_empty_shape() {
+        // An explicit `{}` IS evidence (a witnessed empty body), unlike a missing `args[1]` — `Some`
+        // with empty `keys` but `complete_at: [""]`.
+        let out = extract_http_egress(&files(&[("a.tsx", "axios.post('/users', {});")]));
+        let body = out[0].body.as_ref().unwrap();
+        assert!(body.keys.is_empty());
+        assert_eq!(body.complete_at, vec!["".to_string()]);
+    }
+
+    #[test]
+    fn fetch_json_stringify_body_is_unwrapped() {
+        let out = extract_http_egress(&files(&[(
+            "a.tsx",
+            r#"fetch('/users', { method: 'POST', body: JSON.stringify({ name, email }) });"#,
+        )]));
+        let body = out[0].body.as_ref().unwrap();
+        assert_eq!(body.keys, vec!["email".to_string(), "name".to_string()]);
+        assert_eq!(body.complete_at, vec!["".to_string()]);
+    }
+
+    #[test]
+    fn fetch_body_identifier_is_none() {
+        let out = extract_http_egress(&files(&[(
+            "a.tsx",
+            "fetch('/users', { method: 'POST', body: someVar });",
+        )]));
+        assert!(out[0].body.is_none());
+    }
+
+    #[test]
+    fn angular_http_client_post_body_is_witnessed() {
+        let out = extract_http_egress(&files(&[(
+            "article.service.ts",
+            concat!(
+                "import { HttpClient } from '@angular/common/http';\n",
+                "export class ArticleService {\n",
+                "  constructor(private readonly http: HttpClient) {}\n",
+                "  create() {\n",
+                "    this.http.post('/articles', { title });\n",
+                "  }\n",
+                "}\n",
+            ),
+        )]));
+        let body = out[0].body.as_ref().unwrap();
+        assert_eq!(body.keys, vec!["title".to_string()]);
+        assert_eq!(body.complete_at, vec!["".to_string()]);
+    }
+
+    #[test]
+    fn oazapfts_sibling_body_prop_is_witnessed() {
+        let out = extract_http_egress(&files(&[(
+            "activity.ts",
+            r#"oazapfts.fetchJson("/activities", oazapfts.json({ ...opts, method: "POST", body: { albumId } }));"#,
+        )]));
+        let body = out[0].body.as_ref().unwrap();
+        assert_eq!(body.keys, vec!["albumId".to_string()]);
+    }
+
+    #[test]
+    fn computed_member_mixed_verb_fanout_body_is_none() {
+        // Mixed-verb fanout (`DELETE`/`POST`) never guesses which arm the object belongs to — `None`
+        // for BOTH emitted consumes, even though a static object literal is visibly present.
+        let out = extract_http_egress(&files(&[(
+            "a.ts",
+            "axios[c ? 'delete' : 'post'](`/articles/${slug}/favorite`, { note });",
+        )]));
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|c| c.body.is_none()));
+    }
+
+    #[test]
+    fn depth_three_nesting_is_capped_at_depth_two() {
+        let out = extract_http_egress(&files(&[(
+            "a.tsx",
+            "axios.post('/x', { a: { b: { c: 1 } } });",
+        )]));
+        let body = out[0].body.as_ref().unwrap();
+        assert_eq!(body.keys, vec!["a".to_string(), "a.b".to_string()]);
+        assert_eq!(body.complete_at, vec!["".to_string(), "a".to_string()]);
+    }
+
+    // --- client provenance tag (`axios-defaults-base-v1`) ---
+
+    fn clients(out: &[IoConsume]) -> Vec<Option<String>> {
+        out.iter().map(|c| c.client.clone()).collect()
+    }
+
+    #[test]
+    fn axios_member_call_is_tagged_axios() {
+        let out = extract_http_egress(&files(&[("a.ts", r#"axios.get("/a");"#)]));
+        assert_eq!(clients(&out), vec![Some("axios".to_string())]);
+    }
+
+    #[test]
+    fn bare_axios_call_is_tagged_axios() {
+        let out = extract_http_egress(&files(&[("a.ts", r#"axios("/a");"#)]));
+        assert_eq!(clients(&out), vec![Some("axios".to_string())]);
+    }
+
+    #[test]
+    fn axios_computed_member_call_is_tagged_axios() {
+        let out = extract_http_egress(&files(&[("a.ts", "axios['post']('/a');")]));
+        assert_eq!(clients(&out), vec![Some("axios".to_string())]);
+    }
+
+    #[test]
+    fn axios_computed_member_fanout_is_tagged_axios_for_every_variant() {
+        let out = extract_http_egress(&files(&[(
+            "a.ts",
+            "axios[favorited ? 'delete' : 'post'](`/articles/${slug}/favorite`);",
+        )]));
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|c| c.client.as_deref() == Some("axios")));
+    }
+
+    #[test]
+    fn ky_member_call_is_tagged_ky() {
+        let out = extract_http_egress(&files(&[("a.ts", r#"ky.get("/a");"#)]));
+        assert_eq!(clients(&out), vec![Some("ky".to_string())]);
+    }
+
+    #[test]
+    fn bare_fetch_call_is_tagged_fetch() {
+        let out = extract_http_egress(&files(&[("a.ts", r#"fetch("/a");"#)]));
+        assert_eq!(clients(&out), vec![Some("fetch".to_string())]);
+    }
+
+    #[test]
+    fn dollar_fetch_call_is_tagged_dollar_fetch() {
+        let out = extract_http_egress(&files(&[("a.ts", r#"$fetch("/a");"#)]));
+        assert_eq!(clients(&out), vec![Some("$fetch".to_string())]);
+    }
+
+    #[test]
+    fn oazapfts_call_is_tagged_oazapfts() {
+        let out = extract_http_egress(&files(&[(
+            "a.ts",
+            r#"oazapfts.fetchJson("/activities", { method: "post" });"#,
+        )]));
+        assert_eq!(clients(&out), vec![Some("oazapfts".to_string())]);
+    }
+
+    #[test]
+    fn angular_http_client_call_is_tagged_angular() {
+        let out = extract_http_egress(&files(&[(
+            "article.service.ts",
+            concat!(
+                "import { HttpClient } from '@angular/common/http';\n",
+                "export class ArticleService {\n",
+                "  constructor(private readonly http: HttpClient) {}\n",
+                "  getArticles() {\n",
+                "    this.http.get('/articles');\n",
+                "  }\n",
+                "}\n",
+            ),
+        )]));
+        assert_eq!(clients(&out), vec![Some("angular".to_string())]);
+    }
+
+    #[test]
+    fn unresolved_consume_still_carries_its_client_tag() {
+        // Dynamic URL (unresolved) — `client` is still set from the matcher, independent of whether the
+        // URL itself resolved to a key.
+        let out = extract_http_egress(&files(&[("a.ts", "axios.get(buildUrl(x));")]));
+        assert_eq!(out.len(), 1);
+        assert!(out[0].key.is_none());
+        assert_eq!(out[0].client.as_deref(), Some("axios"));
     }
 }

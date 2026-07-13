@@ -53,6 +53,7 @@ mod tests {
 
     fn provide(key: &str, file: &str, line: u32) -> zzop_core::IoProvide {
         zzop_core::IoProvide {
+            body: None,
             kind: "http".to_string(),
             key: key.to_string(),
             file: file.to_string(),
@@ -146,6 +147,7 @@ mod tests {
     fn non_http_provides_are_ignored() {
         let provides = vec![
             zzop_core::IoProvide {
+                body: None,
                 kind: "queue".to_string(),
                 key: "topic".to_string(),
                 file: "a.ts".to_string(),
@@ -153,6 +155,7 @@ mod tests {
                 symbol: None,
             },
             zzop_core::IoProvide {
+                body: None,
                 kind: "queue".to_string(),
                 key: "topic".to_string(),
                 file: "b.ts".to_string(),

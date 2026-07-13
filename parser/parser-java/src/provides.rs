@@ -83,6 +83,7 @@ pub fn extract_http_provides(rel: &str, text: &str) -> Vec<IoProvide> {
         };
         let full_path = format!("{}/{}", ctx.prefix, path);
         out.push(IoProvide {
+            body: None,
             kind: "http".to_string(),
             key: http_interface_key(&verb, &full_path),
             file: rel.to_string(),

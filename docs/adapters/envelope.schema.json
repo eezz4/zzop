@@ -3,7 +3,7 @@
   "$id": "https://zzop.dev/schema/envelope.v1.json",
   "title": "zzop NormalizedEnvelope v1",
   "description": "External-parser / adapter-overlay envelope contract (docs/NORMALIZED_AST.md; packages/core/src/normalized.rs). Field names, required-ness, and nullability below mirror the Rust serde types field-for-field — a field is 'required' here exactly when its Rust struct field has no #[serde(default)], and 'nullable' exactly when its Rust type is Option<T> deserialized without #[serde(default)] (present key, value may be null) as opposed to omittable-and-defaulting.",
-  "$comment": "TOLERANCE CONTRACT: additionalProperties is true at every object level in this schema. The engine ignores fields it does not recognize (with a warning) — it never hard-fails on an unknown field, the same philosophy as zzop's config surface (see docs/adapters/README.md's 'Envelope schema & versioning policy'). A producer emitting a field ahead of this schema, or omitting any field marked optional below, still produces a valid v1 envelope. Only a BREAKING change (removing, renaming, or re-typing a REQUIRED field) needs a new envelope `version`; additive fields never do.",
+  "$comment": "TOLERANCE CONTRACT: additionalProperties is true at every object level in this schema except the two externally-tagged enum wrapper objects (trpcRouterEntry, routerMountEntry), whose single-discriminator shape is closed. The engine silently ignores fields it does not recognize — it never hard-fails on an unknown field, AND never warns about one either (serde drops unrecognized fields by default; no unknown-field warning code exists anywhere in this crate's envelope/overlay ingestion path). Same tolerant-input philosophy as zzop's config surface (see docs/adapters/README.md's 'Envelope schema & versioning policy'), just without the warning that surface's own deny_unknown_fields config types emit. A producer emitting a field ahead of this schema, or omitting any field marked optional below, still produces a valid v1 envelope. Only a BREAKING change (removing, renaming, or re-typing a REQUIRED field) needs a new envelope `version`; additive fields never do.",
   "type": "object",
   "required": ["format", "version", "parser", "source", "files"],
   "additionalProperties": true,
@@ -63,7 +63,28 @@
         },
         "trpc_router_fragments": { "type": "array", "default": [], "items": { "$ref": "#/definitions/trpcRouterFragment" } },
         "router_mount_fragments": { "type": "array", "default": [], "items": { "$ref": "#/definitions/routerMountFragment" } },
+        "class_shape_fragments": {
+          "type": "array",
+          "default": [],
+          "items": { "$ref": "#/definitions/classShapeFragment" },
+          "description": "Class field-shape fragments (body-shape-v1) — the DTO-resolution substrate for IoProvide.body.dtoRef (packages/core/src/fragments.rs ClassShapeFragment). Absent = this producer doesn't extract class shapes; still a fully valid, non-degraded projection."
+        },
         "io": { "$ref": "#/definitions/ioFacts", "default": { "provides": [], "consumes": [] } },
+        "loop_spans": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "array",
+            "items": [
+              { "type": "integer", "minimum": 0, "description": "1-based start line, inclusive." },
+              { "type": "integer", "minimum": 0, "description": "1-based end line, inclusive." }
+            ],
+            "minItems": 2,
+            "maxItems": 2,
+            "additionalItems": false
+          },
+          "description": "Per-file loop-body line spans (1-based, inclusive) — external-parser counterpart of zzop_core::dsl::SourceFile::loop_spans; each Rust (u32, u32) tuple serializes as a 2-element JSON array. Absent = empty = MethodScan::trigger_in_loop silently skips this file (graceful degrade, same as symbols/io). Canonical wire name is snake_case loop_spans (FileProjection has no rename_all); the frozen camelCase spelling loopSpans is accepted as an input-only alias (#[serde(alias = \"loopSpans\")]) — never emitted, so a serialized envelope only ever carries loop_spans."
+        },
         "degraded": {
           "type": "boolean",
           "default": false,
@@ -91,16 +112,19 @@
         },
         "line": { "type": "integer", "minimum": 1, "description": "Declaration start line (1-based)." },
         "exported": { "type": "boolean" },
-        "is_default": {
+        "isDefault": {
           "type": "boolean",
           "default": false,
-          "description": "export default function — also matchable via the file#default key. Canonical wire name is camelCase isDefault (SourceSymbol is #[serde(rename_all = \"camelCase\")]); this snake_case spelling is the frozen-v1 input alias and stays accepted."
+          "description": "export default function — also matchable via the file#default key. This IS the canonical wire name (SourceSymbol is #[serde(rename_all = \"camelCase\")], which governs the OUTPUT name regardless of the alias below). DRIFT NOTE: an earlier revision of this schema documented the snake_case spelling (is_default) as the primary property, which is backwards — alias only affects deserialization, never the serialized key. The frozen-v1 snake_case spelling is_default is still accepted ON INPUT via #[serde(alias = \"is_default\")], but a conforming producer round-tripping through this engine, or hand-writing a fresh (non-frozen-v1) envelope, will see/should emit isDefault."
         },
-        "body_start": {
+        "bodyStart": {
           "type": ["integer", "null"],
-          "description": "Body line range start (1-based, inclusive) for functions/classes; absent/null for type/interface or a parser that cannot produce spans (those files silently skip method-scan DSL rules — never an error)."
+          "description": "Body line range start (1-based, inclusive) for functions/classes; absent/null for type/interface or a parser that cannot produce spans (those files silently skip method-scan DSL rules — never an error). Canonical wire name; frozen-v1 snake_case body_start is an accepted input-only alias (#[serde(alias = \"body_start\")]) — see isDefault's description for why alias never changes the OUTPUT key."
         },
-        "body_end": { "type": ["integer", "null"] },
+        "bodyEnd": {
+          "type": ["integer", "null"],
+          "description": "Canonical wire name; frozen-v1 snake_case body_end is an accepted input-only alias (#[serde(alias = \"body_end\")])."
+        },
         "writeSites": {
           "type": "array",
           "default": [],
@@ -119,7 +143,8 @@
         "sink": { "type": "string", "description": "Short human-readable label (\"prisma.user.update\", or the first few tokens of a raw-SQL statement)." },
         "kind": {
           "type": ["string", "null"],
-          "description": "Set only when the write also qualifies as non-idempotent (create/atomic-accumulate/counter); kebab-case NonIdempotentKind wire form."
+          "enum": ["create", "atomic-accumulate", "counter", null],
+          "description": "Set only when the write also qualifies as non-idempotent; kebab-case NonIdempotentKind wire form (packages/core/src/ir.rs, #[serde(rename_all = \"kebab-case\")]). null for a plain idempotent update or a raw-SQL write."
         }
       }
     },
@@ -147,10 +172,12 @@
     },
     "ioFacts": {
       "type": "object",
+      "required": ["provides", "consumes"],
       "additionalProperties": true,
+      "$comment": "This nested-required-ness is NOT a typo: IoFacts (packages/core/src/io.rs) derives Default for the container as a whole (so FileProjection.io itself is #[serde(default)] and fully omittable, see fileProjection's io property), but neither `provides` nor `consumes` individually carries #[serde(default)] — so if a `io` OBJECT is present in the JSON at all, both keys must be present inside it (each may still be an empty array).",
       "properties": {
-        "provides": { "type": "array", "default": [], "items": { "$ref": "#/definitions/ioProvide" } },
-        "consumes": { "type": "array", "default": [], "items": { "$ref": "#/definitions/ioConsume" } }
+        "provides": { "type": "array", "items": { "$ref": "#/definitions/ioProvide" } },
+        "consumes": { "type": "array", "items": { "$ref": "#/definitions/ioConsume" } }
       }
     },
     "ioProvide": {
@@ -158,27 +185,124 @@
       "required": ["kind", "key", "file", "line"],
       "additionalProperties": true,
       "properties": {
-        "kind": { "type": "string", "description": "The boundary an interface crosses (\"http\", \"db-table\", ...). Open-ended — an adapter may introduce its own kind." },
+        "kind": {
+          "type": "string",
+          "description": "The boundary an interface crosses (\"http\", \"db-table\", ...). Open-ended — an adapter may introduce its own kind. RESERVED: \"nest-global-prefix\" is an engine-internal sentinel kind (packages/engine/src/envelope.rs is_reserved_provide_kind) produced only by the native TypeScript parser's NestJS setGlobalPrefix() recognizer and consumed only by the native compose seam that applies + strips it. A producer emitting this kind is out of contract: in envelope ingestion (analyze_envelope) it is dropped at ingestion with no rewrite, with one aggregate warning per envelope naming the producer-forbidden kinds; in adapter-overlay application (apply_adapter_overlays) it is likewise dropped before the merge, with one aggregate warning per overlay naming the producer-forbidden kinds. It never reaches output, findings, or the cross-layer linker."
+        },
         "key": { "type": "string", "description": "Adapter-normalized interface identity, e.g. \"GET /users/{}\". Must be byte-identical to what the consuming side computes for the exact join to succeed — see lib/keys.js in examples/adapter-kit." },
         "file": { "type": "string" },
         "line": { "type": "integer", "minimum": 1 },
-        "symbol": { "type": ["string", "null"], "description": "Handler/owner symbol id (e.g. the controller method) for richer edges. Omittable, or explicit null." }
+        "symbol": { "type": ["string", "null"], "description": "Handler/owner symbol id (e.g. the controller method) for richer edges. Omittable, or explicit null." },
+        "body": {
+          "oneOf": [
+            { "$ref": "#/definitions/provideBodyShape" },
+            { "type": "null" }
+          ],
+          "description": "Request-body contract the handler declares, when statically visible (@Body() param with a class DTO type). Additive/optional — absent everywhere it does not apply. Omittable, or explicit null."
+        }
       }
     },
     "ioConsume": {
       "type": "object",
-      "required": ["kind", "key", "file", "line"],
+      "required": ["kind", "file", "line"],
       "additionalProperties": true,
+      "$comment": "`key` is NOT in `required` even though `IoConsume::key` carries no #[serde(default)]: serde_derive special-cases every `Option<T>`-typed field as implicitly omittable on missing input regardless of an explicit `default` attribute (verified: packages/core/tests/envelope_schema_parity.rs's drop-one-key probe against the real type), so an ABSENT key and an explicit `key: null` deserialize identically to `None` — there is no Rust-enforced distinction between them. This is the general rule for every Option<T> property in this schema: `required` reflects the true (probed) Rust behavior, not just the presence/absence of #[serde(default)].",
       "properties": {
-        "kind": { "type": "string" },
+        "kind": {
+          "type": "string",
+          "description": "RESERVED: \"client-base-prefix\" is an engine-internal sentinel kind (packages/engine/src/envelope.rs is_reserved_consume_kind; zzop_parser_typescript::CLIENT_BASE_PREFIX_KIND) produced only by the native TypeScript parser's axios.defaults.baseURL recognizer and consumed only by the native compose seam that applies + strips it. Same out-of-contract posture as ioProvide.kind's \"nest-global-prefix\": envelope ingestion drops it at ingestion (no rewrite), with one aggregate warning per envelope naming the producer-forbidden kinds; adapter-overlay application drops it before the merge, with one aggregate warning per overlay naming the producer-forbidden kinds. It never reaches output, findings, or the cross-layer linker."
+        },
         "key": {
           "type": ["string", "null"],
-          "description": "null when the adapter could not statically resolve a dynamic target — reported, never force-matched (this key IS a required JSON key; its VALUE may be null)."
+          "description": "null OR OMITTED when the adapter could not statically resolve a dynamic target — reported, never force-matched. (Omitted and explicit null are indistinguishable to the engine: Option<String> with no #[serde(default)] is still implicitly omittable, per serde_derive's Option auto-default.)"
         },
         "file": { "type": "string" },
         "line": { "type": "integer", "minimum": 1 },
         "raw": { "type": ["string", "null"], "description": "The raw expression text as written at the call site. Set whenever key is null; kept (not cleared) when late cross-file resolution fills key in afterwards, as provenance. Omittable, or explicit null." },
-        "method": { "type": ["string", "null"], "description": "HTTP method of the call site, kept for late re-resolution. Only meaningful when key is null. Omittable, or explicit null." }
+        "method": { "type": ["string", "null"], "description": "HTTP method of the call site, kept for late re-resolution. Only meaningful when key is null. Omittable, or explicit null." },
+        "body": {
+          "oneOf": [
+            { "$ref": "#/definitions/consumeBodyShape" },
+            { "type": "null" }
+          ],
+          "description": "Statically witnessed request-body literal shape at the call site, when one is visible. Additive/optional. Omittable, or explicit null."
+        },
+        "client": {
+          "type": ["string", "null"],
+          "description": "Which client recognizer produced this consume (\"axios\", \"ky\", \"fetch\", \"$fetch\", \"oazapfts\", \"angular\") — provenance for client-scoped normalization seams (e.g. an axios.defaults.baseURL path prefix must apply to axios call sites only). null = producer doesn't tag (older envelopes, non-egress kinds); a client-scoped seam then leaves the consume untouched. Omittable, or explicit null."
+        }
+      }
+    },
+    "provideBodyField": {
+      "description": "One declared field of a request-body DTO class (packages/core/src/io.rs ProvideBodyField, #[serde(rename_all = \"camelCase\")] — a no-op here since both field names are already single words).",
+      "type": "object",
+      "required": ["name", "optional"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "optional": { "type": "boolean", "description": "true when the field is ?-optional or carries an @IsOptional() decorator." }
+      }
+    },
+    "provideBodyShape": {
+      "description": "The request-body contract a route handler declares (@Body() dto: CreateUserDto) — packages/core/src/io.rs ProvideBodyShape, #[serde(rename_all = \"camelCase\")]. Emitted by the parser with only dtoRef set; assemble resolves the ref against the tree-wide merged class-shape map and fills fields. An unresolvable or ambiguous ref drops the whole shape (never guessed).",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "subKey": {
+          "type": ["string", "null"],
+          "description": "@Body('user') sub-key — the DTO describes body.user, not the body root. null/omitted = root. Omittable, or explicit null (#[serde(default, skip_serializing_if = \"Option::is_none\")])."
+        },
+        "dtoRef": {
+          "type": ["string", "null"],
+          "description": "Unresolved DTO class name as written in the parameter type annotation. Present on parser emit; cleared by assemble once fields is materialized (an adapter overlay may instead supply fields directly and leave this null). Omittable, or explicit null."
+        },
+        "fields": {
+          "type": "array",
+          "default": [],
+          "items": { "$ref": "#/definitions/provideBodyField" },
+          "description": "Resolved DTO fields (empty until assemble resolves dtoRef). #[serde(default, skip_serializing_if = \"Vec::is_empty\")] — omittable when empty."
+        },
+        "complete": {
+          "type": "boolean",
+          "default": false,
+          "description": "false when the DTO's field list may be partial (an extends clause, constructor parameter properties, an index signature, or computed keys) — suppresses \"extra key\" claims. #[serde(default)] with no skip_serializing_if — always serialized on output, but omittable on input."
+        }
+      }
+    },
+    "consumeBodyShape": {
+      "description": "The statically witnessed shape of a request-body object literal at an HTTP consume site (packages/core/src/io.rs ConsumeBodyShape, #[serde(rename_all = \"camelCase\")]). Extraction is evidence-only: keys are recorded exactly as written (dotted paths, depth <= 2), and NOTHING is inferred about parts the literal does not show. A body passed as an identifier/expression is not represented at all (IoConsume.body: null), never approximated.",
+      "type": "object",
+      "required": ["keys", "completeAt"],
+      "additionalProperties": true,
+      "properties": {
+        "keys": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Dotted key paths witnessed in the literal (e.g. \"user\", \"user.email\"). A shorthand property ({ user }) contributes its key; its children stay unwitnessed."
+        },
+        "completeAt": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Paths whose DIRECT children are exhaustively listed in keys — \"\" for the top level. A level containing a spread, computed key, getter, or non-literal nested value is omitted, which suppresses any \"missing field\" comparison at that level. Wire name is camelCase completeAt (ConsumeBodyShape is #[serde(rename_all = \"camelCase\")]); the Rust field is complete_at."
+        }
+      }
+    },
+    "classShapeFragment": {
+      "description": "The field shape of one class declaration — the per-file half of request-body DTO resolution (packages/core/src/fragments.rs ClassShapeFragment; no rename_all, field names are already the wire names). Emitted for EVERY class declaration, field-less ones included. All three fields are REQUIRED (no #[serde(default)] on any of them) even though `fields` is a Vec — a producer that knows no fields for a class must still emit fields: [].",
+      "type": "object",
+      "required": ["name", "fields", "complete"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string", "description": "The class's declared name (class CreateUserDto -> \"CreateUserDto\")." },
+        "fields": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/provideBodyField" },
+          "description": "Property members with statically known names, in source order."
+        },
+        "complete": {
+          "type": "boolean",
+          "description": "false when the field list may be partial: an extends clause, constructor parameter properties, an index signature, or a computed property key."
+        }
       }
     },
     "trpcRouterFragment": {
@@ -209,12 +333,12 @@
         },
         "Ref": {
           "type": "object",
-          "required": ["key", "ident", "specifier"],
+          "required": ["key", "ident"],
           "additionalProperties": true,
           "properties": {
             "key": { "type": "string" },
             "ident": { "type": "string" },
-            "specifier": { "type": ["string", "null"], "description": "Set when ident is imported; null for a same-file binding." }
+            "specifier": { "type": ["string", "null"], "description": "Set when ident is imported; null for a same-file binding. Omittable: `Option<String>` with no #[serde(default)] is still implicitly omittable to serde_derive (see ioConsume's `$comment` on this schema's `required` convention for Option<T> fields) — an absent key and an explicit `null` deserialize identically." }
           }
         },
         "Nested": {
@@ -246,23 +370,23 @@
       "properties": {
         "Verb": {
           "type": "object",
-          "required": ["method", "path", "handler", "line"],
+          "required": ["method", "path", "line"],
           "additionalProperties": true,
           "properties": {
             "method": { "type": "string", "description": "UPPERCASE HTTP method." },
             "path": { "type": "string", "description": "Verbatim string-literal first argument; :param normalized later by the key normalizer, not here." },
-            "handler": { "type": ["string", "null"], "description": "Last argument's name, if identifiable." },
+            "handler": { "type": ["string", "null"], "description": "Last argument's name, if identifiable. Omittable — see ioConsume's `$comment` on this schema's `required` convention for Option<T> fields with no #[serde(default)]." },
             "line": { "type": "integer", "minimum": 1 }
           }
         },
         "Mount": {
           "type": "object",
-          "required": ["prefix", "ident", "specifier"],
+          "required": ["prefix", "ident"],
           "additionalProperties": true,
           "properties": {
             "prefix": { "type": "string" },
             "ident": { "type": "string" },
-            "specifier": { "type": ["string", "null"], "description": "null = the mounted router is a same-file (local) binding." }
+            "specifier": { "type": ["string", "null"], "description": "null = the mounted router is a same-file (local) binding. Omittable — see ioConsume's `$comment` on this schema's `required` convention for Option<T> fields with no #[serde(default)]." }
           }
         }
       }

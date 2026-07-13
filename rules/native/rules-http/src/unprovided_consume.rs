@@ -141,6 +141,7 @@ mod tests {
 
     fn provide(key: &str, file: &str, line: u32) -> zzop_core::IoProvide {
         zzop_core::IoProvide {
+            body: None,
             kind: "http".to_string(),
             key: key.to_string(),
             file: file.to_string(),
@@ -151,6 +152,8 @@ mod tests {
 
     fn consume(kind: &str, key: Option<&str>, file: &str, line: u32) -> zzop_core::IoConsume {
         zzop_core::IoConsume {
+            client: None,
+            body: None,
             kind: kind.to_string(),
             key: key.map(str::to_string),
             file: file.to_string(),
@@ -343,6 +346,7 @@ mod tests {
     #[test]
     fn a_non_http_provide_does_not_satisfy_the_zero_provides_gate() {
         let provides = vec![zzop_core::IoProvide {
+            body: None,
             kind: "queue".to_string(),
             key: "topic:x".to_string(),
             file: "worker.ts".to_string(),

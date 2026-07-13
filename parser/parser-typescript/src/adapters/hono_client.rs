@@ -320,6 +320,8 @@ impl Visit for ConsumeCollector<'_> {
                         format!("{base}/{}", segs.join("/"))
                     };
                     IoConsume {
+                        client: None,
+                        body: None,
                         kind: "http".into(),
                         key: Some(http_consume_interface_key(verb, &path)),
                         file: self.file.into(),
@@ -335,6 +337,8 @@ impl Visit for ConsumeCollector<'_> {
                         format!("{root}.{}", segs.join("."))
                     };
                     IoConsume {
+                        client: None,
+                        body: None,
                         kind: "http".into(),
                         key: None,
                         file: self.file.into(),

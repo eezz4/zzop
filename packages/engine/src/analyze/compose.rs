@@ -2,9 +2,10 @@
 //! per-file pass already collected (no second parse): late cross-file constant re-resolution for `http`
 //! CONSUMEs, tRPC router-fragment composition into `trpc` PROVIDEs, code-registered router-mount
 //! composition into `http` PROVIDEs, wrapper-consume joins, controller-prefix route-fragment
-//! resolution into `http` PROVIDEs, and the NestJS global-prefix apply/strip.
+//! resolution into `http` PROVIDEs, the NestJS global-prefix apply/strip, and the axios `baseURL`
+//! path-prefix apply/strip (the CONSUME-side counterpart of the global-prefix seam).
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use zzop_core::{http_consume_interface_key, http_interface_key, IoConsume, IoProvide};
 
@@ -123,6 +124,11 @@ pub(crate) fn compose_controller_prefix_provides(
                 Some(prefix) => {
                     let full_path = format!("{prefix}/{}", frag.path);
                     out.push(IoProvide {
+                        // Carried through so a prefix-ref route's composed `IoProvide` keeps the same
+                        // body evidence a literal-prefix route gets directly (`ControllerPrefixRouteFragment`
+                        // doc) — `resolve_provide_body_refs` (below) resolves its `dto_ref` afterward
+                        // exactly like any other provide's.
+                        body: frag.body.clone(),
                         kind: "http".to_string(),
                         key: http_interface_key(&frag.verb, &full_path),
                         file: file.clone(),
@@ -156,6 +162,130 @@ pub(crate) fn compose_controller_prefix_provides(
     out
 }
 
+/// Resolves `IoProvide::body`'s `dto_ref` (`body-shape-v1`) against the tree-wide merged class-shape map
+/// (`zzop_core::ClassShapeFragment`) — the assemble-time counterpart of
+/// [`compose_controller_prefix_provides`]'s constant-ref resolution, but for request-body DTO classes: a
+/// `@Body() dto: CreateUserDto` provide only names the DTO class by its identifier; the class declaration
+/// usually lives in another file, so a single-file scan can't resolve it (see `ProvideBodyShape`'s own doc).
+///
+/// ## Merge (never guess)
+/// `class_shapes` is sorted by file path first for a deterministic scan order (mirrors
+/// [`merge_const_map_fragments`]'s determinism rationale), then folded into one `name -> ClassShapeFragment`
+/// map:
+/// - A name declared identically (same `fields` + `complete`) in one file, or repeated identically across
+///   2+ files, resolves normally.
+/// - A name declared with CONFLICTING shapes (different `fields` or `complete`) across 2+ files is
+///   POISONED — it resolves to nothing for every provide referencing it, and ONE aggregated warning names
+///   the class and every file that declared it, rather than guessing which declaration is authoritative.
+///
+/// ## Provide resolution
+/// Every provide whose `body` is `Some(shape)` with `shape.dto_ref == Some(name)`:
+/// - `name` resolved (found, not poisoned): `fields`/`complete` are copied from the merged shape and
+///   `dto_ref` is cleared to `None` — fully resolved, matching `ProvideBodyShape`'s own doc.
+/// - `name` absent from the merge, or poisoned: the WHOLE `body` is dropped to `None` (never guessed,
+///   same policy as an unresolved `prefix_ref`) — one aggregated warning per distinct `(file, dto_ref)`
+///   pair, naming the ref, the file, and how many provides in that file lost their body contract, mirroring
+///   [`compose_controller_prefix_provides`]'s aggregation style.
+///
+/// Must run AFTER every provide-composition pass (`compose_controller_prefix_provides`, the global-prefix
+/// seam, `compose_trpc_provides`, `compose_router_mount_provides`, file-convention routes) so a
+/// prefix-ref-composed provide's body also gets resolved here — see `zzop_engine::analyze::mod`'s call site.
+pub(crate) fn resolve_provide_body_refs(
+    io_provides: &mut [IoProvide],
+    class_shapes: Vec<(String, Vec<zzop_core::ClassShapeFragment>)>,
+    warnings: &mut Vec<String>,
+) {
+    let mut class_shapes = class_shapes;
+    class_shapes.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut shapes_by_name: BTreeMap<String, zzop_core::ClassShapeFragment> = BTreeMap::new();
+    let mut files_by_name: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut poisoned: HashSet<String> = HashSet::new();
+
+    for (file, frags) in &class_shapes {
+        for frag in frags {
+            files_by_name
+                .entry(frag.name.clone())
+                .or_default()
+                .insert(file.clone());
+            match shapes_by_name.get(&frag.name) {
+                None => {
+                    shapes_by_name.insert(frag.name.clone(), frag.clone());
+                }
+                Some(existing) => {
+                    if existing.fields != frag.fields || existing.complete != frag.complete {
+                        poisoned.insert(frag.name.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // Only disclose a poisoned name some provide's `dto_ref` actually references: class-shape
+    // fragments are emitted for EVERY class declaration, so same-name/different-shape non-DTO
+    // classes (`Config`, `Options`, feature-local types) are common and legitimate — warning on an
+    // unreferenced collision would disclose a drop that never happened (a phantom disclosure, the
+    // same stance `unmatched_suppression_warnings` codifies).
+    let referenced: HashSet<&str> = io_provides
+        .iter()
+        .filter_map(|p| p.body.as_ref().and_then(|b| b.dto_ref.as_deref()))
+        .collect();
+    let mut poisoned_names: Vec<&String> = poisoned
+        .iter()
+        .filter(|n| referenced.contains(n.as_str()))
+        .collect();
+    poisoned_names.sort();
+    for name in poisoned_names {
+        let files: Vec<&str> = files_by_name[name].iter().map(String::as_str).collect();
+        warnings.push(format!(
+            "class `{name}` is declared with conflicting field shapes across {} files ({}) — request-body \
+             resolution for `{name}` is dropped, never guessed",
+            files.len(),
+            files.join(", ")
+        ));
+    }
+
+    // One aggregated warning per (file, dto_ref) whose ref could not be resolved — count of provides
+    // dropped, mirroring `compose_controller_prefix_provides`'s aggregation style.
+    let mut unresolved: BTreeMap<(String, String), u32> = BTreeMap::new();
+
+    for provide in io_provides.iter_mut() {
+        let Some(dto_ref) = provide.body.as_ref().and_then(|b| b.dto_ref.clone()) else {
+            continue;
+        };
+        if poisoned.contains(&dto_ref) {
+            provide.body = None;
+            *unresolved
+                .entry((provide.file.clone(), dto_ref))
+                .or_insert(0) += 1;
+            continue;
+        }
+        match shapes_by_name.get(&dto_ref) {
+            Some(frag) => {
+                if let Some(shape) = provide.body.as_mut() {
+                    shape.fields = frag.fields.clone();
+                    shape.complete = frag.complete;
+                    shape.dto_ref = None;
+                }
+            }
+            None => {
+                provide.body = None;
+                *unresolved
+                    .entry((provide.file.clone(), dto_ref))
+                    .or_insert(0) += 1;
+            }
+        }
+    }
+
+    for ((file, dto_ref), count) in unresolved {
+        let provide_word = if count == 1 { "provide" } else { "provides" };
+        warnings.push(format!(
+            "could not resolve request-body DTO `{dto_ref}` ({file}) to a known class shape — its {count} \
+             {provide_word} keep no body contract; the DTO class may live in an unanalyzed file"
+        ));
+    }
+}
+
 /// NestJS `app.setGlobalPrefix(...)` apply + strip — see `zzop_parser_typescript::adapters::global_prefix`'s
 /// module doc for why this rides the `provides` channel as a `nest-global-prefix` sentinel instead of a
 /// dedicated field.
@@ -185,9 +315,13 @@ pub(super) fn apply_and_strip_global_prefix(
     io_provides: &mut Vec<IoProvide>,
     warnings: &mut Vec<String>,
 ) {
+    // Bound to the parser's exported const (not a local literal) so a rename on the emit side
+    // cannot silently desynchronize the strip side — a leaked sentinel would reach output.
+    const SENTINEL_KIND: &str = zzop_parser_typescript::NEST_GLOBAL_PREFIX_KIND;
+
     let mut prefixes: Vec<String> = io_provides
         .iter()
-        .filter(|p| p.kind == "nest-global-prefix")
+        .filter(|p| p.kind == SENTINEL_KIND)
         .map(|p| p.key.clone())
         .collect();
     prefixes.sort();
@@ -216,7 +350,7 @@ pub(super) fn apply_and_strip_global_prefix(
         }
     }
 
-    io_provides.retain(|p| p.kind != "nest-global-prefix");
+    io_provides.retain(|p| p.kind != SENTINEL_KIND);
 }
 
 /// Prepends a global-route prefix (already leading-slash-stripped by the caller) onto an `http` provide
@@ -359,6 +493,7 @@ pub(crate) fn compose_trpc_provides(
                         format!("{}.{key}", path.join("."))
                     };
                     out.push(IoProvide {
+                        body: None,
                         kind: "trpc".to_string(),
                         key: format!("{verb} {full_path}"),
                         file: origin_rel.to_string(),
@@ -496,6 +631,8 @@ pub(crate) fn resolve_wrapper_consumes(
                 .filter(|p| p.starts_with('/'));
             let Some(path) = path else { continue };
             out.push(IoConsume {
+                client: None,
+                body: None,
                 kind: "http".to_string(),
                 key: Some(zzop_core::http_consume_interface_key(&method, &path)),
                 file: file.clone(),
@@ -514,6 +651,131 @@ pub(crate) fn resolve_wrapper_consumes(
     });
     out.dedup_by(|a, b| a.key == b.key && a.file == b.file && a.line == b.line);
     io_consumes.extend(out);
+}
+
+/// Axios `axios.defaults.baseURL` path-prefix apply + strip (`axios-defaults-base-v1`) — the
+/// CONSUME-side counterpart of [`apply_and_strip_global_prefix`]: see
+/// `zzop_parser_typescript::adapters::client_base`'s module doc for why this rides the `consumes`
+/// channel as a `"client-base-prefix"` sentinel (mirrors the `"nest-global-prefix"` sentinel-string
+/// convention that function's own doc describes) instead of a dedicated field.
+///
+/// ## Grouping
+/// Sentinels are grouped by `client` (today only `"axios"` is ever emitted, but the grouping itself is
+/// generic) so a future second recognizer's own base prefix can never cross-contaminate axios's. Within
+/// one client group:
+/// - Exactly one distinct sentinel path: every `http` consume tagged with that SAME `client` gets the
+///   path prepended (see "Apply" below).
+/// - 2+ distinct sentinel paths: nothing is applied for that client — ONE aggregated warning names the
+///   client, every distinct path, and the declaring `file:line` of each sentinel (honest degrade over
+///   guessing which one is real, same stance as [`apply_and_strip_global_prefix`]'s own multi-value
+///   case).
+/// - A sentinel with `key: None`, or a path that normalizes to empty/`"/"`: skipped defensively —
+///   `extract_client_base_prefix_marker` never emits these per its own doc, but this seam does not rely
+///   on that invariant holding.
+///
+/// ## Apply
+/// A consume is rewritten only when ALL of: `kind == "http"`, `client` equals the resolved client, `key`
+/// is `Some` (an unresolved consume is left exactly as unresolved — never guessed), and the key's path
+/// (everything after the first space) starts with `/` and does not carry a scheme (`://` — an absolute
+/// URL axios's `baseURL` never applies to). A matching key `"METHOD /path"` becomes
+/// `"METHOD /<prefix>/path"` — deliberately prepended even when `/path` already starts with the prefix
+/// (`"/api"` + `"/api/users"` -> `"/api/api/users"`), mirroring what the axios runtime actually does.
+///
+/// In every case every `"client-base-prefix"` sentinel is stripped from `io_consumes` unconditionally
+/// (even when conflicting/unapplied) — it must never reach output, the linker, or rules.
+///
+/// ## Placement (load-bearing)
+/// Must run AFTER [`late_resolve_cross_file_consumes`] — that pass fills `key` IN PLACE and preserves
+/// the `client` tag, so a late-resolved axios consume still gets the prefix; this tag preservation is
+/// the load-bearing ordering constraint. Sitting after [`resolve_wrapper_consumes`] is only "after the
+/// last consume-mutating pass" hygiene: wrapper-emitted consumes carry `client: None` and are
+/// DELIBERATELY never prefixed (custom wrappers stay uninterpreted — overlay territory). Must stay
+/// BEFORE `io_consumes` is frozen into `MinimalIr::io` / read by any whole-tree rule
+/// (`unprovided-consume`) or the cross-layer linker — see `zzop_engine::analyze::mod`'s call site.
+pub(crate) fn apply_client_base_prefixes(
+    io_consumes: &mut Vec<IoConsume>,
+    warnings: &mut Vec<String>,
+) {
+    // Bound to the parser's exported const (not a local literal) so a rename on the emit side
+    // cannot silently desynchronize the strip side — a leaked sentinel would reach output.
+    const SENTINEL_KIND: &str = zzop_parser_typescript::CLIENT_BASE_PREFIX_KIND;
+
+    // client -> every sentinel naming it: (normalized path, file, line) — collected before any mutation
+    // so the resolve step below can see every candidate for a client regardless of iteration order.
+    let mut by_client: BTreeMap<String, Vec<(String, String, u32)>> = BTreeMap::new();
+    for c in io_consumes.iter() {
+        if c.kind != SENTINEL_KIND {
+            continue;
+        }
+        let Some(client) = c.client.clone() else {
+            continue; // defensive: the parser always tags a sentinel's client
+        };
+        let Some(key) = c.key.as_deref() else {
+            continue; // defensive: the parser never emits a keyless sentinel
+        };
+        let path = key.trim_matches('/');
+        if path.is_empty() {
+            continue; // defensive: an empty/"/" base has no path part to prepend
+        }
+        by_client
+            .entry(client)
+            .or_default()
+            .push((path.to_string(), c.file.clone(), c.line));
+    }
+
+    // Resolve each client group to exactly one applicable prefix, or none (never-guess on conflict).
+    let mut prefixes: HashMap<String, String> = HashMap::new();
+    for (client, entries) in &by_client {
+        let mut distinct: Vec<&str> = entries.iter().map(|(p, _, _)| p.as_str()).collect();
+        distinct.sort();
+        distinct.dedup();
+        match distinct.as_slice() {
+            [] => {}
+            [path] => {
+                prefixes.insert(client.clone(), (*path).to_string());
+            }
+            _ => {
+                let mut sorted_entries = entries.clone();
+                sorted_entries.sort_by(|a, b| {
+                    a.0.cmp(&b.0)
+                        .then_with(|| a.1.cmp(&b.1))
+                        .then_with(|| a.2.cmp(&b.2))
+                });
+                let detail: Vec<String> = sorted_entries
+                    .iter()
+                    .map(|(p, f, l)| format!("/{p} ({f}:{l})"))
+                    .collect();
+                warnings.push(format!(
+                    "multiple axios.defaults.baseURL values found for client `{client}`: [{}]; skipping baseURL prefix rewrite",
+                    detail.join(", ")
+                ));
+            }
+        }
+    }
+
+    for c in io_consumes.iter_mut() {
+        if c.kind != "http" {
+            continue;
+        }
+        let Some(client) = c.client.as_deref() else {
+            continue;
+        };
+        let Some(prefix) = prefixes.get(client) else {
+            continue;
+        };
+        let Some(key) = c.key.as_deref() else {
+            continue; // unresolved — never guessed
+        };
+        let Some((verb, path)) = key.split_once(' ') else {
+            continue; // defensive: never produced by http_consume_interface_key
+        };
+        if !path.starts_with('/') || path.contains("://") {
+            continue; // external/absolute-URL key — axios ignores baseURL for those
+        }
+        c.key = Some(format!("{verb} /{prefix}{path}"));
+    }
+
+    io_consumes.retain(|c| c.kind != SENTINEL_KIND);
 }
 
 /// Compose whole-tree `http` PROVIDEs from per-file router-mount fragments
@@ -630,6 +892,7 @@ pub(crate) fn compose_router_mount_provides(
                 } => {
                     let full = join_prefix(prefix, path);
                     out.push(IoProvide {
+                        body: None,
                         kind: "http".to_string(),
                         key: zzop_core::http_interface_key(method, &full),
                         file: file.to_string(),
@@ -683,6 +946,8 @@ mod late_resolve_tests {
 
     fn unresolved(raw: &str, method: &str) -> IoConsume {
         IoConsume {
+            client: None,
+            body: None,
             kind: "http".to_string(),
             key: None,
             file: "src/caller.ts".to_string(),
@@ -757,6 +1022,7 @@ mod global_prefix_tests {
 
     fn http_provide(key: &str, file: &str) -> IoProvide {
         IoProvide {
+            body: None,
             kind: "http".to_string(),
             key: key.to_string(),
             file: file.to_string(),
@@ -767,7 +1033,8 @@ mod global_prefix_tests {
 
     fn prefix_marker(key: &str) -> IoProvide {
         IoProvide {
-            kind: "nest-global-prefix".to_string(),
+            body: None,
+            kind: zzop_parser_typescript::NEST_GLOBAL_PREFIX_KIND.to_string(),
             key: key.to_string(),
             file: "main.ts".to_string(),
             line: 1,
@@ -843,6 +1110,7 @@ mod global_prefix_tests {
         // A non-"http" provide (e.g. "trpc") must not be touched by the rewrite.
         let mut provides = vec![
             IoProvide {
+                body: None,
                 kind: "trpc".to_string(),
                 key: "GET /articles".to_string(),
                 file: "t.ts".to_string(),
@@ -1684,6 +1952,7 @@ mod controller_prefix_compose_tests {
         symbol: &str,
     ) -> ControllerPrefixRouteFragment {
         ControllerPrefixRouteFragment {
+            body: None,
             prefix_ref: prefix_ref.to_string(),
             verb: verb.to_string(),
             path: path.to_string(),
@@ -1807,6 +2076,30 @@ mod controller_prefix_compose_tests {
         };
         assert_eq!(view(&out1), view(&out2));
     }
+
+    #[test]
+    fn body_shape_is_carried_through_onto_the_composed_provide() {
+        // `ControllerPrefixRouteFragment.body` (`body-shape-v1`) must survive the prefix-ref join
+        // unchanged — `resolve_provide_body_refs` resolves its `dto_ref` in a LATER pass, over whatever
+        // `io_provides` holds by then, this composer included.
+        let mut with_body = frag("RouteKey.Asset", "POST", "", 1, "create");
+        with_body.body = Some(zzop_core::ProvideBodyShape {
+            sub_key: None,
+            dto_ref: Some("CreateAssetDto".to_string()),
+            fields: Vec::new(),
+            complete: false,
+        });
+        let fragments = vec![("asset.controller.ts".to_string(), vec![with_body])];
+        let mut warnings = Vec::new();
+        let out = compose_controller_prefix_provides(
+            fragments,
+            &consts(&[("RouteKey.Asset", "assets")]),
+            &mut warnings,
+        );
+        assert_eq!(out.len(), 1);
+        let body = out[0].body.as_ref().expect("body carried through");
+        assert_eq!(body.dto_ref.as_deref(), Some("CreateAssetDto"));
+    }
 }
 
 #[cfg(test)]
@@ -1836,5 +2129,375 @@ mod merge_const_map_fragments_tests {
                 .map(String::as_str),
             Some("from-a")
         );
+    }
+}
+
+#[cfg(test)]
+mod resolve_provide_body_refs_tests {
+    //! Coverage for `resolve_provide_body_refs`: successful ref resolution (fields/complete copied,
+    //! `dto_ref` cleared), a conflicting duplicate class name poisoning that name (with an aggregated
+    //! warning), a missing ref dropping the whole `body` (with an aggregated warning), and an identical
+    //! duplicate across 2 files resolving normally with no warning.
+    use super::*;
+    use zzop_core::{ClassShapeFragment, ProvideBodyField, ProvideBodyShape};
+
+    fn class(name: &str, fields: &[(&str, bool)], complete: bool) -> ClassShapeFragment {
+        ClassShapeFragment {
+            name: name.to_string(),
+            fields: fields
+                .iter()
+                .map(|(n, optional)| ProvideBodyField {
+                    name: n.to_string(),
+                    optional: *optional,
+                })
+                .collect(),
+            complete,
+        }
+    }
+
+    fn provide_with_ref(file: &str, line: u32, dto_ref: &str) -> IoProvide {
+        IoProvide {
+            body: Some(ProvideBodyShape {
+                sub_key: None,
+                dto_ref: Some(dto_ref.to_string()),
+                fields: Vec::new(),
+                complete: false,
+            }),
+            kind: "http".to_string(),
+            key: "POST /api/users".to_string(),
+            file: file.to_string(),
+            line,
+            symbol: None,
+        }
+    }
+
+    #[test]
+    fn resolved_ref_copies_fields_and_complete_and_clears_dto_ref() {
+        let mut provides = vec![provide_with_ref("controller.ts", 10, "CreateUserDto")];
+        let class_shapes = vec![(
+            "dto.ts".to_string(),
+            vec![class(
+                "CreateUserDto",
+                &[("name", false), ("nickname", true)],
+                true,
+            )],
+        )];
+        let mut warnings = Vec::new();
+        resolve_provide_body_refs(&mut provides, class_shapes, &mut warnings);
+        assert!(warnings.is_empty());
+        let body = provides[0].body.as_ref().unwrap();
+        assert_eq!(body.dto_ref, None);
+        assert!(body.complete);
+        let names: Vec<&str> = body.fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, vec!["name", "nickname"]);
+        assert!(!body.fields[0].optional);
+        assert!(body.fields[1].optional);
+    }
+
+    #[test]
+    fn conflicting_duplicate_class_shape_poisons_the_name_and_warns_on_both_sides() {
+        // Two warnings are expected: one aggregated warning naming the class + conflicting files (the
+        // MERGE step's honest-degrade), and one aggregated warning naming the dropped provide(s) (the
+        // PROVIDE-resolution step's honest-degrade) — distinct concerns, both disclosed.
+        let mut provides = vec![provide_with_ref("controller.ts", 10, "CreateUserDto")];
+        let class_shapes = vec![
+            (
+                "a.ts".to_string(),
+                vec![class("CreateUserDto", &[("name", false)], true)],
+            ),
+            (
+                "b.ts".to_string(),
+                vec![class(
+                    "CreateUserDto",
+                    &[("name", false), ("email", false)],
+                    true,
+                )],
+            ),
+        ];
+        let mut warnings = Vec::new();
+        resolve_provide_body_refs(&mut provides, class_shapes, &mut warnings);
+        assert!(provides[0].body.is_none(), "poisoned ref drops the body");
+        assert_eq!(warnings.len(), 2);
+        let conflict_warning = warnings
+            .iter()
+            .find(|w| w.contains("conflicting"))
+            .expect("a conflicting-shape warning");
+        assert!(conflict_warning.contains("CreateUserDto"));
+        assert!(conflict_warning.contains("a.ts"));
+        assert!(conflict_warning.contains("b.ts"));
+        let drop_warning = warnings
+            .iter()
+            .find(|w| w.contains("could not resolve"))
+            .expect("a dropped-provide warning");
+        assert!(drop_warning.contains("CreateUserDto"));
+        assert!(drop_warning.contains("controller.ts"));
+    }
+
+    #[test]
+    fn unreferenced_conflicting_class_shape_stays_silent() {
+        // Class-shape fragments cover EVERY class declaration, so same-name/different-shape
+        // non-DTO classes (`Config`, `Options`, ...) are common and legitimate — a collision no
+        // provide's `dto_ref` references must not warn (that would disclose a drop that never
+        // happened: a phantom disclosure).
+        let mut provides = vec![provide_with_ref("controller.ts", 10, "CreateUserDto")];
+        let class_shapes = vec![
+            (
+                "a.ts".to_string(),
+                vec![
+                    class("CreateUserDto", &[("name", false)], true),
+                    class("Options", &[("a", false)], true),
+                ],
+            ),
+            (
+                "b.ts".to_string(),
+                vec![class("Options", &[("b", false)], true)],
+            ),
+        ];
+        let mut warnings = Vec::new();
+        resolve_provide_body_refs(&mut provides, class_shapes, &mut warnings);
+        assert!(
+            warnings.is_empty(),
+            "unreferenced collision must not warn: {warnings:?}"
+        );
+        let body = provides[0].body.as_ref().unwrap();
+        assert_eq!(
+            body.dto_ref, None,
+            "the referenced ref still resolves normally"
+        );
+    }
+
+    #[test]
+    fn identical_duplicate_class_shape_across_two_files_resolves_without_warning() {
+        let mut provides = vec![provide_with_ref("controller.ts", 10, "CreateUserDto")];
+        let class_shapes = vec![
+            (
+                "a.ts".to_string(),
+                vec![class("CreateUserDto", &[("name", false)], true)],
+            ),
+            (
+                "b.ts".to_string(),
+                vec![class("CreateUserDto", &[("name", false)], true)],
+            ),
+        ];
+        let mut warnings = Vec::new();
+        resolve_provide_body_refs(&mut provides, class_shapes, &mut warnings);
+        assert!(warnings.is_empty());
+        let body = provides[0].body.as_ref().unwrap();
+        assert_eq!(body.dto_ref, None);
+    }
+
+    #[test]
+    fn missing_ref_drops_the_whole_body_and_warns_with_a_count() {
+        let mut provides = vec![
+            provide_with_ref("controller.ts", 10, "CreateUserDto"),
+            provide_with_ref("controller.ts", 20, "CreateUserDto"),
+        ];
+        let mut warnings = Vec::new();
+        resolve_provide_body_refs(&mut provides, Vec::new(), &mut warnings);
+        assert!(provides[0].body.is_none());
+        assert!(provides[1].body.is_none());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("CreateUserDto"));
+        assert!(warnings[0].contains("controller.ts"));
+        assert!(warnings[0].contains("2 provides"));
+    }
+
+    #[test]
+    fn provide_with_no_dto_ref_is_left_untouched() {
+        let mut provides = vec![IoProvide {
+            body: Some(ProvideBodyShape {
+                sub_key: None,
+                dto_ref: None,
+                fields: vec![ProvideBodyField {
+                    name: "name".to_string(),
+                    optional: false,
+                }],
+                complete: true,
+            }),
+            kind: "http".to_string(),
+            key: "POST /api/users".to_string(),
+            file: "controller.ts".to_string(),
+            line: 1,
+            symbol: None,
+        }];
+        let mut warnings = Vec::new();
+        resolve_provide_body_refs(&mut provides, Vec::new(), &mut warnings);
+        assert!(warnings.is_empty());
+        assert!(provides[0].body.is_some());
+    }
+}
+
+#[cfg(test)]
+mod client_base_prefix_tests {
+    //! Coverage for `apply_client_base_prefixes`: the single-prefix apply, client-scoping (a
+    //! differently- or un-tagged consume is untouched), the external/absolute-URL and unresolved
+    //! never-touch gates, non-`http`-kind gating, the conflicting-sentinels honest degrade, the
+    //! same-path duplicate-sentinel no-warning case, and the deliberate double-prefix idempotence
+    //! pin.
+    use super::*;
+
+    fn sentinel(path: &str, client: &str, file: &str, line: u32) -> IoConsume {
+        IoConsume {
+            client: Some(client.to_string()),
+            body: None,
+            kind: "client-base-prefix".to_string(),
+            key: Some(path.to_string()),
+            file: file.to_string(),
+            line,
+            raw: None,
+            method: None,
+        }
+    }
+
+    fn http_consume(key: &str, client: Option<&str>, file: &str, line: u32) -> IoConsume {
+        IoConsume {
+            client: client.map(str::to_string),
+            body: None,
+            kind: "http".to_string(),
+            key: Some(key.to_string()),
+            file: file.to_string(),
+            line,
+            raw: None,
+            method: None,
+        }
+    }
+
+    fn unresolved_consume(client: Option<&str>, raw: &str, file: &str, line: u32) -> IoConsume {
+        IoConsume {
+            client: client.map(str::to_string),
+            body: None,
+            kind: "http".to_string(),
+            key: None,
+            file: file.to_string(),
+            line,
+            raw: Some(raw.to_string()),
+            method: Some("GET".to_string()),
+        }
+    }
+
+    #[test]
+    fn single_prefix_rewrites_axios_tagged_http_consumes_and_strips_the_sentinel() {
+        let mut consumes = vec![
+            sentinel("/api", "axios", "src/bootstrap.ts", 3),
+            http_consume("GET /users", Some("axios"), "src/api/users.ts", 10),
+        ];
+        let mut warnings = Vec::new();
+        apply_client_base_prefixes(&mut consumes, &mut warnings);
+        assert_eq!(consumes.len(), 1);
+        assert_eq!(consumes[0].key.as_deref(), Some("GET /api/users"));
+        assert!(warnings.is_empty());
+        assert!(consumes.iter().all(|c| c.kind != "client-base-prefix"));
+    }
+
+    #[test]
+    fn non_axios_tagged_consume_is_untouched() {
+        // `client: None` and `client: Some("fetch")` both must be left alone — the prefix is
+        // scoped to the SAME client tag the sentinel names.
+        let mut consumes = vec![
+            sentinel("/api", "axios", "src/bootstrap.ts", 3),
+            http_consume("GET /users", None, "src/a.ts", 1),
+            http_consume("GET /orders", Some("fetch"), "src/b.ts", 2),
+        ];
+        let mut warnings = Vec::new();
+        apply_client_base_prefixes(&mut consumes, &mut warnings);
+        assert_eq!(consumes.len(), 2);
+        assert_eq!(consumes[0].key.as_deref(), Some("GET /users"));
+        assert_eq!(consumes[1].key.as_deref(), Some("GET /orders"));
+    }
+
+    #[test]
+    fn absolute_url_key_is_untouched() {
+        let mut consumes = vec![
+            sentinel("/api", "axios", "src/bootstrap.ts", 3),
+            http_consume("GET https://x.io/users", Some("axios"), "src/a.ts", 1),
+        ];
+        let mut warnings = Vec::new();
+        apply_client_base_prefixes(&mut consumes, &mut warnings);
+        assert_eq!(consumes.len(), 1);
+        assert_eq!(consumes[0].key.as_deref(), Some("GET https://x.io/users"));
+    }
+
+    #[test]
+    fn unresolved_consume_key_is_untouched() {
+        let mut consumes = vec![
+            sentinel("/api", "axios", "src/bootstrap.ts", 3),
+            unresolved_consume(Some("axios"), "axios.get(url)", "src/a.ts", 1),
+        ];
+        let mut warnings = Vec::new();
+        apply_client_base_prefixes(&mut consumes, &mut warnings);
+        assert_eq!(consumes.len(), 1);
+        assert_eq!(consumes[0].key, None);
+        assert_eq!(consumes[0].raw.as_deref(), Some("axios.get(url)"));
+    }
+
+    #[test]
+    fn conflicting_sentinels_apply_nothing_and_warn_once_naming_both() {
+        let mut consumes = vec![
+            sentinel("/api", "axios", "src/a.ts", 1),
+            sentinel("/v2", "axios", "src/b.ts", 2),
+            http_consume("GET /users", Some("axios"), "src/c.ts", 10),
+        ];
+        let mut warnings = Vec::new();
+        apply_client_base_prefixes(&mut consumes, &mut warnings);
+        assert_eq!(consumes.len(), 1);
+        assert_eq!(consumes[0].key.as_deref(), Some("GET /users")); // unchanged — never guess
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("axios"));
+        assert!(warnings[0].contains("/api"));
+        assert!(warnings[0].contains("src/a.ts:1"));
+        assert!(warnings[0].contains("/v2"));
+        assert!(warnings[0].contains("src/b.ts:2"));
+        assert!(consumes.iter().all(|c| c.kind != "client-base-prefix"));
+    }
+
+    #[test]
+    fn duplicate_sentinels_with_the_same_path_apply_once_with_no_warning() {
+        let mut consumes = vec![
+            sentinel("/api", "axios", "src/a.ts", 1),
+            sentinel("/api", "axios", "src/b.ts", 2),
+            http_consume("GET /users", Some("axios"), "src/c.ts", 10),
+        ];
+        let mut warnings = Vec::new();
+        apply_client_base_prefixes(&mut consumes, &mut warnings);
+        assert_eq!(consumes.len(), 1);
+        assert_eq!(consumes[0].key.as_deref(), Some("GET /api/users"));
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn non_http_kind_with_axios_tag_is_untouched() {
+        // Shouldn't exist in practice (only `http` consumes carry a client tag today), but the
+        // gate must be on `kind`, not merely on the client tag being present.
+        let mut consumes = vec![
+            sentinel("/api", "axios", "src/a.ts", 1),
+            IoConsume {
+                client: Some("axios".to_string()),
+                body: None,
+                kind: "trpc".to_string(),
+                key: Some("GET users".to_string()),
+                file: "src/c.ts".to_string(),
+                line: 1,
+                raw: None,
+                method: None,
+            },
+        ];
+        let mut warnings = Vec::new();
+        apply_client_base_prefixes(&mut consumes, &mut warnings);
+        assert_eq!(consumes.len(), 1);
+        assert_eq!(consumes[0].key.as_deref(), Some("GET users"));
+    }
+
+    #[test]
+    fn prefix_already_present_in_the_path_is_still_prepended() {
+        // Deliberate: the axios runtime really does double it (`baseURL: '/api'` + a call site
+        // that itself already resolves to `/api/users` -> the wire request really goes to
+        // `/api/api/users`). Pins the semantic rather than trying to detect/dedupe it.
+        let mut consumes = vec![
+            sentinel("/api", "axios", "src/a.ts", 1),
+            http_consume("GET /api/users", Some("axios"), "src/c.ts", 10),
+        ];
+        let mut warnings = Vec::new();
+        apply_client_base_prefixes(&mut consumes, &mut warnings);
+        assert_eq!(consumes[0].key.as_deref(), Some("GET /api/api/users"));
     }
 }

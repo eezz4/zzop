@@ -46,6 +46,10 @@ never changes the exit code — that's always computed from the full, unfiltered
 | `1` | At least one finding at or above `failOn` (CI gate). |
 | `2` | Config or usage error. |
 
+When `failOn` is omitted from `zzop.config.jsonc`, it defaults to `"warn"` — so a first run against an
+existing codebase exiting `1` is normal, not a bug; adjust `failOn` (or clear the findings) once you've
+looked at the report.
+
 **Every run also writes a Markdown report to disk by default** — the hand-off surface for a cross-repo
 review (e.g. a frontend agent reviewing a backend, or attaching results to a PR): `./zzop-reports/
 zzop.<epoch-seconds>/` gets one `<sourceId>.md` per analyzed tree, plus a `cross-repo.md` summary (edges,
@@ -74,11 +78,14 @@ Full semantics (lookback window, regex-escaping, which matchers support it) in
 [rules/dsl-reference.md](rules/dsl-reference.md#suppress-marker-semantics).
 
 **(b) Config-level (per project, in `zzop.config.jsonc`).** Turn a rule off, override its severity, or
-drop it for matching file paths:
+drop it for matching file paths. Keys are matched by exact rule id: a DSL rule's id is the full
+`"{pack}/{rule}"` string (e.g. `sql/nplus1`, `sql/race-condition-toctou`), while a native analysis id
+is used as-is (e.g. `dead-candidates` — and note some native ids contain a slash of their own, like
+`cross-layer/unconsumed-endpoint`; that slash is part of the native id, not a pack prefix):
 
 ```jsonc
 "rules": {
-  "no-explicit-any": "off",
+  "typescript/no-explicit-any": "off",
   "dead-candidates": { "exclude": ["**/app/**/{page,layout,route}.tsx"] }
 }
 ```
@@ -96,7 +103,7 @@ pass `suppressions` (finding-level accept-list by rule + path/glob), `disabledRu
 
 Full field shapes in [modules/napi.md](modules/napi.md) (see `AnalyzeRequest`).
 
-**(d) Caveat: native cross-layer analyses are disable-only.** The 20 `cross-layer/*` native rules (run
+**(d) Caveat: native cross-layer analyses are disable-only.** The `cross-layer/*` native rules (run
 over `analyzeTrees`' joined IO graph) have no source line to anchor an inline marker against — silence
 one only via `disabledRules`/config `rules` `"off"`, never a comment. See
 [modules/napi.md](modules/napi.md) for why (no single tree owns a cross-layer finding).

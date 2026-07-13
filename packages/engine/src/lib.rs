@@ -49,7 +49,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use zzop_core::{
-    dsl::RuleTiming, CommonIr, FileNode, Finding, RuleConfig, RulePackDef, RuleRegistry, SourceIo,
+    dsl::RuleTiming, CommonIr, ConsumeBodyShape, FileNode, Finding, ProvideBodyShape, RuleConfig,
+    RulePackDef, RuleRegistry, SourceIo,
 };
 use zzop_metrics::{
     CriticalFile, CrossLayerCoChurn, FolderAggregates, HealthIndex, Recommendation, Scores,
@@ -288,7 +289,7 @@ pub struct MultiAnalyzeOutput {
     /// `(root, config.source_id, output)` for each input tree, in the same order as `trees`.
     pub trees: Vec<(PathBuf, String, AnalyzeOutput)>,
     pub cross_layer: zzop_core::CrossLayerResult,
-    /// The 22 `cross-layer/*` native rules run over `cross_layer` — see `compute_cross_layer_findings`'s
+    /// The 23 `cross-layer/*` native rules run over `cross_layer` — see `compute_cross_layer_findings`'s
     /// doc for the gating/derivation/sort contract. Always populated: even a single-tree `analyze_trees`
     /// call runs these (most find nothing, since e.g. `shared-db-table`/`duplicate-route` need 2+
     /// distinct source trees to ever fire).
@@ -405,7 +406,7 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
     }
 }
 
-/// Runs the 22 `cross-layer/*` native rules (`zzop_rules_cross_layer::cross_layer`) over `cross_layer` and
+/// Runs the 23 `cross-layer/*` native rules (`zzop_rules_cross_layer::cross_layer`) over `cross_layer` and
 /// returns their merged, sorted findings.
 ///
 /// ## disabledRules gating: union, exclude-only
@@ -461,7 +462,33 @@ fn compute_cross_layer_findings(
         })
         .collect();
 
-    let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(22);
+    // `cross-layer/body-field-drift`'s lookup maps — keyed exactly like `HttpProvideSite`/edge anchors
+    // are derived, `(source, file, line)`, so a rule can join an edge's `from`/`to` straight into these
+    // without re-deriving anything. Only entries whose `body` is `Some` are worth keeping (an edge whose
+    // consume/provide never witnessed a body shape can never drift-compare). On a duplicate key, the
+    // FIRST occurrence wins for consumes (same call site => same witnessed body, so any duplicate is
+    // spurious re-collection, never a real second body); a duplicate provide key is likewise first-wins
+    // (same handler declaration site).
+    let mut consume_bodies: BTreeMap<(String, String, u32), ConsumeBodyShape> = BTreeMap::new();
+    let mut provide_bodies: BTreeMap<(String, String, u32), ProvideBodyShape> = BTreeMap::new();
+    for s in source_ios {
+        for c in s.io.consumes.iter().filter(|c| c.kind == "http") {
+            if let Some(body) = &c.body {
+                consume_bodies
+                    .entry((s.source.clone(), c.file.clone(), c.line))
+                    .or_insert_with(|| body.clone());
+            }
+        }
+        for p in s.io.provides.iter().filter(|p| p.kind == "http") {
+            if let Some(body) = &p.body {
+                provide_bodies
+                    .entry((s.source.clone(), p.file.clone(), p.line))
+                    .or_insert_with(|| body.clone());
+            }
+        }
+    }
+
+    let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(23);
 
     // `route_near_miss_results` is called ONCE here (ahead of its own position in `sources` order below) so
     // both `unconsumed-endpoint` and `unconsumed-mutation-endpoint` can annotate a provide that is also a
@@ -620,6 +647,13 @@ fn compute_cross_layer_findings(
     if zzop_core::is_enabled(&gate, "cross-layer/unconsumed-procedure") {
         sources.push(zzop_rules_cross_layer::unconsumed_procedure_findings(
             &cross_layer.unconsumed_provides,
+        ));
+    }
+    if zzop_core::is_enabled(&gate, "cross-layer/body-field-drift") {
+        sources.push(zzop_rules_cross_layer::body_field_drift_findings(
+            &cross_layer.edges,
+            &consume_bodies,
+            &provide_bodies,
         ));
     }
 
