@@ -178,6 +178,19 @@ pub(crate) fn path_segments(path: &str) -> Vec<&str> {
     path.split('/').filter(|s| !s.is_empty()).collect()
 }
 
+/// Consume-side minimum-information gate for the near-miss rules.
+///
+/// True when every segment is the opaque `{}` placeholder (or the path has no
+/// segments at all). Such keys are typically head-drop artifacts (e.g.
+/// `` `${base}/${x}` `` keying as `GET /{}`): they carry zero literal evidence,
+/// so a near-miss suggestion computed from them is vacuous — an all-slot key
+/// "resembles" every same-length route. Deliberately asymmetric: only consume
+/// keys are gated. An all-slot *provide* is a declared catch-all route (e.g.
+/// `app.get('/:page')`) and remains a legitimate suggestion target.
+pub(crate) fn is_all_slot_path(segments: &[&str]) -> bool {
+    segments.iter().all(|s| *s == "{}")
+}
+
 /// An `http` provide whose path carries a literal `trpc` segment (`/api/trpc/{}`, `/trpc/{}`, ...) —
 /// the shape `file_routes`'s Next.js `pages/api/**`/app-router conventions produce for a tRPC adapter
 /// mount file (`createNextApiHandler`/`fetchRequestHandler`, ...).
@@ -337,4 +350,17 @@ pub(crate) fn split_external_key(key: &str) -> Option<ExternalUrl<'_>> {
         path,
         query,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_all_slot_path_pins_the_gate_shape() {
+        assert!(is_all_slot_path(&["{}"]));
+        assert!(is_all_slot_path(&["{}", "{}"]));
+        assert!(is_all_slot_path(&[]));
+        assert!(!is_all_slot_path(&["users", "{}"]));
+    }
 }

@@ -45,6 +45,7 @@ rules/native/rules-graph/src/dead_candidates.rs:DEAD_MAX_CHANGES
 rules/native/rules-http/src/http_scan.rs:OK_MARKER_LOOKBACK_LINES
 rules/native/rules-http/src/http_scan.rs:SAFE_METHODS
 rules/native/rules-http/src/http_scan.rs:WRITE_HTTP_METHODS
+rules/native/rules-http/src/unprovided_consume.rs:MIN_FOREIGN_UNPROVIDED_GROUP
 rules/native/rules-schema/src/structural.rs:GOD_THRESHOLD
 rules/native/rules-schema/src/structural.rs:LOOKUP_FIELD_MAX
 rules/native/rules-schema/src/structural.rs:MONEY_TOKENS

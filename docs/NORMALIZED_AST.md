@@ -79,8 +79,9 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     an `IoConsume` may carry `client: "axios"` naming the HTTP client that produced the call site.
     `client` is a free-form string (`Option<String>` in `packages/core/src/io.rs`), not a closed enum —
     the native TS parser's own recognizers currently tag `"axios"`, `"ky"`, `"fetch"`, `"$fetch"`,
-    `"oazapfts"`, and `"angular"`, but those are examples of the vocabulary in active use, not an
-    exhaustive or enforced list. Client-SCOPED normalization seams (e.g. the engine's
+    and `"angular"`, but those are examples of the vocabulary in active use, not an exhaustive or
+    enforced list — a generated-SDK injection adapter (e.g. for oazapfts) is free to set its own
+    `client` tag. Client-SCOPED normalization seams (e.g. the engine's
     `axios.defaults.baseURL` path-prefix application) act only on consumes tagged with their client
     and leave untagged consumes untouched — an external producer that doesn't tag simply opts out.
   - OPTIONAL request-body evidence (additive since `body-shape-v1`; omit both and nothing changes): an
@@ -254,6 +255,12 @@ output or a rule:
 
 If your framework has an equivalent concept (a global route prefix, a per-client base URL), fold it into
 the normalized `key` you emit yourself rather than trying to reproduce either native rewrite.
+
+Deployment-topology `mounts`/`mountedAt` (config-declared, not a sentinel kind — see
+[packages/cli/README.md](../packages/cli/README.md#connection-topology)) are NOT part of the reserved-kind
+drop above: they apply uniformly to Mode A envelopes and natively-parsed trees alike, at the structurally
+equivalent seam after fragment composition and before the IO freeze — a config mount rewrites a Mode A
+tree's `http` provide keys exactly like it would a native tree's.
 
 ## Adapter overlays
 

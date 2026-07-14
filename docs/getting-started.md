@@ -19,7 +19,8 @@ npx zzop           # analyzes using that config and prints a report
 dev dependency, drop the `npx` prefix if you add a `package.json` script, or keep it for one-off runs.
 
 See [`packages/cli/README.md`](../packages/cli/README.md) for the full `zzop.config.jsonc` schema
-(`roots`/`trees`, `packs`, `rules`, `git`, `cacheDir`, `sizeCap`, `format`, `report`, `failOn`).
+(`roots`/`trees` — including per-tree `mountedAt`/`mounts`/`hosts` connection topology — `packs`, `rules`,
+`git`, `cacheDir`, `sizeCap`, `format`, `report`, `failOn`).
 
 ## Reading the output
 

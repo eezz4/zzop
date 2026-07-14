@@ -54,7 +54,9 @@ pub use lang::write_site::{
 /// - `v3` -> `v4`: NestJS-style `@Controller`/`@Get`/... route PROVIDES extraction.
 /// - `late-resolve-v1`: `IoConsume::method` now set on unresolved consumes; added the late cross-file
 ///   constant re-resolution substrate (`const_map_fragment`/`resolve_raw_path`).
-/// - `oazapfts-v1`: recognizes the oazapfts-generated-SDK call family in HTTP egress.
+/// - `oazapfts-v1`: recognizes the oazapfts-generated-SDK call family in HTTP egress. RETIRED by
+///   `oazapfts-removed-v1` below (decision: generated SDKs are injection adapters, not engine vocab) —
+///   left here so the marker's history stays readable; the recognition itself no longer exists.
 /// - `trpc-v1`: tRPC consume extraction plus per-file tRPC router fragments.
 /// - `router-mounts-v1`: code-registered router-mount fragments (Hono-style), replacing the old
 ///   line-based route extractor — sees chained builders and cross-file mounts it couldn't before.
@@ -128,7 +130,13 @@ pub use lang::write_site::{
 ///   ignored — deploy config, not contract; same effective-URL stance as the openapi adapter's
 ///   `servers[].url` handling). Non-literal base values stay uninterpreted (adapter overlays cover
 ///   them) — see `adapters::client_base`.
-pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2+angular-httpclient-v1+str-concat-url-v1+loop-spans-v1+pathname-dispatch-v1+base-carrier-drop-v1+body-shape-v1+axios-defaults-base-v1";
+/// - `oazapfts-removed-v1`: oazapfts recognition removed from HTTP egress (the `oazapfts-v1` call
+///   family, its `method`/`body` wrapper-unwrap reads, and the trailing `QS.`-suffix template drop) —
+///   generated SDKs are injection adapters, not engine vocab; the vocabulary moves to
+///   `examples/oazapfts-adapter`. Extraction output changes (fewer consumes recognized, a trailing
+///   `QS.` interpolation now keys as an ordinary `{}` placeholder instead of being dropped), so cached
+///   entries from before this marker must not be served as fresh.
+pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2+angular-httpclient-v1+str-concat-url-v1+loop-spans-v1+pathname-dispatch-v1+base-carrier-drop-v1+body-shape-v1+axios-defaults-base-v1+oazapfts-removed-v1";
 
 use std::collections::{HashMap, HashSet};
 

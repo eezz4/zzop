@@ -229,7 +229,7 @@
         },
         "client": {
           "type": ["string", "null"],
-          "description": "Which client recognizer produced this consume (\"axios\", \"ky\", \"fetch\", \"$fetch\", \"oazapfts\", \"angular\") — provenance for client-scoped normalization seams (e.g. an axios.defaults.baseURL path prefix must apply to axios call sites only). null = producer doesn't tag (older envelopes, non-egress kinds); a client-scoped seam then leaves the consume untouched. Omittable, or explicit null."
+          "description": "Which client recognizer produced this consume (\"axios\", \"ky\", \"fetch\", \"$fetch\", \"angular\", or a custom tag set by a generated-SDK injection adapter) — provenance for client-scoped normalization seams (e.g. an axios.defaults.baseURL path prefix must apply to axios call sites only). null = producer doesn't tag (older envelopes, non-egress kinds); a client-scoped seam then leaves the consume untouched. Omittable, or explicit null."
         }
       }
     },

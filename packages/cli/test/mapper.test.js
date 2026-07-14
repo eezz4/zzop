@@ -374,3 +374,133 @@ test('collectConfigWarnings covers trees[i].overlays too, naming the tree', () =
   });
   assert.ok(warnings.some((w) => /does-not-exist\.json/.test(w)));
 });
+
+// -------------------------------------------------------------------------------------------------
+// Connection topology: trees[i].mountedAt / trees[i].mounts / trees[i].hosts.
+// -------------------------------------------------------------------------------------------------
+
+test('trees[i].mountedAt/mounts/hosts map through to the tree request', () => {
+  const { method, request } = configToRequest({
+    trees: [
+      {
+        root: './api',
+        sourceId: 'api',
+        mountedAt: '/gateway',
+        mounts: [{ dir: 'apps/admin', at: '/admin' }],
+        hosts: ['internal.example.com'],
+      },
+    ],
+  });
+  assert.equal(method, 'analyzeTrees');
+  assert.equal(request.trees[0].mountedAt, '/gateway');
+  assert.deepEqual(request.trees[0].mounts, [{ dir: 'apps/admin', at: '/admin' }]);
+  assert.deepEqual(request.trees[0].hosts, ['internal.example.com']);
+});
+
+test('multi-tree topology: each tree carries its own mountedAt/mounts/hosts independently', () => {
+  const { request } = configToRequest({
+    trees: [
+      { root: './api', sourceId: 'api', mountedAt: '/api' },
+      { root: './web', sourceId: 'web', hosts: ['web.internal'] },
+    ],
+  });
+  assert.equal(request.trees[0].mountedAt, '/api');
+  assert.ok(!('hosts' in request.trees[0]));
+  assert.ok(!('mountedAt' in request.trees[1]));
+  assert.deepEqual(request.trees[1].hosts, ['web.internal']);
+});
+
+test('empty mounts/hosts arrays are omitted from the request, mirroring other array knobs', () => {
+  const { request } = configToRequest({
+    trees: [{ root: './api', sourceId: 'api', mounts: [], hosts: [] }],
+  });
+  assert.ok(!('mounts' in request.trees[0]));
+  assert.ok(!('hosts' in request.trees[0]));
+});
+
+test('roots-shorthand trees never carry mountedAt/mounts/hosts (only explicit trees[] accepts them)', () => {
+  const { request } = configToRequest({ roots: ['.'] });
+  assert.ok(!('mountedAt' in request));
+  assert.ok(!('mounts' in request));
+  assert.ok(!('hosts' in request));
+});
+
+test('trees[i].mountedAt validation: must be a string starting with "/", non-empty after trimming slashes, no scheme/placeholder/whitespace', () => {
+  const withMountedAt = (v) => configToRequest({ trees: [{ root: '.', sourceId: 't', mountedAt: v }] });
+  assert.throws(() => withMountedAt(123), ConfigError);
+  assert.throws(() => withMountedAt('///'), ConfigError);
+  assert.throws(() => withMountedAt('gateway'), ConfigError); // missing leading slash
+  assert.throws(() => withMountedAt('https://gateway'), ConfigError);
+  assert.throws(() => withMountedAt('/api/{}'), ConfigError);
+  assert.throws(() => withMountedAt('/api foo'), ConfigError);
+  assert.equal(withMountedAt('/gateway/').request.trees[0].mountedAt, '/gateway/');
+});
+
+test('trees[i].mounts shape/content validation', () => {
+  const withMounts = (m) => configToRequest({ trees: [{ root: '.', sourceId: 't', mounts: m }] });
+  assert.throws(() => withMounts('not-an-array'), ConfigError);
+  assert.throws(() => withMounts(['not-an-object']), ConfigError);
+  assert.throws(() => withMounts([{ dir: 1, at: '/x' }]), ConfigError);
+  assert.throws(() => withMounts([{ dir: 'apps', at: 1 }]), ConfigError);
+  assert.throws(() => withMounts([{ dir: '/apps', at: '/x' }]), ConfigError); // dir starts with "/"
+  assert.throws(() => withMounts([{ dir: 'apps\\api', at: '/x' }]), ConfigError); // dir has a backslash
+  assert.throws(() => withMounts([{ dir: 'apps', at: 'x' }]), ConfigError); // at missing leading "/"
+  assert.throws(() => withMounts([{ dir: 'apps', at: '' }]), ConfigError); // at empty after trimming
+  assert.throws(() => withMounts([{ dir: 'apps', at: 'https://x' }]), ConfigError); // at has a scheme
+  assert.throws(() => withMounts([{ dir: 'apps', at: '/x/{}' }]), ConfigError); // at has a placeholder
+  assert.throws(() => withMounts([{ dir: 'apps', at: '/x y' }]), ConfigError); // at has whitespace
+  assert.deepEqual(
+    withMounts([{ dir: 'apps/api', at: '/api' }]).request.trees[0].mounts,
+    [{ dir: 'apps/api', at: '/api' }]
+  );
+});
+
+test('trees[i].hosts shape/content validation', () => {
+  const withHosts = (h) => configToRequest({ trees: [{ root: '.', sourceId: 't', hosts: h }] });
+  assert.throws(() => withHosts('not-an-array'), ConfigError);
+  assert.throws(() => withHosts(['']), ConfigError);
+  assert.throws(() => withHosts([123]), ConfigError);
+  assert.throws(() => withHosts(['a/b']), ConfigError);
+  assert.throws(() => withHosts(['a b']), ConfigError);
+  assert.deepEqual(withHosts(['internal.example.com']).request.trees[0].hosts, ['internal.example.com']);
+});
+
+// F3 (release-audit v0.14.0): a full-URL value (which always ALSO contains "/") must trip the
+// URL-specific message, not the generic bare-path message the "/" check would otherwise fire first —
+// pins the check-order fix in validateHostsArray.
+test('trees[i].hosts full-URL value yields the URL-specific message, not the generic path one', () => {
+  const withHosts = (h) => configToRequest({ trees: [{ root: '.', sourceId: 't', hosts: h }] });
+  assert.throws(() => withHosts(['https://api.foo.com']), (err) => {
+    assert.ok(err instanceof ConfigError);
+    assert.match(err.message, /not a full URL/);
+    assert.doesNotMatch(err.message, /not a path/);
+    return true;
+  });
+});
+
+test('collectConfigWarnings flags unknown keys inside a trees[i].mounts[] entry with the mount scope', () => {
+  const warnings = collectConfigWarnings({
+    trees: [{ root: '.', sourceId: 't', mounts: [{ dir: 'apps/api', at: '/api', prefx: true }] }],
+  });
+  assert.ok(
+    warnings.some((w) => /"trees\[0\]\.mounts\[0\]\.prefx"/.test(w)),
+    `expected a warning naming trees[0].mounts[0].prefx, got: ${JSON.stringify(warnings)}`
+  );
+});
+
+test('collectConfigWarnings stays silent on well-formed mountedAt/mounts/hosts', () => {
+  assert.deepEqual(
+    collectConfigWarnings({
+      trees: [
+        {
+          root: '.',
+          sourceId: 't',
+          mountedAt: '/gateway',
+          mounts: [{ dir: 'apps/api', at: '/api' }],
+          hosts: ['internal.example.com'],
+        },
+      ],
+    }),
+    []
+  );
+});

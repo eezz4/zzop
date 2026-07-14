@@ -119,6 +119,25 @@ pub struct EngineConfig {
     /// Empty (the default) runs no overlay processing. Each overlay is
     /// `zzop_core::validate_envelope`-checked; an invalid one is skipped with a `warnings` entry.
     pub adapter_overlays: Vec<zzop_core::NormalizedEnvelope>,
+    /// Deployment-topology mounts: prepend `at` to the keys of http provides whose file falls under
+    /// `dir` (tree-relative, forward slashes; empty dir matches the whole tree). Config-declared facts —
+    /// the outermost gateway layer, stacked ON TOP of code-extracted prefixes (Nest setGlobalPrefix etc.),
+    /// because a gateway lives outside the app. Applied by `analyze::compose::apply_config_mounts`, as the
+    /// LAST provide transform in `analyze::assemble`. Empty (the default) applies no mounts.
+    pub mounts: Vec<MountRule>,
+    /// Hosts this tree owns: absolute-URL consumes to these hosts are re-keyed internal at cross-layer
+    /// link time (see `zzop_core::LinkOptions::internal_hosts`) — plumbed in from every tree's own
+    /// `hosts` by `analyze_trees`. Empty (the default) declares no hosts.
+    pub hosts: Vec<String>,
+}
+
+/// One deployment-topology mount (`EngineConfig::mounts`): `at` is prepended to the key of every `http`
+/// provide whose `file` falls under `dir` — see that field's doc for the matching/precedence rules
+/// (`analyze::compose::apply_config_mounts`).
+#[derive(Debug, Clone)]
+pub struct MountRule {
+    pub dir: String,
+    pub at: String,
 }
 
 impl Default for EngineConfig {
@@ -135,6 +154,8 @@ impl Default for EngineConfig {
             cache_dir: None,
             profile_rules: false,
             adapter_overlays: Vec::new(),
+            mounts: Vec::new(),
+            hosts: Vec::new(),
         }
     }
 }
@@ -320,12 +341,48 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
         });
         outputs.push((root.clone(), config.source_id.clone(), output));
     }
+    // Deployment-topology hosts (config-declared): union of every tree's `EngineConfig::hosts` into the
+    // linker's `internal_hosts`, deduped with the FIRST-declaring tree's source id kept (`host_owners`) —
+    // input order preserved, mirroring `zzop_core::CrossLayerResult::host_rekey_counts`'s own ordering
+    // contract.
+    let mut internal_hosts: Vec<String> = Vec::new();
+    let mut host_owners: BTreeMap<String, String> = BTreeMap::new();
+    for (_, config) in trees {
+        for h in &config.hosts {
+            if !internal_hosts.contains(h) {
+                internal_hosts.push(h.clone());
+                host_owners.insert(h.clone(), config.source_id.clone());
+            }
+        }
+    }
     let link_opts = zzop_core::LinkOptions {
         // Default generic-path vocabulary (health/ping/metrics/...) is analysis-domain, not join
         // mechanism, so it lives in `zzop-metrics` rather than `zzop-core`.
         low_confidence_key_patterns: zzop_metrics::default_generic_interface_key_patterns(),
+        internal_hosts,
     };
     let cross_layer = zzop_core::link_cross_layer_io(&source_ios, &link_opts);
+
+    // Topology-host zero-effect tripwire: a declared host with `host_rekey_counts == 0` is either stale
+    // (nothing calls it) or its consumers use relative paths instead of the absolute URL this feature
+    // targets — either way, silent no-op would hide a config mistake. Pushed onto the DECLARING tree's own
+    // `AnalyzeOutput::warnings` — the same per-tree engine self-report channel the tRPC mount-route
+    // suppression note below already uses (chosen over a run-level `MultiAnalyzeOutput` field for
+    // consistency with that precedent, since both are "this tree's own config had no observable effect"
+    // disclosures).
+    for (host, count) in &cross_layer.host_rekey_counts {
+        if *count > 0 {
+            continue;
+        }
+        let Some(owner) = host_owners.get(host) else {
+            continue; // defensive: every entry in host_rekey_counts came from host_owners' own keys
+        };
+        if let Some((_, _, output)) = outputs.iter_mut().find(|(_, s, _)| s == owner) {
+            output.warnings.push(format!(
+                "topology host \"{host}\" had no effect: 0 absolute-URL consumes matched — stale host, the consumers use relative paths, a declared host:port needs the consumer to match host:port exactly, or the consumers use ws/wss (only http/https absolute-URL consumes re-key)"
+            ));
+        }
+    }
     let package_imports: Vec<zzop_rules_cross_layer::PackageImportSite> = outputs
         .iter()
         .flat_map(|(_, source, output)| {

@@ -7,7 +7,10 @@
 //!   multi-provider case, e.g. one tree exposing a topic twice) and still join exactly like before.
 //! - **External egress**: a consume whose key carries a host (`"://"` present — an absolute URL an adapter
 //!   preserved) never cross-tree joins; it goes to [`CrossLayerResult::external_consumes`] instead of
-//!   `unprovidedConsumes`, since it is third-party egress, not drift.
+//!   `unprovidedConsumes`, since it is third-party egress, not drift. An absolute-URL consume whose
+//!   authority matches a declared [`LinkOptions::internal_hosts`] entry is re-keyed to its path and
+//!   exempted from this gate FIRST — deployment topology (a tree calling its own gateway host by its
+//!   public name) is a same-deployment call, not egress.
 //! - **Low confidence**: an edge whose key matches an injected pattern (generic paths like `/health` that many
 //!   unrelated services legitimately share) is still emitted, but tagged with
 //!   [`CrossLayerEdge::low_confidence_reason`] so a consumer can discount it. The pattern table itself is
@@ -125,7 +128,7 @@ pub struct IoConsume {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<ConsumeBodyShape>,
     /// Which client recognizer produced this consume (`"axios"`, `"ky"`, `"fetch"`, `"$fetch"`,
-    /// `"oazapfts"`, `"angular"`) — provenance for CLIENT-SCOPED normalization seams, e.g. an
+    /// `"angular"`) — provenance for CLIENT-SCOPED normalization seams, e.g. an
     /// `axios.defaults.baseURL` path prefix must apply to axios call sites only, never to a fetch
     /// call in the same tree. `None` = producer doesn't tag (older envelopes, non-egress kinds);
     /// a client-scoped seam then leaves the consume untouched (never guessed).
@@ -215,6 +218,14 @@ pub struct CrossLayerResult {
     /// it), since picking one provider over another would be a guess. Every candidate provider is listed
     /// so a caller can resolve the ambiguity by hand.
     pub ambiguous_consumes: Vec<AmbiguousConsume>,
+    /// Per DISTINCT host declared in [`LinkOptions::internal_hosts`] (input order preserved, after
+    /// dedup): how many absolute-URL consumes were re-keyed to internal and joined via the normal path
+    /// (edge/ambiguous/unprovided — see that field's doc for the re-keying gate itself, applied BEFORE
+    /// the `"://"` external-egress gate). Empty when no hosts were declared. Effect-counting substrate
+    /// for the engine's zero-effect tripwire (a declared host with count 0 is stale, or its consumers use
+    /// relative paths — see `zzop_engine::analyze_trees`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_rekey_counts: Vec<(String, usize)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -254,6 +265,17 @@ pub struct LinkOptions {
     /// sets that edge's `low_confidence_reason` to the paired reason string. Empty by default — no edge is
     /// ever marked low-confidence unless a caller injects a table.
     pub low_confidence_key_patterns: Vec<(regex::Regex, String)>,
+    /// Hosts owned by an analyzed tree (config-declared deployment topology, `EngineConfig::hosts` at the
+    /// engine layer). A consume whose key carries `scheme://host` with a matching host is re-keyed to its
+    /// path (internal) BEFORE the `` `://` `` external-egress gate, so it can join that tree's provides —
+    /// see [`link_cross_layer_io`]'s doc for exactly where this sits relative to that gate.
+    ///
+    /// Matching: ascii-case-insensitive host; port is ignored on the CONSUME side unless the declared
+    /// host string itself carries a port, in which case the match requires an exact `host:port`. Only
+    /// `http`/`https` consume-key schemes are eligible — `ws`/`wss` (and anything else) stay external in
+    /// v1, since a websocket URL is not an HTTP route key `http_consume_interface_key` can normalize.
+    /// Empty by default — no consume is ever re-keyed unless a caller injects hosts.
+    pub internal_hosts: Vec<String>,
 }
 
 /// Exact join of trees' IO on (kind, key), with the ambiguity/external/low-confidence gates documented in
@@ -298,6 +320,15 @@ pub fn link_cross_layer_io(trees: &[SourceIo], opts: &LinkOptions) -> CrossLayer
     let mut ambiguous_consumes = Vec::new();
     let mut consumed_keys = std::collections::HashSet::new();
     let mut ambiguously_consumed_keys = std::collections::HashSet::new();
+    // One entry per DISTINCT declared host, in `opts.internal_hosts`' own order (deduped defensively here
+    // too, even though the engine call site already dedups before injecting) — see
+    // `CrossLayerResult::host_rekey_counts`'s doc.
+    let mut host_rekey_counts: Vec<(String, usize)> = Vec::new();
+    for h in &opts.internal_hosts {
+        if !host_rekey_counts.iter().any(|(hh, _)| hh == h) {
+            host_rekey_counts.push((h.clone(), 0));
+        }
+    }
 
     for SourceIo { source, io } in trees {
         for c in &io.consumes {
@@ -308,6 +339,34 @@ pub fn link_cross_layer_io(trees: &[SourceIo], opts: &LinkOptions) -> CrossLayer
                 });
                 continue;
             };
+            // Deployment-topology host re-key — MUST run BEFORE the `"://"` external-egress gate right
+            // below: an absolute-URL consume whose authority matches a declared internal host is a
+            // same-deployment call that merely happens to spell its own gateway host out loud, not
+            // third-party egress. A miss (no host declared, or none matches) falls through to the
+            // ordinary external gate byte-for-byte — this never changes behavior for a tree that declares
+            // no hosts.
+            let rekeyed;
+            // On a re-key, downstream buckets must carry the JOIN key, not the original absolute
+            // URL — `unprovided_consumes`/`ambiguous_consumes` feed the near-miss family, whose
+            // segment logic has never seen (and must not see) a scheme-carrying key. Provenance
+            // lands in `raw`: the original absolute spelling, unless `raw` is already set (a
+            // late-resolved consume keeps its richer const-expr provenance — the earlier stage
+            // wins, same contract as late cross-file resolution filling `key` in).
+            let mut rekeyed_consume: Option<IoConsume> = None;
+            let key: &String = match rekey_if_internal_host(key, &opts.internal_hosts) {
+                Some((new_key, host)) => {
+                    if let Some(entry) = host_rekey_counts.iter_mut().find(|(h, _)| *h == host) {
+                        entry.1 += 1;
+                    }
+                    let mut cc = c.clone();
+                    cc.raw = cc.raw.take().or_else(|| cc.key.clone());
+                    cc.key = Some(new_key.clone());
+                    rekeyed_consume = Some(cc);
+                    rekeyed = new_key;
+                    &rekeyed
+                }
+                None => key,
+            };
             if key.contains("://") {
                 // A host-carrying key is third-party egress — never cross-tree joined, never
                 // `unprovidedConsumes`.
@@ -317,11 +376,25 @@ pub fn link_cross_layer_io(trees: &[SourceIo], opts: &LinkOptions) -> CrossLayer
                 });
                 continue;
             }
+            // Machine-pinned bucket invariant (class sweep 2026-07-14): everything past the
+            // external gate reports under a scheme-free key, and the bucket CLONE must agree with
+            // the join key — the near-miss family consumes these buckets and must never see a
+            // `://` key. Guards any future transform that leaks a pre-rekey record.
+            let bucket_consume = || {
+                let out = rekeyed_consume.clone().unwrap_or_else(|| c.clone());
+                debug_assert!(
+                    out.key.as_deref().is_none_or(|k| !k.contains("://")),
+                    "bucket invariant violated: a scheme-carrying consume key reached a join \
+                     bucket — a transform leaked a pre-rekey record (key {:?})",
+                    out.key
+                );
+                out
+            };
             let k = id_key(&c.kind, key);
             let Some(providers) = providers_by_key.get(&k) else {
                 unprovided_consumes.push(TaggedConsume {
                     source: source.clone(),
-                    consume: c.clone(),
+                    consume: bucket_consume(),
                 });
                 continue;
             };
@@ -336,7 +409,7 @@ pub fn link_cross_layer_io(trees: &[SourceIo], opts: &LinkOptions) -> CrossLayer
                 });
                 ambiguous_consumes.push(AmbiguousConsume {
                     source: source.clone(),
-                    consume: c.clone(),
+                    consume: bucket_consume(),
                     candidates,
                 });
                 continue;
@@ -417,7 +490,44 @@ pub fn link_cross_layer_io(trees: &[SourceIo], opts: &LinkOptions) -> CrossLayer
         unresolved_consumes,
         external_consumes,
         ambiguous_consumes,
+        host_rekey_counts,
     }
+}
+
+/// Attempts to re-key an absolute-URL consume key (`"METHOD http(s)://authority/rest..."`) against
+/// `internal_hosts` — see [`LinkOptions::internal_hosts`]'s doc for the exact matching rule. Returns
+/// `Some((rekeyed_key, matched_host))` on a hit (`matched_host` is the literal entry from
+/// `internal_hosts` that matched, for [`CrossLayerResult::host_rekey_counts`] bookkeeping); `None` when
+/// the key isn't a `"METHOD scheme://..."` shape, the scheme isn't `http`/`https`, or the authority
+/// matches no declared host — the caller falls through to the ordinary external-egress gate untouched.
+fn rekey_if_internal_host(key: &str, internal_hosts: &[String]) -> Option<(String, String)> {
+    let (method, rest) = key.split_once(' ')?;
+    let scheme_end = rest.find("://")?;
+    let scheme = &rest[..scheme_end];
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return None; // ws/wss (and anything else) stay external in v1
+    }
+    let after_scheme = &rest[scheme_end + 3..];
+    let (authority, path) = match after_scheme.find('/') {
+        Some(idx) => (&after_scheme[..idx], &after_scheme[idx..]),
+        None => (after_scheme, "/"),
+    };
+    let authority_host = authority.split(':').next().unwrap_or(authority);
+    for declared in internal_hosts {
+        let matched = match declared.split_once(':') {
+            // Declared host carries an explicit port — the consume must match host:port exactly.
+            Some((decl_host, decl_port)) => match authority.split_once(':') {
+                Some((host, port)) => host.eq_ignore_ascii_case(decl_host) && port == decl_port,
+                None => false,
+            },
+            // Declared host carries no port — the consume side's port (if any) is ignored.
+            None => authority_host.eq_ignore_ascii_case(declared),
+        };
+        if matched {
+            return Some((http_consume_interface_key(method, path), declared.clone()));
+        }
+    }
+    None
 }
 
 fn id_key(kind: &str, key: &str) -> String {
@@ -450,8 +560,7 @@ pub fn http_interface_key(method: &str, raw_path: &str) -> String {
 /// before normalization. A call-site URL's `?` is always a query separator (`axios.get('articles?limit=10')`,
 /// `` `articles?${qs}` `` -> `articles?{}`), and a route provide's key never carries one, so a
 /// query-suffixed consume key is structurally guaranteed to miss the exact join AND the near-miss
-/// segment comparison — the same reasoning that already drops oazapfts's `${QS...}` suffix at
-/// extraction. Provide-side keying must NOT use this: in a route PATTERN a `?` is not a query
+/// segment comparison. Provide-side keying must NOT use this: in a route PATTERN a `?` is not a query
 /// separator (e.g. Spring's `?` single-character wildcard), so provides keep [`http_interface_key`].
 pub fn http_consume_interface_key(method: &str, raw_url: &str) -> String {
     let path = raw_url.split(['?', '#']).next().unwrap_or(raw_url);
@@ -868,6 +977,7 @@ mod tests {
                 regex::Regex::new(r"^GET /health$").unwrap(),
                 "generic path shared by many services".to_string(),
             )],
+            ..LinkOptions::default()
         };
         let r = link_cross_layer_io(&[fe, be], &opts);
 
@@ -878,5 +988,290 @@ mod tests {
         );
         let orders = r.edges.iter().find(|e| e.key == "GET /orders").unwrap();
         assert_eq!(orders.low_confidence_reason, None);
+    }
+
+    // --- topology hosts: consume-side re-keying of absolute-URL consumes against declared internal
+    // hosts (`LinkOptions::internal_hosts`) — see that field's doc for the matching rule.
+
+    #[test]
+    fn absolute_url_consume_matching_a_declared_internal_host_is_rekeyed_and_joins() {
+        let fe = SourceIo {
+            source: "fe".into(),
+            io: IoFacts {
+                provides: vec![],
+                consumes: vec![consume(
+                    "http",
+                    Some("GET https://api.foo.com/users"),
+                    "Client.tsx",
+                    1,
+                    None,
+                )],
+            },
+        };
+        let be = SourceIo {
+            source: "be".into(),
+            io: IoFacts {
+                provides: vec![provide("http", "GET /users", "Api.java", 5, None)],
+                consumes: vec![],
+            },
+        };
+        let opts = LinkOptions {
+            internal_hosts: vec!["api.foo.com".to_string()],
+            ..LinkOptions::default()
+        };
+        let r = link_cross_layer_io(&[fe, be], &opts);
+
+        assert!(r.external_consumes.is_empty());
+        assert_eq!(r.edges.len(), 1, "{:?}", r.edges);
+        assert_eq!(r.edges[0].key, "GET /users");
+        assert!(r.edges[0].cross_source);
+        assert_eq!(r.host_rekey_counts, vec![("api.foo.com".to_string(), 1)]);
+    }
+
+    #[test]
+    fn rekeyed_consume_without_a_provider_lands_in_unprovided_under_its_join_key() {
+        // Field-measured seam (mono-hub, 2026-07-14): the join used the re-keyed internal key but
+        // the bucket entry kept the original absolute URL — a scheme-carrying key leaking into
+        // `unprovided_consumes`, a bucket whose consumers (the near-miss family) must never see
+        // one. The bucket must carry the JOIN key; the original spelling moves to `raw`.
+        let fe = SourceIo {
+            source: "fe".into(),
+            io: IoFacts {
+                provides: vec![],
+                consumes: vec![consume(
+                    "http",
+                    Some("GET https://api.foo.com/price/{}"),
+                    "Client.tsx",
+                    1,
+                    None,
+                )],
+            },
+        };
+        let be = SourceIo {
+            source: "be".into(),
+            io: IoFacts {
+                provides: vec![provide("http", "GET /users", "Api.java", 5, None)],
+                consumes: vec![],
+            },
+        };
+        let opts = LinkOptions {
+            internal_hosts: vec!["api.foo.com".to_string()],
+            ..LinkOptions::default()
+        };
+        let r = link_cross_layer_io(&[fe, be], &opts);
+
+        assert!(r.external_consumes.is_empty());
+        assert_eq!(r.unprovided_consumes.len(), 1);
+        let c = &r.unprovided_consumes[0].consume;
+        assert_eq!(
+            c.key.as_deref(),
+            Some("GET /price/{}"),
+            "bucket must carry the re-keyed join key, not the absolute URL"
+        );
+        assert_eq!(
+            c.raw.as_deref(),
+            Some("GET https://api.foo.com/price/{}"),
+            "original absolute spelling is preserved as raw provenance"
+        );
+        assert_eq!(r.host_rekey_counts, vec![("api.foo.com".to_string(), 1)]);
+    }
+
+    #[test]
+    fn internal_host_match_is_case_insensitive() {
+        let fe = SourceIo {
+            source: "fe".into(),
+            io: IoFacts {
+                provides: vec![],
+                consumes: vec![consume(
+                    "http",
+                    Some("GET https://API.FOO.com/users"),
+                    "Client.tsx",
+                    1,
+                    None,
+                )],
+            },
+        };
+        let be = SourceIo {
+            source: "be".into(),
+            io: IoFacts {
+                provides: vec![provide("http", "GET /users", "Api.java", 5, None)],
+                consumes: vec![],
+            },
+        };
+        let opts = LinkOptions {
+            internal_hosts: vec!["api.foo.com".to_string()],
+            ..LinkOptions::default()
+        };
+        let r = link_cross_layer_io(&[fe, be], &opts);
+        assert_eq!(r.edges.len(), 1, "{:?}", r.edges);
+    }
+
+    #[test]
+    fn consume_side_port_is_ignored_when_declared_host_carries_no_port() {
+        let fe = SourceIo {
+            source: "fe".into(),
+            io: IoFacts {
+                provides: vec![],
+                consumes: vec![consume(
+                    "http",
+                    Some("GET https://api.foo.com:8443/users"),
+                    "Client.tsx",
+                    1,
+                    None,
+                )],
+            },
+        };
+        let be = SourceIo {
+            source: "be".into(),
+            io: IoFacts {
+                provides: vec![provide("http", "GET /users", "Api.java", 5, None)],
+                consumes: vec![],
+            },
+        };
+        let opts = LinkOptions {
+            internal_hosts: vec!["api.foo.com".to_string()],
+            ..LinkOptions::default()
+        };
+        let r = link_cross_layer_io(&[fe, be], &opts);
+        assert_eq!(r.edges.len(), 1, "{:?}", r.edges);
+    }
+
+    #[test]
+    fn declared_host_with_a_port_requires_an_exact_match() {
+        let fe = SourceIo {
+            source: "fe".into(),
+            io: IoFacts {
+                provides: vec![],
+                consumes: vec![
+                    // Exact host:port match -> internal.
+                    consume(
+                        "http",
+                        Some("GET https://api.foo.com:8443/users"),
+                        "A.tsx",
+                        1,
+                        None,
+                    ),
+                    // Same host, no port on the consume side -> declared host demanded a port, no match ->
+                    // stays external.
+                    consume(
+                        "http",
+                        Some("GET https://api.foo.com/orders"),
+                        "B.tsx",
+                        2,
+                        None,
+                    ),
+                ],
+            },
+        };
+        let be = SourceIo {
+            source: "be".into(),
+            io: IoFacts {
+                provides: vec![
+                    provide("http", "GET /users", "Api.java", 5, None),
+                    provide("http", "GET /orders", "Api.java", 9, None),
+                ],
+                consumes: vec![],
+            },
+        };
+        let opts = LinkOptions {
+            internal_hosts: vec!["api.foo.com:8443".to_string()],
+            ..LinkOptions::default()
+        };
+        let r = link_cross_layer_io(&[fe, be], &opts);
+        assert_eq!(r.edges.len(), 1, "{:?}", r.edges);
+        assert_eq!(r.edges[0].key, "GET /users");
+        assert_eq!(r.external_consumes.len(), 1);
+        assert_eq!(
+            r.external_consumes[0].consume.key.as_deref(),
+            Some("GET https://api.foo.com/orders")
+        );
+        assert_eq!(
+            r.host_rekey_counts,
+            vec![("api.foo.com:8443".to_string(), 1)]
+        );
+    }
+
+    #[test]
+    fn rekeyed_host_consume_drops_the_query_string_like_any_other_consume_key() {
+        let fe = SourceIo {
+            source: "fe".into(),
+            io: IoFacts {
+                provides: vec![],
+                consumes: vec![consume(
+                    "http",
+                    Some("GET https://api.foo.com/users?limit=10"),
+                    "Client.tsx",
+                    1,
+                    None,
+                )],
+            },
+        };
+        let be = SourceIo {
+            source: "be".into(),
+            io: IoFacts {
+                provides: vec![provide("http", "GET /users", "Api.java", 5, None)],
+                consumes: vec![],
+            },
+        };
+        let opts = LinkOptions {
+            internal_hosts: vec!["api.foo.com".to_string()],
+            ..LinkOptions::default()
+        };
+        let r = link_cross_layer_io(&[fe, be], &opts);
+        assert_eq!(r.edges.len(), 1, "{:?}", r.edges);
+        assert_eq!(r.edges[0].key, "GET /users");
+    }
+
+    #[test]
+    fn undeclared_host_stays_external_even_with_internal_hosts_configured() {
+        let fe = SourceIo {
+            source: "fe".into(),
+            io: IoFacts {
+                provides: vec![],
+                consumes: vec![consume(
+                    "http",
+                    Some("GET https://other.com/x"),
+                    "Client.tsx",
+                    1,
+                    None,
+                )],
+            },
+        };
+        let opts = LinkOptions {
+            internal_hosts: vec!["api.foo.com".to_string()],
+            ..LinkOptions::default()
+        };
+        let r = link_cross_layer_io(&[fe], &opts);
+        assert_eq!(r.external_consumes.len(), 1);
+        assert!(r.edges.is_empty());
+        assert_eq!(r.host_rekey_counts, vec![("api.foo.com".to_string(), 0)]);
+    }
+
+    #[test]
+    fn ws_scheme_stays_external_even_when_the_host_is_declared_internal() {
+        let fe = SourceIo {
+            source: "fe".into(),
+            io: IoFacts {
+                provides: vec![],
+                consumes: vec![consume(
+                    "http",
+                    Some("GET ws://api.foo.com/socket"),
+                    "Client.tsx",
+                    1,
+                    None,
+                )],
+            },
+        };
+        let opts = LinkOptions {
+            internal_hosts: vec!["api.foo.com".to_string()],
+            ..LinkOptions::default()
+        };
+        let r = link_cross_layer_io(&[fe], &opts);
+        assert_eq!(r.external_consumes.len(), 1);
+        assert_eq!(
+            r.external_consumes[0].consume.key.as_deref(),
+            Some("GET ws://api.foo.com/socket")
+        );
+        assert!(r.edges.is_empty());
     }
 }

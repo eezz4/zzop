@@ -12,7 +12,9 @@ use zzop_core::{
     load_dsl_packs, CommonIr, FileNode, Finding, GlobalExclude, NormalizedEnvelope, RulePackDef,
     Severity, Suppression,
 };
-use zzop_engine::{AnalyzeOutput, CacheStats, EngineConfig, GitOptions, DEFAULT_SIZE_CAP};
+use zzop_engine::{
+    AnalyzeOutput, CacheStats, EngineConfig, GitOptions, MountRule, DEFAULT_SIZE_CAP,
+};
 use zzop_metrics::{
     CriticalFile, CrossLayerCoChurn, FolderAggregates, HealthIndex, Recommendation, Scores,
     SeamCandidate,
@@ -74,6 +76,38 @@ pub struct AnalyzeRequest {
     /// fails request deserialization (producer's contract to emit well-formed envelopes). Overlays are
     /// re-applied every run AFTER the native cache, so they need no cache-key participation.
     pub adapter_overlays: Vec<zzop_core::NormalizedEnvelope>,
+    /// Deployment-topology "whole-tree" mount point — the napi exposure of an implicit
+    /// `zzop_engine::MountRule { dir: String::new(), at: mounted_at }` covering the entire tree (the
+    /// engine's own longest-`dir`-wins rule makes this the lowest-specificity entry: any `mounts[]` entry
+    /// with a non-empty `dir` beats it on a match). `None` (the default) adds no implicit whole-tree
+    /// mount. See `build_engine_config`'s fold order for exactly how this combines with `mounts`. Shape
+    /// (must start with `/`, no scheme/placeholder/whitespace) is NOT validated here — that is the
+    /// mapper's fail-fast gate (`packages/cli/lib/mapper.js`); the engine's own
+    /// `analyze::compose::apply_config_mounts` defensively warns and skips a malformed value as a
+    /// last-resort backstop.
+    pub mounted_at: Option<String>,
+    /// Deployment-topology mounts, in array order — the napi exposure of
+    /// `zzop_engine::EngineConfig::mounts` (see that field's doc for the longest-`dir`-wins matching rule
+    /// `apply_config_mounts` applies at assemble time). Empty (the default) declares no mounts beyond
+    /// `mounted_at`. Same "mapper validates, napi passes through, engine defensively backstops" contract
+    /// as `mounted_at`.
+    pub mounts: Vec<MountEntryRequest>,
+    /// Hosts this tree owns — the napi exposure of `zzop_engine::EngineConfig::hosts` (absolute-URL
+    /// consumes to these hosts are re-keyed internal at cross-layer link time, see
+    /// `zzop_core::LinkOptions::internal_hosts`). Empty (the default) declares no hosts.
+    pub hosts: Vec<String>,
+}
+
+/// One `AnalyzeRequest::mounts` entry: `{dir, at}` — the napi exposure of `zzop_engine::MountRule`,
+/// field-for-field. `#[serde(rename_all = "camelCase")]` is a no-op today (`dir`/`at` are already single
+/// lowercase words) but kept for consistency with every other request struct at this boundary. No shape
+/// validation happens here (empty/leading-slash/scheme/backslash/etc.) — see `AnalyzeRequest::mounts`'s
+/// doc for why that is deliberately the mapper's job, not this layer's.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MountEntryRequest {
+    pub dir: String,
+    pub at: String,
 }
 
 /// `AnalyzeRequest::git`'s payload — mirrors `zzop_engine::GitOptions` field-for-field, as JSON input.
@@ -217,6 +251,31 @@ fn build_engine_config(req: &AnalyzeRequest, warnings: &mut Vec<String>) -> Engi
     // Overlays flow to `analyze_tree`'s unconditional `apply_adapter_overlays` merge; no cache-key
     // impact (applied post-cache, re-applied every run regardless of hit/miss).
     config.adapter_overlays = req.adapter_overlays.clone();
+
+    // Deployment-topology mounts: every `mounts[]` entry folds in FIRST, in array order, followed by
+    // `mounted_at` as the implicit whole-tree entry (`dir: ""`) LAST. The engine's own
+    // `apply_config_mounts` picks the longest matching `dir` on a match and resolves equal-length ties to
+    // the first entry — appending `mounted_at` last so an explicit dir entry of equal length wins ties
+    // (an explicit `{dir:"", at:"..."}` mount, the one shape that can tie with `mounted_at`'s empty
+    // `dir`, is more specific intent than the shorthand and should win). No shape validation happens here
+    // (see `AnalyzeRequest::mounted_at`/`mounts`'s docs) — this is a plain, unchecked pass-through.
+    let mut mounts: Vec<MountRule> = req
+        .mounts
+        .iter()
+        .map(|m| MountRule {
+            dir: m.dir.clone(),
+            at: m.at.clone(),
+        })
+        .collect();
+    if let Some(at) = req.mounted_at.clone() {
+        mounts.push(MountRule {
+            dir: String::new(),
+            at,
+        });
+    }
+    config.mounts = mounts;
+    config.hosts = req.hosts.clone();
+
     config
 }
 
@@ -1015,6 +1074,86 @@ mod tests {
         let config = build_engine_config(&req, &mut warnings);
         let git_cfg = config.git.expect("expected EngineConfig::git to be Some");
         assert!(git_cfg.commit_type_patterns.is_none());
+    }
+
+    #[test]
+    fn analyze_request_mounted_at_mounts_hosts_flow_into_engine_config() {
+        // Plumbing-only, same spirit as `analyze_request_adapter_overlays_flow_into_engine_config`: proves
+        // `mountedAt`/`mounts`/`hosts` deserialize and that `build_engine_config` folds every `mounts[]`
+        // entry in array order FIRST, followed by `mountedAt` as the implicit `dir: ""` entry LAST — so
+        // the engine's first-wins equal-length tie-break favors an explicit mount over the shorthand.
+        let config_json = r#"{
+            "root": "unused",
+            "sourceId": "t",
+            "mountedAt": "/gateway",
+            "mounts": [
+                { "dir": "apps/api", "at": "/api" },
+                { "dir": "apps/admin", "at": "/admin" }
+            ],
+            "hosts": ["internal.example.com"]
+        }"#;
+        let req: AnalyzeRequest =
+            serde_json::from_str(config_json).expect("valid AnalyzeRequest JSON");
+        assert_eq!(req.mounted_at.as_deref(), Some("/gateway"));
+        assert_eq!(req.mounts.len(), 2);
+        assert_eq!(req.hosts, vec!["internal.example.com".to_string()]);
+
+        let mut warnings = Vec::new();
+        let config = build_engine_config(&req, &mut warnings);
+        assert_eq!(
+            config.mounts.len(),
+            3,
+            "expected both mounts[] entries first, then mountedAt"
+        );
+        assert_eq!(config.mounts[0].dir, "apps/api");
+        assert_eq!(config.mounts[0].at, "/api");
+        assert_eq!(config.mounts[1].dir, "apps/admin");
+        assert_eq!(config.mounts[1].at, "/admin");
+        assert_eq!(
+            config.mounts[2].dir, "",
+            "mountedAt becomes the dir \"\" entry, appended LAST so an explicit equal-length dir entry \
+             (e.g. an explicit {{dir:\"\", at:...}} mount) wins the engine's first-wins tie-break over \
+             the mountedAt shorthand"
+        );
+        assert_eq!(config.mounts[2].at, "/gateway");
+        assert_eq!(config.hosts, vec!["internal.example.com".to_string()]);
+    }
+
+    #[test]
+    fn analyze_request_without_mounted_at_omits_the_implicit_whole_tree_mount() {
+        let config_json = r#"{
+            "root": "unused",
+            "sourceId": "t",
+            "mounts": [ { "dir": "apps/api", "at": "/api" } ]
+        }"#;
+        let req: AnalyzeRequest =
+            serde_json::from_str(config_json).expect("valid AnalyzeRequest JSON");
+        assert!(req.mounted_at.is_none());
+
+        let mut warnings = Vec::new();
+        let config = build_engine_config(&req, &mut warnings);
+        assert_eq!(
+            config.mounts.len(),
+            1,
+            "no mountedAt -> no implicit dir \"\" entry"
+        );
+        assert_eq!(config.mounts[0].dir, "apps/api");
+        assert_eq!(config.mounts[0].at, "/api");
+    }
+
+    #[test]
+    fn analyze_request_defaults_mounted_at_mounts_hosts_to_empty() {
+        let config_json = r#"{"root": "unused", "sourceId": "t"}"#;
+        let req: AnalyzeRequest =
+            serde_json::from_str(config_json).expect("valid AnalyzeRequest JSON");
+        assert!(req.mounted_at.is_none());
+        assert!(req.mounts.is_empty());
+        assert!(req.hosts.is_empty());
+
+        let mut warnings = Vec::new();
+        let config = build_engine_config(&req, &mut warnings);
+        assert!(config.mounts.is_empty());
+        assert!(config.hosts.is_empty());
     }
 
     #[test]

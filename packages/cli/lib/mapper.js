@@ -236,6 +236,120 @@ function collectOverlayWarnings(config) {
   return warnings;
 }
 
+// ---------------------------------------------------------------------------------------------------
+// Connection topology — closes the loop for the napi `mountedAt`/`mounts`/`hosts` per-tree request
+// fields (`packages/napi/src/api.rs`'s `AnalyzeRequest`). Config keys `trees[i].mountedAt` (a single
+// whole-tree gateway prefix), `trees[i].mounts` (an array of `{dir, at}` deployment-topology mounts), and
+// `trees[i].hosts` (hosts this tree owns, for cross-layer absolute-URL re-keying) are ONLY accepted on
+// explicit `trees[]` entries — the `roots` shorthand carries no per-tree shape to hang them off, so those
+// keys never apply there (see `configToRequest`'s `roots` branch: it never reads these keys at all).
+//
+// Unlike overlays, this module IS the authoritative fail-fast gate for shape here: the engine's own
+// `apply_config_mounts` (see `packages/engine/src/analyze/compose.rs`) only defensively warns and skips a
+// malformed mount as a last-resort backstop, so a config author should see a ConfigError immediately
+// rather than a warning buried in a run's output.
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * Validate one mount "at" value — `trees[i].mountedAt` or a `trees[i].mounts[].at` entry: must be a
+ * string, non-empty after trimming leading/trailing "/", starting with "/", and containing no scheme
+ * separator ("://"), path-param placeholder ("{}"), or whitespace.
+ *
+ * @param {*} value
+ * @param {string} label  e.g. "trees[0].mountedAt" or "trees[0].mounts[1].at"
+ */
+function validateMountAt(value, label) {
+  if (typeof value !== 'string') {
+    throw new ConfigError(`${label} must be a string.`);
+  }
+  const trimmedSlashes = value.replace(/^\/+/, '').replace(/\/+$/, '');
+  if (trimmedSlashes === '') {
+    throw new ConfigError(`${label} must be a non-empty path after trimming slashes.`);
+  }
+  if (!value.startsWith('/')) {
+    throw new ConfigError(`${label} must start with "/".`);
+  }
+  if (value.includes('://')) {
+    throw new ConfigError(`${label} must not contain a scheme ("://") — it is a path prefix, not a full URL.`);
+  }
+  if (value.includes('{}')) {
+    throw new ConfigError(`${label} must not contain a path-param placeholder ("{}").`);
+  }
+  if (/\s/.test(value)) {
+    throw new ConfigError(`${label} must not contain whitespace.`);
+  }
+}
+
+/**
+ * Validate one `trees[i].mounts[].dir` value: must be a string, tree-relative (must not start with "/"),
+ * using forward slashes only (must not contain a backslash).
+ *
+ * @param {*} value
+ * @param {string} label  e.g. "trees[0].mounts[1].dir"
+ */
+function validateMountDir(value, label) {
+  if (typeof value !== 'string') {
+    throw new ConfigError(`${label} must be a string.`);
+  }
+  if (value.startsWith('/')) {
+    throw new ConfigError(`${label} must be tree-relative and must not start with "/".`);
+  }
+  if (value.includes('\\')) {
+    throw new ConfigError(`${label} must use forward slashes, not backslashes.`);
+  }
+}
+
+/**
+ * Validate a `trees[i].mounts` array's shape: an array of `{dir, at}` objects, each field checked by
+ * `validateMountDir`/`validateMountAt`.
+ *
+ * @param {*} value
+ * @param {string} label  e.g. "trees[0].mounts"
+ */
+function validateMountsArray(value, label) {
+  if (!Array.isArray(value)) {
+    throw new ConfigError(`${label} must be an array of { dir, at } objects.`);
+  }
+  value.forEach((entry, i) => {
+    if (!isPlainObject(entry)) {
+      throw new ConfigError(`${label}[${i}] must be an object with "dir" and "at" strings.`);
+    }
+    validateMountDir(entry.dir, `${label}[${i}].dir`);
+    validateMountAt(entry.at, `${label}[${i}].at`);
+  });
+}
+
+/**
+ * Validate a `trees[i].hosts` array's shape: an array of non-empty bare-host strings — no path separator
+ * ("/"), no scheme ("://"), no whitespace.
+ *
+ * @param {*} value
+ * @param {string} label  e.g. "trees[0].hosts"
+ */
+function validateHostsArray(value, label) {
+  if (!Array.isArray(value)) {
+    throw new ConfigError(`${label} must be an array of host strings.`);
+  }
+  value.forEach((entry, i) => {
+    if (typeof entry !== 'string' || entry === '') {
+      throw new ConfigError(`${label}[${i}] must be a non-empty string.`);
+    }
+    // Checked BEFORE the bare-"/" check below: every "://" value also contains "/", so if the "/" check
+    // ran first it would always win and the URL-specific message below would be unreachable dead code —
+    // a user pasting a full URL like "https://api.foo.com" deserves the URL-specific message, not the
+    // generic path one.
+    if (entry.includes('://')) {
+      throw new ConfigError(`${label}[${i}] must be a bare host, not a full URL ("://" is not allowed).`);
+    }
+    if (entry.includes('/')) {
+      throw new ConfigError(`${label}[${i}] must be a bare host, not a path ("/" is not allowed).`);
+    }
+    if (/\s/.test(entry)) {
+      throw new ConfigError(`${label}[${i}] must not contain whitespace.`);
+    }
+  });
+}
+
 /**
  * Build the per-tree option bundle shared by every tree/root — the rule/pack/git/cache knobs that are
  * global to the config (not per-tree). Returns an object with only the fields that are actually set, so
@@ -382,8 +496,9 @@ const KNOWN_KEYS = require('./config-surface.json').configKeys;
  * Collect warnings for config keys the CLI does not recognize (typos, or a config written for a different
  * zzop version). Never throws and never rejects — unknown keys stay ignored, exactly as the engine treats
  * them; this only makes the drift visible. Returns an array of human-readable warning strings (possibly
- * empty). Covers the top level plus the fixed-shape nested objects (`packs`/`git`/`report`), each tree, and
- * each rule object; `rules`' own keys are rule ids (open set) so they are not checked.
+ * empty). Covers the top level plus the fixed-shape nested objects (`packs`/`git`/`report`), each tree,
+ * each rule object, and each `trees[i].mounts[]` entry; `rules`' own keys are rule ids (open set) so they
+ * are not checked.
  *
  * @param {object} config  parsed config object
  * @returns {string[]}
@@ -410,7 +525,14 @@ function collectConfigWarnings(config) {
   check(config.git, KNOWN_KEYS.git, 'git.');
   check(config.report, KNOWN_KEYS.report, 'report.');
   if (Array.isArray(config.trees)) {
-    config.trees.forEach((tree, i) => check(tree, KNOWN_KEYS.tree, `trees[${i}].`));
+    config.trees.forEach((tree, i) => {
+      check(tree, KNOWN_KEYS.tree, `trees[${i}].`);
+      if (isPlainObject(tree) && Array.isArray(tree.mounts)) {
+        tree.mounts.forEach((entry, j) => {
+          if (isPlainObject(entry)) check(entry, KNOWN_KEYS.mount, `trees[${i}].mounts[${j}].`);
+        });
+      }
+    });
   }
   if (isPlainObject(config.rules)) {
     for (const [ruleId, entry] of Object.entries(config.rules)) {
@@ -471,7 +593,28 @@ function configToRequest(config) {
       // Default sourceId to the tree's root so distinct trees get distinct sources: the cross-source
       // rules (shared-db-table, cross-tree route shadowing, ...) only fire with >= 2 distinct sourceIds.
       const sourceId = tree.sourceId !== undefined ? tree.sourceId : tree.root;
-      return attachOverlays({ root: tree.root, sourceId, ...shared }, tree.root, tree.overlays);
+      const treeRequest = attachOverlays({ root: tree.root, sourceId, ...shared }, tree.root, tree.overlays);
+
+      // --- connection topology: mountedAt / mounts / hosts. Explicit trees[] entries only — the `roots`
+      // shorthand below never reads these keys at all (see this section's module doc above). ---
+      if (tree.mountedAt !== undefined) {
+        validateMountAt(tree.mountedAt, `trees[${i}].mountedAt`);
+        treeRequest.mountedAt = tree.mountedAt;
+      }
+      if (tree.mounts !== undefined) {
+        validateMountsArray(tree.mounts, `trees[${i}].mounts`);
+        if (tree.mounts.length > 0) {
+          treeRequest.mounts = tree.mounts;
+        }
+      }
+      if (tree.hosts !== undefined) {
+        validateHostsArray(tree.hosts, `trees[${i}].hosts`);
+        if (tree.hosts.length > 0) {
+          treeRequest.hosts = tree.hosts;
+        }
+      }
+
+      return treeRequest;
     });
   } else {
     let roots = config.roots;

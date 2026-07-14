@@ -38,8 +38,13 @@ mod compose;
 mod diagnostics;
 mod native_rules;
 
+// `apply_config_mounts` is re-exported here (not just privately `use`d below) for the same reason as the
+// trio above: `envelope::analyze_envelope` (Mode A) reaches it by this path too, at the structurally
+// equivalent seam its own call site documents — origin-agnostic deployment topology must apply
+// regardless of which assembler produced `io_provides`.
 pub(crate) use compose::{
-    compose_router_mount_provides, compose_trpc_provides, late_resolve_cross_file_consumes,
+    apply_config_mounts, compose_router_mount_provides, compose_trpc_provides,
+    late_resolve_cross_file_consumes,
 };
 // `envelope::analyze_envelope` also reaches the config-diagnostics quartet by this path (config-
 // diagnostics parity with `assemble` — a `disabled_rules` typo / dead exclude filter self-reports on
@@ -384,6 +389,17 @@ pub(crate) fn assemble(
     // `compose_controller_prefix_provides`'s doc) gets its `dto_ref` resolved too, not just literal-prefix
     // routes' own directly-emitted provides.
     resolve_provide_body_refs(&mut io_provides, class_shape_pairs, &mut warnings);
+
+    // Deployment-topology mount apply (`EngineConfig::mounts`, config-declared) — MUST run LAST among
+    // provide transforms: after EVERY provide producer above (controller-prefix, global-prefix, tRPC,
+    // router-mount, Java, file-convention routes via `file_routes::compose_file_convention_provides`) and
+    // after body-ref resolution, so a config mount covers ALL http provides regardless of which producer
+    // emitted them. Config mounts stack ON TOP of whatever code-extracted prefix (e.g. Nest
+    // `setGlobalPrefix`) a provide already carries — a deployment gateway lives outside the app, so its
+    // prefix is deliberately the outermost layer, applied last. Must stay before `io_provides` is sorted/
+    // frozen into `MinimalIr::io` below, and before the cross-layer join (`analyze_trees`, `lib.rs`) sees
+    // it. See `compose::apply_config_mounts`'s own doc for the winner-selection/validation/tripwire rules.
+    apply_config_mounts(&mut io_provides, &config.mounts, &mut warnings);
 
     // `type_only_edges` is the ephemeral noncycle-exclusion set (never cached/serialized — see
     // `circular_from_dep_excluding`'s doc): a pair present here is contributed ONLY by edges excludable

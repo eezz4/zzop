@@ -171,6 +171,7 @@
         </div>
       </div>
       <p>The <code>cross-layer/*</code> native analyses run on top of this join — matched-edge diagnostics (unconsumed endpoints, method mismatches, version skew, path near-misses, shared database tables, duplicate routes), external-egress checks (shadowed internal routes, secrets in URLs, IP literals, host fan-out, base-URL drift, and more), and a tRPC procedure-coverage check (an unconsumed procedure joined from cross-file router fragments) — cataloged in the <a href="rules.html">rule reference</a>.</p>
+      <p>A per-tree deployment-topology declaration (<code>mountedAt</code>/<code>mounts</code>/<code>hosts</code> config) supplies the one class of join information that lives only in infra, not in either repo's source: a gateway/ingress mount prefix, and which hosts a tree owns. Mounts apply as the last provide-key transform, stacking on top of any code-extracted prefix; a declared host re-keys a matching absolute-URL consume to an internal joinable key before the external-egress gate above applies. Both self-disclose via a warning when they turn out to have zero effect. See the <a href="sdk.html">SDK reference</a>.</p>
     </section>
 
     <section id="degraded">

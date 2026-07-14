@@ -392,6 +392,17 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         &config.rule_config,
     );
 
+    // Deployment-topology mount apply (`EngineConfig::mounts`, config-declared) — the Mode A counterpart
+    // of `analyze::assemble`'s own call (`analyze/mod.rs`'s placement doc, ~line 397, which this mirrors):
+    // must run AFTER every provide-composing step above (tRPC/router-mount fragment composition,
+    // `compose_trpc_provides`/`compose_router_mount_provides`) so a config mount covers every http provide
+    // this mode ever produces, and BEFORE `io_provides` is sorted/frozen into `MinimalIr::io` just below —
+    // deployment topology is origin-agnostic (same rationale Mode B's overlay provides receive mounts
+    // under, in `analyze::assemble`), so a tree analyzed via Mode A must not silently freeze un-mounted
+    // keys while the native path mounts the same config. See `compose::apply_config_mounts`'s own doc for
+    // the winner-selection/validation/zero-effect-tripwire rules.
+    crate::analyze::apply_config_mounts(&mut io_provides, &config.mounts, &mut warnings);
+
     degraded.sort();
     io_provides.sort_by(|a, b| {
         a.kind
@@ -1386,6 +1397,94 @@ mod tests {
             !out.warnings.iter().any(|w| w.contains("dropped")),
             "{:?}",
             out.warnings
+        );
+    }
+
+    // --- `EngineConfig::mounts` parity: Mode A must apply config mounts too (audited consistency gap —
+    // `apply_config_mounts` used to run only in the native `analyze::assemble` path, so a tree analyzed
+    // via `analyze_envelope` with the same `mounts` config silently froze un-mounted keys). ---
+
+    #[test]
+    fn config_mount_prepends_gateway_prefix_to_an_http_provide_key_in_envelope_mode() {
+        let mut a = projection("users.jsp", 5);
+        a.io.provides.push(IoProvide {
+            body: None,
+            kind: "http".to_string(),
+            key: "GET /users".to_string(),
+            file: "users.jsp".to_string(),
+            line: 1,
+            symbol: None,
+        });
+        let env = envelope(vec![a]);
+        let mut cfg = config();
+        cfg.mounts = vec![crate::MountRule {
+            dir: String::new(),
+            at: "/gw".to_string(),
+        }];
+        let out = analyze_envelope(&env, &cfg);
+        let provides = out.ir.ir.io.expect("expected io facts").provides;
+        assert!(
+            provides
+                .iter()
+                .any(|p| p.kind == "http" && p.key == "GET /gw/users"),
+            "{:?}",
+            provides
+        );
+    }
+
+    #[test]
+    fn config_mount_matching_nothing_emits_the_same_had_no_effect_warning_as_the_native_path_in_envelope_mode(
+    ) {
+        let mut a = projection("users.jsp", 5);
+        a.io.provides.push(IoProvide {
+            body: None,
+            kind: "http".to_string(),
+            key: "GET /users".to_string(),
+            file: "users.jsp".to_string(),
+            line: 1,
+            symbol: None,
+        });
+        let env = envelope(vec![a]);
+        let mut cfg = config();
+        cfg.mounts = vec![crate::MountRule {
+            dir: "nowhere".to_string(),
+            at: "/gw".to_string(),
+        }];
+        let out = analyze_envelope(&env, &cfg);
+        assert!(
+            out.warnings.iter().any(|w| w.contains(
+                "topology mount \"gw\" (dir \"nowhere\") had no effect: 0 http provides matched"
+            )),
+            "{:?}",
+            out.warnings
+        );
+    }
+
+    #[test]
+    fn config_mount_leaves_non_http_provide_kinds_untouched_in_envelope_mode() {
+        let mut a = projection("router.jsp", 5);
+        a.io.provides.push(IoProvide {
+            body: None,
+            kind: "trpc".to_string(),
+            key: "widgets.list".to_string(),
+            file: "router.jsp".to_string(),
+            line: 1,
+            symbol: None,
+        });
+        let env = envelope(vec![a]);
+        let mut cfg = config();
+        cfg.mounts = vec![crate::MountRule {
+            dir: String::new(),
+            at: "/gw".to_string(),
+        }];
+        let out = analyze_envelope(&env, &cfg);
+        let provides = out.ir.ir.io.expect("expected io facts").provides;
+        assert!(
+            provides
+                .iter()
+                .any(|p| p.kind == "trpc" && p.key == "widgets.list"),
+            "{:?}",
+            provides
         );
     }
 

@@ -19,6 +19,12 @@ export interface AnalyzeConfig {
     since?: string;
     /** Window, in days, for each file's `recent_*` fields. Default: 30. */
     recentDays?: number;
+    /** Custom commit-type classifier table (`{pattern: <regex>, tag: <TAG>}[]`). REPLACES the default
+     * FIX/FEAT/REVERT/... table entirely when present and non-empty (match order = array order); absent
+     * or empty falls back to the default table. An entry whose `pattern` fails to compile as a regex is
+     * skipped (matches nothing) and reported as a `warnings` entry, never a failure. Default: the built-in
+     * table. */
+    commitTypePatterns?: { pattern: string; tag: string }[];
   };
   /** Files larger than this (bytes) skip structural parsing, falling back to a lexical line count. */
   sizeCap?: number;
@@ -31,12 +37,28 @@ export interface AnalyzeConfig {
    * within a segment, `**` spans `/`, `{a,b}` alternates). `glob` takes precedence over `path`. Default:
    * nothing suppressed. */
   suppressions?: { rule: string; path?: string; glob?: string }[];
+  /** Config-wide, rule-agnostic finding-level filter (the top-level `"exclude"` config key's napi
+   * exposure): each entry drops findings for EVERY rule at once — globally (no filter, when both `path`
+   * and `glob` are omitted), in files whose path contains `path` (plain substring), or in files matching
+   * `glob` (full-path glob, same syntax as `suppressions[].glob`; takes precedence over `path`). The file
+   * is still analyzed — only findings are filtered. Default: nothing globally excluded. */
+  globalExcludes?: { path?: string; glob?: string }[];
   /** Mode-B adapter overlays: partial Normalized-AST envelopes (typically just `io` + fragment channels
    * for a handful of files — see `docs/NORMALIZED_AST.md`) merged ON TOP of this tree's native analysis.
    * Left as `Record<string, unknown>[]` for the same reason `NormalizedAstEnvelope` is (see that type's
    * doc). Default: none (no overlay processing). Contrast with `analyzeEnvelope()`, where a full envelope
    * REPLACES native analysis rather than augmenting it — this field has no equivalent there. */
   adapterOverlays?: Array<Record<string, unknown>>;
+  /** Deployment-topology "whole-tree" mount point: prepends this gateway prefix to every one of this
+   * tree's http provide keys, as the least-specific entry (an equal or longer `mounts[]` `dir` wins).
+   * Default: no implicit whole-tree mount. */
+  mountedAt?: string;
+  /** Deployment-topology mounts, in array order: prepends `at` to this tree's http provide keys whose
+   * file path falls under `dir` (longest matching `dir` wins). Default: no mounts beyond `mountedAt`. */
+  mounts?: Array<{ dir: string; at: string }>;
+  /** Hosts this tree owns: re-keys absolute-URL consumes targeting these hosts into internal joinable
+   * keys at cross-layer link time. Default: no hosts declared. */
+  hosts?: string[];
 }
 
 /** `analyzeTrees()`'s input: one `AnalyzeConfig` per tree, joined by IoFacts. */

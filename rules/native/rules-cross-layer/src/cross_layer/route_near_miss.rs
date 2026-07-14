@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 use zzop_core::io::TaggedConsume;
 use zzop_core::{disable_hint, Finding, Severity};
 
-use super::{path_segments, split_key, HttpProvideSite};
+use super::{is_all_slot_path, path_segments, split_key, HttpProvideSite};
 
 /// The one structural dimension a route-near-miss pair differs by, in priority order (`case` > `prefix`,
 /// most to least confident — see module doc).
@@ -175,6 +175,12 @@ pub fn route_near_miss_results(
             continue;
         };
         let consume_segs = path_segments(path);
+        if is_all_slot_path(&consume_segs) {
+            // Minimum-information gate: an all-`{}` consume (typically a head-drop artifact) carries
+            // zero literal evidence, so it can vacuously satisfy the prefix dimension against any
+            // same-shaped provide — see `is_all_slot_path`'s doc.
+            continue;
+        }
 
         // Priority order: case > prefix. As soon as one dimension has at least one candidate, stop — the
         // lower-priority dimension never gets consulted for this consume.
@@ -461,6 +467,21 @@ mod tests {
         // `/x` vs `/a/b/c/x` — a 3-segment added prefix exceeds the 1-2 base-path bound. Must NOT fire.
         let unprovided_consumes = vec![consume("http", Some("GET /x"), "fe-react", "Api.tsx", 10)];
         let provides = vec![provide("GET /a/b/c/x", "be-nest", "x.controller.ts", 22)];
+        assert!(route_near_miss_findings(&unprovided_consumes, &provides).is_empty());
+    }
+
+    #[test]
+    fn all_slot_consume_is_gated_out_of_prefix_dimension() {
+        // Field-measured case: a head-drop artifact key `GET /{}` must not vacuously satisfy the
+        // prefix dimension against a same-shaped provide (`GET /api/{}` — suffix `{}`==`{}`, leading
+        // run `api` is all-literal and length 1).
+        let unprovided_consumes = vec![consume("http", Some("GET /{}"), "fe-react", "Api.tsx", 10)];
+        let provides = vec![provide(
+            "GET /api/{}",
+            "be-nest",
+            "articles.controller.ts",
+            22,
+        )];
         assert!(route_near_miss_findings(&unprovided_consumes, &provides).is_empty());
     }
 

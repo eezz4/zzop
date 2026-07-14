@@ -26,8 +26,9 @@
     "packs": ["extraDirs", "disabled"],
     "git": ["since", "recentDays", "commitTypePatterns"],
     "report": ["dir", "formats", "enabled"],
-    "tree": ["root", "sourceId", "overlays"],
-    "ruleObject": ["severity", "exclude"]
+    "tree": ["root", "sourceId", "overlays", "mountedAt", "mounts", "hosts"],
+    "ruleObject": ["severity", "exclude"],
+    "mount": ["dir", "at"]
   },
   "configPaths": [
     "git.since",
@@ -40,7 +41,10 @@
     "report.enabled",
     "trees[].root",
     "trees[].sourceId",
-    "trees[].overlays"
+    "trees[].overlays",
+    "trees[].mountedAt",
+    "trees[].mounts",
+    "trees[].hosts"
   ],
   "cliFlags": [
     "--config",

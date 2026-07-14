@@ -1,7 +1,11 @@
 # @zzop/cli
 
-Config-driven CLI for the **zzop** multi-language SAST/architecture analysis engine. Write a
-`zzop.config.jsonc`, run `npx zzop` — no code, ESLint-style.
+**zzop** joins your repos on their contracts — frontend calls matched against backend routes across a
+repo boundary, with near-misses named instead of left for a human to diff by hand — and does it
+deterministically: same code in, same findings out, byte-stable across runs, so you can gate a PR on
+contract drift (`failOn`) without flaky rechecks. Alongside that join, the same engine runs as a
+multi-language SAST/architecture analyzer over each repo individually. `@zzop/cli` is the config-driven
+front end: write a `zzop.config.jsonc`, run `npx zzop` — no code, ESLint-style.
 
 The analysis engine ships as [`@zzop/native`](https://www.npmjs.com/package/@zzop/native) and is
 installed automatically as a dependency of this package. `@zzop/cli` is the thin config-driven front end;
@@ -106,7 +110,19 @@ annotated copy; the reference below summarizes each option.
 
   // Or name each tree explicitly (takes precedence over "roots"):
   // "trees": [
-  //   { "root": "./api", "sourceId": "api" },
+  //   {
+  //     "root": "./api", "sourceId": "api",
+  //     // Gateway/ingress prefix this tree is served behind (shorthand for a
+  //     // whole-tree mount).
+  //     "mountedAt": "/api",
+  //     // Monorepo: per-directory prefixes for sub-apps mounted at different
+  //     // paths. Longest matching "dir" (tree-relative) wins per file. Stacks
+  //     // on top of prefixes zzop extracts from code (e.g. Nest setGlobalPrefix).
+  //     "mounts": [{ "dir": "apps/settle", "at": "/settle" }],
+  //     // Hosts that serve this tree: an absolute-URL call to one of these
+  //     // from another tree joins as a call into this tree, keyed by path.
+  //     "hosts": ["api.foo.com"]
+  //   },
   //   { "root": "./web", "sourceId": "web" }
   // ],
 
@@ -216,6 +232,30 @@ default `failOn: "warn"` exactly like a per-tree finding does; a handful of `inf
 (`unconsumed-endpoint`, `route-near-miss`, the coverage/blindness notes) never do under the default. In the
 pretty terminal report, cross-layer findings print in their own "Cross-layer findings:" section after the
 per-tree file groups, since the same relative file path can exist in two different trees.
+
+### Connection topology
+
+For a cross-repo/cross-tree join, some facts about how trees connect at runtime live only in deployment
+infra — a gateway's ingress rules, which host serves which service — never in either repo's own code.
+That is the one class of join information zzop cannot recover by reading source, so declare it per tree,
+alongside `sourceId`:
+
+- `mountedAt: "/api"` — shorthand for a whole-tree gateway/ingress prefix (equivalent to a `mounts` entry
+  with `dir: ""`, applied after every `mounts` entry — an explicit `dir: ""` mount of your own wins a tie
+  against this shorthand).
+- `mounts: [{ "dir": "apps/settle", "at": "/settle" }]` — for monorepos where different sub-apps are
+  mounted at different paths; per file, the longest matching `dir` (tree-relative) wins. Mounts stack ON
+  TOP of any prefix zzop already extracts from code (e.g. Nest's `setGlobalPrefix`) — the gateway sits
+  outside the app.
+- `hosts: ["api.foo.com"]` — an absolute-URL call from another tree to one of these hosts (`http`/`https`
+  only) stops counting as external egress and is treated as an internal call (re-keyed to its path) that
+  joins normally instead (a call to `https://api.foo.com/users` re-keys to `/users` and can match any
+  tree's provide at that path, not only this tree's).
+
+A mount or host that ends up with zero effect on the join produces a warning (stale config self-discloses
+instead of silently doing nothing); a prefix that's simply wrong shows up in the near-miss/prefix-drift
+findings rather than failing silently. Values are literal paths, not rewrite patterns. A path that doesn't
+start with `/`, or contains `://`, fails config loading with an error.
 
 ## Examples
 

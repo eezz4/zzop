@@ -113,6 +113,14 @@ The join itself carries three integrity gates on top of the raw `(kind, key)` ma
 - **Low confidence**: an edge whose key matches an injected "generic path" pattern (e.g. `/health`, which
   many unrelated services legitimately share) is still emitted, but tagged so a consumer can discount it.
 
+A per-tree deployment-topology declaration (`mountedAt`/`mounts`/`hosts` — see
+[packages/cli/README.md](../packages/cli/README.md#connection-topology)) supplies the one class of join
+information that lives only in infra, not in either repo's source: a gateway/ingress mount prefix, and
+which hosts a tree owns. Mounts apply as the last provide-key transform, stacking on top of any
+code-extracted prefix (e.g. NestJS's `setGlobalPrefix`); a declared host re-keys a matching absolute-URL
+consume to an internal joinable key before the external-egress gate above ever applies. Both self-disclose
+via a `warnings` entry when they turn out to have zero effect on the join.
+
 ## Sentinel-based tree rewrites
 
 A few cross-cutting facts — a NestJS app's `setGlobalPrefix(...)`, an axios instance's

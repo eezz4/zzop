@@ -20,7 +20,20 @@ const CONFIG_TEMPLATE = `{
   // sibling checkout that serves this repo's calls (e.g. "../provider-repo": a backend,
   // a peer service, or a module-federation remote) to review both sides together.
   // "trees": [
-  //   { "root": "./api", "sourceId": "api" },
+  //   {
+  //     "root": "./api", "sourceId": "api",
+  //     // mountedAt: serve this tree behind a gateway/ingress prefix
+  //     // (shorthand for a whole-tree mount).
+  //     "mountedAt": "/api",
+  //     // mounts: monorepo sub-apps served at different paths; longest
+  //     // matching dir wins per file (dir is tree-relative). Stacks on top
+  //     // of prefixes zzop extracts from code (e.g. Nest setGlobalPrefix).
+  //     "mounts": [{ "dir": "apps/settle", "at": "/settle" }],
+  //     // hosts: absolute-URL calls to these hosts from other trees are
+  //     // re-keyed to their path and join normally, instead of counting as
+  //     // external egress.
+  //     "hosts": ["api.foo.com"]
+  //   },
   //   { "root": "./web", "sourceId": "web" }
   // ],
 

@@ -9,17 +9,15 @@
 //! `query-drop-v1`) so the key matches whatever the BE adapter emits.
 //!
 //! Recognized call shapes: `axios.get/post/put/delete/patch(url)`, `ky.get/post/...(url)`,
-//! `fetch(url, { method })`, `$fetch(url, { method })`, `axios(url)`, the oazapfts-generated-SDK
-//! family (`oazapfts.fetchJson/fetchText/fetchBlob(url, opts)`, receiver matched tightly, method read
-//! from `opts.method` or from an `oazapfts.json/form(...)` wrapper), and a computed member callee on
+//! `fetch(url, { method })`, `$fetch(url, { method })`, `axios(url)`, and a computed member callee on
 //! `axios`/`ky` (`axios['post'](url)`, `axios[favorited ? 'delete' : 'post'](url)`) whose bracket
 //! expression is a recognized-verb string literal or a ternary with two such literal arms, and
 //! Angular's `this.<name>.get/post/put/delete/patch(url)` / `<name>.get/...(url)` where `<name>` must be
 //! HttpClient-typed (constructor param property or class property) or `inject(HttpClient)`-initialized
-//! in a file that itself imports `@angular/common/http` (see `angular-httpclient-v1` below). oazapfts
-//! codegen also appends a query-string suffix via a trailing template interpolation starting with
-//! `QS.` (`` `/activities${QS.query(...)}` ``) — dropped entirely rather than turned into a `{}`
-//! placeholder.
+//! in a file that itself imports `@angular/common/http` (see `angular-httpclient-v1` below).
+//! Generated-SDK clients (e.g. oazapfts) are NOT recognized here — that vocabulary lives in an
+//! injection adapter (`examples/oazapfts-adapter`), not the engine (decision: generated SDKs are
+//! injection adapters, not engine vocab).
 //!
 //! `cond-literal-fanout-v1`: a ternary with two string-literal arms — as the whole URL argument, as a
 //! template interpolation, or as the computed-member method — enumerates one deterministic key per arm
@@ -263,8 +261,8 @@ enum BodyStyle {
     /// Only actually read when every resolved method is a body-position verb (`is_body_position_verb`).
     DirectArg,
     /// `args[1]` is an options object; the body lives at its own `body:` property — the bare
-    /// `fetch`/`$fetch`/oazapfts idiom (mirrors how `method_from_options` reads `method:` from the
-    /// same object).
+    /// `fetch`/`$fetch` idiom (mirrors how `method_from_options` reads `method:` from the same
+    /// object).
     OptionsBodyProp,
 }
 
@@ -282,16 +280,7 @@ fn match_http_call(call: &CallExpr) -> Option<HttpCall<'_>> {
             match &m.prop {
                 MemberProp::Ident(name) => {
                     let name = name.sym.to_string();
-                    if obj == "oazapfts" && is_oazapfts_fetch(&name) {
-                        let method =
-                            method_from_options(call.args.get(1)).unwrap_or_else(|| "GET".into());
-                        Some(HttpCall {
-                            methods: vec![method],
-                            arg,
-                            body_style: BodyStyle::OptionsBodyProp,
-                            client: "oazapfts",
-                        })
-                    } else if (obj == "axios" || obj == "ky") && is_http_method(&name) {
+                    if (obj == "axios" || obj == "ky") && is_http_method(&name) {
                         Some(HttpCall {
                             methods: vec![name],
                             arg,
@@ -303,7 +292,7 @@ fn match_http_call(call: &CallExpr) -> Option<HttpCall<'_>> {
                     }
                 }
                 // Computed member callee — `axios['post'](url)` / `axios[cond ? 'delete' : 'post'](url)`.
-                // Only `axios`/`ky` (never oazapfts, which never spells its verb this way).
+                // Only `axios`/`ky`.
                 MemberProp::Computed(c) => {
                     if obj != "axios" && obj != "ky" {
                         return None;
@@ -358,7 +347,7 @@ fn is_http_method(m: &str) -> bool {
 /// second argument is a config/options object, never a body; a mixed-verb computed-member fanout with
 /// even ONE non-body-position verb rejects the whole site rather than guessing). Uppercase, matching
 /// `zzop_core::HTTP_KEY_VERBS`'s spelling; comparisons uppercase the candidate first since `HttpCall::methods`
-/// mixes lowercase (axios/ky/Angular verb-name spellings) and uppercase (oazapfts/fetch
+/// mixes lowercase (axios/ky/Angular verb-name spellings) and uppercase (fetch/`$fetch`
 /// `method_from_options` output) depending on which matcher produced it.
 ///
 /// Do not unify with `zzop_rules_http`'s `WRITE_HTTP_METHODS` (policy inventory T3): that set is a
@@ -547,38 +536,12 @@ fn methods_from_computed_prop(expr: &Expr) -> Option<Vec<String>> {
     }
 }
 
-/// oazapfts codegen's fetch wrappers — `oazapfts.fetchJson/fetchText/fetchBlob(url, opts)`.
-fn is_oazapfts_fetch(m: &str) -> bool {
-    matches!(m, "fetchJson" | "fetchText" | "fetchBlob")
-}
-
-/// Read `{ method: "post" }` from a fetch/axios options object, or from the object literal wrapped in
-/// any `oazapfts.<helper>({ ... })` call (`json`/`form`/`multipart`/...; receiver matched, not an
-/// allowlist). Only a literal `method: "..."` key is read; `...opts` spreads are silently skipped.
+/// Read `{ method: "post" }` from a fetch/axios options object. Only a literal `method: "..."` key is
+/// read; `...opts` spreads are silently skipped.
 fn method_from_options(opts: Option<&ExprOrSpread>) -> Option<String> {
     let expr = &*opts?.expr;
-    let obj = match expr {
-        Expr::Object(o) => o,
-        Expr::Call(c) => {
-            let Callee::Expr(callee) = &c.callee else {
-                return None;
-            };
-            let Expr::Member(m) = &**callee else {
-                return None;
-            };
-            let (Expr::Ident(obj_id), MemberProp::Ident(_)) = (&*m.obj, &m.prop) else {
-                return None;
-            };
-            // Any `oazapfts.<helper>({ ... })` wrapper counts — receiver matched, not a helper allowlist.
-            if obj_id.sym != "oazapfts" {
-                return None;
-            }
-            let Expr::Object(o) = &*c.args.first()?.expr else {
-                return None;
-            };
-            o
-        }
-        _ => return None,
+    let Expr::Object(obj) = expr else {
+        return None;
     };
     for prop in &obj.props {
         if let PropOrSpread::Prop(p) = prop {
@@ -604,9 +567,9 @@ fn method_from_options(opts: Option<&ExprOrSpread>) -> Option<String> {
 ///   a mixed-verb fanout with even one non-body-position verb never guesses which arm the object belongs
 ///   to, so the whole site yields `None`). A missing `args[1]` (`axios.post(url)`) also yields `None` —
 ///   an interceptor may inject a body invisibly; absence is not evidence either way.
-/// - [`BodyStyle::OptionsBodyProp`]: `args[1]` is an options object (or an oazapfts wrapper around one —
-///   same unwrap as [`method_from_options`]); the body lives at that object's own `body:` property, which
-///   may be a direct object literal, `JSON.stringify(<object literal>)`, or anything else (`None`).
+/// - [`BodyStyle::OptionsBodyProp`]: `args[1]` is an options object; the body lives at that object's own
+///   `body:` property, which may be a direct object literal, `JSON.stringify(<object literal>)`, or
+///   anything else (`None`).
 fn witnessed_body_shape(call: &CallExpr, hc: &HttpCall<'_>) -> Option<ConsumeBodyShape> {
     match hc.body_style {
         BodyStyle::DirectArg => {
@@ -636,33 +599,13 @@ fn witnessed_body_shape(call: &CallExpr, hc: &HttpCall<'_>) -> Option<ConsumeBod
     }
 }
 
-/// Read the `body:` property's value expression from a fetch/axios options object, or from the object
-/// literal wrapped in an `oazapfts.<helper>({ ... })` call — same receiver-matched unwrap pattern as
-/// [`method_from_options`] (module doc: oazapfts-generated-SDK family). Only a literal `body:` key
-/// (ident or string prop name) is read; `...opts` spreads are silently skipped (never guessed).
+/// Read the `body:` property's value expression from a fetch/axios options object. Only a literal
+/// `body:` key (ident or string prop name) is read; `...opts` spreads are silently skipped (never
+/// guessed).
 fn body_prop_from_options(opts: Option<&ExprOrSpread>) -> Option<&Expr> {
     let expr = &*opts?.expr;
-    let obj = match expr {
-        Expr::Object(o) => o,
-        Expr::Call(c) => {
-            let Callee::Expr(callee) = &c.callee else {
-                return None;
-            };
-            let Expr::Member(m) = &**callee else {
-                return None;
-            };
-            let (Expr::Ident(obj_id), MemberProp::Ident(_)) = (&*m.obj, &m.prop) else {
-                return None;
-            };
-            if obj_id.sym != "oazapfts" {
-                return None;
-            }
-            let Expr::Object(o) = &*c.args.first()?.expr else {
-                return None;
-            };
-            o
-        }
-        _ => return None,
+    let Expr::Object(obj) = expr else {
+        return None;
     };
     for prop in &obj.props {
         if let PropOrSpread::Prop(p) = prop {
@@ -679,7 +622,7 @@ fn body_prop_from_options(opts: Option<&ExprOrSpread>) -> Option<&Expr> {
 }
 
 /// `JSON.stringify(<expr>)` — callee must be exactly the member `JSON.stringify` (receiver matched
-/// tightly, like [`is_oazapfts_fetch`]'s receiver match, never a bare-name allowlist).
+/// tightly, never a bare-name allowlist).
 fn is_json_stringify_call(call: &CallExpr) -> bool {
     let Callee::Expr(callee) = &call.callee else {
         return false;
@@ -799,7 +742,7 @@ fn resolve_url_variants(
                 alt.value.as_str().unwrap_or_default().to_string(),
             ])
         }
-        Expr::Tpl(t) => resolve_template_variants(t, cm),
+        Expr::Tpl(t) => resolve_template_variants(t),
         Expr::Ident(_) | Expr::Member(_) => consts
             .get(&expr_text(arg, cm))
             .cloned()
@@ -925,39 +868,23 @@ fn assemble_concat_variants(pieces: &[TplPiece]) -> Vec<String> {
     dedup_preserve_order(variants)
 }
 
-/// One piece of a template literal between two quasis: either fixed text (the old `"{}"` placeholder,
-/// or an empty string for a dropped trailing QS suffix), or a conditional-literal fan-out slot carrying
-/// its two literal arm values.
+/// One piece of a template literal between two quasis: either fixed text (the old `"{}"` placeholder),
+/// or a conditional-literal fan-out slot carrying its two literal arm values.
 enum TplPiece {
     Fixed(String),
     Slot(String, String),
 }
 
-/// Template literal -> URL variants. `/api/users/${id}` -> `["/api/users/{}"]`, same as before. A
-/// *trailing* interpolation starting with `QS.` is still oazapfts's query-string suffix, dropped
-/// entirely rather than turned into `{}`. NEW (`cond-literal-fanout-v1`): an interpolation whose
-/// expression is a ternary with BOTH arms string literals is a fan-out slot instead of a fixed `{}` —
-/// e.g. `` `/users${isRegister ? '' : '/login'}` `` -> `["/users", "/users/login"]`. Multiple slots
-/// cartesian-product together, capped at 2 slots (<=4 variants); a 3rd+ slot forces EVERY slot in this
-/// template back to the old fixed `{}` behavior, keeping output bounded and deterministic. Variants are
-/// deduped preserving first-seen order.
-fn resolve_template_variants(t: &Tpl, cm: &SourceMap) -> Vec<String> {
-    let last_idx = t.exprs.len().checked_sub(1);
-
+/// Template literal -> URL variants. `/api/users/${id}` -> `["/api/users/{}"]`, same as before.
+/// (`cond-literal-fanout-v1`): an interpolation whose expression is a ternary with BOTH arms string
+/// literals is a fan-out slot instead of a fixed `{}` — e.g. `` `/users${isRegister ? '' : '/login'}` ``
+/// -> `["/users", "/users/login"]`. Multiple slots cartesian-product together, capped at 2 slots (<=4
+/// variants); a 3rd+ slot forces EVERY slot in this template back to the old fixed `{}` behavior, keeping
+/// output bounded and deterministic. Variants are deduped preserving first-seen order.
+fn resolve_template_variants(t: &Tpl) -> Vec<String> {
     let mut pieces: Vec<TplPiece> = Vec::with_capacity(t.exprs.len());
     let mut slot_count = 0usize;
-    for (i, e) in t.exprs.iter().enumerate() {
-        let is_trailing = last_idx == Some(i)
-            && t.quasis
-                .get(i + 1)
-                .and_then(|q| q.cooked.as_ref())
-                .map(|a| a.as_str().unwrap_or_default().is_empty())
-                .unwrap_or(false);
-        let is_qs_suffix = is_trailing && expr_text(e, cm).starts_with("QS.");
-        if is_qs_suffix {
-            pieces.push(TplPiece::Fixed(String::new()));
-            continue;
-        }
+    for e in t.exprs.iter() {
         if let Expr::Cond(c) = &**e {
             if let (Expr::Lit(Lit::Str(cons)), Expr::Lit(Lit::Str(alt))) = (&*c.cons, &*c.alt) {
                 slot_count += 1;
@@ -1552,77 +1479,20 @@ mod tests {
         );
     }
 
-    // --- oazapfts-generated-SDK call family ---
+    // --- generated-SDK receivers are not recognized (decision: generated SDKs are injection
+    // adapters, not engine vocab — the former oazapfts-specific recognition lived here) ---
 
     #[test]
-    fn oazapfts_get_with_trailing_qs_suffix_drops_the_interpolation() {
+    fn former_qs_suffix_special_case_is_gone_trailing_interpolation_is_a_plain_placeholder() {
+        // A trailing `${QS.query(...)}`-shaped interpolation used to be dropped entirely as
+        // oazapfts-codegen's query-string suffix. That special case is gone: it now keys like any other
+        // trailing interpolation, as an ordinary `{}` placeholder.
         let out = extract_http_egress(&files(&[(
             "activity.ts",
-            r#"oazapfts.ok(oazapfts.fetchJson<{ status: 200 }>(`/activities${QS.query(QS.explode({ albumId }))}`, { ...opts }));"#,
+            r#"axios.get(`/activities${QS.query(QS.explode({ albumId }))}`);"#,
         )]));
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].key.as_deref(), Some("GET /activities"));
-    }
-
-    #[test]
-    fn oazapfts_post_reads_method_from_oazapfts_json_wrapper() {
-        let out = extract_http_egress(&files(&[(
-            "activity.ts",
-            r#"oazapfts.ok(oazapfts.fetchJson<{ status: 201 }>("/activities", oazapfts.json({ ...opts, method: "POST", body: activityCreateDto })));"#,
-        )]));
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].key.as_deref(), Some("POST /activities"));
-    }
-
-    #[test]
-    fn oazapfts_post_reads_method_from_oazapfts_multipart_wrapper() {
-        let out = extract_http_egress(&files(&[(
-            "backup.ts",
-            r#"oazapfts.fetchJson("/admin/backups/upload", oazapfts.multipart({ ...opts, method: "POST", body }))"#,
-        )]));
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].key.as_deref(), Some("POST /admin/backups/upload"));
-    }
-
-    #[test]
-    fn oazapfts_call_nested_inside_oazapfts_ok_is_still_detected() {
-        // `oazapfts.ok(...)` itself is not a recognized callee — passes only via the visitor's existing
-        // recursion into nested calls, without any special-casing of the `ok` wrapper.
-        let out = extract_http_egress(&files(&[(
-            "a.ts",
-            r#"return oazapfts.ok(oazapfts.fetchJson("/activities", { ...opts }));"#,
-        )]));
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].key.as_deref(), Some("GET /activities"));
-    }
-
-    #[test]
-    fn oazapfts_fetch_blob_with_path_param_template_keeps_placeholder() {
-        let out = extract_http_egress(&files(&[(
-            "asset.ts",
-            r#"oazapfts.ok(oazapfts.fetchBlob(`/assets/${id}/thumbnail`, { ...opts }));"#,
-        )]));
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].key.as_deref(), Some("GET /assets/{}/thumbnail"));
-    }
-
-    #[test]
-    fn mid_path_qs_interpolation_is_not_the_trailing_suffix_shape_and_keeps_placeholder() {
-        let out = extract_http_egress(&files(&[(
-            "weird.ts",
-            r#"oazapfts.ok(oazapfts.fetchJson(`/foo/${QS.query(x)}/bar`, { ...opts }));"#,
-        )]));
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].key.as_deref(), Some("GET /foo/{}/bar"));
-    }
-
-    #[test]
-    fn non_oazapfts_receiver_with_same_method_name_is_not_recognized() {
-        let out = extract_http_egress(&files(&[(
-            "other.ts",
-            r#"other.fetchJson("/activities", { ...opts });"#,
-        )]));
-        assert!(out.is_empty());
+        assert_eq!(out[0].key.as_deref(), Some("GET /activities{}"));
     }
 
     // --- Angular HttpClient injection (`angular-httpclient-v1`) ---
@@ -2032,16 +1902,6 @@ mod tests {
     }
 
     #[test]
-    fn oazapfts_sibling_body_prop_is_witnessed() {
-        let out = extract_http_egress(&files(&[(
-            "activity.ts",
-            r#"oazapfts.fetchJson("/activities", oazapfts.json({ ...opts, method: "POST", body: { albumId } }));"#,
-        )]));
-        let body = out[0].body.as_ref().unwrap();
-        assert_eq!(body.keys, vec!["albumId".to_string()]);
-    }
-
-    #[test]
     fn computed_member_mixed_verb_fanout_body_is_none() {
         // Mixed-verb fanout (`DELETE`/`POST`) never guesses which arm the object belongs to — `None`
         // for BOTH emitted consumes, even though a static object literal is visibly present.
@@ -2114,15 +1974,6 @@ mod tests {
     fn dollar_fetch_call_is_tagged_dollar_fetch() {
         let out = extract_http_egress(&files(&[("a.ts", r#"$fetch("/a");"#)]));
         assert_eq!(clients(&out), vec![Some("$fetch".to_string())]);
-    }
-
-    #[test]
-    fn oazapfts_call_is_tagged_oazapfts() {
-        let out = extract_http_egress(&files(&[(
-            "a.ts",
-            r#"oazapfts.fetchJson("/activities", { method: "post" });"#,
-        )]));
-        assert_eq!(clients(&out), vec![Some("oazapfts".to_string())]);
     }
 
     #[test]

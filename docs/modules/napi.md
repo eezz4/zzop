@@ -28,6 +28,9 @@ plain napi-free Rust (compiles/tests under the workspace's default `gnu` toolcha
 | `severityOverrides` | `BTreeMap<String, "critical" \| "warning" \| "info">` (default `{}`) | Per-rule severity remap, keyed by rule id (same id space as `disabledRules`). Promotes/demotes a rule's findings without editing the pack — applied post-merge, so it also re-sorts the finding into its new severity band. |
 | `suppressions` | `Vec<{ rule: String, path?, glob? }>` (default `[]`) | Finding-level accept-list. Each entry drops findings for `rule` either everywhere (no filter), only in files whose path CONTAINS `path` as a plain substring (case-sensitive), or only in files matching `glob` (full-path shell glob; `glob` takes precedence over `path`). Multiple entries for one rule are OR-ed. |
 | `adapterOverlays` | `Vec<NormalizedEnvelope>` (default `[]`) | Mode-B adapter overlays: partial Normalized-AST envelopes merged ON TOP of native analysis (each re-validated, soft-skipped with a warning if invalid). How a framework/SDK adapter adds IoFacts the engine does not parse natively without reimplementing the parser — contrast `analyzeEnvelope`, where a full envelope REPLACES native analysis. Post-cache, so it does not affect the cache key. See [../NORMALIZED_AST.md](../NORMALIZED_AST.md). |
+| `mountedAt` | `Option<String>` | Deployment-topology whole-tree gateway/ingress mount prefix — shorthand for a `mounts` entry with `dir: ""`, folded in LAST (after every `mounts` entry) so an explicit equal-length `mounts` entry wins a tie. `None` (default) adds no implicit mount. Applied to `kind=http` provides only, stacking on top of any code-extracted prefix. See [../ARCHITECTURE.md](../ARCHITECTURE.md#cross-layer-join) / [packages/cli/README.md](../../packages/cli/README.md#connection-topology). |
+| `mounts` | `Vec<{ dir: String, at: String }>` (default `[]`) | Deployment-topology per-directory mounts: prepends `at` to a `kind=http` provide's key when its file path falls under `dir` (longest matching `dir` wins per provide). Shape is validated fail-fast by the CLI mapper (`ConfigError`); the engine itself defensively skips+warns on a malformed value as a backstop. |
+| `hosts` | `Vec<String>` (default `[]`) | Hosts this tree owns. An absolute-URL consume from any tree targeting one of these hosts (`http`/`https` only) is re-keyed to an internal joinable key at cross-layer link time instead of falling into `externalConsumes` — see `hostRekeyCounts` below. |
 
 ### Defaults (zero-config = full analysis)
 
@@ -151,6 +154,15 @@ join result across six buckets (camelCase like everything else), plus a per-edge
 - `edges[].lowConfidenceReason` (string, omitted when not set) — the edge's key matched a generic-path
   pattern (health checks, `/login`, etc.) that many unrelated services could share, so the match is lower
   confidence than a distinctively-named route; the edge is still emitted.
+
+`crossLayer` also carries `hostRekeyCounts`, an additional field present only when at least one tree in
+the request declares topology `hosts` — one `[host, rekeyedConsumeCount]` pair (a plain 2-element JSON
+array of `[string, number]`, since it serializes a Rust `Vec<(String, usize)>`) per distinct declared
+host, in declaration order. `rekeyedConsumeCount` is how many absolute-URL consumes targeting that host
+were re-keyed to internal and joined via the normal `edges`/`ambiguousConsumes`/`unprovidedConsumes` path
+instead of falling into `externalConsumes`; a count of `0` means the declared host is stale or every
+consumer used a relative path. The field is omitted entirely (not an empty array) when no tree declares
+any hosts.
 
 `crossLayerFindings` is the output of the `cross-layer/*` native rules run over `crossLayer` (see the
 "Native analyses" table in [docs/rules/catalog.md](../rules/catalog.md) for the full id list) — sorted the

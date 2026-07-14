@@ -7,7 +7,7 @@
 use zzop_core::io::TaggedConsume;
 use zzop_core::{disable_hint, Finding, Severity};
 
-use super::{path_segments, split_key, HttpProvideSite};
+use super::{is_all_slot_path, path_segments, split_key, HttpProvideSite};
 
 pub fn path_near_miss_findings(
     unprovided_consumes: &[TaggedConsume],
@@ -25,6 +25,12 @@ pub fn path_near_miss_findings(
             continue;
         };
         let consume_segs = path_segments(path);
+        if is_all_slot_path(&consume_segs) {
+            // Minimum-information gate: an all-`{}` consume (typically a head-drop artifact) carries
+            // zero literal evidence, so it "resembles" every same-length provide vacuously — see
+            // `is_all_slot_path`'s doc.
+            continue;
+        }
 
         let mut matches: Vec<&HttpProvideSite> = Vec::new();
         for p in all_provides {
@@ -193,5 +199,33 @@ mod tests {
         )];
         let provides = vec![provide("GET /users/active/profile", "be", "Api.java", 14)];
         assert!(path_near_miss_findings(&unprovided_consumes, &provides).is_empty());
+    }
+
+    #[test]
+    fn all_slot_consume_is_gated_out_mono_hub_field_case() {
+        // Field-measured case: a head-drop artifact key `GET /{}` (from `` `${base}/${x}` ``) must not
+        // vacuously near-miss every same-length provide.
+        let unprovided_consumes = vec![consume("http", Some("GET /{}"), "fe", "Ctx.tsx", 7)];
+        let provides = vec![provide("GET /feed.xml", "be", "Api.java", 14)];
+        assert!(path_near_miss_findings(&unprovided_consumes, &provides).is_empty());
+    }
+
+    #[test]
+    fn all_slot_consume_multi_segment_is_gated_out() {
+        let unprovided_consumes = vec![consume("http", Some("GET /{}/{}"), "fe", "Ctx.tsx", 7)];
+        let provides = vec![provide("GET /users/{}", "be", "Api.java", 14)];
+        assert!(path_near_miss_findings(&unprovided_consumes, &provides).is_empty());
+    }
+
+    #[test]
+    fn all_slot_provide_is_still_a_suggestion_target() {
+        // Asymmetry pin: the gate only applies to the consume side. An all-slot provide is a declared
+        // catch-all route (e.g. `app.get('/:page')`), not a head-drop artifact, so a literal consume
+        // near-missing it must still fire.
+        let unprovided_consumes = vec![consume("http", Some("GET /users"), "fe", "Ctx.tsx", 7)];
+        let provides = vec![provide("GET /{}", "be", "Api.java", 14)];
+        let out = path_near_miss_findings(&unprovided_consumes, &provides);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].rule_id, "cross-layer/path-near-miss");
     }
 }

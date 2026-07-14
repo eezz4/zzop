@@ -28,7 +28,7 @@ pub fn unprovided_mutation_call_findings(unprovided_consumes: &[TaggedConsume]) 
                  `cross-layer/method-mismatch`, `cross-layer/version-skew`, or `cross-layer/path-near-miss` \
                  also fired for this same consume, one of them likely names the exact drift (a method typo, \
                  a version-segment skew, or a near-miss path) — check those first. If none of them fired, no \
-                 close candidate exists at all: the target route may genuinely not exist yet, its provider \
+                 near-miss candidate was reported: the target route may genuinely not exist yet, its provider \
                  repo may simply be missing from this `analyzeTrees` run, or the route exists but registers \
                  under a non-literal base path (an enum/constant `@Controller(...)` argument, or a \
                  file-routing/dispatch-table framework) this extractor could not resolve — check the provider \

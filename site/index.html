@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>zzop — Overview</title>
-<meta name="description" content="zzop — a multi-language SAST and architecture analysis engine, written in Rust.">
+<meta name="description" content="zzop — deterministic cross-repo contract analysis you can gate CI on, written in Rust. Also a multi-language SAST and architecture analysis engine.">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="assets/site.css">
 </head>
@@ -36,7 +36,7 @@
     <div class="hero__text">
       <span class="eyebrow">ZERO ZONE OF PAIN</span>
       <h1 class="hero__title">zzop</h1>
-      <p class="hero__lead">Built for the AI-agent era: a context window can't hold your codebase, so zzop condenses it — or several codebases at once — into one deterministic JSON map of security findings, structural debt, and cross-layer drift. A multi-language SAST and architecture analysis engine, written in Rust.</p>
+      <p class="hero__lead">Built for the AI-agent era: a context window can't hold your codebase, so zzop condenses it — or several codebases at once — into one deterministic JSON map. At its core is a cross-repo contract analyzer, written in Rust, that joins frontend calls against backend routes and turns drift into a finding you can gate a PR on — same code in, same findings out, every run. It also runs as a multi-language SAST and architecture analysis engine over each repo individually.</p>
       <div class="btn-row">
         <a href="usage.html" class="btn btn--primary">Get started</a>
         <a href="rules.html" class="btn btn--outline-accent">Rule catalog</a>
@@ -81,16 +81,16 @@ npx zzop          # analyze and print a report
       <h2 class="section-title">One engine, three lenses</h2>
       <div class="card-grid">
         <div class="card">
+          <h3>Cross-layer</h3>
+          <p>Frontend calls joined to backend routes: unconsumed endpoints, method mismatches, version skew, path drift — even across repositories.</p>
+        </div>
+        <div class="card">
           <h3>Security (SAST)</h3>
           <p>SQL injection, weak hashing, SSRF, hardcoded secrets — DSL rules plus native analyses catch vulnerable patterns across languages.</p>
         </div>
         <div class="card">
           <h3>Structure</h3>
           <p>Circular dependencies, dead code, risk scores, extraction seams — structural debt, quantified per file and per repository.</p>
-        </div>
-        <div class="card">
-          <h3>Cross-layer</h3>
-          <p>Frontend calls joined to backend routes: unconsumed endpoints, method mismatches, version skew, path drift — even across repositories.</p>
         </div>
       </div>
     </div>

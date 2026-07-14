@@ -363,7 +363,7 @@ fn capture_arg(e: &Expr) -> Option<String> {
 }
 
 /// `` `/workflows/${id}/activate` `` -> `"/workflows/{}/activate"` — same transform `egress.rs`'s own
-/// `resolve_url` applies (minus its oazapfts `QS.`-suffix special case, not relevant here).
+/// `resolve_url` applies.
 fn tpl_shape(t: &Tpl) -> String {
     let mut s = String::new();
     for (i, q) in t.quasis.iter().enumerate() {

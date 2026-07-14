@@ -502,3 +502,45 @@ fn unprovided_consume_disabled_via_config_removes_the_finding() {
         out.findings
     );
 }
+
+/// This tree provides one route family (`/settle`) and consumes three unmatched keys under a totally
+/// different, foreign first segment (`/orders`) — end-to-end proof that the foreign-vs-overlapping fold
+/// (`rules/native/rules-http/src/unprovided_consume.rs`) reaches the real engine wiring: one aggregate
+/// `unprovided-consume` finding, not three independent ones.
+fn unprovided_consume_foreign_fold_fixture() -> TempDir {
+    let dir = TempDir::new("zzop-unprovided-consume-foreign-fold");
+    dir.write(
+        "routes/settle.ts",
+        "const apiRoutes = new Hono();\napiRoutes.get(\"/settle/a\", api.getA);\n",
+    );
+    dir.write(
+        "src/client.ts",
+        concat!(
+            "export function loadOrder1() { return axios.get(\"/orders/1\"); }\n",
+            "export function loadOrder2() { return axios.get(\"/orders/2\"); }\n",
+            "export function loadOrder3() { return axios.get(\"/orders/3\"); }\n",
+        ),
+    );
+    dir
+}
+
+#[test]
+fn three_or_more_foreign_unmatched_consumes_fold_into_one_aggregate_finding_end_to_end() {
+    let dir = unprovided_consume_foreign_fold_fixture();
+    let out = scan(&dir);
+    let found = hits(&out, "unprovided-consume");
+    assert_eq!(found.len(), 1, "{:?}", out.findings);
+    assert_eq!(found[0].severity, zzop_core::Severity::Info);
+    let data = found[0].data.as_ref().unwrap();
+    assert_eq!(data["callCount"], 3);
+    let routes = data["routes"].as_array().unwrap();
+    assert_eq!(routes.len(), 3);
+    for key in ["GET /orders/1", "GET /orders/2", "GET /orders/3"] {
+        assert!(
+            routes.iter().any(|r| r.as_str() == Some(key)),
+            "missing {key} in routes: {routes:?}"
+        );
+        assert!(found[0].message.contains(key), "missing {key} in message");
+    }
+    assert!(found[0].message.contains("disabled_rules"));
+}

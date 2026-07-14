@@ -12,11 +12,17 @@ cd "$(dirname "$0")/.."
 # Non-Latin letter scripts. Punctuation / symbols (— · → ★) are intentionally NOT flagged.
 FOREIGN='[\x{AC00}-\x{D7A3}\x{1100}-\x{11FF}\x{3130}-\x{318F}\x{3040}-\x{30FF}\x{4E00}-\x{9FFF}\x{0400}-\x{04FF}]'
 
-# Scope = git-tracked files only: OSS-facing means "ships in the repo". A filesystem-wide grep
-# also sweeps untracked local corpora (dogfood checkouts of third-party repos, which legitimately
-# contain i18n text) — those are not ours to police. CI runs on a clean checkout, so tracked-only
-# scanning is identical there.
-files=$(git ls-files -- '*.rs' '*.md' '*.toml' '*.json' '*.js' '*.mjs' '*.cjs' '*.ts' \
+# Scope = tracked files PLUS untracked-but-not-ignored ones: OSS-facing means "will ship in the
+# repo". Untracked NEW files must be scanned too — a fresh file passes a tracked-only scan before
+# its first `git add` and the violation lands in the commit (happened 2026-07-14 with a new test
+# file). Ignored paths (local dogfood corpora of third-party repos with legitimate i18n text) stay
+# out via --exclude-standard. CI runs on a clean checkout, where this reduces to tracked-only.
+list_source_files() {
+  { git ls-files -- '*.rs' '*.md' '*.toml' '*.json' '*.js' '*.mjs' '*.cjs' '*.ts'
+    git ls-files --others --exclude-standard -- '*.rs' '*.md' '*.toml' '*.json' '*.js' '*.mjs' '*.cjs' '*.ts'
+  } | sort -u
+}
+files=$(list_source_files \
   | xargs -d '\n' grep -lP "$FOREIGN" 2>/dev/null \
   | grep -v '/\.claude/' | grep -v '/target/' | grep -v '/node_modules/' || true)
 
@@ -34,7 +40,7 @@ echo "English-only source guard: clean."
 # Internal-path guard: OSS-facing files must never point readers at .claude/ — those paths are not
 # published, so any "see .claude/context/..." reference is a broken pointer for anyone outside this
 # repo's working tree. Rationale belongs inline (summarized) or in docs/, not linked by internal path.
-claude_ref_files=$(git ls-files -- '*.rs' '*.md' '*.toml' '*.json' '*.js' '*.mjs' '*.cjs' '*.ts' \
+claude_ref_files=$(list_source_files \
   | xargs -d '\n' grep -lP '\.claude' 2>/dev/null \
   | grep -v '/\.claude/' | grep -v '/target/' | grep -v '/node_modules/' || true)
 

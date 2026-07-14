@@ -14,6 +14,10 @@ side actually agrees. Alongside that cross-layer join it also runs a SAST-style 
 (native whole-graph analyses + declarative JSON rule packs) over each repo individually, returning
 structural findings, dependency/dead-code analysis, and health scores as one JSON document.
 
+Every run is deterministic: same code in, same findings out — byte-stable output you can diff between
+runs. That determinism is what makes zzop usable as a CI gate — fail a PR on contract drift with
+`failOn` — and as a substrate an agent can re-run and diff without chasing flaky rechecks.
+
 - Documentation site: <https://eezz4.github.io/zzop/> (source in [`site/`](site/))
 - Documentation (in-repo): [`docs/README.md`](docs/README.md)
 - External parser protocol: [`docs/NORMALIZED_AST.md`](docs/NORMALIZED_AST.md)

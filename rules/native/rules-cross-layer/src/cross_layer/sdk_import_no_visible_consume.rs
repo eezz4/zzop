@@ -11,8 +11,11 @@
 //! - **SDK-shaped**: a generated/vendor SDK package, credible only once imported from several files
 //!   (`MIN_SDK_IMPORTING_FILES`) — a single dangling import proves nothing about tree-wide consumption.
 //! - **Opaque HTTP client**: a hand-rolled API client built on a library `match_http_call`
-//!   (parser-typescript's egress extractor) does not recognize at all (unlike axios/ky/fetch/oazapfts,
-//!   which ARE recognized and must stay excluded from this pattern to avoid FPs on normal trees). These
+//!   (parser-typescript's egress extractor) does not recognize at all (unlike axios/ky/fetch, which ARE
+//!   recognized and must stay excluded from this pattern to avoid FPs on normal trees). Generated-SDK
+//!   clients such as oazapfts belong here too: the engine deliberately does not recognize them (decision:
+//!   generated SDKs are injection adapters, not engine vocab — see `examples/oazapfts-adapter`), so an
+//!   unadapted oazapfts import is exactly the same join-blind shape as a hand-rolled opaque client. These
 //!   are credible from a single importing file (`MIN_OPAQUE_CLIENT_IMPORTING_FILES`) since the common idiom
 //!   is exactly one central client module wrapping the library for the whole tree.
 //!
@@ -46,11 +49,13 @@ const SDK_SPECIFIER_PATTERN: &str =
 
 /// Opaque HTTP client library specifier: packages `match_http_call` (parser-typescript's egress
 /// extractor) does not recognize at all, so any HTTP calls made through them are invisible to the
-/// cross-layer join. Deliberately excludes axios/ky/fetch/oazapfts — those ARE recognized by the
-/// extractor, so including them here would false-positive on ordinary trees. Segment-anchored so e.g.
-/// `requestly` or `gotham` never match — only a whole package name (or the trailing segment of a scoped
-/// name) counts.
-const OPAQUE_HTTP_CLIENT_PATTERN: &str = r"(?i)(^|[/@-])(superagent-promise|superagent|request-promise|request|got|node-fetch|needle|undici|phin|bent)([/-]|$)";
+/// cross-layer join. Deliberately excludes axios/ky/fetch — those ARE recognized by the extractor, so
+/// including them here would false-positive on ordinary trees. `oazapfts` IS included: the engine no
+/// longer recognizes the oazapfts-generated-SDK call family natively (decision: generated SDKs are
+/// injection adapters, not engine vocab), so an unadapted oazapfts import is exactly this pattern's
+/// opaque-client shape. Segment-anchored so e.g. `requestly` or `gotham` never match — only a whole
+/// package name (or the trailing segment of a scoped name) counts.
+const OPAQUE_HTTP_CLIENT_PATTERN: &str = r"(?i)(^|[/@-])(superagent-promise|superagent|request-promise|request|got|node-fetch|needle|undici|phin|bent|oazapfts)([/-]|$)";
 
 /// Which detection class flagged a package — exposed in `data` so downstream tooling can distinguish
 /// "consumption likely flows through a generated SDK" from "consumption flows through an untraceable
@@ -285,6 +290,20 @@ mod tests {
         let imports = vec![pkg("web", "requestly", 1, "src/lib/client.ts")];
         let totals = vec![("web".to_string(), 0)];
         assert!(sdk_import_no_visible_consume_findings(&imports, &totals).is_empty());
+    }
+
+    #[test]
+    fn oazapfts_from_a_single_file_with_zero_visible_consumes_fires() {
+        // Native recognition of the oazapfts call family is gone (decision: generated SDKs are
+        // injection adapters, not engine vocab); an unadapted oazapfts import is now an opaque client
+        // just like superagent/got, so it must fire the disclosure rather than staying silent.
+        let imports = vec![pkg("web", "oazapfts", 1, "src/lib/client.ts")];
+        let totals = vec![("web".to_string(), 0)];
+        let out = sdk_import_no_visible_consume_findings(&imports, &totals);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].file, "src/lib/client.ts");
+        let data = out[0].data.as_ref().unwrap();
+        assert_eq!(data["sdkPackages"][0]["kind"], "opaqueClient");
     }
 
     #[test]
