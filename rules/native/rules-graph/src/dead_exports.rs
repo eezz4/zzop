@@ -953,9 +953,9 @@ mod tests {
         assert_eq!(out[0].rule_id, "dead-exports");
         // Interpolates `disable_hint`'s own output (rather than spelling "Disable via config `rules:
         // {...}`" as a literal here) so this file's own source never carries that literal text next to a
-        // `` `export` `` backtick — `packages/engine/tests/rule_contracts.rs`'s CHECK B flags exactly that
+        // `` `export` `` backtick — `crates/engine/tests/rule_contracts.rs`'s CHECK B flags exactly that
         // shape (a backtick-quoted, non-config-key token sitting within 120 bytes of the word "config") as
-        // an unvouched-for config-key reference. `disable_hint`'s own unit tests (`packages/core/src/
+        // an unvouched-for config-key reference. `disable_hint`'s own unit tests (`crates/core/src/
         // finding.rs`) already pin its rendered form; this test only needs to confirm it lands in the right
         // place in the surrounding sentence.
         let tail = disable_hint("dead-exports");

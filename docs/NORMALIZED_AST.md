@@ -67,7 +67,7 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
   normalized by the parser (`"GET /users/{}"`, `"table:users"`). Unresolvable dynamic keys are `null`
   (unresolved), never guessed. Key normalization quality is the parser's whole responsibility and the
   only thing cross-layer accuracy depends on. The normative HTTP key-normalization rules live in
-  `packages/core/src/io.rs`'s `http_interface_key`/`http_consume_interface_key` (provide-side vs.
+  `crates/core/src/io.rs`'s `http_interface_key`/`http_consume_interface_key` (provide-side vs.
   consume-side asymmetry, path-param collapse, slash/method normalization); the byte-exact,
   language-agnostic parity contract for reproducing them is
   [`adapters/key-normalization.fixture.json`](adapters/key-normalization.fixture.json) (see
@@ -78,7 +78,7 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
   `adapters/README.md`'s "Absolute URLs bypass normalization entirely" section.
   - OPTIONAL client provenance (additive since `axios-defaults-base-v1`; omit and nothing changes):
     an `IoConsume` may carry `client: "axios"` naming the HTTP client that produced the call site.
-    `client` is a free-form string (`Option<String>` in `packages/core/src/io.rs`), not a closed enum —
+    `client` is a free-form string (`Option<String>` in `crates/core/src/io.rs`), not a closed enum —
     the native TS parser's own recognizers currently tag `"axios"`, `"ky"`, `"fetch"`, `"$fetch"`,
     and `"angular"`, but those are examples of the vocabulary in active use, not an exhaustive or
     enforced list — a generated-SDK injection adapter (e.g. for oazapfts) is free to set its own
@@ -92,7 +92,7 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     "fields": [{"name": "email", "optional": false}], "complete": true }` — either with `dtoRef` set
     (resolved at assemble time against `class_shape_fragments`, below) or with `fields`/`complete`
     supplied directly and `dtoRef` omitted. Feeds `cross-layer/body-field-drift`; see
-    `packages/core/src/io.rs`'s `ConsumeBodyShape`/`ProvideBodyShape` for the normative semantics
+    `crates/core/src/io.rs`'s `ConsumeBodyShape`/`ProvideBodyShape` for the normative semantics
     (evidence-only: anything not statically witnessed is omitted, never approximated).
 - `const_map_fragment`, `procedure_router_fragments`, `router_mount_fragments`, `class_shape_fragments` —
   all four are OPTIONAL
@@ -109,12 +109,12 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
   - `procedure_router_fragments` is `[ <ProcedureRouterFragment> ]`, same shape as the native tRPC-router-fragment
     projection: a named router binding plus entries, each either a `Ref` to another router by
     identifier/import-specifier, a `Nested` inline sub-router, or a `Leaf` procedure. See
-    `packages/core/src/fragments.rs`'s `ProcedureRouterFragment`/`ProcedureRouterEntry` for the normative field
+    `crates/core/src/fragments.rs`'s `ProcedureRouterFragment`/`ProcedureRouterEntry` for the normative field
     names.
   - `router_mount_fragments` is `[ <RouterMountFragment> ]`, same shape as the native Hono-style
     router-mount projection: a named router identifier plus entries, each either a `Verb` registration
     (`{method, path, handler, line}`) or a `Mount` sub-router mount (`{prefix, ident, specifier}`). See
-    `packages/core/src/fragments.rs`'s `RouterMountFragment`/`RouterMountEntry` for the normative field
+    `crates/core/src/fragments.rs`'s `RouterMountFragment`/`RouterMountEntry` for the normative field
     names.
   - `class_shape_fragments` is `[ {"name": "CreateUserDto", "fields": [{"name": "email",
     "optional": false}], "complete": true} ]` — one entry per class declaration the adapter's language
@@ -122,7 +122,7 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     tree-wide merge resolves each `dtoRef` by class name, dropping unresolvable or cross-file-conflicting
     names with a warning rather than guessing. `complete: false` means the field list may be partial
     (inheritance, mixins, index signatures — whatever the source language's equivalent is). See
-    `packages/core/src/fragments.rs`'s `ClassShapeFragment`.
+    `crates/core/src/fragments.rs`'s `ClassShapeFragment`.
 
   **Contract note — specifier resolution is exact-match/relative only, never alias-aware.** A tRPC
   `Ref`'s `specifier` and a router-mount `Mount`'s `specifier` must resolve to either (a) another file's
@@ -195,19 +195,19 @@ Casing is not uniform across the envelope, and which part you get wrong changes 
 
 - **`FileProjection` top-level fields are snake_case** (`re_exports`, `dynamic_imports`,
   `const_map_fragment`, `procedure_router_fragments`, `router_mount_fragments`, `class_shape_fragments`,
-  `is_entry`, ...) — this struct carries no `#[serde(rename_all = ...)]` (`packages/core/src/
+  `is_entry`, ...) — this struct carries no `#[serde(rename_all = ...)]` (`crates/core/src/
   normalized.rs`). The one exception is `loop_spans`, which additionally accepts camelCase
   `loopSpans` on input (`#[serde(alias = "loopSpans")]`). A camelCase spelling of any OTHER
   `FileProjection` field (e.g. `reExports`) matches no struct field, so serde treats it as an
   unrecognized key.
 - **`SourceSymbol` (the `symbols` array) outputs camelCase, but accepts snake_case input for exactly
   three fields**: `is_default`, `body_start`, and `body_end` each carry a `#[serde(alias = ...)]` back
-  to their frozen v1 snake_case spelling (`packages/core/src/ir.rs`) so the original external-parser
+  to their frozen v1 snake_case spelling (`crates/core/src/ir.rs`) so the original external-parser
   contract keeps working alongside the newer camelCase-uniform output. `writeSites` has no snake_case
   alias — camelCase-only, both directions.
 - **The `io` payload types are camelCase with no snake_case aliasing at all**: `IoProvide`/`IoConsume`
   and their nested body-shape payloads (`ConsumeBodyShape`'s `completeAt`, `ProvideBodyShape`'s
-  `subKey`/`dtoRef`, all `#[serde(rename_all = "camelCase")]` in `packages/core/src/io.rs`) only ever
+  `subKey`/`dtoRef`, all `#[serde(rename_all = "camelCase")]` in `crates/core/src/io.rs`) only ever
   match the camelCase spelling — there is no legacy snake_case form to fall back to here.
 
 **The failure mode depends on whether the misspelled field is required or optional**, not on which of
@@ -247,14 +247,14 @@ producer-forbidden and drops them at the boundary rather than leaking a raw, unr
 output or a rule:
 
 - **Mode A** (`analyze_envelope`) drops any `nest-global-prefix`/`client-base-prefix` entry per file, at
-  ingestion, before it ever reaches `MinimalIr::io` or a rule (`packages/engine/src/envelope.rs`,
+  ingestion, before it ever reaches `MinimalIr::io` or a rule (`crates/engine/src/envelope.rs`,
   `is_reserved_provide_kind`/`is_reserved_consume_kind` filtering the per-file `io_provides`/
-  `io_consumes` extend, ~lines 120-146). This drop is not silent: the envelope gets one aggregate
+  `io_consumes` extend, ~lines 165-190). This drop is not silent: the envelope gets one aggregate
   `AnalyzeOutput::warnings` entry naming the envelope's `parser`, the dropped count, and the reserved
   kinds — a partial drop, not a validation failure, so the envelope's other `io`/fragment data still
   analyzes normally.
 - **Mode B** (`apply_adapter_overlays`) drops the same two kinds from every overlay `FileProjection`
-  before either merge branch runs (`packages/engine/src/envelope.rs`, ~lines 444-535), with the same
+  before either merge branch runs (`crates/engine/src/envelope.rs`, ~lines 608-628), with the same
   not-silent posture: an overlay a sentinel was dropped from gets one aggregate
   `AnalyzeOutput::warnings` entry naming the overlay's `parser`, the dropped count, and the reserved
   kinds — a partial drop, not a validation failure, so the overlay's other `io`/fragment data still
@@ -309,6 +309,25 @@ callers can refer to either unambiguously.
   configured overlays is unioned into the `dead-candidates` analysis's exempt set (the overlay
   counterpart of a package.json manifest entry) — a framework-loaded file an adapter declares reachable
   by convention is never flagged dead for having zero in-repo importers.
+
+  **Self-disclosure: `source`, coverage, and synthetic entries.** Three checks run once per ACCEPTED
+  overlay, independent of the merge branch each `FileProjection` takes:
+  - `source` is the overlay's own declared tree/source id, but every projection still merges onto
+    whichever tree's `overlays`/`adapterOverlays` entry carried it, regardless of what `source` says.
+    A non-empty `source` that differs from that tree's own id triggers a warning — its facts will join
+    as intra-source, not cross-source — UNLESS the overlay carries no join-relevant `io` (an
+    attributes-/`is_entry`-only overlay is source-agnostic and never warns here).
+  - A declared `files[].path` matching no file in the tree is still merged in, as a synthetic
+    `FileArtifact` (the "not found" branch above) — but the overlay gets one warning naming how many
+    of its declared paths were synthetic, with up to 3 sample paths. `path` must be tree-root-relative;
+    a mismatch is usually a typo.
+  - An entry counts as adapter coverage for the per-extension "no native parser" diagnostic (the
+    self-report warning a file whose extension has no native parser, naming the `overlays: [...]`
+    remedy) only if it carries at least one fact the merge actually consumes: non-reserved `io`, `imports`,
+    `re_exports`, `dynamic_imports`, a fragment channel, non-empty `attributes`, or `is_entry: true`.
+    **`symbols` does not count** — neither merge branch above reads an overlay projection's `symbols`,
+    so a symbols-only entry is empty coverage. An overlay whose every entry carries none of these gets
+    one "zero-fact" warning, and every file behind it keeps triggering the native-parser diagnostic.
 
   Overlay-added fragments then flow through the EXACT SAME whole-tree composition passes as anything
   else (`compose_trpc_provides`/`compose_router_mount_provides`) — an overlay is not a separate code path
@@ -377,8 +396,8 @@ dedup key is `(kind, key, file, line)`, applied to both `provides` and `consumes
 
 **napi exposure.** Overlays are reachable from Rust (`EngineConfig::adapter_overlays`) AND from napi
 callers: `analyze`/`analyzeTrees`'s config accepts an `adapterOverlays` array of envelopes with this
-same shape (`AnalyzeRequest::adapter_overlays` in `packages/napi/src/api.rs`, `Array<Record<string,
-unknown>>` in `packages/napi/index.d.ts`'s `AnalyzeConfig`), e.g.:
+same shape (`AnalyzeRequest::adapter_overlays` in `crates/facade/src/lib.rs`, `Array<Record<string,
+unknown>>` in `packages/native/index.d.ts`'s `AnalyzeConfig`), e.g.:
 
 ```json
 {

@@ -2,11 +2,11 @@
 
 Everything the engine ships today, read directly from `rules/dsl/**/*.json` and
 `zzop_engine::register_all_native` (which composes `zzop_rules_graph`/`zzop_rules_http`/`zzop_rules_cross_layer`/`zzop_rules_schema`/`zzop_metrics`'s own
-`register_native_analyses` — the kernel, `packages/core`, registers no ids itself). Schema/matcher
+`register_native_analyses` — the kernel, `crates/core`, registers no ids itself). Schema/matcher
 semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 [authoring-guide.md](authoring-guide.md).
 
-**Totals** (machine-checked by `packages/engine/tests/rule_contracts.rs`'s `catalog_totals_match_loaded_rule_and_analysis_counts`): 14 DSL packs, 112 DSL rules, 43 native analysis ids. 11 packs ship rules; 3 are stub packs (see "Stub packs" below).
+**Totals** (machine-checked by `crates/engine/tests/rule_contracts.rs`'s `catalog_totals_match_loaded_rule_and_analysis_counts`): 14 DSL packs, 112 DSL rules, 43 native analysis ids. 11 packs ship rules; 3 are stub packs (see "Stub packs" below).
 
 ## DSL packs (`rules/dsl/<pack>/<pack>.json`)
 
@@ -188,14 +188,14 @@ joins, or JSX/AST structure the DSL can't express (see
 
 Whole-graph/whole-repo analyses, registered under `RuleKind::Native` so they share one
 enable/severity/suppression gating surface with DSL and JS rules (`RuleConfig`). Each id is registered by
-its owning crate's own `register_native_analyses` (`packages/core` itself registers none — the kernel is
+its owning crate's own `register_native_analyses` (`crates/core` itself registers none — the kernel is
 rule-vocabulary-free): `rules/native/rules-graph` owns `circular`, `unreachable`, `dead-candidates`,
 `dead-exports` (dependency/dead-code graph rules); `rules/native/rules-http` owns `duplicate-route`,
 `unsafe-read-endpoint`/`non-idempotent-write` (the 2 call-graph scanners), `route-shadowing`,
 `mutating-route-no-auth`, `unprovided-consume` (single-tree HTTP/route rules);
 `rules/native/rules-cross-layer` owns the 23 `cross-layer/*` ids (multi-tree cross-layer join rules);
 `rules/native/rules-schema` owns `schema-structural`, `schema-usage`, `soft-delete-bypass`,
-`orderby-unindexed`, `enum-string-drift`; `packages/metrics` owns `seams`, `criticality`, `scores`,
+`orderby-unindexed`, `enum-string-drift`; `crates/metrics` owns `seams`, `criticality`, `scores`,
 `health`, `recommendations` (score computations, not findings-producing rules — they only ride the same
 toggle/gating surface). `zzop_engine::register_all_native` composes all five. The 23
 `cross-layer/*` ids are the MULTI-TREE exception: they run over `zzop_engine::analyze_trees`'s joined

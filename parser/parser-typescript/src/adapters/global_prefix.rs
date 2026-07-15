@@ -7,7 +7,7 @@
 //! (already-cached) `IoFacts.provides` channel with a sentinel `IoProvide { kind: "nest-global-prefix",
 //! key: <the literal>, ... }` — `IoKind` is an open `String` by design (`zzop_core::IoProvide`'s own
 //! doc: "an adapter may introduce its own kind"). `zzop-engine`'s tree-assembly pass
-//! (`packages/engine/src/analyze.rs`) collects every such sentinel, uses it to rewrite every `http`
+//! (`crates/engine/src/analyze.rs`) collects every such sentinel, uses it to rewrite every `http`
 //! provide's key, and then strips the sentinel itself so it never reaches output or the cross-layer
 //! join.
 //!

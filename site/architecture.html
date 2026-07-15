@@ -115,7 +115,7 @@
       <p>The workspace splits the engine kernel from every source of rule vocabulary. <code>core</code>/<code>engine</code> know about IR types and a registry — never about what a rule actually checks for. Rules register themselves from their own crates; the kernel only aggregates.</p>
       <div class="card-grid">
         <div class="card">
-          <h3><code>packages/core</code>, <code>packages/engine</code></h3>
+          <h3><code>crates/core</code>, <code>crates/engine</code></h3>
           <p>The kernel. IR types and registry only — no rule-vocabulary knowledge. <code>engine</code> orchestrates the pipeline and aggregates registrations from every rule crate.</p>
         </div>
         <div class="card">
@@ -124,14 +124,14 @@
         </div>
         <div class="card">
           <h3><code>rules/native/*</code></h3>
-          <p><code>rules-graph</code> (circular dependencies, dead code, cross-layer analyses) and <code>rules-schema</code> (Prisma structure and usage) — whole-graph analyses, statically linked into the engine, registering their own ids.</p>
+          <p><code>rules-graph</code> (circular dependencies, dead code), <code>rules-http</code> (single-tree HTTP/route rules), <code>rules-cross-layer</code> (the multi-tree cross-layer join rules), and <code>rules-schema</code> (Prisma structure and usage) — whole-graph analyses, statically linked into the engine, registering their own ids.</p>
         </div>
         <div class="card">
           <h3><code>rules/dsl/*</code></h3>
           <p>One folder per pack, each pairing its JSON rule definitions with co-located tests. Adding a rule means touching a pack folder — never the kernel.</p>
         </div>
         <div class="card">
-          <h3><code>packages/napi</code></h3>
+          <h3><code>packages/native</code></h3>
           <p>The Node.js binding. Exposes exactly four functions: <code>analyze</code>, <code>analyzeTrees</code>, <code>analyzeEnvelope</code>, <code>version</code> — documented in the <a href="sdk.html">SDK reference</a>.</p>
         </div>
       </div>
@@ -191,6 +191,7 @@
         </div>
       </div>
       <p>A hand-written file that happens to contain one long string or comment line among otherwise ordinary lines is not classified as minified — that shape is common enough in real source that it has to keep its rule coverage. When one or more files are classified this way, the output's <code>warnings</code> array gets a single aggregate entry naming the count and a sample of affected paths, never one entry per file.</p>
+      <p>A normal-sized file whose extension has no native parser is a third, distinct case — not counted in <code>degraded</code> — that also self-reports: one aggregate <code>warnings</code> entry per extension, naming a file count and a path sample, pointing at the <code>overlays: [...]</code> config knob. An oversized file of that same unparsed extension gets both facts at once (<code>degraded</code> for its size, plus the per-extension warning for its language).</p>
       <p>Every run also emits a structural <strong>coverage census</strong> per tree (<code>coverage</code> in the output) — vocab-free counts of how much of each channel it actually filled (files, symbols, import edges, and IO), plus the <code>degraded</code> count above — so a consumer can tell "analyzed and found nothing" apart from "this channel was dark". When a tree analyzes files but extracts zero IO, its <code>coverage.joinContributionZero</code> flag asserts the blindness outright: the tree is invisible to the cross-layer join, so any join finding that references it is structurally weak (a client the extractor can't see — a hand-rolled HTTP wrapper, a generated SDK — is a common cause). And a run-global <code>disclosure</code> registry names the classes of silent failure zzop does, and does <em>not</em> yet, actively detect — so the tool never quietly claims to be complete.</p>
     </section>
 

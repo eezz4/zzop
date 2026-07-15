@@ -10,7 +10,7 @@
 // linking is an EXACT string join on `key`, so a key computed even slightly differently than the
 // engine's silently fails to join instead of erroring.
 //
-// Byte-exact port of zzop_core's HTTP interface-key normalization (packages/core/src/io.rs,
+// Byte-exact port of zzop_core's HTTP interface-key normalization (crates/core/src/io.rs,
 // `http_interface_key` / `http_consume_interface_key`) plus the consume-side veto list a call-site
 // URL must clear before it is safe to key at all (parser/parser-typescript/src/adapters/egress.rs,
 // `consume_key_for` / `base_relative_path` / `is_external`).
@@ -26,7 +26,7 @@ const RE_TRAILING = /(.)\/+$/;
  * single-character wildcard), so it is data, not noise. See `normalizeConsumeKey` for the consume-side
  * asymmetry.
  *
- * Exact port of `zzop_core::http_interface_key` (packages/core/src/io.rs).
+ * Exact port of `zzop_core::http_interface_key` (crates/core/src/io.rs).
  */
 export function normalizeProvideKey(method, rawPath) {
   const withSlash = `/${rawPath}`;
@@ -42,7 +42,7 @@ export function normalizeProvideKey(method, rawPath) {
  * one, so an un-stripped consume key is structurally guaranteed to miss the exact join. Provide-side
  * keying must NOT do this (see `normalizeProvideKey`'s doc).
  *
- * Exact port of `zzop_core::http_consume_interface_key` (packages/core/src/io.rs).
+ * Exact port of `zzop_core::http_consume_interface_key` (crates/core/src/io.rs).
  */
 export function normalizeConsumeKey(method, rawUrl) {
   const path = rawUrl.split(/[?#]/)[0];

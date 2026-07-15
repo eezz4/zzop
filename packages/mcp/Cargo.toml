@@ -1,0 +1,20 @@
+[package]
+name = "zzop-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# The Node-free host binary (MCP server over stdio + direct CLI subcommands). `src/lib.rs` carries the
+# modules so integration tests and the bin share one crate; the config front-end lives in the shared
+# `zzop-config` crate (a future full-CLI binary reuses it), and the engine facade lives in
+# `zzop-facade` (extracted from the cdylib crate `zzop-napi`, whose link step breaks under the local
+# gnu toolchain even for rlib dependents — see the mcp-distribution decision).
+[[bin]]
+name = "zzop-mcp"
+path = "src/main.rs"
+
+[dependencies]
+zzop-facade = { path = "../../crates/facade" }
+zzop-config = { path = "../../crates/config" }
+serde_json = { workspace = true }

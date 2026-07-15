@@ -4,7 +4,7 @@
 //! `rules/README.md` for the folder layout and `docs/rules/authoring-guide.md` for how to author a pack.
 //!
 //! The DSL packs themselves are plain JSON data, interpreted at runtime by `zzop_core::load_dsl_packs`
-//! (`packages/core/src/pack_loader.rs`) — nothing in this crate parses or evaluates them; that lives in
+//! (`crates/core/src/pack_loader.rs`) — nothing in this crate parses or evaluates them; that lives in
 //! `zzop-core` (loading/schema) and `zzop-engine` (evaluation), both of which this crate's tests depend on
 //! as dev-dependencies.
 //!

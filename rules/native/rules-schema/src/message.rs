@@ -32,15 +32,15 @@ fn family_disable_hint(gate_id: &str) -> String {
 /// `structural.rs`'s issue ids (`god-model`, `missing-timestamps`, `redundant-index`, `float-money`,
 /// `stale-updated-at`, `temporal-as-string`, `fk-no-index`, `nullable-fk`, `implicit-fk`) are NOT
 /// individually disableable — they're gated as one family behind the native analysis id
-/// `"schema-structural"` (`packages/engine/src/pipeline.rs`'s `schema_findings`). Appended to every
+/// `"schema-structural"` (`crates/engine/src/pipeline.rs`'s `schema_findings`). Appended to every
 /// structural message by `schema_issue_message`.
 fn schema_structural_disable_hint() -> String {
     family_disable_hint("schema-structural")
 }
 
 /// `usage.rs`'s issue ids (`dead-model`, `dead-field`, `schema-churn`) are gated as one family behind the
-/// native analysis id `"schema-usage"` (`packages/engine/src/pipeline.rs`'s `schema_usage_findings`,
-/// `packages/engine/src/analyze/mod.rs`'s `is_enabled(&config.rule_config, "schema-usage")` call site).
+/// native analysis id `"schema-usage"` (`crates/engine/src/pipeline.rs`'s `schema_usage_findings`,
+/// `crates/engine/src/analyze/mod.rs`'s `is_enabled(&config.rule_config, "schema-usage")` call site).
 /// Appended to every usage message by `schema_issue_message`.
 fn schema_usage_disable_hint() -> String {
     family_disable_hint("schema-usage")

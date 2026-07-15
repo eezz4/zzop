@@ -56,7 +56,7 @@
     <section id="functions">
       <span class="eyebrow eyebrow--sm">@zzop/native</span>
       <h2>Four functions, JSON in / JSON out</h2>
-      <p>All four are JSON-string-in / JSON-string-out, except <code>version</code>. Core logic lives in <code>packages/napi/src/api.rs</code> as plain Rust with no napi dependency at all (so it compiles and unit-tests under the workspace's default toolchain); <code>packages/napi/src/addon.rs</code> is a thin <code>#[napi]</code>-annotated wrapper over those same functions, gated behind the <code>addon</code> Cargo feature.</p>
+      <p>All four are JSON-string-in / JSON-string-out, except <code>version</code>. Core logic lives in <code>crates/facade/src/lib.rs</code> (crate <code>zzop-facade</code>) as plain Rust with no napi dependency at all (so it compiles and unit-tests under the workspace's default toolchain); <code>packages/native/src/addon.rs</code> is a thin <code>#[napi]</code>-annotated wrapper over those same functions, gated behind the <code>addon</code> Cargo feature.</p>
       <div class="table-scroll">
         <table>
           <thead>

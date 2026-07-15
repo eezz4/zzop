@@ -48,7 +48,7 @@ pub fn duplicate_route_findings(io_provides: &[zzop_core::IoProvide]) -> Vec<zzo
 
 #[cfg(test)]
 mod tests {
-    //! Unit tests for `duplicate_route_findings`'s grouping logic (e2e coverage: `packages/engine/tests/pack_fullstack.rs`).
+    //! Unit tests for `duplicate_route_findings`'s grouping logic (e2e coverage: `crates/engine/tests/pack_fullstack.rs`).
     use super::*;
 
     fn provide(key: &str, file: &str, line: u32) -> zzop_core::IoProvide {

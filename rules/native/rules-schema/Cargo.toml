@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-zzop-core = { path = "../../../packages/core" }
+zzop-core = { path = "../../../crates/core" }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

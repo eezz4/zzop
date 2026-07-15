@@ -80,6 +80,10 @@ route joins — which has no single-tree equivalent.
 | Java (`.java`) | Native, lexical-level: method/class body spans only, enough for `method-scan` rules |
 | Anything else (Python, JSP, ...) | Lexical fallback in-tree (line count + `line-scan` rules only), or first-class support via an external parser adapter conforming to the [Normalized AST protocol](docs/NORMALIZED_AST.md) |
 
+A normal-sized file whose extension has no native parser also self-reports in the output's `warnings`
+— naming the extension, a file count, and a path sample — instead of vanishing silently; point it at an
+adapter (`overlays: [...]` in `zzop.config.jsonc`) if that language matters for the analysis.
+
 ## Versioning & stability
 
 zzop is **pre-1.0 (`0.x`) and unstable** — any release may change behavior, output, rules, or
@@ -89,19 +93,27 @@ Semantic Versioning and a maintained changelog begin at `1.0.0`. Full policy:
 
 ## Layout
 
-- `packages/core` — engine library: Common IR, cross-layer linker, graph analyses, call graph, rule
+- `crates/core` — engine library: Common IR, cross-layer linker, graph analyses, call graph, rule
   DSL interpreter (line/method/symbol/io matchers), unified rule registry + gating
-- `packages/metrics` — score channels consumed by `engine`: roi/health/criticality/coupling/
+- `crates/metrics` — score channels consumed by `engine`: roi/health/criticality/coupling/
   seams/recommendations/diagnostics
-- `packages/engine` — fused execution pipeline: language dispatch (TS/Prisma/Java-lexical) → rayon
+- `crates/engine` — fused execution pipeline: language dispatch (TS/Prisma/Java-lexical) → rayon
   per-file parse + per-file rules → AST drop → whole-graph passes; graceful degrade, cache
   consumption, git/scores integration, multi-tree cross-layer join, rule profiling
-- `packages/git` — git history collection (single `git log --numstat` pass → per-file stats +
+- `crates/git` — git history collection (single `git log --numstat` pass → per-file stats +
   per-commit sets)
-- `packages/cache` — per-file IR/findings cache (content hash + parser fingerprint + ruleset
+- `crates/cache` — per-file IR/findings cache (content hash + parser fingerprint + ruleset
   fingerprint)
-- `packages/napi` — the single Node↔Rust boundary (`analyze`/`analyzeTrees`/`analyzeEnvelope`/`version`) + npm
-  distribution skeleton ([packages/napi/README.md](packages/napi/README.md))
+- `crates/facade` — pure-JSON `analyze`/`analyzeTrees`/`analyzeEnvelope`/`validateEnvelopeOnly`/`version` facade, extracted
+  from the N-API crate so every native host (`packages/native`, `packages/mcp`) shares one napi-free
+  implementation
+- `crates/config` — shared Rust config front end (`zzop.config.jsonc` discovery → JSONC strip →
+  config→facade-request mapper → `trees: "auto"` workspace expansion), a Rust port of `packages/cli`'s
+  JS config layer, used by `packages/mcp`
+- `packages/native` — the single Node↔Rust boundary (`analyze`/`analyzeTrees`/`analyzeEnvelope`/`validateEnvelopeOnly`/`version`) + npm
+  distribution skeleton ([packages/native/README.md](packages/native/README.md))
+- `packages/mcp` — `zzop-mcp`, a Node-free host binary: an MCP stdio server plus direct CLI
+  subcommands, built on `zzop-config` + `zzop-facade`
 - `parser/` — parser frontends: source → Common IR, including HTTP route/consume extraction across
   languages and frameworks ([parser/README.md](parser/README.md))
 - `rules/native/` — whole-graph native rules (`rules-graph`, `rules-http`, `rules-cross-layer`, `rules-schema`) plus `rules/dsl/`
@@ -119,7 +131,7 @@ cargo clippy --workspace --all-targets   # kept at 0 warnings
 cargo fmt --all
 ```
 
-See [`packages/napi/README.md`](packages/napi/README.md) for the N-API addon build/toolchain details
+See [`packages/native/README.md`](packages/native/README.md) for the N-API addon build/toolchain details
 (`cargo build -p zzop-napi --release --features addon`).
 
 Cold/warm benchmark over a real tree:
@@ -128,7 +140,7 @@ Cold/warm benchmark over a real tree:
 cargo run --release -p zzop-engine --example bench -- <root> --packs rules/dsl --cache <dir> --git
 ```
 
-Other `packages/engine/examples/` ad hoc harnesses: `cross_layer_rule_counts` (per-`cross-layer/*`-rule
+Other `crates/engine/examples/` ad hoc harnesses: `cross_layer_rule_counts` (per-`cross-layer/*`-rule
 finding counts across 1+ tree roots; set `ZZOP_DUMP_MESSAGES=<n>` to print sample messages),
 `dep_graph_export` (exports the file-level dependency graph as Graphviz DOT or Mermaid), and
 `fastapi_overlay_adapter` (reference external adapter — a lexical FastAPI/Python router scanner feeding

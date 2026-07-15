@@ -1528,6 +1528,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "zzop-config"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "zzop-core"
 version = "0.0.0"
 dependencies = [
@@ -1560,6 +1567,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "zzop-facade"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "zzop-core",
+ "zzop-engine",
+ "zzop-metrics",
+ "zzop-parser-prisma",
+ "zzop-parser-typescript",
+]
+
+[[package]]
 name = "zzop-git"
 version = "0.0.0"
 dependencies = [
@@ -1567,6 +1587,15 @@ dependencies = [
  "serde",
  "serde_json",
  "zzop-core",
+]
+
+[[package]]
+name = "zzop-mcp"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "zzop-config",
+ "zzop-facade",
 ]
 
 [[package]]
@@ -1586,13 +1615,7 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
- "serde",
- "serde_json",
- "zzop-core",
- "zzop-engine",
- "zzop-metrics",
- "zzop-parser-prisma",
- "zzop-parser-typescript",
+ "zzop-facade",
 ]
 
 [[package]]

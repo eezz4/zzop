@@ -38,14 +38,20 @@ The engine stays framework/vendor-neutral; the SDK knowledge lives only in this 
 
 ```sh
 # FE call sites -> IoConsume overlay (named-import clients, e.g. @immich/sdk-style function exports)
-node adapter.mjs --mode consume --root <frontend-root> --spec <openapi.json> --sdk '@your/sdk'
+node adapter.mjs --mode consume --root <frontend-root> --spec <openapi.json> --sdk '@your/sdk' --source <treeSourceId>
 
 # FE call sites -> IoConsume overlay (generated CLASS-METHOD clients, e.g. swagger-typescript-api)
-node adapter.mjs --mode consume --root <frontend-root> --spec <openapi.json> --member-calls
+node adapter.mjs --mode consume --root <frontend-root> --spec <openapi.json> --member-calls --source <treeSourceId>
 
 # (optional) spec operations -> IoProvide overlay, for when you have the spec but not the backend tree
 node adapter.mjs --mode provide --spec <openapi.json> --source api
 ```
+
+`--source` defaults to `api` in every mode (a `provide`-mode holdover); pass it explicitly in `consume`
+mode to match the `sourceId` of the tree you attach the overlay to — the engine now warns
+(`adapter overlay "..." declares a different source than the tree "..." it's attached to`) when an
+overlay carrying `io` declares a non-empty `source` that differs from its tree's `sourceId`, since a
+mismatched `source` silently turns what looks like a cross-source join into an intra-source one.
 
 ### `--member-calls`: generated CLASS-METHOD clients
 
@@ -99,7 +105,7 @@ Each writes a `NormalizedEnvelope` JSON to stdout. Pass it through your zzop con
 array (a field on the `analyze` / `analyzeTrees` request):
 
 ```js
-const consume = JSON.parse(execSync(`node adapter.mjs --mode consume --root web --spec spec.json`));
+const consume = JSON.parse(execSync(`node adapter.mjs --mode consume --root web --spec spec.json --source web`));
 const out = JSON.parse(native.analyzeTrees(JSON.stringify({
   trees: [
     { root: 'web', sourceId: 'web', adapterOverlays: [consume] },
@@ -159,6 +165,11 @@ Command run (member mode, explicit local specifier for precision):
 node adapter.mjs --mode consume --root <fe-root> --spec fe-vue-openapi.json \
   --sdk 'src/services' --member-calls
 ```
+
+(This measurement predates the engine's overlay source-mismatch self-report; the command above leaves
+`--source` at its default `api` while the harness below attaches the overlay to tree `fe-vue` via
+`ZZOP_OVERLAYS`. Reproducing this today additionally emits a source-mismatch warning — harmless here
+(it changes no finding/count), but pass `--source fe-vue` to silence it.)
 
 | | keyed HTTP consumes in `<fe-root>` | cross-layer edges (join vs. the paired backend root) |
 |---|---|---|

@@ -70,7 +70,7 @@ jobs:
       - run: cargo test --workspace
 
   napi-addon-build:
-    # Proves the napi addon path (the `addon` feature, default OFF — see packages/napi/Cargo.toml
+    # Proves the napi addon path (the `addon` feature, default OFF — see packages/native/Cargo.toml
     # and src/lib.rs's "Feature gating" module doc) actually compiles, since `test` above only
     # builds the workspace with default features. Mirrors prebuild.yml's non-cross
     # x86_64-unknown-linux-gnu matrix entry: ubuntu-latest's host target already *is*
@@ -88,11 +88,11 @@ jobs:
         run: cargo build -p zzop-napi --features addon
       - name: Smoke test built addon
         run: |
-          cp target/debug/libzzop_napi.so packages/napi/zzop-napi.node
-          node packages/napi/smoke.mjs
+          cp target/debug/libzzop_napi.so packages/native/zzop-napi.node
+          node packages/native/smoke.mjs
       - name: CLI unit tests
         # Placed after the smoke step on purpose: the CLI loads the native addon via
-        # packages/napi/index.js, whose ./zzop-napi.node fallback is exactly the file the smoke
+        # packages/native/index.js, whose ./zzop-napi.node fallback is exactly the file the smoke
         # step just copied into place. Glob form (not a bare directory) — `node --test test/`
         # fails on Node v22+.
         run: node --test packages/cli/test/*.test.js

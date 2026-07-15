@@ -1,0 +1,17 @@
+[package]
+name = "zzop-facade"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+zzop-core = { path = "../core" }
+zzop-metrics = { path = "../metrics" }
+zzop-engine = { path = "../engine" }
+# Path deps purely for `version()`'s diagnostic string (`PARSER_FINGERPRINT` constants) — not part of the
+# analyze pipeline itself (that lives entirely inside `zzop-engine`).
+zzop-parser-typescript = { path = "../../parser/parser-typescript" }
+zzop-parser-prisma = { path = "../../parser/parser-prisma" }
+serde = { workspace = true }
+serde_json = { workspace = true }

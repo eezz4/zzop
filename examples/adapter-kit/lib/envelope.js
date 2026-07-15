@@ -1,5 +1,5 @@
 // Envelope assembly for zzop's NormalizedEnvelope v1 contract (docs/NORMALIZED_AST.md;
-// packages/core/src/normalized.rs). Field names/shapes mirror the Rust serde types field-for-field —
+// crates/core/src/normalized.rs). Field names/shapes mirror the Rust serde types field-for-field —
 // see docs/adapters/envelope.schema.json for the full JSON Schema this builder's output satisfies.
 
 export const NORMALIZED_AST_FORMAT = 'zzop-normalized-ast';
@@ -146,7 +146,7 @@ export class EnvelopeBuilder {
 }
 
 /**
- * Structural validation mirroring `zzop_core::validate_envelope` (packages/core/src/normalized.rs):
+ * Structural validation mirroring `zzop_core::validate_envelope` (crates/core/src/normalized.rs):
  * an unknown `format`, a `version` greater than this kit's `SUPPORTED_NORMALIZED_AST_VERSION`, an
  * empty or duplicate file `path`, and a symbol whose `body_end` is less than its `body_start`.
  * Collects every issue instead of stopping at the first. Like the Rust validator, this does NOT check

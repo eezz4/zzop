@@ -8,7 +8,7 @@
 #      or invent one the catalog does not vouch for.
 #   2. IDS (catalog → site): every DSL rule id and native-analysis id in the catalog must appear on the
 #      site, so a newly-cataloged rule cannot ship undocumented.
-# The catalog is itself pinned to the engine by packages/engine/tests/rule_contracts.rs, so this check
+# The catalog is itself pinned to the engine by crates/engine/tests/rule_contracts.rs, so this check
 # transitively pins the public site to reality. Hand-authored prose on the site is intentionally NOT
 # checked — only the machine-derivable facts (ids + source paths).
 set -euo pipefail

@@ -68,7 +68,7 @@ const relSet = new Set(rels);
 
 // --- crate map: nearest-ancestor Cargo.toml gives each file its crate; `[package] name` (with `-`
 // normalized to `_`, as rustc does) lets `use other_crate::...` resolve across the workspace ---------
-const crateSrcByName = new Map(); // crate_name -> src dir rel (e.g. "packages/core/src")
+const crateSrcByName = new Map(); // crate_name -> src dir rel (e.g. "crates/core/src")
 const crateSrcDirs = []; // sorted longest-first for nearest-ancestor lookup
 const manifestEntries = new Set(); // explicit cargo target files: [[test]]/[[bin]]/[lib] `path = "x.rs"`
 (function findCrates(dir) {

@@ -8,7 +8,7 @@
 // file from examples/adapter-kit/lib/envelope.js rather than hand-patching it.
 //
 // Envelope assembly for zzop's NormalizedEnvelope v1 contract (docs/NORMALIZED_AST.md;
-// packages/core/src/normalized.rs). Field names/shapes mirror the Rust serde types field-for-field.
+// crates/core/src/normalized.rs). Field names/shapes mirror the Rust serde types field-for-field.
 
 export const NORMALIZED_AST_FORMAT = 'zzop-normalized-ast';
 export const SUPPORTED_NORMALIZED_AST_VERSION = 1;
@@ -152,7 +152,7 @@ export class EnvelopeBuilder {
 }
 
 /**
- * Structural validation mirroring `zzop_core::validate_envelope` (packages/core/src/normalized.rs):
+ * Structural validation mirroring `zzop_core::validate_envelope` (crates/core/src/normalized.rs):
  * an unknown `format`, a `version` greater than this kit's `SUPPORTED_NORMALIZED_AST_VERSION`, an
  * empty or duplicate file `path`, and a symbol whose `body_end` is less than its `body_start`.
  * Collects every issue instead of stopping at the first.

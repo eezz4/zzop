@@ -31,6 +31,12 @@ pack from the LATER directory in the list replaces the earlier one WHOLE (not a 
 [../modules/napi.md](../modules/napi.md)'s "Defaults" section for how the JS wrapper uses this to let a
 caller add packs alongside the bundled ones instead of replacing them.
 
+A host with no filesystem-resident pack directory at all (e.g. a self-contained binary embedding its
+packs at compile time) can instead hand already-parsed `RulePackDef` data straight to the engine via the
+request-level `packDefs` field, bypassing `pack_loader` entirely — same schema, same same-id-collision
+rule, just no directory read involved. This changes nothing about how a pack is authored or tested; it is
+one more way the finished JSON reaches the engine.
+
 ## Worked example
 
 A pack that flags a hardcoded `X-Debug-Token` header value (should come from config/env, not be baked
@@ -68,10 +74,10 @@ into source) — a small but realistic `line-scan` rule with a suppress marker:
   and it behaves exactly like any shipped pack — there is no first-party/third-party distinction at the
   interpreter level.
 
-A `method-scan` example (co-occurrence within a function span) and a `symbol-scan`/`io-scan` example are
-in [dsl-reference.md](dsl-reference.md) and in `packages/core/src/dsl.rs`'s own test module (the
-`http-conventions` fixture pack is a full `symbol-scan` + `io-scan` end-to-end demo, kept test-only rather
-than shipped — see [catalog.md](catalog.md) for why).
+[dsl-reference.md](dsl-reference.md) is the field-by-field reference for all four matcher shapes; worked
+`method-scan`, `symbol-scan`, and `io-scan` examples live in `crates/core/src/dsl.rs`'s own test module (the
+`http-conventions` fixture pack there is a full `symbol-scan` + `io-scan` end-to-end demo, kept test-only
+rather than shipped — it exists to demonstrate the matcher shapes, not because it detects anything real).
 
 ## Performance: `require_file`/`require_file_all` rare-token-first
 
@@ -149,7 +155,7 @@ detections that fit neither category yet.
 
 The cross-cutting rules above (marker on every finding, message tells the reader how to exclude it, catalog
 totals match reality) used to be conventions a human had to remember — and drifted, silently, more than
-once. `packages/engine/tests/rule_contracts.rs` machine-enforces them over every shipped DSL pack and the
+once. `crates/engine/tests/rule_contracts.rs` machine-enforces them over every shipped DSL pack and the
 native registry, so a violation is a failing test in `cargo test --workspace`, not something a reviewer has
 to notice by eye. If that file's tests fail on your change, the test name and failure message identify
 exactly which rule/pack/doc line to fix — do not silence the test, fix the offending rule or doc.
@@ -168,7 +174,7 @@ What it checks:
   proxy can and cannot prove).
 - **Id hygiene** — DSL pack ids are unique across packs, rule ids are unique within a pack, and no DSL
   `"pack"` or `"pack/rule"` id collides with a native analysis id (all three id shapes share one
-  `disabled_rules`/`suppressions` string-match space — see `packages/core/src/registry.rs::is_enabled`).
+  `disabled_rules`/`suppressions` string-match space — see `crates/core/src/registry.rs::is_enabled`).
 - **Catalog sync** — [catalog.md](catalog.md)'s totals sentence (`N DSL packs, N DSL rules, N native
   analysis ids`) matches what `load_dsl_packs`/`register_native_analyses` actually load, and every native
   analysis id / DSL pack id appears somewhere in the catalog's text.
@@ -202,7 +208,7 @@ through before it ships:
    scan every path, test directories included. Decide which one a new rule is, and for deployed-surface
    rules add the shared canonical test-path exclude (copy it verbatim, do not invent a new regex):
    ```
-   "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?)/|\\.(test|spec)\\.|(^|/)(playwright|vitest|jest|cypress)\\.config\\.)"
+   "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?)/|\\.(test|spec)\\.|\\.stories\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress)\\.config\\.)"
    ```
    This is the same string `be-reliability/debug-true-committed` and `fullstack/localhost-egress-committed`
    already used before the sweep unified every other deployed-surface DSL rule onto it. If a rule already
@@ -212,13 +218,13 @@ through before it ships:
    excludes config-file basenames AND folds in the canonical test-path/`scripts/` exclusion, documented
    in its own `message` — see that rule for the reasoning.)
 
-   Adversarial review on a large real monorepo closed three gaps in the canonical string: NestJS
+   Adversarial review on a large real monorepo closed three more gaps in the canonical string: NestJS
    `*.e2e-spec.ts` files (the old `\.(test|spec)\.` alternative requires a literal `.spec.`, which an
    `-spec.` hyphen separator doesn't produce), `packages/testing/` helper directories, and `vite.config.*`
    (the tool-config alternation had vitest/jest/playwright/cypress but not vite). The canonical string is
    now:
    ```
-   "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)"
+   "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)"
    ```
 3. **Does the message carry problem + fix + suppress?** Every DSL rule's `message` must explain what's wrong,
    how to fix it, and name its own `suppress_marker` — already machine-enforced by the "Message triple" check

@@ -4,7 +4,7 @@
 //! over consumes it could resolve, so a mostly-unresolved tree would otherwise look quiet while actually
 //! being invisible to the join. This rule surfaces that blind spot instead of staying silent about it.
 //!
-//! `http_consume_totals` is threaded in from the engine rather than recomputed here, since `packages/core`
+//! `http_consume_totals` is threaded in from the engine rather than recomputed here, since `crates/core`
 //! stays rule-vocabulary-free.
 
 use std::collections::{BTreeMap, BTreeSet};

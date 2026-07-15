@@ -25,10 +25,10 @@ class ConfigError extends Error {
 // Severity normalization — the SINGLE source of truth for turning friendly config severities into the
 // engine's `Severity` serde values.
 //
-// CONFIRMED against the engine: `packages/core/src/finding.rs` declares
+// CONFIRMED against the engine: `crates/core/src/finding.rs` declares
 //   #[serde(rename_all = "lowercase")] enum Severity { Critical, Warning, Info }
 // so the engine's JSON `Severity` strings are exactly "critical" / "warning" / "info". The napi
-// `AnalyzeRequest.severityOverrides` (packages/napi/src/api.rs) reuses that same enum. If the engine's
+// `AnalyzeRequest.severityOverrides` (crates/facade/src/lib.rs) reuses that same enum. If the engine's
 // Severity serde ever changes, adjust ONLY the ENGINE_SEVERITY values below.
 // ---------------------------------------------------------------------------------------------------
 
@@ -118,7 +118,7 @@ function isGlobPattern(value) {
 
 // ---------------------------------------------------------------------------------------------------
 // Adapter overlays — closes the loop for the napi `adapterOverlays` request field
-// (`packages/napi/src/api.rs`'s `AnalyzeRequest::adapter_overlays`, itself per-tree). Config key
+// (`crates/facade/src/lib.rs`'s `AnalyzeRequest::adapter_overlays`, itself per-tree). Config key
 // `overlays: ["path/to/envelope.json", ...]` names Mode-B overlay envelope FILES (partial
 // `NormalizedEnvelope` JSON); the CLI reads and parses each one and inlines the parsed object into the
 // request's `adapterOverlays` array — the napi layer has no notion of "a path to an overlay file", only
@@ -167,7 +167,7 @@ function validateOverlaysArray(value, label) {
  * `root`, into `NormalizedEnvelope`-shaped objects ready to inline as `adapterOverlays`. Never throws: a
  * file that cannot be read or does not parse as JSON is dropped, with a human-readable warning describing
  * which path and why. The engine independently re-validates each surviving envelope's SHAPE and
- * soft-skips an invalid one with its own warning (see `packages/napi/src/api.rs`'s
+ * soft-skips an invalid one with its own warning (see `crates/facade/src/lib.rs`'s
  * `adapter_overlays` doc), so this function only needs to guarantee well-formed JSON, not a well-formed
  * envelope.
  *
@@ -238,14 +238,14 @@ function collectOverlayWarnings(config) {
 
 // ---------------------------------------------------------------------------------------------------
 // Connection topology — closes the loop for the napi `mountedAt`/`mounts`/`hosts` per-tree request
-// fields (`packages/napi/src/api.rs`'s `AnalyzeRequest`). Config keys `trees[i].mountedAt` (a single
+// fields (`crates/facade/src/lib.rs`'s `AnalyzeRequest`). Config keys `trees[i].mountedAt` (a single
 // whole-tree gateway prefix), `trees[i].mounts` (an array of `{dir, at}` deployment-topology mounts), and
 // `trees[i].hosts` (hosts this tree owns, for cross-layer absolute-URL re-keying) are ONLY accepted on
 // explicit `trees[]` entries — the `roots` shorthand carries no per-tree shape to hang them off, so those
 // keys never apply there (see `configToRequest`'s `roots` branch: it never reads these keys at all).
 //
 // Unlike overlays, this module IS the authoritative fail-fast gate for shape here: the engine's own
-// `apply_config_mounts` (see `packages/engine/src/analyze/compose.rs`) only defensively warns and skips a
+// `apply_config_mounts` (see `crates/engine/src/analyze/compose.rs`) only defensively warns and skips a
 // malformed mount as a last-resort backstop, so a config author should see a ConfigError immediately
 // rather than a warning buried in a run's output.
 // ---------------------------------------------------------------------------------------------------
@@ -482,12 +482,12 @@ function buildSharedOptions(config) {
 }
 
 // Known config keys, by scope. Used ONLY to warn on drift — never to reject (the engine deliberately
-// ignores unknown fields; see `packages/napi/src/api.rs`). An unknown key almost always means a typo or a
+// ignores unknown fields; see `crates/facade/src/lib.rs`). An unknown key almost always means a typo or a
 // config written for a different zzop version, and silently ignoring it defeats zzop's "narrowed scope
 // self-reports in warnings, never silently" contract — so we surface it as a warning, not an error.
 //
 // Sourced from `config-surface.json`'s `configKeys` — the single vocabulary file shared with
-// `packages/engine/tests/rule_contracts.rs`'s reference-validation meta-test, so the CLI's own drift
+// `crates/engine/tests/rule_contracts.rs`'s reference-validation meta-test, so the CLI's own drift
 // warnings and the engine's "does every message name a real knob" check can never disagree about what a
 // valid config key is.
 const KNOWN_KEYS = require('./config-surface.json').configKeys;

@@ -2,7 +2,7 @@
 # On a `v*` tag push, also publishes the 5 platform sub-packages, the main @zzop/native package, and
 # the `zzop` CLI to npm via OIDC "trusted publishing" (no NPM_TOKEN secret) — requires each of the 7
 # packages to have a trusted publisher configured on npmjs.com for this repo + this workflow file. See
-# packages/napi/README.md's "Publishing" section for the one-time npmjs.com setup.
+# packages/native/README.md's "Publishing" section for the one-time npmjs.com setup.
 name: prebuild
 
 on:
@@ -62,8 +62,8 @@ jobs:
         if: matrix.cross != 'true'
         shell: bash
         run: |
-          cp "dist/zzop-napi.${{ matrix.target }}.node" packages/napi/zzop-napi.node
-          node packages/napi/smoke.mjs
+          cp "dist/zzop-napi.${{ matrix.target }}.node" packages/native/zzop-napi.node
+          node packages/native/smoke.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: zzop-napi-${{ matrix.target }}
@@ -72,11 +72,11 @@ jobs:
   # Only runs on a `v*` tag push (job-level `if`, since the build matrix above must also run for
   # workflow_dispatch without publishing). The git tag is the single source of truth for the
   # published version: this job overwrites every package.json's committed version with the tag's,
-  # so there is no separate "bump packages/napi/package.json before tagging" step to forget.
+  # so there is no separate "bump packages/native/package.json before tagging" step to forget.
   #
   # Publishes via npm OIDC "trusted publishing" — no NPM_TOKEN secret. Each of the 7 package names
   # (@zzop/native + the 5 platform sub-packages + the `zzop` CLI) must have a trusted publisher
-  # configured on npmjs.com pointing at this repo and this workflow file (packages/napi/README.md
+  # configured on npmjs.com pointing at this repo and this workflow file (packages/native/README.md
   # "Publishing").
   publish:
     needs: build
@@ -107,20 +107,20 @@ jobs:
       - name: Set version from tag (overwrites committed version everywhere)
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          (cd packages/napi && npm version --no-git-tag-version "$VERSION")
-          node packages/napi/scripts/sync-versions.mjs
+          (cd packages/native && npm version --no-git-tag-version "$VERSION")
+          node packages/native/scripts/sync-versions.mjs
           # CLI package (`zzop`): bump its version and pin its @zzop/native dependency to this same
           # release, so `npm i zzop` always pulls the matching engine build.
           (cd packages/cli && npm version --no-git-tag-version "$VERSION" && npm pkg set "dependencies.@zzop/native=$VERSION")
       - name: Place prebuilt binaries into platform packages
-        run: node packages/napi/scripts/place-artifacts.mjs artifacts
+        run: node packages/native/scripts/place-artifacts.mjs artifacts
       - name: Publish platform packages
         run: |
-          for dir in packages/napi/npm/*/; do
+          for dir in packages/native/npm/*/; do
             (cd "$dir" && npm publish --provenance)
           done
       - name: Publish main package
-        run: (cd packages/napi && npm publish --provenance)
+        run: (cd packages/native && npm publish --provenance)
       - name: Publish CLI (`zzop`)
         run: (cd packages/cli && npm publish --provenance)
       - name: Create GitHub release

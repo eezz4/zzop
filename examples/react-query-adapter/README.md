@@ -74,7 +74,7 @@ const out = JSON.parse(native.analyzeTrees(JSON.stringify({
 })));
 ```
 
-The `packages/engine/examples/cross_layer_rule_counts.rs` measurement harness used for the worked
+The `crates/engine/examples/cross_layer_rule_counts.rs` measurement harness used for the worked
 result below reads the same overlay shape from `ZZOP_OVERLAYS` (`sourceId=path.json` entries, `;`
 separated) rather than requiring a bespoke Rust harness per adapter:
 

@@ -1,13 +1,18 @@
 [workspace]
 resolver = "2"
 members = [
-  # Engine (native, always built)
-  "packages/core",
-  "packages/metrics",
-  "packages/engine",
-  "packages/git",
-  "packages/cache",
-  "packages/napi",
+  # Internal engine crates (not published directly; consumed by the packages/ artifacts below)
+  "crates/core",
+  "crates/metrics",
+  "crates/engine",
+  "crates/git",
+  "crates/cache",
+  "crates/facade",
+  "crates/config",
+
+  # Published artifacts — packages/ holds ONLY externally-published artifacts
+  "packages/native",
+  "packages/mcp",
 
   # Parser frontends (former lang/ + dsl/, merged) — source -> Normalized AST / Common IR
   "parser/parser-typescript",

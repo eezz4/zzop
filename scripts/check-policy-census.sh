@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Mechanical census of every policy-shaped constant under the crates that hold rule/extraction logic
-# (packages/engine/src, packages/core/src, parser/*/src, rules/native/*/src). This is the "continuous
+# (crates/engine/src, crates/core/src, parser/*/src, rules/native/*/src). This is the "continuous
 # drift review" mechanism (A5): the census tracks EXISTENCE (path:CONST_NAME), never values — values
 # change legitimately and are not what this guard is for. Its job is to force a triage moment (tier
 # T1/T2/T3, or "not policy") every time a *new* policy-shaped constant is introduced, by failing CI
@@ -47,7 +47,7 @@ census_file="scripts/policy-census.txt"
 pattern='^[[:space:]]*(pub(\((crate|super|in [^)]+)\))? )?const [A-Z_][A-Z0-9_]*: (&\[&str\]|\[&str;[[:space:]]*[0-9]+\]|usize|u32|i32|f64)'
 
 dirs=()
-for d in packages/engine/src packages/core/src parser/*/src rules/native/*/src; do
+for d in crates/engine/src crates/core/src parser/*/src rules/native/*/src; do
   [ -d "$d" ] && dirs+=("$d")
 done
 

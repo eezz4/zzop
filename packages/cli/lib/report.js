@@ -165,7 +165,7 @@ function assignTreeFilenames(sourceIds) {
 }
 
 // A tree's `ir.io` is normally at `output.ir.io` (CommonIr's MinimalIr fields are serde-flattened onto
-// `ir` — see packages/core/src/ir.rs). Also checks the doubly-nested `ir.ir.io` shape defensively, so a
+// `ir` — see crates/core/src/ir.rs). Also checks the doubly-nested `ir.ir.io` shape defensively, so a
 // future/alternate wire shape degrades to "no HTTP interface section" rather than throwing.
 function treeIo(treeOutput) {
   const ir = treeOutput && treeOutput.ir;

@@ -16,7 +16,7 @@ versioning policy).
   default.
 - **`lib/keys.js`** — `normalizeProvideKey(method, path)` / `normalizeConsumeKey(method, url)` are
   exact ports of `zzop_core::http_interface_key` / `http_consume_interface_key`
-  (`packages/core/src/io.rs`); `resolveConsumeKey(method, url)` additionally applies the
+  (`crates/core/src/io.rs`); `resolveConsumeKey(method, url)` additionally applies the
   internal/external/base-relative veto list every adapter needs before it can key a raw call-site
   literal at all (ported from `consume_key_for`/`base_relative_path` in
   `parser/parser-typescript/src/adapters/egress.rs`). Cross-layer linking is an exact string join —

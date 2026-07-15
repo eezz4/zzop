@@ -1246,7 +1246,7 @@ fn sql_destructive_migration_unmarked_drop_in_sql_still_fires() {
 #[test]
 fn sql_destructive_migration_unrelated_dash_dash_marker_text_does_not_suppress() {
     // A `--`-comment that names a DIFFERENT marker must not suppress — mirrors
-    // `unrelated_marker_text_does_not_suppress` in `packages/core/src/dsl.rs` for the `//` form.
+    // `unrelated_marker_text_does_not_suppress` in `crates/core/src/dsl.rs` for the `//` form.
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "migrations/008_drop_unrelated.sql",

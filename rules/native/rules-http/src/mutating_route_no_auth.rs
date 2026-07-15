@@ -242,7 +242,7 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
 #[cfg(test)]
 mod tests {
     //! Unit tests for `scan_mutating_route_no_auth`'s BFS + guard-vocabulary logic in isolation (e2e coverage
-    //! — real handler-file fixtures — lives in `packages/engine/tests/analyze_io_natives.rs`).
+    //! — real handler-file fixtures — lives in `crates/engine/tests/analyze_io_natives.rs`).
     use super::*;
     use zzop_core::callgraph::SymbolEdge;
     use zzop_core::SourceSymbolKind;

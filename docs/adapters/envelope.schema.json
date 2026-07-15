@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://zzop.dev/schema/envelope.v1.json",
   "title": "zzop NormalizedEnvelope v1",
-  "description": "External-parser / adapter-overlay envelope contract (docs/NORMALIZED_AST.md; packages/core/src/normalized.rs). Field names, required-ness, and nullability below mirror the Rust serde types field-for-field — a field is 'required' here exactly when its Rust struct field has no #[serde(default)], and 'nullable' exactly when its Rust type is Option<T> deserialized without #[serde(default)] (present key, value may be null) as opposed to omittable-and-defaulting.",
+  "description": "External-parser / adapter-overlay envelope contract (docs/NORMALIZED_AST.md; crates/core/src/normalized.rs). Field names, required-ness, and nullability below mirror the Rust serde types field-for-field — a field is 'required' here exactly when its Rust struct field has no #[serde(default)], and 'nullable' exactly when its Rust type is Option<T> deserialized without #[serde(default)] (present key, value may be null) as opposed to omittable-and-defaulting.",
   "$comment": "TOLERANCE CONTRACT: additionalProperties is true at every object level in this schema except the two externally-tagged enum wrapper objects (procedureRouterEntry, routerMountEntry), whose single-discriminator shape is closed. The engine silently ignores fields it does not recognize — it never hard-fails on an unknown field, AND never warns about one either (serde drops unrecognized fields by default; no unknown-field warning code exists anywhere in this crate's envelope/overlay ingestion path). Same tolerant-input philosophy as zzop's config surface (see docs/adapters/README.md's 'Envelope schema & versioning policy'), just without the warning that surface's own deny_unknown_fields config types emit. A producer emitting a field ahead of this schema, or omitting any field marked optional below, still produces a valid v1 envelope. Only a BREAKING change (removing, renaming, or re-typing a REQUIRED field) needs a new envelope `version`; additive fields never do.",
   "type": "object",
   "required": ["format", "version", "parser", "source", "files"],
@@ -67,7 +67,7 @@
           "type": "array",
           "default": [],
           "items": { "$ref": "#/definitions/classShapeFragment" },
-          "description": "Class field-shape fragments (body-shape-v1) — the DTO-resolution substrate for IoProvide.body.dtoRef (packages/core/src/fragments.rs ClassShapeFragment). Absent = this producer doesn't extract class shapes; still a fully valid, non-degraded projection."
+          "description": "Class field-shape fragments (body-shape-v1) — the DTO-resolution substrate for IoProvide.body.dtoRef (crates/core/src/fragments.rs ClassShapeFragment). Absent = this producer doesn't extract class shapes; still a fully valid, non-degraded projection."
         },
         "io": { "$ref": "#/definitions/ioFacts", "default": { "provides": [], "consumes": [] } },
         "attributes": {
@@ -114,7 +114,7 @@
         "kind": {
           "type": "string",
           "enum": ["function", "class", "const", "type", "interface"],
-          "$comment": "Wire form is lowercase (SourceSymbolKind's #[serde(rename_all = \"lowercase\")], packages/core/src/ir.rs)."
+          "$comment": "Wire form is lowercase (SourceSymbolKind's #[serde(rename_all = \"lowercase\")], crates/core/src/ir.rs)."
         },
         "line": { "type": "integer", "minimum": 1, "description": "Declaration start line (1-based)." },
         "exported": { "type": "boolean" },
@@ -150,7 +150,7 @@
         "kind": {
           "type": ["string", "null"],
           "enum": ["create", "atomic-accumulate", "counter", null],
-          "description": "Set only when the write also qualifies as non-idempotent; kebab-case NonIdempotentKind wire form (packages/core/src/ir.rs, #[serde(rename_all = \"kebab-case\")]). null for a plain idempotent update or a raw-SQL write."
+          "description": "Set only when the write also qualifies as non-idempotent; kebab-case NonIdempotentKind wire form (crates/core/src/ir.rs, #[serde(rename_all = \"kebab-case\")]). null for a plain idempotent update or a raw-SQL write."
         }
       }
     },
@@ -180,7 +180,7 @@
       "type": "object",
       "required": ["provides", "consumes"],
       "additionalProperties": true,
-      "$comment": "This nested-required-ness is NOT a typo: IoFacts (packages/core/src/io.rs) derives Default for the container as a whole (so FileProjection.io itself is #[serde(default)] and fully omittable, see fileProjection's io property), but neither `provides` nor `consumes` individually carries #[serde(default)] — so if a `io` OBJECT is present in the JSON at all, both keys must be present inside it (each may still be an empty array).",
+      "$comment": "This nested-required-ness is NOT a typo: IoFacts (crates/core/src/io.rs) derives Default for the container as a whole (so FileProjection.io itself is #[serde(default)] and fully omittable, see fileProjection's io property), but neither `provides` nor `consumes` individually carries #[serde(default)] — so if a `io` OBJECT is present in the JSON at all, both keys must be present inside it (each may still be an empty array).",
       "properties": {
         "provides": { "type": "array", "items": { "$ref": "#/definitions/ioProvide" } },
         "consumes": { "type": "array", "items": { "$ref": "#/definitions/ioConsume" } }
@@ -193,7 +193,7 @@
       "properties": {
         "kind": {
           "type": "string",
-          "description": "The boundary an interface crosses (\"http\", \"db-table\", ...). Open-ended — an adapter may introduce its own kind. RESERVED: \"nest-global-prefix\" is an engine-internal sentinel kind (packages/engine/src/envelope.rs is_reserved_provide_kind) produced only by the native TypeScript parser's NestJS setGlobalPrefix() recognizer and consumed only by the native compose seam that applies + strips it. A producer emitting this kind is out of contract: in envelope ingestion (analyze_envelope) it is dropped at ingestion with no rewrite, with one aggregate warning per envelope naming the producer-forbidden kinds; in adapter-overlay application (apply_adapter_overlays) it is likewise dropped before the merge, with one aggregate warning per overlay naming the producer-forbidden kinds. It never reaches output, findings, or the cross-layer linker."
+          "description": "The boundary an interface crosses (\"http\", \"db-table\", ...). Open-ended — an adapter may introduce its own kind. RESERVED: \"nest-global-prefix\" is an engine-internal sentinel kind (crates/engine/src/envelope.rs is_reserved_provide_kind) produced only by the native TypeScript parser's NestJS setGlobalPrefix() recognizer and consumed only by the native compose seam that applies + strips it. A producer emitting this kind is out of contract: in envelope ingestion (analyze_envelope) it is dropped at ingestion with no rewrite, with one aggregate warning per envelope naming the producer-forbidden kinds; in adapter-overlay application (apply_adapter_overlays) it is likewise dropped before the merge, with one aggregate warning per overlay naming the producer-forbidden kinds. It never reaches output, findings, or the cross-layer linker."
         },
         "key": { "type": "string", "description": "Adapter-normalized interface identity, e.g. \"GET /users/{}\". Must be byte-identical to what the consuming side computes for the exact join to succeed — see lib/keys.js in examples/adapter-kit." },
         "file": { "type": "string" },
@@ -212,11 +212,11 @@
       "type": "object",
       "required": ["kind", "file", "line"],
       "additionalProperties": true,
-      "$comment": "`key` is NOT in `required` even though `IoConsume::key` carries no #[serde(default)]: serde_derive special-cases every `Option<T>`-typed field as implicitly omittable on missing input regardless of an explicit `default` attribute (verified: packages/core/tests/envelope_schema_parity.rs's drop-one-key probe against the real type), so an ABSENT key and an explicit `key: null` deserialize identically to `None` — there is no Rust-enforced distinction between them. This is the general rule for every Option<T> property in this schema: `required` reflects the true (probed) Rust behavior, not just the presence/absence of #[serde(default)].",
+      "$comment": "`key` is NOT in `required` even though `IoConsume::key` carries no #[serde(default)]: serde_derive special-cases every `Option<T>`-typed field as implicitly omittable on missing input regardless of an explicit `default` attribute (verified: crates/core/tests/envelope_schema_parity.rs's drop-one-key probe against the real type), so an ABSENT key and an explicit `key: null` deserialize identically to `None` — there is no Rust-enforced distinction between them. This is the general rule for every Option<T> property in this schema: `required` reflects the true (probed) Rust behavior, not just the presence/absence of #[serde(default)].",
       "properties": {
         "kind": {
           "type": "string",
-          "description": "RESERVED: \"client-base-prefix\" is an engine-internal sentinel kind (packages/engine/src/envelope.rs is_reserved_consume_kind; zzop_parser_typescript::CLIENT_BASE_PREFIX_KIND) produced only by the native TypeScript parser's axios.defaults.baseURL recognizer and consumed only by the native compose seam that applies + strips it. Same out-of-contract posture as ioProvide.kind's \"nest-global-prefix\": envelope ingestion drops it at ingestion (no rewrite), with one aggregate warning per envelope naming the producer-forbidden kinds; adapter-overlay application drops it before the merge, with one aggregate warning per overlay naming the producer-forbidden kinds. It never reaches output, findings, or the cross-layer linker."
+          "description": "RESERVED: \"client-base-prefix\" is an engine-internal sentinel kind (crates/engine/src/envelope.rs is_reserved_consume_kind; zzop_parser_typescript::CLIENT_BASE_PREFIX_KIND) produced only by the native TypeScript parser's axios.defaults.baseURL recognizer and consumed only by the native compose seam that applies + strips it. Same out-of-contract posture as ioProvide.kind's \"nest-global-prefix\": envelope ingestion drops it at ingestion (no rewrite), with one aggregate warning per envelope naming the producer-forbidden kinds; adapter-overlay application drops it before the merge, with one aggregate warning per overlay naming the producer-forbidden kinds. It never reaches output, findings, or the cross-layer linker."
         },
         "key": {
           "type": ["string", "null"],
@@ -240,7 +240,7 @@
       }
     },
     "provideBodyField": {
-      "description": "One declared field of a request-body DTO class (packages/core/src/io.rs ProvideBodyField, #[serde(rename_all = \"camelCase\")] — a no-op here since both field names are already single words).",
+      "description": "One declared field of a request-body DTO class (crates/core/src/io.rs ProvideBodyField, #[serde(rename_all = \"camelCase\")] — a no-op here since both field names are already single words).",
       "type": "object",
       "required": ["name", "optional"],
       "additionalProperties": true,
@@ -250,7 +250,7 @@
       }
     },
     "provideBodyShape": {
-      "description": "The request-body contract a route handler declares (@Body() dto: CreateUserDto) — packages/core/src/io.rs ProvideBodyShape, #[serde(rename_all = \"camelCase\")]. Emitted by the parser with only dtoRef set; assemble resolves the ref against the tree-wide merged class-shape map and fills fields. An unresolvable or ambiguous ref drops the whole shape (never guessed).",
+      "description": "The request-body contract a route handler declares (@Body() dto: CreateUserDto) — crates/core/src/io.rs ProvideBodyShape, #[serde(rename_all = \"camelCase\")]. Emitted by the parser with only dtoRef set; assemble resolves the ref against the tree-wide merged class-shape map and fills fields. An unresolvable or ambiguous ref drops the whole shape (never guessed).",
       "type": "object",
       "additionalProperties": true,
       "properties": {
@@ -276,7 +276,7 @@
       }
     },
     "consumeBodyShape": {
-      "description": "The statically witnessed shape of a request-body object literal at an HTTP consume site (packages/core/src/io.rs ConsumeBodyShape, #[serde(rename_all = \"camelCase\")]). Extraction is evidence-only: keys are recorded exactly as written (dotted paths, depth <= 2), and NOTHING is inferred about parts the literal does not show. A body passed as an identifier/expression is not represented at all (IoConsume.body: null), never approximated.",
+      "description": "The statically witnessed shape of a request-body object literal at an HTTP consume site (crates/core/src/io.rs ConsumeBodyShape, #[serde(rename_all = \"camelCase\")]). Extraction is evidence-only: keys are recorded exactly as written (dotted paths, depth <= 2), and NOTHING is inferred about parts the literal does not show. A body passed as an identifier/expression is not represented at all (IoConsume.body: null), never approximated.",
       "type": "object",
       "required": ["keys", "completeAt"],
       "additionalProperties": true,
@@ -294,7 +294,7 @@
       }
     },
     "classShapeFragment": {
-      "description": "The field shape of one class declaration — the per-file half of request-body DTO resolution (packages/core/src/fragments.rs ClassShapeFragment; no rename_all, field names are already the wire names). Emitted for EVERY class declaration, field-less ones included. All three fields are REQUIRED (no #[serde(default)] on any of them) even though `fields` is a Vec — a producer that knows no fields for a class must still emit fields: [].",
+      "description": "The field shape of one class declaration — the per-file half of request-body DTO resolution (crates/core/src/fragments.rs ClassShapeFragment; no rename_all, field names are already the wire names). Emitted for EVERY class declaration, field-less ones included. All three fields are REQUIRED (no #[serde(default)] on any of them) even though `fields` is a Vec — a producer that knows no fields for a class must still emit fields: [].",
       "type": "object",
       "required": ["name", "fields", "complete"],
       "additionalProperties": true,
@@ -321,7 +321,7 @@
       }
     },
     "procedureRouterEntry": {
-      "description": "Externally-tagged Rust enum (ProcedureRouterEntry, packages/core/src/fragments.rs) — exactly one of Leaf/Ref/Nested present per entry, e.g. { \"Leaf\": { \"key\": \"getUser\", \"verb\": \"QUERY\", \"line\": 12 } }.",
+      "description": "Externally-tagged Rust enum (ProcedureRouterEntry, crates/core/src/fragments.rs) — exactly one of Leaf/Ref/Nested present per entry, e.g. { \"Leaf\": { \"key\": \"getUser\", \"verb\": \"QUERY\", \"line\": 12 } }.",
       "type": "object",
       "additionalProperties": false,
       "minProperties": 1,
@@ -368,7 +368,7 @@
       }
     },
     "routerMountEntry": {
-      "description": "Externally-tagged Rust enum (RouterMountEntry, packages/core/src/fragments.rs) — exactly one of Verb/Mount present per entry.",
+      "description": "Externally-tagged Rust enum (RouterMountEntry, crates/core/src/fragments.rs) — exactly one of Verb/Mount present per entry.",
       "type": "object",
       "additionalProperties": false,
       "minProperties": 1,

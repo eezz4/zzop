@@ -1,7 +1,7 @@
 //! `cross-layer/body-field-drift` (warning) — the FE request-body literal a call site sends drifts from
 //! the request-body DTO the matched BE handler declares (`body-shape-v1`: `ConsumeBodyShape` witnessed at
 //! the consume site, `ProvideBodyShape` resolved at assemble time from a `@Body() dto: X` handler param —
-//! see `packages/core/src/io.rs`'s module doc for both shapes).
+//! see `crates/core/src/io.rs`'s module doc for both shapes).
 //!
 //! Two independent checks, both keyed off comparing the consume's witnessed body keys against the
 //! provide's resolved DTO fields:

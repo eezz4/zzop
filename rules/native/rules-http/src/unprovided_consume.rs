@@ -288,7 +288,7 @@ pub fn unprovided_consume_findings(
 #[cfg(test)]
 mod tests {
     //! Unit tests for `unprovided_consume_findings`'s join + veto logic in isolation (e2e coverage —
-    //! real FE/BE fixtures — lives in `packages/engine/tests/analyze_io_natives.rs`).
+    //! real FE/BE fixtures — lives in `crates/engine/tests/analyze_io_natives.rs`).
     use super::*;
 
     fn provide(key: &str, file: &str, line: u32) -> zzop_core::IoProvide {

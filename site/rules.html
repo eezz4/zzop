@@ -51,7 +51,7 @@
     <div class="docs-content-header">
       <h1>Rule catalog</h1>
       <p>This catalog is read directly from the shipped rule packs and the native analysis registry, and a
-      meta-test (<code>packages/engine/tests/rule_contracts.rs</code>) machine-checks that every id listed
+      meta-test (<code>crates/engine/tests/rule_contracts.rs</code>) machine-checks that every id listed
       below matches what the engine actually loads at runtime, so the catalog cannot silently drift out of
       sync with the code. DSL pack rules below each carry their own inline suppress marker (see each
       table's "Suppress marker" column); native analyses do not support inline suppression. Every rule and
@@ -328,7 +328,7 @@
       <p>Whole-graph/whole-repo analyses, registered under <code>RuleKind::Native</code> so they share one
       enable/severity/suppression gating surface with DSL rules (<code>RuleConfig</code>). Each id is
       registered by its owning crate's own <code>register_native_analyses</code> — the kernel
-      (<code>packages/core</code>) itself registers none, staying rule-vocabulary-free.
+      (<code>crates/core</code>) itself registers none, staying rule-vocabulary-free.
       <code>rules/native/rules-graph</code> owns <code>circular</code>, <code>unreachable</code>,
       <code>dead-candidates</code>, <code>dead-exports</code> (dependency/dead-code graph rules).
       <code>rules/native/rules-http</code> owns <code>duplicate-route</code>,
@@ -337,7 +337,7 @@
       <code>rules/native/rules-cross-layer</code> owns the <code>cross-layer/*</code> ids (multi-tree
       cross-layer join rules). <code>rules/native/rules-schema</code> owns
       <code>schema-structural</code>, <code>schema-usage</code>, <code>soft-delete-bypass</code>,
-      <code>orderby-unindexed</code>, <code>enum-string-drift</code>. <code>packages/metrics</code> owns
+      <code>orderby-unindexed</code>, <code>enum-string-drift</code>. <code>crates/metrics</code> owns
       <code>seams</code>, <code>criticality</code>, <code>scores</code>, <code>health</code>,
       <code>recommendations</code> — score computations, not findings-producing rules, that ride the same
       toggle/gating surface. <code>zzop_engine::register_all_native</code> composes all five.</p>

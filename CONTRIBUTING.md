@@ -16,7 +16,7 @@ cargo clippy --workspace --all-targets -- -D warnings   # kept at 0 warnings
 cargo fmt --all
 ```
 
-The N-API addon (the Node<->Rust boundary, `packages/napi`) is not built by default. On Windows it
+The N-API addon (the Node<->Rust boundary, `packages/native`) is not built by default. On Windows it
 requires the MSVC toolchain — the workspace's default toolchain is windows-gnu, which cannot build the
 `addon` feature:
 
@@ -28,7 +28,7 @@ cargo +stable-x86_64-pc-windows-msvc build -p zzop-napi --release --features add
 cargo build -p zzop-napi --release --features addon
 ```
 
-See [`packages/napi/README.md`](packages/napi/README.md) for platform/toolchain details.
+See [`packages/native/README.md`](packages/native/README.md) for platform/toolchain details.
 
 ## CI guards
 
@@ -42,6 +42,12 @@ A PR must pass every job in [`.github/workflows/ci.yml`](.github/workflows/ci.ym
   (rule/analysis ids and source paths).
 - **cli-readme-sync-guard** — `packages/cli/README.md` must stay in sync with the `--help` text
   embedded in `packages/cli/bin/zzop.js`.
+- **docs-rule-ids-guard** — every bare/`{pack}/{rule}` id used in a user-facing `rules:` config
+  example (README, init template, getting-started doc, marketing site) must resolve against the rule
+  catalog, so a stale example can't silently become a no-op.
+- **drift-guards** — a parser-fingerprint-bump guard (a parser crate's `src/**` changed without
+  bumping its `PARSER_FINGERPRINT` const) and a policy-value census guard (a new policy-shaped
+  constant must be triaged into `scripts/policy-census.txt`).
 - **test** — `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
   `cargo test --workspace`.
 - **napi-addon-build** — builds the `zzop-napi` crate with the `addon` feature and runs its smoke
@@ -54,6 +60,9 @@ bash scripts/check-english-source.sh
 bash scripts/check-swc-isolation.sh
 bash scripts/check-rules-catalog-sync.sh
 bash scripts/check-cli-readme-sync.sh
+bash scripts/check-docs-rule-ids.sh
+bash scripts/check-parser-fingerprint-bump.sh
+bash scripts/check-policy-census.sh
 ```
 
 ## Conventions

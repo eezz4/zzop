@@ -5,15 +5,15 @@ whether the rule is common or environment-specific).
 
 ## `rules/native/` — native rules (Rust crates)
 - **Criterion**: whole-graph analysis (must see all nodes/trees at once) — not expressible in the DSL.
-- **Form**: Rust, one crate per rule family, statically linked into the **engine** (`packages/engine`, not
-  `core` — `core` stays rule-agnostic; see `packages/core/Cargo.toml` vs `packages/engine/Cargo.toml`). Full
+- **Form**: Rust, one crate per rule family, statically linked into the **engine** (`crates/engine`, not
+  `core` — `core` stays rule-agnostic; see `crates/core/Cargo.toml` vs `crates/engine/Cargo.toml`). Full
   native speed, shares IR memory directly, oxlint-style single traversal.
 - **Distribution**: bundled in the engine's prebuilds (5 platforms). Changing one requires rebuilding.
 - **Examples**: `rules-graph` (circular, unreachable, dead-candidates, dead-exports, duplicate-route, plus
   the 2 call-graph-BFS HTTP scanners: unsafe-read-endpoint, non-idempotent-write, and the 20 multi-tree
   `cross-layer/*` rules joining HTTP/DB/tRPC IO facts across trees) and `rules-schema`
   (Prisma structural rules + the usage-aware dead-model/dead-field/schema-churn checks). Seams, criticality,
-  scores, health, and recommendations are **not** rules — they're scores computed in `packages/metrics`,
+  scores, health, and recommendations are **not** rules — they're scores computed in `crates/metrics`,
   registered via that crate's own `register_native_analyses` (see "Adding a rule" below), and only ride the
   same registry toggle/gating machinery as native rules do. Layer-violations/feature-envy are a roadmap item
   (see `docs/rules/catalog.md#roadmap`) — no crate exists for them yet; a placeholder `rules-architecture`
@@ -25,19 +25,19 @@ whether the rule is common or environment-specific).
   data, not a crate. Each first-party pack lives in its own folder, `rules/dsl/<pack>/<pack>.json`, with
   the pack's end-to-end tests co-located right next to it as `rules/dsl/<pack>/<pack>.rs` (packs shipping at
   least one rule only — stub packs have no tests yet). `zzop_core::pack_loader::load_dsl_packs`
-  (`packages/core/src/pack_loader.rs`) scans BOTH this depth-1 "pack folder" layout and a flat
+  (`crates/core/src/pack_loader.rs`) scans BOTH this depth-1 "pack folder" layout and a flat
   `<dir>/<id>.json` layout in the same call — a caller-supplied `packsDir` (third-party packs) is free to
   stay flat; nesting is purely organizational, never required.
 - **`zzop-rule-packs` crate** (`rules/Cargo.toml`, sibling to this README): a thin, code-free crate that
   exists ONLY to give each pack folder's `<pack>.rs` a `cargo test` target (one `[[test]]` entry per pack,
   `path = "dsl/<pack>/<pack>.rs"`). It carries no rule data and no interpreter logic — that stays in
   `zzop-core` (loading/schema) and `zzop-engine` (evaluation), both of which it depends on as
-  dev-dependencies. `packages/engine/tests/rule_contracts.rs` machine-checks that this crate's `[[test]]`
+  dev-dependencies. `crates/engine/tests/rule_contracts.rs` machine-checks that this crate's `[[test]]`
   list stays in sync with the pack folders on disk.
 - **Distribution**: published/versioned **independently** via npm/registry, loaded on demand by language
   detection / config. **Platform-independent** (data, so prebuilds are unaffected). Build-free replacement.
-  The npm package's `prepack` step (`packages/napi/scripts/copy-rules.mjs`) copies `rules/dsl/` (both
-  layouts) into `packages/napi/rules/`, preserving whichever shape each pack uses; `<pack>.rs` files are
+  The npm package's `prepack` step (`packages/native/scripts/copy-rules.mjs`) copies `rules/dsl/` (both
+  layouts) into `packages/native/rules/`, preserving whichever shape each pack uses; `<pack>.rs` files are
   never copied.
 - **Extensibility**: same DSL schema for first-party and third-party — a user can drop in a JSON rule.
 - **Why DSL over WASM?** Redistribution is needed regardless, so the DSL gives the same build-free / platform-independent benefits while wasmtime, the ABI, the boundary cost, and the ~3x slowdown all disappear. (Biome GritQL / ast-grep / Semgrep model.)
@@ -61,23 +61,23 @@ whether the rule is common or environment-specific).
 
 ## Adding a rule touches only `rules/`
 
-The kernel (`packages/core`) and the engine's orchestration code are rule-vocabulary-free by construction —
-`packages/core/src/registry.rs` exposes only a generic, id-agnostic mechanism
+The kernel (`crates/core`) and the engine's orchestration code are rule-vocabulary-free by construction —
+`crates/core/src/registry.rs` exposes only a generic, id-agnostic mechanism
 (`register_native_analysis_stub`), never a specific rule id. Two meta-tests
-(`packages/engine/tests/rule_contracts.rs`) machine-enforce this: `no_dsl_id_collides_with_a_native_analysis_id`
+(`crates/engine/tests/rule_contracts.rs`) machine-enforce this: `no_dsl_id_collides_with_a_native_analysis_id`
 plus id-hygiene checks for DSL, and `kernel_core_carries_no_native_analysis_id_string_literal` for native.
-Concretely, adding either kind of rule never requires editing `packages/core` or `packages/engine`'s
+Concretely, adding either kind of rule never requires editing `crates/core` or `crates/engine`'s
 orchestration logic:
 
 - **A native rule**: implement the body in its owning crate (`rules/native/rules-graph` or
   `rules/native/rules-schema` — or a new sibling crate for a new rule family), add its id/severity to that
   crate's own `register_native_analyses` function, and add tests in the same crate. `zzop_engine::register_all_native`
-  (`packages/engine/src/lib.rs`) composes every owning crate's `register_native_analyses` — it already
+  (`crates/engine/src/lib.rs`) composes every owning crate's `register_native_analyses` — it already
   depends on all of them, so a new crate only needs one line added there. `docs/rules/catalog.md`'s totals
   and per-id table need updating too (machine-checked by `rule_contracts.rs`'s catalog-sync tests).
 - **A DSL rule**: add a rule entry to a pack's `<pack>.json` (or a new pack folder) under `rules/dsl/`, plus
   a co-located `<pack>.rs` end-to-end test. No Rust code changes anywhere — `zzop_core::load_dsl_packs`
   discovers packs from disk.
 
-In both cases `packages/core`/`packages/engine`'s own source is untouched — only `rules/` (and
+In both cases `crates/core`/`crates/engine`'s own source is untouched — only `rules/` (and
 `docs/rules/catalog.md`) changes.

@@ -95,7 +95,7 @@ as consumed. The silence is gone, with zero wrapper-specific code in the engine.
   `/articles`, so it will not join a backend that serves the prefixed route. (This is exactly why the
   RealWorld pair is a poor live demo: its `API_ROOT` both points at an external host *and* ends in
   `/api`.) A richer adapter can resolve the wrapper's `API_ROOT` constant one hop — like the
-  [FastAPI example](../../packages/engine/examples/fastapi_overlay_adapter.rs) folds a config constant —
+  [FastAPI example](../../crates/engine/examples/fastapi_overlay_adapter.rs) folds a config constant —
   and prepend it.
 - The wrapper binding must be a named identifier from the default/`--wrapper` list; a wrapper reached
   through a differently-named local or a member chain (`this.api.get(...)`) is not matched.

@@ -5,10 +5,10 @@
 //
 // USAGE
 //   node adapter.mjs --root <workspaceRoot> --source <id> > envelope.json
-//   node analyze.mjs envelope.json [--native <path-to-@zzop/native-or-checkout-packages/napi>]
+//   node analyze.mjs envelope.json [--native <path-to-@zzop/native-or-checkout-packages/native>]
 //
 // `--native` defaults to `@zzop/native` (npm install) and falls back to the in-checkout addon at
-// `../../packages/napi/index.js` so the example runs inside the zzop repo without an install.
+// `../../packages/native/index.js` so the example runs inside the zzop repo without an install.
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';

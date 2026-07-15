@@ -1,5 +1,5 @@
 //! `cross-layer/*` — 23 native rules that run over `zzop_core::CrossLayerResult`, the multi-tree join result
-//! `zzop_engine::analyze_trees` produces (see `packages/core/src/io.rs`'s module doc for the join itself:
+//! `zzop_engine::analyze_trees` produces (see `crates/core/src/io.rs`'s module doc for the join itself:
 //! exact `(kind, key)` join with an ambiguity gate for keys provided by 2+ distinct source trees, an
 //! external-egress gate for host-carrying consume keys, and a low-confidence tag for generic paths).
 //! Every rule here is a pure function over `&CrossLayerResult` (+ the provide-key universe some of them
@@ -92,7 +92,7 @@
 //! ones `CrossLayerResult`
 //! happens to expose (`unconsumed_provides` excludes ambiguous-candidate provides; `edges`/`ambiguous_consumes` only cover
 //! provides some consume already matched). That full universe is deliberately NOT threaded through
-//! `zzop_core::io::link_cross_layer_io`'s return type (`packages/core` stays rule-vocabulary-free by design —
+//! `zzop_core::io::link_cross_layer_io`'s return type (`crates/core` stays rule-vocabulary-free by design —
 //! the kernel carries mechanisms, never rule data); instead the engine call site
 //! (`zzop_engine::analyze_trees`) derives a flat `Vec<HttpProvideSite>` straight from the same `SourceIo`
 //! inputs it already built for the join, and passes it into these rule functions directly. See

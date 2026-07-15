@@ -119,7 +119,7 @@ fn shadows(param_segs: &[&str], literal_segs: &[&str]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    //! Unit tests for `route_shadowing_findings`'s grouping + shape logic (e2e coverage: `packages/engine/tests/analyze_io_natives.rs`).
+    //! Unit tests for `route_shadowing_findings`'s grouping + shape logic (e2e coverage: `crates/engine/tests/analyze_io_natives.rs`).
     use super::*;
 
     fn provide(key: &str, file: &str, line: u32) -> zzop_core::IoProvide {

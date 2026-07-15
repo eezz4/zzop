@@ -1,12 +1,12 @@
 'use strict';
 
 // Pure renderer for `--debug-io`: the join-debug surface. Turns a parsed native output's `crossLayer`
-// result (already carried on a multi-tree `analyzeTrees` output — see packages/core/src/io.rs's
+// result (already carried on a multi-tree `analyzeTrees` output — see crates/core/src/io.rs's
 // `CrossLayerResult`) into a deterministic plain-text dump, one section per bucket, one line per entry,
 // nothing capped/omitted (unlike the markdown report's `UNRESOLVED_LIST_CAP` — this is the "give me
 // everything" surface). No I/O here: bin/zzop.js owns the stdout write, same split as lib/report.js.
 
-// Bucket render order — mirrors CrossLayerResult's own field order (packages/core/src/io.rs) and
+// Bucket render order — mirrors CrossLayerResult's own field order (crates/core/src/io.rs) and
 // lib/report.js's "edges, unconsumed, unprovided, then the Other-buckets trio" grouping.
 const BUCKETS = [
   'edges',
@@ -27,7 +27,7 @@ function cmpNum(a, b) {
 // `<key-or-raw(+method)>`: a resolved entry (`key` non-null) prints its key; an unresolved one falls
 // back to `raw` (or a literal placeholder when even `raw` is missing), with `[METHOD]` appended when
 // `method` is present — `method` is only ever set alongside a null `key` (see TaggedConsume's doc in
-// packages/core/src/io.rs), so this never doubles up with a resolved key.
+// crates/core/src/io.rs), so this never doubles up with a resolved key.
 function keyOrRaw(entry) {
   if (entry && entry.key != null) return String(entry.key);
   const raw = entry && entry.raw != null ? String(entry.raw) : '(no key/raw)';

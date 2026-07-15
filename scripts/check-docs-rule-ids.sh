@@ -7,13 +7,13 @@
 # discovered by a user.
 #
 # SSOT id set: docs/rules/catalog.md, read the same way scripts/check-rules-catalog-sync.sh does — it is
-# machine-pinned to the engine by packages/engine/tests/rule_contracts.rs, so it transitively vouches for
+# machine-pinned to the engine by crates/engine/tests/rule_contracts.rs, so it transitively vouches for
 # reality. The catalog lists DSL rule ids BARE, one table per pack under a `### `<pack>`` heading (e.g.
 # `no-explicit-any` under `### `typescript``), so this script reconstructs each rule's config-facing id
 # as `<pack>/<id>` from heading + row. Native analysis ids (the "## Native analyses" section) are
 # config-facing as-is, including the 23 `cross-layer/*` ids that carry a "/" of their own — those are
 # NOT DSL packs and are never re-prefixed. The valid id universe additionally includes bare DSL PACK ids
-# (`sql`, `typescript`, ...): packages/core/src/registry.rs's `is_enabled` doc states all three id shapes
+# (`sql`, `typescript`, ...): crates/core/src/registry.rs's `is_enabled` doc states all three id shapes
 # are honored end to end ("a bare native-analysis/JS-quick-rule id, a whole DSL pack id, or a full
 # `"<pack>/<rule>"` id"), so a doc example disabling a whole pack by its bare id is legitimate.
 #
@@ -36,8 +36,8 @@
 #   - `packs.disabled` entries (bare pack ids by design — a different, pack-id-only key space; validating
 #     it against the pack-id set would be a separate check, not this drift class).
 #
-# Severity/disable token vocabulary (pass A): the UNION of packages/core's wire-level `Severity` enum
-# (packages/core/src/finding.rs: `#[serde(rename_all = "lowercase")] enum Severity { Critical, Warning,
+# Severity/disable token vocabulary (pass A): the UNION of crates/core's wire-level `Severity` enum
+# (crates/core/src/finding.rs: `#[serde(rename_all = "lowercase")] enum Severity { Critical, Warning,
 # Info }`) and packages/cli/lib/mapper.js's `SEVERITY_ALIASES` (that file's own header calls it "the
 # SINGLE source of truth for turning friendly config severities into the engine's Severity serde values",
 # and cites finding.rs directly) plus the off/none/disable/disabled family it maps to a disabled rule.
@@ -96,7 +96,7 @@ catalog_ids="$(awk '
 
 # Bare DSL pack ids (the `### `<pack>`` headings of the DSL section; the stub-packs heading carries no
 # backtick-wrapped id, so it is naturally excluded). Valid in `disabledRules` and as a whole-pack-off
-# `rules:` key per packages/core/src/registry.rs's `is_enabled` doc (see header comment).
+# `rules:` key per crates/core/src/registry.rs's `is_enabled` doc (see header comment).
 pack_ids="$(awk '
   /^## Native analyses/ { exit }
   /^### `/ { p = $0; sub(/^### `/, "", p); sub(/`.*/, "", p); print p }

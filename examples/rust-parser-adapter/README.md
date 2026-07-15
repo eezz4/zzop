@@ -37,7 +37,7 @@ node analyze.mjs envelope.json                                              # an
 ```
 
 `analyze.mjs` uses `@zzop/native` when installed and falls back to the in-checkout addon
-(`packages/napi/index.js`), so inside the zzop repo it runs with no install.
+(`packages/native/index.js`), so inside the zzop repo it runs with no install.
 
 ## Worked result — zzop analyzing itself
 

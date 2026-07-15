@@ -3,7 +3,7 @@
 # parser/parser-typescript.
 #
 # Architecture guarantee: the engine never holds swc ASTs; swc is confined to parser-typescript,
-# which projects source into the Common IR (see packages/core/src/lib.rs's module doc: "swc /
+# which projects source into the Common IR (see crates/core/src/lib.rs's module doc: "swc /
 # external-parser types never leak in") and the workspace root Cargo.toml's "swc version
 # isolation" note (an swc upgrade's re-verification scope is one crate, not the whole workspace).
 # This script is the regression guard for that guarantee.
@@ -25,6 +25,7 @@ echo "swc isolation guard: checking Cargo.toml dependency declarations..."
 DEP_PATTERN='^\s*swc[_-][A-Za-z0-9_-]*\s*='
 cargo_files=$(grep -rlP "$DEP_PATTERN" . --include='Cargo.toml' 2>/dev/null \
   | grep -v '/target/' \
+  | grep -v '^\./\.claude/' \
   | grep -v -x './Cargo.toml' \
   | grep -v -x './parser/parser-typescript/Cargo.toml' || true)
 
@@ -40,6 +41,7 @@ echo "swc isolation guard: checking .rs source usage..."
 USE_PATTERN='swc_core::|use\s+swc_'
 rs_files=$(grep -rlP "$USE_PATTERN" . --include='*.rs' 2>/dev/null \
   | grep -v '/target/' \
+  | grep -v '^\./\.claude/' \
   | grep -v '^\./parser/parser-typescript/src/' || true)
 
 if [ -n "$rs_files" ]; then
@@ -52,7 +54,7 @@ fi
 
 if [ "$violations" -ne 0 ]; then
   echo
-  echo "swc must stay confined to parser/parser-typescript (see packages/core/src/lib.rs and the"
+  echo "swc must stay confined to parser/parser-typescript (see crates/core/src/lib.rs and the"
   echo "workspace root Cargo.toml's \"swc version isolation\" note) -- the engine must never hold"
   echo "swc ASTs directly."
   exit 1

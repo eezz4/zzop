@@ -1,7 +1,7 @@
 # DSL rule pack reference
 
-Normative schema for `rules/dsl/*.json`. Source of truth: `packages/core/src/dsl.rs` (interpreter) and
-`packages/core/src/pack_loader.rs` (loader/schema-version gate). Every field below is read directly from
+Normative schema for `rules/dsl/*.json`. Source of truth: `crates/core/src/dsl.rs` (interpreter) and
+`crates/core/src/pack_loader.rs` (loader/schema-version gate). Every field below is read directly from
 those files — if they diverge, the Rust source wins.
 
 See also: [authoring-guide.md](authoring-guide.md) (how to write a pack), [catalog.md](catalog.md) (what
@@ -78,6 +78,7 @@ one function" matcher (e.g. `Runtime.exec` + string concatenation in the same me
 | `skip_comment_lines` | bool | `false` | Skip comment lines when testing patterns (span-scoped). |
 | `patterns` | `LabeledPattern[]` | required | **All** must each match at least one line inside a symbol's span (lines don't need to share a line — "co-occurrence", not "one regex"). |
 | `trigger` | string | required | Must equal one `patterns[].label`; that pattern's first (top-down) match anchors the finding's `line`/snippet. A `trigger` naming no real label makes the rule malformed → skipped. |
+| `trigger_in_loop` | bool | `false` | Structural containment gate on the trigger pattern only: when `true`, a trigger-pattern line match counts (for both satisfaction and the finding's line) only if that line falls within one of the file's projected `loop_spans` (see below) — i.e. the call is textually INSIDE a loop statement or an array-iteration callback body, not merely co-occurring with loop tokens somewhere in the same function. Non-trigger `patterns`/`absent` entries are unaffected. A file with no projected loop spans can never satisfy the trigger, so the rule is silent there — same graceful-degrade policy as a file with no symbol spans. |
 | `absent` | `LabeledPattern[]` | `[]` | Veto patterns: after every `patterns` entry is satisfied, the finding is dropped if **any** of these also matches a line in the **same span** (encodes "a guard makes this not a violation" — e.g. a `try {` wrapping a read-then-write, or a `$transaction(` wrapper). |
 | `snippet_max` | usize | `160` | Same as line-scan. |
 
@@ -97,6 +98,14 @@ Span semantics:
   of the per-span check — see the [authoring guide](authoring-guide.md#performance-require_file--require_file_all-rare-token-first) for why this mattered for a real hotspot).
 - A symbol with no body span (e.g. a `type`/`interface`, or a parser that couldn't project one) is not
   scannable and is skipped.
+- **Loop spans** (`trigger_in_loop`'s substrate): alongside `symbols`, the parser projects each file's
+  `loop_spans` — 1-based, inclusive line ranges covering every `for`/`for-of`/`for-in`/`while`/`do-while`
+  statement (header line included) plus the callback-argument span of an array-iteration call
+  (`.map`/`.forEach`/`.filter`/`.reduce`/...; the callback body only, not the whole call expression). Line
+  ranges, not byte offsets — a trigger match sharing a line with a loop span's line counts as contained
+  even if it is, byte-wise, outside the loop (e.g. a receiver expression on the same line as a one-line
+  `.map()` callback). Empty when the parser has no support / falls back lexically, same graceful-degrade
+  policy as `symbols`.
 
 ### `symbol-scan` (`SymbolScan`)
 
@@ -197,7 +206,7 @@ rule's patterns in the pack (`line_pattern` or all `any[].pattern` entries) and 
 through it once. A rule with zero set-hits in a file is proven to find nothing under its full per-line
 logic (labels, comment-skip, snippets, `require_file`) — every one of the rule's real patterns is in the
 set, so this is a correctness-preserving skip, not a heuristic. It changes nothing observable: a
-differential test (`prefilter_matches_unoptimized_findings_across_java_security_pack`) asserts the
+differential test (`prefilter_matches_unoptimized_findings_across_the_moved_java_rules`) asserts the
 optimized and unoptimized paths produce byte-for-byte identical findings. `method-scan`/`symbol-scan`/
 `io-scan` query different substrates (symbol spans / IO facts, not raw lines) and are not part of the set.
 

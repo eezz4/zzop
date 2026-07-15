@@ -35,9 +35,11 @@ producer of a Normalized AST envelope that either stands in for an entire tree (
 `analyzeEnvelope`) or overlays extra `io`/router facts — and generic entity attributes (open-vocab
 cross-cutting annotations a rule consumes by key, e.g. an injected `auth-guarded` marker) — onto a
 natively-parsed tree (Mode B, the Rust
-`EngineConfig::adapter_overlays` field, also reachable via napi's `adapterOverlays` config field) — see
+`EngineConfig::adapter_overlays` field, also reachable via any host's `adapterOverlays` config field —
+`packages/native`'s napi bindings directly, or `packages/mcp`'s `zzop-mcp` host through
+`zzop.config.jsonc`'s `overlays` key, mapped by the shared `zzop-config` crate) — see
 [NORMALIZED_AST.md](NORMALIZED_AST.md)'s "Adapter overlays" section and
-`packages/engine/examples/fastapi_overlay_adapter.rs` for a runnable FastAPI/Python demo.
+`crates/engine/examples/fastapi_overlay_adapter.rs` for a runnable FastAPI/Python demo.
 
 ## Degraded files
 
@@ -80,6 +82,12 @@ one entry per file) naming the count and a sample of the affected paths.
 `.jsp`/Python sources can still participate as first-class analysis input via a hand-written external
 parser adapter conforming to [NORMALIZED_AST.md](NORMALIZED_AST.md) — that path doesn't depend on
 in-tree structural support for the language.
+
+A normal-sized file whose extension has no native parser is not counted in `degraded` (that's a
+size-cap/parse-failure fact, not a coverage one) — instead it self-reports as a per-extension entry in
+`warnings`, naming the extension, a file count, and a path sample, pointing at the `overlays: [...]`
+config knob. An oversized file of that same unparsed extension gets both: it still lands in `degraded`
+and still names its extension in the per-extension warning — the two facts are orthogonal.
 
 ## Caching
 

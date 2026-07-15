@@ -1,9 +1,19 @@
 # `zzop-napi`
 
-The Node.js binding surface over `zzop-engine`. Four functions, all JSON-string-in / JSON-string-out
-(except `version`), defined in `src/addon.rs` and re-exported from `src/api.rs`. `api.rs` itself is
-plain napi-free Rust (compiles/tests under the workspace's default `gnu` toolchain); `addon.rs` is the
-`#[napi]`-annotated layer, gated behind the `addon` feature.
+The Node.js binding surface over the zzop analysis engine. Five functions, all JSON-string-in /
+JSON-string-out (except `version`), are actually DEFINED in the shared `zzop-facade` crate
+(`crates/facade/src/lib.rs`) — plain, napi-free Rust that compiles and has a normal `#[test]` surface
+under the workspace's default `gnu` toolchain with no feature flags at all. This crate, `zzop-napi`
+(published as the npm binding `@zzop/native` from `packages/native/`), is one of two consumers:
+`src/lib.rs` re-exports every `zzop-facade` function unchanged, and `src/addon.rs` — compiled only
+under the default-off `addon` feature (MSVC-only; see [Building the addon from source](#building-the-addon-from-source)
+below) — wraps each one in a thin `#[napi]` shim. The other consumer is the Node-free `zzop-mcp`
+binary (`packages/mcp/`, see [modules/mcp.md](mcp.md)), which calls the same `zzop-facade` functions
+directly with no napi and no Node process at all. `zzop-facade` lives in its own `rlib`-only crate,
+separate from `zzop-napi`, because cargo builds a dependency's `cdylib` target even on an `rlib`
+dependency edge — `zzop-napi`'s `cdylib` half (the Node addon artifact) fails to link under the local
+`gnu` toolchain once its `#[napi]` surface is compiled in, and that failure would poison any crate that
+merely depended on `zzop-napi` for its plain-Rust logic, `zzop-mcp` included.
 
 ## Functions
 
@@ -12,6 +22,7 @@ plain napi-free Rust (compiles/tests under the workspace's default `gnu` toolcha
 | `analyze` | `(configJson: string) -> string` | `AnalyzeRequest` → `AnalyzeOutputView` |
 | `analyzeTrees` | `(configJson: string) -> string` | `AnalyzeTreesRequest{trees: [AnalyzeRequest]}` → `MultiAnalyzeOutputView` |
 | `analyzeEnvelope` | `(envelopeJson: string, configJson: string) -> string` | `NormalizedEnvelope` + `EnvelopeAnalyzeRequest` → `AnalyzeOutputView` |
+| `validateEnvelopeOnly` | `(envelopeJson: string) -> string` | envelope JSON → `{valid: boolean, issues: string[]}` — see [below](#validation-only-validateenvelopeonly). |
 | `version` | `() -> string` | none (cannot fail, no `Result`) |
 
 `AnalyzeRequest` (`#[serde(rename_all="camelCase", default)]`, unknown fields ignored):
@@ -21,12 +32,14 @@ plain napi-free Rust (compiles/tests under the workspace's default `gnu` toolcha
 | `root` | `String` (required — empty → `Err`) | Tree root to walk. |
 | `sourceId` | `String` (default `""`) | Free-form label carried through into cross-tree output. |
 | `packsDir` | `Option<String \| String[]>` | Directory (or directories) of `*.json` DSL rule packs to load — see [rules/authoring-guide.md](../rules/authoring-guide.md). Multiple directories are loaded and MERGED (see [Defaults](#defaults-zero-config--full-analysis) below for the collision rule). A bad/missing directory is a non-fatal `warnings` entry, not a failure — other directories in the list still load. |
+| `packDefs` | `RulePackDef[]` (default `[]`) | Inline rule-pack definitions handed to the engine as data instead of a filesystem directory — the self-contained-binary alternative to `packsDir` (e.g. `zzop-mcp`'s bundled packs, embedded at compile time). Loaded BEFORE `packsDir` directories, so a directory pack with the same id wins the collision (mirrors the JS wrapper's bundled-first `packsDir` ordering below). A same-id collision among `packDefs` entries themselves: the later array entry wins whole. The JS CLI/wrapper never sends this field — it stays on the `packsDir`-only path unchanged; this is purely additive for non-JS hosts like `zzop-mcp` (see [modules/mcp.md](mcp.md)). Not available on `analyzeEnvelope`'s config (`EnvelopeAnalyzeRequest` has no equivalent field — envelope mode takes packs via `packsDir` only). |
 | `cacheDir` | `Option<String>` | See [Caching](../ARCHITECTURE.md#caching). Omit to run uncached. |
 | `git` | `Option<{ since: Option<String>, recentDays: Option<u32>, commitTypePatterns: Option<Array<{ pattern: String, tag: String }>> }>` | Enables git-derived scores/health/recommendations/criticality/seams. `recentDays` default is 30. `commitTypePatterns`, when present and non-empty, REPLACES the default FIX/FEAT/REVERT/... classifier table entirely (match order = array order, mirroring the default table's REVERT-first rationale); an entry whose `pattern` fails to compile as a regex is skipped (matches nothing) and reported as a `warnings` entry, never a failure. |
 | `sizeCap` | `Option<usize>` | Default 1,500,000 bytes (~1.5MB) — see [degraded files](../ARCHITECTURE.md#degraded-files). |
 | `disabledRules` | `Vec<String>` | Rule/analysis ids to turn off — see [rules/catalog.md](../rules/catalog.md) for the id list. |
 | `severityOverrides` | `BTreeMap<String, "critical" \| "warning" \| "info">` (default `{}`) | Per-rule severity remap, keyed by rule id (same id space as `disabledRules`). Promotes/demotes a rule's findings without editing the pack — applied post-merge, so it also re-sorts the finding into its new severity band. |
 | `suppressions` | `Vec<{ rule: String, path?, glob? }>` (default `[]`) | Finding-level accept-list. Each entry drops findings for `rule` either everywhere (no filter), only in files whose path CONTAINS `path` as a plain substring (case-sensitive), or only in files matching `glob` (full-path shell glob; `glob` takes precedence over `path`). Multiple entries for one rule are OR-ed. |
+| `globalExcludes` | `Vec<{ path?, glob? }>` (default `[]`) | Config-wide, rule-agnostic finding-level filter — the top-level `"exclude"` config key. Same `path`/`glob` matching as `suppressions`, but drops matching findings from EVERY rule at once (rather than one named `rule`); the file itself is still analyzed, only its findings are filtered. |
 | `adapterOverlays` | `Vec<NormalizedEnvelope>` (default `[]`) | Mode-B adapter overlays: partial Normalized-AST envelopes merged ON TOP of native analysis (each re-validated, soft-skipped with a warning if invalid). How a framework/SDK adapter adds IoFacts the engine does not parse natively without reimplementing the parser — contrast `analyzeEnvelope`, where a full envelope REPLACES native analysis. Post-cache, so it does not affect the cache key. See [../NORMALIZED_AST.md](../NORMALIZED_AST.md). |
 | `mountedAt` | `Option<String>` | Deployment-topology whole-tree gateway/ingress mount prefix — shorthand for a `mounts` entry with `dir: ""`, folded in LAST (after every `mounts` entry) so an explicit equal-length `mounts` entry wins a tie. `None` (default) adds no implicit mount. Applied to `kind=http` provides only, stacking on top of any code-extracted prefix. See [../ARCHITECTURE.md](../ARCHITECTURE.md#cross-layer-join) / [packages/cli/README.md](../../packages/cli/README.md#connection-topology). |
 | `mounts` | `Vec<{ dir: String, at: String }>` (default `[]`) | Deployment-topology per-directory mounts: prepends `at` to a `kind=http` provide's key when its file path falls under `dir` (longest matching `dir` wins per provide). Shape is validated fail-fast by the CLI mapper (`ConfigError`); the engine itself defensively skips+warns on a malformed value as a backstop. |
@@ -55,6 +68,14 @@ analysis instead of silently degrading to native-analyses-only:
   default). An explicit value wins; `git: null` disables git collection. If `root` is not a git
   repository, the engine degrades gracefully with a "git collection skipped" warning.
 
+This bundled-packs default is JS-specific: `index.js` injects it as a `packsDir` pointing at a directory
+on disk (a source checkout's `rules/dsl`, or the installed package's copied `rules/`). A non-JS host with
+no such directory to point at — `zzop-mcp` is the only one today — gets the same "bundled packs always
+load" guarantee through `packDefs` instead: the shared `zzop-config` crate embeds the bundled pack JSON
+at compile time and injects it as inline `packDefs` before mapping a config to a request (see
+[modules/mcp.md](mcp.md)). `packDefs` is additive to this crate's own contract — the JS wrapper never
+sends it, so this default-injection description is unchanged for JS callers.
+
 `analyzeEnvelope`'s config gets only the `packsDir` default — envelope mode has no `root`/git. To turn
 off individual rules rather than a whole channel, use `disabledRules`
 (see [rules/catalog.md](../rules/catalog.md)).
@@ -68,10 +89,21 @@ calling the Rust engine directly), it self-reports on `warnings` instead of stay
 These are capability notes, not errors — the analysis still completes normally. The zero-packs note
 also applies to `analyzeEnvelope`; the git note never does (envelope mode has no git by design).
 
-`EnvelopeAnalyzeRequest { sourceId: String, packsDir: Option<String | Vec<String>>, disabledRules: Vec<String>, severityOverrides: BTreeMap<String, Severity>, suppressions: Vec<{ rule, path?, glob? }> }` —
-deliberately no `root`/`cacheDir`/`git`/`sizeCap` (envelope mode has no filesystem root or git repo).
-`severityOverrides`/`suppressions` behave identically to their `AnalyzeConfig` counterparts above.
-`NormalizedEnvelope` shape: see `../NORMALIZED_AST.md`.
+`EnvelopeAnalyzeRequest { sourceId: String, packsDir: Option<String | Vec<String>>, disabledRules: Vec<String>, severityOverrides: BTreeMap<String, Severity>, suppressions: Vec<{ rule, path?, glob? }>, globalExcludes: Vec<{ path?, glob? }> }` —
+deliberately no `root`/`cacheDir`/`git`/`sizeCap`/`packDefs` (envelope mode has no filesystem root or git
+repo, and takes packs via `packsDir` only — see `packDefs`'s row above).
+`severityOverrides`/`suppressions`/`globalExcludes` behave identically to their `AnalyzeRequest`
+counterparts above. `NormalizedEnvelope` shape: see `../NORMALIZED_AST.md`.
+
+### Validation-only: `validateEnvelopeOnly`
+
+`validateEnvelopeOnly(envelopeJson)` runs the same structural/semantic checks `analyzeEnvelope` applies
+to its envelope argument (`zzop_core::validate_envelope`) but stops there — no `configJson`, no pack
+loading, no engine run — so an external adapter author gets fast, offline "is my envelope well-formed"
+feedback without a full analysis. It returns `{"valid": boolean, "issues": string[]}` and, unlike every
+other function on this page, **never fails**: an unparseable or semantically invalid envelope still
+produces an ordinary `{"valid": false, "issues": [...]}` result rather than a rejected `Result`/thrown
+`Error` — a validity check cannot itself be "wrong" the way a malformed request can.
 
 `AnalyzeOutputView` (`camelCase`, a zero-copy borrowing view) is the shape every successful `analyze`/
 `analyzeEnvelope` call returns:
@@ -205,8 +237,9 @@ is dropped before sorting — it never appears in the output at all, with no sup
 
 ## Error/panic discipline
 
-Two layers. `api.rs` never panics by contract — every fallible path (bad JSON, missing `root`, invalid
-envelope) returns `Result<String, String>`. `addon.rs` wraps each of the three fallible calls in:
+Two layers. `zzop-facade` (`crates/facade/src/lib.rs`) never panics by contract — every fallible path
+(bad JSON, missing `root`, invalid envelope) returns `Result<String, String>`. `addon.rs` wraps each of
+the three fallible calls (analyze/analyzeTrees/analyzeEnvelope — validateEnvelopeOnly is wrapped only for panic-safety and never itself returns Err) in:
 
 ```rust
 fn catch<F: FnOnce() -> Result<String, String> + UnwindSafe>(f: F) -> napi::Result<String> {
@@ -265,10 +298,12 @@ fails with `ERR_UNSUPPORTED_ESM_URL_SCHEME` — Node requires a `file://` URL or
 
 ```js
 import { createRequire } from 'node:module';
-const native = createRequire(import.meta.url)('/abs/path/to/packages/napi/index.js');
+const native = createRequire(import.meta.url)('/abs/path/to/packages/native/index.js');
 // or: import { pathToFileURL } from 'node:url';
 //     const native = (await import(pathToFileURL('/abs/path/to/index.js').href)).default;
 ```
 
 See also: [../ARCHITECTURE.md](../ARCHITECTURE.md) (how a tree is processed, degrade/cache behavior),
-[../rules/catalog.md](../rules/catalog.md) (every rule/analysis id `disabledRules` can reference).
+[../rules/catalog.md](../rules/catalog.md) (every rule/analysis id `disabledRules` can reference),
+[mcp.md](mcp.md) (the Node-free host that shares this page's `zzop-facade` request/response contract
+end-to-end, over an MCP tool surface and a CLI instead of a JS binding).
