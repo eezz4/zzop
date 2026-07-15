@@ -8,7 +8,7 @@
 //! extraction time. The provide side is NOT projected here: a tRPC router's full route path is only
 //! knowable once every file's router fragment is assembled (e.g. a `viewerRouter` mounting a
 //! `bookingsRouter` imported from another file). Instead `pipeline::FileArtifact::
-//! trpc_router_fragments` collects each file's own router shape, and `analyze::compose_trpc_provides`
+//! procedure_router_fragments` collects each file's own router shape, and `analyze::compose_trpc_provides`
 //! composes every fragment at assembly time.
 //!
 //! ## Cross-file resolution (fragment now, compose later)

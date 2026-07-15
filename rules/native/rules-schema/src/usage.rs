@@ -1,23 +1,29 @@
-//! Prisma schema-usage analysis — usage-evidence collectors (per-file field-usage tokens, migration churn) plus the usage-aware cross-check layered on top of the structural analyzer in `structural.rs`.
+//! Prisma schema-usage analysis — usage-evidence collectors (per-file field-usage tokens) plus the usage-aware cross-check layered on top of the structural analyzer in `structural.rs`.
 //! `SchemaUsage` (the usage-evidence IR a producer assembles) lives in `zzop-core`; every function that consumes or produces it lives here. `analyze_schema_with_usage` wraps `structural::analyze_schema`
 //! rather than modifying it, layering cross-check/churn issues and risk points on top. `structural::severity_points` is private to `structural.rs`, so it's duplicated here — keep the two in sync.
 //!
-//! `bound_models`/`identifier_counts` evidence used to come from this crate's own `<root>/src` filesystem re-walks (`scan_store_map`/`scan_field_usage`, both removed). Both are now sourced from per-file
-//! facts carried through `zzop_engine`'s fused per-file pass instead: [`field_usage_tokens`] (this module) is the direct per-file substrate for `identifier_counts`, called once per file with the text
-//! that pass already has in hand; the store-binding sibling (`extract_store_bound_models`) moved to `zzop_parser_typescript` since it needs the AST-based recognizer `db_table_consume.rs` already hosts.
-//! Store/client-binding vocabulary (factory name "createStore" / getter name "getPrisma") is now a fixed literal at that call site rather than a caller-supplied parameter — this engine never had a second
-//! vocabulary to plug in, so the parameterization the removed `scan_store_map` offered was unused generality.
+//! `identifier_counts` evidence comes from a per-file fact carried through `zzop_engine`'s fused per-file pass: [`field_usage_tokens`] (this module) is the direct per-file substrate, called once per file
+//! with the text that pass already has in hand (no filesystem re-walk). Store-binding and migration-churn are environment facts about a specific project's architecture (a store-binding convention, a
+//! migration-history layout); per the "native = common environments only, everything else injected" line, their app-specific native recognizers were removed — both are now read off the generic
+//! entity-attribute channel (`zzop_core::AttributeStore`, Symbol-keyed [`BOUND_MODEL_ATTR`]/[`MODEL_CHURN_ATTR`]) rather than typed `SchemaUsage` slots. `dead-model` therefore keys on the generic
+//! vocab-free signal (is the model name referenced anywhere?) plus whatever a producer injects into `BOUND_MODEL_ATTR`.
 
-use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::Path;
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use regex::Regex;
 
-use zzop_core::{SchemaModel, SchemaUsage, Severity};
+use zzop_core::{AttributeStore, SchemaModel, SchemaUsage, Severity};
 
 use crate::structural::{analyze_schema, SchemaAnalysis, SchemaIssue};
+
+/// Attribute key a producer/overlay sets on a model `Symbol` to assert a store/repository binding exists
+/// (suppresses dead-model). The retrofit of the removed native store-binding recognizer onto the generic
+/// entity-attribute channel — dead-model now reads this instead of `SchemaUsage.bound_models`.
+pub const BOUND_MODEL_ATTR: &str = "bound-model";
+/// Attribute key a producer/overlay sets on a model `Symbol` carrying that model's cumulative migration
+/// churn count (a number). Drives schema-churn. Replaces the removed `SchemaUsage.model_churn` slot.
+pub const MODEL_CHURN_ATTR: &str = "model-churn";
 
 macro_rules! lazy_re {
     ($f:ident, $p:expr) => {
@@ -82,93 +88,14 @@ lazy_re!(template_re, r"`(?:\\.|[^`\\])*`");
 // ASCII-only identifier token, mirroring JS `\b[a-zA-Z_$][\w$]*\b` (JS `\w` is ASCII-only).
 lazy_re!(ident_re, r"[A-Za-z_$][A-Za-z0-9_$]*");
 
-// --- scanMigrationChurn ---
-
-/// Counts accumulated schema changes per model from `prisma/migrations/` history. Scans `{timestamp}_{name}/migration.sql` files under each domain's migrations directory for CREATE/ALTER/DROP TABLE
-/// statements, tallies by table name, then maps to model names via `SchemaModel.table_name` or a snake_case fallback; returns an empty map when no migrations directory exists (e.g. a `db push` workflow).
-pub fn scan_migration_churn(app_dir: &Path, models: &[SchemaModel]) -> HashMap<String, u32> {
-    let table_counts = collect_table_counts(app_dir);
-    map_tables_to_models(&table_counts, models)
-}
-
-fn collect_table_counts(app_dir: &Path) -> HashMap<String, u32> {
-    let mut counts = HashMap::new();
-    let domains_dir = app_dir.join("src").join("domains");
-    let Ok(domains) = fs::read_dir(&domains_dir) else {
-        return counts;
-    };
-    let mut domains: Vec<_> = domains.filter_map(Result::ok).collect();
-    domains.sort_by_key(|e| e.file_name());
-    for domain in domains {
-        if !domain.path().is_dir() {
-            continue;
-        }
-        let mig_dir = domain.path().join("prisma").join("migrations");
-        let Ok(entries) = fs::read_dir(&mig_dir) else {
-            continue;
-        };
-        let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
-        entries.sort_by_key(|e| e.file_name());
-        for entry in entries {
-            if !entry.path().is_dir() {
-                continue;
-            }
-            let sql_path = entry.path().join("migration.sql");
-            let Ok(sql) = fs::read_to_string(&sql_path) else {
-                continue;
-            };
-            count_tables_in_sql(&sql, &mut counts);
-        }
-    }
-    counts
-}
-
-// Matches CREATE/ALTER/DROP TABLE with optionally quoted names; covers Prisma-generated SQL, not full SQL DDL.
-lazy_re!(
-    table_re,
-    r#"(?i)(?:CREATE|ALTER|DROP)\s+TABLE\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?["`]?([A-Za-z0-9_.]+?)["`]?(?:\s|;|\()"#
-);
-
-fn count_tables_in_sql(sql: &str, counts: &mut HashMap<String, u32>) {
-    for c in table_re().captures_iter(sql) {
-        let table = strip_schema(&c[1]);
-        *counts.entry(table).or_insert(0) += 1;
-    }
-}
-
-fn map_tables_to_models(
-    table_counts: &HashMap<String, u32>,
-    models: &[SchemaModel],
-) -> HashMap<String, u32> {
-    let mut out = HashMap::new();
-    for model in models {
-        let key = model
-            .table_name
-            .clone()
-            .unwrap_or_else(|| to_snake_case(&model.name));
-        if let Some(&count) = table_counts.get(&key) {
-            if count > 0 {
-                out.insert(model.name.clone(), count);
-            }
-        }
-    }
-    out
-}
-
-fn strip_schema(raw: &str) -> String {
-    match raw.rfind('.') {
-        Some(idx) => raw[idx + 1..].to_string(),
-        None => raw.to_string(),
-    }
-}
-
-lazy_re!(snake_case_re, r"([a-z0-9])([A-Z])");
-
-fn to_snake_case(pascal: &str) -> String {
-    snake_case_re()
-        .replace_all(pascal, "${1}_${2}")
-        .to_lowercase()
-}
+// Migration churn (`MODEL_CHURN_ATTR`) is an environment fact — accumulated schema-change history that
+// lives in migration files the parse pass never dispatches, under a deployment-specific directory layout.
+// Per the "native = common environments only; everything else is injected" design line, a native
+// recognizer for it (the removed `scan_migration_churn`, which FS-walked a
+// `<root>/src/domains/*/prisma/migrations/` layout and regex-re-parsed raw `.sql` off disk — both a
+// rule-side re-parse leak AND a one-project layout) has no place here. `MODEL_CHURN_ATTR` is the injection
+// slot instead — a producer that knows a project's migration layout injects it on the model `Symbol`, and
+// `apply_churn_rule` (below) reads it off the generic entity-attribute channel.
 
 // --- crossCheckSchema + applyChurnRule + analyzeSchema (usage branch) ---
 
@@ -178,10 +105,29 @@ const MIN_FIELD_NAME_LEN: usize = 3;
 
 /// Schema cross-check — compares the schema-IR against actual BE code usage. Surfaces dead-model (a model not bound to any store) and dead-field (a field never appearing as an identifier in BE source)
 /// issues. id/createdAt/updatedAt are excluded by default since infrastructure fields are rarely referenced directly.
-pub fn cross_check_schema(models: &[SchemaModel], usage: &SchemaUsage) -> Vec<SchemaIssue> {
+pub fn cross_check_schema(
+    models: &[SchemaModel],
+    usage: &SchemaUsage,
+    attrs: &AttributeStore,
+) -> Vec<SchemaIssue> {
     let mut issues = Vec::new();
     for model in models {
-        if !usage.bound_models.contains(&model.name) {
+        // A model is "used" if its name appears as an identifier anywhere in BE source
+        // (`identifier_counts`, the generic vocab-free signal — same substrate dead-field uses), OR if a
+        // Mode-B producer injected a truthy `BOUND_MODEL_ATTR` on the model's `Symbol` through the generic
+        // entity-attribute channel. That channel is empty under native analysis now that the app-specific
+        // store-binding recognizer is gone. This makes dead-model a general "the model name is never
+        // referenced" check instead of "the model isn't wired through one project's store convention."
+        let referenced = usage
+            .identifier_counts
+            .get(&model.name)
+            .copied()
+            .unwrap_or(0)
+            > 0;
+        let bound = attrs
+            .symbol_attr(&model.name, None, BOUND_MODEL_ATTR)
+            .is_some_and(zzop_core::attr_is_truthy);
+        if !referenced && !bound {
             issues.push(SchemaIssue {
                 rule: "dead-model".to_string(),
                 severity: Severity::Info,
@@ -222,11 +168,16 @@ pub fn cross_check_schema(models: &[SchemaModel], usage: &SchemaUsage) -> Vec<Sc
 const CHURN_WARNING_THRESHOLD: u32 = 5;
 const CHURN_CRITICAL_THRESHOLD: u32 = 10;
 
-/// schema-churn rule — detects design instability from accumulated migration churn on a model.
-pub fn apply_churn_rule(models: &[SchemaModel], churn: &HashMap<String, u32>) -> Vec<SchemaIssue> {
+/// schema-churn rule — detects design instability from accumulated migration churn on a model. Churn count
+/// per model is read off the generic entity-attribute channel (`MODEL_CHURN_ATTR` on the model's `Symbol`);
+/// a model with no injected churn attribute is treated as zero, so this self-gates and is safe to always call.
+pub fn apply_churn_rule(models: &[SchemaModel], attrs: &AttributeStore) -> Vec<SchemaIssue> {
     let mut issues = Vec::new();
     for model in models {
-        let count = churn.get(&model.name).copied().unwrap_or(0);
+        let count = attrs
+            .symbol_attr(&model.name, None, MODEL_CHURN_ATTR)
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
         if count < CHURN_WARNING_THRESHOLD {
             continue;
         }
@@ -256,19 +207,18 @@ fn severity_points(s: Severity) -> i64 {
 }
 
 /// Usage-aware schema analysis: schema-IR (+ optional usage) -> `SchemaAnalysis` with a `model_risk` rollup. Always runs the structural rules; when `usage` is present, also runs `cross_check_schema` and
-/// (if migration-churn data is available) `apply_churn_rule`, folding their risk points into `model_risk`.
+/// `apply_churn_rule` (self-gating: a model with no injected `MODEL_CHURN_ATTR` yields count 0 -> no issue), folding their risk points into `model_risk`.
 pub fn analyze_schema_with_usage(
     models: Vec<SchemaModel>,
     usage: Option<SchemaUsage>,
+    attrs: &AttributeStore,
 ) -> SchemaAnalysis {
     let mut analysis = analyze_schema(models);
     let Some(usage) = usage else {
         return analysis;
     };
-    let mut extra = cross_check_schema(&analysis.models, &usage);
-    if let Some(churn) = &usage.model_churn {
-        extra.extend(apply_churn_rule(&analysis.models, churn));
-    }
+    let mut extra = cross_check_schema(&analysis.models, &usage, attrs);
+    extra.extend(apply_churn_rule(&analysis.models, attrs));
     for issue in &extra {
         *analysis.model_risk.entry(issue.model.clone()).or_insert(0) +=
             severity_points(issue.severity);
@@ -282,46 +232,7 @@ mod tests {
     //! Unit tests for the usage-evidence collectors, the usage-aware cross-check, the churn rule, and
     //! `analyze_schema_with_usage`'s composition of structural + usage signals.
     use super::*;
-    use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use zzop_core::{FieldAttr, SchemaField};
-
-    /// Self-cleaning temp directory (std-only, no `tempfile` dependency). Created fresh per test and removed
-    /// on drop so tests don't leak directories between runs.
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(prefix: &str) -> Self {
-            static COUNTER: AtomicU64 = AtomicU64::new(0);
-            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let dir =
-                std::env::temp_dir().join(format!("{prefix}-{}-{nanos}-{n}", std::process::id()));
-            fs::create_dir_all(&dir).unwrap();
-            TempDir(dir)
-        }
-
-        fn path(&self) -> &Path {
-            &self.0
-        }
-
-        fn write(&self, rel: &str, content: &str) {
-            let full = self.0.join(rel);
-            if let Some(parent) = full.parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
-            fs::write(full, content).unwrap();
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
+    use zzop_core::{Attribute, EntityRef, FieldAttr, SchemaField};
 
     // --- fieldUsageTokens ---
 
@@ -389,182 +300,6 @@ mod tests {
         assert!(result.contains("title"));
     }
 
-    // --- scanMigrationChurn ---
-
-    fn write_migration(dir: &TempDir, domain: &str, mig_name: &str, sql: &str) {
-        dir.write(
-            &format!("src/domains/{domain}/prisma/migrations/{mig_name}/migration.sql"),
-            sql,
-        );
-    }
-
-    fn churn_model(name: &str, table_name: Option<&str>) -> SchemaModel {
-        SchemaModel {
-            name: name.to_string(),
-            table_name: table_name.map(str::to_string),
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn churn_single_domain_create_table_once_maps_with_count_1() {
-        let dir = TempDir::new("zzop-mig-churn");
-        write_migration(
-            &dir,
-            "post",
-            "20240101000000_init",
-            "CREATE TABLE \"post\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY,\n  \"title\" TEXT NOT NULL\n);",
-        );
-        let models = vec![churn_model("Post", Some("post"))];
-        let result = scan_migration_churn(dir.path(), &models);
-        assert_eq!(result.get("Post").copied(), Some(1));
-    }
-
-    #[test]
-    fn churn_multiple_alter_table_on_same_table_accumulates() {
-        let dir = TempDir::new("zzop-mig-churn");
-        write_migration(
-            &dir,
-            "user",
-            "20240101000000_init",
-            "CREATE TABLE \"user\" (\"id\" TEXT NOT NULL PRIMARY KEY);",
-        );
-        write_migration(
-            &dir,
-            "user",
-            "20240201000000_add_email",
-            "ALTER TABLE \"user\" ADD COLUMN \"email\" TEXT;",
-        );
-        write_migration(
-            &dir,
-            "user",
-            "20240301000000_add_avatar",
-            "ALTER TABLE \"user\" ADD COLUMN \"avatarUrl\" TEXT;",
-        );
-        let models = vec![churn_model("User", Some("user"))];
-        let result = scan_migration_churn(dir.path(), &models);
-        assert_eq!(result.get("User").copied(), Some(3));
-    }
-
-    #[test]
-    fn churn_model_without_map_infers_snake_case_table_name() {
-        let dir = TempDir::new("zzop-mig-churn");
-        write_migration(
-            &dir,
-            "item",
-            "20240101000000_init",
-            "CREATE TABLE \"item_user_limit\" (\"id\" TEXT NOT NULL PRIMARY KEY);",
-        );
-        let models = vec![churn_model("ItemUserLimit", None)];
-        let result = scan_migration_churn(dir.path(), &models);
-        assert_eq!(result.get("ItemUserLimit").copied(), Some(1));
-    }
-
-    #[test]
-    fn churn_drop_table_also_counted() {
-        let dir = TempDir::new("zzop-mig-churn");
-        write_migration(
-            &dir,
-            "legacy",
-            "20240101000000_create",
-            "CREATE TABLE \"legacy_item\" (\"id\" TEXT NOT NULL PRIMARY KEY);",
-        );
-        write_migration(
-            &dir,
-            "legacy",
-            "20240201000000_drop",
-            "DROP TABLE IF EXISTS \"legacy_item\";",
-        );
-        let models = vec![churn_model("LegacyItem", Some("legacy_item"))];
-        let result = scan_migration_churn(dir.path(), &models);
-        assert_eq!(result.get("LegacyItem").copied(), Some(2));
-    }
-
-    #[test]
-    fn churn_multiple_domains_counted_independently() {
-        let dir = TempDir::new("zzop-mig-churn");
-        write_migration(
-            &dir,
-            "post",
-            "20240101000000_init",
-            "CREATE TABLE \"post\" (\"id\" TEXT NOT NULL PRIMARY KEY);\nALTER TABLE \"post\" ADD COLUMN \"slug\" TEXT;",
-        );
-        write_migration(
-            &dir,
-            "comment",
-            "20240101000000_init",
-            "CREATE TABLE \"comment\" (\"id\" TEXT NOT NULL PRIMARY KEY);",
-        );
-        let models = vec![
-            churn_model("Post", Some("post")),
-            churn_model("Comment", Some("comment")),
-        ];
-        let result = scan_migration_churn(dir.path(), &models);
-        assert_eq!(result.get("Post").copied(), Some(2));
-        assert_eq!(result.get("Comment").copied(), Some(1));
-    }
-
-    #[test]
-    fn churn_no_migrations_folder_empty_map() {
-        let dir = TempDir::new("zzop-mig-churn");
-        let models = vec![churn_model("Post", Some("post"))];
-        let result = scan_migration_churn(dir.path(), &models);
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn churn_sql_does_not_reference_table_model_absent() {
-        let dir = TempDir::new("zzop-mig-churn");
-        write_migration(
-            &dir,
-            "post",
-            "20240101000000_init",
-            "CREATE TABLE \"unrelated_table\" (\"id\" TEXT NOT NULL PRIMARY KEY);",
-        );
-        let models = vec![churn_model("Post", Some("post"))];
-        let result = scan_migration_churn(dir.path(), &models);
-        assert!(!result.contains_key("Post"));
-    }
-
-    #[test]
-    fn churn_empty_model_list_empty_map() {
-        let dir = TempDir::new("zzop-mig-churn");
-        write_migration(
-            &dir,
-            "post",
-            "20240101000000_init",
-            "CREATE TABLE \"post\" (\"id\" TEXT NOT NULL PRIMARY KEY);",
-        );
-        let result = scan_migration_churn(dir.path(), &[]);
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn churn_migration_folder_without_sql_skipped_without_error() {
-        let dir = TempDir::new("zzop-mig-churn");
-        dir.write(
-            "src/domains/post/prisma/migrations/20240101000000_init/.gitkeep",
-            "",
-        );
-        let models = vec![churn_model("Post", Some("post"))];
-        let result = scan_migration_churn(dir.path(), &models);
-        assert_eq!(result.len(), 0);
-    }
-
-    #[test]
-    fn churn_create_table_if_not_exists_also_counted() {
-        let dir = TempDir::new("zzop-mig-churn");
-        write_migration(
-            &dir,
-            "post",
-            "20240101000000_init",
-            "CREATE TABLE IF NOT EXISTS post (\"id\" TEXT NOT NULL PRIMARY KEY);",
-        );
-        let models = vec![churn_model("Post", Some("post"))];
-        let result = scan_migration_churn(dir.path(), &models);
-        assert_eq!(result.get("Post").copied(), Some(1));
-    }
-
     // --- crossCheckSchema ---
 
     fn field(name: &str) -> SchemaField {
@@ -585,20 +320,58 @@ mod tests {
         }
     }
 
-    fn usage(bound: &[&str], identifiers: &[(&str, u32)]) -> SchemaUsage {
+    fn usage(identifiers: &[(&str, u32)]) -> SchemaUsage {
         SchemaUsage {
-            bound_models: bound.iter().map(|s| s.to_string()).collect(),
             identifier_counts: identifiers
                 .iter()
                 .map(|(k, v)| (k.to_string(), *v))
                 .collect(),
-            model_churn: None,
         }
+    }
+
+    /// An `AttributeStore` asserting a truthy `BOUND_MODEL_ATTR` on each name-only model `Symbol` —
+    /// the injection replacement for the removed `SchemaUsage.bound_models` set.
+    fn bound_attrs(names: &[&str]) -> AttributeStore {
+        AttributeStore::from_attrs(
+            names
+                .iter()
+                .map(|n| Attribute {
+                    target: EntityRef::Symbol {
+                        name: n.to_string(),
+                        file: None,
+                    },
+                    key: BOUND_MODEL_ATTR.to_string(),
+                    value: serde_json::json!(true),
+                })
+                .collect(),
+        )
+    }
+
+    /// An `AttributeStore` carrying `MODEL_CHURN_ATTR` counts per name-only model `Symbol` — the
+    /// injection replacement for the removed `SchemaUsage.model_churn` map.
+    fn churn_attrs(pairs: &[(&str, u32)]) -> AttributeStore {
+        AttributeStore::from_attrs(
+            pairs
+                .iter()
+                .map(|(n, count)| Attribute {
+                    target: EntityRef::Symbol {
+                        name: n.to_string(),
+                        file: None,
+                    },
+                    key: MODEL_CHURN_ATTR.to_string(),
+                    value: serde_json::json!(count),
+                })
+                .collect(),
+        )
     }
 
     #[test]
     fn cross_check_dead_model_no_store_binding_reported() {
-        let issues = cross_check_schema(&[model("Orphan", &["id", "payload"])], &usage(&[], &[]));
+        let issues = cross_check_schema(
+            &[model("Orphan", &["id", "payload"])],
+            &usage(&[]),
+            &AttributeStore::default(),
+        );
         assert!(issues
             .iter()
             .any(|i| i.rule == "dead-model" && i.model == "Orphan"));
@@ -608,7 +381,8 @@ mod tests {
     fn cross_check_dead_model_bound_model_not_reported() {
         let issues = cross_check_schema(
             &[model("User", &["id", "nickname"])],
-            &usage(&["User"], &[("nickname", 5)]),
+            &usage(&[("nickname", 5)]),
+            &bound_attrs(&["User"]),
         );
         assert!(!issues.iter().any(|i| i.rule == "dead-model"));
     }
@@ -617,7 +391,8 @@ mod tests {
     fn cross_check_dead_field_zero_occurrences_reported() {
         let issues = cross_check_schema(
             &[model("User", &["id", "nickname", "ghostField"])],
-            &usage(&["User"], &[("nickname", 3)]),
+            &usage(&[("nickname", 3)]),
+            &bound_attrs(&["User"]),
         );
         assert!(issues
             .iter()
@@ -631,7 +406,8 @@ mod tests {
     fn cross_check_dead_field_excludes_id_created_updated_at() {
         let issues = cross_check_schema(
             &[model("X", &["id", "createdAt", "updatedAt", "name"])],
-            &usage(&["X"], &[]),
+            &usage(&[]),
+            &bound_attrs(&["X"]),
         );
         let dead_fields: Vec<&str> = issues
             .iter()
@@ -643,7 +419,11 @@ mod tests {
 
     #[test]
     fn cross_check_dead_field_excludes_short_names() {
-        let issues = cross_check_schema(&[model("Y", &["id", "ab", "name"])], &usage(&["Y"], &[]));
+        let issues = cross_check_schema(
+            &[model("Y", &["id", "ab", "name"])],
+            &usage(&[]),
+            &bound_attrs(&["Y"]),
+        );
         assert!(!issues
             .iter()
             .any(|i| i.rule == "dead-field" && i.field.as_deref() == Some("ab")));
@@ -651,33 +431,32 @@ mod tests {
 
     #[test]
     fn cross_check_dead_field_not_reported_when_parent_is_dead_model() {
-        let issues =
-            cross_check_schema(&[model("Q", &["id", "name", "payload"])], &usage(&[], &[]));
+        let issues = cross_check_schema(
+            &[model("Q", &["id", "name", "payload"])],
+            &usage(&[]),
+            &AttributeStore::default(),
+        );
         assert_eq!(issues.iter().filter(|i| i.rule == "dead-field").count(), 0);
     }
 
     // --- applyChurnRule ---
 
-    fn churn_map(pairs: &[(&str, u32)]) -> HashMap<String, u32> {
-        pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect()
-    }
-
     #[test]
     fn churn_rule_at_least_5_is_warning() {
-        let issues = apply_churn_rule(&[model("User", &["id"])], &churn_map(&[("User", 5)]));
+        let issues = apply_churn_rule(&[model("User", &["id"])], &churn_attrs(&[("User", 5)]));
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].severity, Severity::Warning);
     }
 
     #[test]
     fn churn_rule_at_least_10_is_critical() {
-        let issues = apply_churn_rule(&[model("User", &["id"])], &churn_map(&[("User", 12)]));
+        let issues = apply_churn_rule(&[model("User", &["id"])], &churn_attrs(&[("User", 12)]));
         assert_eq!(issues[0].severity, Severity::Critical);
     }
 
     #[test]
     fn churn_rule_at_most_4_no_hit() {
-        let issues = apply_churn_rule(&[model("User", &["id"])], &churn_map(&[("User", 4)]));
+        let issues = apply_churn_rule(&[model("User", &["id"])], &churn_attrs(&[("User", 4)]));
         assert_eq!(issues.len(), 0);
     }
 
@@ -685,7 +464,7 @@ mod tests {
     fn churn_rule_model_absent_from_churn_treated_as_zero() {
         let issues = apply_churn_rule(
             &[model("User", &["id"]), model("Item", &["id"])],
-            &churn_map(&[("User", 6)]),
+            &churn_attrs(&[("User", 6)]),
         );
         assert_eq!(
             issues.iter().map(|i| i.model.as_str()).collect::<Vec<_>>(),
@@ -695,7 +474,7 @@ mod tests {
 
     #[test]
     fn churn_rule_empty_churn_map_no_issues() {
-        let issues = apply_churn_rule(&[model("User", &["id"])], &HashMap::new());
+        let issues = apply_churn_rule(&[model("User", &["id"])], &AttributeStore::default());
         assert_eq!(issues.len(), 0);
     }
 
@@ -728,8 +507,11 @@ mod tests {
 
     #[test]
     fn analyze_with_usage_structural_only_model_risk_matches_summed_points() {
-        let analysis =
-            analyze_schema_with_usage(vec![risk_model("P", &["id", "userId", "content"])], None);
+        let analysis = analyze_schema_with_usage(
+            vec![risk_model("P", &["id", "userId", "content"])],
+            None,
+            &AttributeStore::default(),
+        );
         assert!(analysis.model_risk["P"] > 0);
         let expected: i64 = analysis
             .issues
@@ -742,7 +524,11 @@ mod tests {
 
     #[test]
     fn analyze_with_usage_every_model_gets_model_risk_entry_even_zero_issues() {
-        let analysis = analyze_schema_with_usage(vec![risk_model("Lookup", &["id", "code"])], None);
+        let analysis = analyze_schema_with_usage(
+            vec![risk_model("Lookup", &["id", "code"])],
+            None,
+            &AttributeStore::default(),
+        );
         assert_eq!(analysis.model_risk["Lookup"], 0);
     }
 
@@ -750,11 +536,8 @@ mod tests {
     fn analyze_with_usage_signals_add_dead_model_field_and_churn_issues() {
         let analysis = analyze_schema_with_usage(
             vec![risk_model("Ghost", &["id", "secretField"])],
-            Some(SchemaUsage {
-                bound_models: HashSet::new(),
-                identifier_counts: HashMap::new(),
-                model_churn: Some(churn_map(&[("Ghost", 12)])),
-            }),
+            Some(SchemaUsage::default()),
+            &churn_attrs(&[("Ghost", 12)]),
         );
         // Ghost is unbound -> dead-model; churn 12 -> schema-churn critical. dead-field is skipped under dead-model.
         assert!(analysis.issues.iter().any(|i| i.rule == "dead-model"));
@@ -766,8 +549,11 @@ mod tests {
 
     #[test]
     fn analyze_with_usage_no_usage_runs_only_structural_rules() {
-        let analysis =
-            analyze_schema_with_usage(vec![risk_model("Orphan", &["id", "payload"])], None);
+        let analysis = analyze_schema_with_usage(
+            vec![risk_model("Orphan", &["id", "payload"])],
+            None,
+            &AttributeStore::default(),
+        );
         assert!(!analysis.issues.iter().any(|i| i.rule == "dead-model"));
     }
 }

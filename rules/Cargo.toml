@@ -46,10 +46,6 @@ name = "pack_http"
 path = "dsl/http/http.rs"
 
 [[test]]
-name = "pack_java_security"
-path = "dsl/java-security/java-security.rs"
-
-[[test]]
 name = "pack_perf"
 path = "dsl/perf/perf.rs"
 

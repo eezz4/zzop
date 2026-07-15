@@ -55,7 +55,7 @@ impl Drop for TempDir {
 
 /// Every real shipped pack under `rules/dsl/` — resolved from `CARGO_MANIFEST_DIR`
 /// (`packages/engine` -> up two -> repo root -> `rules/dsl`), same resolution shape
-/// `zzop_engine`'s own `lib.rs` test module (`java_security_pack`) and `analyze_cache.rs`'s
+/// `zzop_engine`'s own `lib.rs` test module (`be_security_java_pack`) and `analyze_cache.rs`'s
 /// `typescript_pack` already use.
 fn all_shipped_packs() -> Vec<RulePackDef> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/dsl");

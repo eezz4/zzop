@@ -323,7 +323,7 @@
       }
     },
     {
-      "id": "java-hardcoded-password",
+      "id": "hardcoded-password",
       "severity": "warning",
       "message": "A password-shaped literal is hardcoded — a direct assignment (`password = \"...\"`) or a JDBC `getConnection(url, user, password)` call with literal credentials — exposed to every reader of the repo and impossible to rotate without a code change. Read it from an environment variable, an excluded properties file, or a secrets manager — but that only stops the NEXT leak: this password is already exposed via git history and any forks/clones that pulled it, so rotate/revoke the actual credential too. Suppress a vetted case with `// java-pwd-ok`.",
       "suppress_marker": "java-pwd-ok",
@@ -380,6 +380,7 @@
     },
     {
       "id": "java-path-traversal",
+      "_note": "Rule id intentionally keeps its `java-` prefix: dropping it to `path-traversal` would collide with this pack's existing JS `path-traversal` rule (the Java `new File(...)` + `request.getParameter(...)` shape is distinct from the JS fs+path.join shape). The prefix earns its keep as a disambiguator.",
       "severity": "warning",
       "message": "`new File(...)` is constructed in a function that also reads `request.getParameter(...)` — an unvalidated parameter flowing into the path lets an attacker escape the intended directory and read/write files outside it. Reject `..` segments, or resolve and compare against the base directory before use. Suppress a vetted case with `// java-traversal-ok`.",
       "suppress_marker": "java-traversal-ok",
@@ -397,7 +398,7 @@
       }
     },
     {
-      "id": "java-weak-random",
+      "id": "weak-random",
       "severity": "warning",
       "message": "`new Random()` is used on the same line as a token/session/otp/nonce-shaped identifier — `java.util.Random` is a predictable PRNG, not cryptographically secure, so a value generated this way can be predicted or brute-forced. Use `java.security.SecureRandom` instead. Suppress a vetted case with `// java-random-ok`.",
       "suppress_marker": "java-random-ok",
@@ -668,6 +669,60 @@
           { "pattern": "(?i)content-security-policy['\"]?\\s*[:,].*unsafe-inline", "label": "csp-unsafe-inline" },
           { "pattern": "(?i)default-src[^'\"]*\\*", "label": "csp-wildcard" }
         ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "sql-taint",
+      "severity": "warning",
+      "message": "A SQL string is built by concatenating an expression into the statement text — if the concatenated part is request-derived, this is SQL injection (the input rewrites the query); even a constant fragment hides that risk from review. Use a parameterized/bound query instead (PreparedStatement `?`, JPA `:named` + setParameter) — never escape values into the string. Suppress a vetted case with `// sql-taint-ok`.",
+      "suppress_marker": "sql-taint-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(java|jsp|jspx|tag)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "(?i)\\b(?:SELECT|INSERT|UPDATE|DELETE|MERGE)\\b",
+        "skip_comment_lines": true,
+        "line_pattern": "(?i)(?:\"[^\"]*(?:SELECT[^\"]*\\bFROM\\b|DELETE\\s+FROM\\b|INSERT\\s+INTO\\b|MERGE\\s+INTO\\b)[^\"]*\"|\"\\s*UPDATE\\b[^\"]*\")\\s*\\+\\s*[A-Za-z_$]",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "weak-crypto",
+      "severity": "warning",
+      "message": "Weak/deprecated cryptography in use — MD5 and SHA-1 have practical collision attacks (forgeable signatures/certificates), DES/RC4 are brute-forceable or biased, and ECB mode leaks plaintext structure across blocks. Use SHA-256 or stronger for hashing and AES-GCM for encryption; for passwords specifically use bcrypt/PBKDF2/Argon2 (a fast hash is the wrong tool even at SHA-256). Suppress a vetted non-security use (e.g. a legacy-interop checksum) with `// weak-crypto-ok`.",
+      "suppress_marker": "weak-crypto-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(java|jsp|jspx|tag)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "\\b(?:MessageDigest|DigestUtils|Cipher)\\b",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "(?i)\\bMessageDigest\\.getInstance\\(\\s*\"(?:MD5|MD2|SHA-?1)\"", "label": "weak hash (MD5/SHA-1)" },
+          { "pattern": "(?i)\\bDigestUtils\\.(?:md5|md2|sha1)\\w*", "label": "weak hash (MD5/SHA-1)" },
+          { "pattern": "(?i)\\bCipher\\.getInstance\\(\\s*\"(?:DES|RC4|RC2)(?:[\"/])", "label": "weak cipher (DES/RC4/RC2)" },
+          { "pattern": "(?i)\\bCipher\\.getInstance\\(\\s*\"[^\"]*/ECB/", "label": "ECB mode (no diffusion)" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "cmd-injection",
+      "severity": "warning",
+      "message": "Method runs an external process (Runtime.exec / ProcessBuilder) and builds the command by string concatenation — command-injection risk. Pass arguments as an array element per token and validate/allow-list any user-controlled part. Suppress a vetted case with `// cmd-injection-ok`.",
+      "suppress_marker": "cmd-injection-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.java$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "\\b(?:exec|ProcessBuilder)\\b",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\b(?:exec|ProcessBuilder)\\b", "label": "exec" },
+          { "pattern": "\"[^\"]*\"\\s*\\+\\s*[A-Za-z_$]", "label": "concat" }
+        ],
+        "trigger": "concat",
         "snippet_max": 160
       }
     }

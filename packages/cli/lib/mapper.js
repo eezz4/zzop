@@ -580,6 +580,16 @@ function configToRequest(config) {
   // --- determine tree layout: explicit trees, or roots (default ["."]). ---
   let trees;
   if (config.trees !== undefined) {
+    // The `trees: "auto"` shorthand must be expanded to a concrete array BEFORE reaching this pure mapper
+    // (the CLI calls `expandAutoTrees` in bin/zzop.js). If the string leaks through here — e.g. an
+    // embedder calling `configToRequest` directly — fail with an actionable message rather than the
+    // generic "must be a non-empty array" below.
+    if (config.trees === 'auto') {
+      throw new ConfigError(
+        'trees: "auto" must be expanded before configToRequest — call expandAutoTrees(config, cwd) first ' +
+          '(the zzop CLI does this automatically).'
+      );
+    }
     if (!Array.isArray(config.trees) || config.trees.length === 0) {
       throw new ConfigError('trees, when present, must be a non-empty array of { root, sourceId }.');
     }

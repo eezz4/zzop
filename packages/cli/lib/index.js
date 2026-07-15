@@ -4,6 +4,7 @@
 // be imported and unit-tested (and reused by embedders) without going through the CLI entry point.
 
 const { configToRequest, normalizeSeverity, severityRank, ConfigError } = require('./mapper');
+const { expandAutoTrees } = require('./workspaces');
 const { loadConfig, DEFAULT_CONFIG_FILENAME } = require('./config');
 const { stripJsonComments } = require('./jsonc');
 const {
@@ -16,6 +17,7 @@ const { CONFIG_TEMPLATE } = require('./init');
 
 module.exports = {
   configToRequest,
+  expandAutoTrees,
   normalizeSeverity,
   severityRank,
   ConfigError,

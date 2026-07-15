@@ -12,20 +12,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use zzop_core::io::TaggedConsume;
 use zzop_core::{disable_hint, Finding, Severity};
 
-// Shared with `sdk_import_no_visible_consume`, which fires only BELOW this floor — the two rules
-// partition the blind-spot space and never co-fire on one tree (see mod.rs).
-use super::MIN_TOTAL_CONSUMES;
-
-/// Majority threshold, integer math only (no floats — output must be byte-stable across platforms):
-/// `unresolved * 2 >= total` is equivalent to `unresolved / total >= 0.5` without any floating-point division.
-fn is_majority_unresolved(unresolved: usize, total: usize) -> bool {
-    unresolved * 2 >= total
-}
+// The majority-unresolved predicate and its `MIN_TOTAL_CONSUMES` floor now live in mod.rs as
+// `majority_unresolved_http_sources`/`is_majority_unresolved` — shared with the `unconsumed-*` rules'
+// blindness gate, so this rule's own qualifying-source computation is delegated there rather than
+// duplicated, and the two can never silently drift apart on what "majority-unresolved" means.
+use super::majority_unresolved_http_sources;
 
 pub fn unresolved_consume_ratio_findings(
     unresolved_consumes: &[TaggedConsume],
     http_consume_totals: &[(String, usize)],
 ) -> Vec<Finding> {
+    let blind_sources = majority_unresolved_http_sources(unresolved_consumes, http_consume_totals);
+
     let mut by_source: BTreeMap<&str, Vec<&TaggedConsume>> = BTreeMap::new();
     for c in unresolved_consumes {
         if c.consume.kind == "http" {
@@ -39,16 +37,13 @@ pub fn unresolved_consume_ratio_findings(
     let mut out = Vec::new();
     for (source, total) in totals {
         let total = *total;
-        if total < MIN_TOTAL_CONSUMES {
+        if !blind_sources.contains(source) {
             continue;
         }
         let Some(source_unresolved) = by_source.get(source.as_str()) else {
             continue;
         };
         let unresolved_count = source_unresolved.len();
-        if !is_majority_unresolved(unresolved_count, total) {
-            continue;
-        }
 
         let mut sorted: Vec<&TaggedConsume> = source_unresolved.clone();
         sorted.sort_by(|a, b| {

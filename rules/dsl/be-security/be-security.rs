@@ -1,4 +1,4 @@
-//! End-to-end tests for `rules/dsl/be-security/be-security.json` (38 backend-security rules), exercised via
+//! End-to-end tests for `rules/dsl/be-security/be-security.json` (41 backend-security rules), exercised via
 //! `zzop_engine::analyze_tree` so `Matcher::MethodScan` rules run against real parser-derived
 //! `SourceSymbol` body spans (TypeScript via swc), not hand-built spans. Each rule below has at least
 //! one positive fixture (asserting finding count AND line number) and one realistic negative
@@ -1239,7 +1239,7 @@ fn non_token_value_written_to_local_storage_is_not_flagged() {
     );
 }
 
-// --- java-hardcoded-password (Java) ---
+// --- hardcoded-password (Java) ---
 
 #[test]
 fn direct_password_field_assignment_is_flagged() {
@@ -1249,7 +1249,7 @@ fn direct_password_field_assignment_is_flagged() {
         "public class Config {\n    public String password = \"sup3rSecretPwd\";\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "java-hardcoded-password");
+    let h = hits(&out, "hardcoded-password");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 2);
 }
@@ -1263,7 +1263,7 @@ fn jdbc_get_connection_with_literal_credentials_is_flagged() {
     );
     let out = scan(&dir);
     assert_eq!(
-        hits(&out, "java-hardcoded-password").len(),
+        hits(&out, "hardcoded-password").len(),
         1,
         "{:?}",
         out.findings
@@ -1279,7 +1279,7 @@ fn password_read_from_env_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "java-hardcoded-password").is_empty(),
+        hits(&out, "hardcoded-password").is_empty(),
         "{:?}",
         out.findings
     );
@@ -1294,7 +1294,7 @@ fn java_pwd_ok_marker_above_the_line_suppresses_the_finding() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "java-hardcoded-password").is_empty(),
+        hits(&out, "hardcoded-password").is_empty(),
         "{:?}",
         out.findings
     );
@@ -1439,7 +1439,7 @@ fn new_file_with_a_fixed_path_and_no_request_parameter_is_not_flagged() {
     );
 }
 
-// --- java-weak-random (Java) ---
+// --- weak-random (Java) ---
 
 #[test]
 fn new_random_with_token_keyword_before_it_on_the_line_is_flagged() {
@@ -1449,7 +1449,7 @@ fn new_random_with_token_keyword_before_it_on_the_line_is_flagged() {
         "public class TokenGenerator {\n    public String makeToken() {\n        String token = String.valueOf(new Random().nextLong());\n        return token;\n    }\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "java-weak-random");
+    let h = hits(&out, "weak-random");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 3);
 }
@@ -1462,12 +1462,7 @@ fn new_random_with_session_keyword_after_it_on_the_line_is_flagged() {
         "public class SessionUtil {\n    public String makeSessionId() {\n        return new Random().nextLong() + \"-session\";\n    }\n}\n",
     );
     let out = scan(&dir);
-    assert_eq!(
-        hits(&out, "java-weak-random").len(),
-        1,
-        "{:?}",
-        out.findings
-    );
+    assert_eq!(hits(&out, "weak-random").len(), 1, "{:?}", out.findings);
 }
 
 #[test]
@@ -1478,11 +1473,7 @@ fn new_random_with_no_security_keyword_on_the_line_is_not_flagged() {
         "public class DiceRoller {\n    public int roll() {\n        return new Random().nextInt(6) + 1;\n    }\n}\n",
     );
     let out = scan(&dir);
-    assert!(
-        hits(&out, "java-weak-random").is_empty(),
-        "{:?}",
-        out.findings
-    );
+    assert!(hits(&out, "weak-random").is_empty(), "{:?}", out.findings);
 }
 
 // --- stacktrace-to-response (Java) ---
@@ -1823,7 +1814,7 @@ fn conn_cred_ok_marker_above_the_line_suppresses_the_finding() {
 // --- skip_comment_lines + test-path file_exclude_pattern ---
 // Without `skip_comment_lines`, a commented-out example of a matched shape (e.g. the `mass-assignment`
 // body-passthrough shape) would fire on `method-scan` rules. Deployed-surface rules in this pack
-// (everything except `hardcoded-secret`/`java-hardcoded-password`) exclude test-path files via the
+// (everything except `hardcoded-secret`/`hardcoded-password`) exclude test-path files via the
 // shared `file_exclude_pattern`.
 
 #[test]
@@ -1858,7 +1849,7 @@ fn cookie_set_without_httponly_in_a_test_fixture_path_is_not_flagged() {
 
 #[test]
 fn hardcoded_secret_in_a_test_fixture_path_is_still_flagged() {
-    // `hardcoded-secret` (and `java-hardcoded-password`) are repo-content rules, not deployed-surface,
+    // `hardcoded-secret` (and `hardcoded-password`) are repo-content rules, not deployed-surface,
     // so unlike the rest of this pack they don't exclude test-fixture paths — a real secret committed
     // inside a test file is still a leaked credential the moment it's pushed.
     let dir = TempDir::new("zzop-be-sec");
@@ -3234,4 +3225,175 @@ fn csp_disabled_ok_marker_above_the_line_suppresses_the_finding() {
     );
     let out = scan(&dir);
     assert!(hits(&out, "csp-disabled").is_empty(), "{:?}", out.findings);
+}
+
+// --- cmd-injection (Java, moved here from the dissolved java-security pack) ---
+
+#[test]
+fn method_that_execs_and_concatenates_a_string_is_flagged_the_dvja_pingaction_pattern() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "PingAction.java",
+        "public class C {\n  private void run() {\n    String[] cmd = { \"/bin/bash\", \"-c\", \"ping \" + getAddress() };\n    Runtime.getRuntime().exec(cmd);\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    let found = hits(&out, "cmd-injection");
+    assert_eq!(found.len(), 1, "{:?}", out.findings);
+    assert_eq!(
+        found[0]
+            .data
+            .as_ref()
+            .and_then(|d| d.get("method"))
+            .and_then(|m| m.as_str()),
+        Some("run")
+    );
+    let snippet = found[0]
+        .data
+        .as_ref()
+        .and_then(|d| d.get("snippet"))
+        .and_then(|s| s.as_str())
+        .unwrap_or_default();
+    assert!(snippet.contains("ping"), "{snippet}");
+}
+
+#[test]
+fn exec_with_a_constant_command_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "Const.java",
+        "public class C { void r(){ Runtime.getRuntime().exec(\"ls -la\"); } }",
+    );
+    let out = scan(&dir);
+    assert!(hits(&out, "cmd-injection").is_empty(), "{:?}", out.findings);
+}
+
+#[test]
+fn string_concatenation_in_a_method_that_never_execs_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "NoExec.java",
+        "public class C { String g(String n){ return \"hello \" + n; } }",
+    );
+    let out = scan(&dir);
+    assert!(hits(&out, "cmd-injection").is_empty(), "{:?}", out.findings);
+}
+
+#[test]
+fn exec_in_one_method_and_concat_in_a_sibling_method_is_not_flagged_method_scoped() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "Sibling.java",
+        "public class C {\n  void a() { Runtime.getRuntime().exec(\"safe\"); }\n  String b(String x) { return \"msg \" + x; }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(hits(&out, "cmd-injection").is_empty(), "{:?}", out.findings);
+}
+
+#[test]
+fn process_builder_plus_concatenation_is_flagged() {
+    // Deliberately multi-line: a single-line class+method body would give both spans identical line
+    // numbers, and "innermost span wins" dedup only drops a STRICTLY wider span, so both would double-count.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "Pb.java",
+        "class C {\n  void r(String h) {\n    new ProcessBuilder(\"sh\", \"-c\", \"curl \" + h).start();\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(hits(&out, "cmd-injection").len(), 1, "{:?}", out.findings);
+}
+
+// --- sql-taint / weak-crypto (Java line-scan rules, moved here from the dissolved java-security pack) ---
+
+#[test]
+fn sql_taint_still_fires_on_string_concatenated_query() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "C.java",
+        "public class C {\n  void run(String login) {\n    Query q = em.createQuery(\"SELECT u FROM User u WHERE u.login = '\" + login + \"'\");\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(hits(&out, "sql-taint").len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn sql_taint_fires_on_an_update_whose_set_clause_is_a_separate_concatenated_literal() {
+    // Covers `"UPDATE " + tableName + " SET col = 1"`, where `SET` is a separate trailing literal — a
+    // pattern requiring both keywords in ONE literal would miss every UPDATE built this way.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "C.java",
+        "public class C {\n  void run(String tableName) {\n    String q = \"UPDATE \" + tableName + \" SET col = 1\";\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(hits(&out, "sql-taint").len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn prose_strings_containing_the_word_update_are_not_sql_taint() {
+    // A bare `UPDATE\b` anywhere in a literal would make logging/exception prose fire; the verb must OPEN
+    // the SQL string (`"UPDATE " + table`), so none of these shapes may match.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "P.java",
+        "public class P {\n  void run(String entityName, String version, String date, String field) {\n    String a = \"Failed to update \" + entityName;\n    String b = \"Checking for update \" + version;\n    String c = \"Last update: \" + date;\n    String d = \"Please update your \" + field + \" now\";\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(hits(&out, "sql-taint").len(), 0, "{:?}", out.findings);
+}
+
+#[test]
+fn weak_crypto_still_fires_on_md5_and_des() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "D.java",
+        "MessageDigest md = MessageDigest.getInstance(\"MD5\");\nCipher.getInstance(\"DES/CBC/PKCS5Padding\");\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(hits(&out, "weak-crypto").len(), 2, "{:?}", out.findings);
+}
+
+// --- suppress_marker coverage for the moved Java rules ---
+
+#[test]
+fn sql_taint_ok_marker_on_the_same_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "C.java",
+        "public class C {\n  void run(String login) {\n    Query q = em.createQuery(\"SELECT u FROM User u WHERE u.login = '\" + login + \"'\"); // sql-taint-ok: login is server-generated, never user input\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(hits(&out, "sql-taint").is_empty(), "{:?}", out.findings);
+}
+
+#[test]
+fn weak_crypto_ok_marker_on_the_same_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "D.java",
+        "MessageDigest md = MessageDigest.getInstance(\"MD5\"); // weak-crypto-ok: non-security checksum only\n",
+    );
+    let out = scan(&dir);
+    assert!(hits(&out, "weak-crypto").is_empty(), "{:?}", out.findings);
+}
+
+#[test]
+fn cmd_injection_ok_marker_directly_above_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "PingAction.java",
+        "public class C {\n  private void run() {\n    // cmd-injection-ok: getAddress() is validated against an allow-list above\n    String[] cmd = { \"/bin/bash\", \"-c\", \"ping \" + getAddress() };\n    Runtime.getRuntime().exec(cmd);\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(hits(&out, "cmd-injection").is_empty(), "{:?}", out.findings);
+}
+
+#[test]
+fn sql_taint_inside_a_test_fixture_path_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "src/test/java/com/example/CTest.java",
+        "public class C {\n  void run(String login) {\n    Query q = em.createQuery(\"SELECT u FROM User u WHERE u.login = '\" + login + \"'\");\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(hits(&out, "sql-taint").is_empty(), "{:?}", out.findings);
 }

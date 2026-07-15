@@ -2,8 +2,8 @@
 //! claims to mirror field-for-field (`packages/core/src/normalized.rs`'s `NormalizedEnvelope`/
 //! `FileProjection`, and everything reachable from them: `SourceSymbol`/`WriteSite`,
 //! `ImportBinding`/`ReExport`, `IoFacts`/`IoProvide`/`IoConsume`/`ProvideBodyShape`/
-//! `ProvideBodyField`/`ConsumeBodyShape`, `ClassShapeFragment`, `TrpcRouterFragment`/
-//! `TrpcRouterEntry`, `RouterMountFragment`/`RouterMountEntry`).
+//! `ProvideBodyField`/`ConsumeBodyShape`, `ClassShapeFragment`, `ProcedureRouterFragment`/
+//! `ProcedureRouterEntry`, `RouterMountFragment`/`RouterMountEntry`).
 //!
 //! ## Method
 //! Build ONE fully-populated `NormalizedEnvelope` sample — every `Option` is `Some`, every
@@ -45,8 +45,8 @@
 //!     file's test-batch report for the fix.
 //!   - ENUM VALUE SETS: `sourceSymbol.kind` (`SourceSymbolKind`) and `writeSite.kind`
 //!     (`Option<NonIdempotentKind>`) are the only schema `enum` properties backed by a real Rust enum
-//!     type (swept: `trpcRouterEntry.Leaf.verb` also has a schema `enum`, but
-//!     `TrpcRouterEntry::Leaf::verb` is a plain `String` field in Rust, not an enum — nothing to seal
+//!     type (swept: `procedureRouterEntry.Leaf.verb` also has a schema `enum`, but
+//!     `ProcedureRouterEntry::Leaf::verb` is a plain `String` field in Rust, not an enum — nothing to seal
 //!     there). Checked bidirectionally: every schema enum value must deserialize into the Rust enum,
 //!     and every Rust variant (enumerated via an EXHAUSTIVE match with no wildcard arm — a new variant
 //!     then breaks compilation, forcing this file to be updated) must serialize into a value the schema
@@ -70,9 +70,9 @@ use serde_json::Value;
 
 use zzop_core::{
     ClassShapeFragment, ConsumeBodyShape, FileProjection, ImportBinding, IoConsume, IoFacts,
-    IoProvide, NonIdempotentKind, NormalizedEnvelope, ProvideBodyField, ProvideBodyShape, ReExport,
-    RouterMountEntry, RouterMountFragment, SourceSymbol, SourceSymbolKind, TrpcRouterEntry,
-    TrpcRouterFragment, WriteSite, NORMALIZED_AST_FORMAT,
+    IoProvide, NonIdempotentKind, NormalizedEnvelope, ProcedureRouterEntry,
+    ProcedureRouterFragment, ProvideBodyField, ProvideBodyShape, ReExport, RouterMountEntry,
+    RouterMountFragment, SourceSymbol, SourceSymbolKind, WriteSite, NORMALIZED_AST_FORMAT,
 };
 
 /// Schema properties that are DELIBERATELY alias-only (never produced by any serialization) — see
@@ -167,7 +167,7 @@ fn assert_parity(
     );
 }
 
-/// Bidirectional check for one instance of an externally-tagged Rust enum (`TrpcRouterEntry`,
+/// Bidirectional check for one instance of an externally-tagged Rust enum (`ProcedureRouterEntry`,
 /// `RouterMountEntry`): a produced instance is `{ "<Variant>": { ...fields... } }` — exactly one
 /// key. Checked per-call in the FORWARD direction only (the tag must be a known schema variant);
 /// the REVERSE direction (every schema variant gets exercised by at least one sample) is checked
@@ -350,7 +350,7 @@ fn assert_required_and_nullable_parity<T>(
 }
 
 /// Same as [`assert_required_and_nullable_parity`], but for one variant of an externally-tagged enum
-/// (`TrpcRouterEntry`/`RouterMountEntry`): `sample` serializes as `{ "<tag>": { ...inner... } }`, and
+/// (`ProcedureRouterEntry`/`RouterMountEntry`): `sample` serializes as `{ "<tag>": { ...inner... } }`, and
 /// probing removes/nulls keys inside `inner` while re-wrapping in the tag on each attempt.
 fn assert_variant_required_and_nullable_parity<T>(
     pointer: &str,
@@ -605,31 +605,31 @@ fn sample_class_shape_fragment() -> ClassShapeFragment {
     }
 }
 
-fn sample_trpc_leaf() -> TrpcRouterEntry {
-    TrpcRouterEntry::Leaf {
+fn sample_trpc_leaf() -> ProcedureRouterEntry {
+    ProcedureRouterEntry::Leaf {
         key: "get".to_string(),
         verb: "QUERY".to_string(),
         line: 3,
     }
 }
 
-fn sample_trpc_ref() -> TrpcRouterEntry {
-    TrpcRouterEntry::Ref {
+fn sample_trpc_ref() -> ProcedureRouterEntry {
+    ProcedureRouterEntry::Ref {
         key: "sub".to_string(),
         ident: "subRouter".to_string(),
         specifier: Some("./sub".to_string()),
     }
 }
 
-fn sample_trpc_nested() -> TrpcRouterEntry {
-    TrpcRouterEntry::Nested {
+fn sample_trpc_nested() -> ProcedureRouterEntry {
+    ProcedureRouterEntry::Nested {
         key: "nested".to_string(),
         entries: vec![sample_trpc_leaf()],
     }
 }
 
-fn sample_trpc_fragment() -> TrpcRouterFragment {
-    TrpcRouterFragment {
+fn sample_trpc_fragment() -> ProcedureRouterFragment {
+    ProcedureRouterFragment {
         name: "appRouter".to_string(),
         entries: vec![sample_trpc_leaf(), sample_trpc_ref(), sample_trpc_nested()],
     }
@@ -677,7 +677,7 @@ fn sample_file_projection() -> FileProjection {
         dynamic_imports: vec!["./lazy".to_string()],
         used_names: vec!["createUser".to_string()],
         const_map_fragment,
-        trpc_router_fragments: vec![sample_trpc_fragment()],
+        procedure_router_fragments: vec![sample_trpc_fragment()],
         router_mount_fragments: vec![sample_router_mount_fragment()],
         class_shape_fragments: vec![sample_class_shape_fragment()],
         io: IoFacts {
@@ -687,6 +687,7 @@ fn sample_file_projection() -> FileProjection {
         loop_spans: vec![(10, 20)],
         degraded: true,
         is_entry: true,
+        attributes: Vec::new(),
     }
 }
 
@@ -721,10 +722,12 @@ fn schema_definitions_cover_exactly_the_expected_type_set() {
         "provideBodyShape",
         "consumeBodyShape",
         "classShapeFragment",
-        "trpcRouterFragment",
-        "trpcRouterEntry",
+        "procedureRouterFragment",
+        "procedureRouterEntry",
         "routerMountFragment",
         "routerMountEntry",
+        "attribute",
+        "entityRef",
     ]
     .into_iter()
     .collect();
@@ -903,32 +906,32 @@ fn envelope_schema_matches_normalized_envelope_field_for_field() {
         props(def(&schema, "consumeBodyShape")),
     );
 
-    // $.files[0].trpc_router_fragments[0] -> definitions.trpcRouterFragment
+    // $.files[0].procedure_router_fragments[0] -> definitions.procedureRouterFragment
     let trpc_fragment0 = idx(
-        field(file0, "trpc_router_fragments", "$.files[0]"),
+        field(file0, "procedure_router_fragments", "$.files[0]"),
         0,
-        "$.files[0].trpc_router_fragments",
+        "$.files[0].procedure_router_fragments",
     );
     assert_parity(
-        "$.files[0].trpc_router_fragments[0]",
-        "trpcRouterFragment",
+        "$.files[0].procedure_router_fragments[0]",
+        "procedureRouterFragment",
         trpc_fragment0,
-        props(def(&schema, "trpcRouterFragment")),
+        props(def(&schema, "procedureRouterFragment")),
     );
-    // $.files[0].trpc_router_fragments[0].entries[*] -> definitions.trpcRouterEntry (externally
+    // $.files[0].procedure_router_fragments[0].entries[*] -> definitions.procedureRouterEntry (externally
     // tagged enum: Leaf/Ref/Nested). The fixture carries all three variants; Nested additionally
     // recurses into its own `entries[0]` (a Leaf) to exercise the recursive shape once.
     let trpc_entries = field(
         trpc_fragment0,
         "entries",
-        "$.files[0].trpc_router_fragments[0]",
+        "$.files[0].procedure_router_fragments[0]",
     )
     .as_array()
     .expect("entries must be an array");
-    let trpc_entry_def = def(&schema, "trpcRouterEntry");
+    let trpc_entry_def = def(&schema, "procedureRouterEntry");
     let mut trpc_tags_seen = Vec::new();
     for (i, entry) in trpc_entries.iter().enumerate() {
-        let pointer = format!("$.files[0].trpc_router_fragments[0].entries[{i}]");
+        let pointer = format!("$.files[0].procedure_router_fragments[0].entries[{i}]");
         let (tag, inner) = assert_variant_tag_known(&pointer, entry, trpc_entry_def);
         trpc_tags_seen.push(tag);
         let variant_props = props(
@@ -938,7 +941,7 @@ fn envelope_schema_matches_normalized_envelope_field_for_field() {
         );
         assert_parity(
             &format!("{pointer}.{tag}"),
-            &format!("trpcRouterEntry.{tag}"),
+            &format!("procedureRouterEntry.{tag}"),
             inner,
             variant_props,
         );
@@ -959,14 +962,14 @@ fn envelope_schema_matches_normalized_envelope_field_for_field() {
             );
             assert_parity(
                 &format!("{nested_pointer}.{nested_tag}"),
-                &format!("trpcRouterEntry.{nested_tag}"),
+                &format!("procedureRouterEntry.{nested_tag}"),
                 nested_inner,
                 nested_variant_props,
             );
         }
     }
     assert_all_variants_covered(
-        "$.files[0].trpc_router_fragments[0].entries[*]",
+        "$.files[0].procedure_router_fragments[0].entries[*]",
         trpc_entry_def,
         &trpc_tags_seen,
     );
@@ -1018,7 +1021,7 @@ fn envelope_schema_matches_normalized_envelope_field_for_field() {
 
 /// The required-ness + nullability parity guard — see the module doc's "Beyond key-NAME presence"
 /// section for method. One call per schema definition (16 total), plus the schema root, plus one call
-/// per externally-tagged enum VARIANT (`trpcRouterEntry`'s Leaf/Ref/Nested, `routerMountEntry`'s
+/// per externally-tagged enum VARIANT (`procedureRouterEntry`'s Leaf/Ref/Nested, `routerMountEntry`'s
 /// Verb/Mount — each variant has its own independent `required`/`properties`, so each needs its own
 /// probe).
 #[test]
@@ -1118,39 +1121,39 @@ fn envelope_schema_required_and_nullability_matches_rust_types() {
     );
 
     assert_required_and_nullable_parity(
-        "$.files[0].trpc_router_fragments[0]",
-        "trpcRouterFragment",
+        "$.files[0].procedure_router_fragments[0]",
+        "procedureRouterFragment",
         &sample_trpc_fragment(),
-        def(&schema, "trpcRouterFragment"),
+        def(&schema, "procedureRouterFragment"),
     );
 
-    let trpc_entry_def = def(&schema, "trpcRouterEntry");
+    let trpc_entry_def = def(&schema, "procedureRouterEntry");
     let trpc_variant_def = |tag: &str| {
         field(
             trpc_entry_def,
             "properties",
-            "$.definitions.trpcRouterEntry",
+            "$.definitions.procedureRouterEntry",
         )
         .get(tag)
-        .unwrap_or_else(|| panic!("definitions.trpcRouterEntry.properties.{tag} must exist"))
+        .unwrap_or_else(|| panic!("definitions.procedureRouterEntry.properties.{tag} must exist"))
     };
     assert_variant_required_and_nullable_parity(
-        "$.files[0].trpc_router_fragments[0].entries[Leaf]",
-        "trpcRouterEntry.Leaf",
+        "$.files[0].procedure_router_fragments[0].entries[Leaf]",
+        "procedureRouterEntry.Leaf",
         "Leaf",
         &sample_trpc_leaf(),
         trpc_variant_def("Leaf"),
     );
     assert_variant_required_and_nullable_parity(
-        "$.files[0].trpc_router_fragments[0].entries[Ref]",
-        "trpcRouterEntry.Ref",
+        "$.files[0].procedure_router_fragments[0].entries[Ref]",
+        "procedureRouterEntry.Ref",
         "Ref",
         &sample_trpc_ref(),
         trpc_variant_def("Ref"),
     );
     assert_variant_required_and_nullable_parity(
-        "$.files[0].trpc_router_fragments[0].entries[Nested]",
-        "trpcRouterEntry.Nested",
+        "$.files[0].procedure_router_fragments[0].entries[Nested]",
+        "procedureRouterEntry.Nested",
         "Nested",
         &sample_trpc_nested(),
         trpc_variant_def("Nested"),
@@ -1209,8 +1212,8 @@ fn source_symbol_kind_enum_matches_schema_bidirectionally() {
 /// `writeSite.kind`'s enum value set (excluding its `null` alternative, which the nullability check
 /// above already covers), bidirectionally sealed against `NonIdempotentKind`. Sweep note: this and
 /// `sourceSymbol.kind` are the only schema `enum` properties backed by a real Rust enum type —
-/// `trpcRouterEntry.Leaf.verb` also declares a schema `enum`
-/// (`["QUERY","MUTATION","SUBSCRIPTION"]`), but `TrpcRouterEntry::Leaf::verb` is a plain `String`
+/// `procedureRouterEntry.Leaf.verb` also declares a schema `enum`
+/// (`["QUERY","MUTATION","SUBSCRIPTION"]`), but `ProcedureRouterEntry::Leaf::verb` is a plain `String`
 /// field in Rust (`packages/core/src/fragments.rs`), not an enum, so there is no Rust variant set to
 /// seal it against; that schema `enum` is documentation-only today. No other schema property in this
 /// file declares `enum`.

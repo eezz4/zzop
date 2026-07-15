@@ -380,7 +380,7 @@ fn prepend_global_prefix(key: &str, prefix: &str) -> String {
 /// test with a hand-built resolver map.
 ///
 /// ## Resolution
-/// Fragments are indexed by `(rel, name)`. Each `TrpcRouterEntry::Ref` is resolved to a target fragment
+/// Fragments are indexed by `(rel, name)`. Each `ProcedureRouterEntry::Ref` is resolved to a target fragment
 /// key: `specifier: Some(s)` -> `resolve(s, rel)` gives the target file, then `(target_rel, ident)`;
 /// `specifier: None` -> same-file, `(rel, ident)`. A `Ref` whose specifier does not resolve, or whose
 /// resolved key names no known fragment, is skipped — honest absence, never fabricated.
@@ -398,12 +398,12 @@ fn prepend_global_prefix(key: &str, prefix: &str) -> String {
 /// Deduped on `(kind, key, file, line)` and sorted to match the ordering `assemble` applies to every
 /// other `IoProvide` before freezing `MinimalIr::io`.
 pub(crate) fn compose_trpc_provides(
-    fragments: Vec<(String, Vec<zzop_core::TrpcRouterFragment>)>,
+    fragments: Vec<(String, Vec<zzop_core::ProcedureRouterFragment>)>,
     resolve: impl Fn(&str, &str) -> Option<String>,
 ) -> Vec<IoProvide> {
-    use zzop_core::{TrpcRouterEntry, TrpcRouterFragment};
+    use zzop_core::{ProcedureRouterEntry, ProcedureRouterFragment};
 
-    let mut by_key: HashMap<(String, String), &TrpcRouterFragment> = HashMap::new();
+    let mut by_key: HashMap<(String, String), &ProcedureRouterFragment> = HashMap::new();
     for (rel, frags) in &fragments {
         for frag in frags {
             by_key.insert((rel.clone(), frag.name.clone()), frag);
@@ -432,7 +432,7 @@ pub(crate) fn compose_trpc_provides(
     let mut targeted: HashSet<(String, String)> = HashSet::new();
     let mut ref_named_idents: HashSet<String> = HashSet::new();
     fn collect_targeted(
-        entries: &[TrpcRouterEntry],
+        entries: &[ProcedureRouterEntry],
         origin_rel: &str,
         ref_target: &impl Fn(&str, &str, &Option<String>) -> Option<(String, String)>,
         targeted: &mut HashSet<(String, String)>,
@@ -440,7 +440,7 @@ pub(crate) fn compose_trpc_provides(
     ) {
         for entry in entries {
             match entry {
-                TrpcRouterEntry::Ref {
+                ProcedureRouterEntry::Ref {
                     ident, specifier, ..
                 } => {
                     ref_named_idents.insert(ident.clone());
@@ -448,10 +448,10 @@ pub(crate) fn compose_trpc_provides(
                         targeted.insert(key);
                     }
                 }
-                TrpcRouterEntry::Nested { entries, .. } => {
+                ProcedureRouterEntry::Nested { entries, .. } => {
                     collect_targeted(entries, origin_rel, ref_target, targeted, ref_named_idents);
                 }
-                TrpcRouterEntry::Leaf { .. } => {}
+                ProcedureRouterEntry::Leaf { .. } => {}
             }
         }
     }
@@ -476,17 +476,17 @@ pub(crate) fn compose_trpc_provides(
 
     #[allow(clippy::too_many_arguments)]
     fn compose_entries(
-        entries: &[TrpcRouterEntry],
+        entries: &[ProcedureRouterEntry],
         origin_rel: &str,
         path: &[String],
-        by_key: &HashMap<(String, String), &TrpcRouterFragment>,
+        by_key: &HashMap<(String, String), &ProcedureRouterFragment>,
         ref_target: &impl Fn(&str, &str, &Option<String>) -> Option<(String, String)>,
         ancestry: &mut Vec<(String, String)>,
         out: &mut Vec<IoProvide>,
     ) {
         for entry in entries {
             match entry {
-                TrpcRouterEntry::Leaf { key, verb, line } => {
+                ProcedureRouterEntry::Leaf { key, verb, line } => {
                     let full_path = if path.is_empty() {
                         key.clone()
                     } else {
@@ -501,7 +501,7 @@ pub(crate) fn compose_trpc_provides(
                         symbol: None,
                     });
                 }
-                TrpcRouterEntry::Nested {
+                ProcedureRouterEntry::Nested {
                     key,
                     entries: inner,
                 } => {
@@ -511,7 +511,7 @@ pub(crate) fn compose_trpc_provides(
                         inner, origin_rel, &new_path, by_key, ref_target, ancestry, out,
                     );
                 }
-                TrpcRouterEntry::Ref {
+                ProcedureRouterEntry::Ref {
                     key,
                     ident,
                     specifier,
@@ -1781,7 +1781,7 @@ mod trpc_compose_tests {
     //! (sibling entries survive), a self-referencing cycle guarded against infinite recursion, and
     //! determinism under input-order reshuffling.
     use super::*;
-    use zzop_core::{TrpcRouterEntry, TrpcRouterFragment};
+    use zzop_core::{ProcedureRouterEntry, ProcedureRouterFragment};
 
     /// A resolver that only ever answers the exact `(specifier, from_file)` pairs listed — anything else is
     /// `None`, mirroring how a real unresolvable/external specifier behaves.
@@ -1800,8 +1800,8 @@ mod trpc_compose_tests {
         |_, _| None
     }
 
-    fn frag(name: &str, entries: Vec<TrpcRouterEntry>) -> TrpcRouterFragment {
-        TrpcRouterFragment {
+    fn frag(name: &str, entries: Vec<ProcedureRouterEntry>) -> ProcedureRouterFragment {
+        ProcedureRouterFragment {
             name: name.to_string(),
             entries,
         }
@@ -1820,15 +1820,15 @@ mod trpc_compose_tests {
             vec![frag(
                 "appRouter",
                 vec![
-                    TrpcRouterEntry::Nested {
+                    ProcedureRouterEntry::Nested {
                         key: "greeting".into(),
-                        entries: vec![TrpcRouterEntry::Leaf {
+                        entries: vec![ProcedureRouterEntry::Leaf {
                             key: "hello".into(),
                             verb: "QUERY".into(),
                             line: 2,
                         }],
                     },
-                    TrpcRouterEntry::Leaf {
+                    ProcedureRouterEntry::Leaf {
                         key: "ping".into(),
                         verb: "QUERY".into(),
                         line: 5,
@@ -1853,7 +1853,7 @@ mod trpc_compose_tests {
                 "trpc.ts".to_string(),
                 vec![frag(
                     "appRouter",
-                    vec![TrpcRouterEntry::Ref {
+                    vec![ProcedureRouterEntry::Ref {
                         key: "viewer".into(),
                         ident: "viewerRouter".into(),
                         specifier: Some("./viewer".into()),
@@ -1864,7 +1864,7 @@ mod trpc_compose_tests {
                 "viewer.ts".to_string(),
                 vec![frag(
                     "viewerRouter",
-                    vec![TrpcRouterEntry::Leaf {
+                    vec![ProcedureRouterEntry::Leaf {
                         key: "me".into(),
                         verb: "QUERY".into(),
                         line: 1,
@@ -1887,7 +1887,7 @@ mod trpc_compose_tests {
             vec![
                 frag(
                     "outer",
-                    vec![TrpcRouterEntry::Ref {
+                    vec![ProcedureRouterEntry::Ref {
                         key: "nested".into(),
                         ident: "inner".into(),
                         specifier: None,
@@ -1895,7 +1895,7 @@ mod trpc_compose_tests {
                 ),
                 frag(
                     "inner",
-                    vec![TrpcRouterEntry::Leaf {
+                    vec![ProcedureRouterEntry::Leaf {
                         key: "x".into(),
                         verb: "QUERY".into(),
                         line: 3,
@@ -1918,12 +1918,12 @@ mod trpc_compose_tests {
                 vec![frag(
                     "combined",
                     vec![
-                        TrpcRouterEntry::Ref {
+                        ProcedureRouterEntry::Ref {
                             key: String::new(),
                             ident: "aRouter".into(),
                             specifier: Some("./a".into()),
                         },
-                        TrpcRouterEntry::Ref {
+                        ProcedureRouterEntry::Ref {
                             key: String::new(),
                             ident: "bRouter".into(),
                             specifier: Some("./b".into()),
@@ -1935,7 +1935,7 @@ mod trpc_compose_tests {
                 "a.ts".to_string(),
                 vec![frag(
                     "aRouter",
-                    vec![TrpcRouterEntry::Leaf {
+                    vec![ProcedureRouterEntry::Leaf {
                         key: "x".into(),
                         verb: "QUERY".into(),
                         line: 1,
@@ -1946,7 +1946,7 @@ mod trpc_compose_tests {
                 "b.ts".to_string(),
                 vec![frag(
                     "bRouter",
-                    vec![TrpcRouterEntry::Leaf {
+                    vec![ProcedureRouterEntry::Leaf {
                         key: "y".into(),
                         verb: "MUTATION".into(),
                         line: 2,
@@ -1974,12 +1974,12 @@ mod trpc_compose_tests {
             vec![frag(
                 "appRouter",
                 vec![
-                    TrpcRouterEntry::Ref {
+                    ProcedureRouterEntry::Ref {
                         key: "missing".into(),
                         ident: "ghost".into(),
                         specifier: Some("./ghost".into()),
                     },
-                    TrpcRouterEntry::Leaf {
+                    ProcedureRouterEntry::Leaf {
                         key: "ok".into(),
                         verb: "QUERY".into(),
                         line: 1,
@@ -2003,7 +2003,7 @@ mod trpc_compose_tests {
             vec![
                 frag(
                     "app",
-                    vec![TrpcRouterEntry::Ref {
+                    vec![ProcedureRouterEntry::Ref {
                         key: "a".into(),
                         ident: "a".into(),
                         specifier: None,
@@ -2012,13 +2012,13 @@ mod trpc_compose_tests {
                 frag(
                     "a",
                     vec![
-                        TrpcRouterEntry::Leaf {
+                        ProcedureRouterEntry::Leaf {
                             key: "x".into(),
                             verb: "QUERY".into(),
                             line: 5,
                         },
                         // Cycles back to itself — must be skipped, not re-composed.
-                        TrpcRouterEntry::Ref {
+                        ProcedureRouterEntry::Ref {
                             key: "loop".into(),
                             ident: "a".into(),
                             specifier: None,
@@ -2042,7 +2042,7 @@ mod trpc_compose_tests {
                     "trpc.ts".to_string(),
                     vec![frag(
                         "appRouter",
-                        vec![TrpcRouterEntry::Ref {
+                        vec![ProcedureRouterEntry::Ref {
                             key: "viewer".into(),
                             ident: "viewerRouter".into(),
                             specifier: Some("./viewer".into()),
@@ -2053,7 +2053,7 @@ mod trpc_compose_tests {
                     "viewer.ts".to_string(),
                     vec![frag(
                         "viewerRouter",
-                        vec![TrpcRouterEntry::Leaf {
+                        vec![ProcedureRouterEntry::Leaf {
                             key: "me".into(),
                             verb: "QUERY".into(),
                             line: 1,

@@ -669,17 +669,46 @@ fn compute_cross_layer_findings(
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/unconsumed-mutation-endpoint") {
+        // Same blindness predicate `cross-layer/unresolved-consume-ratio` self-reports with (below) —
+        // computed via the shared helper so the two rules can never silently drift apart on what counts as
+        // a BLIND source (mono-hub field review: a confident "unconsumed" verdict requires a resolved
+        // consume side).
+        let blind_sources = zzop_rules_cross_layer::majority_unresolved_http_sources(
+            &cross_layer.unresolved_consumes,
+            &http_consume_totals,
+        );
         sources.push(
             zzop_rules_cross_layer::unconsumed_mutation_endpoint_findings(
                 &cross_layer.unconsumed_provides,
+                &cross_layer.unresolved_consumes,
+                &blind_sources,
                 &near_miss_targets,
                 trpc_participating_sources,
             ),
         );
     }
     if zzop_core::is_enabled(&gate, "cross-layer/unprovided-mutation-call") {
+        // Provide-side blindness gate — the symmetric mirror of `unconsumed-mutation-endpoint`'s
+        // consume-blind gate above: a confident "no provider anywhere" verdict cannot be trusted when a
+        // framework-bearing tree in this run extracted almost no routes (the S2 framework-silence
+        // tripwire condition, `framework_silence::provide_blind_sources`) — the provider may live in that
+        // blind tree, unseen. `http_provide_counts` seeds every source in this run at 0 (not just sources
+        // that appear in `http_provides`) so a framework-importer with zero extracted routes — the most
+        // blind case — is never silently dropped from the count map.
+        let mut http_provide_counts_map: BTreeMap<String, usize> = source_ios
+            .iter()
+            .map(|s| (s.source.clone(), 0usize))
+            .collect();
+        for p in &http_provides {
+            *http_provide_counts_map.entry(p.source.clone()).or_insert(0) += 1;
+        }
+        let http_provide_counts: Vec<(String, usize)> =
+            http_provide_counts_map.into_iter().collect();
+        let provide_blind_sources =
+            crate::framework_silence::provide_blind_sources(package_imports, &http_provide_counts);
         sources.push(zzop_rules_cross_layer::unprovided_mutation_call_findings(
             &cross_layer.unprovided_consumes,
+            &provide_blind_sources,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/route-shadowing") {
@@ -762,15 +791,21 @@ mod tests {
         }
     }
 
-    /// Loads the real `rules/dsl/java-security/java-security.json` from the repo, resolved from
-    /// `CARGO_MANIFEST_DIR` (`packages/engine` -> up two -> repo root -> `rules/dsl/...`) so the test
-    /// exercises the shipped pack.
-    fn java_security_pack() -> RulePackDef {
+    /// Loads the real `rules/dsl/be-security/be-security.json` from the repo, resolved from
+    /// `CARGO_MANIFEST_DIR` (`packages/engine` -> up two -> repo root -> `rules/dsl/...`), filtered to the
+    /// three Java security-concern rules (`sql-taint`/`weak-crypto`/`cmd-injection`) that moved into
+    /// `be-security` when the language-named `java-security` pack was dissolved (v0.15). Filtering keeps
+    /// this fixture a small, fully-`.java`-applicable pack (every rule fires only on the `.java` fixture
+    /// file), which the profiling/degradation tests below rely on.
+    fn be_security_java_pack() -> RulePackDef {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../rules/dsl/java-security/java-security.json");
+            .join("../../rules/dsl/be-security/be-security.json");
         let text = fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-        serde_json::from_str(&text).expect("parse java-security.json")
+        let mut pack: RulePackDef = serde_json::from_str(&text).expect("parse be-security.json");
+        pack.rules
+            .retain(|r| matches!(r.id.as_str(), "sql-taint" | "weak-crypto" | "cmd-injection"));
+        pack
     }
 
     /// Builds the shared fixture tree:
@@ -778,7 +813,7 @@ mod tests {
     /// - `c.ts`: imports a module that does not exist (dangling import — must not panic, must not resolve
     ///   to an edge).
     /// - `db/schema.prisma`: a `User` model.
-    /// - `legacy/C.java`: a SQL-taint pattern the `java-security` DSL pack's line-scan rule matches.
+    /// - `legacy/C.java`: a SQL-taint pattern the `be-security` pack's `sql-taint` line-scan rule matches.
     /// - `generated/big.ts`: exceeds `size_cap` -> oversized lexical fallback.
     /// - `broken.ts`: unbalanced braces -> structurally-broken lexical fallback.
     fn fixture_tree() -> TempDir {
@@ -815,7 +850,7 @@ mod tests {
         EngineConfig {
             source_id: "fixture".to_string(),
             size_cap,
-            packs: vec![java_security_pack()],
+            packs: vec![be_security_java_pack()],
             ..EngineConfig::default()
         }
     }
@@ -835,16 +870,16 @@ mod tests {
     }
 
     #[test]
-    fn java_security_line_scan_pack_fires_on_the_java_file() {
+    fn be_security_java_line_scan_rules_fire_on_the_java_file() {
         let dir = fixture_tree();
         let out = analyze_tree(dir.path(), &config(DEFAULT_SIZE_CAP));
         let hit = out
             .findings
             .iter()
-            .find(|f| f.rule_id == "java-security/sql-taint");
+            .find(|f| f.rule_id == "be-security/sql-taint");
         assert!(
             hit.is_some(),
-            "expected a java-security/sql-taint finding, got: {:?}",
+            "expected a be-security/sql-taint finding, got: {:?}",
             out.findings
         );
         assert_eq!(hit.unwrap().file, "legacy/C.java");
@@ -935,12 +970,12 @@ mod tests {
         let mut cfg = config(DEFAULT_SIZE_CAP);
         cfg.rule_config
             .disabled_rules
-            .push("java-security".to_string());
+            .push("be-security".to_string());
         let out = analyze_tree(dir.path(), &cfg);
         assert!(!out
             .findings
             .iter()
-            .any(|f| f.rule_id.starts_with("java-security/")));
+            .any(|f| f.rule_id.starts_with("be-security/")));
     }
 
     #[test]

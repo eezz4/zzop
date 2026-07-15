@@ -3,7 +3,7 @@
   "$id": "https://zzop.dev/schema/envelope.v1.json",
   "title": "zzop NormalizedEnvelope v1",
   "description": "External-parser / adapter-overlay envelope contract (docs/NORMALIZED_AST.md; packages/core/src/normalized.rs). Field names, required-ness, and nullability below mirror the Rust serde types field-for-field — a field is 'required' here exactly when its Rust struct field has no #[serde(default)], and 'nullable' exactly when its Rust type is Option<T> deserialized without #[serde(default)] (present key, value may be null) as opposed to omittable-and-defaulting.",
-  "$comment": "TOLERANCE CONTRACT: additionalProperties is true at every object level in this schema except the two externally-tagged enum wrapper objects (trpcRouterEntry, routerMountEntry), whose single-discriminator shape is closed. The engine silently ignores fields it does not recognize — it never hard-fails on an unknown field, AND never warns about one either (serde drops unrecognized fields by default; no unknown-field warning code exists anywhere in this crate's envelope/overlay ingestion path). Same tolerant-input philosophy as zzop's config surface (see docs/adapters/README.md's 'Envelope schema & versioning policy'), just without the warning that surface's own deny_unknown_fields config types emit. A producer emitting a field ahead of this schema, or omitting any field marked optional below, still produces a valid v1 envelope. Only a BREAKING change (removing, renaming, or re-typing a REQUIRED field) needs a new envelope `version`; additive fields never do.",
+  "$comment": "TOLERANCE CONTRACT: additionalProperties is true at every object level in this schema except the two externally-tagged enum wrapper objects (procedureRouterEntry, routerMountEntry), whose single-discriminator shape is closed. The engine silently ignores fields it does not recognize — it never hard-fails on an unknown field, AND never warns about one either (serde drops unrecognized fields by default; no unknown-field warning code exists anywhere in this crate's envelope/overlay ingestion path). Same tolerant-input philosophy as zzop's config surface (see docs/adapters/README.md's 'Envelope schema & versioning policy'), just without the warning that surface's own deny_unknown_fields config types emit. A producer emitting a field ahead of this schema, or omitting any field marked optional below, still produces a valid v1 envelope. Only a BREAKING change (removing, renaming, or re-typing a REQUIRED field) needs a new envelope `version`; additive fields never do.",
   "type": "object",
   "required": ["format", "version", "parser", "source", "files"],
   "additionalProperties": true,
@@ -61,7 +61,7 @@
           "additionalProperties": { "type": "string" },
           "description": "identifier -> literal string value, for this file's top-level const string bindings."
         },
-        "trpc_router_fragments": { "type": "array", "default": [], "items": { "$ref": "#/definitions/trpcRouterFragment" } },
+        "procedure_router_fragments": { "type": "array", "default": [], "items": { "$ref": "#/definitions/procedureRouterFragment" } },
         "router_mount_fragments": { "type": "array", "default": [], "items": { "$ref": "#/definitions/routerMountFragment" } },
         "class_shape_fragments": {
           "type": "array",
@@ -70,6 +70,12 @@
           "description": "Class field-shape fragments (body-shape-v1) — the DTO-resolution substrate for IoProvide.body.dtoRef (packages/core/src/fragments.rs ClassShapeFragment). Absent = this producer doesn't extract class shapes; still a fully valid, non-degraded projection."
         },
         "io": { "$ref": "#/definitions/ioFacts", "default": { "provides": [], "consumes": [] } },
+        "attributes": {
+          "type": "array",
+          "default": [],
+          "items": { "$ref": "#/definitions/attribute" },
+          "description": "Generic entity-attribute annotations (attributes-v1) — open-vocab cross-cutting facts a producer attaches to entities (a route, symbol, file, or path scope) that per-file extraction can't see, e.g. { target: { pathScope: { prefix: \"/admin\" } }, key: \"auth-guarded\", value: true }. Consumed BY KEY by rules (zzop_core::AttributeStore); the contract/kernel is agnostic to `key`. Absent = no annotations."
+        },
         "loop_spans": {
           "type": "array",
           "default": [],
@@ -305,17 +311,17 @@
         }
       }
     },
-    "trpcRouterFragment": {
+    "procedureRouterFragment": {
       "type": "object",
       "required": ["name", "entries"],
       "additionalProperties": true,
       "properties": {
         "name": { "type": "string", "description": "The identifier this router binding is exported as." },
-        "entries": { "type": "array", "items": { "$ref": "#/definitions/trpcRouterEntry" } }
+        "entries": { "type": "array", "items": { "$ref": "#/definitions/procedureRouterEntry" } }
       }
     },
-    "trpcRouterEntry": {
-      "description": "Externally-tagged Rust enum (TrpcRouterEntry, packages/core/src/fragments.rs) — exactly one of Leaf/Ref/Nested present per entry, e.g. { \"Leaf\": { \"key\": \"getUser\", \"verb\": \"QUERY\", \"line\": 12 } }.",
+    "procedureRouterEntry": {
+      "description": "Externally-tagged Rust enum (ProcedureRouterEntry, packages/core/src/fragments.rs) — exactly one of Leaf/Ref/Nested present per entry, e.g. { \"Leaf\": { \"key\": \"getUser\", \"verb\": \"QUERY\", \"line\": 12 } }.",
       "type": "object",
       "additionalProperties": false,
       "minProperties": 1,
@@ -347,7 +353,7 @@
           "additionalProperties": true,
           "properties": {
             "key": { "type": "string" },
-            "entries": { "type": "array", "items": { "$ref": "#/definitions/trpcRouterEntry" } }
+            "entries": { "type": "array", "items": { "$ref": "#/definitions/procedureRouterEntry" } }
           }
         }
       }
@@ -388,6 +394,55 @@
             "ident": { "type": "string" },
             "specifier": { "type": ["string", "null"], "description": "null = the mounted router is a same-file (local) binding. Omittable — see ioConsume's `$comment` on this schema's `required` convention for Option<T> fields with no #[serde(default)]." }
           }
+        }
+      }
+    },
+    "attribute": {
+      "type": "object",
+      "required": ["target", "key", "value"],
+      "additionalProperties": true,
+      "properties": {
+        "target": { "$ref": "#/definitions/entityRef" },
+        "key": { "type": "string", "description": "Producer/rule vocabulary (e.g. \"auth-guarded\"); the contract is agnostic to it." },
+        "value": { "description": "Open JSON value — most consumers use `true` or a scalar. `null`/`false`/`0`/`\"\"` read as absent by presence-style consumers." }
+      }
+    },
+    "entityRef": {
+      "$comment": "Externally-tagged enum (zzop_core::EntityRef): exactly one discriminator key. camelCase.",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "file": {
+          "type": "object",
+          "required": ["path"],
+          "additionalProperties": true,
+          "properties": { "path": { "type": "string", "description": "Repo-relative forward-slash path." } }
+        },
+        "symbol": {
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": true,
+          "properties": {
+            "name": { "type": "string" },
+            "file": { "type": ["string", "null"], "description": "Optional declaring-file disambiguator. Omittable." }
+          }
+        },
+        "ioKey": {
+          "type": "object",
+          "required": ["kind", "key"],
+          "additionalProperties": true,
+          "properties": {
+            "kind": { "type": "string", "description": "Join kind, e.g. \"http\"." },
+            "key": { "type": "string", "description": "Normalized join key, e.g. \"POST /api/users\"." }
+          }
+        },
+        "pathScope": {
+          "type": "object",
+          "required": ["prefix"],
+          "additionalProperties": true,
+          "properties": { "prefix": { "type": "string", "description": "Path prefix; applies to every http route under it (longest match wins)." } }
         }
       }
     }

@@ -15,7 +15,7 @@ const ADAPTER = path.join(__dirname, '..', 'adapter.mjs');
 
 // Post-refactor, every file entry goes through adapter-kit's EnvelopeBuilder, which always emits the
 // FULL FileProjection shape (symbols/imports/re_exports/dynamic_imports/used_names/
-// const_map_fragment/trpc_router_fragments/router_mount_fragments/degraded/is_entry, all at their zero
+// const_map_fragment/procedure_router_fragments/router_mount_fragments/degraded/is_entry, all at their zero
 // values when unset) instead of the pre-refactor adapter's sparse `{path, loc, io}` object. This is a
 // deliberate, flagged consequence of adopting the kit (schema-complete output, matching the Rust
 // engine's FileProjection field-for-field) — not a semantic change to what gets keyed. This helper
@@ -30,7 +30,7 @@ function fileProjection({ path: p, loc, io }) {
     dynamic_imports: [],
     used_names: [],
     const_map_fragment: {},
-    trpc_router_fragments: [],
+    procedure_router_fragments: [],
     router_mount_fragments: [],
     io,
     degraded: false,

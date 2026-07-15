@@ -53,7 +53,9 @@
 //! - [`ambiguous_consume`]: a consume whose key 2+ distinct trees provide — deploy-time routing decides
 //!   (`cross-layer/ambiguous-consume`, warning).
 //! - [`unconsumed_mutation_endpoint`]: an unconsumed provide with a write method — standing attack surface
-//!   (`cross-layer/unconsumed-mutation-endpoint`, warning; co-fires with `unconsumed-endpoint` by design).
+//!   (`cross-layer/unconsumed-mutation-endpoint`, warning; downgraded to info, with a named-source
+//!   explanation, when the run has 1+ [`majority_unresolved_http_sources`] BLIND source — a confident
+//!   "unconsumed" verdict requires a resolved consume side; co-fires with `unconsumed-endpoint` by design).
 //! - [`unprovided_mutation_call`]: an unprovided consume with a write method — a state-changing call going nowhere
 //!   visible (`cross-layer/unprovided-mutation-call`, warning; co-fires with the unprovided-diagnosis trio).
 //! - [`cross_tree_route_shadowing`]: a `{}`-pattern route in one tree that would shadow a same-method
@@ -196,7 +198,7 @@ pub(crate) fn is_all_slot_path(segments: &[&str]) -> bool {
 /// mount file (`createNextApiHandler`/`fetchRequestHandler`, ...).
 ///
 /// **Why string-based, not structural**: `compose_trpc_provides` (the engine's assembly pass) composes
-/// `trpc`-kind PROVIDEs from each file's own `TrpcRouterFragment` — the router-definition file(s). The
+/// `trpc`-kind PROVIDEs from each file's own `ProcedureRouterFragment` — the router-definition file(s). The
 /// mount file's `http`-kind PROVIDE comes from an entirely separate, content-blind pass
 /// (`zzop_engine::file_routes`'s pure filesystem-path convention scan): it never reads what the file's
 /// default export actually calls, so there is no shared file/symbol/import-edge between a `trpc` PROVIDE
@@ -290,8 +292,54 @@ pub(crate) const VERSION_SEGMENT_PATTERN: &str = r"(?i)^v[0-9]+(?:\.[0-9]+)*$";
 
 /// Trees below this many total `http` consumes are too small for a ratio claim — shared floor between
 /// `unresolved_consume_ratio` (fires at/above it) and `sdk_import_no_visible_consume` (fires below it),
-/// so the two blind-spot self-reports partition the space and never co-fire on one tree.
+/// so the two blind-spot self-reports partition the space and never co-fire on one tree. Also the floor
+/// [`majority_unresolved_http_sources`] uses to decide which sources are eligible to count as BLIND at all.
 pub(crate) const MIN_TOTAL_CONSUMES: usize = 5;
+
+/// Majority threshold, integer math only (no floats — output must be byte-stable across platforms):
+/// `unresolved * 2 >= total` is equivalent to `unresolved / total >= 0.5` without any floating-point
+/// division. Single definition, shared by [`majority_unresolved_http_sources`] and `unresolved_consume_ratio`
+/// so the two can never drift apart on what "majority" means.
+pub(crate) fn is_majority_unresolved(unresolved: usize, total: usize) -> bool {
+    unresolved * 2 >= total
+}
+
+/// Sources whose `http` consumes are majority-unresolved (key extraction failed for most call sites) AND
+/// above the small-sample floor ([`MIN_TOTAL_CONSUMES`]) — i.e. sources the cross-layer join is effectively
+/// BLIND to. Single definition shared by `unresolved-consume-ratio` (which discloses the blindness per
+/// source) and the `unconsumed-*` rules (which must not over-claim a confident "unconsumed" verdict when a
+/// blind source could be the unseen caller). Integer math only — no floats reach output.
+///
+/// Field defect (mono-hub review, first external v0.14.0 reviews): `cross-layer/unconsumed-mutation-endpoint`
+/// fired Warning on write routes that WERE actually called, just through URLs this run's egress extraction
+/// couldn't resolve (83% of one tree's http consumes, in the field case) — the highest-severity finding was
+/// the least trustworthy one. This helper is the shared predicate that lets both the disclosure rule
+/// (`unresolved_consume_ratio`) and the confidence-gated rules reason about blindness identically, so they
+/// can never silently drift apart on the definition again.
+pub fn majority_unresolved_http_sources(
+    unresolved_consumes: &[zzop_core::io::TaggedConsume],
+    http_consume_totals: &[(String, usize)],
+) -> std::collections::BTreeSet<String> {
+    let mut unresolved_by_source: std::collections::BTreeMap<&str, usize> =
+        std::collections::BTreeMap::new();
+    for c in unresolved_consumes {
+        if c.consume.kind == "http" {
+            *unresolved_by_source.entry(c.source.as_str()).or_insert(0) += 1;
+        }
+    }
+
+    http_consume_totals
+        .iter()
+        .filter_map(|(source, total)| {
+            let total = *total;
+            if total < MIN_TOTAL_CONSUMES {
+                return None;
+            }
+            let unresolved_count = *unresolved_by_source.get(source.as_str())?;
+            is_majority_unresolved(unresolved_count, total).then(|| source.clone())
+        })
+        .collect()
+}
 
 /// One non-relative (package) import specifier observed in a tree, aggregated per specifier — the input
 /// `sdk_import_no_visible_consume` needs. Engine-derived like [`HttpProvideSite`] and for the same reason:

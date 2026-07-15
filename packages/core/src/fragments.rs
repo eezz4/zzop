@@ -4,7 +4,7 @@
 //! fragment, the engine composes fragments tree-wide, and `zzop-cache` round-trips a fragment
 //! verbatim through its on-disk `FileIrSlice` — three crates need one concrete type.
 //!
-//! tRPC routers (`TrpcRouterEntry`/`TrpcRouterFragment`) compose across files: a router typically
+//! tRPC routers (`ProcedureRouterEntry`/`ProcedureRouterFragment`) compose across files: a router typically
 //! imports and re-mounts a sub-router under a key, so a nested leaf's full route path is only
 //! knowable once every file's fragment is assembled. Router-mount fragments
 //! (`RouterMountEntry`/`RouterMountFragment`) are the same idea for a code-registered router split
@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 /// One entry of a tRPC router's object literal (or a `mergeRouters` argument list).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum TrpcRouterEntry {
+pub enum ProcedureRouterEntry {
     /// A procedure leaf: `verb` is `"QUERY"` | `"MUTATION"` | `"SUBSCRIPTION"`; `line` anchors the emitted `IoProvide`.
     Leaf {
         key: String,
@@ -35,16 +35,16 @@ pub enum TrpcRouterEntry {
     /// An inline nested `router({...})` (or `createTRPCRouter({...})`) call as a property value.
     Nested {
         key: String,
-        entries: Vec<TrpcRouterEntry>,
+        entries: Vec<ProcedureRouterEntry>,
     },
 }
 
 /// One `const <name> = router({...})` top-level binding in a file. A cross-file `Ref` only resolves
 /// if the binding is exported — checked by the assembling engine.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TrpcRouterFragment {
+pub struct ProcedureRouterFragment {
     pub name: String,
-    pub entries: Vec<TrpcRouterEntry>,
+    pub entries: Vec<ProcedureRouterEntry>,
 }
 
 /// One entry of a router-mount fragment.

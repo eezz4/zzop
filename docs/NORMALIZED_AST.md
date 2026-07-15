@@ -39,12 +39,13 @@ the linker is an exact join on normalized keys, never AST matching).
   "used_names": ["identifiersReferencedLocally", "..."],
   "io": { "provides": [ <IoProvide> ], "consumes": [ <IoConsume> ] },
   "const_map_fragment": { "<dotted.const.KEY>": "<literal-string-value>" },
-  "trpc_router_fragments": [ <TrpcRouterFragment> ],
+  "procedure_router_fragments": [ <ProcedureRouterFragment> ],
   "router_mount_fragments": [ <RouterMountFragment> ],
   "class_shape_fragments": [ <ClassShapeFragment> ],
   "degraded": false,
   "is_entry": false,
-  "loop_spans": [[10, 14]]
+  "loop_spans": [[10, 14]],
+  "attributes": [ <Attribute> ]
 }
 ```
 
@@ -93,7 +94,7 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     supplied directly and `dtoRef` omitted. Feeds `cross-layer/body-field-drift`; see
     `packages/core/src/io.rs`'s `ConsumeBodyShape`/`ProvideBodyShape` for the normative semantics
     (evidence-only: anything not statically witnessed is omitted, never approximated).
-- `const_map_fragment`, `trpc_router_fragments`, `router_mount_fragments`, `class_shape_fragments` —
+- `const_map_fragment`, `procedure_router_fragments`, `router_mount_fragments`, `class_shape_fragments` —
   all four are OPTIONAL
   (`#[serde(default)]`; absent = empty; a projection with none of them is still fully valid and
   non-degraded). They are the envelope equivalent of the fragment channels native in-process adapters
@@ -105,10 +106,10 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     string bindings — the same shape the native adapters' own const-map fragment uses. It feeds late
     cross-file consume resolution: an `IoConsume` with `key: null` but a `raw`/`method` set gets
     re-resolved once some file's `const_map_fragment` supplies a matching key.
-  - `trpc_router_fragments` is `[ <TrpcRouterFragment> ]`, same shape as the native tRPC-router-fragment
+  - `procedure_router_fragments` is `[ <ProcedureRouterFragment> ]`, same shape as the native tRPC-router-fragment
     projection: a named router binding plus entries, each either a `Ref` to another router by
     identifier/import-specifier, a `Nested` inline sub-router, or a `Leaf` procedure. See
-    `packages/core/src/fragments.rs`'s `TrpcRouterFragment`/`TrpcRouterEntry` for the normative field
+    `packages/core/src/fragments.rs`'s `ProcedureRouterFragment`/`ProcedureRouterEntry` for the normative field
     names.
   - `router_mount_fragments` is `[ <RouterMountFragment> ]`, same shape as the native Hono-style
     router-mount projection: a named router identifier plus entries, each either a `Verb` registration
@@ -138,6 +139,14 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
   same "never guess" convention this doc already documents above for `io` consume keys.
 - `degraded` — the parser could not fully process the file (size cap, syntax failure); `loc` must
   still be present.
+- `attributes` — OPTIONAL (`#[serde(default)]`; absent = empty). The generic entity-attribute channel:
+  open-vocab cross-cutting facts a producer attaches to entities that per-file extraction can't see. Each
+  is `{ "target": <EntityRef>, "key": "<producer/rule vocab>", "value": <any JSON> }`. `EntityRef` is an
+  externally-tagged, camelCase enum: `{ "file": { "path" } }`, `{ "symbol": { "name", "file"? } }`,
+  `{ "ioKey": { "kind", "key" } }`, or `{ "pathScope": { "prefix" } }` (a route-prefix scope; longest match
+  wins). Rules consume by key — the contract is agnostic to what `key` means. First consumer:
+  `mutating-route-no-auth` reads `key: "auth-guarded"` on a route's `ioKey`/`pathScope` to clear a route
+  guarded by middleware the call-graph can't see. See `docs/adapters/envelope.schema.json` `attribute`/`entityRef`.
 - `is_entry` — OPTIONAL (`#[serde(default)]`, default `false`). Marks this file a framework/runtime
   ENTRY loaded by convention rather than imported (a SvelteKit `hooks.*`/`+page`, a `.vue` route, ...),
   so zero in-repo importers is expected, not dead-code signal — the overlay counterpart of a
@@ -185,7 +194,7 @@ versioning policy" section for how it tracks this document.
 Casing is not uniform across the envelope, and which part you get wrong changes the failure mode:
 
 - **`FileProjection` top-level fields are snake_case** (`re_exports`, `dynamic_imports`,
-  `const_map_fragment`, `trpc_router_fragments`, `router_mount_fragments`, `class_shape_fragments`,
+  `const_map_fragment`, `procedure_router_fragments`, `router_mount_fragments`, `class_shape_fragments`,
   `is_entry`, ...) — this struct carries no `#[serde(rename_all = ...)]` (`packages/core/src/
   normalized.rs`). The one exception is `loop_spans`, which additionally accepts camelCase
   `loopSpans` on input (`#[serde(alias = "loopSpans")]`). A camelCase spelling of any OTHER
@@ -274,7 +283,7 @@ callers can refer to either unambiguously.
   ENTIRE source tree; `zzop_engine::analyze_envelope(envelope, config)` runs the whole language-neutral
   analysis over it alone — no native parsing involved at all.
 - **Mode B — adapter overlay.** A PARTIAL envelope — typically only `io` plus the three fragment
-  channels (`const_map_fragment`/`trpc_router_fragments`/`router_mount_fragments`) populated, with
+  channels (`const_map_fragment`/`procedure_router_fragments`/`router_mount_fragments`) populated, with
   `symbols`/`imports`/etc. often left empty — is merged ON TOP of a NATIVE `analyze_tree` run over the
   same tree. Supplied via the Rust `EngineConfig::adapter_overlays: Vec<NormalizedEnvelope>` field
   (empty by default: zero behavior change for every existing caller).
@@ -284,7 +293,7 @@ callers can refer to either unambiguously.
   for the other overlays or for the native files. Per `FileProjection` in a valid overlay:
   - If a native artifact exists at the SAME `path`/`rel`: its `io` is extended with the overlay's `io`
     entries (an overlay entry EXACTLY duplicating a native one — same kind/key/file/line — is deduped,
-    never double-counted), its fragment channels (`trpc_router_fragments`/`router_mount_fragments`) are
+    never double-counted), its fragment channels (`procedure_router_fragments`/`router_mount_fragments`) are
     appended, and `const_map_fragment` merges NATIVE-FIRST (a key the native pass already resolved is
     never overwritten by an overlay). The native artifact's own `imports`/`re_exports`/`dynamic_imports`
     are left untouched — native dep-graph facts stay authoritative; this merge branch never adds to them.

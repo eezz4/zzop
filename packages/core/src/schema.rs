@@ -5,7 +5,7 @@
 //! (structural anti-patterns, usage-aware cross-checks) moved to `zzop-rules-schema`, but these types stay
 //! here since a foundational parser crate constructs them directly and must not depend on a rules crate.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -62,16 +62,16 @@ pub struct SchemaModel {
     pub source_path: Option<String>,
 }
 
-/// Usage/change signals a producer extracts from BE code + migration history, cross-checked against the
-/// schema-IR by `zzop_rules_schema::analyze_schema_with_usage` (dead-model / dead-field / schema-churn). A
-/// producer with no code access can omit this entirely and only the structural rules run
-/// (`zzop_rules_schema::analyze_schema`).
+/// Usage signal a producer extracts from BE code, cross-checked against the schema-IR by
+/// `zzop_rules_schema::analyze_schema_with_usage` (dead-field, and dead-model's "is the name referenced
+/// anywhere" half). A producer with no code access can omit this entirely and only the structural rules
+/// run (`zzop_rules_schema::analyze_schema`).
+///
+/// Store-binding and migration-churn signals no longer live here — they're injected via the generic
+/// entity-attribute channel instead (`zzop_core::AttributeStore`, Symbol-keyed `bound-model`/`model-churn`),
+/// which dead-model and schema-churn read directly.
 #[derive(Debug, Clone, Default)]
 pub struct SchemaUsage {
-    /// PascalCase model name -> whether a bound store/repository exists in code. Drives dead-model.
-    pub bound_models: HashSet<String>,
     /// Identifier name -> total occurrences in BE source (comments/strings stripped). Drives dead-field.
     pub identifier_counts: HashMap<String, u32>,
-    /// Model name -> cumulative CREATE/ALTER/DROP TABLE appearances in migration SQL. Drives schema-churn.
-    pub model_churn: Option<HashMap<String, u32>>,
 }

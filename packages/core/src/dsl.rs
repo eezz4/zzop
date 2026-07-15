@@ -1073,14 +1073,20 @@ fn eval_io_scan(
 
 #[cfg(test)]
 mod tests {
-    //! Exercises the full DSL pipeline end-to-end against the java-security rule pack.
+    //! Exercises the full DSL pipeline end-to-end against the three Java security-concern rules
+    //! (`sql-taint`/`weak-crypto`/`cmd-injection`) that moved into `be-security` when the language-named
+    //! `java-security` pack was dissolved (v0.15). We load the real `be-security.json` and filter to just
+    //! those three so the fixture stays a small, fully-`.java`-applicable set.
     use super::*;
 
     fn pack() -> RulePackDef {
-        serde_json::from_str(include_str!(
-            "../../../rules/dsl/java-security/java-security.json"
+        let mut p: RulePackDef = serde_json::from_str(include_str!(
+            "../../../rules/dsl/be-security/be-security.json"
         ))
-        .expect("parse java-security.json")
+        .expect("parse be-security.json");
+        p.rules
+            .retain(|r| matches!(r.id.as_str(), "sql-taint" | "weak-crypto" | "cmd-injection"));
+        p
     }
 
     fn scan(src: &str, rel: &str) -> Vec<Finding> {
@@ -1702,7 +1708,7 @@ mod tests {
     }
 
     #[test]
-    fn prefilter_matches_unoptimized_findings_across_java_security_pack() {
+    fn prefilter_matches_unoptimized_findings_across_the_moved_java_rules() {
         let files = vec![
             SourceFile {
                 loop_spans: Vec::new(),
@@ -1832,7 +1838,7 @@ mod tests {
             timings.iter().map(|t| t.rule_id.as_str()).collect();
         assert_eq!(ids.len(), timings.len(), "duplicate rule_id in timings");
         for t in &timings {
-            assert!(t.rule_id.starts_with("java-security/"));
+            assert!(t.rule_id.starts_with("be-security/"));
         }
         let total_findings: usize = timings.iter().map(|t| t.findings).sum();
         assert_eq!(total_findings, plain.len());

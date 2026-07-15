@@ -84,7 +84,7 @@ use crate::{CacheStats, EngineConfig};
 /// (`axios-defaults-base-v1`) — a stale entry defaulting it to `None` would silently exempt that
 /// file's axios call sites from the assemble-time `axios.defaults.baseURL` path-prefix seam on
 /// every warm run (client-scoped seams skip untagged consumes rather than guess).
-pub const CACHE_SCHEMA_VERSION: &str = "zzop-cache-v20";
+pub const CACHE_SCHEMA_VERSION: &str = "zzop-cache-v21";
 
 /// Fingerprint for files that never reach a structural parser crate in the fused pass: no `Language` match
 /// (`dispatch::dispatch` returned `None` — unrecognized extension), or the size-cap lexical fallback

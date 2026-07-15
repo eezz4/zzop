@@ -15,7 +15,7 @@ function emptyFile(filePath) {
     dynamic_imports: [],
     used_names: [],
     const_map_fragment: {},
-    trpc_router_fragments: [],
+    procedure_router_fragments: [],
     router_mount_fragments: [],
     io: { provides: [], consumes: [] },
     degraded: false,
@@ -51,7 +51,7 @@ export class EnvelopeBuilder {
    * convention — see docs/NORMALIZED_AST.md's FileProjection.path). `opts` may set any other
    * FileProjection field verbatim, snake_case, matching the wire contract (`loc`, `symbols`,
    * `imports`, `re_exports`, `dynamic_imports`, `used_names`, `const_map_fragment`,
-   * `trpc_router_fragments`, `router_mount_fragments`, `degraded`) — `path` and `io` are owned by this
+   * `procedure_router_fragments`, `router_mount_fragments`, `degraded`) — `path` and `io` are owned by this
    * builder and ignored if passed here (use `addProvide`/`addConsume` for `io`, `markEntry` for
    * `is_entry`).
    */
@@ -150,7 +150,7 @@ export class EnvelopeBuilder {
  * an unknown `format`, a `version` greater than this kit's `SUPPORTED_NORMALIZED_AST_VERSION`, an
  * empty or duplicate file `path`, and a symbol whose `body_end` is less than its `body_start`.
  * Collects every issue instead of stopping at the first. Like the Rust validator, this does NOT check
- * fragment (`trpc_router_fragments`/`router_mount_fragments`) specifier resolvability — that is a
+ * fragment (`procedure_router_fragments`/`router_mount_fragments`) specifier resolvability — that is a
  * composition-time concern, silently skipped by the engine, never a validation-time rejection.
  */
 export function validateEnvelope(envelope) {

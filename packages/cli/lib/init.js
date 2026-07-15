@@ -37,6 +37,12 @@ const CONFIG_TEMPLATE = `{
   //   { "root": "./web", "sourceId": "web" }
   // ],
 
+  // Monorepo shortcut: set "trees": "auto" to expand to one tree per workspace package
+  // automatically (sourceId = each package's name), detected from pnpm-workspace.yaml or
+  // package.json "workspaces". This turns the cross-layer join on for a workspace with no
+  // hand-authoring. Run zzop from the workspace root. Remove "roots" above if you use this.
+  // "trees": "auto",
+
   // Monorepo tip: analyzing a repo as a SINGLE root mixes every app's I/O into one
   // tree, which can MASK an app whose routes zzop cannot extract — its blindness is
   // hidden by the other apps' signals, so it looks like "only part of the repo ran".

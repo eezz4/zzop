@@ -126,6 +126,12 @@ annotated copy; the reference below summarizes each option.
   //   { "root": "./web", "sourceId": "web" }
   // ],
 
+  // Monorepo shortcut: "trees": "auto" expands to one tree per workspace package
+  // (sourceId = each package's name), detected from pnpm-workspace.yaml or
+  // package.json "workspaces". Turns the cross-layer join on with no hand-authoring;
+  // run zzop from the workspace root.
+  // "trees": "auto",
+
   "packs": {
     // Extra directories of custom DSL rule packs (rules/dsl/*.json). These MERGE
     // with the bundled packs; a custom pack whose id matches a bundled one wins.

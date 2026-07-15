@@ -272,23 +272,20 @@ fn unbound_models_fire_dead_model_per_model() {
     assert_eq!(dead[1].line, 6); // `model Customer {` (line 5 is the blank separator)
 }
 
-/// A store binding (dsl-prisma default vocabulary: `createStore` + `getPrisma`) clears dead-model;
-/// the bound model's fields are then usage-checked individually — `nickname` appears nowhere as an
+/// A model whose NAME is referenced anywhere in BE source clears dead-model (the generic, vocab-free
+/// "is this model used?" signal, now that the app-specific store-binding recognizer is gone); the
+/// referenced model's fields are then usage-checked individually — `nickname` appears nowhere as an
 /// identifier while `email` does, so exactly one dead-field fires.
 #[test]
-fn bound_model_skips_dead_model_but_flags_unused_field() {
+fn referenced_model_skips_dead_model_but_flags_unused_field() {
     let dir = TempDir::new("zzop-schema-usage");
     dir.write(
         "prisma/schema.prisma",
         "model User {\n  id String @id\n  email String\n  nickname String\n}\n",
     );
     dir.write(
-        "src/domains/user/STORES.ts",
-        "import { createStore } from \"@app/store\";\nimport { PrismaStore, getPrisma } from \"@app/prisma\";\nexport const STORES = {\n  userStore: createStore((f: UserFilters) => f, () => new PrismaStore(getPrisma().user)),\n};\n",
-    );
-    dir.write(
-        "src/domains/user/service.ts",
-        "import { STORES } from \"./STORES\";\nexport function contact(u: { email: string }) {\n  return u.email;\n}\n",
+        "src/user/service.ts",
+        "import { User } from \"./types\";\nexport function contact(u: User) {\n  return u.email;\n}\n",
     );
     let out = analyze_tree(dir.path(), &EngineConfig::default());
 

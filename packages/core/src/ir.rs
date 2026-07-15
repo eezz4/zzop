@@ -113,7 +113,7 @@ pub struct SourceSymbol {
 /// through the cache, and `zzop_engine::analyze::assemble` collects every file's sites into one
 /// tree-wide `Vec` for `zzop_rules_schema::join`'s three schema x usage JOIN rules
 /// (`soft-delete-bypass`/`orderby-unindexed`/`enum-string-drift`) to scan — mirroring how
-/// `trpc_router_fragments` travels from parser to engine.
+/// `procedure_router_fragments` travels from parser to engine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryCallSite {

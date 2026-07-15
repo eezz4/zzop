@@ -182,19 +182,64 @@ function groupByFile(findings) {
   return sorted;
 }
 
+// Soft cap for a headline when a message has no sentence boundary to split on — keeps a long, period-less
+// message from printing as a wall in the default (folded) terminal view.
+const HEADLINE_SOFT_CAP = 200;
+
+/**
+ * Split a finding message into a one-line `headline` + the remaining `detail`. zzop's messages are
+ * self-documenting mini-docs — a problem clause, then elaboration, then a fix/disable hint — so the first
+ * SENTENCE is the natural headline. Splits on the first `". "` (period + whitespace) that ends a real
+ * sentence: a dotted token like `axios.get` has no space after the period (never matches), and a
+ * single-letter abbreviation (`e.g.`, `i.e.`) is skipped so it is not mistaken for a sentence end. When a
+ * message has no such boundary, `detail` is `''` (nothing to fold) unless the message exceeds
+ * HEADLINE_SOFT_CAP, in which case it is cut on a word boundary. PURE + deterministic.
+ *
+ * @param {string} message
+ * @returns {{ headline: string, detail: string }}
+ */
+function splitMessage(message) {
+  const msg = String(message == null ? '' : message).trim();
+  const re = /\.\s+/g;
+  let m;
+  while ((m = re.exec(msg)) !== null) {
+    const before = msg.slice(0, m.index);
+    const word = /([A-Za-z]+)$/.exec(before);
+    if (word && word[1].length <= 1) continue; // `e.g.`/`i.e.` — an abbreviation, not a sentence end.
+    const detail = msg.slice(m.index + m[0].length).trim();
+    if (detail === '') break; // period is the last thing in the message — nothing to fold.
+    return { headline: msg.slice(0, m.index + 1).trim(), detail };
+  }
+  if (msg.length > HEADLINE_SOFT_CAP) {
+    let cut = msg.lastIndexOf(' ', HEADLINE_SOFT_CAP);
+    if (cut < HEADLINE_SOFT_CAP / 2) cut = HEADLINE_SOFT_CAP; // no usable space — hard cut.
+    return { headline: `${msg.slice(0, cut).trim()}…`, detail: msg.slice(cut).trim() };
+  }
+  return { headline: msg, detail: '' };
+}
+
 /**
  * Render one finding as its terminal line: `  <severity>  <line>  <message>  <ruleId>`. Shared by the
- * per-file groups and the cross-layer section below so both stay byte-for-byte consistent.
+ * per-file groups and the cross-layer section below so both stay byte-for-byte consistent. By default the
+ * message is folded to its one-line headline (a trailing dim ` …` signals hidden detail); `verbose` (the
+ * CLI's `--all`) prints the full self-documenting message. The complete message is always intact in the
+ * JSON output and the markdown reports — this fold is a terminal-scannability aid only.
  * @param {object} f
  * @param {boolean} color
+ * @param {boolean} [verbose]
  * @returns {string}
  */
-function renderFindingLine(f, color) {
+function renderFindingLine(f, color, verbose) {
   const sevRaw = String(f.severity || 'info');
   const sev = paint(sevRaw.padEnd(8), SEVERITY_COLOR[sevRaw] || '', color);
   const loc = paint(`${f.line != null ? f.line : '?'}`, ANSI.dim, color);
   const rule = paint(String(f.ruleId || ''), ANSI.dim, color);
-  return `  ${sev} ${loc}  ${f.message || ''}  ${rule}`;
+  let msg = f.message || '';
+  if (!verbose) {
+    const { headline, detail } = splitMessage(msg);
+    msg = detail ? `${headline}${paint(' …', ANSI.dim, color)}` : headline;
+  }
+  return `  ${sev} ${loc}  ${msg}  ${rule}`;
 }
 
 /**
@@ -242,7 +287,7 @@ function formatPretty(output, opts = {}) {
     for (const [file, list] of groupByFile(perTreeVisible)) {
       lines.push(paint(file, ANSI.bold, color));
       for (const f of list) {
-        lines.push(renderFindingLine(f, color));
+        lines.push(renderFindingLine(f, color, showAllInfo));
       }
       lines.push('');
     }
@@ -251,9 +296,16 @@ function formatPretty(output, opts = {}) {
       for (const [file, list] of groupByFile(crossLayerVisible)) {
         lines.push(`  ${paint(file, ANSI.dim, color)}`);
         for (const f of list) {
-          lines.push(renderFindingLine(f, color));
+          lines.push(renderFindingLine(f, color, showAllInfo));
         }
       }
+      lines.push('');
+    }
+
+    // When any shown message was folded to its headline, say so once — the fix/exclude guidance is still
+    // in the full message (JSON output, markdown reports, or `--all`), never lost, just not on screen.
+    if (!showAllInfo && visible.some((f) => splitMessage(f.message || '').detail !== '')) {
+      lines.push(paint('Messages trimmed to a one-line summary — pass --all for full guidance.', ANSI.dim, color));
       lines.push('');
     }
   }
@@ -360,6 +412,7 @@ module.exports = {
   collectWarnings,
   groupByFile,
   countBySeverity,
+  splitMessage,
   foldByRule,
   filterOutputBySeverity,
   formatPretty,

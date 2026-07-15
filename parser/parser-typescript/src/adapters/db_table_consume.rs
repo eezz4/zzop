@@ -20,7 +20,7 @@
 //! facts, the per-file substrate `zzop_rules_schema::join`'s three schema x usage JOIN rules
 //! (soft-delete-bypass / orderby-unindexed / enum-string-drift) scan. This replaces that crate's own
 //! `<root>/src` filesystem re-walk (`zzop_rules_schema::join::scan_query_call_sites`, now removed) — the
-//! facts instead travel through the fused per-file pass and cache, like `trpc_router_fragments`.
+//! facts instead travel through the fused per-file pass and cache, like `procedure_router_fragments`.
 
 use swc_core::common::{SourceMap, SourceMapper, Span};
 use swc_core::ecma::ast::{CallExpr, Callee, Expr, MemberProp};

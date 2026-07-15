@@ -43,7 +43,7 @@ pub struct NormalizedEnvelope {
 /// to say about, say, `re_exports`), matching the doc's "graceful degrade, never an error" convention.
 ///
 /// IMPORTANT — cross-file specifier resolution for the fragment-channel fields below
-/// (`const_map_fragment`/`trpc_router_fragments`/`router_mount_fragments`): a `TrpcRouterEntry::Ref`'s
+/// (`const_map_fragment`/`procedure_router_fragments`/`router_mount_fragments`): a `ProcedureRouterEntry::Ref`'s
 /// `specifier` or a `RouterMountEntry::Mount`'s `specifier` MUST resolve to either (a) another file's
 /// `path` exactly as that file emits it in this SAME envelope's `files[]` (an exact repo-relative
 /// string match), or (b) a `./`- or `../`-relative path resolved from the EMITTING file's own
@@ -85,7 +85,7 @@ pub struct FileProjection {
     #[serde(default)]
     pub const_map_fragment: std::collections::HashMap<String, String>,
     #[serde(default)]
-    pub trpc_router_fragments: Vec<crate::TrpcRouterFragment>,
+    pub procedure_router_fragments: Vec<crate::ProcedureRouterFragment>,
     #[serde(default)]
     pub router_mount_fragments: Vec<crate::RouterMountFragment>,
     /// Class field-shape fragments (`body-shape-v1`) — the DTO-resolution substrate for
@@ -95,6 +95,15 @@ pub struct FileProjection {
     pub class_shape_fragments: Vec<crate::ClassShapeFragment>,
     #[serde(default)]
     pub io: IoFacts,
+    /// Generic entity-attribute annotations (`attributes-v1`) — the open-vocab injection channel for
+    /// cross-cutting facts a producer attaches to entities (routes/symbols/files/path-scopes) that
+    /// per-file extraction can't see, e.g. `{ "target": { "pathScope": { "prefix": "/admin" } },
+    /// "key": "auth-guarded", "value": true }` to mark a middleware-guarded router. Consumed BY KEY by
+    /// rules (see `zzop_core::AttributeStore`); the contract/kernel is agnostic to `key`. OPTIONAL
+    /// (`#[serde(default)]`; absent = no annotations = every attribute-aware rule keeps its native
+    /// behavior). Collected tree-wide at assemble regardless of which file emits them.
+    #[serde(default)]
+    pub attributes: Vec<crate::Attribute>,
     /// Per-file loop-body line spans (1-based, inclusive) — external-parser counterpart of
     /// `zzop_core::dsl::SourceFile::loop_spans` (see that field's doc for the exact span contract: each
     /// loop statement's full span, plus array-iteration callback ARGUMENT spans only, never the whole
@@ -133,7 +142,7 @@ pub struct FileProjection {
 /// uses for a directory of packs). Returns `Ok(envelope)` only when the JSON parses AND every semantic
 /// check passes; a JSON parse failure short-circuits with a single-element `Vec` (there is no partial
 /// envelope to inspect for further issues in that case).
-// Note: `const_map_fragment`/`trpc_router_fragments`/`router_mount_fragments` presence is never
+// Note: `const_map_fragment`/`procedure_router_fragments`/`router_mount_fragments` presence is never
 // validated here — any fragment content a producer emits is accepted as-is (empty is always valid,
 // per their `#[serde(default)]`). An unresolvable `Ref`/`Mount` specifier is a composition-time
 // concern, silently skipped by the engine's assembly pass, not a validation-time rejection — "never
@@ -257,7 +266,7 @@ mod tests {
         // A producer that only knows plain io facts may omit the fragment channels entirely — absent
         // still means empty, and this remains a fully valid, non-degraded projection.
         assert!(file.const_map_fragment.is_empty());
-        assert!(file.trpc_router_fragments.is_empty());
+        assert!(file.procedure_router_fragments.is_empty());
         assert!(file.router_mount_fragments.is_empty());
         // `is_entry` defaults to `false` — a producer that knows nothing about framework entry
         // conventions makes no exemption claim, same "absent means the least-privileged value" rule as
@@ -267,7 +276,9 @@ mod tests {
 
     #[test]
     fn fragment_channels_round_trip_when_present() {
-        use crate::{RouterMountEntry, RouterMountFragment, TrpcRouterEntry, TrpcRouterFragment};
+        use crate::{
+            ProcedureRouterEntry, ProcedureRouterFragment, RouterMountEntry, RouterMountFragment,
+        };
 
         let mut const_map_fragment = std::collections::HashMap::new();
         const_map_fragment.insert("USERS_TABLE".to_string(), "users".to_string());
@@ -287,9 +298,9 @@ mod tests {
                 dynamic_imports: vec![],
                 used_names: vec![],
                 const_map_fragment,
-                trpc_router_fragments: vec![TrpcRouterFragment {
+                procedure_router_fragments: vec![ProcedureRouterFragment {
                     name: "viewerRouter".to_string(),
-                    entries: vec![TrpcRouterEntry::Leaf {
+                    entries: vec![ProcedureRouterEntry::Leaf {
                         key: "get".to_string(),
                         verb: "QUERY".to_string(),
                         line: 3,
@@ -307,6 +318,7 @@ mod tests {
                 io: IoFacts::default(),
                 degraded: false,
                 is_entry: false,
+                attributes: Vec::new(),
                 loop_spans: vec![],
             }],
         };
@@ -318,14 +330,14 @@ mod tests {
             file.const_map_fragment.get("USERS_TABLE"),
             Some(&"users".to_string())
         );
-        assert_eq!(file.trpc_router_fragments.len(), 1);
-        assert_eq!(file.trpc_router_fragments[0].name, "viewerRouter");
+        assert_eq!(file.procedure_router_fragments.len(), 1);
+        assert_eq!(file.procedure_router_fragments[0].name, "viewerRouter");
         assert_eq!(file.router_mount_fragments.len(), 1);
         assert_eq!(file.router_mount_fragments[0].name, "auth");
 
         // Re-serializing keeps the fragment channels present (not silently dropped on round-trip).
         assert!(json.contains("const_map_fragment"));
-        assert!(json.contains("trpc_router_fragments"));
+        assert!(json.contains("procedure_router_fragments"));
         assert!(json.contains("router_mount_fragments"));
     }
 
@@ -380,11 +392,12 @@ mod tests {
                     dynamic_imports: vec![],
                     used_names: vec![],
                     const_map_fragment: std::collections::HashMap::new(),
-                    trpc_router_fragments: vec![],
+                    procedure_router_fragments: vec![],
                     router_mount_fragments: vec![],
                     io: IoFacts::default(),
                     degraded: false,
                     is_entry: false,
+                    attributes: Vec::new(),
                     loop_spans: vec![],
                 },
                 FileProjection {
@@ -397,11 +410,12 @@ mod tests {
                     dynamic_imports: vec![],
                     used_names: vec![],
                     const_map_fragment: std::collections::HashMap::new(),
-                    trpc_router_fragments: vec![],
+                    procedure_router_fragments: vec![],
                     router_mount_fragments: vec![],
                     io: IoFacts::default(),
                     degraded: false,
                     is_entry: false,
+                    attributes: Vec::new(),
                     loop_spans: vec![],
                 },
             ],

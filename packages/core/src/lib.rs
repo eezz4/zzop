@@ -4,6 +4,7 @@
 //! here — parser-specific ASTs stay behind the parser crates' own boundaries. Rules and parsers
 //! see only this module's Common IR.
 
+pub mod attributes;
 pub mod callgraph;
 pub mod coupling;
 pub mod dsl;
@@ -21,11 +22,13 @@ pub mod registry;
 pub mod schema;
 pub mod serde_util;
 
+pub use attributes::{attr_is_truthy, Attribute, AttributeStore, EntityRef};
 pub use coupling::CommitFileSet;
 
 pub use fragments::{
-    ClassShapeFragment, ControllerPrefixRouteFragment, RouterMountEntry, RouterMountFragment,
-    TrpcRouterEntry, TrpcRouterFragment, WrapperCallFragment, WrapperDefFragment,
+    ClassShapeFragment, ControllerPrefixRouteFragment, ProcedureRouterEntry,
+    ProcedureRouterFragment, RouterMountEntry, RouterMountFragment, WrapperCallFragment,
+    WrapperDefFragment,
 };
 
 pub use schema::{FieldAttr, SchemaEnum, SchemaField, SchemaModel, SchemaUsage};

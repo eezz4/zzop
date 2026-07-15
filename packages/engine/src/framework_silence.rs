@@ -142,6 +142,47 @@ fn is_server_framework_specifier(specifier: &str) -> bool {
         .any(|vocab| specifier == *vocab || specifier.starts_with(&format!("{vocab}/")))
 }
 
+/// Sources the cross-layer join is provide-BLIND to: a tree that imports a server framework
+/// (`is_server_framework_specifier`) yet extracted fewer than `MIN_PROVIDES_FLOOR` http provides — the
+/// S2 tripwire condition, lifted to a reusable set. The provide-side analog of
+/// `zzop_rules_cross_layer::cross_layer::majority_unresolved_http_sources` (consume-blind): when such a
+/// source exists, a confident "no provider anywhere" verdict cannot be trusted, since the provider may
+/// live in the blind tree. Single definition shared by the S2 warning (`server_framework_import_warning`,
+/// per-tree self-report) and `cross-layer/unprovided-mutation-call`'s severity gate (run-wide, across every
+/// tree in this analysis).
+///
+/// Qualification mirrors S2 EXACTLY: a source qualifies iff (a) at least one of its `package_imports`
+/// specifiers is [`is_server_framework_specifier`], AND (b) its http provide count is `< MIN_PROVIDES_FLOOR`
+/// (same floor, same strict-less-than comparison). `http_provide_counts` must carry an entry for every
+/// source in this run, including sources with 0 http provides — a framework-importer with 0 provides is
+/// the most blind case, and omitting its entry would only be safe by accident (this function treats a
+/// missing entry as 0 anyway, defensively).
+///
+/// Returns a `BTreeSet` for determinism — output must be byte-stable across platforms/iteration order,
+/// same convention as `majority_unresolved_http_sources`.
+pub fn provide_blind_sources(
+    package_imports: &[zzop_rules_cross_layer::PackageImportSite],
+    http_provide_counts: &[(String, usize)],
+) -> BTreeSet<String> {
+    let framework_sources: BTreeSet<&str> = package_imports
+        .iter()
+        .filter(|p| is_server_framework_specifier(&p.specifier))
+        .map(|p| p.source.as_str())
+        .collect();
+    if framework_sources.is_empty() {
+        return BTreeSet::new();
+    }
+    let counts: BTreeMap<&str, usize> = http_provide_counts
+        .iter()
+        .map(|(source, count)| (source.as_str(), *count))
+        .collect();
+    framework_sources
+        .into_iter()
+        .filter(|source| counts.get(source).copied().unwrap_or(0) < MIN_PROVIDES_FLOOR)
+        .map(str::to_string)
+        .collect()
+}
+
 /// Returns a ready-to-push `warnings` entry when at least one server-framework package (see
 /// `SERVER_FRAMEWORK_SPECIFIERS`) is imported anywhere in the tree while `http_provides_count` sits below
 /// `MIN_PROVIDES_FLOOR`. Pure map lookup — no disk IO, so this is cheap on every tree regardless of
@@ -588,6 +629,73 @@ mod tests {
         let map = package_import_files(&[("express/lib/router", &["src/x.ts"])]);
         let warning = server_framework_import_warning(&map, 0);
         assert!(warning.is_some(), "got: {warning:?}");
+    }
+
+    // --- provide_blind_sources (unprovided-mutation-call's severity gate, symmetric to
+    // majority_unresolved_http_sources) -------------------------------------------------------------
+
+    fn package_import_sites(
+        entries: &[(&str, &str)],
+    ) -> Vec<zzop_rules_cross_layer::PackageImportSite> {
+        entries
+            .iter()
+            .map(
+                |(source, specifier)| zzop_rules_cross_layer::PackageImportSite {
+                    source: source.to_string(),
+                    specifier: specifier.to_string(),
+                    file_count: 1,
+                    example_file: "src/app.ts".to_string(),
+                },
+            )
+            .collect()
+    }
+
+    fn provide_counts(entries: &[(&str, usize)]) -> Vec<(String, usize)> {
+        entries
+            .iter()
+            .map(|(source, count)| (source.to_string(), *count))
+            .collect()
+    }
+
+    #[test]
+    fn framework_importer_with_two_provides_is_blind() {
+        let imports = package_import_sites(&[("be", "express")]);
+        let counts = provide_counts(&[("be", 2)]);
+        let blind = provide_blind_sources(&imports, &counts);
+        assert_eq!(blind, BTreeSet::from(["be".to_string()]));
+    }
+
+    #[test]
+    fn framework_importer_with_three_provides_is_not_blind() {
+        // MIN_PROVIDES_FLOOR is 3 — the floor itself already clears the gate (strict less-than).
+        let imports = package_import_sites(&[("be", "express")]);
+        let counts = provide_counts(&[("be", 3)]);
+        let blind = provide_blind_sources(&imports, &counts);
+        assert!(blind.is_empty(), "got: {blind:?}");
+    }
+
+    #[test]
+    fn non_framework_importer_with_zero_provides_is_not_blind() {
+        // Importing react/lodash says nothing about whether this tree serves routes — same S2 rationale.
+        let imports = package_import_sites(&[("fe", "react")]);
+        let counts = provide_counts(&[("fe", 0)]);
+        let blind = provide_blind_sources(&imports, &counts);
+        assert!(blind.is_empty(), "got: {blind:?}");
+    }
+
+    #[test]
+    fn framework_importer_missing_from_provide_counts_defaults_to_zero_and_is_blind() {
+        // A source with 0 http provides tree-wide may legitimately have no entry in http_provide_counts;
+        // the helper must treat a missing entry as 0, not silently skip the source.
+        let imports = package_import_sites(&[("be", "@nestjs/common")]);
+        let blind = provide_blind_sources(&imports, &[]);
+        assert_eq!(blind, BTreeSet::from(["be".to_string()]));
+    }
+
+    #[test]
+    fn no_package_imports_at_all_yields_no_blind_sources() {
+        let blind = provide_blind_sources(&[], &provide_counts(&[("be", 0)]));
+        assert!(blind.is_empty(), "got: {blind:?}");
     }
 
     // --- S3 -----------------------------------------------------------------------------------------

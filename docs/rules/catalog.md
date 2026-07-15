@@ -6,7 +6,7 @@ Everything the engine ships today, read directly from `rules/dsl/**/*.json` and
 semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 [authoring-guide.md](authoring-guide.md).
 
-**Totals** (machine-checked by `packages/engine/tests/rule_contracts.rs`'s `catalog_totals_match_loaded_rule_and_analysis_counts`): 16 DSL packs, 112 DSL rules, 43 native analysis ids. 12 packs ship rules; 4 are stub packs (see "Stub packs" below).
+**Totals** (machine-checked by `packages/engine/tests/rule_contracts.rs`'s `catalog_totals_match_loaded_rule_and_analysis_counts`): 14 DSL packs, 112 DSL rules, 43 native analysis ids. 11 packs ship rules; 3 are stub packs (see "Stub packs" below).
 
 ## DSL packs (`rules/dsl/<pack>/<pack>.json`)
 
@@ -45,7 +45,7 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `interval-no-clear` | warning | line-scan | `interval-ok` | `setInterval(...)` with no matching `clearInterval(...)` anywhere in the file — a leaked timer keeps the process/page alive and re-fires forever. |
 | `env-outside-config` | info | line-scan | `env-access-ok` | `process.env.X` accessed outside a config module (files/dirs named `config`/`env`/`settings` exempt) — scatters env parsing/validation instead of centralizing it. |
 
-### `be-security` (38 rules)
+### `be-security` (41 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
@@ -67,11 +67,11 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `error-leak-to-client` | warning | line-scan | `error-leak-ok` | A raw error object sent directly to the client (`res.status(5xx).send/json(err)`, Hono `c.json(err)`) — stack traces/paths/SQL fragments help an attacker map internals. |
 | `secret-env-in-fe` | warning | line-scan | `fe-env-ok` | A server-only-shaped env var (`SECRET`/`PRIVATE`/`SERVICE_ROLE`/`SERVICE_KEY`) referenced from frontend code — inlined into the shipped JS bundle, readable via devtools. |
 | `localstorage-jwt` | warning | line-scan | `ls-token-ok` | A token/JWT-shaped value written to `localStorage` — readable by any script on the page, so one XSS bug anywhere on the origin exfiltrates it. |
-| `java-hardcoded-password` | warning | line-scan | `java-pwd-ok` | A password-shaped literal hardcoded (direct assignment, or a JDBC `getConnection(url, user, password)` call) — a credential committed to source, can't be rotated without a code change. |
+| `hardcoded-password` | warning | line-scan | `java-pwd-ok` | A password-shaped literal hardcoded (direct assignment, or a JDBC `getConnection(url, user, password)` call) — a credential committed to source, can't be rotated without a code change. |
 | `xxe-no-guard` | critical | method-scan | `xxe-ok` | `DocumentBuilderFactory`/`SAXParserFactory.newInstance()` with no XXE guard (`disallow-doctype-decl`/`FEATURE_SECURE_PROCESSING`) — default XML parsing resolves external entities (file read/SSRF/billion laughs). |
 | `unsafe-deserialization` | warning | method-scan | `deser-ok` | `ObjectInputStream.readObject()` called — native Java deserialization of an attacker-controlled byte stream can trigger remote code execution via gadget chains. |
-| `java-path-traversal` | warning | method-scan | `java-traversal-ok` | `new File(...)` constructed in a function that also reads `request.getParameter(...)` — unvalidated `..` segments escape the intended directory. |
-| `java-weak-random` | warning | line-scan | `java-random-ok` | `new Random()` used on the same line as a token/session/otp/nonce-shaped identifier — a predictable, non-cryptographic PRNG for a security-sensitive value. |
+| `java-path-traversal` | warning | method-scan | `java-traversal-ok` | `new File(...)` constructed in a function that also reads `request.getParameter(...)` — unvalidated `..` segments escape the intended directory. **Id keeps its `java-` prefix** (documented exception): dropping it would collide with this pack's JS `path-traversal` rule above. |
+| `weak-random` | warning | line-scan | `java-random-ok` | `new Random()` used on the same line as a token/session/otp/nonce-shaped identifier — a predictable, non-cryptographic PRNG for a security-sensitive value. |
 | `stacktrace-to-response` | warning | method-scan | `stacktrace-ok` | An exception's stack trace/message (`printStackTrace()`/`.getMessage()`) produced in a method that also touches the HTTP response — internal class names/paths/SQL fragments can reach the client. |
 | `trust-all-tls` | critical | line-scan | `trust-all-ok` | TLS certificate/hostname verification disabled (trust-all `X509TrustManager`, `ALLOW_ALL_HOSTNAME_VERIFIER`, or an always-`true` hostname-verifier lambda) — accepts any certificate for any host, opening a MITM path. |
 | `conn-string-credentials` | critical | line-scan | `conn-cred-ok` | Connection-string URL with a password in the userinfo slot (`scheme://user:pass@host` — redis/postgres/mongodb/amqp/...) committed to source — repo readers own the datastore and git history preserves it; move to env/secret config AND rotate. Scans test paths too (a committed credential is leaked regardless). |
@@ -87,6 +87,9 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `html-response-from-request` | warning | method-scan | `html-response-ok` | A `res.send/write/end` of HTML-shaped content in the same function as `req.query/params/body/headers` with no sanitizer — reflected XSS (co-occurrence heuristic; the res.send-HTML sink `security/taint-flow` does not list). |
 | `dangerous-html-concat` | warning | line-scan | `html-concat-ok` | An HTML tag string literal concatenated with a variable (`"<div>" + userVar`) in a response-context file — an injection sink if the variable is user-influenced; use an auto-escaping template engine or sanitizer. |
 | `csp-disabled` | warning | line-scan | `csp-disabled-ok` | Content-Security-Policy turned off or wide-open (`contentSecurityPolicy: false`, `unsafe-inline`, `default-src *`) — removes the browser's last-line XSS mitigation; keep a restrictive policy. |
+| `sql-taint` | warning | line-scan | `sql-taint-ok` | SQL built by string concatenation — injection risk. |
+| `weak-crypto` | warning | line-scan | `weak-crypto-ok` | Weak/deprecated cryptography — MD5/SHA-1/DES/RC4/ECB. |
+| `cmd-injection` | warning | method-scan | `cmd-injection-ok` | `Runtime.exec`/`ProcessBuilder` co-occurring with string concatenation in the same method — command-injection risk. |
 
 ### `browser` (9 rules)
 
@@ -118,14 +121,6 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `read-model-path` | info | line-scan | `read-model-ok` | `apiRoutes.get(...)` with no cache-strategy marker (`// cache:`, `// no-cache:`, `// read-model-ok:`) on the same line. |
 | `auth-gates` | warning | line-scan | `auth-gate-ok` | Route under a protected path segment (`/admin/`, `/internal/`, `/dev/`) whose handler identifier carries no admin/role/guard/protect keyword. |
 | `route-exposure` | warning | line-scan | `route-exposure-ok` | Route under a dev/debug/internal/test/playground path segment whose handler identifier carries no guard-hint keyword. |
-
-### `java-security` (3 rules)
-
-| Rule id | Severity | Matcher | Suppress marker | Detects |
-|---|---|---|---|---|
-| `sql-taint` | warning | line-scan | `sql-taint-ok` | SQL built by string concatenation — injection risk. |
-| `weak-crypto` | warning | line-scan | `weak-crypto-ok` | Weak/deprecated cryptography — MD5/SHA-1/DES/RC4/ECB. |
-| `cmd-injection` | warning | method-scan | `cmd-injection-ok` | `Runtime.exec`/`ProcessBuilder` co-occurring with string concatenation in the same method — command-injection risk. |
 
 ### `perf` (1 rule)
 
@@ -184,7 +179,7 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 
 ### Stub packs (0 rules — roadmap)
 
-`conventions`, `jsp-security`, `react`, `routes` load successfully (valid, empty `rules: []`)
+`conventions`, `react`, `routes` load successfully (valid, empty `rules: []`)
 but currently ship no detections — each needs either declaration→use tracking, cross-repo/cross-file
 joins, or JSX/AST structure the DSL can't express (see
 [authoring-guide.md#when-a-rule-does-not-fit-the-dsl](authoring-guide.md#when-a-rule-does-not-fit-the-dsl)).
@@ -220,7 +215,7 @@ toggle/gating surface). `zzop_engine::register_all_native` composes all five. Th
 | `health` | info | Composite structural-health index rolling the per-metric scores up into one number (`health.rs`). |
 | `recommendations` | info | ROI-ranked improvement recommendations derived from `FileNode`s, coupling, and circular deps (`recommendations.rs`). |
 | `schema-structural` | warning | Prisma schema structural rules — god-model, missing timestamps, FK with no index, nullable FK, implicit FK, float-as-money, temporal-as-string, redundant index, stale `updatedAt` (`rules/native/rules-schema/src/structural.rs`). |
-| `schema-usage` | warning | Prisma schema usage-aware cross-check — dead model/field, migration churn, store-binding map, layered on the structural rules (`rules/native/rules-schema/src/usage.rs`). |
+| `schema-usage` | warning | Prisma schema usage-aware cross-check — dead model (a model whose name is never referenced in source, unless a `bound-model` attribute is injected on its symbol) / dead field, plus migration churn (a Mode-B-injected `model-churn` attribute on the model's symbol), layered on the structural rules (`rules/native/rules-schema/src/usage.rs`). |
 | `unsafe-read-endpoint` | warning | A GET/HEAD ("safe") endpoint whose handler reaches a database/store write via call-graph BFS — violates the safe-method contract. |
 | `non-idempotent-write` | warning | A write endpoint (PUT/DELETE always; POST/PATCH for accumulation only) that reaches a non-idempotent create, atomic-accumulate, or counter-bump operation via call-graph BFS — a retry duplicates or doubles the effect. |
 | `duplicate-route` | warning | The same `(METHOD, path)` HTTP route provided 2+ times across the tree. |
@@ -228,7 +223,7 @@ toggle/gating surface). `zzop_engine::register_all_native` composes all five. Th
 | `orderby-unindexed` | warning | A single-field literal `orderBy: { field: 'asc' }` naming a field with no `@id`/`@unique`/leading-`@@index` coverage on the target model — an unindexed sort that gets slower as the table grows (`rules/native/rules-schema/src/join.rs`). |
 | `enum-string-drift` | warning | A literal-object `field: 'Literal'` at a query call site whose field resolves to exactly one declared schema enum, where `'Literal'` is not one of that enum's members — a string that drifted out of sync with the enum (`rules/native/rules-schema/src/join.rs`). |
 | `route-shadowing` | warning | Within one file, a param-segment route (`/x/{}`) registered earlier than a same-shape literal-segment route of the same method makes the later literal route unreachable in a first-match router (Express/Koa/Fastify-style) (`rules/native/rules-http/src/route_shadowing.rs`). |
-| `mutating-route-no-auth` | info | A POST/PUT/PATCH/DELETE route whose handler's call-graph BFS never reaches a callee named like an auth guard (`auth`/`guard`/`verify`/`session`/`token`/`permission`/`acl`) — misses route-level middleware, so a middleware-guarded route can false-positive (`rules/native/rules-http/src/mutating_route_no_auth.rs`). |
+| `mutating-route-no-auth` | info | A POST/PUT/PATCH/DELETE route whose handler's call-graph BFS never reaches a callee named like an auth guard (`auth`/`guard`/`verify`/`session`/`token`/`permission`/`acl`). The BFS can't see route-level middleware, so a producer/adapter completes it by injecting an `auth-guarded` attribute (on the route's `ioKey` or a `pathScope` prefix) through the generic entity-attribute channel; native vocab and injected evidence compose (`rules/native/rules-http/src/mutating_route_no_auth.rs`). |
 | `unprovided-consume` | info | An HTTP `IoConsume` whose key matches no `IoProvide` anywhere in the analysis, gated to trees that provide at least one HTTP route themselves — a typo'd path, a renamed/removed backend route, or a route this analysis failed to parse. Unmatched consumes are split by first-path-segment overlap with the tree's own provided key space: overlapping ones stay individual; "foreign" ones (no overlap) fold into ONE aggregate finding once 3+ accumulate, enumerating every folded key (below 3, foreign consumes also stay individual) (`rules/native/rules-http/src/unprovided_consume.rs`). |
 | `cross-layer/unconsumed-endpoint` | info | A `crossLayer.unconsumedProvides` `http` entry — an endpoint no tree in this `analyzeTrees` run calls. Caveats consumers outside the analysis (another repo, a mobile client, an unresolved dynamic URL) may still exist. A provide identified as a tRPC mount route (a literal `trpc` path segment, e.g. `/api/trpc/{}`) is excluded when this run produced 1+ `trpc`-kind cross-layer edge — the mount route IS the transport those edges flow through, so "unconsumed" would be tone noise; the exclusion is disclosed via a `warnings` entry on the owning tree, never silent (`rules/native/rules-cross-layer/src/cross_layer/unconsumed_endpoint.rs`). |
 | `cross-layer/method-mismatch` | warning | A `crossLayer.unprovidedConsumes` `http` consume whose path exactly matches a provide somewhere in the analysis, but the method differs (e.g. FE calls `POST /api/users`, only `GET /api/users` is provided) (`rules/native/rules-cross-layer/src/cross_layer/method_mismatch.rs`). |
@@ -246,8 +241,8 @@ toggle/gating surface). `zzop_engine::register_all_native` composes all five. Th
 | `cross-layer/external-version-inconsistent` | info | One external host consumed through both version-shaped (`/v1/...`) and versionless paths — inconsistent API version pinning against the same vendor (`rules/native/rules-cross-layer/src/cross_layer/external_version_inconsistent.rs`). |
 | `cross-layer/external-ip-literal` | warning | A `crossLayer.externalConsumes` consume whose host is a raw IP literal (loopback excluded — committed localhost URLs are the DSL `localhost-egress-committed` rule's turf) — environment-specific addressing committed into code (`rules/native/rules-cross-layer/src/cross_layer/external_ip_literal.rs`). |
 | `cross-layer/ambiguous-consume` | warning | A consume whose key is provided by 2+ distinct trees (`crossLayer.ambiguousConsumes`) — which provider actually serves the call depends on deploy-time routing the analysis cannot see (`rules/native/rules-cross-layer/src/cross_layer/ambiguous_consume.rs`). |
-| `cross-layer/unconsumed-mutation-endpoint` | warning | A `crossLayer.unconsumedProvides` `http` entry with a write method (POST/PUT/PATCH/DELETE) — an unconsumed mutation endpoint is standing attack surface, not just dead code; intentionally co-fires with `cross-layer/unconsumed-endpoint`. Same tRPC mount-route exclusion as that rule (see its catalog entry) applies here too (`rules/native/rules-cross-layer/src/cross_layer/unconsumed_mutation_endpoint.rs`). |
-| `cross-layer/unprovided-mutation-call` | warning | A `crossLayer.unprovidedConsumes` `http` consume with a write method — a state-changing call whose target no analyzed tree provides; intentionally co-fires with the unprovided-diagnosis rules above (`rules/native/rules-cross-layer/src/cross_layer/unprovided_mutation_call.rs`). |
+| `cross-layer/unconsumed-mutation-endpoint` | warning (downgraded to info when the run has a blind source) | A `crossLayer.unconsumedProvides` `http` entry with a write method (POST/PUT/PATCH/DELETE) — an unconsumed mutation endpoint is standing attack surface, not just dead code; intentionally co-fires with `cross-layer/unconsumed-endpoint`. Severity is conditional: when this run has 1+ source whose `http` consumes are majority-unresolved (the same blindness `cross-layer/unresolved-consume-ratio` self-reports), a confident "unconsumed" verdict is not warranted, so the finding fires at info instead and the message names the blind source(s) plus the quantified unresolved-consume count — the finding still fires either way (never suppressed), only the severity and framing change. Same tRPC mount-route exclusion as that rule (see its catalog entry) applies here too (`rules/native/rules-cross-layer/src/cross_layer/unconsumed_mutation_endpoint.rs`). |
+| `cross-layer/unprovided-mutation-call` | warning (downgraded to info when the run has a provide-blind source) | A `crossLayer.unprovidedConsumes` `http` consume with a write method — a state-changing call whose target no analyzed tree provides; intentionally co-fires with the unprovided-diagnosis rules above. Severity is conditional: when this run has 1+ source that imports a server framework yet extracted almost no `http` routes tree-wide (the same near-zero condition the engine's framework-silence self-report fires on), a confident "no matching provide anywhere" verdict is not warranted, so the finding fires at info instead and the message names the blind source(s) — the finding still fires either way (never suppressed), only the severity and framing change. The provide-side mirror of `cross-layer/unconsumed-mutation-endpoint`'s consume-blind downgrade above (`rules/native/rules-cross-layer/src/cross_layer/unprovided_mutation_call.rs`). |
 | `cross-layer/route-shadowing` | warning | A `{}`-parameter route pattern provided by one tree that would shadow a same-method, same-shape literal route provided by a DIFFERENT tree if both are served behind one first-match gateway — the cross-tree counterpart to `route-shadowing` above (`rules/native/rules-cross-layer/src/cross_layer/cross_tree_route_shadowing.rs`). |
 | `cross-layer/unresolved-consume-ratio` | info | A tree whose `http` consumes are majority-unresolved (dynamic URLs, generated SDK clients, wrapper functions) — self-reports that the cross-layer join is mostly blind for that tree instead of staying silent (`rules/native/rules-cross-layer/src/cross_layer/unresolved_consume_ratio.rs`). |
 | `cross-layer/sdk-import-no-visible-consume` | info | A tree importing an SDK-shaped package (`@scope/sdk`, `*-sdk`, `openapi*`, `*api-client*`) from 3+ files, OR an opaque HTTP client library (`superagent`, `got`, `node-fetch`, `oazapfts`, ...) the egress extractor cannot trace at all, from 1+ files, while having fewer visible `http` consumes than `unresolved-consume-ratio`'s floor — consumption flows through a client the egress extractor cannot see; the not-even-visible half of the blind-spot partition. `oazapfts` joined the opaque-client list once its native recognition retired in favor of `examples/oazapfts-adapter` (Mode B). Rule id kept for compatibility even though scope now covers both classes (`rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs`). |

@@ -12,6 +12,7 @@ const path = require('node:path');
 
 const { loadConfig, DEFAULT_CONFIG_FILENAME } = require('../lib/config');
 const { configToRequest, collectConfigWarnings, ConfigError } = require('../lib/mapper');
+const { expandAutoTrees } = require('../lib/workspaces');
 const {
   collectFindings,
   collectWarnings,
@@ -52,7 +53,10 @@ Options (run):
                                     Default format is markdown: one file per tree, plus cross-repo.md for
                                     a multi-tree run. Set config report.formats to also/instead emit
                                     json/sarif, or report.enabled: false to disable report writing.
-  -a, --all                        Expand info-level findings (folded to per-rule counts by default).
+  -a, --all                        Show everything expanded: info-level findings (folded to per-rule
+                                    counts by default) AND each finding's full message (folded to a
+                                    one-line summary by default). The complete message is always in the
+                                    JSON output and markdown reports regardless of this flag.
   --severity <critical|warning|info|off>
                                     Only display findings at/above this severity (default: off = show all).
   --debug-io                       After the normal output, dump every cross-layer join bucket (edges,
@@ -405,7 +409,13 @@ function emitWarnings(warnings) {
 
 function runAnalyze(opts) {
   const configPath = opts.config || DEFAULT_CONFIG_FILENAME;
-  const config = loadConfig(configPath);
+  const rawConfig = loadConfig(configPath);
+  // Expand `trees: "auto"` into a concrete per-workspace-package trees array before anything else reads
+  // the config (a no-op for every other `trees`/`roots` shape). Resolved against process.cwd() — the same
+  // directory the native engine resolves relative roots against — so a derived tree root means the same
+  // thing to the engine as a hand-written one. Its notes go through the same stderr warnings channel.
+  const { config, warnings: autoTreeWarnings } = expandAutoTrees(rawConfig, process.cwd());
+  emitWarnings(autoTreeWarnings);
   const format = resolveFormat(opts, config);
   // Surface unknown config keys (typos / cross-version drift) — ignored by the engine, but not silently.
   emitWarnings(collectConfigWarnings(config));

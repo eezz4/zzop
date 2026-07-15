@@ -8,6 +8,7 @@ const {
   collectWarnings,
   groupByFile,
   countBySeverity,
+  splitMessage,
   filterOutputBySeverity,
   formatPretty,
   formatJson,
@@ -420,4 +421,91 @@ test('exit code is computed from UNFILTERED findings, not the --severity display
   // paths must read from different sources.
   const { findings: filteredFindings } = collectFindings(filtered);
   assert.equal(computeExitCode(filteredFindings, 'warn'), 0);
+});
+
+// ---------------------------------------------------------------------------------------------------
+// splitMessage + the terminal one-line-headline fold (the "2-tier message" render).
+// ---------------------------------------------------------------------------------------------------
+
+test('splitMessage splits a mini-doc message at its first sentence', () => {
+  const { headline, detail } = splitMessage(
+    'endpoint `GET /foo` is not called by any source in this analysis. This may be dead code. Disable via config.'
+  );
+  assert.equal(headline, 'endpoint `GET /foo` is not called by any source in this analysis.');
+  assert.equal(detail, 'This may be dead code. Disable via config.');
+});
+
+test('splitMessage does not split on a dotted token (no space after the period)', () => {
+  const { headline, detail } = splitMessage('call `axios.get(url)` uses a dynamic URL and is unresolved');
+  assert.equal(headline, 'call `axios.get(url)` uses a dynamic URL and is unresolved');
+  assert.equal(detail, '');
+});
+
+test('splitMessage skips e.g./i.e. abbreviations when finding the sentence end', () => {
+  const { headline, detail } = splitMessage(
+    'this route is provider-only, e.g. a webhook or health probe. Confirm before removing.'
+  );
+  assert.equal(headline, 'this route is provider-only, e.g. a webhook or health probe.');
+  assert.equal(detail, 'Confirm before removing.');
+});
+
+test('splitMessage returns no detail for a short single-sentence message', () => {
+  const { headline, detail } = splitMessage('duplicate route `POST /x` across two trees');
+  assert.equal(headline, 'duplicate route `POST /x` across two trees');
+  assert.equal(detail, '');
+});
+
+test('splitMessage soft-caps a long period-less message on a word boundary', () => {
+  const long = 'word '.repeat(80).trim(); // 400 chars, no periods
+  const { headline, detail } = splitMessage(long);
+  // format.js's internal HEADLINE_SOFT_CAP is 200; headline is that plus at most a trailing ellipsis.
+  assert.ok(headline.length <= 201, 'headline stays within the soft cap (+ellipsis)');
+  assert.ok(headline.endsWith('…'));
+  assert.ok(detail.length > 0);
+});
+
+test('formatPretty folds a finding message to its headline by default, with a trim notice', () => {
+  const output = {
+    fileCount: 1,
+    findings: [
+      {
+        ruleId: 'r',
+        severity: 'warning',
+        file: 'a.ts',
+        line: 3,
+        message: 'headline sentence here. hidden detail follows with the fix.',
+      },
+    ],
+  };
+  const out = formatPretty(output, { color: false });
+  assert.ok(out.includes('headline sentence here.'), 'headline shown');
+  assert.ok(!out.includes('hidden detail follows'), 'detail hidden by default');
+  assert.ok(out.includes('pass --all for full guidance'), 'trim notice shown');
+});
+
+test('formatPretty showAllInfo prints the full finding message and no trim notice', () => {
+  const output = {
+    fileCount: 1,
+    findings: [
+      {
+        ruleId: 'r',
+        severity: 'warning',
+        file: 'a.ts',
+        line: 3,
+        message: 'headline sentence here. hidden detail follows with the fix.',
+      },
+    ],
+  };
+  const out = formatPretty(output, { color: false, showAllInfo: true });
+  assert.ok(out.includes('hidden detail follows with the fix.'), 'full message shown under --all');
+  assert.ok(!out.includes('pass --all for full guidance'), 'no trim notice when already expanded');
+});
+
+test('formatPretty shows no trim notice when no message has foldable detail', () => {
+  const output = {
+    fileCount: 1,
+    findings: [{ ruleId: 'r', severity: 'warning', file: 'a.ts', line: 1, message: 'short single clause' }],
+  };
+  const out = formatPretty(output, { color: false });
+  assert.ok(!out.includes('pass --all for full guidance'));
 });

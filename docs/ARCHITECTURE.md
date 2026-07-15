@@ -32,7 +32,9 @@ directly.
 
 Both directions can be extended by an **external adapter** without touching this workspace — a
 producer of a Normalized AST envelope that either stands in for an entire tree (Mode A,
-`analyzeEnvelope`) or overlays extra `io`/router facts onto a natively-parsed tree (Mode B, the Rust
+`analyzeEnvelope`) or overlays extra `io`/router facts — and generic entity attributes (open-vocab
+cross-cutting annotations a rule consumes by key, e.g. an injected `auth-guarded` marker) — onto a
+natively-parsed tree (Mode B, the Rust
 `EngineConfig::adapter_overlays` field, also reachable via napi's `adapterOverlays` config field) — see
 [NORMALIZED_AST.md](NORMALIZED_AST.md)'s "Adapter overlays" section and
 `packages/engine/examples/fastapi_overlay_adapter.rs` for a runnable FastAPI/Python demo.

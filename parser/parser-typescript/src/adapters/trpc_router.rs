@@ -1,6 +1,6 @@
 //! tRPC ROUTER-FRAGMENT extractor — projects the STATIC shape of every top-level `router({...})` /
-//! `createTRPCRouter({...})` initializer in one TS file into a [`TrpcRouterFragment`]: an ordered list of
-//! [`TrpcRouterEntry`] describing what each object key resolves to (a leaf procedure, an inline nested
+//! `createTRPCRouter({...})` initializer in one TS file into a [`ProcedureRouterFragment`]: an ordered list of
+//! [`ProcedureRouterEntry`] describing what each object key resolves to (a leaf procedure, an inline nested
 //! router, or a reference to a sub-router by identifier).
 //!
 //! ## Why a fragment, not an `IoProvide`
@@ -16,16 +16,16 @@
 //! by lexical name only, captured from `const <name> = router({...})` at module top level after
 //! unwrapping `as`/`(...)`/`satisfies`/`!` wrappers. Object keys are a plain identifier or
 //! string-literal key; a **computed key** (`[someExpr()]: ...`) skips just that one entry. A property
-//! value is classified in this order: (1) a bare identifier -> [`TrpcRouterEntry::Ref`] (`specifier` =
+//! value is classified in this order: (1) a bare identifier -> [`ProcedureRouterEntry::Ref`] (`specifier` =
 //! `Some(source)` when the ident is one of this file's own import bindings, `None` otherwise —
 //! assumed a same-file local router); (2) a call to `router(...)`/`createTRPCRouter(...)` ->
-//! [`TrpcRouterEntry::Nested`], recursing the same way; (3) a builder-chain call with a
+//! [`ProcedureRouterEntry::Nested`], recursing the same way; (3) a builder-chain call with a
 //! `query`/`mutation`/`subscription` member call anywhere down the chain ->
-//! [`TrpcRouterEntry::Leaf`] (e.g. `authedProcedure.input(z...).use(mw).mutation(fn)` is MUTATION);
+//! [`ProcedureRouterEntry::Leaf`] (e.g. `authedProcedure.input(z...).use(mw).mutation(fn)` is MUTATION);
 //! (4) anything else is skipped.
 //!
 //! `mergeRouters(a, b, ...)` as the top-level initializer produces one
-//! `TrpcRouterEntry::Ref { key: String::new(), ident, specifier }` per bare-identifier argument, in
+//! `ProcedureRouterEntry::Ref { key: String::new(), ident, specifier }` per bare-identifier argument, in
 //! argument order — the empty key signals "splice this sub-router's entries in here" (there is no
 //! key: `mergeRouters` flattens its arguments into ONE namespace). A non-identifier argument is
 //! skipped, not recursed into — v1 only recognizes a plain sub-router
@@ -41,11 +41,11 @@ use swc_core::ecma::ast::{
     Callee, Decl, Expr, MemberProp, ModuleDecl, ModuleItem, ObjectLit, Pat, Prop, PropName,
     PropOrSpread, Stmt,
 };
-use zzop_core::{ImportMap, TrpcRouterEntry, TrpcRouterFragment};
+use zzop_core::{ImportMap, ProcedureRouterEntry, ProcedureRouterFragment};
 
 /// Extract every top-level tRPC router fragment from one file's raw source. Returns an empty `Vec`
 /// (never panics) when the file fails to parse at all.
-pub fn extract_trpc_router_fragments(rel: &str, text: &str) -> Vec<TrpcRouterFragment> {
+pub fn extract_procedure_router_fragments(rel: &str, text: &str) -> Vec<ProcedureRouterFragment> {
     let Some((cm, module)) = crate::parse_with_cm(rel, text) else {
         return Vec::new();
     };
@@ -77,7 +77,7 @@ fn classify_top_level_init(
     init: &Expr,
     imports: &ImportMap,
     cm: &SourceMap,
-) -> Option<TrpcRouterFragment> {
+) -> Option<ProcedureRouterFragment> {
     let Expr::Call(call) = unwrap_expr(init) else {
         return None;
     };
@@ -97,7 +97,7 @@ fn classify_top_level_init(
             })
             .map(|o| parse_object_entries(o, imports, cm))
             .unwrap_or_default();
-        Some(TrpcRouterFragment { name, entries })
+        Some(ProcedureRouterFragment { name, entries })
     } else if id.sym == "mergeRouters" {
         let mut entries = Vec::new();
         for arg in &call.args {
@@ -105,7 +105,7 @@ fn classify_top_level_init(
                 continue; // a spread argument — not a plain sub-router ident, never guessed
             }
             if let Expr::Ident(aid) = unwrap_expr(&arg.expr) {
-                entries.push(TrpcRouterEntry::Ref {
+                entries.push(ProcedureRouterEntry::Ref {
                     key: String::new(),
                     ident: aid.sym.to_string(),
                     specifier: resolve_specifier(&aid.sym, imports),
@@ -113,7 +113,7 @@ fn classify_top_level_init(
             }
             // a non-identifier argument (inline router(...), nested mergeRouters(...), literal, ...) is skipped.
         }
-        Some(TrpcRouterFragment { name, entries })
+        Some(ProcedureRouterFragment { name, entries })
     } else {
         None
     }
@@ -135,7 +135,7 @@ fn parse_object_entries(
     obj: &ObjectLit,
     imports: &ImportMap,
     cm: &SourceMap,
-) -> Vec<TrpcRouterEntry> {
+) -> Vec<ProcedureRouterEntry> {
     let mut out = Vec::new();
     for prop in &obj.props {
         let PropOrSpread::Prop(p) = prop else {
@@ -169,15 +169,15 @@ fn prop_key_name(key: &PropName) -> Option<String> {
     }
 }
 
-/// Classifies one object property's value expression into a `TrpcRouterEntry` — see module doc.
+/// Classifies one object property's value expression into a `ProcedureRouterEntry` — see module doc.
 fn classify_entry(
     key: String,
     value: &Expr,
     imports: &ImportMap,
     cm: &SourceMap,
-) -> Option<TrpcRouterEntry> {
+) -> Option<ProcedureRouterEntry> {
     match unwrap_expr(value) {
-        Expr::Ident(id) => Some(TrpcRouterEntry::Ref {
+        Expr::Ident(id) => Some(ProcedureRouterEntry::Ref {
             key,
             ident: id.sym.to_string(),
             specifier: resolve_specifier(&id.sym, imports),
@@ -197,11 +197,11 @@ fn classify_entry(
                         })
                         .map(|o| parse_object_entries(o, imports, cm))
                         .unwrap_or_default();
-                    return Some(TrpcRouterEntry::Nested { key, entries });
+                    return Some(ProcedureRouterEntry::Nested { key, entries });
                 }
             }
             let verb = verb_of_call_chain(call)?;
-            Some(TrpcRouterEntry::Leaf {
+            Some(ProcedureRouterEntry::Leaf {
                 key,
                 verb,
                 line: crate::line_of(cm, call.span.lo),
@@ -259,12 +259,12 @@ fn unwrap_expr(e: &Expr) -> &Expr {
 
 #[cfg(test)]
 mod tests {
-    //! Coverage for `extract_trpc_router_fragments`: leaf verb detection, `Ref` specifier resolution,
+    //! Coverage for `extract_procedure_router_fragments`: leaf verb detection, `Ref` specifier resolution,
     //! inline `Nested` routers, string-literal/computed keys, `mergeRouters` ordering, and non-router
     //! consts producing no fragment.
     use super::*;
 
-    fn frag<'a>(out: &'a [TrpcRouterFragment], name: &str) -> &'a TrpcRouterFragment {
+    fn frag<'a>(out: &'a [ProcedureRouterFragment], name: &str) -> &'a ProcedureRouterFragment {
         out.iter().find(|f| f.name == name).unwrap()
     }
 
@@ -276,17 +276,17 @@ mod tests {
             "  create: authedProcedure.input(z.object({})).mutation(async () => 1),\n",
             "});\n"
         );
-        let out = extract_trpc_router_fragments("router.ts", src);
+        let out = extract_procedure_router_fragments("router.ts", src);
         let f = frag(&out, "appRouter");
         assert_eq!(
             f.entries,
             vec![
-                TrpcRouterEntry::Leaf {
+                ProcedureRouterEntry::Leaf {
                     key: "hello".into(),
                     verb: "QUERY".into(),
                     line: 2
                 },
-                TrpcRouterEntry::Leaf {
+                ProcedureRouterEntry::Leaf {
                     key: "create".into(),
                     verb: "MUTATION".into(),
                     line: 3
@@ -299,10 +299,10 @@ mod tests {
     fn leaf_verb_found_through_a_use_middleware_link() {
         let src =
             "export const r = router({\n  sub: proc.input(x).use(mw).subscription(fn),\n});\n";
-        let out = extract_trpc_router_fragments("r.ts", src);
+        let out = extract_procedure_router_fragments("r.ts", src);
         assert_eq!(
             frag(&out, "r").entries,
-            vec![TrpcRouterEntry::Leaf {
+            vec![ProcedureRouterEntry::Leaf {
                 key: "sub".into(),
                 verb: "SUBSCRIPTION".into(),
                 line: 2
@@ -319,10 +319,10 @@ mod tests {
             "  bookings: bookingsRouter,\n",
             "});\n"
         );
-        let out = extract_trpc_router_fragments("viewer/_router.ts", src);
+        let out = extract_procedure_router_fragments("viewer/_router.ts", src);
         assert_eq!(
             frag(&out, "viewerRouter").entries,
-            vec![TrpcRouterEntry::Ref {
+            vec![ProcedureRouterEntry::Ref {
                 key: "bookings".into(),
                 ident: "bookingsRouter".into(),
                 specifier: Some("./bookings/_router".into()),
@@ -339,10 +339,10 @@ mod tests {
             "  nested: inner,\n",
             "});\n"
         );
-        let out = extract_trpc_router_fragments("r.ts", src);
+        let out = extract_procedure_router_fragments("r.ts", src);
         assert_eq!(
             frag(&out, "outer").entries,
-            vec![TrpcRouterEntry::Ref {
+            vec![ProcedureRouterEntry::Ref {
                 key: "nested".into(),
                 ident: "inner".into(),
                 specifier: None,
@@ -359,10 +359,10 @@ mod tests {
             "import { bookings } from \"./bookings/_router\";\n",
             "export const viewerRouter = router({\n  bookings,\n});\n"
         );
-        let out = extract_trpc_router_fragments("r.ts", src);
+        let out = extract_procedure_router_fragments("r.ts", src);
         assert_eq!(
             frag(&out, "viewerRouter").entries,
-            vec![TrpcRouterEntry::Ref {
+            vec![ProcedureRouterEntry::Ref {
                 key: "bookings".into(),
                 ident: "bookings".into(),
                 specifier: Some("./bookings/_router".into()),
@@ -379,12 +379,12 @@ mod tests {
             "  }),\n",
             "});\n"
         );
-        let out = extract_trpc_router_fragments("r.ts", src);
+        let out = extract_procedure_router_fragments("r.ts", src);
         assert_eq!(
             frag(&out, "viewerRouter").entries,
-            vec![TrpcRouterEntry::Nested {
+            vec![ProcedureRouterEntry::Nested {
                 key: "greeting".into(),
-                entries: vec![TrpcRouterEntry::Leaf {
+                entries: vec![ProcedureRouterEntry::Leaf {
                     key: "hello".into(),
                     verb: "QUERY".into(),
                     line: 3
@@ -396,10 +396,10 @@ mod tests {
     #[test]
     fn create_trpc_router_callee_name_is_also_recognized() {
         let src = "export const appRouter = createTRPCRouter({\n  a: proc.query(fn),\n});\n";
-        let out = extract_trpc_router_fragments("r.ts", src);
+        let out = extract_procedure_router_fragments("r.ts", src);
         assert_eq!(
             frag(&out, "appRouter").entries,
-            vec![TrpcRouterEntry::Leaf {
+            vec![ProcedureRouterEntry::Leaf {
                 key: "a".into(),
                 verb: "QUERY".into(),
                 line: 2
@@ -410,10 +410,10 @@ mod tests {
     #[test]
     fn string_literal_key_is_supported() {
         let src = "export const r = router({\n  \"weird-key\": proc.query(fn),\n});\n";
-        let out = extract_trpc_router_fragments("r.ts", src);
+        let out = extract_procedure_router_fragments("r.ts", src);
         assert_eq!(
             frag(&out, "r").entries,
-            vec![TrpcRouterEntry::Leaf {
+            vec![ProcedureRouterEntry::Leaf {
                 key: "weird-key".into(),
                 verb: "QUERY".into(),
                 line: 2
@@ -429,10 +429,10 @@ mod tests {
             "  ok: proc.query(fn),\n",
             "});\n"
         );
-        let out = extract_trpc_router_fragments("r.ts", src);
+        let out = extract_procedure_router_fragments("r.ts", src);
         assert_eq!(
             frag(&out, "r").entries,
-            vec![TrpcRouterEntry::Leaf {
+            vec![ProcedureRouterEntry::Leaf {
                 key: "ok".into(),
                 verb: "QUERY".into(),
                 line: 3
@@ -448,16 +448,16 @@ mod tests {
             "import { bRouter } from \"./b\";\n",
             "export const combined = mergeRouters(aRouter, bRouter);\n"
         );
-        let out = extract_trpc_router_fragments("r.ts", src);
+        let out = extract_procedure_router_fragments("r.ts", src);
         assert_eq!(
             frag(&out, "combined").entries,
             vec![
-                TrpcRouterEntry::Ref {
+                ProcedureRouterEntry::Ref {
                     key: String::new(),
                     ident: "aRouter".into(),
                     specifier: Some("./a".into()),
                 },
-                TrpcRouterEntry::Ref {
+                ProcedureRouterEntry::Ref {
                     key: String::new(),
                     ident: "bRouter".into(),
                     specifier: Some("./b".into()),
@@ -473,10 +473,10 @@ mod tests {
             "import { aRouter } from \"./a\";\n",
             "export const combined = mergeRouters(aRouter, router({}));\n"
         );
-        let out = extract_trpc_router_fragments("r.ts", src);
+        let out = extract_procedure_router_fragments("r.ts", src);
         assert_eq!(
             frag(&out, "combined").entries,
-            vec![TrpcRouterEntry::Ref {
+            vec![ProcedureRouterEntry::Ref {
                 key: String::new(),
                 ident: "aRouter".into(),
                 specifier: Some("./a".into()),
@@ -487,7 +487,7 @@ mod tests {
     #[test]
     fn non_router_consts_produce_no_fragment() {
         let src = "export const PAGE_SIZE = 10;\nconst helper = () => 1;\n";
-        let out = extract_trpc_router_fragments("r.ts", src);
+        let out = extract_procedure_router_fragments("r.ts", src);
         assert!(out.is_empty(), "{out:?}");
     }
 
@@ -497,7 +497,7 @@ mod tests {
             "const a = router({ x: proc.query(fn) });\n",
             "const b = router({ y: proc.query(fn) });\n"
         );
-        let out = extract_trpc_router_fragments("r.ts", src);
+        let out = extract_procedure_router_fragments("r.ts", src);
         assert_eq!(
             out.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
             vec!["a", "b"]
@@ -506,16 +506,16 @@ mod tests {
 
     #[test]
     fn empty_file_yields_no_fragments() {
-        assert!(extract_trpc_router_fragments("e.ts", "").is_empty());
+        assert!(extract_procedure_router_fragments("e.ts", "").is_empty());
     }
 
     #[test]
     fn as_const_and_paren_wrappers_are_unwrapped_on_the_initializer() {
         let src = "export const r = (router({ a: proc.query(fn) })) as any;\n";
-        let out = extract_trpc_router_fragments("r.ts", src);
+        let out = extract_procedure_router_fragments("r.ts", src);
         assert_eq!(
             frag(&out, "r").entries,
-            vec![TrpcRouterEntry::Leaf {
+            vec![ProcedureRouterEntry::Leaf {
                 key: "a".into(),
                 verb: "QUERY".into(),
                 line: 1

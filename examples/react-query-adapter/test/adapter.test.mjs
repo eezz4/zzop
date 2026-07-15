@@ -19,7 +19,7 @@ const ADAPTER = path.join(__dirname, '..', 'adapter.mjs');
 
 // Post-refactor, every file entry goes through adapter-kit's EnvelopeBuilder, which always emits the
 // full FileProjection shape (symbols/imports/re_exports/dynamic_imports/used_names/
-// const_map_fragment/trpc_router_fragments/router_mount_fragments/degraded/is_entry, all at their zero
+// const_map_fragment/procedure_router_fragments/router_mount_fragments/degraded/is_entry, all at their zero
 // values when unset) instead of the pre-refactor adapter's sparse `{path, loc, io}` object. Verified
 // (pre-refactor run of this same test) that this padding is the ONLY diff — every io entry below is
 // byte-identical to the pre-refactor output. Flagged, documented consequence of adopting the kit.
@@ -33,7 +33,7 @@ function fileProjection({ path: p, loc, io }) {
     dynamic_imports: [],
     used_names: [],
     const_map_fragment: {},
-    trpc_router_fragments: [],
+    procedure_router_fragments: [],
     router_mount_fragments: [],
     io,
     degraded: false,

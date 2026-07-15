@@ -23,7 +23,7 @@ function emptyFile(filePath) {
     dynamic_imports: [],
     used_names: [],
     const_map_fragment: {},
-    trpc_router_fragments: [],
+    procedure_router_fragments: [],
     router_mount_fragments: [],
     io: { provides: [], consumes: [] },
     degraded: false,
@@ -57,7 +57,7 @@ export class EnvelopeBuilder {
    * convention — see docs/NORMALIZED_AST.md's FileProjection.path). `opts` may set any other
    * FileProjection field verbatim, snake_case, matching the wire contract (`loc`, `symbols`,
    * `imports`, `re_exports`, `dynamic_imports`, `used_names`, `const_map_fragment`,
-   * `trpc_router_fragments`, `router_mount_fragments`, `degraded`) — `path` and `io` are owned by this
+   * `procedure_router_fragments`, `router_mount_fragments`, `degraded`) — `path` and `io` are owned by this
    * builder and ignored if passed here (use `addProvide`/`addConsume` for `io`, `markEntry` for
    * `is_entry`).
    */

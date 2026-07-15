@@ -125,7 +125,8 @@ pub(crate) fn assemble(
     // tRPC PROVIDE composition's substrate (`compose_trpc_provides`): each TS file's own tRPC
     // router-fragment shape, paired with its `rel`. Composed directly into `IoProvide`s rather than
     // re-keying an `IoConsume` (see `crate::io`'s module doc).
-    let mut trpc_fragment_pairs: Vec<(String, Vec<zzop_core::TrpcRouterFragment>)> = Vec::new();
+    let mut trpc_fragment_pairs: Vec<(String, Vec<zzop_core::ProcedureRouterFragment>)> =
+        Vec::new();
     // Code-registered router-mount composition's substrate (`compose_router_mount_provides`): the
     // provide-side sibling of `trpc_fragment_pairs`, for Hono-style chained builders and cross-file
     // sub-router mounts.
@@ -153,9 +154,11 @@ pub(crate) fn assemble(
     // `run_schema_join_rules`' substrate: every file's Prisma query-call-site facts, collected tree-wide
     // then sorted by `(file, line)` below to match the removed filesystem scan's own ordering.
     let mut query_call_sites: Vec<zzop_core::QueryCallSite> = Vec::new();
-    // `schema_usage_findings`'s `SchemaUsage.bound_models` substrate: every file's store-binding model
-    // names, unioned tree-wide — replaces that pass's own `scan_store_map` filesystem re-walk.
-    let mut bound_models: HashSet<String> = HashSet::new();
+    // Generic entity-attribute channel — every Mode-B adapter overlay's per-file `attributes`, flattened
+    // tree-wide. Shared by both `schema_usage_findings` below (dead-model/schema-churn read Symbol-keyed
+    // `bound-model`/`model-churn`) and `run_callgraph_rules` (route-level auth-guard evidence), so it's
+    // built once here rather than inlined at each call site.
+    let attribute_store = zzop_core::AttributeStore::from_overlays(&config.adapter_overlays);
     // `schema_usage_findings`'s `SchemaUsage.identifier_counts` substrate: every file's comment/string-
     // stripped identifier tokens, unioned tree-wide — replaces that pass's own `scan_field_usage`
     // filesystem re-walk. Deliberately NOT `used_names_by_file` below: that field is AST-based
@@ -207,8 +210,8 @@ pub(crate) fn assemble(
         if !artifact.const_map_fragment.is_empty() {
             fragment_pairs.push((artifact.rel.clone(), artifact.const_map_fragment));
         }
-        if !artifact.trpc_router_fragments.is_empty() {
-            trpc_fragment_pairs.push((artifact.rel.clone(), artifact.trpc_router_fragments));
+        if !artifact.procedure_router_fragments.is_empty() {
+            trpc_fragment_pairs.push((artifact.rel.clone(), artifact.procedure_router_fragments));
         }
         if !artifact.router_mount_fragments.is_empty() {
             router_mount_pairs.push((artifact.rel.clone(), artifact.router_mount_fragments));
@@ -229,7 +232,6 @@ pub(crate) fn assemble(
             class_shape_pairs.push((artifact.rel.clone(), artifact.class_shape_fragments));
         }
         query_call_sites.extend(artifact.query_call_sites);
-        bound_models.extend(artifact.store_bound_models);
         field_usage_tokens.extend(artifact.field_usage_tokens);
         all_symbols.extend(artifact.symbols);
         for t in artifact.rule_timings {
@@ -513,7 +515,7 @@ pub(crate) fn assemble(
         let found = crate::pipeline::schema_usage_findings(
             root,
             &prisma_rels,
-            &bound_models,
+            &attribute_store,
             &field_usage_tokens,
         );
         record_native_timing(&mut rule_time, t0, "schema-usage", found.len());
@@ -562,6 +564,7 @@ pub(crate) fn assemble(
     run_callgraph_rules(
         root,
         config,
+        &attribute_store,
         &io_provides,
         &ts_paths,
         &ts_import_pairs,

@@ -197,7 +197,7 @@ through before it ships:
    *does* at runtime (a missing `await`, a wildcard CORS origin, an unbounded query) — call this
    **deployed-surface**: a test file exercising the same code shape isn't a production bug, so exclude test
    paths. A minority of rules reason about a literal value simply being *present in the repo*
-   (`be-security/hardcoded-secret`, `be-security/java-hardcoded-password`) — call this **repo-content**: a
+   (`be-security/hardcoded-secret`, `be-security/hardcoded-password`) — call this **repo-content**: a
    secret committed inside a test fixture is still a leaked credential the moment it's pushed, so these must
    scan every path, test directories included. Decide which one a new rule is, and for deployed-surface
    rules add the shared canonical test-path exclude (copy it verbatim, do not invent a new regex):
@@ -240,7 +240,7 @@ through before it ships:
    `\bUPDATE\b`), never a bare word alone. Machine-checked by `rule_contracts.rs`'s
    `dangerous_bare_words_are_syntax_anchored_not_bare_prose_matches` test (see that test's own doc comment
    for the curated word list and exactly what the check can/cannot prove) — this is the fix that shipped for
-   `perf/api-in-loop` (bare `\bdo\b`) and `java-security/sql-taint` (bare `UPDATE`).
+   `perf/api-in-loop` (bare `\bdo\b`) and `be-security/sql-taint` (bare `UPDATE`).
 6. **What is the nearest benign lookalike, and is it pinned as a negative fixture?** Before shipping,
    name the most common INNOCENT code that matches the same surface shape the rule keys on, and pin it
    as a negative test in the pack's `.rs` — not a synthetic near-miss, but the real-world idiom a scan

@@ -17,7 +17,6 @@ pub mod hono_client;
 pub mod next_pages_api;
 pub mod pathname_dispatch;
 pub mod router_mounts;
-pub mod store_binding;
 pub mod trpc_consume;
 pub mod trpc_router;
 pub mod wrapper_calls;

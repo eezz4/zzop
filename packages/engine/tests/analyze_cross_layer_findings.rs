@@ -146,6 +146,62 @@ fn prefix_drift_be_tree() -> TempDir {
     dir
 }
 
+/// FE tree with exactly `MIN_TOTAL_CONSUMES` (5) total `http` consumes, 3 of them dynamic-URL calls
+/// (`axios.get(buildUrl(...))`) the egress extractor cannot resolve to a key — majority-unresolved
+/// (`unresolved * 2 >= total`: 3*2=6 >= 5) and above the small-sample floor, so this tree is BLIND per
+/// `zzop_rules_cross_layer::majority_unresolved_http_sources`.
+fn blind_fe_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-xlf-blind-fe");
+    dir.write(
+        "src/Api.tsx",
+        "export function a() { return axios.get(buildUrl(x)); }\n\
+         export function b() { return axios.get(buildUrl(y)); }\n\
+         export function c() { return axios.get(buildUrl(z)); }\n\
+         export function d() { return fetch(\"/health\"); }\n\
+         export function e() { return fetch(\"/status\"); }\n",
+    );
+    dir
+}
+
+/// BE tree providing a single unconsumed write route (`POST /api/group`) — nobody in the run calls it,
+/// driving both `cross-layer/unconsumed-endpoint` and `cross-layer/unconsumed-mutation-endpoint`.
+fn write_only_be_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-xlf-write-be");
+    dir.write(
+        "routes/group.controller.ts",
+        "const groupRoutes = new Hono();\ngroupRoutes.post(\"/api/group\", api.createGroup);\n",
+    );
+    dir
+}
+
+/// FE tree with one unmatched write consume (`POST /api/orders`) — nobody in the run provides it, driving
+/// `cross-layer/unprovided-mutation-call`.
+fn unprovided_write_fe_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-xlf-unprovided-write-fe");
+    dir.write(
+        "src/Api.tsx",
+        "export function create() { return fetch(\"/api/orders\", { method: \"POST\" }); }\n",
+    );
+    dir
+}
+
+/// BE tree that imports a server framework (`express`) yet only registers ONE http route — below
+/// `MIN_PROVIDES_FLOOR` (3) — the S2 framework-silence tripwire condition
+/// (`zzop_engine::framework_silence::server_framework_import_warning`), lifted by
+/// `provide_blind_sources` into `cross-layer/unprovided-mutation-call`'s severity gate. Registers `/health`
+/// only — never `/api/orders` — so it never satisfies `unprovided_write_fe_tree`'s write call either way;
+/// this tree's whole point is to make the RUN provide-blind, not to actually provide the target.
+fn provide_blind_be_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-xlf-provide-blind-be");
+    dir.write(
+        "src/app.ts",
+        "import express from \"express\";\n\
+         const app = express();\n\
+         app.get(\"/health\", () => {});\n",
+    );
+    dir
+}
+
 fn config(source_id: &str) -> EngineConfig {
     EngineConfig {
         source_id: source_id.to_string(),
@@ -613,5 +669,250 @@ fn trpc_mount_route_in_a_tree_with_no_trpc_edges_of_its_own_stays_reported_even_
             .all(|w| !w.contains("tRPC mount")),
         "expected no suppression note on `other` — nothing of its own was suppressed: {:?}",
         other_output.warnings
+    );
+}
+
+// --- Severity calibration (mono-hub field review, first external v0.14.0 reviews) ---
+//
+// `cross-layer/unconsumed-mutation-endpoint` used to fire Warning unconditionally, even when the run's own
+// consume side was mostly unresolved (83% of one tree's `http` consumes in the field case) — the
+// highest-severity cross-layer finding was the least trustworthy. These pins lock in the fix: the rule
+// downgrades to Info (naming the blind source + unresolved count) when the run has a blind consume-side
+// source, and stays Warning otherwise.
+
+/// Downgrade pin: a majority-unresolved (blind) source + an unconsumed write provide -> the
+/// `unconsumed-mutation-endpoint` finding is `Severity::Info`, and its message names the blind source and
+/// the unresolved count.
+#[test]
+fn unconsumed_mutation_endpoint_downgrades_to_info_when_the_run_has_a_blind_source() {
+    let fe = blind_fe_tree();
+    let be = write_only_be_tree();
+    let trees = vec![
+        (fe.path().to_path_buf(), config("fe")),
+        (be.path().to_path_buf(), config("be")),
+    ];
+    let out = analyze_trees(&trees);
+
+    // Sanity: `fe` is really blind per the shared predicate (self-reported by its own rule).
+    let ratio = find(
+        &out.cross_layer_findings,
+        "cross-layer/unresolved-consume-ratio",
+    );
+    assert_eq!(
+        ratio.len(),
+        1,
+        "expected fe to be majority-unresolved: {:?}",
+        out.cross_layer_findings
+    );
+
+    let mutation = find(
+        &out.cross_layer_findings,
+        "cross-layer/unconsumed-mutation-endpoint",
+    );
+    assert_eq!(mutation.len(), 1, "{:?}", mutation);
+    assert_eq!(mutation[0].severity, zzop_core::Severity::Info);
+    assert!(mutation[0].message.contains("POST /api/group"));
+    assert!(
+        mutation[0].message.contains("`fe`"),
+        "expected the blind source to be named: {}",
+        mutation[0].message
+    );
+    assert!(
+        mutation[0].message.contains("3 unresolved"),
+        "expected the quantified caveat: {}",
+        mutation[0].message
+    );
+    let data = mutation[0].data.as_ref().unwrap();
+    assert_eq!(data["unresolvedHttpConsumeCount"], 3);
+}
+
+/// No-blind pin: the same unconsumed write provide, but no blind source anywhere in the run (no other tree
+/// at all, so `unresolved_consumes` is empty) -> stays `Severity::Warning` with the attack-surface wording.
+#[test]
+fn unconsumed_mutation_endpoint_stays_warning_when_the_run_has_no_blind_source() {
+    let be = write_only_be_tree();
+    let trees = vec![(be.path().to_path_buf(), config("be"))];
+    let out = analyze_trees(&trees);
+
+    assert!(find(
+        &out.cross_layer_findings,
+        "cross-layer/unresolved-consume-ratio"
+    )
+    .is_empty());
+
+    let mutation = find(
+        &out.cross_layer_findings,
+        "cross-layer/unconsumed-mutation-endpoint",
+    );
+    assert_eq!(mutation.len(), 1, "{:?}", mutation);
+    assert_eq!(mutation[0].severity, zzop_core::Severity::Warning);
+    assert!(mutation[0].message.contains("standing attack surface"));
+    assert!(!mutation[0].message.contains("severity here is reduced"));
+}
+
+/// Class-parity guard (the recurrence guard): given the same unconsumed write provide + the same unresolved
+/// http consumes, BOTH `unconsumed-endpoint` and `unconsumed-mutation-endpoint` carry
+/// `data.unresolvedHttpConsumeCount` with the SAME value — so a future edit can never let the warning-
+/// severity variant silently drop the blind-spot disclosure its info sibling makes.
+#[test]
+fn unconsumed_endpoint_and_unconsumed_mutation_endpoint_disclose_the_same_unresolved_count() {
+    let fe = blind_fe_tree();
+    let be = write_only_be_tree();
+    let trees = vec![
+        (fe.path().to_path_buf(), config("fe")),
+        (be.path().to_path_buf(), config("be")),
+    ];
+    let out = analyze_trees(&trees);
+
+    let unconsumed = find(&out.cross_layer_findings, "cross-layer/unconsumed-endpoint");
+    let unconsumed_write = unconsumed
+        .iter()
+        .find(|f| f.message.contains("POST /api/group"))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected unconsumed-endpoint to also co-fire on the write route: {:?}",
+                unconsumed
+            )
+        });
+
+    let mutation = find(
+        &out.cross_layer_findings,
+        "cross-layer/unconsumed-mutation-endpoint",
+    );
+    assert_eq!(mutation.len(), 1, "{:?}", mutation);
+
+    let info_count = unconsumed_write.data.as_ref().unwrap()["unresolvedHttpConsumeCount"].clone();
+    let warning_count = mutation[0].data.as_ref().unwrap()["unresolvedHttpConsumeCount"].clone();
+    assert_eq!(info_count, warning_count);
+    assert_eq!(info_count, serde_json::json!(3));
+}
+
+// --- Severity calibration, symmetric sibling (opus-reviewer class-extrapolation) ---
+//
+// `cross-layer/unprovided-mutation-call` used to fire Warning unconditionally, even when a framework-
+// bearing tree in the run extracted almost no routes (the S2 framework-silence tripwire condition) — a
+// confident "no provider anywhere" verdict is not warranted when the provide side itself is near-blind.
+// These pins mirror `unconsumed_mutation_endpoint_downgrades_to_info_when_the_run_has_a_blind_source` above
+// exactly, on the provide side: the rule downgrades to Info (naming the blind source) when the run has a
+// provide-blind source, and stays Warning otherwise.
+
+/// Downgrade pin: a provide-blind source (a tree importing `express` with fewer than `MIN_PROVIDES_FLOOR`
+/// http provides) + an unmatched write consume in another tree -> the `unprovided-mutation-call` finding is
+/// `Severity::Info`, and its message names the blind source.
+#[test]
+fn unprovided_mutation_call_downgrades_to_info_when_the_run_has_a_provide_blind_source() {
+    let fe = unprovided_write_fe_tree();
+    let be = provide_blind_be_tree();
+    let trees = vec![
+        (fe.path().to_path_buf(), config("fe")),
+        (be.path().to_path_buf(), config("be-express")),
+    ];
+    let out = analyze_trees(&trees);
+
+    // Sanity: `be-express` is really provide-blind per the S2 tripwire (self-reported on its own tree's
+    // warnings) — the same condition `provide_blind_sources` lifts into a reusable set.
+    let (_, _, be_output) = out
+        .trees
+        .iter()
+        .find(|(_, source, _)| source == "be-express")
+        .expect("be-express tree present in output");
+    assert!(
+        be_output
+            .warnings
+            .iter()
+            .any(|w| w.contains("server-framework package(s) imported")),
+        "expected be-express to self-report S2 framework-silence: {:?}",
+        be_output.warnings
+    );
+
+    let unprovided = find(
+        &out.cross_layer_findings,
+        "cross-layer/unprovided-mutation-call",
+    );
+    assert_eq!(unprovided.len(), 1, "{:?}", unprovided);
+    assert_eq!(unprovided[0].severity, zzop_core::Severity::Info);
+    assert!(unprovided[0].message.contains("POST /api/orders"));
+    assert!(
+        unprovided[0].message.contains("`be-express`"),
+        "expected the blind source to be named: {}",
+        unprovided[0].message
+    );
+    assert!(
+        unprovided[0].message.contains("provider-side blind spot"),
+        "{}",
+        unprovided[0].message
+    );
+    let data = unprovided[0].data.as_ref().unwrap();
+    assert_eq!(data["provideBlindSourceCount"], 1);
+}
+
+/// No-blind pin: the same unmatched write consume, but no source in the run imports a server framework at
+/// all -> `cross-layer/unprovided-mutation-call` stays `Severity::Warning` with today's framing unchanged.
+#[test]
+fn unprovided_mutation_call_stays_warning_when_the_run_has_no_provide_blind_source() {
+    let fe = unprovided_write_fe_tree();
+    let be = write_only_be_tree();
+    let trees = vec![
+        (fe.path().to_path_buf(), config("fe")),
+        (be.path().to_path_buf(), config("be")),
+    ];
+    let out = analyze_trees(&trees);
+
+    let unprovided = find(
+        &out.cross_layer_findings,
+        "cross-layer/unprovided-mutation-call",
+    );
+    assert_eq!(unprovided.len(), 1, "{:?}", unprovided);
+    assert_eq!(unprovided[0].severity, zzop_core::Severity::Warning);
+    assert!(!unprovided[0].message.contains("provider-side blind spot"));
+    let data = unprovided[0].data.as_ref().unwrap();
+    assert_eq!(data["provideBlindSourceCount"], 0);
+}
+
+/// Class-seal pin (recurrence guard): the SAME run drives both mutation rules' confident-zero downgrade
+/// simultaneously — `unconsumed-mutation-endpoint` downgrades on its consume-blind source, and
+/// `unprovided-mutation-call` downgrades on its provide-blind source — proving the symmetric invariant
+/// holds together, not just individually. A future edit that fixes/touches one downgrade while silently
+/// dropping the other would fail exactly this test, even if each rule's own dedicated pin above still
+/// passed in isolation.
+#[test]
+fn both_mutation_rules_downgrade_together_when_their_respective_side_is_blind() {
+    let fe = blind_fe_tree(); // consume-blind: majority-unresolved http consumes
+    let write_fe = unprovided_write_fe_tree(); // drives unprovided-mutation-call's unmatched write
+    let write_be = write_only_be_tree(); // unconsumed write route: drives unconsumed-mutation-endpoint
+    let provide_blind_be = provide_blind_be_tree(); // provide-blind: framework import, near-zero provides
+    let trees = vec![
+        (fe.path().to_path_buf(), config("fe")),
+        (write_fe.path().to_path_buf(), config("write-fe")),
+        (write_be.path().to_path_buf(), config("write-be")),
+        (
+            provide_blind_be.path().to_path_buf(),
+            config("provide-blind-be"),
+        ),
+    ];
+    let out = analyze_trees(&trees);
+
+    let unconsumed_mutation = find(
+        &out.cross_layer_findings,
+        "cross-layer/unconsumed-mutation-endpoint",
+    );
+    assert_eq!(unconsumed_mutation.len(), 1, "{:?}", unconsumed_mutation);
+    assert_eq!(
+        unconsumed_mutation[0].severity,
+        zzop_core::Severity::Info,
+        "unconsumed-mutation-endpoint must downgrade on its own consume-blind source: {:?}",
+        unconsumed_mutation[0]
+    );
+
+    let unprovided_mutation = find(
+        &out.cross_layer_findings,
+        "cross-layer/unprovided-mutation-call",
+    );
+    assert_eq!(unprovided_mutation.len(), 1, "{:?}", unprovided_mutation);
+    assert_eq!(
+        unprovided_mutation[0].severity,
+        zzop_core::Severity::Info,
+        "unprovided-mutation-call must downgrade on its own provide-blind source: {:?}",
+        unprovided_mutation[0]
     );
 }

@@ -131,7 +131,8 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     // Fragment-composition substrate — the envelope-mode counterpart of `analyze::assemble`'s own
     // `trpc_fragment_pairs`/`router_mount_pairs`/`fragment_pairs`: collected during the per-file loop,
     // composed once after (path-paired so composition can sort for deterministic first-writer-wins).
-    let mut trpc_fragment_pairs: Vec<(String, Vec<zzop_core::TrpcRouterFragment>)> = Vec::new();
+    let mut trpc_fragment_pairs: Vec<(String, Vec<zzop_core::ProcedureRouterFragment>)> =
+        Vec::new();
     let mut router_mount_pairs: Vec<(String, Vec<zzop_core::RouterMountFragment>)> = Vec::new();
     let mut const_fragment_pairs: Vec<(String, HashMap<String, String>)> = Vec::new();
     // Same summary `analyze::assemble` builds natively — see `AnalyzeOutput::package_imports`.
@@ -187,8 +188,8 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
                 .filter(|c| !is_reserved_consume_kind(&c.kind))
                 .cloned(),
         );
-        if !file.trpc_router_fragments.is_empty() {
-            trpc_fragment_pairs.push((file.path.clone(), file.trpc_router_fragments.clone()));
+        if !file.procedure_router_fragments.is_empty() {
+            trpc_fragment_pairs.push((file.path.clone(), file.procedure_router_fragments.clone()));
         }
         if !file.router_mount_fragments.is_empty() {
             router_mount_pairs.push((file.path.clone(), file.router_mount_fragments.clone()));
@@ -651,8 +652,8 @@ fn merge_projection_onto_artifact(
     }
 
     artifact
-        .trpc_router_fragments
-        .extend(projection.trpc_router_fragments.iter().cloned());
+        .procedure_router_fragments
+        .extend(projection.procedure_router_fragments.iter().cloned());
     artifact
         .router_mount_fragments
         .extend(projection.router_mount_fragments.iter().cloned());
@@ -720,7 +721,7 @@ fn synthetic_artifact_from_projection(
         rule_timings: Vec::new(),
         used_names: Vec::new(),
         const_map_fragment: projection.const_map_fragment.clone(),
-        trpc_router_fragments: projection.trpc_router_fragments.clone(),
+        procedure_router_fragments: projection.procedure_router_fragments.clone(),
         router_mount_fragments: projection.router_mount_fragments.clone(),
         // Wrapper resolution, query-call-site recognition, store-binding recognition, and field-usage-
         // token scanning are all native-TS-source concerns; an external adapter emits final io/router
@@ -736,7 +737,6 @@ fn synthetic_artifact_from_projection(
         // native controllers use, feeding it shapes for classes its own language declares.
         class_shape_fragments: projection.class_shape_fragments.clone(),
         query_call_sites: Vec::new(),
-        store_bound_models: Vec::new(),
         field_usage_tokens: Vec::new(),
         // Plumbed straight from the projection (empty when absent) — same "carry the real fact, never a
         // placeholder" reasoning as the Mode A `SourceFile` above, even though no DSL rule pass runs over
@@ -818,12 +818,13 @@ mod tests {
             dynamic_imports: Vec::new(),
             used_names: Vec::new(),
             const_map_fragment: HashMap::new(),
-            trpc_router_fragments: Vec::new(),
+            procedure_router_fragments: Vec::new(),
             router_mount_fragments: Vec::new(),
             class_shape_fragments: Vec::new(),
             io: IoFacts::default(),
             degraded: false,
             is_entry: false,
+            attributes: Vec::new(),
             loop_spans: Vec::new(),
         }
     }

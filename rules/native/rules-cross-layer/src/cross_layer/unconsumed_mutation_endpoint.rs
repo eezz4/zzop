@@ -1,11 +1,24 @@
-//! `cross-layer/unconsumed-mutation-endpoint` (warning) — one finding per unconsumed write-verb HTTP provide
-//! (`is_write_method`: POST/PUT/PATCH/DELETE): an endpoint that MUTATES state and that no source in this
-//! analysis calls. An unconsumed write endpoint is standing attack surface — reachable by anyone who finds
-//! it — not merely dead code, hence a warning here versus the plain info of `cross-layer/unconsumed-endpoint`.
-//! This rule intentionally co-fires with that rule for the same site: it reports "unreferenced" uniformly
-//! across all methods, while this one is the severity-split for the write subset specifically.
+//! `cross-layer/unconsumed-mutation-endpoint` (warning, downgraded to info when the run has a blind consume
+//! side) — one finding per unconsumed write-verb HTTP provide (`is_write_method`: POST/PUT/PATCH/DELETE): an
+//! endpoint that MUTATES state and that no source in this analysis calls. An unconsumed write endpoint is
+//! standing attack surface — reachable by anyone who finds it — not merely dead code, hence a warning here
+//! versus the plain info of `cross-layer/unconsumed-endpoint`. This rule intentionally co-fires with that
+//! rule for the same site: it reports "unreferenced" uniformly across all methods, while this one is the
+//! severity-split for the write subset specifically.
 //!
 //! Provider sites in test-path files (`zzop_core::is_test_file`) are skipped — not deployed surface.
+//!
+//! ## Confidence downgrade when the run is blind
+//! Field defect (mono-hub review, first external v0.14.0 reviews): this rule fired Warning unconditionally,
+//! even on a run whose own consume side was mostly unresolved (83% of one tree's `http` consumes, in the
+//! field case) — the highest-severity cross-layer finding turned out to be the least trustworthy, because a
+//! zero ("unconsumed") is only a confident zero when the consume key space was actually resolved
+//! (`output-philosophy.md` §1). When `blind_sources` (`super::majority_unresolved_http_sources`, the same
+//! predicate `unresolved_consume_ratio` uses to self-report) is non-empty for this run, "unconsumed" cannot
+//! be trusted as a confident zero — this rule de-escalates to `Severity::Info` and names the blind source(s)
+//! in the message instead of silently keeping Warning. With zero blind sources, severity and message keep
+//! today's Warning/"standing attack surface" framing unchanged. This is a de-escalation to match confidence,
+//! NOT suppression — the finding still fires either way (`output-philosophy.md` §0: total by default).
 //!
 //! ## Near-miss cross-reference
 //! Same annotation as the sibling `unconsumed_endpoint`: when a write provide here is ALSO the chosen
@@ -24,7 +37,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use zzop_core::io::TaggedProvide;
+use zzop_core::io::{TaggedConsume, TaggedProvide};
 use zzop_core::{disable_hint, Finding, Severity};
 
 use super::route_near_miss::NearMissTargetRef;
@@ -32,9 +45,47 @@ use super::{is_write_method, split_key};
 
 pub fn unconsumed_mutation_endpoint_findings(
     unconsumed_provides: &[TaggedProvide],
+    unresolved_consumes: &[TaggedConsume],
+    blind_sources: &BTreeSet<String>,
     near_miss_targets: &BTreeMap<(String, String, u32), NearMissTargetRef>,
     trpc_participating_sources: &BTreeSet<String>,
 ) -> Vec<Finding> {
+    let unresolved_http = unresolved_consumes
+        .iter()
+        .filter(|c| c.consume.kind == "http")
+        .count();
+
+    // Run-level, not per-provide: "is this run's consume side blind at all" is the question, since a blind
+    // source ANYWHERE in the run is a plausible unseen caller of ANY write route regardless of which tree
+    // provides it (see this rule's module doc's "Confidence downgrade" section).
+    let severity = if blind_sources.is_empty() {
+        Severity::Warning
+    } else {
+        Severity::Info
+    };
+    let downgrade_note = if blind_sources.is_empty() {
+        String::new()
+    } else {
+        let named: Vec<String> = blind_sources
+            .iter()
+            .take(3)
+            .map(|s| format!("`{s}`"))
+            .collect();
+        let more = blind_sources.len() - named.len();
+        let more_note = if more > 0 {
+            format!(", and {more} more")
+        } else {
+            String::new()
+        };
+        format!(
+            " This run's consume side is partly blind — source(s) {}{more_note} have majority-unresolved \
+             `http` consumes (see `cross-layer/unresolved-consume-ratio`) — so severity here is reduced to \
+             info: \"unconsumed\" cannot be trusted as a confident zero, and this write endpoint may well be \
+             called through one of those unresolved URLs. Confirm before treating it as attack surface.",
+            named.join(", ")
+        )
+    };
+
     let mut out: Vec<Finding> = unconsumed_provides
         .iter()
         .filter(|p| p.provide.kind == "http" && !zzop_core::is_test_file(&p.provide.file))
@@ -67,12 +118,13 @@ pub fn unconsumed_mutation_endpoint_findings(
                 "write endpoint `{key}` (source `{}`) is not called by any source in this analysis. Because it \
                  mutates state, an unconsumed write route is standing attack surface — reachable by anyone \
                  who finds it — not just dead code. That said, this analysis cannot see every caller: a repo \
-                 not included in this `analyzeTrees` run, a mobile/native client, a webhook sender, or a \
-                 dynamically-built URL this run could not statically resolve may still call it. This finding \
+                 not included in this `analyzeTrees` run, a mobile/native client, a webhook sender, or one of \
+                 the {unresolved_http} unresolved dynamic-URL http consume(s) this run could not statically \
+                 match to a key (see `crossLayer.unresolvedConsumes`) may still call it. This finding \
                  intentionally co-fires with `cross-layer/unconsumed-endpoint` for the same site — this rule \
                  is the severity-split for write verbs specifically. Confirm with real traffic/access logs \
                  before removing the route, or add authorization/rate-limiting if it must stay reachable.\
-                 {near_miss_note} {} if provider-only write endpoints (webhook targets, endpoints consumed only outside this \
+                 {near_miss_note}{downgrade_note} {} if provider-only write endpoints (webhook targets, endpoints consumed only outside this \
                  analysis) are expected in your stack.",
                 p.source,
                 disable_hint("cross-layer/unconsumed-mutation-endpoint")
@@ -82,6 +134,7 @@ pub fn unconsumed_mutation_endpoint_findings(
                 "source": p.source,
                 "method": method,
                 "symbol": p.provide.symbol,
+                "unresolvedHttpConsumeCount": unresolved_http,
             });
             if let Some(t) = near_miss {
                 data["nearMissConsumeCount"] = serde_json::json!(t.count);
@@ -90,7 +143,7 @@ pub fn unconsumed_mutation_endpoint_findings(
             }
             Some(Finding {
                 rule_id: "cross-layer/unconsumed-mutation-endpoint".to_string(),
-                severity: Severity::Warning,
+                severity,
                 file: p.provide.file.clone(),
                 line: p.provide.line,
                 message,
@@ -128,6 +181,22 @@ mod tests {
         }
     }
 
+    fn unresolved_http(source: &str) -> TaggedConsume {
+        TaggedConsume {
+            source: source.to_string(),
+            consume: zzop_core::IoConsume {
+                client: None,
+                body: None,
+                kind: "http".to_string(),
+                key: None,
+                file: "dyn.ts".to_string(),
+                line: 1,
+                raw: Some("dyn".to_string()),
+                method: None,
+            },
+        }
+    }
+
     fn no_near_miss() -> BTreeMap<(String, String, u32), NearMissTargetRef> {
         BTreeMap::new()
     }
@@ -137,6 +206,14 @@ mod tests {
     }
 
     fn trpc_sources(sources: &[&str]) -> BTreeSet<String> {
+        sources.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn no_blind() -> BTreeSet<String> {
+        BTreeSet::new()
+    }
+
+    fn blind(sources: &[&str]) -> BTreeSet<String> {
         sources.iter().map(|s| s.to_string()).collect()
     }
 
@@ -151,6 +228,8 @@ mod tests {
                 12,
                 Some("deleteUser"),
             )],
+            &[],
+            &no_blind(),
             &no_near_miss(),
             &no_trpc(),
         );
@@ -167,6 +246,7 @@ mod tests {
         let data = out[0].data.as_ref().unwrap();
         assert_eq!(data["method"], "DELETE");
         assert_eq!(data["symbol"], "deleteUser");
+        assert_eq!(data["unresolvedHttpConsumeCount"], 0);
     }
 
     #[test]
@@ -180,6 +260,8 @@ mod tests {
                 12,
                 None,
             )],
+            &[],
+            &no_blind(),
             &no_near_miss(),
             &no_trpc(),
         );
@@ -197,6 +279,8 @@ mod tests {
                 5,
                 None,
             )],
+            &[],
+            &no_blind(),
             &no_near_miss(),
             &no_trpc(),
         );
@@ -214,6 +298,8 @@ mod tests {
                 1,
                 None,
             )],
+            &[],
+            &no_blind(),
             &no_near_miss(),
             &no_trpc(),
         );
@@ -228,6 +314,8 @@ mod tests {
                 unconsumed_provide("http", "PUT /a", "be", "a.java", 9, None),
                 unconsumed_provide("http", "PATCH /c", "be", "a.java", 2, None),
             ],
+            &[],
+            &no_blind(),
             &no_near_miss(),
             &no_trpc(),
         );
@@ -255,6 +343,8 @@ mod tests {
                 12,
                 Some("deleteUser"),
             )],
+            &[],
+            &no_blind(),
             &targets,
             &no_trpc(),
         );
@@ -279,6 +369,8 @@ mod tests {
                 12,
                 Some("deleteUser"),
             )],
+            &[],
+            &no_blind(),
             &no_near_miss(),
             &no_trpc(),
         );
@@ -305,6 +397,8 @@ mod tests {
                 3,
                 Some("default"),
             )],
+            &[],
+            &no_blind(),
             &no_near_miss(),
             &trpc_sources(&["web"]),
         );
@@ -322,6 +416,8 @@ mod tests {
                 3,
                 Some("default"),
             )],
+            &[],
+            &no_blind(),
             &no_near_miss(),
             &no_trpc(),
         );
@@ -341,9 +437,123 @@ mod tests {
                 3,
                 Some("default"),
             )],
+            &[],
+            &no_blind(),
             &no_near_miss(),
             &trpc_sources(&["api"]),
         );
         assert_eq!(out.len(), 1);
+    }
+
+    // --- Severity calibration (mono-hub field review) ---
+
+    #[test]
+    fn message_states_the_unresolved_http_count_honestly() {
+        let out = unconsumed_mutation_endpoint_findings(
+            &[unconsumed_provide(
+                "http",
+                "DELETE /api/users/{}",
+                "be",
+                "Api.java",
+                12,
+                None,
+            )],
+            &[
+                unresolved_http("fe"),
+                unresolved_http("fe"),
+                unresolved_http("fe"),
+            ],
+            &no_blind(),
+            &no_near_miss(),
+            &no_trpc(),
+        );
+        assert_eq!(out.len(), 1);
+        assert!(out[0].message.contains("3 unresolved"));
+        let data = out[0].data.as_ref().unwrap();
+        assert_eq!(data["unresolvedHttpConsumeCount"], 3);
+    }
+
+    #[test]
+    fn a_blind_source_downgrades_severity_to_info_and_names_the_source() {
+        let out = unconsumed_mutation_endpoint_findings(
+            &[unconsumed_provide(
+                "http",
+                "POST /api/group",
+                "be",
+                "Api.java",
+                12,
+                None,
+            )],
+            &[
+                unresolved_http("fe"),
+                unresolved_http("fe"),
+                unresolved_http("fe"),
+            ],
+            &blind(&["fe"]),
+            &no_near_miss(),
+            &no_trpc(),
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].severity, Severity::Info);
+        assert!(out[0].message.contains("`fe`"), "{}", out[0].message);
+        assert!(
+            out[0].message.contains("3 unresolved"),
+            "{}",
+            out[0].message
+        );
+        assert!(
+            out[0].message.contains("severity here is reduced to"),
+            "{}",
+            out[0].message
+        );
+        // Still attack-surface-framed — the downgrade lowers confidence, not the underlying claim.
+        assert!(out[0].message.contains("standing attack surface"));
+    }
+
+    #[test]
+    fn no_blind_source_keeps_warning_and_todays_attack_surface_framing() {
+        let out = unconsumed_mutation_endpoint_findings(
+            &[unconsumed_provide(
+                "http",
+                "POST /api/group",
+                "be",
+                "Api.java",
+                12,
+                None,
+            )],
+            &[],
+            &no_blind(),
+            &no_near_miss(),
+            &no_trpc(),
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].severity, Severity::Warning);
+        assert!(out[0].message.contains("standing attack surface"));
+        assert!(!out[0].message.contains("severity here is reduced"));
+    }
+
+    #[test]
+    fn blind_source_list_is_capped_at_three_with_a_remainder_count() {
+        let out = unconsumed_mutation_endpoint_findings(
+            &[unconsumed_provide(
+                "http",
+                "POST /api/group",
+                "be",
+                "Api.java",
+                12,
+                None,
+            )],
+            &[],
+            &blind(&["a", "b", "c", "d", "e"]),
+            &no_near_miss(),
+            &no_trpc(),
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].severity, Severity::Info);
+        assert!(out[0].message.contains("`a`"));
+        assert!(out[0].message.contains("`b`"));
+        assert!(out[0].message.contains("`c`"));
+        assert!(!out[0].message.contains("`d`"));
+        assert!(out[0].message.contains("and 2 more"), "{}", out[0].message);
     }
 }

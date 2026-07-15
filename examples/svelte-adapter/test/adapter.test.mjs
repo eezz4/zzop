@@ -16,7 +16,7 @@ const ADAPTER = path.join(__dirname, '..', 'adapter.mjs');
 
 // Post-refactor, every file entry goes through adapter-kit's EnvelopeBuilder, which always emits the
 // full FileProjection shape (symbols/re_exports/dynamic_imports/used_names/const_map_fragment/
-// trpc_router_fragments/router_mount_fragments/degraded/io, all at their zero values when unset)
+// procedure_router_fragments/router_mount_fragments/degraded/io, all at their zero values when unset)
 // instead of the pre-refactor adapter's sparse `{path, loc, imports, is_entry}` object — notably `io`
 // (`{provides: [], consumes: []}`) is now present where it was previously omitted entirely (this
 // adapter never projects `io`). Verified (pre-refactor run of this same test) that this padding is the
@@ -32,7 +32,7 @@ function fileProjection({ path: p, loc, imports, is_entry }) {
     dynamic_imports: [],
     used_names: [],
     const_map_fragment: {},
-    trpc_router_fragments: [],
+    procedure_router_fragments: [],
     router_mount_fragments: [],
     io: { provides: [], consumes: [] },
     degraded: false,

@@ -70,6 +70,7 @@ pub(crate) fn unreachable_findings(nodes: &[FileNode], dep: &DepGraph) -> Vec<Fi
 pub(super) fn run_callgraph_rules(
     root: &std::path::Path,
     config: &EngineConfig,
+    attribute_store: &zzop_core::AttributeStore,
     io_provides: &[zzop_core::IoProvide],
     ts_paths: &HashSet<String>,
     ts_import_pairs: &[(String, ImportMap)],
@@ -173,6 +174,10 @@ pub(super) fn run_callgraph_rules(
                     .map(move |line| (rel.clone(), line))
             })
             .collect();
+        // Generic entity-attribute channel — injected auth-guard evidence for routes the call-graph BFS
+        // can't see (middleware). Built once by `analyze::assemble` from every Mode-B adapter overlay's
+        // `attributes` and threaded in (shared with `schema_usage_findings`). Empty unless an adapter
+        // injects; then old behavior.
         let t0 = profile.then(Instant::now);
         let found = zzop_rules_http::scan_mutating_route_no_auth(
             &zzop_rules_http::ScanMutatingRouteNoAuthInput {
@@ -181,6 +186,7 @@ pub(super) fn run_callgraph_rules(
                 symbol_graph: &symbol_graph,
                 auth_guard_pattern: zzop_rules_http::DEFAULT_AUTH_GUARD_PATTERN,
                 nest_guarded: &nest_guarded,
+                route_attr_store: attribute_store,
             },
         );
         record_native_timing(rule_time, t0, "mutating-route-no-auth", found.len());

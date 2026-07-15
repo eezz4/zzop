@@ -675,12 +675,12 @@ mod tests {
     #[test]
     fn severity_override_replaces_matching_rule_severity() {
         let mut overrides = BTreeMap::new();
-        overrides.insert("java-security/sql-taint".to_string(), Severity::Critical);
+        overrides.insert("be-security/sql-taint".to_string(), Severity::Critical);
         let config = RuleConfig {
             severity_overrides: overrides,
             ..Default::default()
         };
-        let f = finding("java-security/sql-taint", Severity::Warning, "C.java", 1);
+        let f = finding("be-security/sql-taint", Severity::Warning, "C.java", 1);
         let overridden = apply_severity_override(&config, f);
         assert_eq!(overridden.severity, Severity::Critical);
     }
@@ -688,7 +688,7 @@ mod tests {
     #[test]
     fn severity_override_leaves_unmatched_rule_unchanged() {
         let config = RuleConfig::default();
-        let f = finding("java-security/sql-taint", Severity::Warning, "C.java", 1);
+        let f = finding("be-security/sql-taint", Severity::Warning, "C.java", 1);
         let unchanged = apply_severity_override(&config, f);
         assert_eq!(unchanged.severity, Severity::Warning);
     }

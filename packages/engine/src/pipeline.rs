@@ -70,9 +70,9 @@ pub(crate) struct FileArtifact {
     /// fragment into one project-wide map to re-resolve consumes left unresolved.
     pub const_map_fragment: std::collections::HashMap<String, String>,
     /// tRPC router shape fragment — `analyze::compose_trpc_provides`'s substrate.
-    pub trpc_router_fragments: Vec<zzop_core::TrpcRouterFragment>,
+    pub procedure_router_fragments: Vec<zzop_core::ProcedureRouterFragment>,
     /// Code-registered router-mount fragment (Hono chained builders / cross-file sub-router mounts) —
-    /// provide-side sibling of `trpc_router_fragments`.
+    /// provide-side sibling of `procedure_router_fragments`.
     pub router_mount_fragments: Vec<zzop_core::RouterMountFragment>,
     /// Wrapper-DEFINITION fragment — substrate for `analyze`'s assemble-time wrapper-consume join.
     pub wrapper_def_fragments: Vec<zzop_core::WrapperDefFragment>,
@@ -92,11 +92,6 @@ pub(crate) struct FileArtifact {
     /// replacing that pass's own filesystem re-walk (`zzop_rules_schema::join::scan_query_call_sites`,
     /// now removed).
     pub query_call_sites: Vec<zzop_core::QueryCallSite>,
-    /// This file's store-binding model names (`zzop_parser_typescript::extract_store_bound_models`) —
-    /// `analyze::assemble`'s substrate for `SchemaUsage.bound_models`, replacing
-    /// `zzop_rules_schema::usage::scan_store_map`'s own `<root>/src/domains/**` filesystem re-walk (now
-    /// removed). Empty for non-TypeScript/degraded files and any file outside the store-file convention.
-    pub store_bound_models: Vec<String>,
     /// This file's comment/string-stripped identifier tokens (`zzop_rules_schema::field_usage_tokens`) —
     /// `analyze::assemble`'s substrate for `SchemaUsage.identifier_counts` (presence only), replacing
     /// `zzop_rules_schema::usage::scan_field_usage`'s own `<root>/src` filesystem re-walk (now removed).
@@ -336,14 +331,13 @@ fn process_file(
                 rule_timings: Vec::new(),
                 used_names: Vec::new(),
                 const_map_fragment: std::collections::HashMap::new(),
-                trpc_router_fragments: Vec::new(),
+                procedure_router_fragments: Vec::new(),
                 router_mount_fragments: Vec::new(),
                 wrapper_def_fragments: Vec::new(),
                 wrapper_call_fragments: Vec::new(),
                 controller_prefix_route_fragments: Vec::new(),
                 class_shape_fragments: Vec::new(),
                 query_call_sites: Vec::new(),
-                store_bound_models: Vec::new(),
                 field_usage_tokens: Vec::new(),
                 loop_spans: Vec::new(),
             };
@@ -415,14 +409,13 @@ fn process_file(
             used_names: artifact.used_names.clone(),
             minified_or_generated: artifact.minified_or_generated,
             const_map_fragment: artifact.const_map_fragment.clone(),
-            trpc_router_fragments: artifact.trpc_router_fragments.clone(),
+            procedure_router_fragments: artifact.procedure_router_fragments.clone(),
             router_mount_fragments: artifact.router_mount_fragments.clone(),
             wrapper_def_fragments: artifact.wrapper_def_fragments.clone(),
             wrapper_call_fragments: artifact.wrapper_call_fragments.clone(),
             controller_prefix_route_fragments: artifact.controller_prefix_route_fragments.clone(),
             class_shape_fragments: artifact.class_shape_fragments.clone(),
             query_call_sites: artifact.query_call_sites.clone(),
-            store_bound_models: artifact.store_bound_models.clone(),
             field_usage_tokens: artifact.field_usage_tokens.clone(),
             loop_spans: artifact.loop_spans.clone(),
         };
@@ -456,14 +449,13 @@ fn artifact_from_ir(
         rule_timings,
         used_names: ir.used_names,
         const_map_fragment: ir.const_map_fragment,
-        trpc_router_fragments: ir.trpc_router_fragments,
+        procedure_router_fragments: ir.procedure_router_fragments,
         router_mount_fragments: ir.router_mount_fragments,
         wrapper_def_fragments: ir.wrapper_def_fragments,
         wrapper_call_fragments: ir.wrapper_call_fragments,
         controller_prefix_route_fragments: ir.controller_prefix_route_fragments,
         class_shape_fragments: ir.class_shape_fragments,
         query_call_sites: ir.query_call_sites,
-        store_bound_models: ir.store_bound_models,
         field_usage_tokens: ir.field_usage_tokens,
         loop_spans: ir.loop_spans,
     }
@@ -502,7 +494,7 @@ fn compute_fresh_artifact(
             rule_timings,
             used_names: Vec::new(),
             const_map_fragment: std::collections::HashMap::new(),
-            trpc_router_fragments: Vec::new(),
+            procedure_router_fragments: Vec::new(),
             router_mount_fragments: Vec::new(),
             wrapper_def_fragments: Vec::new(),
             wrapper_call_fragments: Vec::new(),
@@ -510,7 +502,6 @@ fn compute_fresh_artifact(
             class_shape_fragments: Vec::new(),
             query_call_sites: Vec::new(),
             loop_spans: Vec::new(),
-            store_bound_models: zzop_parser_typescript::extract_store_bound_models(rel, text),
             field_usage_tokens: sorted_field_usage_tokens(rel, text),
         };
     }
@@ -551,9 +542,9 @@ fn compute_fresh_artifact(
         }
         _ => std::collections::HashMap::new(),
     };
-    let trpc_router_fragments = match language {
+    let procedure_router_fragments = match language {
         Some(Language::TypeScript) if !degraded => {
-            zzop_parser_typescript::extract_trpc_router_fragments(rel, text)
+            zzop_parser_typescript::extract_procedure_router_fragments(rel, text)
         }
         _ => Vec::new(),
     };
@@ -625,7 +616,6 @@ fn compute_fresh_artifact(
     // like the removed `scan_store_map`/`scan_field_usage` filesystem walks they replace — they run
     // unconditionally on `rel`/`text` here regardless of `language`/`degraded`; each gates its own
     // applicability internally (the store-file convention, the `.ts`/`.tsx` extension, respectively).
-    let store_bound_models = zzop_parser_typescript::extract_store_bound_models(rel, text);
     let field_usage_tokens = sorted_field_usage_tokens(rel, text);
     let (mut findings, rule_timings, minified_or_generated) = eval_packs(
         packs,
@@ -653,14 +643,13 @@ fn compute_fresh_artifact(
         rule_timings,
         used_names,
         const_map_fragment,
-        trpc_router_fragments,
+        procedure_router_fragments,
         router_mount_fragments,
         wrapper_def_fragments,
         wrapper_call_fragments,
         controller_prefix_route_fragments,
         class_shape_fragments,
         query_call_sites,
-        store_bound_models,
         field_usage_tokens,
         loop_spans,
     }
@@ -851,21 +840,23 @@ fn schema_findings(
 
 /// The usage counterpart of `schema_findings`: wires the usage cross-check (dead-model / dead-field /
 /// schema-churn) via `zzop_rules_schema::cross_check_schema`/`apply_churn_rule`. Unlike `schema_findings`
-/// this is a whole-tree pass — usage evidence (store bindings, identifier presence, migration churn)
-/// spans every source file, so it runs from `analyze::assemble`'s global stage and is recomputed each
-/// run, never entering the per-file findings cache. `analyze_schema_with_usage` is deliberately not used
-/// here since it re-runs the structural rules the per-file pass already emitted.
+/// this is a whole-tree pass — usage evidence (identifier presence) spans every source file, so it runs
+/// from `analyze::assemble`'s global stage and is recomputed each run, never entering the per-file
+/// findings cache. `analyze_schema_with_usage` is deliberately not used here since it re-runs the
+/// structural rules the per-file pass already emitted.
 ///
-/// `bound_models`/`used_names` are the tree-wide unions `analyze::assemble` already collects from every
-/// `FileArtifact::store_bound_models`/`field_usage_tokens` (themselves populated by
-/// `zzop_parser_typescript::extract_store_bound_models`/`zzop_rules_schema::field_usage_tokens` in the
-/// fused per-file pass) — this fn no longer walks the filesystem for either; only `scan_migration_churn`
-/// (a separate concern, untouched by this) still does. Degraded `.prisma` files are excluded by the
-/// caller; unreadable schema files are skipped.
+/// `used_names` is the tree-wide union `analyze::assemble` collects from every `FileArtifact`'s
+/// `field_usage_tokens` (populated in the fused per-file pass) — no filesystem re-walk. `attrs` is the
+/// generic entity-attribute channel (`zzop_core::AttributeStore`) — store-binding and migration-churn are
+/// no longer typed `SchemaUsage` slots, they're Symbol-keyed attributes (`bound-model`/`model-churn`) a
+/// Mode-B producer injects; empty under native analysis, so `cross_check_schema`'s dead-model keys on the
+/// generic `identifier_counts` presence signal alone, and `apply_churn_rule` fires only when a producer
+/// injects churn (previously it could never fire). Degraded `.prisma` files are excluded by the caller;
+/// unreadable schema files are skipped.
 pub(crate) fn schema_usage_findings(
     root: &Path,
     prisma_rels: &[String],
-    bound_models: &std::collections::HashSet<String>,
+    attrs: &zzop_core::AttributeStore,
     used_names: &std::collections::HashSet<String>,
 ) -> Vec<zzop_core::Finding> {
     if prisma_rels.is_empty() {
@@ -883,14 +874,11 @@ pub(crate) fn schema_usage_findings(
     if models.is_empty() {
         return Vec::new();
     }
-    let churn = zzop_rules_schema::scan_migration_churn(root, &models);
     let usage = zzop_core::SchemaUsage {
-        bound_models: bound_models.clone(),
         identifier_counts: used_names.iter().map(|name| (name.clone(), 1u32)).collect(),
-        model_churn: None, // `apply_churn_rule` is called explicitly below instead
     };
-    let mut issues = zzop_rules_schema::cross_check_schema(&models, &usage);
-    issues.extend(zzop_rules_schema::apply_churn_rule(&models, &churn));
+    let mut issues = zzop_rules_schema::cross_check_schema(&models, &usage, attrs);
+    issues.extend(zzop_rules_schema::apply_churn_rule(&models, attrs));
     issues
         .iter()
         .map(|issue| {

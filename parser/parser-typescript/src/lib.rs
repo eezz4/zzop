@@ -32,9 +32,8 @@ pub use adapters::pathname_dispatch::{
     extract_pathname_dispatch_provides, PATHNAME_DISPATCH_FALLBACK_VERBS,
 };
 pub use adapters::router_mounts::extract_router_mount_fragments;
-pub use adapters::store_binding::extract_store_bound_models;
 pub use adapters::trpc_consume::extract_trpc_consumes;
-pub use adapters::trpc_router::extract_trpc_router_fragments;
+pub use adapters::trpc_router::extract_procedure_router_fragments;
 pub use adapters::wrapper_calls::extract_wrapper_fragments;
 pub use lang::calls::parse_calls;
 pub use lang::resolve::{
@@ -67,9 +66,11 @@ pub use lang::write_site::{
 ///   fragment shape and engine-side compose pass are unchanged, only the recognizer's vocabulary grew.
 /// - `query-call-sites-v1`: `extract_query_call_sites` — per-file `zzop_core::QueryCallSite` facts for
 ///   the schema x usage JOIN rules, replacing `zzop_rules_schema::join`'s own filesystem re-walk.
-/// - `store-binding-v1`: `extract_store_bound_models` — per-file store-binding model names for the
-///   `schema-usage` native rule's `dead-model` check, replacing `zzop_rules_schema::usage::scan_store_map`'s
-///   own `<root>/src/domains/**` filesystem re-walk.
+/// - `store-binding-removed-v1`: the per-file store-binding recognizer (`extract_store_bound_models`) was
+///   removed — it recognized one project's `createStore`/`STORES`/`/domains/` convention, an app-specific
+///   environment that belongs in a Mode-B overlay, not native. `dead-model` now keys on the generic
+///   `identifier_counts` presence signal (see `zzop_rules_schema::usage`); a store binding is now injected
+///   as a generic `bound-model` attribute on the model `Symbol` (the entity-attribute channel), not a slot.
 /// - `write-sites-v1`: `SourceSymbol::write_sites` — per-symbol store-write site detection, computed once
 ///   here instead of `zzop_rules_http::http_scan` re-scanning each BFS-reached symbol's raw text on every
 ///   analysis run.
@@ -136,7 +137,7 @@ pub use lang::write_site::{
 ///   `examples/oazapfts-adapter`. Extraction output changes (fewer consumes recognized, a trailing
 ///   `QS.` interpolation now keys as an ordinary `{}` placeholder instead of being dropped), so cached
 ///   entries from before this marker must not be served as fresh.
-pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2+angular-httpclient-v1+str-concat-url-v1+loop-spans-v1+pathname-dispatch-v1+base-carrier-drop-v1+body-shape-v1+axios-defaults-base-v1+oazapfts-removed-v1";
+pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-removed-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2+angular-httpclient-v1+str-concat-url-v1+loop-spans-v1+pathname-dispatch-v1+base-carrier-drop-v1+body-shape-v1+axios-defaults-base-v1+oazapfts-removed-v1";
 
 use std::collections::{HashMap, HashSet};
 

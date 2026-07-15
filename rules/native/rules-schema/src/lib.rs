@@ -7,9 +7,12 @@
 //! - [`structural`]: the 9 structural rules, keyed off a model's own declaration (god-model,
 //!   missing-timestamps, redundant-index, float-money, stale-updated-at, temporal-as-string, fk-no-index,
 //!   nullable-fk, implicit-fk).
-//! - [`usage`]: usage-evidence collectors (per-file field-usage tokens, migration churn) and the rules
-//!   built on them (dead-model, dead-field, schema-churn). Store-binding evidence for `dead-model` is a
-//!   parser-side fact now (`zzop_parser_typescript::extract_store_bound_models`), not a collector here.
+//! - [`usage`]: usage-evidence collectors (per-file field-usage tokens) and the rules built on them
+//!   (dead-model, dead-field, schema-churn). `dead-model` keys on the generic vocab-free signal (is the
+//!   model name referenced in source?); store-binding/migration-churn are read off the generic
+//!   entity-attribute channel (`zzop_core::AttributeStore`, Symbol-keyed `bound-model`/`model-churn`) now
+//!   (the app-specific store-binding recognizer and migration-history FS-walk were removed as native
+//!   over-reach).
 //! - [`join`]: schema x usage JOIN rules (soft-delete-bypass, orderby-unindexed, enum-string-drift),
 //!   anchored at the query call site instead of the model declaration.
 //! - [`message`]: the human-facing prose for every rule id above.
@@ -52,5 +55,4 @@ pub use structural::{
 };
 pub use usage::{
     analyze_schema_with_usage, apply_churn_rule, cross_check_schema, field_usage_tokens,
-    scan_migration_churn,
 };

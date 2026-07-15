@@ -96,7 +96,7 @@ mod disable_hint_tests {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Finding {
-    /// Rule id (e.g. "java-security/taint", "graph/circular").
+    /// Rule id (e.g. "be-security/sql-taint", "graph/circular").
     pub rule_id: String,
     pub severity: Severity,
     pub file: String,

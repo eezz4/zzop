@@ -205,11 +205,12 @@ fn build_overlay(scan_root: &Path, scan_prefix: &str) -> NormalizedEnvelope {
             dynamic_imports: Vec::new(),
             used_names: Vec::new(),
             const_map_fragment: HashMap::new(),
-            trpc_router_fragments: Vec::new(),
+            procedure_router_fragments: Vec::new(),
             router_mount_fragments,
             io: IoFacts::default(),
             degraded: false,
             is_entry: false,
+            attributes: Vec::new(),
             loop_spans: Vec::new(),
         });
     }

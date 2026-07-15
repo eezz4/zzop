@@ -4,15 +4,16 @@
 //! and `findings` (a separate cache entry — see `CacheKey`). Defined here, not in `zzop-engine`, so
 //! this crate stays a leaf dependent of `zzop-core` only.
 //!
-//! `trpc_router_fragments` / `router_mount_fragments` / `wrapper_def_fragments` /
+//! `procedure_router_fragments` / `router_mount_fragments` / `wrapper_def_fragments` /
 //! `wrapper_call_fragments` round-trip the matching `zzop_core` types verbatim; those types live in
 //! `zzop-core` (not the TypeScript parser crate that produces them) so this crate never needs
 //! `zzop-parser-typescript` as a dependency.
 
 use serde::{Deserialize, Serialize};
 use zzop_core::{
-    ClassShapeFragment, ControllerPrefixRouteFragment, ImportMap, IoFacts, QueryCallSite, ReExport,
-    RouterMountFragment, SourceSymbol, TrpcRouterFragment, WrapperCallFragment, WrapperDefFragment,
+    ClassShapeFragment, ControllerPrefixRouteFragment, ImportMap, IoFacts, ProcedureRouterFragment,
+    QueryCallSite, ReExport, RouterMountFragment, SourceSymbol, WrapperCallFragment,
+    WrapperDefFragment,
 };
 
 /// One file's Common-IR slice, as produced by parse + per-file projection.
@@ -58,11 +59,11 @@ pub struct FileIrSlice {
     /// above applies.
     #[serde(default)]
     pub const_map_fragment: std::collections::HashMap<String, String>,
-    /// This file's tRPC router-fragment shape — mirrors `FileArtifact::trpc_router_fragments`. Same
+    /// This file's tRPC router-fragment shape — mirrors `FileArtifact::procedure_router_fragments`. Same
     /// round-trip-through-the-cache reasoning as `const_map_fragment` above.
     #[serde(default)]
-    pub trpc_router_fragments: Vec<TrpcRouterFragment>,
-    /// The provide-side sibling of `trpc_router_fragments` — mirrors
+    pub procedure_router_fragments: Vec<ProcedureRouterFragment>,
+    /// The provide-side sibling of `procedure_router_fragments` — mirrors
     /// `FileArtifact::router_mount_fragments`. Same round-trip reasoning.
     #[serde(default)]
     pub router_mount_fragments: Vec<RouterMountFragment>,
@@ -93,12 +94,6 @@ pub struct FileIrSlice {
     /// `enum-string-drift`) of call-site evidence for this file, same reasoning as `io` above.
     #[serde(default)]
     pub query_call_sites: Vec<QueryCallSite>,
-    /// This file's store-binding model names (`zzop_parser_typescript::extract_store_bound_models`) —
-    /// mirrors `FileArtifact::store_bound_models`. Must round-trip through the cache: dropping it on a
-    /// hit would silently starve the `schema-usage` native rule's `dead-model` check of this file's
-    /// binding evidence, same reasoning as `query_call_sites` above.
-    #[serde(default)]
-    pub store_bound_models: Vec<String>,
     /// This file's comment/string-stripped identifier tokens (`zzop_rules_schema::field_usage_tokens`) —
     /// mirrors `FileArtifact::field_usage_tokens`. Must round-trip through the cache: dropping it on a
     /// hit would silently starve the `schema-usage` native rule's `dead-field` check of this file's

@@ -22,12 +22,19 @@
 //! skipped. `bfs_reachable` can match the handler's own symbol id at depth 0, so a self-describing handler
 //! name alone is enough to clear this check.
 //!
-//! ## Precision limit
+//! ## Precision limit (and its injection completion)
 //! This is a vocabulary-based reachability check over the CALL graph only. Route-level middleware —
 //! `app.post("/x", requireAuth, handler)`, or a router-level `.use(authMiddleware)` — never appears as a
 //! call edge FROM the handler symbol itself, so it is invisible to this rule: a route guarded exclusively
-//! via middleware will false-positive. Severity starts at [`Severity::Info`] until this check becomes
-//! middleware-aware.
+//! via middleware will false-positive. Severity starts at [`Severity::Info`] because of this.
+//!
+//! Middleware is a per-project environment fact the native call-graph can't see — so, per zzop's design
+//! line (native sees the common case; everything else is injected), it is COMPLETED BY INJECTION rather
+//! than by ever-growing native middleware modeling. A producer/adapter that understands a project's
+//! middleware injects an [`AUTH_GUARDED_ATTR`] attribute on the guarded route (an `IoKey`) or router
+//! prefix (a `PathScope`) through the generic entity-attribute channel (`zzop_core::AttributeStore`,
+//! [`ScanMutatingRouteNoAuthInput::route_attr_store`]); the native vocab BFS and the injected evidence
+//! COMPOSE (either clears the route). This is one consumer of a general channel, not a bespoke auth path.
 //!
 //! ## Auth-acquisition exemption
 //! A provide whose PATH sits on the auth-acquisition surface is exempt entirely, never entering the BFS —
@@ -77,6 +84,15 @@ use zzop_core::is_test_file;
 /// Default guard-name vocabulary — see module doc "Guard vocabulary".
 pub const DEFAULT_AUTH_GUARD_PATTERN: &str = r"(?i)(auth|guard|verify|session|token|permission|acl|owner|admin|role|(?:has|can|check|require)access|is(?:local|dev|production))";
 
+/// The attribute key this rule reads off the generic entity-attribute channel (`zzop_core::AttributeStore`)
+/// to clear a route it cannot see a guard for. A producer/adapter that understands a project's middleware
+/// (route-level middleware, a router-wide `.use(authMiddleware)`, a framework guard the call-graph BFS
+/// can't reach) injects `{ target: <route IoKey | PathScope>, key: "auth-guarded", value: true }`. This is
+/// the injection completion of the "Precision limit" below — native sees the vocab guards it can, the
+/// adapter completes the middleware layer, and the two compose (either clears the route). This literal is
+/// RULE vocabulary, never the kernel's — the store is queried by key, agnostic to what it means.
+pub const AUTH_GUARDED_ATTR: &str = "auth-guarded";
+
 /// Auth-acquisition exemption, standalone tier — see module doc "Auth-acquisition exemption".
 const AUTH_ACQUISITION_STANDALONE_PATTERN: &str = r"(?i)/(auth|login|logout|signin|signup)(/|$)";
 
@@ -107,6 +123,11 @@ pub struct ScanMutatingRouteNoAuthInput<'a> {
     /// call edge — see "Precision limit" above). Pass an empty set for a non-Nest tree, or when the
     /// caller doesn't compute this exemption — old behavior (no exemption) is preserved.
     pub nest_guarded: &'a std::collections::HashSet<(String, u32)>,
+    /// Injected auth-guard evidence from the generic entity-attribute channel — a route whose
+    /// [`AUTH_GUARDED_ATTR`] attribute resolves truthy (an exact `IoKey`, or a `PathScope` prefix a
+    /// middleware guards) is exempt, the injection completion of the middleware "Precision limit". Pass an
+    /// empty store (`&AttributeStore::default()`) when nothing is injected — old behavior is preserved.
+    pub route_attr_store: &'a zzop_core::AttributeStore,
 }
 
 pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<Finding> {
@@ -123,6 +144,14 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
         .filter(|p| p.kind == "http")
         .filter(|p| !is_test_file(&p.file))
         .filter(|p| !input.nest_guarded.contains(&(p.file.clone(), p.line)))
+        // Injected auth-guard evidence (route-level middleware the call-graph BFS can't see) — see
+        // `AUTH_GUARDED_ATTR`. Exempt BEFORE the BFS, like `nest_guarded`: this IS how the route is guarded.
+        .filter(|p| {
+            !input
+                .route_attr_store
+                .route_attr(&p.kind, &p.key, AUTH_GUARDED_ATTR)
+                .is_some_and(zzop_core::attr_is_truthy)
+        })
         .filter(|p| {
             let Some((method, path)) = p.key.split_once(' ') else {
                 return false;
@@ -261,6 +290,7 @@ mod tests {
             symbol_graph: &Vec::new(),
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].file, "routes/api.ts");
@@ -287,6 +317,7 @@ mod tests {
             symbol_graph: &Vec::new(),
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert!(out.is_empty());
     }
@@ -301,6 +332,7 @@ mod tests {
             symbol_graph: &Vec::new(),
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert!(out.is_empty());
     }
@@ -322,6 +354,7 @@ mod tests {
             symbol_graph: &Vec::new(),
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert!(out.is_empty());
     }
@@ -344,6 +377,7 @@ mod tests {
             symbol_graph: &Vec::new(),
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert_eq!(out.len(), 1, "{:?}", out);
         let data = out[0].data.as_ref().unwrap();
@@ -369,6 +403,7 @@ mod tests {
             symbol_graph: &Vec::new(),
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert_eq!(out.len(), 1, "{:?}", out);
     }
@@ -391,6 +426,7 @@ mod tests {
             symbol_graph: &Vec::new(),
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert_eq!(out.len(), 1, "{:?}", out);
     }
@@ -412,6 +448,7 @@ mod tests {
             symbol_graph: &graph,
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert!(out.is_empty());
     }
@@ -431,6 +468,7 @@ mod tests {
             symbol_graph: &Vec::new(),
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert!(out.is_empty());
     }
@@ -445,6 +483,7 @@ mod tests {
             symbol_graph: &Vec::new(),
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert!(out.is_empty());
     }
@@ -459,6 +498,7 @@ mod tests {
             symbol_graph: &Vec::new(),
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert!(out.is_empty());
     }
@@ -479,6 +519,7 @@ mod tests {
             symbol_graph: &Vec::new(),
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert!(out.is_empty());
     }
@@ -498,6 +539,7 @@ mod tests {
             symbol_graph: &Vec::new(),
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert!(out.is_empty(), "{:?}", out);
     }
@@ -524,6 +566,7 @@ mod tests {
             symbol_graph: &graph,
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert!(out.is_empty(), "{:?}", out);
     }
@@ -555,6 +598,7 @@ mod tests {
             symbol_graph: &graph,
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert_eq!(out.len(), 1, "{:?}", out);
         assert_eq!(out[0].file, "routes/api.ts");
@@ -582,6 +626,7 @@ mod tests {
             symbol_graph: &graph,
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert!(out.is_empty(), "{:?}", out);
     }
@@ -606,6 +651,7 @@ mod tests {
             symbol_graph: &graph,
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert_eq!(out.len(), 1, "{:?}", out);
     }
@@ -630,6 +676,7 @@ mod tests {
             symbol_graph: &Vec::new(),
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &nest_guarded,
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert!(out.is_empty(), "{:?}", out);
     }
@@ -653,6 +700,7 @@ mod tests {
             symbol_graph: &Vec::new(),
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &nest_guarded,
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert_eq!(out.len(), 1, "{:?}", out);
     }
@@ -678,6 +726,7 @@ mod tests {
             symbol_graph: &Vec::new(),
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &nest_guarded,
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert_eq!(out.len(), 1, "{:?}", out);
         assert_eq!(out[0].line, 7);
@@ -699,7 +748,65 @@ mod tests {
             symbol_graph: &Vec::new(),
             auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
             nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &zzop_core::AttributeStore::default(),
         });
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn injected_auth_guarded_attribute_on_the_route_iokey_exempts_it() {
+        // Empty graph + a handler name with no guard vocabulary — the BFS alone clears nothing. An
+        // injected `auth-guarded` attribute on the route's exact IoKey (middleware the BFS can't see)
+        // exempts it, the injection completion of the middleware precision limit.
+        let provides = vec![provide("POST /items", "routes/api.ts", 3, "createItem")];
+        let symbols = vec![sym("routes/handlers.ts", "createItem", 1)];
+        let store = zzop_core::AttributeStore::from_attrs(vec![zzop_core::Attribute {
+            target: zzop_core::EntityRef::IoKey {
+                kind: "http".to_string(),
+                key: "POST /items".to_string(),
+            },
+            key: AUTH_GUARDED_ATTR.to_string(),
+            value: serde_json::json!(true),
+        }]);
+        let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+            io_provides: &provides,
+            symbols: &symbols,
+            symbol_graph: &Vec::new(),
+            auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+            nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &store,
+        });
+        assert!(out.is_empty(), "{:?}", out);
+    }
+
+    #[test]
+    fn injected_pathscope_auth_guarded_exempts_every_route_under_the_prefix() {
+        // A router-level middleware guards `/admin/*`; injected as a PathScope, it clears both routes
+        // under it without naming each — while a route OUTSIDE the scope still fires.
+        let provides = vec![
+            provide("DELETE /admin/users/{}", "routes/api.ts", 3, "deleteUser"),
+            provide("POST /public/signup-lite", "routes/api.ts", 5, "createLite"),
+        ];
+        let symbols = vec![
+            sym("routes/handlers.ts", "deleteUser", 1),
+            sym("routes/handlers.ts", "createLite", 2),
+        ];
+        let store = zzop_core::AttributeStore::from_attrs(vec![zzop_core::Attribute {
+            target: zzop_core::EntityRef::PathScope {
+                prefix: "/admin".to_string(),
+            },
+            key: AUTH_GUARDED_ATTR.to_string(),
+            value: serde_json::json!(true),
+        }]);
+        let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+            io_provides: &provides,
+            symbols: &symbols,
+            symbol_graph: &Vec::new(),
+            auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+            nest_guarded: &std::collections::HashSet::new(),
+            route_attr_store: &store,
+        });
+        assert_eq!(out.len(), 1, "{:?}", out);
+        assert_eq!(out[0].data.as_ref().unwrap()["path"], "/public/signup-lite");
     }
 }

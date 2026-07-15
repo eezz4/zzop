@@ -41,10 +41,11 @@ whether the rule is common or environment-specific).
   never copied.
 - **Extensibility**: same DSL schema for first-party and third-party — a user can drop in a JSON rule.
 - **Why DSL over WASM?** Redistribution is needed regardless, so the DSL gives the same build-free / platform-independent benefits while wasmtime, the ABI, the boundary cost, and the ~3x slowdown all disappear. (Biome GritQL / ast-grep / Semgrep model.)
-- **Status**: 16 packs shipped (`rules/dsl/<pack>/<pack>.json`), most with rules implemented, a handful
-  still `"rules": []` stubs. `java-security` is fully implemented, including `cmd-injection` (a
-  `method-scan` co-occurrence of `exec`/`ProcessBuilder` with string concatenation — no Java CST needed
-  after all). Full pack/rule list: [`docs/rules/catalog.md`](../docs/rules/catalog.md).
+- **Status**: 14 packs shipped (`rules/dsl/<pack>/<pack>.json`), most with rules implemented, a handful
+  still `"rules": []` stubs. Java security-concern rules live in `be-security` (concern-named, not
+  language-named), including `cmd-injection` (a `method-scan` co-occurrence of `exec`/`ProcessBuilder`
+  with string concatenation — no Java CST needed after all). Full pack/rule list:
+  [`docs/rules/catalog.md`](../docs/rules/catalog.md).
 
 ### DSL matchers (`core::dsl::Matcher`)
 - Shipped: `line-scan`, `method-scan`, `symbol-scan`, `io-scan`, each with a growing set of v2/v3 fields
