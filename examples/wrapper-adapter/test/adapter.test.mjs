@@ -1,11 +1,10 @@
 // Snapshot test: runs adapter.mjs as a subprocess against a minimal, inline-written fixture tree and
 // deep-equals the parsed envelope JSON against a committed expected object. Fixture exercises
 // wrapper-adapter's normalization edge cases (a `#fragment` literal, a base-relative literal with no
-// leading slash) — the adapter now delegates ALL of these to adapter-kit's
-// `resolveConsumeKey`/`normalizeConsumeKey` (matching `zzop_core`/`parser-typescript`'s own consume-key
-// semantics exactly), so this is a parity-WITH-the-kit guard now, not a parity-divergence guard: a
-// `#fragment` suffix drops like a `?query` suffix, and a base-relative literal (no leading `/`) resolves
-// via `baseRelativePath` instead of being skipped.
+// leading slash) — all delegated to adapter-kit's `resolveConsumeKey`/`normalizeConsumeKey` (matching
+// `zzop_core`/`parser-typescript`'s own consume-key semantics exactly), so this guards parity WITH
+// the kit: a `#fragment` suffix drops like a `?query` suffix, and a base-relative literal (no leading
+// `/`) resolves via `baseRelativePath`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -17,12 +16,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADAPTER = path.join(__dirname, '..', 'adapter.mjs');
 
-// Post-refactor, every file entry goes through adapter-kit's EnvelopeBuilder, which always emits the
-// full FileProjection shape (symbols/imports/re_exports/dynamic_imports/used_names/
-// const_map_fragment/procedure_router_fragments/router_mount_fragments/degraded/is_entry, all at their zero
-// values when unset) instead of the pre-refactor adapter's sparse `{path, loc, io}` object. Verified
-// (pre-refactor run of this same test) that this padding is the ONLY diff — every io entry below is
-// byte-identical to the pre-refactor output. Flagged, documented consequence of adopting the kit.
+// adapter-kit's EnvelopeBuilder always emits the full FileProjection shape (all fields present, at
+// their zero values when unset); this helper pads the sparse expectation to that shape.
 function fileProjection({ path: p, loc, io }) {
   return {
     path: p,
@@ -88,7 +83,7 @@ test('wrapper-adapter: envelope matches committed snapshot (incl. normalization 
     assert.deepEqual(envelope, {
       format: 'zzop-normalized-ast',
       version: 1,
-      parser: 'wrapper-adapter',
+      parser: 'wrapper-adapter/1',
       source: 'web',
       files: [
         fileProjection({
@@ -101,11 +96,11 @@ test('wrapper-adapter: envelope matches committed snapshot (incl. normalization 
               { kind: 'http', key: 'POST /users/login', file: 'src/service.ts', line: 8 },
               { kind: 'http', key: 'GET /articles/{}/comments', file: 'src/service.ts', line: 12 },
               { kind: 'http', key: 'GET /articles/{}', file: 'src/service.ts', line: 16 },
-              // baseRelative(): a literal with NO leading slash now resolves via `resolveConsumeKey`'s
-              // `baseRelativePath` branch — parity fix: was previously skipped entirely.
+              // baseRelative(): a literal with NO leading slash resolves via `resolveConsumeKey`'s
+              // `baseRelativePath` branch.
               { kind: 'http', key: 'GET /users/login', file: 'src/service.ts', line: 20 },
-              // withHash(): a trailing `#fragment` now DROPS, same as a `?query` suffix
-              // (`normalizeConsumeKey` splits on `[?#]`) — parity fix: was previously kept in the key.
+              // withHash(): a trailing `#fragment` drops, same as a `?query` suffix
+              // (`normalizeConsumeKey` splits on `[?#]`).
               { kind: 'http', key: 'GET /articles', file: 'src/service.ts', line: 24 },
             ],
           },

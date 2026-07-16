@@ -22,6 +22,14 @@ use super::split_external_key;
 /// Fanout threshold: 3 distinct files calling the same external host directly. Two files sharing a host is
 /// common and unremarkable; three or more is where inlining the call stops scaling and a shared client
 /// module starts paying for itself.
+///
+/// Do not unify or pin (policy inventory T3 — coincidental equality): S1's `MIN_FILES` (engine
+/// framework_silence) and `SEAMS_MIN_FILES` (zzop-metrics) are also 3, and so is the pinned
+/// `MIN_PREFIX_DRIFT_GROUP`/`MIN_FOREIGN_UNPROVIDED_GROUP` fold-threshold pair — but this 3 is a
+/// remedy-economics judgment (the fanout at which a shared client module pays for itself), not a
+/// disclosure evidence floor, a metric eligibility floor, or the "2 is coincidence, 3+ is a pattern"
+/// same-cause fold policy. It may move for noise tuning (e.g. large monorepos where several files
+/// legitimately touch one host) without re-justifying any of those.
 const FANOUT_MIN_FILES: usize = 3;
 
 struct Site<'a> {

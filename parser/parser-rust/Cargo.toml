@@ -1,0 +1,10 @@
+[package]
+name = "zzop-parser-rust"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+syn = { version = "2", features = ["full", "visit"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
+zzop-core = { version = "0.0.0", path = "../../crates/core" }

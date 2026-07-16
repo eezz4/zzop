@@ -1,4 +1,4 @@
-//! Ad hoc verification harness for `zzop_parser_java::extract_http_provides_project` (the
+//! Ad hoc verification harness for `zzop_parser_java_21::extract_http_provides_project` (the
 //! whole-project Spring HTTP route pass — see that module's doc). Not wired into the fused per-file
 //! engine pipeline (see `project.rs`), so this walks a `.java` tree directly and calls the parser
 //! crate's entry point itself, rather than going through `analyze_tree`.
@@ -43,7 +43,7 @@ fn main() {
     }
     eprintln!("java files scanned: {}", files.len());
 
-    let report = zzop_parser_java::extract_http_provides_project(&files);
+    let report = zzop_parser_java_21::extract_http_provides_project(&files);
     println!("provides_total={}", report.provides.len());
     println!(
         "skipped_unresolved_prefix={}",

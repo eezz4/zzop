@@ -1,11 +1,10 @@
 // Snapshot test: runs adapter.mjs as a subprocess against a minimal, inline-written fixture tree and
 // deep-equals the parsed envelope JSON against a committed expected object. Fixture exercises the
 // react-query-adapter's normalization edge cases (external https URL, `:param` colon segment,
-// base-relative literal) — the adapter now delegates ALL of these to adapter-kit's
-// `resolveConsumeKey`/`normalizeProvideKey` (matching `zzop_core`/`parser-typescript`'s own consume-key
-// semantics exactly), so this is a parity-WITH-the-kit guard now, not a parity-divergence guard: an
-// `https://` literal keys verbatim as an external consume, and a `:param` colon segment collapses to
-// `{}` the same as a `{param}` template placeholder.
+// base-relative literal) — all delegated to adapter-kit's `resolveConsumeKey`/`normalizeProvideKey`
+// (matching `zzop_core`/`parser-typescript`'s own consume-key semantics exactly), so this guards
+// parity WITH the kit: an `https://` literal keys verbatim as an external consume, and a `:param`
+// colon segment collapses to `{}` the same as a `{param}` template placeholder.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -17,12 +16,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADAPTER = path.join(__dirname, '..', 'adapter.mjs');
 
-// Post-refactor, every file entry goes through adapter-kit's EnvelopeBuilder, which always emits the
-// full FileProjection shape (symbols/imports/re_exports/dynamic_imports/used_names/
-// const_map_fragment/procedure_router_fragments/router_mount_fragments/degraded/is_entry, all at their zero
-// values when unset) instead of the pre-refactor adapter's sparse `{path, loc, io}` object. Verified
-// (pre-refactor run of this same test) that this padding is the ONLY diff — every io entry below is
-// byte-identical to the pre-refactor output. Flagged, documented consequence of adopting the kit.
+// adapter-kit's EnvelopeBuilder always emits the full FileProjection shape (all fields present, at
+// their zero values when unset); this helper pads the sparse expectation to that shape.
 function fileProjection({ path: p, loc, io }) {
   return {
     path: p,
@@ -100,12 +95,10 @@ test('react-query-adapter: envelope matches committed snapshot (incl. normalizat
               { kind: 'http', key: 'GET /articles/{}', file: 'src/articles.ts', line: 4 },
               { kind: 'http', key: 'GET /tags', file: 'src/articles.ts', line: 8 },
               { kind: 'http', key: 'GET /articles{}', file: 'src/articles.ts', line: 12 },
-              // useExternal(): an absolute https:// literal now keys VERBATIM as an external consume
-              // (`resolveConsumeKey`'s `isExternalUrl` branch) — parity fix: was previously dropped
-              // entirely by the hand-rolled normalize().
+              // useExternal(): an absolute https:// literal keys VERBATIM as an external consume
+              // (`resolveConsumeKey`'s `isExternalUrl` branch).
               { kind: 'http', key: 'GET https://api.example.com/v1/users', file: 'src/articles.ts', line: 16 },
-              // useColonParam(): `:slug` now COLLAPSES to `{}` (`normalizeProvideKey`'s `RE_PARAM`) —
-              // parity fix: was previously kept literal by the hand-rolled normalize().
+              // useColonParam(): `:slug` collapses to `{}` (`normalizeProvideKey`'s `RE_PARAM`).
               { kind: 'http', key: 'GET /articles/{}/comments', file: 'src/articles.ts', line: 20 },
               { kind: 'http', key: 'GET /users/login', file: 'src/articles.ts', line: 24 },
             ],

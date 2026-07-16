@@ -102,6 +102,77 @@ function collectWarnings(output) {
 }
 
 /**
+ * Collect the positive pack-load confirmation (`packsLoaded`) from a parsed native output. Single-tree:
+ * the top-level array as-is (already id-sorted by the engine). Multi-tree: entries IDENTICAL across
+ * trees (same id, rules, source — the common one-config case) merge into one; a same-id entry that
+ * DIFFERS between trees (each tree may declare its own packsDir/packDefs) is kept per tree, tagged
+ * with that tree's `sourceId`, so the summary never reports values that match no actual tree (same
+ * per-tree-truth rule as `collectWarnings`). Re-sorted by id. Returns `null` when NO packsLoaded field
+ * exists anywhere (an output from an older engine), so callers can tell "engine did not report" apart
+ * from the real zero-packs `[]` signal.
+ *
+ * @param {object} output  parsed native output
+ * @returns {object[] | null}
+ */
+function collectPacksLoaded(output) {
+  if (!output || typeof output !== 'object') return null;
+  if (Array.isArray(output.trees)) {
+    let seenField = false;
+    const byId = new Map();
+    for (const tree of output.trees) {
+      const arr = tree && tree.output && tree.output.packsLoaded;
+      if (!Array.isArray(arr)) continue;
+      seenField = true;
+      const sourceId = tree && tree.sourceId;
+      for (const p of arr) {
+        const id = String((p && p.id) || '');
+        const entries = byId.get(id) || [];
+        const same = (a, b) =>
+          (Number(a && a.rules) || 0) === (Number(b && b.rules) || 0) &&
+          String((a && a.source) || '') === String((b && b.source) || '');
+        if (!entries.some((e) => same(e, p))) entries.push({ ...p, sourceId });
+        byId.set(id, entries);
+      }
+    }
+    if (!seenField) return null;
+    // An id whose every occurrence is identical drops the tag (it is tree-independent truth).
+    return [...byId.keys()].sort().flatMap((id) => {
+      const entries = byId.get(id);
+      if (entries.length === 1) {
+        const { sourceId: _dropped, ...rest } = entries[0];
+        return [rest];
+      }
+      return entries;
+    });
+  }
+  return Array.isArray(output.packsLoaded) ? output.packsLoaded : null;
+}
+
+/**
+ * One-line pack-load confirmation for the terminal (`--all` only): `N packs loaded (M rules): id1,
+ * id2, ...`. `0 packs loaded (0 rules)` (no id list) is a real, honest state — the positive
+ * complement of the engine's zero-packs warning.
+ * @param {object[]} packs  collectPacksLoaded's non-null result
+ * @param {boolean} color
+ * @returns {string}
+ */
+function packsLoadedLine(packs, color) {
+  const rules = packs.reduce((n, p) => n + (Number(p && p.rules) || 0), 0);
+  const head = `${packs.length} pack${packs.length === 1 ? '' : 's'} loaded (${rules} rule${
+    rules === 1 ? '' : 's'
+  })`;
+  // A `sourceId`-tagged entry is a per-tree variant (see collectPacksLoaded) — the tag disambiguates
+  // two same-id entries in the list.
+  const ids = packs
+    .map((p) => {
+      const id = String((p && p.id) || '');
+      return p && p.sourceId ? `${id} [${p.sourceId}]` : id;
+    })
+    .join(', ');
+  return paint(ids ? `${head}: ${ids}` : head, ANSI.dim, color);
+}
+
+/**
  * Return a shallow-cloned output with all findings arrays filtered to `severityRank >= minSeverity`'s
  * threshold. Display-only helper — never touches exit-code computation, which must run on the
  * unfiltered findings. Filters, in order: single-tree top-level `findings`, each `trees[].output.findings`
@@ -261,10 +332,14 @@ function formatPretty(output, opts = {}) {
   const color = Boolean(opts.color);
   const showAllInfo = Boolean(opts.showAllInfo);
   const { findings, fileCount } = collectFindings(filterOutputBySeverity(output, opts.minSeverity));
+  // Positive pack-load confirmation, `--all` only (the default view stays quiet — the field is always
+  // in the JSON output regardless). `null` = the output predates the field; print nothing.
+  const packs = showAllInfo ? collectPacksLoaded(output) : null;
 
   if (findings.length === 0) {
     const ok = paint('No findings.', ANSI.dim, color);
-    return `${ok}\n\n${summaryFooter(findings, fileCount, color)}`;
+    const packsBlock = packs ? `${packsLoadedLine(packs, color)}\n` : '';
+    return `${ok}\n\n${packsBlock}${summaryFooter(findings, fileCount, color)}`;
   }
 
   // Split info (foldable, hygiene-tier) from elevated (warning/critical/other — always shown inline).
@@ -317,6 +392,9 @@ function formatPretty(output, opts = {}) {
     lines.push('');
   }
 
+  if (packs) {
+    lines.push(packsLoadedLine(packs, color));
+  }
   lines.push(summaryFooter(findings, fileCount, color));
   return lines.join('\n');
 }
@@ -409,7 +487,9 @@ function computeExitCode(findings, failOn) {
 
 module.exports = {
   collectFindings,
+  collectPacksLoaded,
   collectWarnings,
+  packsLoadedLine,
   groupByFile,
   countBySeverity,
   splitMessage,

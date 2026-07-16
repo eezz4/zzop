@@ -168,6 +168,12 @@ function analyzeTrees(configJson) {
 }
 
 function analyzeEnvelope(envelopeJson, configJson) {
+  // The engine facade ALSO seeds the bundled packs as inline `packDefs` on every envelope analysis
+  // (host-consistency default — see docs/modules/napi.md "Defaults"); this wrapper's on-disk
+  // `packsDir` prepend stays on top of that so a live rules/dsl edit in a source checkout is never
+  // shadowed by the compile-time embedded copy (a directory pack wins every id collision). An
+  // explicit `packsDir: null` still disables the bundled seed and every pack directory (caller
+  // `packDefs`, which this wrapper never sends, stay honored) — the facade honors the same opt-out.
   return native.analyzeEnvelope(envelopeJson, withDefaultedConfigJson(configJson, { includeGit: false }));
 }
 
@@ -179,5 +185,12 @@ module.exports = {
   // this call takes no `configJson` at all (see `crates/facade/src/lib.rs`'s `validate_envelope_only_json`
   // doc), so there is no `packsDir`/`git` default to apply.
   validateEnvelopeOnly: native.validateEnvelopeOnly,
+  // Pure pass-through for the same reason: a pack JSON text in, a {valid, issues} report out —
+  // structure-only pre-load validation (the loader's own judgments), no config, no analysis.
+  validateRulePackOnly: native.validateRulePackOnly,
+  // Pure pass-through too: post-processing over an already-produced analysis output — its two
+  // arguments are the OUTPUT of an analyze call and a tiny `{pattern}` query, neither of which is a
+  // config that could take `packsDir`/`git` defaults.
+  queryIo: native.queryIo,
   version: native.version,
 };

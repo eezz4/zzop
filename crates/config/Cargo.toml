@@ -3,7 +3,9 @@
 # config->facade-request mapper -> `trees: "auto"` workspace expansion. A shared rlib so every native
 # host maps configs identically — the zzop-mcp binary today, and the binary's own CLI surface if it
 # subsumes the JS CLI later (mcp-distribution decision, "MCP-first, CLI later"). The JS CLI keeps its
-# own JS implementation for Node users; parity is pinned by comparing emitted request JSON.
+# own JS implementation for Node users; parity is pinned by comparing emitted request JSON against the
+# committed docs/contracts/config-parity.fixture.json — tests/config_parity.rs here and
+# packages/cli/test/config-parity.test.js on the JS side both replay every fixture case.
 [package]
 name = "zzop-config"
 version.workspace = true

@@ -1,0 +1,155 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://zzop.dev/schema/rule-pack.v1.json",
+  "title": "zzop DSL rule pack v1",
+  "description": "The DSL rule-pack contract (docs/rules/dsl-reference.md; crates/core/src/dsl/def.rs). Field names, required-ness, and defaults below mirror the Rust serde types field-for-field: a field is 'required' here exactly when its Rust struct field has neither #[serde(default)] nor an Option type; DSL pack fields are snake_case (packs are DSL-authored data files, not part of the camelCase JS-facing config boundary). Machine-check a pack without a schema validator via the validate_rule_pack MCP tool / `zzop pack validate <path>` — both run the engine's own loader judgments (structure only, never rule-quality semantics).",
+  "$comment": "TOLERANCE CONTRACT: additionalProperties is true at every object level — the engine's serde derive silently ignores fields it does not recognize (no deny_unknown_fields anywhere in dsl/def.rs), same tolerant-input philosophy as the envelope schema (docs/adapters/envelope.schema.json). A pack authored against a FUTURE additive field still loads on an older engine. Only an incompatible revision of the matcher/pack shape itself bumps schema_version (see pack_loader::SUPPORTED_DSL_SCHEMA_VERSION's gate).",
+  "type": "object",
+  "required": ["id", "rules"],
+  "additionalProperties": true,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Pack id — the prefix of every finding's ruleId (`<pack id>/<rule id>`) and the unit of same-id collision replacement across packDefs/packsDir layers."
+    },
+    "framework": {
+      "type": "string",
+      "default": "any",
+      "description": "Declared target environment (\"any\" | \"react\" | \"prisma\" | ...). Currently informational — carried on RuleMeta.framework, but no engine code path filters on it today (see docs/rules/dsl-reference.md's Pack shape table). Default \"any\"."
+    },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "DSL schema version this pack was authored against. Defaults to 1 when absent; the loader rejects a pack whose version exceeds the engine's SUPPORTED_DSL_SCHEMA_VERSION (currently 1) rather than silently misinterpreting newer fields."
+    },
+    "rules": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/rule" },
+      "description": "The pack's rules, evaluated in array order."
+    }
+  },
+  "definitions": {
+    "rule": {
+      "type": "object",
+      "required": ["id", "severity", "message", "matcher"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "description": "Rule id — combined with the pack id as `<pack id>/<rule id>` in findings." },
+        "severity": {
+          "enum": ["critical", "warning", "info"],
+          "description": "Finding severity (zzop_core::Severity, lowercase serde form)."
+        },
+        "message": { "type": "string", "description": "Human-facing finding message (cause / fix hint)." },
+        "matcher": { "$ref": "#/definitions/matcher" },
+        "suppress_marker": {
+          "type": ["string", "null"],
+          "description": "Inline ok-marker: a `// <marker>` comment on the finding's line or the line above suppresses it (`-- <marker>` in .sql files). Absent or null = no inline suppression."
+        }
+      }
+    },
+    "matcher": {
+      "description": "Dispatched on the `type` tag — one of the four matcher kinds (zzop_core::dsl::Matcher, kebab-case). line-scan/method-scan read source text (never run in envelope mode); symbol-scan/io-scan query the projected IR (run everywhere).",
+      "oneOf": [
+        { "$ref": "#/definitions/lineScan" },
+        { "$ref": "#/definitions/methodScan" },
+        { "$ref": "#/definitions/symbolScan" },
+        { "$ref": "#/definitions/ioScan" }
+      ]
+    },
+    "labeledPattern": {
+      "type": "object",
+      "required": ["pattern", "label"],
+      "additionalProperties": true,
+      "properties": {
+        "pattern": { "type": "string", "description": "Regex (Rust `regex` crate syntax — no lookaround/backreferences). A non-compiling pattern silently no-ops its rule; `zzop pack validate` names it." },
+        "label": { "type": "string", "description": "Classification label — lands in the finding's `data.label` (line-scan `any`) or names the pattern for `trigger`/veto roles (method-scan)." }
+      }
+    },
+    "lineScan": {
+      "type": "object",
+      "required": ["type", "file_pattern"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "const": "line-scan", "description": "Per-line regex scan over source text. Use either `line_pattern` (single) or `any` (labeled alternatives, first match per line wins)." },
+        "file_pattern": { "type": "string", "description": "Target file-path regex (e.g. `(?i)\\.(java|jsp)$`) — the rule only scans matching files." },
+        "require_file": { "type": ["string", "null"], "description": "Cheap pre-skip: only scan a file whose whole text matches this regex. Absent = always scan." },
+        "require_file_all": { "type": "array", "default": [], "items": { "type": "string" }, "description": "Additional pre-skip regexes, ALL of which must match the file text (short-circuits on first miss)." },
+        "require_file_absent": { "type": "array", "default": [], "items": { "type": "string" }, "description": "Negated pre-skip: if ANY of these matches the whole file text, the rule skips the file entirely (\"flag X only when there is no Y anywhere in the file\")." },
+        "skip_comment_lines": { "type": "boolean", "default": false, "description": "Skip lines whose trimmed start begins with `//`, `*`, or `/*`." },
+        "line_pattern": { "type": ["string", "null"], "description": "Regex that flags a line (single pattern, no label). Mutually alternative with `any`." },
+        "any": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/definitions/labeledPattern" },
+          "description": "Labeled alternatives — first match per line wins, its label lands in the finding's `data.label`."
+        },
+        "exclude_pattern": { "type": ["string", "null"], "description": "A line matching the main pattern is skipped when it ALSO matches this regex (per-line veto)." },
+        "file_exclude_pattern": { "type": ["string", "null"], "description": "Path regex — a file whose relative path matches is skipped entirely (the escape hatch for \"this extension but NOT under scripts/\")." },
+        "snippet_max": { "type": "integer", "default": 160, "description": "Max snippet length in the finding (long lines truncate)." }
+      }
+    },
+    "methodScan": {
+      "type": "object",
+      "required": ["type", "file_pattern", "patterns", "trigger"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "const": "method-scan", "description": "Multi-pattern co-occurrence within one symbol's body span (e.g. exec + string concatenation in the SAME method). Needs parser-projected symbol spans; files without them are silently skipped." },
+        "file_pattern": { "type": "string", "description": "Target file-path regex — the rule only scans matching files." },
+        "require_file": { "type": ["string", "null"], "description": "Cheap pre-skip: only scan a file whose whole text matches this regex. Absent = always scan." },
+        "require_file_all": { "type": "array", "default": [], "items": { "type": "string" }, "description": "Additional pre-skip regexes, ALL of which must match the file text." },
+        "require_file_absent": { "type": "array", "default": [], "items": { "type": "string" }, "description": "Negated pre-skip: if ANY of these matches the whole file text, the rule skips the file entirely." },
+        "skip_comment_lines": { "type": "boolean", "default": false, "description": "Skip comment lines (`//`, `*`, `/*` starts) when testing any pattern." },
+        "patterns": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/labeledPattern" },
+          "description": "ALL of these must match somewhere within one symbol's body span for a finding."
+        },
+        "trigger": { "type": "string", "description": "The `patterns[].label` whose first (top-down) match supplies the finding's line and snippet." },
+        "trigger_in_loop": { "type": "boolean", "default": false, "description": "Structural gate: a trigger match only counts when it falls inside one of the file's projected loop spans (loop statement or array-iteration callback body). Files with no loop spans can never satisfy the trigger (graceful degrade)." },
+        "absent": {
+          "type": "array",
+          "default": [],
+          "items": { "$ref": "#/definitions/labeledPattern" },
+          "description": "Vetoes: after every `patterns` entry is satisfied, the finding is dropped if ANY of these also matches a line in the SAME span (e.g. a guarding try/catch or `$transaction(...)` wrapper)."
+        },
+        "file_exclude_pattern": { "type": ["string", "null"], "description": "Path regex — a file whose relative path matches is skipped entirely." },
+        "snippet_max": { "type": "integer", "default": 160, "description": "Max snippet length in the finding (long lines truncate)." }
+      }
+    },
+    "symbolScan": {
+      "type": "object",
+      "required": ["type", "file_pattern"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "const": "symbol-scan", "description": "Query over a file's projected symbol declarations (naming-convention / banned-export style rules). Filters AND together. Runs in envelope mode too." },
+        "file_pattern": { "type": "string", "description": "Target file-path regex — narrows the file set before symbol filters apply." },
+        "kind": {
+          "enum": ["function", "class", "const", "type", "interface", null],
+          "description": "Restrict to one symbol kind (zzop_core::SourceSymbolKind, lowercase serde form). Absent = any kind."
+        },
+        "name_pattern": { "type": ["string", "null"], "description": "Regex on the symbol name — fires on a match, or on a NON-match under `negate: true`." },
+        "exported": { "type": ["boolean", "null"], "description": "Restrict to exported (`true`) or non-exported (`false`) symbols. Absent = both." },
+        "negate": { "type": "boolean", "default": false, "description": "Flips `name_pattern` from \"must match\" to \"must not match\" (e.g. \"every exported component must be PascalCase\"). With no `name_pattern`, every symbol passes." }
+      }
+    },
+    "ioScan": {
+      "type": "object",
+      "required": ["type", "file_pattern", "direction"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "const": "io-scan", "description": "Query over a file's projected IoFacts (boundary-convention rules, e.g. \"every HTTP endpoint must be versioned\"). Filters AND together. Runs in envelope mode too." },
+        "file_pattern": { "type": "string", "description": "Target file-path regex — narrows the file set before io filters apply." },
+        "direction": {
+          "enum": ["provides", "consumes", "any"],
+          "description": "Which side(s) of the file's IoFacts to query (zzop_core::IoDirection, lowercase serde form)."
+        },
+        "kind": {
+          "type": ["string", "null"],
+          "description": "Exact match against the io entry's kind string (open vocabulary — e.g. \"http\", \"db-table\", \"env\", \"topic\"). Absent = any kind."
+        },
+        "key_pattern": { "type": ["string", "null"], "description": "Regex on the entry's normalized key — fires on a match, or on a NON-match under `negate: true`. An entry with an unresolved (null) key never matches; under `negate: true` that makes it a hit." },
+        "negate": { "type": "boolean", "default": false, "description": "Flips `key_pattern` from \"must match\" to \"must not match\"." }
+      }
+    }
+  }
+}

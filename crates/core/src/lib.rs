@@ -44,9 +44,9 @@ pub use graph::{
     ComponentEdge, ConnectedComponentsResult,
 };
 pub use io::{
-    http_consume_interface_key, http_interface_key, link_cross_layer_io, AmbiguousConsume,
-    ConsumeBodyShape, CrossLayerEdge, CrossLayerResult, IoConsume, IoFacts, IoKind, IoProvide,
-    LinkOptions, ProvideBodyField, ProvideBodyShape, SourceIo, HTTP_KEY_VERBS,
+    http_consume_interface_key, http_interface_key, link_cross_layer_io, normalize_http_path,
+    AmbiguousConsume, ConsumeBodyShape, CrossLayerEdge, CrossLayerResult, IoConsume, IoFacts,
+    IoKind, IoProvide, LinkOptions, ProvideBodyField, ProvideBodyShape, SourceIo, HTTP_KEY_VERBS,
 };
 pub use ir::{
     ApiEndpoint, CommonIr, DepGraph, ImportBinding, ImportMap, MinimalIr, NonIdempotentKind,
@@ -60,7 +60,10 @@ pub use normalized::{
     validate_envelope, FileProjection, NormalizedEnvelope, NORMALIZED_AST_FORMAT,
     SUPPORTED_NORMALIZED_AST_VERSION,
 };
-pub use pack_loader::{applies_to, load_dsl_packs, LoadResult, PackLoadError};
+pub use pack_loader::{
+    applies_to, check_dsl_schema_version, load_dsl_packs, pack_regex_issues, parse_dsl_pack,
+    LoadResult, PackLoadError,
+};
 pub use paths::is_test_file;
 pub use registry::{
     apply_severity_override, global_exclude_matches_path, is_enabled, is_suppressed,

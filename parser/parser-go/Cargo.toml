@@ -1,0 +1,18 @@
+[package]
+name = "zzop-parser-go"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# Grammar pinned EXACT (0.x — no semver guarantee across even patch releases; a node-kind rename
+# must be an explicit, reviewed bump, never a silent `cargo update`). See this crate's
+# `node_kinds_are_pinned_to_the_grammar` test — a rename would fail loudly, not silently extract
+# nothing.
+tree-sitter-go = "=0.25.0"
+# Runtime pinned to the minimal version tree-sitter-go 0.25.0 itself was built/tested against (its
+# own Cargo.toml dev-dependency, and its doc comment's docs.rs link, both name 0.25.8 — see this
+# crate's module doc for the full trail) with a caret requirement (">=0.25.8, <0.26"), the same
+# "minimal compatible, not exact" discipline the task brief calls for on a runtime crate.
+tree-sitter = "0.25.8"
+zzop-core = { version = "0.0.0", path = "../../crates/core" }

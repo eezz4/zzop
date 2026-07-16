@@ -1,21 +1,8 @@
 #!/usr/bin/env node
-// Reference "Mode B" adapter for zzop: recognizes a project's router-level middleware auth
-// registrations (an Express/Hono-style `app.use('/admin', requireAuth)`) and injects `auth-guarded`
-// PathScope attributes through the generic entity-attribute channel — evidence the native call-graph
-// BFS cannot see on its own.
-//
-// WHY THIS EXISTS
-// `mutating-route-no-auth` (zzop_rules_http::mutating_route_no_auth) walks the call graph FROM a
-// mutating route's handler, looking for a callee whose name looks like an auth guard. A router-level
-// `.use(requireAuth)` middleware guards every route mounted under it WITHOUT ever being called BY the
-// handler itself — it's a registration-time wiring fact, not a call edge — so it is structurally
-// invisible to that BFS, and a route guarded only this way false-positives (Info severity, precisely
-// because of this gap). Per zzop's direction (native sees the common in-body case; a per-project
-// middleware CONVENTION is completed by injection rather than by ever teaching the engine every
-// framework's middleware vocabulary natively), this adapter recognizes ONE common, concrete shape and
-// injects its completion: `{ target: { pathScope: { prefix } }, key: "auth-guarded", value: true }`.
-// The native BFS and this injected evidence COMPOSE — either one clears the route
-// (`zzop_core::AttributeStore::route_attr`, checked before the BFS runs at all).
+// Reference "Mode B" adapter for zzop: recognizes router-level `app.use('<prefix>', <guard>)` auth
+// registrations and injects `{ target: { pathScope: { prefix } }, key: "auth-guarded", value: true }`
+// attributes through the generic entity-attribute channel — evidence `mutating-route-no-auth`'s
+// call-graph BFS cannot see. Rationale and contract points: README.md.
 //
 // USAGE:  node adapter.mjs --root <root> > auth.json
 import { readFileSync } from 'node:fs';
@@ -41,7 +28,9 @@ const USE_AUTH_RE = /\b(?:app|router)\.use\(\s*(['"])([^'"]+)\1\s*,\s*([A-Za-z_$
 // Guard-name vocabulary for the second `.use()` argument — matched against the whole identifier.
 const GUARD_NAME_RE = /auth|guard|requireAuth|isAuthenticated/i;
 
-const builder = new EnvelopeBuilder({ parser: 'auth-overlay-adapter/1', source: 'web' });
+// `source` matches the `sourceId` of the tree this overlay attaches to in the README example. For an
+// attributes-only overlay (no io) the engine treats a mismatch as inert, but keep them aligned.
+const builder = new EnvelopeBuilder({ parser: 'auth-overlay-adapter/1', source: 'backend' });
 let fileCount = 0;
 let registrationCount = 0;
 

@@ -32,7 +32,7 @@ pub struct RuleExplain {
 /// literal `{{` in its output because a mechanical format!-escaping sweep assumed every site was inside a
 /// `format!` call — both defect classes are structurally impossible once every site calls this instead of
 /// hand-writing the text. See `docs/rules/authoring-guide.md`'s "Message triple" / native-rule-message
-/// contract bullets, and `crates/engine/tests/rule_contracts.rs`'s
+/// contract bullets, and `crates/engine/tests/rule_contracts/`'s
 /// `native_rule_files_that_build_findings_mention_disabled_rules` test, for the "how to exclude" leg every
 /// native finding message must carry.
 pub fn disable_hint(id: &str) -> String {
@@ -42,7 +42,7 @@ pub fn disable_hint(id: &str) -> String {
 #[cfg(test)]
 mod disable_hint_tests {
     // Deliberately synthetic, made-up ids (not a real registered native analysis id) — this module lives
-    // in `crates/core/src`, which `crates/engine/tests/rule_contracts.rs`'s
+    // in `crates/core/src`, which `crates/engine/tests/rule_contracts/`'s
     // `kernel_core_carries_no_native_analysis_id_string_literal` contract forbids from quoting any REAL
     // native analysis id as a literal (the kernel must stay rule-vocabulary-free); only `registry.rs` and
     // `dsl.rs` are exempt from that check, and this file is neither.

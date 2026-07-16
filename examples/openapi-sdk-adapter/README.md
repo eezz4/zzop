@@ -1,222 +1,61 @@
 # OpenAPI SDK adapter (Mode B overlay example)
 
-A reference **adapter** that makes a generated OpenAPI SDK client's frontend calls visible to zzop's
-cross-layer analysis — without adding any SDK-specific vocabulary to the engine.
+Makes a generated OpenAPI SDK client's frontend calls (`getUser(id)` instead of a literal
+`fetch('/users/1')`) visible to zzop's cross-layer join, with zero SDK-specific engine vocabulary.
+Every mainstream generator names its exported function (or class method) after the spec's
+`operationId`, and the spec is almost always committed — so the adapter builds
+`operationId -> "METHOD /path"` from the spec, scans the frontend for call sites, and emits each as
+an `IoConsume` in a NormalizedEnvelope fed to the engine via `adapterOverlays`. See
+[examples/README.md](../README.md) for the Mode A/B overview,
+[docs/adapters/README.md](../../docs/adapters/README.md) for key-normalization parity, and
+[docs/modules/napi.md](../../docs/modules/napi.md) for the host API that accepts the overlay.
 
-## The problem it solves
-
-When a frontend talks to its backend only through a generated SDK client, it never writes a literal
-route:
-
-```ts
-import { getActivities, deleteActivity } from '@immich/sdk';
-await getActivities({ albumId });   // which HTTP route is this? invisible to a static egress scan
-```
-
-zzop's native egress extractor recognizes `fetch(...)` / `axios.*` / `ky.*` and a few generated-client
-runtimes, but it cannot see a route buried inside a generated function. So for an SDK-only frontend the
-FE→BE cross-layer join is blind.
-
-## The approach
-
-Every mainstream OpenAPI generator names each exported function after the spec's `operationId`, and the
-OpenAPI spec is almost always committed. So an **injected adapter** can resolve the calls entirely from
-data that is already on disk — the engine never needs to learn the SDK's shape:
-
-1. Read the OpenAPI spec → build `operationId → "METHOD /path"` (normalized the same way zzop keys
-   routes: `{id}` path params → `{}`).
-2. Scan the frontend for value imports from the SDK package and their call sites.
-3. Emit each call site as an `IoConsume` fact, grouped per file into a Normalized-AST envelope.
-4. Feed that envelope to zzop via the **`adapterOverlays`** config field ([Mode B overlay](../../docs/NORMALIZED_AST.md)),
-   which the engine merges on top of native TypeScript analysis.
-
-This is "Mode B": the overlay *augments* native analysis (unlike `analyzeEnvelope`, which *replaces* it).
-The engine stays framework/vendor-neutral; the SDK knowledge lives only in this adapter. See
-[../../docs/NORMALIZED_AST.md](../../docs/NORMALIZED_AST.md) for the overlay contract.
-
-## Usage
+## Run
 
 ```sh
-# FE call sites -> IoConsume overlay (named-import clients, e.g. @immich/sdk-style function exports)
-node adapter.mjs --mode consume --root <frontend-root> --spec <openapi.json> --sdk '@your/sdk' --source <treeSourceId>
+# named-import clients (import { getUser } from '@your/sdk')
+node adapter.mjs --mode consume --root <fe-root> --spec <openapi.json> --sdk '@your/sdk' --source <treeSourceId>
 
-# FE call sites -> IoConsume overlay (generated CLASS-METHOD clients, e.g. swagger-typescript-api)
-node adapter.mjs --mode consume --root <frontend-root> --spec <openapi.json> --member-calls --source <treeSourceId>
+# generated CLASS-METHOD clients (api.articles.getArticles(...), e.g. swagger-typescript-api)
+node adapter.mjs --mode consume --root <fe-root> --spec <openapi.json> --member-calls --source <treeSourceId>
 
-# (optional) spec operations -> IoProvide overlay, for when you have the spec but not the backend tree
+# spec operations as IoProvide (when you have the spec but not the backend tree)
 node adapter.mjs --mode provide --spec <openapi.json> --source api
+
+# tests
+node --test test/*.test.mjs
 ```
 
-`--source` defaults to `api` in every mode (a `provide`-mode holdover); pass it explicitly in `consume`
-mode to match the `sourceId` of the tree you attach the overlay to — the engine now warns
-(`adapter overlay "..." declares a different source than the tree "..." it's attached to`) when an
-overlay carrying `io` declares a non-empty `source` that differs from its tree's `sourceId`, since a
-mismatched `source` silently turns what looks like a cross-source join into an intra-source one.
+Attach the stdout envelope to a tree's `adapterOverlays` array on an `analyze`/`analyzeTrees`
+request; with a real backend tree present, zzop extracts the provide side natively and only the
+consume overlay is needed.
 
-### `--member-calls`: generated CLASS-METHOD clients
+## Contract points
 
-Some generators (swagger-typescript-api and others) emit a single `Api` class whose methods are
-grouped by tag, called in **member position** — `api.articles.getArticles(...)`,
-`this.api.getArticles(...)` — instead of a named function import
-(`import { getArticles } from sdk`). The default named-import scan sees nothing at all for this
-shape, because there is no `import { getArticles }` to find; the call is buried behind a class
-instance. `--member-calls` (default **OFF**, so default behavior is byte-for-byte unchanged) adds a
-second detection path: a call site also matches when the operation name appears as `.name(` anywhere
-in a scanned file.
+- Keying: consume `key` = `METHOD` + `servers[0].url`'s static path part + the `paths` key
+  (OpenAPI's effective-URL rule), `{param}` collapsed to `{}` — byte-identical to the engine's keys
+  ([docs/adapters/README.md](../../docs/adapters/README.md)). A templated server path part
+  contributes no prefix rather than a guess.
+- Named-import shape (default): a call counts only if the name is a value import from the `--sdk`
+  specifier AND a spec `operationId`. `type`-only imports excluded; namespace imports and re-exports
+  not followed.
+- CLASS-METHOD shape (`--member-calls`, default OFF): `.name(` matches when `name` is an
+  `operationId` or its lowerFirst transform (`GetArticles` -> `getArticles`); colliding candidates
+  are marked ambiguous and skipped (reported on stderr), never guessed. A literal `.` must
+  immediately precede the identifier and `(` follow it.
+- `--sdk` gate: plain substring pre-filter (npm or local specifier alike), default `@immich/sdk`;
+  skipped entirely when `--member-calls` is on and `--sdk` is not passed.
+- Envelope: `parser: 'openapi-sdk-adapter/1'`; pass `--source` equal to the attached tree's
+  `sourceId` (the engine warns on mismatch). Spec must be JSON — convert YAML once, e.g.
+  `npx --yes yaml --json --single < openapi.yml > openapi.json` (`--single` avoids the CLI's
+  document-stream array wrapper).
 
-The same safety rationale as the rest of this adapter still holds: a member name only counts if it
-resolves to a real spec `operationId`. The resolution step has one addition — verified against
-fe-vue's committed `src/services/api.ts` (generated by swagger-typescript-api): every method name is
-the operationId with **only its first character lower-cased** (`GetArticles` -> `getArticles`,
-`Login` -> `login`, `GetProfileByUsername` -> `getProfileByUsername` — 19/19 operations, no
-exceptions found). The adapter accepts both the raw `operationId` and this lowerFirst transform as
-valid member names. It never guesses further: if two distinct operationIds collide on the same
-candidate name, that name is marked ambiguous and every call site using it is skipped — reported in
-the stderr summary (`member-calls: N ambiguous name(s) skipped (...)`), not silently attributed to
-either operation.
+## Measured results
 
-Precision guards in member mode:
-- The name must be immediately preceded by a literal `.` and immediately followed by `(`
-  (whitespace aside) — `.getArticles(` matches, `regetArticles(` does not (no `.` directly before
-  `get`), and `.getArticlesFeed(` does not match a search for `getArticles` (the identifier is
-  captured whole, not as a prefix).
-- Files are still filtered by the walker's existing `.spec.`/`.test.` exclusion and file-extension
-  allowlist — no separate opt-out needed.
-
-### `--sdk` gating in member mode
-
-The pre-existing `--sdk` flag gates which files even get regex-scanned: a file is skipped unless its
-raw text contains the `--sdk` value as a substring. That check has always been a plain
-`text.includes(...)`, never an import-statement parse — so it already works for a **local/relative
-specifier** (`--sdk 'src/services'`, matching `import { api } from 'src/services'`) exactly as well
-as an npm package name (`--sdk '@immich/sdk'`). No code change was needed for that part; pass
-whatever substring actually appears in your frontend's import of the API client/instance.
-
-What member mode changes: if `--member-calls` is on and `--sdk` is **not** passed at all, the gate is
-skipped entirely (every walked file is scanned). Rationale: a member call site doesn't depend on
-finding an import of the *operation name* the way named-import mode does — the operationId gate on
-the matched member name is what keeps this safe, not the file-level substring pre-filter. Passing
-`--sdk` explicitly in member mode still works and is recommended when you know the specifier (skips
-irrelevant files before doing any regex work, same as today). This was the smallest change that kept
-non-member-mode behavior (including the immich regression baseline below) byte-for-byte identical:
-`--sdk` still defaults to `@immich/sdk` and still gates unconditionally outside member mode.
-
-Each writes a `NormalizedEnvelope` JSON to stdout. Pass it through your zzop config's `adapterOverlays`
-array (a field on the `analyze` / `analyzeTrees` request):
-
-```js
-const consume = JSON.parse(execSync(`node adapter.mjs --mode consume --root web --spec spec.json --source web`));
-const out = JSON.parse(native.analyzeTrees(JSON.stringify({
-  trees: [
-    { root: 'web', sourceId: 'web', adapterOverlays: [consume] },
-    { root: 'server', sourceId: 'api' },   // native NestJS/Hono/etc. provides, no overlay needed
-  ],
-})));
-```
-
-When you have the real backend tree, zzop extracts its route *provides* natively — you only need the
-*consume* overlay. The `provide` mode is a convenience for demoing the join from the spec alone.
-
-## Worked result (immich)
-
-Against immich's `web/` frontend (which calls the backend exclusively through `@immich/sdk`) and its
-committed `immich-openapi-specs.json`:
-
-| | keyed HTTP consumes in `web/` | cross-layer edges |
-|---|---|---|
-| native only (no overlay) | 0 | 0 |
-| consume overlay, joined against the spec-provide overlay | 349 (179 files, 184 operations) | 349 |
-| consume overlay, joined against the REAL `server/` tree (native NestJS extraction) | 349 | 361 |
-
-Every SDK call site that was invisible to the native scan becomes a first-class, route-keyed
-cross-layer edge — resolved purely from the committed spec + call sites, with zero SDK-specific code
-in the engine. The native-tree join is the stronger result: each edge lands on the actual controller
-method (`DELETE /api/activities/{} -> activity.controller.ts (deleteActivity)`), with ZERO
-unprovided consumes left unexplained. Two pieces make it exact: the adapter honors OpenAPI's
-effective-URL rule — the emitted key is `servers[].url`'s path part (`/api` for immich) + the
-`paths` key — and the engine resolves immich's `@Controller(RouteKey.Asset)` enum-referenced
-prefixes cross-file (`controller-prefix-ref-v1`), so the backend side serves the same keys.
-
-## Worked result (fe-vue, `--member-calls`)
-
-`mutoe/vue3-realworld-example-app` (a local checkout, frontend root referred to below as `<fe-root>`)
-talks to its backend exclusively through a **generated CLASS-METHOD client** —
-`src/services/api.ts`, generated by `swagger-typescript-api` from the committed
-`src/services/openapi.yml`. Call sites look like `api.articles.getArticles(...)`, never a named
-import. This is exactly the shape `--member-calls` exists for; the default named-import scan
-resolves 0 consumes here regardless of `--sdk`.
-
-**Spec is YAML, not JSON.** `adapter.mjs` only parses JSON (no bundled deps, by design — see
-LIMITATIONS). Converting YAML->JSON needs an external tool; the least-magic option available
-without adding a project dependency is `npx yaml` (fetches the small, single-purpose `yaml` CLI
-package on first use — no python assumed). Exact command run for this measurement:
-
-```sh
-npx --yes yaml --json --single < <fe-root>/src/services/openapi.yml > fe-vue-openapi.json
-```
-
-`--single` matters: without it, the `yaml` CLI wraps the result in a `[ ... ]` document-stream array
-even for a single-document file, and `adapter.mjs` expects a bare spec object (it reads
-`spec.servers` / `spec.paths` directly).
-
-Command run (member mode, explicit local specifier for precision):
-
-```sh
-node adapter.mjs --mode consume --root <fe-root> --spec fe-vue-openapi.json \
-  --sdk 'src/services' --member-calls
-```
-
-(This measurement predates the engine's overlay source-mismatch self-report; the command above leaves
-`--source` at its default `api` while the harness below attaches the overlay to tree `fe-vue` via
-`ZZOP_OVERLAYS`. Reproducing this today additionally emits a source-mismatch warning — harmless here
-(it changes no finding/count), but pass `--source fe-vue` to silence it.)
-
-| | keyed HTTP consumes in `<fe-root>` | cross-layer edges (join vs. the paired backend root) |
-|---|---|---|
-| native + named-import scan only (no `--member-calls`) | 0 (0 files, 0/19 operations) | 1 |
-| `--member-calls` consume overlay | 18 (11 files, 14/19 operations, 0 ambiguous) | 19 |
-
-Sample keys emitted (`file:line -> key`):
-
-```
-src/pages/Login.vue:88 -> POST /api/users/login
-src/pages/Register.vue:97 -> POST /api/users
-src/composable/use-articles.ts:21 -> GET /api/articles/feed
-src/composable/use-articles.ts:25 -> GET /api/articles
-src/composable/use-profile.ts:18 -> GET /api/profiles/{}
-src/pages/EditArticle.vue:127 -> PUT /api/articles/{}
-src/components/ArticleDetailComments.vue:40 -> DELETE /api/articles/{}/comments/{}
-src/components/ArticleDetailMeta.vue:98 -> DELETE /api/articles/{}
-src/pages/Settings.vue:106 -> PUT /api/user
-src/composable/use-tags.ts:9 -> GET /api/tags
-```
-
-Joined against the real paired Express backend tree (native Express extraction; that backend's own
-route-vocabulary coverage is a separate, unfinished task, so its provide side may still be sparse —
-these are the buckets as measured, not a target):
-
-| | edges | unconsumedProvides | unprovidedConsumes | unresolvedConsumes |
-|---|---|---|---|---|
-| before (`ZZOP_OVERLAYS` unset) | 1 | 19 | 0 | 1 |
-| after (`ZZOP_OVERLAYS="fe-vue=fe-vue-consume.json"`) | 19 | 5 | 0 | 1 |
-
-The consume-side delta is the deliverable: 18 previously-invisible FE call sites become keyed,
-route-resolved consumes, and the join moves from 1 lucky edge to 19 — `cross-layer/unconsumed-endpoint`
-findings on the BE side drop from 19 to 5 accordingly, purely from making the CLASS-METHOD client's
-calls visible. (`unresolvedConsumes` stays at 1 in both runs — a pre-existing, unrelated native
-finding, not something this overlay touches.)
-
-## Limitations (a production adapter can go further)
-
-- Named-import call sites only by default (`import { getUser } from '<sdk>'`); namespace imports
-  (`import * as sdk`) and re-exports are not followed. `--member-calls` adds member-position
-  detection (`.getUser(`) for generated CLASS-METHOD clients, but is opt-in — default behavior is
-  unchanged.
-- `type`-only imports are excluded (they are not calls).
-- Call detection is lexical (`name(` / `.name(`), which is safe here because the name must also be a
-  spec `operationId` (in member mode, after the lowerFirst transform documented above).
-- In member mode, a member name that lowerFirst-collides across two distinct operationIds is skipped
-  entirely rather than guessed — see the ambiguity note above.
-- The spec file must be JSON. YAML specs (like fe-vue's) need converting first — this adapter takes
-  no dependencies, so that conversion is a one-time external step, not something `adapter.mjs` does
-  for you (see the fe-vue worked result above for the exact command).
+- immich (`web/` calls the backend exclusively via `@immich/sdk`, named-import mode): keyed HTTP
+  consumes 0 -> 349 (179 files, 184 operations); cross-layer edges 0 -> 349 vs. the spec-provide
+  overlay, 361 vs. the real NestJS `server/` tree with zero unexplained unprovided consumes.
+- fe-vue (`mutoe/vue3-realworld-example-app`, class-method client, `--member-calls`): keyed consumes
+  0 -> 18 (11 files, 14/19 operations, 0 ambiguous); edges vs. its Express backend 1 -> 19, BE
+  `cross-layer/unconsumed-endpoint` findings 19 -> 5. (Run predates the engine's overlay
+  source-mismatch warning — pass `--source fe-vue` today to silence it; counts unchanged.)

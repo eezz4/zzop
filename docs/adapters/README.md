@@ -72,7 +72,7 @@ verbatim-preservation behavior itself is pinned instead by `crates/core/src/io.r
 
 [`envelope.schema.json`](envelope.schema.json) is a draft-07 JSON Schema for the v1
 `NormalizedEnvelope`/`FileProjection` contract, derived field-for-field from the real Rust serde
-types (`crates/core/src/normalized.rs`, `io.rs`, `ir.rs`, `fragments.rs`) — field names,
+types (`crates/core/src/normalized.rs`, `io.rs`, `ir.rs`, `fragments.rs`, `attributes.rs`) — field names,
 required-ness, and nullability all trace back to whether the Rust field carries `#[serde(default)]`.
 
 The versioning policy is the same tolerance philosophy zzop's config surface already uses: this is
@@ -82,10 +82,13 @@ warning, never a hard fail**. Verified against the engine, not just asserted: no
 envelope-related type, and there is no warning code anywhere in `zzop-engine`/`zzop-core` for an
 unrecognized envelope field — an unknown key is simply dropped during deserialization, the same as any
 other serde struct in this codebase without `deny_unknown_fields` (see e.g.
-`crates/facade/src/lib.rs`'s or `crates/engine/tests/rule_contracts.rs`'s own doc comments on that
-same convention). The only envelope-related `AnalyzeOutput::warnings` entries that exist today are for
-a whole Mode B overlay failing `validate_envelope`, or for a reserved-sentinel-kind drop (see
-`docs/NORMALIZED_AST.md`'s "Reserved sentinel kinds" section) — neither is about unknown fields.
+`crates/facade/src/lib.rs`'s or `crates/engine/tests/rule_contracts/`'s own doc comments on that
+same convention). The envelope-related `AnalyzeOutput::warnings` entries that exist today — a whole
+Mode B overlay failing `validate_envelope`, a reserved-sentinel-kind drop (see
+`docs/NORMALIZED_AST.md`'s "Reserved sentinel kinds" section), and the self-disclosure checks listed
+in the [Self-disclosure section below](#self-disclosure-coverage-source-and-synthetic-entries)
+(source mismatch, synthetic paths, zero-fact census) — are all about envelope *content*, never about
+unknown fields.
 `additionalProperties: true` at every level in the schema reflects the "ignored" half of that
 tolerance, not a warning. A producer emitting a field ahead of the schema, or omitting any field
 marked optional, still produces a valid envelope. Only a **breaking** change — removing, renaming, or

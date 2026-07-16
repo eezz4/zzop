@@ -53,6 +53,114 @@ pub struct LoadResult {
     pub errors: Vec<PackLoadError>,
 }
 
+/// The single "pack JSON text -> loadable `RulePackDef`" judgment: serde deserialization (missing
+/// field / wrong type errors come back verbatim as serde's own message) followed by the
+/// schema-version gate above. This is the exact per-file step [`load_dsl_packs`] applies to every
+/// `rules/dsl/*.json`, extracted so a pre-load validator (`zzop_facade::validate_rule_pack_json`,
+/// the `validate_rule_pack` MCP tool / `zzop pack validate` CLI) surfaces the SAME verdicts the
+/// loader would produce at load time — one path, no forked logic.
+pub fn parse_dsl_pack(text: &str) -> Result<RulePackDef, String> {
+    match serde_json::from_str::<RulePackDef>(text) {
+        Ok(pack) => check_dsl_schema_version(&pack).map(|()| pack),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+/// The schema-version gate on its own, for a pack that is ALREADY a deserialized `RulePackDef`
+/// (an inline `packDefs` request entry never passes through [`parse_dsl_pack`]'s text path, but must
+/// face the exact same verdict with the exact same wording — one wording, no fork). This is the one
+/// place the "too new" message is composed; `parse_dsl_pack` delegates here.
+pub fn check_dsl_schema_version(pack: &RulePackDef) -> Result<(), String> {
+    if pack.schema_version > SUPPORTED_DSL_SCHEMA_VERSION {
+        return Err(format!(
+            "pack requires newer DSL schema (schema_version {}, this engine supports up to {})",
+            pack.schema_version, SUPPORTED_DSL_SCHEMA_VERSION
+        ));
+    }
+    Ok(())
+}
+
+/// Every regex-typed field in `pack` that fails to compile, as one issue string each (deterministic:
+/// rule order, then field order within the matcher). This surfaces, at validation time, the exact
+/// judgment the DSL interpreter applies at eval time — `regex::Regex::new(p)` failing — where the
+/// interpreter's contract is to silently no-op the affected rule (see `dsl::line_scan`/`method_scan`/
+/// `ir_scan` and [`applies_to`] below) rather than panic. A pack with such an issue still LOADS; it
+/// just carries a rule that can never fire, which is exactly what a pack author wants told before
+/// shipping it.
+pub fn pack_regex_issues(pack: &RulePackDef) -> Vec<String> {
+    let mut issues = Vec::new();
+    for rule in &pack.rules {
+        let mut check = |field: &str, pattern: &str| {
+            if let Err(err) = regex::Regex::new(pattern) {
+                issues.push(format!(
+                    "rule \"{}\": `{field}` is not a valid regex (the rule would silently never fire): {err}",
+                    rule.id
+                ));
+            }
+        };
+        match &rule.matcher {
+            Matcher::LineScan(m) => {
+                check("file_pattern", &m.file_pattern);
+                if let Some(p) = &m.require_file {
+                    check("require_file", p);
+                }
+                for p in &m.require_file_all {
+                    check("require_file_all", p);
+                }
+                for p in &m.require_file_absent {
+                    check("require_file_absent", p);
+                }
+                if let Some(p) = &m.line_pattern {
+                    check("line_pattern", p);
+                }
+                for lp in m.any.iter().flatten() {
+                    check("any[].pattern", &lp.pattern);
+                }
+                if let Some(p) = &m.exclude_pattern {
+                    check("exclude_pattern", p);
+                }
+                if let Some(p) = &m.file_exclude_pattern {
+                    check("file_exclude_pattern", p);
+                }
+            }
+            Matcher::MethodScan(m) => {
+                check("file_pattern", &m.file_pattern);
+                if let Some(p) = &m.require_file {
+                    check("require_file", p);
+                }
+                for p in &m.require_file_all {
+                    check("require_file_all", p);
+                }
+                for p in &m.require_file_absent {
+                    check("require_file_absent", p);
+                }
+                for lp in &m.patterns {
+                    check("patterns[].pattern", &lp.pattern);
+                }
+                for lp in &m.absent {
+                    check("absent[].pattern", &lp.pattern);
+                }
+                if let Some(p) = &m.file_exclude_pattern {
+                    check("file_exclude_pattern", p);
+                }
+            }
+            Matcher::SymbolScan(m) => {
+                check("file_pattern", &m.file_pattern);
+                if let Some(p) = &m.name_pattern {
+                    check("name_pattern", p);
+                }
+            }
+            Matcher::IoScan(m) => {
+                check("file_pattern", &m.file_pattern);
+                if let Some(p) = &m.key_pattern {
+                    check("key_pattern", p);
+                }
+            }
+        }
+    }
+    issues
+}
+
 /// Reads every `*.json` file directly under `dir`, PLUS every `*.json` file one level down inside a
 /// subdirectory of `dir` (`<dir>/<name>/*.json`) — see the module doc for the two supported shapes — and
 /// deserializes each into a `RulePackDef`. Only one level of subdirectory is scanned (a
@@ -98,22 +206,12 @@ pub fn load_dsl_packs(dir: &Path) -> LoadResult {
     paths.sort();
 
     for path in paths {
+        // Per-file verdicts come from `parse_dsl_pack` — the same judgment path the pre-load
+        // validator (`validate_rule_pack`) surfaces, so the two can never disagree.
         match fs::read_to_string(&path) {
-            Ok(text) => match serde_json::from_str::<RulePackDef>(&text) {
-                Ok(pack) if pack.schema_version > SUPPORTED_DSL_SCHEMA_VERSION => {
-                    result.errors.push(PackLoadError {
-                        path,
-                        message: format!(
-                            "pack requires newer DSL schema (schema_version {}, this engine supports up to {})",
-                            pack.schema_version, SUPPORTED_DSL_SCHEMA_VERSION
-                        ),
-                    });
-                }
+            Ok(text) => match parse_dsl_pack(&text) {
                 Ok(pack) => result.packs.push((path, pack)),
-                Err(err) => result.errors.push(PackLoadError {
-                    path,
-                    message: err.to_string(),
-                }),
+                Err(message) => result.errors.push(PackLoadError { path, message }),
             },
             Err(err) => result.errors.push(PackLoadError {
                 path,
@@ -150,216 +248,4 @@ pub fn applies_to(pack: &RulePackDef, file_path: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    /// A self-cleaning temp directory (std-only mkdtemp equivalent — no `tempfile` crate dependency in this
-    /// workspace). Same pattern as `schema_usage.rs`'s test-local `TempDir` (duplicated here rather than
-    /// shared, since it is a private `#[cfg(test)]` helper with no public home to import from).
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(prefix: &str) -> Self {
-            static COUNTER: AtomicU64 = AtomicU64::new(0);
-            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let dir =
-                std::env::temp_dir().join(format!("{prefix}-{}-{nanos}-{n}", std::process::id()));
-            fs::create_dir_all(&dir).unwrap();
-            TempDir(dir)
-        }
-
-        fn path(&self) -> &Path {
-            &self.0
-        }
-
-        fn write(&self, rel: &str, content: &str) {
-            let full = self.0.join(rel);
-            if let Some(parent) = full.parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
-            fs::write(full, content).unwrap();
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    fn valid_pack(id: &str) -> String {
-        format!(
-            r#"{{
-                "id": "{id}",
-                "framework": "any",
-                "rules": [
-                    {{
-                        "id": "r1",
-                        "severity": "warning",
-                        "message": "msg",
-                        "matcher": {{
-                            "type": "line-scan",
-                            "file_pattern": "\\.java$",
-                            "line_pattern": "TODO"
-                        }}
-                    }}
-                ]
-            }}"#
-        )
-    }
-
-    /// Same as `valid_pack` but with an explicit `schema_version` field, for schema-gate tests.
-    fn pack_with_schema_version(id: &str, schema_version: u32) -> String {
-        format!(
-            r#"{{
-                "id": "{id}",
-                "framework": "any",
-                "schema_version": {schema_version},
-                "rules": [
-                    {{
-                        "id": "r1",
-                        "severity": "warning",
-                        "message": "msg",
-                        "matcher": {{
-                            "type": "line-scan",
-                            "file_pattern": "\\.java$",
-                            "line_pattern": "TODO"
-                        }}
-                    }}
-                ]
-            }}"#
-        )
-    }
-
-    // --- schema_version gate (see `docs/rules/dsl-reference.md`'s "Schema version policy") ---
-
-    #[test]
-    fn pack_missing_schema_version_defaults_to_1_and_loads() {
-        let dir = TempDir::new("zzop-pack-loader");
-        dir.write("p.json", &valid_pack("p")); // no schema_version field at all
-        let result = load_dsl_packs(dir.path());
-        assert!(result.errors.is_empty());
-        assert_eq!(result.packs.len(), 1);
-        assert_eq!(result.packs[0].1.schema_version, 1);
-    }
-
-    #[test]
-    fn pack_with_explicit_schema_version_1_loads() {
-        let dir = TempDir::new("zzop-pack-loader");
-        dir.write("p.json", &pack_with_schema_version("p", 1));
-        let result = load_dsl_packs(dir.path());
-        assert!(result.errors.is_empty());
-        assert_eq!(result.packs.len(), 1);
-        assert_eq!(result.packs[0].1.schema_version, 1);
-    }
-
-    #[test]
-    fn pack_requiring_a_newer_schema_is_rejected_as_a_load_error_not_a_panic() {
-        let dir = TempDir::new("zzop-pack-loader");
-        dir.write("good.json", &valid_pack("good"));
-        dir.write("too-new.json", &pack_with_schema_version("too-new", 999));
-        let result = load_dsl_packs(dir.path());
-        assert_eq!(result.packs.len(), 1);
-        assert_eq!(result.packs[0].1.id, "good");
-        assert_eq!(result.errors.len(), 1);
-        assert!(result.errors[0].path.ends_with("too-new.json"));
-        assert!(result.errors[0].message.contains("newer DSL schema"));
-    }
-
-    #[test]
-    fn loads_every_json_file_sorted_by_name() {
-        let dir = TempDir::new("zzop-pack-loader");
-        dir.write("b-pack.json", &valid_pack("b-pack"));
-        dir.write("a-pack.json", &valid_pack("a-pack"));
-        let result = load_dsl_packs(dir.path());
-        assert!(result.errors.is_empty());
-        assert_eq!(result.packs.len(), 2);
-        assert_eq!(result.packs[0].1.id, "a-pack");
-        assert_eq!(result.packs[1].1.id, "b-pack");
-    }
-
-    #[test]
-    fn discovers_packs_in_depth_one_subdirectories() {
-        let dir = TempDir::new("zzop-pack-loader");
-        dir.write("flat.json", &valid_pack("flat"));
-        dir.write("nested/nested.json", &valid_pack("nested"));
-        let result = load_dsl_packs(dir.path());
-        assert!(result.errors.is_empty());
-        let mut ids: Vec<&str> = result.packs.iter().map(|(_, p)| p.id.as_str()).collect();
-        ids.sort();
-        assert_eq!(ids, vec!["flat", "nested"]);
-    }
-
-    #[test]
-    fn does_not_recurse_past_one_level_of_subdirectory() {
-        let dir = TempDir::new("zzop-pack-loader");
-        dir.write("nested/deeper/too-deep.json", &valid_pack("too-deep"));
-        let result = load_dsl_packs(dir.path());
-        assert!(result.errors.is_empty());
-        assert!(result.packs.is_empty());
-    }
-
-    #[test]
-    fn load_order_is_deterministic_across_mixed_flat_and_nested_layout() {
-        let dir = TempDir::new("zzop-pack-loader");
-        dir.write("z-flat.json", &valid_pack("z-flat"));
-        dir.write("a-nested/a-nested.json", &valid_pack("a-nested"));
-        let first = load_dsl_packs(dir.path());
-        let second = load_dsl_packs(dir.path());
-        let first_ids: Vec<&str> = first.packs.iter().map(|(_, p)| p.id.as_str()).collect();
-        let second_ids: Vec<&str> = second.packs.iter().map(|(_, p)| p.id.as_str()).collect();
-        assert_eq!(first_ids, second_ids);
-        assert_eq!(first_ids.len(), 2);
-    }
-
-    #[test]
-    fn ignores_non_json_files() {
-        let dir = TempDir::new("zzop-pack-loader");
-        dir.write("pack.json", &valid_pack("p"));
-        dir.write("readme.md", "not a pack");
-        let result = load_dsl_packs(dir.path());
-        assert_eq!(result.packs.len(), 1);
-    }
-
-    #[test]
-    fn malformed_file_is_a_per_file_error_not_a_panic() {
-        let dir = TempDir::new("zzop-pack-loader");
-        dir.write("good.json", &valid_pack("good"));
-        dir.write("bad.json", "{ not json");
-        let result = load_dsl_packs(dir.path());
-        assert_eq!(result.packs.len(), 1);
-        assert_eq!(result.packs[0].1.id, "good");
-        assert_eq!(result.errors.len(), 1);
-        assert!(result.errors[0].path.ends_with("bad.json"));
-    }
-
-    #[test]
-    fn missing_directory_is_reported_as_an_error_not_a_panic() {
-        let result = load_dsl_packs(Path::new("/no/such/dir/zzop-nope"));
-        assert!(result.packs.is_empty());
-        assert_eq!(result.errors.len(), 1);
-    }
-
-    #[test]
-    fn applies_to_matches_when_a_rule_file_pattern_matches() {
-        let pack: RulePackDef = serde_json::from_str(&valid_pack("p")).unwrap();
-        assert!(applies_to(&pack, "src/Foo.java"));
-        assert!(!applies_to(&pack, "src/foo.ts"));
-    }
-
-    #[test]
-    fn applies_to_is_false_for_a_pack_with_no_rules() {
-        let pack = RulePackDef {
-            id: "empty".into(),
-            framework: "any".into(),
-            schema_version: 1,
-            rules: vec![],
-        };
-        assert!(!applies_to(&pack, "anything.java"));
-    }
-}
+mod tests;

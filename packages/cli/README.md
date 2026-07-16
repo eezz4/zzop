@@ -5,7 +5,9 @@ repo boundary, with near-misses named instead of left for a human to diff by han
 deterministically: same code in, same findings out, byte-stable across runs, so you can gate a PR on
 contract drift (`failOn`) without flaky rechecks. Alongside that join, the same engine runs as a
 multi-language SAST/architecture analyzer over each repo individually. `@zzop/cli` is the config-driven
-front end: write a `zzop.config.jsonc`, run `npx zzop` — no code, ESLint-style.
+front end: install it (`npm i -D @zzop/cli`), write a `zzop.config.jsonc`, run `npx zzop` — no code,
+ESLint-style. (A bare one-off `npx zzop` without the install fails — no package named `zzop` exists;
+use `npx @zzop/cli` for one-off runs.)
 
 The analysis engine ships as [`@zzop/native`](https://www.npmjs.com/package/@zzop/native) and is
 installed automatically as a dependency of this package. `@zzop/cli` is the thin config-driven front end;
@@ -40,7 +42,12 @@ zzop           # analyzes using that config and prints a report
 | `zzop init [--force]` | Write an annotated `zzop.config.jsonc` to the current directory. |
 | `zzop init adapter --mode <a\|b> --kind <consume\|provide> [--force]` | Scaffold a self-contained starter adapter into `./zzop-adapter/` (`main.mjs`, bundled `lib/keys.mjs` + `lib/envelope.mjs`, `README.md`). `--mode a` = full envelope (replaces native analysis for the tree); `--mode b` = io-only overlay (merged via the `overlays` config key). `--kind` selects which side's extraction TODOs are stubbed in. Refuses to overwrite an existing `zzop-adapter/` without `--force`. See [docs/adapters/README.md](../../docs/adapters/README.md). |
 | `zzop [run] [options]` | Load the config, analyze, and print. This is the default command. |
+| `zzop endpoint <pattern>` | Definitive io-key query: is `<pattern>` (a case-insensitive substring of any io key — http routes, env keys, DB tables, topics) provided, consumed, or joined? Runs the same config-driven analysis as `zzop run` (honors `--config`; a configured `cacheDir` makes the re-run cheap) and prints ONE verdict — `linked` \| `provided-only` \| `consumed-unprovided` \| `external` \| `unresolved-only` \| `ambiguous` \| `mixed` \| `not-found` — with the matching sites (`file:line (source)`), related findings, and key suggestions on `not-found`. `--json` prints the raw query JSON (the same shape the zzop-mcp `check_endpoint` tool returns — both run one shared query core). Exits `0` regardless of verdict (a query is not a gate); `2` = config/usage error. |
 | `zzop adapter validate <envelope.json>` | Check an adapter envelope offline: structural validation against the v1 envelope contract plus lint hints (unnormalized `http` keys, host-carrying provide keys, duplicate provides, absolute file paths). Exits non-zero if the envelope is structurally invalid; hints never affect the exit code. Attach a valid overlay envelope to a run via the `overlays` config key. |
+| `zzop pack validate <pack.json>` | Check a DSL rule-pack JSON offline, before loading it: the same judgments the engine's pack loader makes at load time (bad JSON, missing field, wrong type, too-new `schema_version`) plus any matcher regex that fails to compile (such a rule would load but silently never fire). Structure only — it never judges rule quality or semantics. Exits non-zero if the pack is invalid. The machine-readable shape contract is [docs/contracts/rule-pack.schema.json](../../docs/contracts/rule-pack.schema.json); see [docs/rules/dsl-reference.md](../../docs/rules/dsl-reference.md) for the fields. |
+
+Every command also answers `--help`/`-h` with a focused help block for that command (e.g.
+`zzop init adapter --help`), exiting `0`; a bare `zzop --help` prints the full usage.
 
 ### `run` options
 
@@ -50,7 +57,7 @@ zzop           # analyzes using that config and prints a report
 | `--format <pretty\|json>` | Output format, overriding the config's `format`. |
 | `--json` | Alias for `--format json`. |
 | `--out <dir>` | Override the report base directory (default `./zzop-reports`; equivalent to config `report.dir`). Each run writes to `<dir>/zzop.<epoch>/`, a fresh subdir per run so runs accumulate. |
-| `-a, --all` | Expand info-level findings. By default they are folded to a per-rule count so warnings/errors stay visible. |
+| `-a, --all` | Show everything expanded: info-level findings (folded to a per-rule count by default so warnings/errors stay visible) AND each finding's full message (folded to a one-line summary by default), plus a one-line rule-pack load confirmation (`N packs loaded (M rules): ...` — the output's `packsLoaded` field). The complete message is always in the JSON output and markdown reports regardless of this flag. |
 | `--severity <critical\|warning\|info\|off>` | Only display findings at or above this severity (default `off` = show all). This is a display filter only — the exit code is always computed from the unfiltered findings and the config's `failOn`, never from `--severity`. |
 | `--debug-io` | After the normal output, dump every cross-layer join bucket (`edges`, `unconsumedProvides`, `unprovidedConsumes`, `unresolvedConsumes`, `externalConsumes`, `ambiguousConsumes`) as deterministic plain text, one section per bucket and one line per entry — the join-debug surface for troubleshooting an adapter/overlay. A no-op single-tree run still prints every section, each at count 0. |
 | `-h, --help` | Show help. |
@@ -95,7 +102,10 @@ keep `failOn` gating in CI from there.
 
 `zzop adapter validate <path>` does not read `failOn` — its `0`/`1` mean the envelope passed/failed
 structural validation instead (see the Commands table above); `2` is still a usage error (bad path,
-malformed JSON).
+malformed JSON). `zzop pack validate <path>` follows the same rule: `0`/`1` mean the rule pack
+passed/failed its structure check, `2` is a usage error. `zzop endpoint <pattern>` does not read
+`failOn` either — it exits `0` on any successful query regardless of verdict (a query is not a
+gate); `2` is still a config/usage error.
 
 ## Configuration
 

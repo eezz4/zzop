@@ -6,23 +6,49 @@
 //! a lexical-only `SourceFile` — no symbols/imports/io, but still scanned by line-scan DSL rules. `None`
 //! means "no structural parser", not "ignore this file".
 //!
-//! `.java` gets the same "no real parser, still worth spans" treatment via `Language::JavaLexical`,
-//! routed to `zzop_parser_java::parse_method_spans` — a comment/string-aware brace matcher, not a real
-//! grammar — so `Matcher::MethodScan` rules still get class/method spans. `.jsp`/`.jspx`/`.tag` stay on
-//! the `None` path: JSP embeds Java inside HTML-like markup, a shape the brace matcher isn't built to
+//! `.java` routes to `Language::Java21`, a real structural parser (`zzop_parser_java_21`,
+//! tree-sitter-backed) at the same grade as `TypeScript`/`Python`/`Rust`/`Go` — see
+//! `pipeline::parse_java21`'s own doc for the fused-pipeline wiring. `.jsp`/`.jspx`/`.tag` stay on the
+//! `None` path: JSP embeds Java inside HTML-like markup, a shape this CST frontend isn't built to
 //! disentangle.
+//!
+//! `.py`/`.pyi` route to `Language::Python`, a real structural parser (`zzop_parser_python_3`, ruff-backed)
+//! at the same grade as `TypeScript` — see `pipeline::parse_python`'s own doc for the fused-pipeline wiring.
+//!
+//! `.rs` routes to `Language::Rust`, a real structural parser (`zzop_parser_rust`, syn-backed) at the
+//! same grade as `TypeScript`/`Python` — see `pipeline::parse_rust`'s own doc for the fused-pipeline
+//! wiring. Nothing else maps to `Language::Rust` (`.rs.in` and similar template-adjacent extensions stay
+//! out of v1 scope, same as the general "no plausible mapping without guessing" discipline this table
+//! upholds elsewhere).
+//!
+//! `.go` routes to `Language::Go`, a real structural parser (`zzop_parser_go`, tree-sitter-backed) at the
+//! same grade as `TypeScript`/`Python`/`Rust` — see `pipeline::parse_go`'s own doc for the fused-pipeline
+//! wiring. Nothing else maps to `Language::Go`.
 
 use std::path::Path;
 
-/// A source language this engine has a parser frontend for. `TypeScript`/`Prisma` are real structural
-/// parsers; `JavaLexical` is the lexical brace-matcher (`zzop_parser_java`, see module doc). JSP/Python
-/// parser crates exist in the workspace but are out of scope: files routed to them by extension get no
+/// A source language this engine has a parser frontend for. `TypeScript`/`Prisma`/`Python`/`Rust`/`Go`/
+/// `Java21` are all real structural parsers (`Java21` — `zzop_parser_java_21`, tree-sitter-backed — see
+/// module doc). JSP has no parser crate in this workspace at all: files that would route to it get no
 /// `Language` match.
+///
+/// **Naming / serialization audit (Java21 vs the retired `JavaLexical`)**: `Language` derives no
+/// `Serialize`/`Deserialize` and is never written into `zzop_cache::FileIrSlice`, the cache envelope, or
+/// any wire-format enum — `CacheKey::parser_fingerprint` (the only cache-visible trace of "which language
+/// handled this file") is a plain `String` built from `PARSER_FINGERPRINT` constants, not this enum's own
+/// name. `zzop_core::ir::SourceSymbolKind`/`NormalizedEnvelope` (the two schemas that DO get serialized)
+/// carry no `Language`-shaped field either. So renaming the variant is safe on its own; the accompanying
+/// `CACHE_SCHEMA_VERSION` bump (`zzop-cache-v24` -> `zzop-cache-v25`, `cache.rs`) is required regardless,
+/// since `.java`'s projected `FileIrSlice` shape (real symbols/imports vs the old brace-matcher spans)
+/// changes for byte-identical content — the rename itself contributes nothing further to invalidate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Language {
     TypeScript,
     Prisma,
-    JavaLexical,
+    Java21,
+    Python,
+    Rust,
+    Go,
 }
 
 /// Directory names skipped entirely during the tree walk: common Node-ecosystem build/dependency dirs,
@@ -169,7 +195,10 @@ fn dispatch_by_extension(rel_path: &str) -> Option<Language> {
     match ext.as_str() {
         "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "mts" | "cts" => Some(Language::TypeScript),
         "prisma" => Some(Language::Prisma),
-        "java" => Some(Language::JavaLexical),
+        "java" => Some(Language::Java21),
+        "py" | "pyi" => Some(Language::Python),
+        "rs" => Some(Language::Rust),
+        "go" => Some(Language::Go),
         _ => None,
     }
 }
@@ -206,194 +235,4 @@ fn matches_glob(path: &str, glob: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn cfg() -> DispatchConfig {
-        DispatchConfig::default()
-    }
-
-    #[test]
-    fn dispatches_known_typescript_extensions() {
-        for ext in ["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"] {
-            let path = format!("src/x.{ext}");
-            assert_eq!(
-                dispatch(&path, &cfg()),
-                Some(Language::TypeScript),
-                "{path}"
-            );
-        }
-    }
-
-    #[test]
-    fn dispatches_prisma_extension() {
-        assert_eq!(dispatch("db/schema.prisma", &cfg()), Some(Language::Prisma));
-    }
-
-    #[test]
-    fn unknown_extension_dispatches_to_none() {
-        assert_eq!(dispatch("README", &cfg()), None);
-        // .jsp/.jspx/.tag stay lexical-fallback; only .java gets the lexical projector.
-        assert_eq!(dispatch("src/Foo.jsp", &cfg()), None);
-    }
-
-    #[test]
-    fn dispatches_java_extension_to_the_lexical_projector() {
-        assert_eq!(
-            dispatch("src/Foo.java", &cfg()),
-            Some(Language::JavaLexical)
-        );
-    }
-
-    #[test]
-    fn extension_match_is_case_insensitive() {
-        assert_eq!(dispatch("src/Foo.TS", &cfg()), Some(Language::TypeScript));
-    }
-
-    #[test]
-    fn glob_override_wins_over_extension_map() {
-        let config = DispatchConfig {
-            glob_overrides: vec![("legacy/**".to_string(), Language::Prisma)],
-            ..cfg()
-        };
-        // `.ts` would normally be TypeScript, but the override forces the whole `legacy/` subtree to Prisma.
-        assert_eq!(
-            dispatch("legacy/schema.ts", &config),
-            Some(Language::Prisma)
-        );
-        assert_eq!(
-            dispatch("fresh/schema.ts", &config),
-            Some(Language::TypeScript)
-        );
-    }
-
-    #[test]
-    fn glob_single_star_does_not_cross_slash() {
-        let config = DispatchConfig {
-            glob_overrides: vec![("src/*.ts".to_string(), Language::Prisma)],
-            ..cfg()
-        };
-        assert_eq!(dispatch("src/Foo.ts", &config), Some(Language::Prisma));
-        // `*` must not cross `/`, so the override doesn't apply here — falls through to the extension map.
-        assert_eq!(
-            dispatch("src/nested/Foo.ts", &config),
-            Some(Language::TypeScript)
-        );
-    }
-
-    #[test]
-    fn default_skip_dirs_cover_common_build_and_vcs_output() {
-        let config = cfg();
-        for name in [
-            "node_modules",
-            "dist",
-            "build",
-            ".next",
-            ".git",
-            "target",
-            ".yarn",
-        ] {
-            assert!(is_skip_dir(name, &config), "{name}");
-        }
-        assert!(!is_skip_dir("src", &config));
-    }
-
-    /// T2 policy pin: the exact `NON_SOURCE_EXTENSIONS` contents. Any edit to this list changes which
-    /// extensions the "bring an adapter" per-extension disclosure stays silent about — pinned so a change
-    /// is a conscious, reviewed decision, not an accidental drop/add.
-    #[test]
-    fn non_source_extensions_pin() {
-        const EXPECTED: &[&str] = &[
-            // docs/text
-            "md",
-            "mdx",
-            "txt",
-            "rst",
-            "adoc", // data/config
-            "json",
-            "jsonc",
-            "json5",
-            "yaml",
-            "yml",
-            "toml",
-            "xml",
-            "csv",
-            "tsv",
-            "ini",
-            "properties",
-            "lock", // styles
-            "css",
-            "scss",
-            "sass",
-            "less",
-            "styl", // markup-as-asset
-            "html",
-            "htm", // images
-            "png",
-            "jpg",
-            "jpeg",
-            "gif",
-            "webp",
-            "svg",
-            "ico",
-            "bmp",
-            "avif", // fonts
-            "woff",
-            "woff2",
-            "ttf",
-            "otf",
-            "eot", // media
-            "mp3",
-            "mp4",
-            "webm",
-            "wav",
-            "ogg",
-            "mov", // binaries/archives
-            "zip",
-            "gz",
-            "tar",
-            "pdf",
-            "wasm",
-            "exe",
-            "dll",
-            "so",
-            "dylib",
-            "node",
-            "jar",
-            "map",
-            // misc
-            "pem",
-            "crt",
-        ];
-        assert_eq!(
-            NON_SOURCE_EXTENSIONS, EXPECTED,
-            "NON_SOURCE_EXTENSIONS drifted — update EXPECTED deliberately if this is an intended policy \
-             change"
-        );
-    }
-
-    #[test]
-    fn is_non_source_extension_matches_every_pinned_entry() {
-        for ext in NON_SOURCE_EXTENSIONS {
-            assert!(is_non_source_extension(ext), "{ext}");
-        }
-    }
-
-    #[test]
-    fn is_non_source_extension_is_case_insensitive() {
-        assert!(is_non_source_extension("MD"));
-        assert!(is_non_source_extension("Png"));
-    }
-
-    #[test]
-    fn is_non_source_extension_rejects_real_source_and_template_dialects() {
-        for ext in ["ts", "py", "sql", "rb", "go"] {
-            assert!(!is_non_source_extension(ext), "{ext}");
-        }
-        // Template dialects that embed source in markup — deliberately NOT in the non-source list, since
-        // an adapter for these is a real, plausible gap worth naming.
-        for ext in ["jsp", "erb", "vue", "svelte"] {
-            assert!(!is_non_source_extension(ext), "{ext}");
-        }
-    }
-}
+mod tests;

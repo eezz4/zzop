@@ -572,3 +572,26 @@ test('buildMarkdownReports: unprovided consumes section carries the cause-taxono
   assert.match(empty.content, /## Unprovided consumes \(0\)\nNone\./);
   assert.doesNotMatch(empty.content, /No attached tree provides these keys/);
 });
+
+test('buildMarkdownReports: single-tree summary carries the Rule packs loaded bullet when present', () => {
+  const output = {
+    fileCount: 1,
+    findings: [],
+    warnings: [],
+    packsLoaded: [
+      { id: 'be-security', rules: 3, source: 'dir' },
+      { id: 'custom', rules: 1, source: 'inline' },
+    ],
+  };
+  const [file] = buildMarkdownReports(output, { sourceId: 'app', root: '/repo' });
+  assert.ok(
+    file.content.includes('- Rule packs loaded: 2 (4 rules) — `be-security`, `custom`'),
+    `expected the pack-load bullet, got:\n${file.content}`
+  );
+});
+
+test('buildMarkdownReports: no Rule packs bullet for an older output without packsLoaded', () => {
+  const output = { fileCount: 1, findings: [], warnings: [] };
+  const [file] = buildMarkdownReports(output, { sourceId: 'app', root: '/repo' });
+  assert.ok(!file.content.includes('Rule packs loaded'), `got:\n${file.content}`);
+});

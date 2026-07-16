@@ -367,6 +367,7 @@ fn envelope_composes_router_mount_fragments_split_across_two_files() {
             prefix: "/api/widgets".to_string(),
             ident: "widgetsRoute".to_string(),
             specifier: Some("be/widgets.jsp".to_string()),
+            attr_keys: vec![],
         }],
     });
 
@@ -378,6 +379,7 @@ fn envelope_composes_router_mount_fragments_split_across_two_files() {
             path: "/create".to_string(),
             handler: Some("createWidget".to_string()),
             line: 6,
+            attr_keys: vec![],
         }],
     });
 

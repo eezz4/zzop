@@ -1,8 +1,8 @@
 //! Compile-time embedded authoring contracts — the documents a custom-parser or rule author needs,
 //! served over MCP `resources/*` as `zzop://contract/<name>`. Embedding (vs. reading from disk) is
 //! what makes the "author an adapter with only the binary" promise hold: no zzop source checkout, no
-//! sidecar files, no install-location assumptions. All sources are the repo's committed public docs
-//! (English, CI-guarded), ~105KB total.
+//! sidecar files, no install-location assumptions. All sources are committed, English, CI-guarded repo
+//! files — the public docs plus the machine-verified config-surface vocabulary — ~130KB total.
 
 /// One embedded contract document.
 pub struct ContractDoc {
@@ -12,6 +12,20 @@ pub struct ContractDoc {
     pub description: &'static str,
     pub mime: &'static str,
     pub content: &'static str,
+}
+
+/// Looks up an embedded contract document by its `<name>` (the `zzop://contract/<name>` URI tail).
+/// The ONE lookup both surfaces share — the MCP `resources/read` handler (`crate::resources`) and the
+/// `zzop-mcp contract <name>` CLI path (`main.rs`) resolve names through this function, so the two
+/// surfaces cannot drift on which names exist.
+pub fn find(name: &str) -> Option<&'static ContractDoc> {
+    CONTRACT_DOCS.iter().find(|doc| doc.name == name)
+}
+
+/// Every embedded contract name, in `CONTRACT_DOCS` (= `resources/list`) order — the shared "valid
+/// names" vocabulary both the unknown-URI resource error and the unknown-name CLI error enumerate.
+pub fn names() -> impl Iterator<Item = &'static str> {
+    CONTRACT_DOCS.iter().map(|doc| doc.name)
 }
 
 /// Every contract resource this binary serves. Order is the `resources/list` order (deterministic).
@@ -53,9 +67,23 @@ pub static CONTRACT_DOCS: &[ContractDoc] = &[
         content: include_str!("../../../docs/rules/authoring-guide.md"),
     },
     ContractDoc {
+        name: "rule-pack-schema",
+        description: "JSON Schema (draft-07) for the DSL rule-pack shape — pack id, rules[], the four matcher kinds (line-scan, method-scan, symbol-scan, io-scan), severity; every property documented. Machine-check a pack with the validate_rule_pack tool (structure only — the same loader judgments, never rule-quality semantics).",
+        mime: "application/json",
+        content: include_str!("../../../docs/contracts/rule-pack.schema.json"),
+    },
+    ContractDoc {
         name: "example-envelope",
         description: "Minimal valid Mode-A envelope example (a crude JSP parser's output) — the smallest starting point for a custom parser.",
         mime: "application/json",
         content: include_str!("../../../examples/jsp-envelope.example.json"),
+    },
+    ContractDoc {
+        name: "config-surface",
+        description: "Machine-verified config vocabulary — every config key, dotted path, CLI flag, and embedder field zzop accepts (the purpose/configKeys/configPaths/embedderFields sections self-describe). Usage: config lives in zzop.config.jsonc at the repo root; multi-tree analysis declares trees[] (or trees: \"auto\"), where one DB/schema directory joins as its own tree; unknown keys warn, never fail.",
+        mime: "application/json",
+        // Reused from `zzop-config` (this crate already depends on it), which embeds the same
+        // `packages/cli/lib/config-surface.json` for unknown-key warnings — one embed, one truth.
+        content: zzop_config::CONFIG_SURFACE_JSON,
     },
 ];

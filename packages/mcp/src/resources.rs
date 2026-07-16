@@ -29,10 +29,9 @@ pub fn read(params: Option<&serde_json::Value>) -> Result<serde_json::Value, Str
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing `uri` argument".to_string())?;
     let name = uri.strip_prefix(URI_PREFIX).unwrap_or("");
-    match crate::embedded::CONTRACT_DOCS
-        .iter()
-        .find(|doc| doc.name == name)
-    {
+    // `embedded::find` is the shared name-lookup the `zzop-mcp contract <name>` CLI path also uses —
+    // one table, one resolver, so the MCP and terminal surfaces cannot drift.
+    match crate::embedded::find(name) {
         Some(doc) => Ok(serde_json::json!({
             "contents": [{
                 "uri": uri,
@@ -41,9 +40,8 @@ pub fn read(params: Option<&serde_json::Value>) -> Result<serde_json::Value, Str
             }]
         })),
         None => {
-            let known: Vec<String> = crate::embedded::CONTRACT_DOCS
-                .iter()
-                .map(|d| format!("{URI_PREFIX}{}", d.name))
+            let known: Vec<String> = crate::embedded::names()
+                .map(|n| format!("{URI_PREFIX}{n}"))
                 .collect();
             Err(format!(
                 "unknown resource uri {uri:?} — known resources: {}",
@@ -86,5 +84,46 @@ mod tests {
                     .unwrap_or_else(|e| panic!("embedded {} is not valid JSON: {e}", doc.name));
             }
         }
+    }
+
+    /// Pins the ninth resource: `rule-pack-schema` serves the exact bytes of the authored
+    /// `docs/contracts/rule-pack.schema.json`, as JSON that names all four matcher kinds — the
+    /// machine-readable twin of the `validate_rule_pack` tool.
+    #[test]
+    fn rule_pack_schema_resource_is_the_dsl_pack_shape_contract() {
+        let doc = crate::embedded::CONTRACT_DOCS
+            .iter()
+            .find(|d| d.name == "rule-pack-schema")
+            .expect("rule-pack-schema resource is embedded");
+        assert_eq!(doc.mime, "application/json");
+        let json: serde_json::Value = serde_json::from_str(doc.content).unwrap();
+        assert_eq!(json["$schema"], "http://json-schema.org/draft-07/schema#");
+        for kind in ["lineScan", "methodScan", "symbolScan", "ioScan"] {
+            assert!(
+                json["definitions"][kind].is_object(),
+                "missing matcher definition {kind}"
+            );
+        }
+    }
+
+    /// Pins the config-surface resource: it serves the same vocabulary `zzop-config` embeds,
+    /// as JSON whose self-describing sections (promised by the resource description) really exist.
+    #[test]
+    fn config_surface_resource_is_the_self_describing_config_vocabulary() {
+        assert_eq!(crate::embedded::CONTRACT_DOCS.len(), 9);
+        let doc = crate::embedded::CONTRACT_DOCS
+            .iter()
+            .find(|d| d.name == "config-surface")
+            .expect("config-surface resource is embedded");
+        assert_eq!(doc.mime, "application/json");
+        assert_eq!(doc.content, zzop_config::CONFIG_SURFACE_JSON);
+        let json: serde_json::Value = serde_json::from_str(doc.content).unwrap();
+        for section in ["configKeys", "configPaths", "embedderFields"] {
+            assert!(json.get(section).is_some(), "missing section {section}");
+        }
+        assert!(
+            json["_docs"]["purpose"].is_string(),
+            "missing _docs.purpose"
+        );
     }
 }

@@ -48,11 +48,11 @@ impl Default for IoOptions {
 
 /// Projects one Java file's `IoFacts` — Spring MVC HTTP route provides only (`consumes` is always empty;
 /// this engine has no Java-side HTTP-egress extractor yet). Delegates to
-/// `zzop_parser_java::extract_http_provides` — see that function's module doc for the annotation shapes
-/// recognized and the `@RestController`/`@Controller` class-gating rule. `None` when the file yields no
-/// provides at all. Called only for `.java` files (`Language::JavaLexical`).
+/// `zzop_parser_java_21::extract_http_provides` — see that function's module doc for the annotation
+/// shapes recognized and the `@RestController`/`@Controller` class-gating rule. `None` when the file
+/// yields no provides at all. Called only for `.java` files (`Language::Java21`).
 pub(crate) fn extract_java_file_io(rel: &str, text: &str) -> Option<IoFacts> {
-    let provides = zzop_parser_java::extract_http_provides(rel, text);
+    let provides = zzop_parser_java_21::extract_http_provides(rel, text);
     if provides.is_empty() {
         None
     } else {

@@ -1,0 +1,2 @@
+# max-file-lines ratchet baseline — files grandfathered above the 300-line limit.
+# Maintained by scripts/check-max-file-lines.sh --update-baseline (shrink/remove only).

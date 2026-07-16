@@ -20,6 +20,27 @@ jobs:
       - name: swc isolation guard
         run: bash scripts/check-swc-isolation.sh
 
+  ruff-isolation-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ruff isolation guard
+        run: bash scripts/check-ruff-isolation.sh
+
+  syn-isolation-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: syn isolation guard
+        run: bash scripts/check-syn-isolation.sh
+
+  tree-sitter-isolation-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: tree-sitter isolation guard
+        run: bash scripts/check-tree-sitter-isolation.sh
+
   rules-catalog-sync-guard:
     runs-on: ubuntu-latest
     steps:
@@ -40,6 +61,48 @@ jobs:
       - uses: actions/checkout@v4
       - name: docs rule-id ↔ catalog sync guard
         run: bash scripts/check-docs-rule-ids.sh
+
+  docs-link-graph-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docs link-graph guard
+        run: bash scripts/check-docs-link-graph.sh
+
+  site-sdk-tokens-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: site SDK-page ↔ napi surface sync guard
+        run: bash scripts/check-site-sdk-tokens.sh
+
+  io-key-vocab-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: io-key kind-vocabulary sync guard
+        run: bash scripts/check-io-key-vocab.sh
+
+  napi-request-fields-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: napi AnalyzeRequest field-table sync guard
+        run: bash scripts/check-napi-request-fields.sh
+
+  max-file-lines-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: max file lines ratchet guard
+        run: bash scripts/check-max-file-lines.sh
+
+  shell-pipe-sigpipe-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shell pipe-to-grep-q SIGPIPE seal
+        run: bash scripts/check-shell-pipe-sigpipe.sh
 
   drift-guards:
     # Two mechanical drift guards. Both need `fetch-depth: 0` (unlike the other guard jobs above,

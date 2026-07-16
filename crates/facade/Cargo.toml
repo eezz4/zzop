@@ -9,9 +9,19 @@ publish = false
 zzop-core = { path = "../core" }
 zzop-metrics = { path = "../metrics" }
 zzop-engine = { path = "../engine" }
+# Data dependency only: `zzop-config` owns the ONE compile-time embed of the bundled rule packs
+# (`BUNDLED_PACK_SOURCES`, build.rs) — `analyze_envelope_json`'s bundled-pack default reuses it
+# instead of embedding the same JSON a second time ("one embed, one truth"). No config-front-end
+# logic (discovery/JSONC/mapping) is called from this crate; the dependency edge is acyclic
+# (`zzop-config` depends only on `serde_json`).
+zzop-config = { path = "../config" }
 # Path deps purely for `version()`'s diagnostic string (`PARSER_FINGERPRINT` constants) — not part of the
 # analyze pipeline itself (that lives entirely inside `zzop-engine`).
 zzop-parser-typescript = { path = "../../parser/parser-typescript" }
 zzop-parser-prisma = { path = "../../parser/parser-prisma" }
+zzop-parser-python-3 = { path = "../../parser/parser-python-3" }
+zzop-parser-java-21 = { path = "../../parser/parser-java-21" }
+zzop-parser-rust = { path = "../../parser/parser-rust" }
+zzop-parser-go = { path = "../../parser/parser-go" }
 serde = { workspace = true }
 serde_json = { workspace = true }

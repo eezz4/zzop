@@ -2,13 +2,19 @@
 # Guards that packages/cli/README.md has not drifted from the `--help` text embedded in
 # packages/cli/bin/zzop.js (the source of truth for CLI flags).
 #
-# Two asymmetric checks close the drift class that actually bites us — a flag added to the CLI but
-# never documented, or a flag documented in the README that no longer exists (renamed/removed):
+# Three checks close the drift classes that actually bite us — a flag added to the CLI but
+# never documented, a flag documented in the README that no longer exists (renamed/removed), or a
+# new command shipped without a README row:
 #   1. HELP -> README (help ⊆ README): every long option token (`--foo`) that appears in the help
 #      text must also appear somewhere in the README.
-#   2. README -> HELP (README ⊆ help): every long option token documented in the README's options
-#      section must also appear in the help text, so the README cannot document a flag that was
-#      renamed or removed.
+#   2. README -> HELP (README ⊆ help): every long option token appearing ANYWHERE in the README
+#      (options table or prose) must also appear in the help text, so the README cannot mention a
+#      flag that was renamed or removed. Deliberately broader than the options section alone.
+#   3. HELP commands -> README: every command word on a USAGE `  zzop <cmd> ...` line (brackets
+#      stripped, so `[run]` counts as `run`) must appear in the README as `zzop <cmd>`. One
+#      direction only — the rot class is "new command undocumented"; README prose mentioning an
+#      old command is already caught by check 2 whenever the command carries flags, and a
+#      README ⊆ help command check would be too brittle against ordinary prose.
 # Short flags (`-a`, `-h`) are intentionally not checked — they always appear paired with a long
 # form (`-a, --all`) in both files, so the long-form check already covers them.
 set -euo pipefail
@@ -60,6 +66,27 @@ if [ -n "$stale_in_readme" ]; then
   fail=1
 fi
 
+# --- Check 3: every USAGE command is documented in the README as `zzop <cmd>` -----------------
+# Command lines in the USAGE literal all start `  zzop <cmd> ...` (two spaces, then the invocation).
+# The second whitespace-separated word is the command; `[run]`'s brackets mark the default command
+# and are stripped. Anchored to the line shape, not to specific command names, so a new command
+# line is picked up automatically.
+help_commands="$(printf '%s\n' "$help_text" | grep -E '^  zzop ' | awk '{print $2}' | tr -d '[]' | sort -u)"
+if [ -z "$help_commands" ]; then
+  echo "check-cli-readme-sync: could not extract any command from the USAGE literal's '  zzop <cmd>' lines" >&2
+  exit 1
+fi
+missing_cmds=""
+while IFS= read -r cmd; do
+  [ -z "$cmd" ] && continue
+  grep -qE "zzop ${cmd}\b" "$readme" || missing_cmds="$missing_cmds $cmd"
+done <<< "$help_commands"
+if [ -n "$missing_cmds" ]; then
+  echo "check-cli-readme-sync: commands in \`zzop --help\` missing from packages/cli/README.md (expected a \`zzop <cmd>\` mention):" >&2
+  printf '    %s\n' $missing_cmds >&2
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "check-cli-readme-sync: FAILED — keep packages/cli/README.md in sync with bin/zzop.js's help text." >&2
   exit 1
@@ -67,4 +94,5 @@ fi
 
 help_count="$(printf '%s\n' "$help_flags" | grep -c . || true)"
 readme_count="$(printf '%s\n' "$readme_flags" | grep -c . || true)"
-echo "check-cli-readme-sync: OK (${help_count} help flags documented in README, ${readme_count} README flags recognized by --help)"
+cmd_count="$(printf '%s\n' "$help_commands" | grep -c . || true)"
+echo "check-cli-readme-sync: OK (${help_count} help flags documented in README, ${readme_count} README flags recognized by --help, ${cmd_count} commands documented in README)"

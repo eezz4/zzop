@@ -12,7 +12,10 @@ zzop-git = { path = "../git" }
 zzop-cache = { path = "../cache" }
 zzop-parser-typescript = { path = "../../parser/parser-typescript" }
 zzop-parser-prisma = { path = "../../parser/parser-prisma" }
-zzop-parser-java = { path = "../../parser/parser-java" }
+zzop-parser-java-21 = { path = "../../parser/parser-java-21" }
+zzop-parser-python-3 = { path = "../../parser/parser-python-3" }
+zzop-parser-rust = { path = "../../parser/parser-rust" }
+zzop-parser-go = { path = "../../parser/parser-go" }
 zzop-rules-graph = { path = "../../rules/native/rules-graph" }
 zzop-rules-http = { path = "../../rules/native/rules-http" }
 zzop-rules-cross-layer = { path = "../../rules/native/rules-cross-layer" }

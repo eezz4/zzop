@@ -75,10 +75,16 @@ route joins — which has no single-tree equivalent.
 
 | Language | Support |
 |---|---|
-| TypeScript / JavaScript (`.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts`) | Native, full: symbols, imports, calls, HTTP routes/egress |
-| Prisma schema (`.prisma`) | Native: schema models/fields (structural + usage-aware schema rules) |
-| Java (`.java`) | Native, lexical-level: method/class body spans only, enough for `method-scan` rules |
-| Anything else (Python, JSP, ...) | Lexical fallback in-tree (line count + `line-scan` rules only), or first-class support via an external parser adapter conforming to the [Normalized AST protocol](docs/NORMALIZED_AST.md) |
+| TypeScript / JavaScript (`.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts`) | Native, full AST (swc): symbols, imports, calls, HTTP routes/egress |
+| Python (`.py, .pyi`) | Native, full AST (ruff, Python 3 — Python-2-only syntax falls back to lexical): symbols, imports, FastAPI route provides, `requests`/`httpx` consumes — v1 scope |
+| Rust (`.rs`) | Native, full AST (syn 2): symbols, imports/`mod` tree (incl. same-workspace crate resolution), axum route provides, `reqwest` consumes — v1 scope |
+| Go (`.go`) | Native, full CST (tree-sitter-go 0.25): symbols, imports/dep graph (`go.mod` module resolution, package-directory-wide edges), gin + `net/http` route provides (incl. Go 1.22 `"METHOD /path"` mux syntax), `net/http` literal egress consumes — v1 scope |
+| Java (`.java`) | Native, full CST (tree-sitter-java 0.23.5): symbols (incl. nested types, dot-qualified method names, real visibility), imports/dep graph (`(package, type)`-indexed resolution, glob package-directory-wide edges), Spring MVC route provides (cross-file `extends`-chain + constant-prefix resolution) — v1 scope |
+| Prisma schema (`.prisma`) | Native, lexical schema: models/fields (structural + usage-aware schema rules) |
+| Anything else (Ruby, JSP, ...) | Lexical fallback in-tree (line count + `line-scan` rules only), or first-class support via an external parser adapter conforming to the [Normalized AST protocol](docs/NORMALIZED_AST.md) |
+
+Full precision-tier breakdown — exactly what each native parser extracts, Python's v1 scope note, and
+each parser's `zzop --version` fingerprint — in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#language-support).
 
 A normal-sized file whose extension has no native parser also self-reports in the output's `warnings`
 — naming the extension, a file count, and a path sample — instead of vanishing silently; point it at an
@@ -97,20 +103,20 @@ Semantic Versioning and a maintained changelog begin at `1.0.0`. Full policy:
   DSL interpreter (line/method/symbol/io matchers), unified rule registry + gating
 - `crates/metrics` — score channels consumed by `engine`: roi/health/criticality/coupling/
   seams/recommendations/diagnostics
-- `crates/engine` — fused execution pipeline: language dispatch (TS/Prisma/Java-lexical) → rayon
+- `crates/engine` — fused execution pipeline: language dispatch (TS/Prisma/Python/Rust/Go/Java) → rayon
   per-file parse + per-file rules → AST drop → whole-graph passes; graceful degrade, cache
   consumption, git/scores integration, multi-tree cross-layer join, rule profiling
 - `crates/git` — git history collection (single `git log --numstat` pass → per-file stats +
   per-commit sets)
 - `crates/cache` — per-file IR/findings cache (content hash + parser fingerprint + ruleset
   fingerprint)
-- `crates/facade` — pure-JSON `analyze`/`analyzeTrees`/`analyzeEnvelope`/`validateEnvelopeOnly`/`version` facade, extracted
+- `crates/facade` — pure-JSON `analyze`/`analyzeTrees`/`analyzeEnvelope`/`validateEnvelopeOnly`/`validateRulePackOnly`/`queryIo`/`version` facade, extracted
   from the N-API crate so every native host (`packages/native`, `packages/mcp`) shares one napi-free
   implementation
 - `crates/config` — shared Rust config front end (`zzop.config.jsonc` discovery → JSONC strip →
   config→facade-request mapper → `trees: "auto"` workspace expansion), a Rust port of `packages/cli`'s
   JS config layer, used by `packages/mcp`
-- `packages/native` — the single Node↔Rust boundary (`analyze`/`analyzeTrees`/`analyzeEnvelope`/`validateEnvelopeOnly`/`version`) + npm
+- `packages/native` — the single Node↔Rust boundary (`analyze`/`analyzeTrees`/`analyzeEnvelope`/`validateEnvelopeOnly`/`validateRulePackOnly`/`queryIo`/`version`) + npm
   distribution skeleton ([packages/native/README.md](packages/native/README.md))
 - `packages/mcp` — `zzop-mcp`, a Node-free host binary: an MCP stdio server plus direct CLI
   subcommands, built on `zzop-config` + `zzop-facade`
@@ -144,7 +150,9 @@ Other `crates/engine/examples/` ad hoc harnesses: `cross_layer_rule_counts` (per
 finding counts across 1+ tree roots; set `ZZOP_DUMP_MESSAGES=<n>` to print sample messages),
 `dep_graph_export` (exports the file-level dependency graph as Graphviz DOT or Mermaid), and
 `fastapi_overlay_adapter` (reference external adapter — a lexical FastAPI/Python router scanner feeding
-`EngineConfig::adapter_overlays`, Mode B, also reachable via napi's `adapterOverlays` config field; see
+`EngineConfig::adapter_overlays`, Mode B; now the reference for what native Python v1 deliberately skips
+— non-literal prefixes, Flask/Django, custom conventions — since native FastAPI extraction covers the
+common literal shapes directly; also reachable via napi's `adapterOverlays` config field; see
 [`docs/NORMALIZED_AST.md`](docs/NORMALIZED_AST.md)'s "Adapter overlays" section).
 
 Run the English-only source guard (OSS-facing files must be English; Korean is confined to the internal

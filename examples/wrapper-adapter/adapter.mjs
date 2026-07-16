@@ -1,40 +1,21 @@
 #!/usr/bin/env node
-// Reference "Mode B" adapter for zzop: resolve a hand-rolled HTTP client wrapper's call sites into
-// cross-layer IO facts, emitted as a NormalizedEnvelope overlay for zzop's `adapterOverlays` config.
-//
-// WHY THIS EXISTS
-// Many frontends never call `fetch`/`axios` directly — they funnel every request through one central
-// hand-written wrapper module (a superagent/got/node-fetch-style helper), e.g.:
-//
-//     const requests = {
-//       get:  url        => superagent.get(`${API_ROOT}${url}`).then(...),
-//       post: (url, body) => superagent.post(`${API_ROOT}${url}`, body).then(...),
-//       del:  url        => superagent.del(`${API_ROOT}${url}`).then(...),
-//     };
-//     // ...callers everywhere:
-//     requests.get('/articles');
-//     requests.post('/users/login', { user });
-//     requests.get(`/articles/${slug}/comments`);
-//
-// zzop's native egress extractor recognizes `fetch`/`axios`/`ky` (and a few generated-client runtimes),
-// but the route here lives at the WRAPPER call site (`requests.get('/articles')`), keyed by a verb-named
-// method plus a path argument the engine does not model. So the whole tree goes SILENT — not "0 findings"
-// but "extracted nothing", which is the worst cross-layer failure (a reviewing agent can't tell a clean
-// tree from a blind one). This adapter fills the gap WITHOUT teaching the engine the wrapper's vocabulary:
-// it lexically matches `<wrapper>.<verb>(<pathLiteral>)` call sites and projects each as an `IoConsume`,
-// normalizing the path the same way zzop keys routes so the consume JOINS a native backend provide.
+// Mode B adapter: projects a hand-rolled HTTP client wrapper's call sites
+// (`<wrapper>.<verb>(<pathLiteral>)`, e.g. `requests.get('/articles')`) as `IoConsume` facts in a
+// NormalizedEnvelope overlay for zzop's `adapterOverlays` config, keyed the same way zzop keys
+// routes so a consume can join a native backend provide. Rationale and measured result: README.md.
 //
 // USAGE
 //   node adapter.mjs --root <feRoot> [--wrapper requests,agent,api] [--source <id>]
 // Writes the overlay envelope JSON to stdout; a one-line summary to stderr. Feed stdout to a tree's
 // `adapterOverlays` array on an `analyze`/`analyzeTrees` request (see docs/NORMALIZED_AST.md).
 //
-// LIMITATIONS (intentional — a real adapter can go further): the wrapper binding must be named (default
-// `requests`/`agent`/`api`/`http`/`client`); only a first-argument STRING literal path is keyed (a path
-// built in a variable or concatenated is skipped — never guessed); template `${...}` and `:param`
-// segments normalize to `{}` (zzop's own route-param key), a `?query`/`#fragment` suffix is dropped;
-// call detection is lexical and single-line. A path with no leading `/` resolves as base-relative (the
-// axios/ky `baseURL` idiom) the same way native egress extraction does — see `resolveConsumeKey`.
+// CONTRACT CONSTRAINTS: the wrapper binding must be named (default
+// `requests`/`agent`/`api`/`http`/`client`); only a first-argument STRING literal path is keyed (a
+// path built in a variable or concatenated is skipped — never guessed); template `${...}` and
+// `:param` segments normalize to `{}` (zzop's own route-param key), a `?query`/`#fragment` suffix
+// is dropped; call detection is lexical and single-line. A path with no leading `/` resolves as
+// base-relative (the axios/ky `baseURL` idiom) the same way native egress extraction does — see
+// `resolveConsumeKey`.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { walk, EnvelopeBuilder, resolveConsumeKey } from '../adapter-kit/index.js';
@@ -68,16 +49,15 @@ const callRe = new RegExp(
 );
 
 // Collapse a JS template literal's `${...}` interpolations to zzop's own `{}` route-param placeholder
-// BEFORE handing the literal to adapter-kit's `resolveConsumeKey`. The kit's normalization
-// (`normalizeProvideKey`'s `RE_PARAM`) mirrors `zzop_core::http_interface_key`, which only ever sees a
-// `{param}`/`:param`-SHAPED route pattern — never raw JS template syntax; the native extractor already
-// collapses `${...}` at the AST level before keying. Non-greedy, no nesting — same documented limitation
-// as the react-query adapter's own `collapseTemplate`.
+// BEFORE handing the literal to adapter-kit's `resolveConsumeKey`: the kit's normalization mirrors
+// `zzop_core::http_interface_key`, which only ever sees a `{param}`/`:param`-SHAPED route pattern —
+// never raw JS template syntax. Non-greedy, no nesting — same documented limitation as the
+// react-query adapter's `collapseTemplate`.
 function collapseTemplate(raw) {
   return raw.replace(/\$\{[^}]*\}/g, '{}');
 }
 
-const builder = new EnvelopeBuilder({ parser: 'wrapper-adapter', source });
+const builder = new EnvelopeBuilder({ parser: 'wrapper-adapter/1', source });
 let fileCount = 0;
 let calls = 0;
 let skipped = 0;
@@ -91,13 +71,12 @@ for (const rel of walk(feRoot, { include: ['ts', 'tsx', 'js', 'jsx', 'mjs'], exc
     if (!m) continue;
     calls++;
     const rawPath = collapseTemplate(m[4]);
-    // Delegated to adapter-kit's `resolveConsumeKey` — the same internal/external/base-relative
-    // dispatch `parser/parser-typescript/src/adapters/egress.rs`'s `consume_key_for` uses: a leading
-    // `/` keys directly, `http(s)://` keys verbatim as an external consume, a bare `path/like/this`
-    // resolves as base-relative (the axios/ky `baseURL` idiom — previously skipped entirely here), and
-    // a `?query`/`#fragment` suffix drops on either resolved path. Returns the full `"METHOD key"`
-    // string, or `null` when the literal clears no resolvable shape (reported via `skipped`, never
-    // guessed).
+    // adapter-kit's `resolveConsumeKey` applies the same internal/external/base-relative dispatch
+    // as the native extractor (`egress.rs`'s `consume_key_for`): a leading `/` keys directly,
+    // `http(s)://` keys verbatim as an external consume, a bare `path/like/this` resolves as
+    // base-relative (the axios/ky `baseURL` idiom), and a `?query`/`#fragment` suffix drops on
+    // either resolved path. Returns the full `"METHOD key"` string, or `null` when the literal
+    // clears no resolvable shape (counted as `skipped`, never guessed).
     const key = resolveConsumeKey(VERB[m[2]], rawPath);
     if (key === null) {
       skipped++;

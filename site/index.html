@@ -56,12 +56,14 @@ npx zzop          # analyze and print a report
         <div class="code-panel__tab">Result (abridged)</div>
         <pre class="code-block"><code>{
   "findings":           [ /* DSL rules + native analyses */ ],
-  "crossLayerFindings": [ /* frontend fetch &lt;-&gt; backend route joins */ ],
   "scores":             { /* structural subscores, 0-100 */ },
   "health":             { "pain": 12.4, "contributors": [ /* highest-impact metrics first */ ] },
   "recommendations":    [ /* refactor-first candidates, ROI-ordered */ ],
   "warnings":           [ /* anything this run could not provide */ ]
-}</code></pre>
+}
+
+// analyzeTrees (multi-tree) additionally returns "crossLayerFindings"
+// — frontend fetch &lt;-&gt; backend route joins.</code></pre>
       </div>
     </div>
   </section>

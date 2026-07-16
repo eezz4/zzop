@@ -1,36 +1,19 @@
 #!/usr/bin/env node
-// Reference "Mode B" adapter for zzop: resolve react-query v3's positional-key idiom into cross-layer
-// IO facts, emitted as a NormalizedEnvelope overlay for zzop's `adapterOverlays` config.
-//
-// WHY THIS EXISTS
-// react-query v3's common wiring is ONE default `queryFn` registered on the client
-// (`axios.get(queryKey[0], { params: queryKey[1] })`), and every read call is just:
-//
-//     useQuery('/tags')
-//     useQuery(`/articles/${slug}`)
-//     useQuery([`/articles${filters.feed ? '/feed' : ''}`, { limit: 10, ...filters }])
-//
-// The HTTP route lives in the queryKey argument, not in any recognizable HTTP call — there is no
-// `fetch(...)`/`axios.*` call site at all in the calling file. zzop's native egress extractor is
-// structurally blind to this: the route is data passed to a cache-key hook, not an argument to an
-// HTTP client method. This adapter fills the gap WITHOUT teaching the engine react-query's vocabulary:
-// it lexically matches `useQuery(`/`useInfiniteQuery(` call sites whose first queryKey element is a
-// string/template literal, and projects each as an `IoConsume`, normalized to zzop's own
-// `http_consume_interface_key` shape so the consume can join a native backend provide.
+// Mode B adapter: projects react-query v3 positional queryKey call sites (`useQuery('/x')`,
+// `useQuery(['/x', vars])`) as `IoConsume` facts in a NormalizedEnvelope overlay for zzop's
+// `adapterOverlays` config, keyed to zzop's own `http_consume_interface_key` shape so a consume can
+// join a native backend provide. Rationale and measured result: README.md.
 //
 // USAGE
 //   node adapter.mjs --root <frontend-root> [--source web] [--hooks useQuery,useInfiniteQuery] [--method GET]
 // Writes the overlay envelope JSON to stdout; a one-line summary to stderr. Feed stdout to a tree's
 // `adapterOverlays` array on an `analyze`/`analyzeTrees` request (see docs/NORMALIZED_AST.md).
 //
-// LIMITATIONS (intentional — a real adapter can go further): call detection is lexical and
-// single-line (one call per matched line). Template `${...}` interpolation collapses to a single
-// `{}` with no nesting support and no ternary fan-out — `` `/articles${filters.feed ? '/feed' : ''}` ``
-// becomes the single key `/articles{}`, not two keys for the two branches. Only the v3 POSITIONAL-key
-// idiom is covered (`useQuery('/x')` / `useQuery(['/x', vars])`); the object-form idiom
-// (`useQuery({ queryKey: ['/x'], queryFn })`) is not matched. The emitted HTTP method is a flag
-// (default `GET`) applied uniformly — react-query itself has no verb in the call site; the verb is
-// whatever the app's default `queryFn` uses, which is app-specific and must be supplied by the caller.
+// CONTRACT CONSTRAINTS: call detection is lexical and single-line (one call per matched line).
+// Template `${...}` interpolation collapses to a single `{}` — no nesting, no ternary fan-out. Only
+// the v3 POSITIONAL-key idiom is matched (the object-form `useQuery({ queryKey: ['/x'], queryFn })`
+// is not). The emitted HTTP method is the `--method` flag (default `GET`) applied uniformly — the
+// call site carries no verb; it must be supplied by the caller, never guessed.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { walk, EnvelopeBuilder, resolveConsumeKey } from '../adapter-kit/index.js';
@@ -86,12 +69,10 @@ for (const rel of walk(feRoot, { include: ['ts', 'tsx', 'js', 'jsx', 'mjs'], exc
     calls++;
     const quote = m[1];
     const raw = quote === '`' ? collapseTemplate(m[2]) : m[2];
-    // Delegated to adapter-kit's `resolveConsumeKey` — the same internal/external/base-relative
-    // dispatch `parser/parser-typescript/src/adapters/egress.rs`'s `consume_key_for` uses: an
-    // `http(s)://` literal keys VERBATIM as an external consume (never dropped — it still joins
-    // `crossLayer.externalConsumes`), and a `:param` colon segment collapses to `{}` exactly like a
-    // `{param}` template placeholder (`normalizeProvideKey`'s `RE_PARAM`). Returns the full
-    // `"METHOD key"` string, or `null` when the literal clears no resolvable shape (reported via
+    // adapter-kit's `resolveConsumeKey` applies the same internal/external/base-relative dispatch
+    // as the native extractor (`egress.rs`'s `consume_key_for`): an `http(s)://` literal keys
+    // VERBATIM as an external consume, a `:param` segment collapses to `{}`. Returns the full
+    // `"METHOD key"` string, or `null` when the literal clears no resolvable shape (counted as
     // `skipped`, never guessed).
     const key = resolveConsumeKey(method, raw);
     if (key === null) {

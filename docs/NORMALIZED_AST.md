@@ -1,6 +1,8 @@
 # Normalized AST contract (external parser protocol) — v1 freeze
 
-External/custom parsers (Java, Python, JSP, anything the engine does not parse natively) join the
+External/custom parsers (Ruby, JSP, anything the engine does not parse natively — see
+`docs/ARCHITECTURE.md`'s "Language support" section for what TypeScript/JavaScript, Python, Java,
+Rust, Go, and Prisma already get natively) join the
 analysis by producing this serialized projection per source tree. The engine never sees their real
 AST — it consumes exactly the structures below, projects them into the Common IR, and runs every
 language-neutral analysis (dep graph, dead code, scores, cross-layer join, DSL rules) unchanged.
@@ -54,8 +56,8 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
 - `loc` — raw physical line count (`text.split('\n').length` semantics, trailing newline adds one).
 - `symbols` — declarations. `body_start`/`body_end` (1-based, inclusive) power method-scan DSL rules;
   a parser that cannot produce spans omits them and those rules silently skip the file (graceful
-  degrade, never an error). A lexical brace-matcher is an acceptable span source (the built-in Java
-  projector works this way).
+  degrade, never an error). A lexical brace-matcher is an acceptable span source (zzop's own Java
+  projector worked exactly this way before its tree-sitter CST upgrade).
 - `imports` — internal dependency edges are derived from these by the engine's resolver; a parser may
   instead pre-resolve and emit repo-relative specifiers.
 - `dynamic_imports` — OPTIONAL (`#[serde(default)]`; absent = empty), this file's dynamic-`import()`
@@ -116,6 +118,31 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     (`{method, path, handler, line}`) or a `Mount` sub-router mount (`{prefix, ident, specifier}`). See
     `crates/core/src/fragments.rs`'s `RouterMountFragment`/`RouterMountEntry` for the normative field
     names.
+    - **Additive, backwards-compatible (`#[serde(default)]`; absent = empty/no-op for both shapes):**
+      `Verb` and `Mount` each also accept an `attr_keys: [String]` field, and `RouterMountEntry` gains a
+      third variant, `ScopedAttr: {prefix, key, line}`. All three ride the generic entity-attribute
+      channel (`attributes`, above) rather than introducing a new one: each key is open vocabulary (the
+      kernel never interprets it) and its composed attribute value is implicitly `true` — there is no
+      value field to set. Semantics:
+      - `Verb.attr_keys` — one attribute per key, attached to that verb's own composed `IoKey` once
+        assembled (an `EntityRef::IoKey`). E.g. a route-level guard argument
+        (`router.post('/x', requireAuth, handler)`) yields `attr_keys: ["auth-guarded"]` on `POST /x`.
+      - `Mount.attr_keys` — UNRESOLVED-FALLBACK semantics: at compose time, if `ident`/`specifier`
+        resolves to another router fragment, this is an ordinary mount and `attr_keys` is ignored (the
+        ident named a sub-router, not a guard). If it does NOT resolve, each key instead becomes an
+        `EntityRef::PathScope` attribute at the composed prefix — the mount that turned out not to be a
+        mount is reinterpreted as a scoped fact instead of silently dropped. This is how a producer emits
+        one entry for an ambiguous shape (`.use(prefix, ident)`, where `ident` could be a sub-router or a
+        middleware guard) without pre-deciding which it is.
+      - `ScopedAttr` — a standalone entry (no `Verb`/`Mount` attached) for a middleware registration that
+        never resolves to a mount at all, e.g. `app.use('/admin', requireAuth())` (a call, not an ident).
+        Composes straight to an `EntityRef::PathScope` attribute at the composed `prefix` (joined through
+        the same router-mount chain as `Mount.prefix`).
+      - A producer that only knows plain `Verb`/`Mount` registrations (no attribute judgment) can omit
+        `attr_keys` and the `ScopedAttr` variant entirely — existing envelopes and adapters keep working
+        unchanged. See `parser/parser-typescript/src/adapters/router_mounts.rs` for the native producer
+        that populates these for Express middleware guards, and `crates/engine/src/analyze/compose.rs`'s
+        `compose_router_mount_provides` for the composition semantics above.
   - `class_shape_fragments` is `[ {"name": "CreateUserDto", "fields": [{"name": "email",
     "optional": false}], "complete": true} ]` — one entry per class declaration the adapter's language
     can see, the resolution substrate for `IoProvide.body.dtoRef` (above): at assemble time the
@@ -181,7 +208,16 @@ first. The engine-side receiver, `zzop_engine::analyze_envelope(envelope, config
 projects an already-validated envelope into the same per-file artifact shape a native parser produces
 and runs every language-neutral whole-graph analysis over it (see that function's own module doc for
 exactly which per-file DSL rules and analyses run in envelope mode, and why line-scan/method-scan rules
-and git-history-dependent analyses do not). `examples/jsp-envelope.example.json` is a hand-written,
+and git-history-dependent analyses do not). Envelope analysis also gets the same bundled-rule-pack
+default as every other analyze path: the facade entry point (`zzop_facade::analyze_envelope_json`, the
+one code path every host drives) seeds the bundled packs as inline `packDefs` unless the config passes
+an explicit `packsDir: null` — they appear in the output's `packsLoaded` (`source: "inline"`; `"dir"`
+through the JS wrapper, whose on-disk bundled copy wins the id collision), and since only
+`symbol-scan`/`io-scan` rules can fire without source text and every current bundled rule is
+`line-scan`/`method-scan`, the default currently adds pack-load confirmation, not findings. A
+caller-supplied pack reusing a bundled id keeps the existing collision semantics (a later inline def,
+or any directory pack, wins whole). See `docs/modules/napi.md`'s "Defaults" section for the full
+contract. `examples/jsp-envelope.example.json` is a hand-written,
 crude-parser-shaped fixture (symbols with no body spans, one `http` provide, one `db-table` consume, no
 imports) that validates cleanly against this contract — see `zzop-core`'s `normalized::tests::
 jsp_contract_example_validates` for the fixture-based check. A JSON Schema export for this contract
@@ -332,6 +368,19 @@ callers can refer to either unambiguously.
   Overlay-added fragments then flow through the EXACT SAME whole-tree composition passes as anything
   else (`compose_trpc_provides`/`compose_router_mount_provides`) — an overlay is not a separate code path
   past the merge point.
+
+**Start minimal — partial-envelope-first.** You do not need a parser to close a coverage gap: the
+default on-ramp is a Mode B partial envelope covering just the missing channel and files — a
+tens-of-lines script, not an hours-long native parser. Exhibit A:
+[`examples/java-imports-adapter/`](../examples/java-imports-adapter/) filled exactly ONE channel
+(dep-graph `imports`) in ~90 lines, back when Java's built-in projector was lexical and extracted
+no imports at all — the native Java parser has since closed that specific gap, but the recipe is
+unchanged for any extension still missing a channel. Iterate against the embedded contract
+(`zzop-mcp contract envelope-guide` / `zzop-mcp contract envelope-schema` print this document and
+its JSON Schema straight from the binary), validate offline with `zzop adapter validate
+<envelope.json>`, and add further channels only when an analysis you care about needs them. The
+per-extension "no native parser" warning and the consume-silence tripwires point here for exactly
+this reason.
 
 **Minimal overlay example.** A `router_mount_fragments` overlay contributing `POST
 /api/auth/two-factor/setup`, split across two files exactly as the source tree splits it: one file

@@ -10,6 +10,43 @@
 
 use std::io::{BufRead, Write};
 
+/// The version this binary reports as MCP `serverInfo.version`.
+///
+/// Release builds are stamped at compile time: the prebuild workflow's zzop-mcp build step
+/// exports `ZZOP_RELEASE_VERSION` from the release tag (`v1.2.3` → `1.2.3`) — the same tag the
+/// publish job's `sync-versions.mjs` stamps into the npm packages — so the binary's reported
+/// version equals the `@zzop/cli` package version by construction. Everywhere else (local dev,
+/// CI tests, workflow_dispatch runs on a branch ref) the env var is unset and the version falls
+/// back to `CARGO_PKG_VERSION`, the workspace-wide `0.0.0` placeholder.
+pub fn version() -> &'static str {
+    option_env!("ZZOP_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
+/// MCP protocol versions this server actually supports, newest first. All three listed revisions
+/// are genuinely supported, not aspirational: this server's surface (`initialize`, `tools/list`/
+/// `tools/call` with text content, `resources/list`/`resources/read`) is semantically identical
+/// across them — no revision-divergent feature (elicitation, structured tool output, auth) is
+/// implemented. Listing the older revisions keeps older-SDK clients connectable where a
+/// latest-only counter-offer could make them disconnect.
+const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
+
+/// The server's latest supported protocol version — the spec-mandated counter-offer when a client
+/// requests a version this server does not support.
+const LATEST_PROTOCOL_VERSION: &str = "2025-06-18";
+
+/// MCP version negotiation, per spec: reply with the client's requested version only when this
+/// server supports it; otherwise reply with the server's latest supported version. Echoing an
+/// arbitrary requested version verbatim (the previous behavior) falsely claims support for e.g.
+/// "9999-99-99" — the client is entitled to treat the echoed version's semantics as honored.
+/// A missing/non-string `protocolVersion` param also gets the latest supported version.
+fn negotiate_protocol_version(requested: Option<&str>) -> &'static str {
+    SUPPORTED_PROTOCOL_VERSIONS
+        .iter()
+        .copied()
+        .find(|supported| Some(*supported) == requested)
+        .unwrap_or(LATEST_PROTOCOL_VERSION)
+}
+
 /// Runs the stdio server until stdin closes. Notifications (parsed objects with no `id`) get no reply,
 /// per JSON-RPC 2.0; an explicit `"id": null` is NOT a notification and is answered.
 pub fn run_stdio() {
@@ -59,17 +96,16 @@ pub fn run_stdio() {
 
         let reply = match method {
             "initialize" => {
-                let proto = msg
+                let requested = msg
                     .get("params")
                     .and_then(|p| p.get("protocolVersion"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("2025-06-18");
+                    .and_then(|v| v.as_str());
                 ok(
                     id,
                     serde_json::json!({
-                        "protocolVersion": proto,
+                        "protocolVersion": negotiate_protocol_version(requested),
                         "capabilities": { "tools": {}, "resources": {} },
-                        "serverInfo": { "name": "zzop", "version": env!("CARGO_PKG_VERSION") }
+                        "serverInfo": { "name": "zzop", "version": version() }
                     }),
                 )
             }
@@ -99,4 +135,41 @@ fn ok(id: serde_json::Value, result: serde_json::Value) -> serde_json::Value {
 fn respond(stdout: &mut std::io::Stdout, value: serde_json::Value) {
     let _ = writeln!(stdout, "{value}");
     let _ = stdout.flush();
+}
+
+#[cfg(test)]
+mod tests {
+    // `ZZOP_RELEASE_VERSION` is a compile-time env (`option_env!`), so only the fallback path is
+    // testable here: test builds never set it, and this pins that the fallback is exactly
+    // `CARGO_PKG_VERSION` (the workspace `0.0.0` placeholder). The release path — the env exported
+    // from the tag in .github/workflows/prebuild.yml — is exercised live by release CI.
+    #[test]
+    fn version_falls_back_to_cargo_pkg_version_when_release_env_is_unset() {
+        assert_eq!(super::version(), env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn negotiate_echoes_a_supported_requested_protocol_version() {
+        // Every listed revision echoes — an older-SDK client (2024-11-05) keeps its own version
+        // rather than being counter-offered into a disconnect.
+        for v in super::SUPPORTED_PROTOCOL_VERSIONS {
+            assert_eq!(super::negotiate_protocol_version(Some(v)), *v);
+        }
+    }
+
+    #[test]
+    fn negotiate_counter_offers_latest_supported_for_unsupported_or_missing_versions() {
+        // An unsupported request must NOT be echoed back (that would falsely claim support) —
+        // the spec's answer is the server's latest supported version.
+        assert_eq!(
+            super::negotiate_protocol_version(Some("9999-99-99")),
+            super::LATEST_PROTOCOL_VERSION
+        );
+        assert_eq!(
+            super::negotiate_protocol_version(None),
+            super::LATEST_PROTOCOL_VERSION
+        );
+        // Sanity: the counter-offer is itself a supported version.
+        assert!(super::SUPPORTED_PROTOCOL_VERSIONS.contains(&super::LATEST_PROTOCOL_VERSION));
+    }
 }

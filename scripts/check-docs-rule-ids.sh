@@ -7,7 +7,7 @@
 # discovered by a user.
 #
 # SSOT id set: docs/rules/catalog.md, read the same way scripts/check-rules-catalog-sync.sh does — it is
-# machine-pinned to the engine by crates/engine/tests/rule_contracts.rs, so it transitively vouches for
+# machine-pinned to the engine by crates/engine/tests/rule_contracts/, so it transitively vouches for
 # reality. The catalog lists DSL rule ids BARE, one table per pack under a `### `<pack>`` heading (e.g.
 # `no-explicit-any` under `### `typescript``), so this script reconstructs each rule's config-facing id
 # as `<pack>/<id>` from heading + row. Native analysis ids (the "## Native analyses" section) are
@@ -109,12 +109,14 @@ pack_id_count="$(printf '%s\n' "$pack_ids" | grep -c . || true)"
 [ "$catalog_id_count" -gt 0 ] || { echo "check-docs-rule-ids: extracted 0 ids from $catalog — extraction is broken" >&2; exit 1; }
 [ "$pack_id_count" -gt 0 ] || { echo "check-docs-rule-ids: extracted 0 pack ids from $catalog — extraction is broken" >&2; exit 1; }
 
+# Herestrings, never `printf big-blob | grep -q`: under pipefail, grep -q exiting on first match
+# SIGPIPEs printf (exit 141) once the input exceeds the pipe buffer — a real match reads as failure.
 is_valid_id() {
-  printf '%s\n' "$valid_ids" | grep -qxF "$1"
+  grep -qxF "$1" <<< "$valid_ids"
 }
 
 is_in() { # $1 = candidate, $2 = newline-separated set
-  printf '%s\n' "$2" | grep -qxF "$1"
+  grep -qxF "$1" <<< "$2"
 }
 
 # Pass-A allowlist: config keys that legitimately carry a severity-like STRING value without being a rule

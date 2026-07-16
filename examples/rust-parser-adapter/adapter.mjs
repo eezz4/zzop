@@ -1,39 +1,24 @@
 #!/usr/bin/env node
-// Reference "Mode A" parser for zzop: a lexical Rust parser that projects a Rust workspace into a
-// complete NormalizedEnvelope for `analyzeEnvelope` (docs/NORMALIZED_AST.md).
-//
-// WHY THIS EXISTS
-// zzop's engine has no Rust crate — Rust enters (like any new language) through the external-parser
-// contract: an out-of-process producer emits one `NormalizedEnvelope` and the engine runs every
-// language-neutral analysis it can on the projected channels (dep graph -> circular / dead-candidates /
-// unreachable / fan-in-out / folder rollups, symbols -> symbol-scan DSL rules, coverage census,
-// config diagnostics). This adapter is the first *runnable* Mode A reference (the JSP example is a
-// hand-written fixture) — and its worked demo is zzop analyzing its own Rust workspace.
-//
-// WHAT IT PROJECTS (all lexical, line-based — no real Rust parse)
-// - symbols:  top-level `fn` / `struct` / `enum` / `trait` / `type` / `const` / `static` items;
-//   `exported` = declared with any `pub` form (`pub`, `pub(crate)`, `pub(super)`, `pub(in ...)`).
-// - imports:  `mod foo;` declarations edge to the child module file (`foo.rs` / `foo/mod.rs`), and
-//   `use` paths (`crate::`, `super::`, `self::`, and cross-crate `use other_workspace_crate::...`)
-//   resolve module-tree prefixes to repo-relative file paths. The envelope contract matches import
-//   specifiers against the envelope's own path set EXACTLY, so the adapter resolves paths itself; an
-//   unresolvable path is simply omitted (external, never guessed).
-// - is_entry: crate roots and cargo-convention files (`lib.rs`, `main.rs`, `build.rs`, `tests/**`,
-//   `benches/**`, `examples/**`, `src/bin/**`) — cargo loads these by convention with zero in-repo
-//   importers, exactly what the contract's `is_entry` marker exists for.
-// - io:       left empty on purpose. This adapter models the module graph, not routes; a Rust web
-//   service would extract its axum/actix routes here the same way (see the Mode B adapters).
+// Mode A reference: a lexical Rust parser projecting a Cargo workspace into one complete
+// NormalizedEnvelope for `analyzeEnvelope` (docs/NORMALIZED_AST.md). See README.md.
 //
 // USAGE
 //   node adapter.mjs --root <workspaceRoot> [--source <id>]
-// Writes the envelope JSON to stdout; a one-line summary to stderr. Feed stdout to
-// `analyzeEnvelope(envelopeJson, configJson)` — `analyze.mjs` next to this file does exactly that.
+// Envelope JSON to stdout, one-line summary to stderr; pipe stdout to analyze.mjs.
 //
-// LIMITATIONS (intentional — a real adapter can go further): detection is lexical and line-based, so
-// items inside `macro_rules!`/`cfg`-gated blocks or multi-line `use` groups spanning `{` newlines are
-// approximated (grouped `use a::{b, c}` on ONE line is handled); `#[path = ...]` module overrides,
-// `include!`, and re-export chains (`pub use`) are not modeled; glob imports resolve to the module
-// file itself (which is the right dep edge anyway).
+// CONTRACT CONSTRAINTS
+// - The envelope contract matches import specifiers against the envelope's own path set EXACTLY, so
+//   this adapter resolves `use`/`mod`/inline paths to repo-relative files itself; an unresolvable
+//   path (std, external registry crates) is omitted — external, never guessed.
+// - is_entry marks cargo-convention files (crate roots, `build.rs`, `tests/**`, `benches/**`,
+//   `examples/**`, `src/bin/**`, explicit manifest targets): loaded by cargo with zero in-repo
+//   importers, exactly what the contract's marker exists for.
+// - io is left empty on purpose — this adapter models the module graph, not routes.
+//
+// LIMITATIONS (lexical, line-based — no real Rust parse): `macro_rules!`/`cfg`-gated items are
+// approximated; multi-line `use` groups are missed (single-line groups handled); `#[path = ...]`,
+// `include!`, and `pub use` re-export chains are not modeled; glob imports resolve to the module
+// file itself; string/comment contents can produce spurious inline-path matches.
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import path from 'node:path';
 
@@ -49,11 +34,12 @@ if (!root) {
   process.exit(2);
 }
 
-// --- walk: every .rs file, skipping build output and vendored trees ---------------------------------
-const SKIP_DIRS = new Set(['target', 'node_modules', '.git', '.zzop-cache']);
+// --- walk: every .rs file, skipping build output, vendored trees, and hidden (dot) directories ------
+const SKIP_DIRS = new Set(['target', 'node_modules']);
+const skipEntry = (name) => name.startsWith('.') || SKIP_DIRS.has(name);
 function walk(dir, out = []) {
   for (const e of readdirSync(dir)) {
-    if (SKIP_DIRS.has(e)) continue;
+    if (skipEntry(e)) continue;
     const abs = path.join(dir, e);
     const st = statSync(abs);
     if (st.isDirectory()) walk(abs, out);
@@ -73,7 +59,7 @@ const crateSrcDirs = []; // sorted longest-first for nearest-ancestor lookup
 const manifestEntries = new Set(); // explicit cargo target files: [[test]]/[[bin]]/[lib] `path = "x.rs"`
 (function findCrates(dir) {
   for (const e of readdirSync(dir)) {
-    if (SKIP_DIRS.has(e)) continue;
+    if (skipEntry(e)) continue;
     const abs = path.join(dir, e);
     if (statSync(abs).isDirectory()) findCrates(abs);
     else if (e === 'Cargo.toml') {

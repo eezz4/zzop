@@ -13,6 +13,12 @@
 //! resolves across files and emits `IoProvide`s. The fragment shape is framework-agnostic — only the
 //! producer's recognizer varies; see `zzop_parser_typescript::adapters::router_mounts` for the
 //! current one.
+//!
+//! Router-mount fragments can additionally carry PRODUCER-JUDGED attributes (`RouterMountEntry::Verb::attr_keys`,
+//! `RouterMountEntry::Mount::attr_keys`, `RouterMountEntry::ScopedAttr`) — open-vocabulary facts (e.g.
+//! "auth-guarded") composed at assemble time into `zzop_core::Attribute`s on the same `zzop_core::AttributeStore`
+//! channel a Mode-B overlay feeds. The kernel never interprets these keys; see `zzop_core::attributes`'s
+//! module doc for the channel itself.
 
 use serde::{Deserialize, Serialize};
 
@@ -58,6 +64,11 @@ pub enum RouterMountEntry {
         path: String,
         handler: Option<String>,
         line: u32,
+        /// Attribute keys the producer attaches to this route's composed IoKey (open vocabulary — the
+        /// kernel never interprets them; the value is implicitly `true`). E.g. "auth-guarded" from a
+        /// route-level guard argument.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attr_keys: Vec<String>,
     },
     /// A sub-router mount, e.g. `recv.route('/two-factor', twoFactorRoute)` (Hono): `prefix` is the
     /// first argument; `ident`/`specifier` identify the mounted router (`None` = local).
@@ -65,6 +76,25 @@ pub enum RouterMountEntry {
         prefix: String,
         ident: String,
         specifier: Option<String>,
+        /// Producer-judged attribute keys for the case this mount does NOT resolve to a router fragment:
+        /// a `.use(prefix, ident)` cannot be locally disambiguated between "sub-router" and "middleware
+        /// guard" — the composer resolves it. Resolved: a normal mount, keys ignored (the ident was a
+        /// router). Unresolved: each key becomes a PathScope attribute at the composed prefix.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attr_keys: Vec<String>,
+    },
+    /// A producer-judged cross-cutting attribute scoped to this router's local `prefix` — e.g. an
+    /// Express `app.use('/admin', requireAuth())` middleware guard. Resolved to a final `PathScope`
+    /// attribute once the router's mount chain is composed; the value is implicitly `true` (a
+    /// `serde_json::Value` here would break the `Eq` derive, and every current producer emits
+    /// presence facts — generalize when a non-presence native producer exists).
+    ScopedAttr {
+        /// Router-local literal path prefix the attribute covers ("/" = the whole router).
+        prefix: String,
+        /// Open-vocabulary attribute key (producer-owned, e.g. "auth-guarded").
+        key: String,
+        /// 1-based line of the registration call.
+        line: u32,
     },
 }
 

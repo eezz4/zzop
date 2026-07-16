@@ -91,6 +91,22 @@ test('validateEnvelope flags duplicate paths and body_end < body_start', () => {
   assert.ok(errors.some((e) => e.includes('body_end')));
 });
 
+test('validateEnvelope reads the canonical camelCase bodyStart/bodyEnd spelling too', () => {
+  // Wire-canonical names are camelCase (envelope.schema.json); snake_case is a frozen-v1 input
+  // alias. Both spellings must trip the same body-range check, matching zzop_core's serde aliases.
+  const base = { format: NORMALIZED_AST_FORMAT, version: 1, parser: 'x/1', source: 'web' };
+  const camel = validateEnvelope({
+    ...base,
+    files: [{ path: 'a.ts', loc: 1, symbols: [{ name: 'f', bodyStart: 10, bodyEnd: 5 }] }],
+  });
+  assert.ok(camel.some((e) => e.includes('body_end')));
+  const valid = validateEnvelope({
+    ...base,
+    files: [{ path: 'a.ts', loc: 1, symbols: [{ name: 'f', bodyStart: 5, bodyEnd: 10 }] }],
+  });
+  assert.deepEqual(valid, []);
+});
+
 test('validateEnvelope flags unknown format and unsupported version', () => {
   const errors = validateEnvelope({ format: 'bogus', version: 99, parser: 'x', source: 's', files: [] });
   assert.ok(errors.some((e) => e.includes('unknown format')));
@@ -98,10 +114,13 @@ test('validateEnvelope flags unknown format and unsupported version', () => {
 });
 
 test('toEnvelope throws (not silently emits) an invalid envelope', () => {
-  // Force an invalid state by hand-editing after the fact is not possible via the public API — this
-  // instead checks that a valid builder round trip validates clean, i.e. toEnvelope's internal
-  // validateEnvelope call is actually wired up.
-  const b = new EnvelopeBuilder({ parser: 'x/1', source: 'web' });
-  b.addFile('a.ts', { loc: 1 });
-  assert.doesNotThrow(() => b.toEnvelope());
+  // addFile's opts set FileProjection fields verbatim, so an invalid symbol body range is reachable
+  // through the public API — toEnvelope must refuse to emit it.
+  const bad = new EnvelopeBuilder({ parser: 'x/1', source: 'web' });
+  bad.addFile('a.ts', { loc: 1, symbols: [{ name: 'f', bodyStart: 10, bodyEnd: 5 }] });
+  assert.throws(() => bad.toEnvelope(), /invalid envelope[\s\S]*body_end/);
+
+  const ok = new EnvelopeBuilder({ parser: 'x/1', source: 'web' });
+  ok.addFile('a.ts', { loc: 1 });
+  assert.doesNotThrow(() => ok.toEnvelope());
 });

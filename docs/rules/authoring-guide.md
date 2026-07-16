@@ -135,12 +135,12 @@ the check needs:
   facts) in isolation; nothing in the DSL contract can see a second file's content. A rule that needs to
   resolve a constant defined in another module, join against a shared `REDIS_KEYS`-style vocabulary
   module, or correlate a route registration in one file with its handler's body in another (`http`
-  pack's `authGates`/`routeExposure` already approximate this by folding everything onto one
+  pack's `auth-gates`/`route-exposure` already approximate this by folding everything onto one
   registration line — the real cross-file handler-body check is out of scope for line-scan) needs either
   a whole-graph native rule or a new IR-level join primitive.
 - **Declaration→use / call-graph tracking.** Any check that must follow "handler X is registered at this
   route, and X (or something X calls, transitively) does Y" is a call-graph BFS problem, not a
-  per-file pattern match. `unsafe-read-endpoint`/`non-idempotent-write` (`rules/native/rules-graph`) are
+  per-file pattern match. `unsafe-read-endpoint`/`non-idempotent-write` (`rules/native/rules-http`) are
   exactly this shape: they resolve an `ApiEndpoint`'s handler to a symbol, then BFS the whole-repo
   `SymbolGraph` for a reachable write site.
 - **AST shape rather than text co-occurrence.** Anything that genuinely needs a parse tree — cyclomatic/
@@ -155,7 +155,7 @@ detections that fit neither category yet.
 
 The cross-cutting rules above (marker on every finding, message tells the reader how to exclude it, catalog
 totals match reality) used to be conventions a human had to remember — and drifted, silently, more than
-once. `crates/engine/tests/rule_contracts.rs` machine-enforces them over every shipped DSL pack and the
+once. `crates/engine/tests/rule_contracts/` machine-enforces them over every shipped DSL pack and the
 native registry, so a violation is a failing test in `cargo test --workspace`, not something a reviewer has
 to notice by eye. If that file's tests fail on your change, the test name and failure message identify
 exactly which rule/pack/doc line to fix — do not silence the test, fix the offending rule or doc.
@@ -243,7 +243,7 @@ through before it ships:
    (`"logged in to do this"` matches a bare `\bdo\b`; `"waiting for ${x}"` matches a bare `\bfor\b`). Require
    an adjacent syntax anchor — a `(`, `{`, a wrapping quote, etc. — immediately before/after the word in the
    same alternative (`\bdo\s*\{`, not bare `\bdo\b`; `"..."` wrapping `SELECT`/`UPDATE`, not a bare
-   `\bUPDATE\b`), never a bare word alone. Machine-checked by `rule_contracts.rs`'s
+   `\bUPDATE\b`), never a bare word alone. Machine-checked by the `rule_contracts` meta-test's
    `dangerous_bare_words_are_syntax_anchored_not_bare_prose_matches` test (see that test's own doc comment
    for the curated word list and exactly what the check can/cannot prove) — this is the fix that shipped for
    `perf/api-in-loop` (bare `\bdo\b`) and `be-security/sql-taint` (bare `UPDATE`).

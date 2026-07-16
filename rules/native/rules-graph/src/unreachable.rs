@@ -20,11 +20,24 @@ pub struct UnreachableFile {
 }
 
 /// Files with fanIn > 0 that no entrypoint reaches — closed dead islands. Ranked by loc desc, then risk, then path.
-/// Entrypoints = conventional entry files + test files + every fanIn=0 file (false-positive-safe).
-pub fn find_unreachable(nodes: &[FileNode], dep: &DepGraph, limit: usize) -> Vec<UnreachableFile> {
+/// Entrypoints = conventional entry files + test files + every fanIn=0 file (false-positive-safe) +
+/// `extra_entries` — paths the CALLER knows are loaded by a mechanism this graph can't see (the same
+/// contract as `find_dead_candidates`' parameter of the same name): cargo-manifest-declared target
+/// files (`[[bin]]`/`[[test]]`/... `path = "..."` — loaded by cargo, never imported) and Mode-B
+/// adapter-overlay files marked `is_entry`.
+pub fn find_unreachable(
+    nodes: &[FileNode],
+    dep: &DepGraph,
+    limit: usize,
+    extra_entries: &HashSet<String>,
+) -> Vec<UnreachableFile> {
     let mut entries: HashSet<String> = HashSet::new();
     for n in nodes {
-        if n.fan_in == 0 || is_entry_file(&n.path) || is_test_file(&n.path) {
+        if n.fan_in == 0
+            || is_entry_file(&n.path)
+            || is_test_file(&n.path)
+            || extra_entries.contains(&n.path)
+        {
             entries.insert(n.path.clone());
         }
     }
@@ -56,8 +69,12 @@ pub fn find_unreachable(nodes: &[FileNode], dep: &DepGraph, limit: usize) -> Vec
 
 /// One `Finding` per unreachable file (native analysis id `"unreachable"`, matching
 /// `register_native_analyses`). No `limit` param — the engine's own call site passes `nodes.len()`.
-pub fn unreachable_findings(nodes: &[FileNode], dep: &DepGraph) -> Vec<Finding> {
-    find_unreachable(nodes, dep, nodes.len())
+pub fn unreachable_findings(
+    nodes: &[FileNode],
+    dep: &DepGraph,
+    extra_entries: &HashSet<String>,
+) -> Vec<Finding> {
+    find_unreachable(nodes, dep, nodes.len(), extra_entries)
         .into_iter()
         .map(|u| Finding {
             rule_id: "unreachable".to_string(),
@@ -166,7 +183,15 @@ fn entry_patterns() -> &'static [Regex] {
             r"(^|/)(cmd)/",
             r"Application\.java$",
             r"(^|/)Main\.java$",
-            r"(^|/)(__main__|manage|wsgi|asgi)\.py$",
+            r"(^|/)(__main__|manage|wsgi|asgi|main|settings|conftest)\.py$",
+            // Rust entry conventions: crate/binary roots (`main.rs`/`lib.rs`/`build.rs`) plus any file
+            // under a `tests/`/`examples/`/`benches/`/`src/bin/` path component — cargo's own conventional
+            // test-harness/example-binary/benchmark-binary/multi-binary directories, each compiled and run
+            // as its own separate target rather than `use`d from elsewhere in the crate, so zero in-repo
+            // importers is expected for files under them, not a dead/unreachable signal.
+            r"(^|/)(main|lib|build)\.rs$",
+            r"(^|/)(tests|examples|benches)/",
+            r"(^|/)src/bin/",
         ]
         .iter()
         .map(|p| Regex::new(p).unwrap())
@@ -175,148 +200,4 @@ fn entry_patterns() -> &'static [Regex] {
 }
 
 #[cfg(test)]
-mod tests {
-    //! Covers dead-island detection: a closed cycle unreachable from any entrypoint is flagged, a library's
-    //! public API entry keeps its helpers live, and files reachable from a test entrypoint are not flagged.
-    use super::*;
-    use std::collections::HashMap;
-
-    #[test]
-    fn e2e_infra_directories_are_test_paths() {
-        assert!(is_test_file(
-            "packages/testing/playwright/scripts/import-data.mjs"
-        ));
-        assert!(is_test_file("app/e2e/flows/login.ts"));
-        assert!(is_test_file("cypress/scripts/setup.js"));
-        // Whole-segment match only — names merely containing "testing" are not test paths.
-        assert!(!is_test_file("src/app-testing-utils/service.ts"));
-    }
-
-    fn node(path: &str, fan_in: u32, loc: u32) -> FileNode {
-        FileNode {
-            id: path.into(),
-            path: path.into(),
-            change_count: 0,
-            churn: 0,
-            last_modified: None,
-            author_count: 1,
-            loc,
-            tag_counts: HashMap::new(),
-            fan_in,
-            fan_out: 0,
-            total_connections: 0,
-            risk_score: 0.0,
-            ..Default::default()
-        }
-    }
-
-    fn dep(pairs: &[(&str, &[&str])]) -> DepGraph {
-        pairs
-            .iter()
-            .map(|(k, vs)| (k.to_string(), vs.iter().map(|s| s.to_string()).collect()))
-            .collect()
-    }
-
-    #[test]
-    fn flags_closed_dead_island() {
-        let d = dep(&[
-            ("index.ts", &["live.ts"]),
-            ("live.ts", &[]),
-            ("dead1.ts", &["dead2.ts"]),
-            ("dead2.ts", &["dead1.ts"]),
-        ]);
-        let nodes = vec![
-            node("index.ts", 0, 10),
-            node("live.ts", 1, 10),
-            node("dead1.ts", 1, 40),
-            node("dead2.ts", 1, 20),
-        ];
-        let dead: Vec<String> = find_unreachable(&nodes, &d, 30)
-            .into_iter()
-            .map(|n| n.path)
-            .collect();
-        assert_eq!(dead, vec!["dead1.ts".to_string(), "dead2.ts".to_string()]); // ranked by loc desc
-    }
-
-    #[test]
-    fn does_not_flag_library_public_api() {
-        let d = dep(&[("publicApi.ts", &["helper.ts"]), ("helper.ts", &[])]);
-        let nodes = vec![node("publicApi.ts", 0, 10), node("helper.ts", 1, 10)];
-        assert!(find_unreachable(&nodes, &d, 30).is_empty());
-    }
-
-    #[test]
-    fn files_reachable_from_test_entry_not_flagged() {
-        let d = dep(&[("x.test.ts", &["util.ts"]), ("util.ts", &[])]);
-        let nodes = vec![node("x.test.ts", 0, 10), node("util.ts", 1, 10)];
-        assert!(find_unreachable(&nodes, &d, 30).is_empty());
-    }
-
-    /// Pins the exact rendered message — regression coverage for the `disable_hint` splice
-    /// `unreachable_findings` went through during the 2026-07-10 dialect-consolidation sweep.
-    #[test]
-    fn finding_message_is_byte_identical_to_the_pre_sweep_text() {
-        let d = dep(&[("dead1.ts", &["dead2.ts"]), ("dead2.ts", &["dead1.ts"])]);
-        let nodes = vec![node("dead1.ts", 1, 10), node("dead2.ts", 1, 5)];
-        let out = unreachable_findings(&nodes, &d);
-        assert_eq!(out.len(), 2);
-        assert_eq!(out[0].rule_id, "unreachable");
-        assert_eq!(
-            out[0].message,
-            "file has 1 importer(s) in this tree but is unreachable from any entrypoint — its importers \
-             form a closed island nothing outside it can reach, so it's effectively dead despite having \
-             in-repo references. Delete the island, or wire it back to a real entrypoint if it should be \
-             reachable. Disable via config `rules: { \"unreachable\": \"off\" }` (embedders: \
-             `disabled_rules`) if this island is reached by a mechanism this graph doesn't see (e.g. \
-             dynamic `require`, a plugin loader)."
-        );
-    }
-
-    #[test]
-    fn tool_entry_file_positives() {
-        for path in [
-            "vite.config.ts",
-            "vite.config.js",
-            "vitest.config.mts",
-            "jest.config.cjs",
-            "playwright.config.ts",
-            "tailwind.config.js",
-            "postcss.config.cjs",
-            "rollup.config.mjs",
-            "webpack.config.js",
-            "next.config.mjs",
-            "nuxt.config.ts",
-            "svelte.config.js",
-            "astro.config.mts",
-            "eslint.config.cts",
-            ".eslintrc.cjs",
-            ".eslintrc.js",
-            ".prettierrc.cjs",
-            ".babelrc.js",
-            ".stylelintrc.js",
-            "vite-env.d.ts",
-            "foo.d.ts",
-            "packages/app/src/vite-env.d.ts",
-        ] {
-            assert!(
-                is_tool_entry_file(path),
-                "expected tool-entry match: {path}"
-            );
-        }
-    }
-
-    #[test]
-    fn tool_entry_file_negatives() {
-        for path in [
-            "config.ts",
-            "card.ts",
-            "features/x/Component.tsx",
-            "index.ts",
-        ] {
-            assert!(
-                !is_tool_entry_file(path),
-                "expected NOT a tool-entry match: {path}"
-            );
-        }
-    }
-}
+mod tests;

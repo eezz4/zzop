@@ -9,9 +9,11 @@ whether the rule is common or environment-specific).
   `core` — `core` stays rule-agnostic; see `crates/core/Cargo.toml` vs `crates/engine/Cargo.toml`). Full
   native speed, shares IR memory directly, oxlint-style single traversal.
 - **Distribution**: bundled in the engine's prebuilds (5 platforms). Changing one requires rebuilding.
-- **Examples**: `rules-graph` (circular, unreachable, dead-candidates, dead-exports, duplicate-route, plus
-  the 2 call-graph-BFS HTTP scanners: unsafe-read-endpoint, non-idempotent-write, and the 20 multi-tree
-  `cross-layer/*` rules joining HTTP/DB/tRPC IO facts across trees) and `rules-schema`
+- **Examples**: `rules-graph` (circular, unreachable, dead-candidates, dead-exports), `rules-http`
+  (single-tree HTTP/route rules: duplicate-route, route-shadowing, mutating-route-no-auth,
+  unprovided-consume, plus the 2 call-graph-BFS scanners unsafe-read-endpoint and non-idempotent-write),
+  `rules-cross-layer` (the 23 multi-tree `cross-layer/*` rules joining HTTP/DB/tRPC IO facts across
+  trees), and `rules-schema`
   (Prisma structural rules + the usage-aware dead-model/dead-field/schema-churn checks). Seams, criticality,
   scores, health, and recommendations are **not** rules — they're scores computed in `crates/metrics`,
   registered via that crate's own `register_native_analyses` (see "Adding a rule" below), and only ride the
@@ -32,7 +34,7 @@ whether the rule is common or environment-specific).
   exists ONLY to give each pack folder's `<pack>.rs` a `cargo test` target (one `[[test]]` entry per pack,
   `path = "dsl/<pack>/<pack>.rs"`). It carries no rule data and no interpreter logic — that stays in
   `zzop-core` (loading/schema) and `zzop-engine` (evaluation), both of which it depends on as
-  dev-dependencies. `crates/engine/tests/rule_contracts.rs` machine-checks that this crate's `[[test]]`
+  dev-dependencies. `crates/engine/tests/rule_contracts/` machine-checks that this crate's `[[test]]`
   list stays in sync with the pack folders on disk.
 - **Distribution**: published/versioned **independently** via npm/registry, loaded on demand by language
   detection / config. **Platform-independent** (data, so prebuilds are unaffected). Build-free replacement.
@@ -64,17 +66,18 @@ whether the rule is common or environment-specific).
 The kernel (`crates/core`) and the engine's orchestration code are rule-vocabulary-free by construction —
 `crates/core/src/registry.rs` exposes only a generic, id-agnostic mechanism
 (`register_native_analysis_stub`), never a specific rule id. Two meta-tests
-(`crates/engine/tests/rule_contracts.rs`) machine-enforce this: `no_dsl_id_collides_with_a_native_analysis_id`
+(`crates/engine/tests/rule_contracts/`) machine-enforce this: `no_dsl_id_collides_with_a_native_analysis_id`
 plus id-hygiene checks for DSL, and `kernel_core_carries_no_native_analysis_id_string_literal` for native.
 Concretely, adding either kind of rule never requires editing `crates/core` or `crates/engine`'s
 orchestration logic:
 
-- **A native rule**: implement the body in its owning crate (`rules/native/rules-graph` or
-  `rules/native/rules-schema` — or a new sibling crate for a new rule family), add its id/severity to that
+- **A native rule**: implement the body in its owning crate (`rules/native/rules-graph`,
+  `rules/native/rules-http`, `rules/native/rules-cross-layer`, or `rules/native/rules-schema` — or a new
+  sibling crate for a new rule family), add its id/severity to that
   crate's own `register_native_analyses` function, and add tests in the same crate. `zzop_engine::register_all_native`
   (`crates/engine/src/lib.rs`) composes every owning crate's `register_native_analyses` — it already
   depends on all of them, so a new crate only needs one line added there. `docs/rules/catalog.md`'s totals
-  and per-id table need updating too (machine-checked by `rule_contracts.rs`'s catalog-sync tests).
+  and per-id table need updating too (machine-checked by the `rule_contracts` meta-test's catalog-sync tests).
 - **A DSL rule**: add a rule entry to a pack's `<pack>.json` (or a new pack folder) under `rules/dsl/`, plus
   a co-located `<pack>.rs` end-to-end test. No Rust code changes anywhere — `zzop_core::load_dsl_packs`
   discovers packs from disk.

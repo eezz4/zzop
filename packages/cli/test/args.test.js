@@ -126,6 +126,65 @@ test('--help bypasses adapter subcommand/path validation', () => {
   assert.equal(opts.command, 'adapter');
 });
 
+test('pack validate <path> parses the subcommand and path', () => {
+  const opts = parseArgs(['pack', 'validate', 'my-pack.json']);
+  assert.equal(opts.command, 'pack');
+  assert.equal(opts.packSubcommand, 'validate');
+  assert.equal(opts.packPath, 'my-pack.json');
+});
+
+test('pack validate requires a path argument', () => {
+  assert.throws(
+    () => parseArgs(['pack', 'validate']),
+    (e) => e instanceof ConfigError && /requires a <pack\.json> path argument/.test(e.message)
+  );
+});
+
+test('pack requires the "validate" subcommand', () => {
+  assert.throws(
+    () => parseArgs(['pack']),
+    (e) => e instanceof ConfigError && /Unknown "pack" subcommand ""/.test(e.message)
+  );
+  assert.throws(
+    () => parseArgs(['pack', 'bogus', 'my-pack.json']),
+    (e) => e instanceof ConfigError && /Unknown "pack" subcommand "bogus"/.test(e.message)
+  );
+});
+
+test('pack validate rejects a run-scoped flag instead of silently ignoring it', () => {
+  assert.throws(
+    () => parseArgs(['pack', 'validate', 'my-pack.json', '--json']),
+    (e) => e instanceof ConfigError && /not valid for the `pack` command/.test(e.message)
+  );
+});
+
+test('pack validate rejects a trailing extra argument', () => {
+  assert.throws(
+    () => parseArgs(['pack', 'validate', 'my-pack.json', 'extra']),
+    (e) => e instanceof ConfigError && /Unexpected argument "extra"/.test(e.message)
+  );
+});
+
+test('--help bypasses pack subcommand/path validation', () => {
+  const opts = parseArgs(['pack', '--help']);
+  assert.equal(opts.help, true);
+  assert.equal(opts.command, 'pack');
+});
+
+test('--help bypasses init extra-positional validation', () => {
+  // Mirrors the adapter/pack help-escape tests: a trailing extra positional must not beat the
+  // global `--help` escape hatch.
+  const opts = parseArgs(['init', 'adapter', 'x', '--help']);
+  assert.equal(opts.help, true);
+  assert.equal(opts.command, 'init');
+});
+
+test('--help bypasses endpoint extra-positional validation', () => {
+  const opts = parseArgs(['endpoint', 'a', 'b', '--help']);
+  assert.equal(opts.help, true);
+  assert.equal(opts.command, 'endpoint');
+});
+
 test('--debug-io parses under run (explicit or default command) and defaults to false', () => {
   assert.equal(parseArgs([]).debugIo, false);
   assert.equal(parseArgs(['--debug-io']).debugIo, true);

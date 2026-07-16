@@ -6,6 +6,15 @@
 # T1/T2/T3, or "not policy") every time a *new* policy-shaped constant is introduced, by failing CI
 # until the committed snapshot (scripts/policy-census.txt) is regenerated to include it.
 #
+# crates/metrics/src is DELIBERATELY out of scope (2026-07-16): its thresholds (e.g. SEAMS_MIN_FILES)
+# are metric eligibility/presentation floors, not rule/extraction policy vocab — the one value that
+# overlaps rule thresholds is adjudicated T3 coincidental equality in the inventory + its doc comment.
+#
+# crates/facade/src and packages/mcp/src are likewise DELIBERATELY out of scope (2026-07-16): their
+# census-regex-matching consts (QUERY_*_LIMIT / DEFAULT_*_LIMIT / MAX_LIMIT) are result-truncation /
+# presentation caps on already-computed output — how much of an answer is shown, never what the
+# engine extracts or which rules fire — not rule/extraction policy vocabulary.
+#
 # Regex is intentionally narrow: `^\s*(pub[(vis)] )?const NAME: (&[&str]|[&str; N]|usize|u32|i32|f64) = ...`.
 # This is tighter than "every const" on purpose — it's scoped to the shapes that actually carry policy
 # (string-list vocabularies and small numeric thresholds), which keeps the initial census under

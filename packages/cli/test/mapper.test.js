@@ -291,6 +291,31 @@ test('invalid shapes throw ConfigError', () => {
   assert.throws(() => configToRequest({ packs: { extraDirs: 'x' } }), ConfigError);
 });
 
+test('packs must be an object: a truthy non-object packs fails loudly, like rules', () => {
+  for (const v of [[], 'x', 5, true]) {
+    assert.throws(
+      () => configToRequest({ packs: v }),
+      (err) => {
+        assert.ok(err instanceof ConfigError);
+        assert.equal(
+          err.message,
+          'packs must be an object ({ "extraDirs": [...], "disabled": [...] }).'
+        );
+        return true;
+      },
+      `expected a ConfigError for packs: ${JSON.stringify(v)}`
+    );
+  }
+});
+
+test('falsy packs values are treated as absent, not an error (mirrors rules)', () => {
+  for (const v of [null, false, 0, '']) {
+    const { request } = configToRequest({ roots: ['.'], packs: v });
+    assert.ok(!('packsDir' in request));
+    assert.ok(!('disabledRules' in request));
+  }
+});
+
 test('top-level overlays -> adapterOverlays on the single-tree request, resolved relative to the root', () => {
   const { method, request } = configToRequest({
     roots: [overlayScratchDir],

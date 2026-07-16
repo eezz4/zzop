@@ -1,8 +1,6 @@
-// zzop adapter kit — the shared boilerplate every hand-rolled JS adapter in this repo's examples/
-// tree (openapi-sdk-adapter, react-query-adapter, wrapper-adapter, svelte-adapter) re-derives: file
-// walking, envelope assembly, and byte-exact HTTP key normalization matching zzop_core. Not
-// published — a reference kit meant to be copied or imported from within this repo; see README.md
-// for how the three pieces compose.
+// zzop adapter kit — shared file walking, envelope assembly, and byte-exact HTTP key normalization,
+// extracted from the example adapters' formerly hand-rolled copies (the JS adapters now import it).
+// Not published to npm; copy or import from within this repo. See README.md.
 
 export {
   normalizeProvideKey,

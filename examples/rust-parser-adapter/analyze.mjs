@@ -32,7 +32,7 @@ if (nativeSpec) {
   try {
     native = require('@zzop/native');
   } catch {
-    native = require(path.join(here, '..', '..', 'packages', 'napi', 'index.js'));
+    native = require(path.join(here, '..', '..', 'packages', 'native', 'index.js'));
   }
 }
 

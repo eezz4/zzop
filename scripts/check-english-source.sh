@@ -17,14 +17,17 @@ FOREIGN='[\x{AC00}-\x{D7A3}\x{1100}-\x{11FF}\x{3130}-\x{318F}\x{3040}-\x{30FF}\x
 # its first `git add` and the violation lands in the commit (happened 2026-07-14 with a new test
 # file). Ignored paths (local dogfood corpora of third-party repos with legitimate i18n text) stay
 # out via --exclude-standard. CI runs on a clean checkout, where this reduces to tracked-only.
+# `jsonc yaml tsx jsx py` are future-proofing (zero tracked files of these types today) — added so
+# the first file of one of these types is covered from day one instead of slipping past the guard.
 list_source_files() {
-  { git ls-files -- '*.rs' '*.md' '*.toml' '*.json' '*.js' '*.mjs' '*.cjs' '*.ts'
-    git ls-files --others --exclude-standard -- '*.rs' '*.md' '*.toml' '*.json' '*.js' '*.mjs' '*.cjs' '*.ts'
+  { git ls-files -- '*.rs' '*.md' '*.toml' '*.json' '*.jsonc' '*.js' '*.mjs' '*.cjs' '*.ts' '*.tsx' '*.jsx' '*.py' '*.html' '*.yml' '*.yaml' '*.sh'
+    git ls-files --others --exclude-standard -- '*.rs' '*.md' '*.toml' '*.json' '*.jsonc' '*.js' '*.mjs' '*.cjs' '*.ts' '*.tsx' '*.jsx' '*.py' '*.html' '*.yml' '*.yaml' '*.sh'
   } | sort -u
 }
+# git ls-files emits root-relative paths (no leading ./), so exclusions must anchor with (^|/).
 files=$(list_source_files \
   | xargs -d '\n' grep -lP "$FOREIGN" 2>/dev/null \
-  | grep -v '/\.claude/' | grep -v '/target/' | grep -v '/node_modules/' || true)
+  | grep -vE '(^|/)\.claude/' | grep -vE '(^|/)target/' | grep -vE '(^|/)node_modules/' || true)
 
 if [ -n "$files" ]; then
   echo "English-only source guard: non-Latin letters found in OSS files:"
@@ -40,9 +43,13 @@ echo "English-only source guard: clean."
 # Internal-path guard: OSS-facing files must never point readers at .claude/ — those paths are not
 # published, so any "see .claude/context/..." reference is a broken pointer for anyone outside this
 # repo's working tree. Rationale belongs inline (summarized) or in docs/, not linked by internal path.
+# scripts/ is self-exempt here: guard machinery must name the very pattern it excludes (this
+# file's own grep -v lines, max-file-lines/swc scope filters), which is not a reader-facing
+# "see .claude/..." pointer. The Korean check above still covers scripts/.
 claude_ref_files=$(list_source_files \
+  | grep -v '^scripts/' \
   | xargs -d '\n' grep -lP '\.claude' 2>/dev/null \
-  | grep -v '/\.claude/' | grep -v '/target/' | grep -v '/node_modules/' || true)
+  | grep -vE '(^|/)\.claude/' | grep -vE '(^|/)target/' | grep -vE '(^|/)node_modules/' || true)
 
 if [ -n "$claude_ref_files" ]; then
   echo "English-only source guard: .claude/ path references found in OSS files:"

@@ -17,6 +17,51 @@
 //! "no importers" signal, since no edge was ever computed for them. Envelope-ingested non-TS source (e.g.
 //! `.jsp`) that does participate in the graph stays eligible: `fan_in == 0` on it is real signal.
 //!
+//! **`.py`/`.pyi` are excluded from eligibility entirely** (F1), even though every `.py`/`.pyi` file now
+//! participates in the `DepGraph` (a `dep`-map key or edge target, same as any other tracked file — see
+//! `pipeline::FileArtifact::imports`'s doc). Unlike TypeScript's import-graph loading, Python's module
+//! loading is substantially filename-convention-driven: `main.py`, `manage.py`, `wsgi.py`/`asgi.py`,
+//! `settings.py`, `conftest.py`, a migration module, a `test_*.py` file — none of these are ever
+//! `import`ed, so `fan_in == 0` on them is not "no importers" evidence, it's the loading convention
+//! working as intended. Java is excluded too, for its own reason — see the `.java` paragraph below:
+//! since the parser-java-21 upgrade `.java` DOES participate in the `DepGraph`, but same-package
+//! visibility needs no import, so graph fan-in still is not liveness evidence there; Python's case
+//! differs only in HOW graph participation fails to be evidence (loading-convention entry files vs
+//! Java's import-free same-package visibility). Revisit if Python entry conventions are ever modeled the
+//! way `entry_patterns`/`is_tool_entry_file` model TS/JS/Java conventions (a real per-file exemption list
+//! instead of a blanket language exclusion) — until then, a blanket exclusion is the honest floor.
+//!
+//! **`.rs` is excluded from eligibility entirely too**, for a DIFFERENT reason than Python's: it is not a
+//! filename-loading-convention gap, it is a real-uses-without-an-import-edge gap. A `pub` Rust item can be
+//! genuinely, heavily used with NO import binding ever pointing at its own file: a trait implementation
+//! (`impl Display for Foo`) is reached by the compiler through trait resolution, never a `use`; `#[derive(
+//! ...)]` expansion generates calls into a type with no `use` of its own; and a fully-qualified call
+//! (`crate::a::f()`) never binds a local name the way `use crate::a::f;` would, so it never surfaces in
+//! the caller's own `ImportMap` at all — `lang::imports`' v1 scope is top-level `use`/`mod` items only.
+//! So "exported + fan_in == 0" is not dead-code evidence for Rust the way it is for TypeScript: the import
+//! graph structurally cannot see these use shapes, not merely doesn't happen to.
+//!
+//! **`.go` is excluded from eligibility entirely too**, same exclusion CLASS as `.rs` (a real-uses-
+//! without-an-import-edge gap, not a filename-loading-convention gap like Python's): files in the SAME Go
+//! package share every top-level symbol with NO import statement between them at all — Go's own
+//! compilation-unit model (a package is compiled as one unit; a sibling file's `func`/`type`/`var` is
+//! reachable with zero `import`s). So a `pub`-equivalent (exported, capitalized) Go symbol can be
+//! genuinely, heavily used by a sibling file in its own package while the FILE that declares it shows
+//! `fan_in == 0` — the import graph structurally cannot see intra-package usage, only cross-package
+//! `import`-bound edges (`merge_go_dep_edges`'s own doc, engine side).
+//!
+//! **`.java` is excluded from eligibility entirely too**, same exclusion CLASS as `.rs`/`.go` (a
+//! real-uses-without-an-import-edge gap): Java's own package-visibility model lets a type/member with NO
+//! explicit access modifier (package-private) — and even a fully-qualified reference to a `public` type
+//! in the SAME package — be used by a sibling file with no `import` statement pointing at it at all
+//! (Java, like Go, never requires importing a type declared in your own package). So a `.java` file can
+//! show `fan_in == 0` while genuinely, heavily used by same-package siblings — the import graph
+//! structurally cannot see that usage, only cross-package `import`-bound edges
+//! (`merge_java_dep_edges`'s own doc, engine side). `.java` previously never participated in `DepGraph`
+//! at all (no import-graph-based dep resolution existed for it); now that it does
+//! (`merge_java_dep_edges`), this exclusion keeps eligibility unaffected by that change rather than
+//! silently gaining a whole language's worth of same-package false positives.
+//!
 //! `dead_candidate_findings` is the `"dead-candidates"` native-analysis Finding-shaping wrapper the engine
 //! calls.
 
@@ -107,10 +152,58 @@ fn dep_graph_participants(dep: &DepGraph) -> HashSet<&str> {
         .collect()
 }
 
-/// Union discriminator — see module doc. True if the path participates in the dep graph (branch a) OR its
-/// extension is in the TS-dispatch set (branch b).
+/// Union discriminator — see module doc. `.py`/`.pyi` are excluded up front regardless of graph
+/// participation (F1: filename-convention loading makes `fan_in == 0` on them meaningless as "no
+/// importers" evidence); `.rs`, `.go`, and `.java` are excluded up front too, for the DIFFERENT reason
+/// the module doc's "`.rs` is excluded from eligibility entirely too" / "`.go` is excluded from
+/// eligibility entirely too" / "`.java` is excluded from eligibility entirely too" paragraphs explain
+/// (trait impls/derive expansion/full-path calls for Rust, same-package symbol sharing with no import
+/// statement for Go and Java — all give a real use the import graph structurally cannot see). Otherwise:
+/// true if the path participates in the dep graph (branch a) OR its extension is in the TS-dispatch set
+/// (branch b).
 fn is_dead_candidate_eligible(path: &str, participants: &HashSet<&str>) -> bool {
+    if is_python_source_ext(path)
+        || is_rust_source_ext(path)
+        || is_go_source_ext(path)
+        || is_java_source_ext(path)
+    {
+        return false;
+    }
     participants.contains(path) || is_ts_dispatch_extension(path)
+}
+
+/// True for `.py`/`.pyi` (case-insensitive) — see `is_dead_candidate_eligible`'s doc and the module doc's
+/// "Eligibility scope" section (F1) for why Python is excluded from candidacy entirely rather than
+/// folded into the TS-dispatch fallback.
+fn is_python_source_ext(path: &str) -> bool {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"(?i)\.pyi?$").unwrap())
+        .is_match(path)
+}
+
+/// True for `.rs` (case-insensitive) — see `is_dead_candidate_eligible`'s doc and the module doc's "`.rs`
+/// is excluded from eligibility entirely too" paragraph for why Rust is excluded from candidacy entirely.
+fn is_rust_source_ext(path: &str) -> bool {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"(?i)\.rs$").unwrap())
+        .is_match(path)
+}
+
+/// True for `.go` (case-insensitive) — see `is_dead_candidate_eligible`'s doc and the module doc's "`.go`
+/// is excluded from eligibility entirely too" paragraph for why Go is excluded from candidacy entirely.
+fn is_go_source_ext(path: &str) -> bool {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"(?i)\.go$").unwrap())
+        .is_match(path)
+}
+
+/// True for `.java` (case-insensitive) — see `is_dead_candidate_eligible`'s doc and the module doc's
+/// "`.java` is excluded from eligibility entirely too" paragraph for why Java is excluded from candidacy
+/// entirely.
+fn is_java_source_ext(path: &str) -> bool {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"(?i)\.java$").unwrap())
+        .is_match(path)
 }
 
 /// True for the extensions `dispatch_by_extension` routes to `Language::TypeScript` (case-insensitive).
@@ -160,310 +253,4 @@ fn exclude_patterns() -> &'static [Regex] {
 }
 
 #[cfg(test)]
-mod tests {
-    //! Exercises `find_dead_candidates`: zero-fan-in low-change-count files are flagged; files with
-    //! incoming edges, high change counts, or entry/test patterns are excluded; non-source files never
-    //! linked in the dep graph are excluded from candidacy entirely; a non-TS file that does participate in
-    //! the dep graph (envelope-ingested source, e.g. `.jsp`) is still a candidate on zero fan-in.
-    use super::*;
-    use std::collections::HashMap;
-
-    fn n(path: &str, fan_in: u32, change_count: u32) -> FileNode {
-        FileNode {
-            id: path.into(),
-            path: path.into(),
-            change_count,
-            churn: 0,
-            last_modified: Some("2026-01-01".into()),
-            author_count: 1,
-            loc: 50,
-            tag_counts: HashMap::new(),
-            fan_in,
-            fan_out: 0,
-            total_connections: fan_in,
-            risk_score: 0.0,
-            ..Default::default()
-        }
-    }
-
-    fn empty_dep() -> DepGraph {
-        DepGraph::new()
-    }
-
-    fn no_extra_entries() -> HashSet<String> {
-        HashSet::new()
-    }
-
-    #[test]
-    fn fan_in_zero_low_change_count_is_candidate() {
-        let r = find_dead_candidates(
-            &[n("features/x/Orphan.tsx", 0, 1)],
-            &empty_dep(),
-            DEAD_MAX_CHANGES,
-            &no_extra_entries(),
-        );
-        let paths: Vec<&str> = r.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(paths, vec!["features/x/Orphan.tsx"]);
-    }
-
-    #[test]
-    fn fan_in_positive_is_excluded() {
-        let r = find_dead_candidates(
-            &[n("x.tsx", 2, 1)],
-            &empty_dep(),
-            DEAD_MAX_CHANGES,
-            &no_extra_entries(),
-        );
-        assert!(r.is_empty());
-    }
-
-    #[test]
-    fn entry_patterns_are_excluded() {
-        let r = find_dead_candidates(
-            &[
-                n("pages/HomePage.tsx", 0, 1),
-                n("App.tsx", 0, 1),
-                n("features/x/index.ts", 0, 1),
-            ],
-            &empty_dep(),
-            DEAD_MAX_CHANGES,
-            &no_extra_entries(),
-        );
-        assert!(r.is_empty());
-    }
-
-    #[test]
-    fn nextjs_app_router_convention_files_are_not_dead_candidates() {
-        // Framework-loaded by filename (never imported) so fan_in == 0 is expected — must not be flagged.
-        // A genuinely orphaned sibling in the same set still fires.
-        let r = find_dead_candidates(
-            &[
-                n("app/(lang)/[lang]/about/page.tsx", 0, 1),
-                n("app/dashboard/layout.tsx", 0, 1),
-                n("app/api/users/route.ts", 0, 1),
-                n("app/not-found.tsx", 0, 1),
-                n("app/sitemap.ts", 0, 1),
-                n("app/robots.ts", 0, 1),
-                n("features/x/old-helper.ts", 0, 1),
-            ],
-            &empty_dep(),
-            DEAD_MAX_CHANGES,
-            &no_extra_entries(),
-        );
-        let paths: Vec<&str> = r.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(paths, vec!["features/x/old-helper.ts"], "{r:?}");
-    }
-
-    #[test]
-    fn test_files_are_excluded() {
-        let r = find_dead_candidates(
-            &[n("features/x/__test__/x.test.ts", 0, 1)],
-            &empty_dep(),
-            DEAD_MAX_CHANGES,
-            &no_extra_entries(),
-        );
-        assert!(r.is_empty());
-    }
-
-    #[test]
-    fn high_change_count_is_excluded() {
-        let r = find_dead_candidates(
-            &[n("features/x/Hot.ts", 0, 10)],
-            &empty_dep(),
-            DEAD_MAX_CHANGES,
-            &no_extra_entries(),
-        );
-        assert!(r.is_empty());
-    }
-
-    #[test]
-    fn non_source_files_never_in_the_dep_graph_are_never_candidates() {
-        // These extensions never participate in the dep graph and aren't TS-dispatch extensions, so
-        // fan_in == 0 on them is not a "no importers" signal — it's just "untracked".
-        let r = find_dead_candidates(
-            &[
-                n("data/config.json", 0, 1),
-                n("styles/app.css", 0, 1),
-                n("docs/README.md", 0, 1),
-                n("assets/logo.svg", 0, 1),
-                n("schema.prisma", 0, 1),
-                n("Service.java", 0, 1),
-            ],
-            &empty_dep(),
-            DEAD_MAX_CHANGES,
-            &no_extra_entries(),
-        );
-        assert!(r.is_empty(), "expected no candidates, got: {r:?}");
-    }
-
-    #[test]
-    fn source_file_dead_still_fires_alongside_excluded_non_source_files() {
-        // Non-source files with equally zero fan-in don't suppress a genuine dead file in the same set.
-        let r = find_dead_candidates(
-            &[
-                n("features/x/Orphan.tsx", 0, 1),
-                n("data/config.json", 0, 1),
-            ],
-            &empty_dep(),
-            DEAD_MAX_CHANGES,
-            &no_extra_entries(),
-        );
-        let paths: Vec<&str> = r.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(paths, vec!["features/x/Orphan.tsx"]);
-    }
-
-    #[test]
-    fn finding_message_renders_single_braces_in_the_disable_hint() {
-        // Regression: this message is a PLAIN string literal (not `format!`), so a `{{` written for
-        // format-escaping renders literally as `{{` in user output — the 2026-07-10 dialect sweep
-        // shipped exactly that. Pin the rendered form.
-        let out = dead_candidate_findings(
-            &[n("features/x/Orphan.tsx", 0, 1)],
-            &empty_dep(),
-            &no_extra_entries(),
-        );
-        assert_eq!(out.len(), 1);
-        assert!(
-            out[0]
-                .message
-                .contains("`rules: { \"dead-candidates\": \"off\" }`"),
-            "{}",
-            out[0].message
-        );
-        assert!(!out[0].message.contains("{{"), "{}", out[0].message);
-    }
-
-    #[test]
-    fn all_import_eligible_extensions_are_candidates_when_dead() {
-        let nodes: Vec<FileNode> = [
-            "a.ts", "b.tsx", "c.js", "d.jsx", "e.mjs", "f.cjs", "g.mts", "h.cts",
-        ]
-        .iter()
-        .map(|p| n(p, 0, 1))
-        .collect();
-        let r = find_dead_candidates(&nodes, &empty_dep(), DEAD_MAX_CHANGES, &no_extra_entries());
-        assert_eq!(
-            r.len(),
-            8,
-            "expected all 8 import-eligible extensions to be candidates, got: {r:?}"
-        );
-    }
-
-    #[test]
-    fn ts_extension_match_is_case_insensitive() {
-        let r = find_dead_candidates(
-            &[n("features/x/Orphan.TSX", 0, 1)],
-            &empty_dep(),
-            DEAD_MAX_CHANGES,
-            &no_extra_entries(),
-        );
-        assert_eq!(r.len(), 1, "{r:?}");
-    }
-
-    #[test]
-    fn non_ts_file_present_as_a_dep_key_with_zero_fan_in_is_a_candidate() {
-        // Envelope-ingested source inserted as a `dep` key is a real graph node, so fan_in == 0 here is
-        // real "no importers" signal, not "untracked".
-        let mut dep = empty_dep();
-        dep.insert("legacy/UserController.jsp".to_string(), Vec::new());
-        let r = find_dead_candidates(
-            &[n("legacy/UserController.jsp", 0, 1)],
-            &dep,
-            DEAD_MAX_CHANGES,
-            &no_extra_entries(),
-        );
-        assert_eq!(r.len(), 1, "{r:?}");
-    }
-
-    #[test]
-    fn non_ts_file_present_only_as_an_edge_target_with_zero_fan_in_is_still_evaluated() {
-        // A file that appears only as a target in another file's edge list (never as its own `dep` key)
-        // still participates in the graph — branch (a) checks both positions.
-        let mut dep = empty_dep();
-        dep.insert(
-            "legacy/Controller.jsp".to_string(),
-            vec!["legacy/util.jsp".to_string()],
-        );
-        // fan_in 1 means something imports it, so it correctly is NOT a candidate here.
-        let r = find_dead_candidates(
-            &[n("legacy/util.jsp", 1, 1)],
-            &dep,
-            DEAD_MAX_CHANGES,
-            &no_extra_entries(),
-        );
-        assert!(r.is_empty());
-    }
-
-    #[test]
-    fn non_ts_file_absent_from_the_dep_graph_entirely_is_never_a_candidate() {
-        // Never appears in `dep` at all, so it doesn't participate in the graph fan_in was computed from —
-        // fan_in == 0 here is "untracked", not "no importers".
-        let r = find_dead_candidates(
-            &[n("legacy/Orphaned.jsp", 0, 1)],
-            &empty_dep(),
-            DEAD_MAX_CHANGES,
-            &no_extra_entries(),
-        );
-        assert!(r.is_empty());
-    }
-
-    #[test]
-    fn ts_file_absent_from_the_dep_graph_is_still_a_candidate_via_extension_fallback() {
-        // Never made it into `dep` at all, but still falls back to branch (b) — a `.ts` file missing from
-        // the graph reads as an ingestion gap, not "outside the import graph".
-        let r = find_dead_candidates(
-            &[n("features/x/Isolated.ts", 0, 1)],
-            &empty_dep(),
-            DEAD_MAX_CHANGES,
-            &no_extra_entries(),
-        );
-        assert_eq!(r.len(), 1, "{r:?}");
-    }
-
-    #[test]
-    fn tool_entry_files_are_never_dead_candidates() {
-        // These are all zero-fan-in because they're loaded by a tool, not imported by app code.
-        let r = find_dead_candidates(
-            &[
-                n(".eslintrc.cjs", 0, 1),
-                n(".prettierrc.cjs", 0, 1),
-                n("vite.config.ts", 0, 1),
-                n("vite-env.d.ts", 0, 1),
-            ],
-            &empty_dep(),
-            DEAD_MAX_CHANGES,
-            &no_extra_entries(),
-        );
-        assert!(r.is_empty(), "expected no candidates, got: {r:?}");
-    }
-
-    #[test]
-    fn genuinely_orphaned_source_file_still_fires_alongside_tool_entry_files() {
-        let r = find_dead_candidates(
-            &[
-                n("vite.config.ts", 0, 1),
-                n("features/x/old-helper.ts", 0, 1),
-            ],
-            &empty_dep(),
-            DEAD_MAX_CHANGES,
-            &no_extra_entries(),
-        );
-        let paths: Vec<&str> = r.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(paths, vec!["features/x/old-helper.ts"]);
-    }
-
-    #[test]
-    fn package_json_referenced_file_is_never_a_dead_candidate() {
-        // A path present in `extra_entries` (e.g. a package.json `main` target) is excluded, same as an
-        // entry-pattern or tool-entry file; a genuinely orphaned file not in `extra_entries` still fires.
-        let extra: HashSet<String> = ["src/cli.ts".to_string()].into_iter().collect();
-        let r = find_dead_candidates(
-            &[n("src/cli.ts", 0, 1), n("features/x/old-helper.ts", 0, 1)],
-            &empty_dep(),
-            DEAD_MAX_CHANGES,
-            &extra,
-        );
-        let paths: Vec<&str> = r.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(paths, vec!["features/x/old-helper.ts"]);
-    }
-}
+mod tests;

@@ -59,17 +59,27 @@ fn config() -> EngineConfig {
     }
 }
 
-/// The shared fixture: two `.sql` files, one `.py` file (all dispatch-`None`, real source signal), a
-/// `README.md` (non-source extension), an `img.png` (non-source extension), and a native `src/x.ts` (has a
-/// real parser). Only `.sql`/`.py` are expected to ever appear in the per-extension warning.
+/// The shared fixture: two `.sql` files, one `.rb` file (all dispatch-`None`, real source signal), a
+/// `README.md` (non-source extension), an `img.png` (non-source extension), a native `src/x.ts` (has a
+/// real parser), a native `native.py` (also has a real parser — `zzop-parser-python-3`; asserted absent
+/// from the warning below, same as `.ts`, not merely omitted from the "expected present" list), a native
+/// `native.rs` (also has a real parser — `zzop-parser-rust`; same assertion), and a native `native.go`
+/// (also has a real parser — `zzop-parser-go`; same assertion). Only `.sql`/`.rb` are expected to ever
+/// appear in the per-extension warning.
 fn fixture_tree() -> TempDir {
     let dir = TempDir::new("zzop-engine-unparsed-ext");
     dir.write("a.sql", "SELECT * FROM users;\n");
     dir.write("b.sql", "SELECT * FROM orders;\n");
-    dir.write("c.py", "def handler():\n    return 1\n");
+    dir.write("c.rb", "def handler\n  1\nend\n");
     dir.write("README.md", "# not real source\n");
     dir.write("img.png", "not a real png, just bytes\n");
     dir.write("src/x.ts", "export const x = 1;\n");
+    dir.write("native.py", "def handler():\n    return 1\n");
+    dir.write("native.rs", "fn handler() -> i32 {\n    1\n}\n");
+    dir.write(
+        "native.go",
+        "package main\n\nfunc handler() int {\n\treturn 1\n}\n",
+    );
     dir
 }
 
@@ -130,16 +140,16 @@ fn unparsed_source_extensions_warn_exactly_once_each_non_source_and_native_exten
     let dir = fixture_tree();
     let out = analyze_tree(dir.path(), &config());
 
-    let py_line = out
+    let rb_line = out
         .warnings
         .iter()
-        .find(|w| w.contains("extension .py"))
-        .unwrap_or_else(|| panic!("expected a .py warning, got: {:?}", out.warnings));
+        .find(|w| w.contains("extension .rb"))
+        .unwrap_or_else(|| panic!("expected a .rb warning, got: {:?}", out.warnings));
     assert!(
-        py_line.starts_with("1 file(s) with extension .py"),
-        "{py_line}"
+        rb_line.starts_with("1 file(s) with extension .rb"),
+        "{rb_line}"
     );
-    assert!(py_line.contains("c.py"), "{py_line}");
+    assert!(rb_line.contains("c.rb"), "{rb_line}");
 
     let sql_line = out
         .warnings
@@ -157,7 +167,7 @@ fn unparsed_source_extensions_warn_exactly_once_each_non_source_and_native_exten
     assert_eq!(
         out.warnings
             .iter()
-            .filter(|w| w.contains("extension .py"))
+            .filter(|w| w.contains("extension .rb"))
             .count(),
         1
     );
@@ -169,11 +179,11 @@ fn unparsed_source_extensions_warn_exactly_once_each_non_source_and_native_exten
         1
     );
 
-    // BTreeMap key order: "py" sorts before "sql".
-    let py_idx = out
+    // BTreeMap key order: "rb" sorts before "sql".
+    let rb_idx = out
         .warnings
         .iter()
-        .position(|w| w.contains("extension .py"))
+        .position(|w| w.contains("extension .rb"))
         .unwrap();
     let sql_idx = out
         .warnings
@@ -181,12 +191,14 @@ fn unparsed_source_extensions_warn_exactly_once_each_non_source_and_native_exten
         .position(|w| w.contains("extension .sql"))
         .unwrap();
     assert!(
-        py_idx < sql_idx,
-        "expected .py before .sql: {:?}",
+        rb_idx < sql_idx,
+        "expected .rb before .sql: {:?}",
         out.warnings
     );
 
-    // Non-source extensions and natively-dispatched extensions never appear.
+    // Non-source extensions and natively-dispatched extensions never appear — `.py` is dispatched to
+    // `zzop-parser-python-3`, `.rs` to `zzop-parser-rust`, and `.go` to `zzop-parser-go` (all native, full
+    // AST/CST), same silence class as `.ts`.
     assert!(
         !out.warnings.iter().any(|w| w.contains("extension .md")),
         "{:?}",
@@ -199,6 +211,21 @@ fn unparsed_source_extensions_warn_exactly_once_each_non_source_and_native_exten
     );
     assert!(
         !out.warnings.iter().any(|w| w.contains("extension .ts")),
+        "{:?}",
+        out.warnings
+    );
+    assert!(
+        !out.warnings.iter().any(|w| w.contains("extension .py")),
+        "{:?}",
+        out.warnings
+    );
+    assert!(
+        !out.warnings.iter().any(|w| w.contains("extension .rs")),
+        "{:?}",
+        out.warnings
+    );
+    assert!(
+        !out.warnings.iter().any(|w| w.contains("extension .go")),
         "{:?}",
         out.warnings
     );

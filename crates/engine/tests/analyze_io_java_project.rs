@@ -1,4 +1,4 @@
-//! End-to-end test for the whole-project Java Spring provides pass (`zzop_parser_java::
+//! End-to-end test for the whole-project Java Spring provides pass (`zzop_parser_java_21::
 //! extract_http_provides_project`, wired into `analyze::assemble` by `run_java_provides_project_pass`)
 //! reaching `analyze_tree`/`analyze_trees` — a shape neither the fused per-file pass
 //! (`crate::io::extract_java_file_io`) nor `analyze_io_java.rs`'s single-file fixture can see on their own:

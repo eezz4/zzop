@@ -15,22 +15,30 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # `platform` is the npm/<platform> sub-package name for the target (napi-rs/swc/Prisma
+        # convention, same mapping as packages/native/scripts/place-artifacts.mjs) — used to name
+        # the zzop-mcp release assets.
         include:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
+            platform: win32-x64-msvc
           # Intel macOS: cross-compiled from the Apple Silicon runner (Intel `macos-13` runners are
           # scarce/deprecated). Same lane as linux-arm64 below — a secondary arch built on the primary
           # runner; smoke test is skipped for cross targets.
           - target: x86_64-apple-darwin
             os: macos-latest
             cross: "true"
+            platform: darwin-x64
           - target: aarch64-apple-darwin
             os: macos-latest
+            platform: darwin-arm64
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            platform: linux-x64-gnu
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             cross: "true"
+            platform: linux-arm64-gnu
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +55,19 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu
           echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc' >> "$GITHUB_ENV"
       - name: Build addon
-        run: cargo build -p zzop-napi --release --features addon --target ${{ matrix.target }}
+        # On a `v*` tag, stamp the addon's reported version (`version()`'s `zzop-napi/<version>`
+        # segment, compile-time `ZZOP_RELEASE_VERSION`) from the tag — the same source the publish
+        # job's sync-versions.mjs stamps into the npm packages, so the addon's reported version ==
+        # @zzop/native version by construction (same gate/export as the zzop-mcp step below).
+        # Gated on ref TYPE (refs/tags/v*), matching the publish job's startsWith gate — a
+        # workflow_dispatch run on a branch merely NAMED v-something must not stamp a bogus
+        # version; non-tag runs leave it unset so the 0.0.0 dev fallback applies.
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            export ZZOP_RELEASE_VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          cargo build -p zzop-napi --release --features addon --target ${{ matrix.target }}
       - name: Collect artifact
         shell: bash
         run: |
@@ -68,6 +88,35 @@ jobs:
         with:
           name: zzop-napi-${{ matrix.target }}
           path: dist/*.node
+      # The Node-free standalone binary (packages/mcp) — same target as the addon build above; it
+      # depends only on the same pure-workspace crates the addon already cross-compiles, so every
+      # lane (including the two cross ones) works with no extra toolchain setup.
+      - name: Build zzop-mcp binary
+        # On a `v*` tag, stamp the binary's reported version (MCP serverInfo.version, compile-time
+        # `ZZOP_RELEASE_VERSION`) from the tag — the same source the publish job's sync-versions.mjs
+        # stamps into the npm packages, so binary version == @zzop/cli version by construction.
+        # Gated on ref TYPE (refs/tags/v*), matching the publish job's startsWith gate — a
+        # workflow_dispatch run on a branch merely NAMED v-something must not stamp a bogus
+        # version; non-tag runs leave it unset so the 0.0.0 dev fallback applies.
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            export ZZOP_RELEASE_VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          cargo build -p zzop-mcp --release --target ${{ matrix.target }}
+      - name: Collect zzop-mcp binary
+        shell: bash
+        run: |
+          mkdir -p dist-mcp
+          case "${{ matrix.target }}" in
+            *windows*) cp "target/${{ matrix.target }}/release/zzop-mcp.exe" "dist-mcp/zzop-mcp-${{ matrix.platform }}.exe" ;;
+            *)         cp "target/${{ matrix.target }}/release/zzop-mcp" "dist-mcp/zzop-mcp-${{ matrix.platform }}" ;;
+          esac
+          ls -la dist-mcp
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zzop-mcp-${{ matrix.target }}
+          path: dist-mcp/*
 
   # Only runs on a `v*` tag push (job-level `if`, since the build matrix above must also run for
   # workflow_dispatch without publishing). The git tag is the single source of truth for the
@@ -127,3 +176,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
+      # Standalone zzop-mcp binaries (built per-target by the matrix above) attach to the release as
+      # `zzop-mcp-<platform>[.exe]` assets — the Node-free install path (packages/mcp/README.md).
+      - name: Download zzop-mcp binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: zzop-mcp-*
+          path: mcp-artifacts
+          merge-multiple: true
+      - name: Upload zzop-mcp binaries to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" mcp-artifacts/* --clobber

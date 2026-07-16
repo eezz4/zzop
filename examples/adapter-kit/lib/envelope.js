@@ -148,8 +148,9 @@ export class EnvelopeBuilder {
 /**
  * Structural validation mirroring `zzop_core::validate_envelope` (crates/core/src/normalized.rs):
  * an unknown `format`, a `version` greater than this kit's `SUPPORTED_NORMALIZED_AST_VERSION`, an
- * empty or duplicate file `path`, and a symbol whose `body_end` is less than its `body_start`.
- * Collects every issue instead of stopping at the first. Like the Rust validator, this does NOT check
+ * empty or duplicate file `path`, and a symbol whose body end is less than its body start (both the
+ * canonical camelCase `bodyStart`/`bodyEnd` and the frozen-v1 snake_case alias are read, matching the
+ * engine's serde aliases). Collects every issue instead of stopping at the first. Like the Rust validator, this does NOT check
  * fragment (`procedure_router_fragments`/`router_mount_fragments`) specifier resolvability — that is a
  * composition-time concern, silently skipped by the engine, never a validation-time rejection.
  */
@@ -180,9 +181,13 @@ export function validateEnvelope(envelope) {
     }
     const symbols = (file && file.symbols) || [];
     for (const sym of symbols) {
-      if (sym.body_start != null && sym.body_end != null && sym.body_end < sym.body_start) {
+      // Canonical wire names are camelCase (bodyStart/bodyEnd); frozen-v1 snake_case is an accepted
+      // input alias (envelope.schema.json) — the engine's serde alias reads both, so this must too.
+      const start = sym.bodyStart != null ? sym.bodyStart : sym.body_start;
+      const end = sym.bodyEnd != null ? sym.bodyEnd : sym.body_end;
+      if (start != null && end != null && end < start) {
         errors.push(
-          `files[${idx}] ('${file.path}') symbol '${sym.name}': body_end (${sym.body_end}) < body_start (${sym.body_start})`
+          `files[${idx}] ('${file.path}') symbol '${sym.name}': body_end (${end}) < body_start (${start})`
         );
       }
     }

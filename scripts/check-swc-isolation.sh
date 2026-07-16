@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# swc isolation guard — fails when an swc_* crate is depended on, or swc_core is used, outside
-# parser/parser-typescript.
+# swc isolation guard — fails when an swc_* crate is depended on outside parser/parser-typescript,
+# or swc_core is used in any .rs outside parser/parser-typescript/src/.
 #
 # Architecture guarantee: the engine never holds swc ASTs; swc is confined to parser-typescript,
 # which projects source into the Common IR (see crates/core/src/lib.rs's module doc: "swc /
@@ -11,11 +11,17 @@
 # Two checks:
 #  1. Cargo.toml dependency lines declaring an `swc_<name>` (or `swc-<name>`) crate, in any
 #     Cargo.toml except parser/parser-typescript/Cargo.toml and the workspace root Cargo.toml
-#     (the latter is where the swc pin/isolation note lives, per DESIGN.md — exempted even though
-#     it does not currently declare swc as an actual [workspace.dependencies] entry).
+#     (the latter is where the swc isolation note lives — exempted even though it does not
+#     currently declare swc as an actual [workspace.dependencies] entry; the version pin itself
+#     lives in parser/parser-typescript/Cargo.toml).
 #  2. `swc_core::` or `use swc_...` in any .rs file outside parser/parser-typescript/src/.
 #
-# No deps beyond grep -P (PCRE). Exit 1 on any violation, listing file:line.
+# Scope: git-TRACKED files only (git ls-files). The working tree also holds gitignored/untracked
+# local corpora (cloned third-party repos, benchmark checkouts) whose own swc usage is not ours to
+# police — a `grep -r .` over the tree false-positives on them. Anything that could ship must be
+# tracked, so tracked-only is exactly the isolation surface (and matches what CI checks out).
+#
+# No deps beyond git + grep -P (PCRE). Exit 1 on any violation, listing file:line.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -23,11 +29,12 @@ violations=0
 
 echo "swc isolation guard: checking Cargo.toml dependency declarations..."
 DEP_PATTERN='^\s*swc[_-][A-Za-z0-9_-]*\s*='
-cargo_files=$(grep -rlP "$DEP_PATTERN" . --include='Cargo.toml' 2>/dev/null \
+cargo_files=$(git ls-files -z -- 'Cargo.toml' '*/Cargo.toml' \
+  | xargs -0 -r grep -lP "$DEP_PATTERN" -- 2>/dev/null \
   | grep -v '/target/' \
-  | grep -v '^\./\.claude/' \
-  | grep -v -x './Cargo.toml' \
-  | grep -v -x './parser/parser-typescript/Cargo.toml' || true)
+  | grep -v '^\.claude/' \
+  | grep -v -x 'Cargo.toml' \
+  | grep -v -x 'parser/parser-typescript/Cargo.toml' || true)
 
 if [ -n "$cargo_files" ]; then
   echo "swc isolation guard: swc_* dependency declared outside parser-typescript:"
@@ -39,10 +46,11 @@ fi
 
 echo "swc isolation guard: checking .rs source usage..."
 USE_PATTERN='swc_core::|use\s+swc_'
-rs_files=$(grep -rlP "$USE_PATTERN" . --include='*.rs' 2>/dev/null \
+rs_files=$(git ls-files -z -- '*.rs' \
+  | xargs -0 -r grep -lP "$USE_PATTERN" -- 2>/dev/null \
   | grep -v '/target/' \
-  | grep -v '^\./\.claude/' \
-  | grep -v '^\./parser/parser-typescript/src/' || true)
+  | grep -v '^\.claude/' \
+  | grep -v '^parser/parser-typescript/src/' || true)
 
 if [ -n "$rs_files" ]; then
   echo "swc isolation guard: swc_core usage found outside parser-typescript/src:"

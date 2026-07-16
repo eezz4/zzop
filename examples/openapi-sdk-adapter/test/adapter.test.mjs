@@ -86,7 +86,7 @@ test('openapi-sdk-adapter --mode consume: envelope matches committed snapshot', 
     assert.deepEqual(envelope, {
       format: 'zzop-normalized-ast',
       version: 1,
-      parser: 'openapi-sdk-adapter',
+      parser: 'openapi-sdk-adapter/1',
       source: 'api',
       files: [
         fileProjection({
@@ -117,7 +117,7 @@ test('openapi-sdk-adapter --mode provide: envelope matches committed snapshot', 
     assert.deepEqual(envelope, {
       format: 'zzop-normalized-ast',
       version: 1,
-      parser: 'openapi-sdk-adapter',
+      parser: 'openapi-sdk-adapter/1',
       source: 'api',
       files: [
         fileProjection({

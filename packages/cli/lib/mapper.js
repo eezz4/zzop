@@ -362,7 +362,13 @@ function buildSharedOptions(config) {
   const shared = {};
 
   // --- packs.extraDirs -> packsDir (user dirs only; the napi wrapper PREPENDS the bundled dir). ---
+  // `config.packs || {}`: an absent or falsy `packs` defaults to empty (no error); a present, truthy,
+  // non-object `packs` (e.g. an array) is a shape error — failing loudly like `rules` below instead of
+  // silently mapping to nothing.
   const packs = config.packs || {};
+  if (!isPlainObject(packs)) {
+    throw new ConfigError('packs must be an object ({ "extraDirs": [...], "disabled": [...] }).');
+  }
   if (packs.extraDirs !== undefined && !Array.isArray(packs.extraDirs)) {
     throw new ConfigError('packs.extraDirs must be an array of directory paths.');
   }
@@ -487,7 +493,7 @@ function buildSharedOptions(config) {
 // self-reports in warnings, never silently" contract — so we surface it as a warning, not an error.
 //
 // Sourced from `config-surface.json`'s `configKeys` — the single vocabulary file shared with
-// `crates/engine/tests/rule_contracts.rs`'s reference-validation meta-test, so the CLI's own drift
+// `crates/engine/tests/rule_contracts/`'s reference-validation meta-test, so the CLI's own drift
 // warnings and the engine's "does every message name a real knob" check can never disagree about what a
 // valid config key is.
 const KNOWN_KEYS = require('./config-surface.json').configKeys;

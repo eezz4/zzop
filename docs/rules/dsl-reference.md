@@ -5,7 +5,10 @@ Normative schema for `rules/dsl/*.json`. Source of truth: `crates/core/src/dsl.r
 those files — if they diverge, the Rust source wins.
 
 See also: [authoring-guide.md](authoring-guide.md) (how to write a pack), [catalog.md](catalog.md) (what
-ships today).
+ships today). A machine-readable JSON Schema for this shape ships at
+[../contracts/rule-pack.schema.json](../contracts/rule-pack.schema.json), and `zzop pack validate
+<path>` (CLI) / the `validate_rule_pack` MCP tool check a pack file against the loader's own load-time
+judgments — structure only, never rule quality — before you ship it.
 
 ## Pack shape (`RulePackDef`)
 
@@ -21,7 +24,7 @@ ships today).
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `id` | string | — | Pack id; a finding's `rule_id` is `"{id}/{rule.id}"`. |
-| `framework` | string | `"any"` | Target-environment gate (`"any"` \| `"react"` \| `"prisma"` \| ...), consumed uniformly with native/JS rules via `RuleMeta::applies_to`. |
+| `framework` | string | `"any"` | Declared target environment (`"any"` \| `"react"` \| `"prisma"` \| ...). Currently informational: it is carried on `RuleMeta.framework`, but no engine code path filters on it today — `RuleMeta::applies_to` (crates/core/src/registry.rs) ignores its target argument and gates only on `enabled`. The per-file pre-filter that does run is path-based (`pack_loader::applies_to`, over each rule's `file_pattern`), not framework-based. |
 | `schema_version` | u32 | `1` | DSL schema this pack was authored against — see [Schema version policy](#schema-version-policy). |
 | `rules` | `RuleDef[]` | — | The pack's rules. |
 
@@ -50,7 +53,7 @@ Per-line regex scan over a file's raw text — the DSL's lexical matcher.
 | `file_pattern` | regex | required | Path regex a file must match (e.g. `"(?i)\\.(java\|jsp\|jspx\|tag)$"`). |
 | `file_exclude_pattern` | regex \| null | `null` | Path regex — a file whose `rel` path matches this is skipped entirely, checked immediately after `file_pattern`. Exists because `file_pattern` is positive-only and the `regex` crate has no lookaround, so `file_pattern` alone cannot express "match this extension but NOT under `scripts/`" — see [Path-exclusion semantics](#path-exclusion-semantics). |
 | `require_file` | regex \| null | `null` | Cheap pre-skip: the rule only scans a file whose full text matches this regex. Absent = always scan. |
-| `require_file_all` | regex[] | `[]` | Additional pre-skip regexes, **all** of which must match the file text, evaluated in order, short-circuiting on the first miss. Order rare-token-first — see the [authoring guide's performance section](authoring-guide.md#performance-require_file--require_file_all-rare-token-first). |
+| `require_file_all` | regex[] | `[]` | Additional pre-skip regexes, **all** of which must match the file text, evaluated in order, short-circuiting on the first miss. Order rare-token-first — see the [authoring guide's performance section](authoring-guide.md#performance-require_filerequire_file_all-rare-token-first). |
 | `require_file_absent` | regex[] | `[]` | Negated mirror of `require_file_all`, evaluated right after it: if **any** of these regexes matches the whole file text, the rule skips that file entirely. Encodes "flag X only when there is no Y anywhere in the file" (e.g. `setInterval` with no `clearInterval` anywhere in the same file) — a shape `exclude_pattern` cannot express, since that field only vetoes the matching *line*, not the whole file. |
 | `skip_comment_lines` | bool | `false` | Skip lines whose `trim_start()` begins with `//`, `*`, or `/*`. |
 | `line_pattern` | regex \| null | `null` | Single flag regex — mutually exclusive with `any` (see below). |
@@ -95,7 +98,7 @@ Span semantics:
   evidence). Computed per rule invocation, O(n²) over one file's (small) symbol list.
 - Before per-span evaluation, a whole-file necessary-condition pre-skip applies: every `patterns` entry
   must match *somewhere* in the file's full text, or the file is skipped entirely (a strict subsumption
-  of the per-span check — see the [authoring guide](authoring-guide.md#performance-require_file--require_file_all-rare-token-first) for why this mattered for a real hotspot).
+  of the per-span check — see the [authoring guide](authoring-guide.md#performance-require_filerequire_file_all-rare-token-first) for why this mattered for a real hotspot).
 - A symbol with no body span (e.g. a `type`/`interface`, or a parser that couldn't project one) is not
   scannable and is skipped.
 - **Loop spans** (`trigger_in_loop`'s substrate): alongside `symbols`, the parser projects each file's

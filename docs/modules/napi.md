@@ -1,6 +1,6 @@
 # `zzop-napi`
 
-The Node.js binding surface over the zzop analysis engine. Five functions, all JSON-string-in /
+The Node.js binding surface over the zzop analysis engine. Seven functions, all JSON-string-in /
 JSON-string-out (except `version`), are actually DEFINED in the shared `zzop-facade` crate
 (`crates/facade/src/lib.rs`) — plain, napi-free Rust that compiles and has a normal `#[test]` surface
 under the workspace's default `gnu` toolchain with no feature flags at all. This crate, `zzop-napi`
@@ -23,6 +23,8 @@ merely depended on `zzop-napi` for its plain-Rust logic, `zzop-mcp` included.
 | `analyzeTrees` | `(configJson: string) -> string` | `AnalyzeTreesRequest{trees: [AnalyzeRequest]}` → `MultiAnalyzeOutputView` |
 | `analyzeEnvelope` | `(envelopeJson: string, configJson: string) -> string` | `NormalizedEnvelope` + `EnvelopeAnalyzeRequest` → `AnalyzeOutputView` |
 | `validateEnvelopeOnly` | `(envelopeJson: string) -> string` | envelope JSON → `{valid: boolean, issues: string[]}` — see [below](#validation-only-validateenvelopeonly). |
+| `validateRulePackOnly` | `(packJson: string) -> string` | rule-pack JSON → `{valid: boolean, issues: string[]}` — see [below](#validation-only-validaterulepackonly). |
+| `queryIo` | `(analysisJson: string, queryJson: string) -> string` | an `analyzeTrees` OUTPUT + `{pattern}` → the definitive endpoint-query result — see [below](#endpoint-queries-queryio). |
 | `version` | `() -> string` | none (cannot fail, no `Result`) |
 
 `AnalyzeRequest` (`#[serde(rename_all="camelCase", default)]`, unknown fields ignored):
@@ -32,7 +34,7 @@ merely depended on `zzop-napi` for its plain-Rust logic, `zzop-mcp` included.
 | `root` | `String` (required — empty → `Err`) | Tree root to walk. |
 | `sourceId` | `String` (default `""`) | Free-form label carried through into cross-tree output. |
 | `packsDir` | `Option<String \| String[]>` | Directory (or directories) of `*.json` DSL rule packs to load — see [rules/authoring-guide.md](../rules/authoring-guide.md). Multiple directories are loaded and MERGED (see [Defaults](#defaults-zero-config--full-analysis) below for the collision rule). A bad/missing directory is a non-fatal `warnings` entry, not a failure — other directories in the list still load. |
-| `packDefs` | `RulePackDef[]` (default `[]`) | Inline rule-pack definitions handed to the engine as data instead of a filesystem directory — the self-contained-binary alternative to `packsDir` (e.g. `zzop-mcp`'s bundled packs, embedded at compile time). Loaded BEFORE `packsDir` directories, so a directory pack with the same id wins the collision (mirrors the JS wrapper's bundled-first `packsDir` ordering below). A same-id collision among `packDefs` entries themselves: the later array entry wins whole. The JS CLI/wrapper never sends this field — it stays on the `packsDir`-only path unchanged; this is purely additive for non-JS hosts like `zzop-mcp` (see [modules/mcp.md](mcp.md)). Not available on `analyzeEnvelope`'s config (`EnvelopeAnalyzeRequest` has no equivalent field — envelope mode takes packs via `packsDir` only). |
+| `packDefs` | `RulePackDef[]` (default `[]`) | Inline rule-pack definitions handed to the engine as data instead of a filesystem directory — the self-contained-binary alternative to `packsDir` (e.g. `zzop-mcp`'s bundled packs, embedded at compile time). Loaded BEFORE `packsDir` directories, so a directory pack with the same id wins the collision (mirrors the JS wrapper's bundled-first `packsDir` ordering below). A same-id collision among `packDefs` entries themselves: the later array entry wins whole. The JS CLI/wrapper never sends this field — it stays on the `packsDir`-only path unchanged; this is purely additive for non-JS hosts like `zzop-mcp` (see [modules/mcp.md](mcp.md)). Also accepted on `analyzeEnvelope`'s config — `EnvelopeAnalyzeRequest` carries the same field with the identical contract. |
 | `cacheDir` | `Option<String>` | See [Caching](../ARCHITECTURE.md#caching). Omit to run uncached. |
 | `git` | `Option<{ since: Option<String>, recentDays: Option<u32>, commitTypePatterns: Option<Array<{ pattern: String, tag: String }>> }>` | Enables git-derived scores/health/recommendations/criticality/seams. `recentDays` default is 30. `commitTypePatterns`, when present and non-empty, REPLACES the default FIX/FEAT/REVERT/... classifier table entirely (match order = array order, mirroring the default table's REVERT-first rationale); an entry whose `pattern` fails to compile as a regex is skipped (matches nothing) and reported as a `warnings` entry, never a failure. |
 | `sizeCap` | `Option<usize>` | Default 1,500,000 bytes (~1.5MB) — see [degraded files](../ARCHITECTURE.md#degraded-files). |
@@ -76,24 +78,48 @@ at compile time and injects it as inline `packDefs` before mapping a config to a
 [modules/mcp.md](mcp.md)). `packDefs` is additive to this crate's own contract — the JS wrapper never
 sends it, so this default-injection description is unchanged for JS callers.
 
-`analyzeEnvelope`'s config gets only the `packsDir` default — envelope mode has no `root`/git. To turn
-off individual rules rather than a whole channel, use `disabledRules`
-(see [rules/catalog.md](../rules/catalog.md)).
+`analyzeEnvelope`'s config gets only the pack default — envelope mode has no `root`/git — and gets it
+at TWO layers: the JS wrapper still applies the `packsDir` default/prepend above, and the engine facade
+itself (`zzop_facade::analyze_envelope_json`) additionally seeds the bundled packs as inline `packDefs`
+on EVERY envelope analysis, whatever the host — the envelope path has no per-host config front-end on
+the Rust side, so its "zero-config = full analysis" default lives at the shared chokepoint instead. The
+seed order keeps every existing collision rule: bundled inline defs load first, a caller `packDefs`
+entry with a bundled id wins whole (later inline def wins), and any `packsDir` directory pack wins
+whole over both (so through the JS wrapper the bundled packs still report `packsLoaded` `source: "dir"`
+— the wrapper's on-disk copy shadows the embedded twin — while a raw facade/binary caller sees
+`source: "inline"`). An explicit `packsDir: null` disables the bundled seed and all pack directories
+— caller-supplied `packDefs` (never sent by the JS wrapper) are still honored, per the standing
+"packDefs always load" contract — the facade distinguishes an absent key from an explicit `null` for
+exactly this opt-out. Note only
+`symbol-scan`/`io-scan` rules can fire in envelope mode (no source text); every current bundled rule is
+`line-scan`/`method-scan`, so today the bundled default changes `packsLoaded` (and removes the spurious
+zero-packs warning), not findings. To turn off individual rules rather than a whole channel, use
+`disabledRules` (see [rules/catalog.md](../rules/catalog.md)).
 
 When the engine itself runs with a narrowed scope anyway (explicit opt-out, or a non-JS consumer
 calling the Rust engine directly), it self-reports on `warnings` instead of staying silent:
 
 - `git history not requested (git option omitted): scores, health, recommendations, criticality, seams and layerCoChurn are null. Pass git: {} to enable them.`
-- `no DSL rule packs loaded: only the N built-in native analyses ran. Set packsDir to a directory of *.json rule packs to enable the shipped DSL rules.` (N = the engine's actual native-analysis count.)
+- ``no DSL rule packs loaded: only the N built-in native analyses ran. If you expected the bundled packs, reinstall/check the package (the bundled packs directory may be missing); to add your own, set `packs: { extraDirs: [...] }` in zzop.config.jsonc (embedders: `packsDir`).`` (N = the engine's actual native-analysis count.)
 
 These are capability notes, not errors — the analysis still completes normally. The zero-packs note
-also applies to `analyzeEnvelope`; the git note never does (envelope mode has no git by design).
+can reach `analyzeEnvelope` only via the explicit `packsDir: null` opt-out now (the facade's bundled
+default otherwise guarantees a non-empty pack set); the git note never does (envelope mode has no git
+by design).
 
-`EnvelopeAnalyzeRequest { sourceId: String, packsDir: Option<String | Vec<String>>, disabledRules: Vec<String>, severityOverrides: BTreeMap<String, Severity>, suppressions: Vec<{ rule, path?, glob? }>, globalExcludes: Vec<{ path?, glob? }> }` —
-deliberately no `root`/`cacheDir`/`git`/`sizeCap`/`packDefs` (envelope mode has no filesystem root or git
-repo, and takes packs via `packsDir` only — see `packDefs`'s row above).
-`severityOverrides`/`suppressions`/`globalExcludes` behave identically to their `AnalyzeRequest`
-counterparts above. `NormalizedEnvelope` shape: see `../NORMALIZED_AST.md`.
+`EnvelopeAnalyzeRequest { sourceId: String, packsDir: Option<String | Vec<String>> (absent ≠ null), packDefs: Vec<RulePackDef>, disabledRules: Vec<String>, severityOverrides: BTreeMap<String, Severity>, suppressions: Vec<{ rule, path?, glob? }>, globalExcludes: Vec<{ path?, glob? }>, mountedAt: Option<String>, mounts: Vec<{ dir, at }> }` —
+deliberately no `root`/`cacheDir`/`git`/`sizeCap` (envelope mode has no filesystem root or git repo).
+`packDefs`/`severityOverrides`/`suppressions`/`globalExcludes`/`mountedAt`/`mounts` behave identically
+to their `AnalyzeRequest` counterparts above (for `packDefs` that includes the seed order: inline defs
+load BEFORE `packsDir` directories, so a directory pack with the same id wins the collision whole; for
+`mountedAt`/`mounts` that includes the fold order — every `mounts[]` entry first, `mountedAt` as the
+implicit whole-tree `dir: ""` entry last — with the engine applying them uniformly to Mode A envelopes,
+per `../NORMALIZED_AST.md`'s deployment-topology note).
+Unlike `AnalyzeRequest`, `packsDir` here distinguishes an ABSENT key from an explicit `null`: absent
+(or a directory value) keeps the facade's bundled-pack default (see
+[Defaults](#defaults-zero-config--full-analysis) above); `null` opts out of the bundled seed and all
+pack directories (caller `packDefs` are still honored). `NormalizedEnvelope` shape: see
+`../NORMALIZED_AST.md`.
 
 ### Validation-only: `validateEnvelopeOnly`
 
@@ -104,6 +130,59 @@ feedback without a full analysis. It returns `{"valid": boolean, "issues": strin
 other function on this page, **never fails**: an unparseable or semantically invalid envelope still
 produces an ordinary `{"valid": false, "issues": [...]}` result rather than a rejected `Result`/thrown
 `Error` — a validity check cannot itself be "wrong" the way a malformed request can.
+
+### Validation-only: `validateRulePackOnly`
+
+`validateRulePackOnly(packJson)` is the same idea for a DSL rule pack: the pre-load, structure-only
+check behind `zzop pack validate <path>` and the `zzop-mcp` binary's `validate_rule_pack` tool (one
+shared facade core, `zzop_facade::validate_rule_pack_json` — identical answers from every host). Its
+`issues` surface exactly the judgments the engine's pack loader makes when it loads a
+`packsDir`/`packDefs` pack — bad JSON, a missing field, a wrong type (serde's own messages, verbatim),
+a too-new `schema_version` — plus every matcher regex that fails to compile, which the DSL interpreter
+otherwise reports by silently never firing that rule. It never judges rule QUALITY or semantics: a
+structurally sound pack with a useless rule is `valid: true`. Same `{"valid": boolean, "issues":
+string[]}` shape and never-fails contract as `validateEnvelopeOnly` above. The machine-readable shape
+contract ships as [`docs/contracts/rule-pack.schema.json`](../contracts/rule-pack.schema.json)
+(`zzop://contract/rule-pack-schema` over MCP); the human-readable field reference is
+[rules/dsl-reference.md](../rules/dsl-reference.md).
+
+### Endpoint queries: `queryIo`
+
+`queryIo(analysisJson, queryJson)` answers "is io key X provided/consumed/joined?" DEFINITIVELY —
+pure post-processing over an ALREADY-PRODUCED `analyzeTrees` output (no re-analysis, no cache
+interaction). It is the one shared query core: the JS CLI's `zzop endpoint` command and the
+Node-free `zzop-mcp` binary's `check_endpoint` tool (see [mcp.md](mcp.md)) both call this exact
+function, so they give identical answers for the same analysis.
+
+- `analysisJson` — the string `analyzeTrees` returned. A single-tree `analyze` output is a guided
+  error: it carries raw io facts (`ir.io`) but no cross-layer join, and every verdict below is a
+  join fact — run `analyzeTrees` instead (the join runs even over one tree, intra-tree edges
+  included; the error reports how many raw provides/consumes matched so the guidance is concrete).
+- `queryJson` — `{"pattern": "<non-empty string>"}`. The pattern is matched as a case-insensitive
+  substring against every cross-layer io key (http routes, env keys, DB tables, topics — every
+  bucket plus `edges`), and against the `raw` expression of an unresolved consume (`key: null`);
+  an unresolved consume with no `raw` recorded is unmatched, never guessed. An unknown query key
+  (a typo like `"patern"`) is a named error, not a silent `not-found`.
+
+The result (camelCase):
+
+| Field | Meaning |
+|---|---|
+| `pattern` | Echo of the query pattern. |
+| `verdict` | ONE token from the sealed vocabulary below. |
+| `counts` | FULL match counts per bucket (`{edges, unconsumedProvides, unprovidedConsumes, unresolvedConsumes, externalConsumes, ambiguousConsumes}`) — never capped. |
+| `matches` | The same six keys, each an array of the ORIGINAL matched objects (`file`/`line`/`source` intact), capped at 20 per bucket. |
+| `truncated` | `{bucket: remainingCount}` — present only when a bucket's `matches` list was capped. |
+| `relatedFindings` | Findings (from every tree's `findings` AND `crossLayerFindings`) whose message contains the pattern or any matched key, case-insensitively — capped at 20, with a sibling `truncatedFindings: N` only when capped. |
+| `suggestions` | Up to 10 candidate keys, present ONLY on a `not-found` verdict: keys whose last path segment equals the pattern's (case-insensitively), falling back to keys containing any single `/`-segment of the pattern. |
+| `disclosure` | Forwarded verbatim from the analysis output (the run-global registry above). |
+
+`verdict` is a **sealed wire vocabulary** (`crates/facade/src/query.rs`), derived deterministically
+from which join buckets contain a match: `edges` → `"linked"`, `unconsumedProvides` →
+`"provided-only"`, `unprovidedConsumes` → `"consumed-unprovided"`, `unresolvedConsumes` →
+`"unresolved-only"`, `externalConsumes` → `"external"`, `ambiguousConsumes` → `"ambiguous"`.
+Exactly one class matching yields its token; two or more yield `"mixed"` (the `counts`
+disambiguate); zero yield `"not-found"`.
 
 `AnalyzeOutputView` (`camelCase`, a zero-copy borrowing view) is the shape every successful `analyze`/
 `analyzeEnvelope` call returns:
@@ -122,6 +201,7 @@ produces an ordinary `{"valid": false, "issues": [...]}` result rather than a re
 | `seams` | `object[]` | Folders that are good first-extraction candidates (low boundary-crossing coupling). |
 | `folders` | `object \| null` | Folder-granularity rollup of `nodes`/the dep graph. Not git-gated — `nodes`/dep graph are built unconditionally, so this is always non-null (an empty tree still gets an object with empty arrays, never `null`). |
 | `layerCoChurn` | `object[] \| null` | Cross-layer commit co-churn pairs (files in different architectural layers that change together). `null` unless `git` is set and collection succeeded — same git-gating as `scores`/`health`; `[]` (not `null`) when git is active but no pair meets the co-change threshold. |
+| `packsLoaded` | `{ id, rules, source }[]` | Positive pack-load confirmation: one entry per loaded DSL pack (sorted by `id`), with its rule count as loaded and its provenance — `source` is `"dir"` (read from a `packsDir` directory, which is also how the JS wrapper's bundled defaults arrive) or `"inline"` (`packDefs`). Always present; `[]` is the honest "zero DSL packs loaded" state (the same condition the `warnings` self-report names). Reflects loading, not gating: a pack disabled via `disabledRules` still appears — it did load. |
 | `warnings` | `string[]` | Non-fatal issues (e.g. a bad `packsDir`) plus the capability self-report notes — see [Defaults](#defaults-zero-config--full-analysis). |
 | `cache` | `{ hits, misses } \| null` | Set only when `cacheDir` was given. |
 | `ruleTimings` | `object[] \| null` | Per-rule id + elapsed time + finding count; set only when the caller requests profiling. |
@@ -203,8 +283,13 @@ every tree's `disabledRules` (any one tree disabling a cross-layer rule id drops
 entirely, since it is a joint-analysis output no single tree fully owns).
 
 `version()` returns
-`"zzop-napi/{CARGO_PKG_VERSION} zzop-parser-typescript={PARSER_FINGERPRINT} zzop-parser-prisma={PARSER_FINGERPRINT}"`
-(Java's fingerprint is not currently surfaced here).
+`"zzop-napi/{version} zzop-parser-typescript={FP} zzop-parser-prisma={FP} zzop-parser-python-3={FP} zzop-parser-java-21={FP} zzop-parser-rust={FP} zzop-parser-go={FP}"`
+— every native parser's `PARSER_FINGERPRINT`, in that order. `{version}` follows the same tag→binary
+stamping chain as `zzop-mcp`'s `serverInfo.version` (see [mcp.md](mcp.md#mcp-surface)): release
+prebuilds are stamped from the release tag at compile time (`ZZOP_RELEASE_VERSION`, exported by
+`prebuild.yml`'s addon build step from the same tag the npm package versions come from), so a
+released addon reports its own package version; local/dev builds fall back to `CARGO_PKG_VERSION`,
+the workspace-wide `0.0.0` placeholder.
 
 ## Output data shapes
 
@@ -218,7 +303,7 @@ an external parser adapter must produce (see [NORMALIZED_AST.md](../NORMALIZED_A
 | — `symbols` | `SourceSymbol[]` | See below. |
 | — `loc` | `{ [path]: number }` | Physical line count per file. |
 | — `io` | `IoFacts \| null` | `provides`/`consumes` HTTP/DB/tRPC facts, joined cross-tree by `analyzeTrees`. |
-| `SourceSymbol` | `id, file, name, kind, line, exported, isDefault, bodyStart?, bodyEnd?` | `kind` is one of `function\|class\|const\|type\|interface`; `bodyStart`/`bodyEnd` (1-based, inclusive) are set only for functions/classes with a recoverable body span. camelCase on output like every other type here. On the way IN, `SourceSymbol` is also reused verbatim as the deserialize target for [NORMALIZED_AST.md](../NORMALIZED_AST.md)'s frozen v1 external-parser envelope input contract (`FileProjection.symbols`), so it additionally *accepts* that contract's snake_case names (`is_default`, `body_start`, `body_end`) via `#[serde(alias = ...)]` — a conforming envelope producer's JSON keeps working unchanged. |
+| `SourceSymbol` | `id, file, name, kind, line, exported, isDefault, bodyStart?, bodyEnd?, writeSites?` | `kind` is one of `function\|class\|const\|type\|interface`; `bodyStart`/`bodyEnd` (1-based, inclusive) are set only for functions/classes with a recoverable body span; `writeSites` (skipped when empty; camelCase-only, no snake_case alias — see [NORMALIZED_AST.md](../NORMALIZED_AST.md)) lists pre-computed store-write call sites within the symbol's body span (TS only; feeds the `unsafe-read-endpoint`/`non-idempotent-write` call-graph scanners). camelCase on output like every other type here. On the way IN, `SourceSymbol` is also reused verbatim as the deserialize target for [NORMALIZED_AST.md](../NORMALIZED_AST.md)'s frozen v1 external-parser envelope input contract (`FileProjection.symbols`), so it additionally *accepts* that contract's snake_case names (`is_default`, `body_start`, `body_end`) via `#[serde(alias = ...)]` — a conforming envelope producer's JSON keeps working unchanged. |
 
 Every finding — from a DSL rule pack or a native analysis alike — has this shape:
 
@@ -238,8 +323,8 @@ is dropped before sorting — it never appears in the output at all, with no sup
 ## Error/panic discipline
 
 Two layers. `zzop-facade` (`crates/facade/src/lib.rs`) never panics by contract — every fallible path
-(bad JSON, missing `root`, invalid envelope) returns `Result<String, String>`. `addon.rs` wraps each of
-the three fallible calls (analyze/analyzeTrees/analyzeEnvelope — validateEnvelopeOnly is wrapped only for panic-safety and never itself returns Err) in:
+(bad JSON, missing `root`, invalid envelope, a malformed query) returns `Result<String, String>`. `addon.rs` wraps each of
+the four fallible calls (analyze/analyzeTrees/analyzeEnvelope/queryIo — validateEnvelopeOnly and validateRulePackOnly are wrapped only for panic-safety and never themselves return Err) in:
 
 ```rust
 fn catch<F: FnOnce() -> Result<String, String> + UnwindSafe>(f: F) -> napi::Result<String> {

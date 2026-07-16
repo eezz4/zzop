@@ -32,6 +32,6 @@
 mod addon;
 
 pub use zzop_facade::{
-    analyze_envelope_json, analyze_json, analyze_trees_json, validate_envelope_only_json,
-    version_string,
+    analyze_envelope_json, analyze_json, analyze_trees_json, query_io_json,
+    validate_envelope_only_json, validate_rule_pack_json, version_string,
 };

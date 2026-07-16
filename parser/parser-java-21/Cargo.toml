@@ -1,0 +1,17 @@
+[package]
+name = "zzop-parser-java-21"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# Grammar pinned EXACT (0.x — no semver guarantee across even patch releases; a node-kind rename
+# must be an explicit, reviewed bump, never a silent `cargo update`). See this crate's
+# `node_kinds_are_pinned_to_the_grammar` test — a rename would fail loudly, not silently extract
+# nothing. Mirrors `zzop-parser-go`'s identical exact-pin discipline for `tree-sitter-go`.
+tree-sitter-java = "=0.23.5"
+# Runtime version requirement mirrors `zzop-parser-go`'s "minimal compatible, not exact" discipline
+# on the tree-sitter runtime crate itself.
+tree-sitter = "0.25.8"
+zzop-core = { version = "0.0.0", path = "../../crates/core" }
+regex = { workspace = true }

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# pre-commit — runs the repo's mechanical guards before every commit.
+#
+# Enable once per clone (no dependency on husky or any package manager; plain git):
+#   git config core.hooksPath .githooks
+#
+# Scope: the fast, working-tree-only guards. The parser-fingerprint guard is excluded (it diffs
+# against a base commit — a release/CI concern, not a per-commit one), as are cargo test/clippy
+# (too slow for a hook; CI owns them). Note the guards scan the WORKING TREE, not the index — a
+# violation in an unstaged file also blocks the commit; stash if that's ever wrong.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+GUARDS=(
+  check-english-source
+  check-max-file-lines
+  check-swc-isolation
+  check-ruff-isolation
+  check-syn-isolation
+  check-tree-sitter-isolation
+  check-rules-catalog-sync
+  check-cli-readme-sync
+  check-docs-rule-ids
+  check-docs-link-graph
+  check-site-sdk-tokens
+  check-io-key-vocab
+  check-napi-request-fields
+  check-policy-census
+  check-shell-pipe-sigpipe
+)
+
+for g in "${GUARDS[@]}"; do
+  if ! out=$(bash "scripts/$g.sh" 2>&1); then
+    echo "pre-commit: scripts/$g.sh FAILED"
+    echo "$out"
+    exit 1
+  fi
+done
+echo "pre-commit: ${#GUARDS[@]} guards clean."

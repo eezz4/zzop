@@ -333,6 +333,15 @@ fn koa_import_with_zero_http_provides_fires_the_s2_warning() {
         "expected the S2 server-framework-import warning naming koa, got: {:?}",
         out.warnings
     );
+    // Funnel pin (D9): the S2 disclosure must chain to CREATION like every sibling silence
+    // warning — a reword dropping the partial-envelope on-ramp or the contract pointer fails here.
+    assert!(
+        out.warnings.iter().any(|w| w.contains(S2_WARNING_SUBSTRING)
+            && w.contains("zzop-mcp contract envelope-guide")
+            && w.contains("partial envelope")),
+        "expected the S2 warning to carry the adapter-creation funnel tail, got: {:?}",
+        out.warnings
+    );
 }
 
 #[test]

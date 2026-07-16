@@ -3,13 +3,12 @@
 **/*.rs.bk
 *.pdb
 
-# Local detection-benchmark corpus (labeled fixture — not shipped; see
-# .claude/context/plans/benchmark-corpus-2026-07.md)
-/benchmark
-
-# Local dogfood corpus checkouts (cloned OSS repos with embedded .git — never shipped;
-# re-acquisition commands live in the internal context docs)
-/테스트
+# All local-only measurement material in ONE place (never shipped):
+#   corpus/oss/       — dogfood corpus checkouts (cloned OSS repos with embedded .git;
+#                       re-acquisition commands live in the internal context docs)
+#   corpus/benchmark/ — labeled detection-benchmark fixture (its own README)
+#   corpus/*.json*    — local e2e configs/overlays
+/corpus
 
 # zzop report output (runtime artifact; --out / report.dir)
 zzop-report.*/

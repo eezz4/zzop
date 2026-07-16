@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 'use strict';
 
-// `zzop` CLI entry point. Two commands:
-//   zzop init            -> write an annotated zzop.config.jsonc to cwd
-//   zzop [run]           -> load config, analyze via @zzop/native, print, exit per failOn
+// `zzop` CLI entry point. Commands:
+//   zzop init                -> write an annotated zzop.config.jsonc to cwd (init adapter: scaffold)
+//   zzop [run]               -> load config, analyze via @zzop/native, print, exit per failOn
+//   zzop endpoint <pattern>  -> definitive io-key query over the same analysis (exit 0 on any verdict)
+//   zzop adapter validate    -> offline envelope check
+//   zzop pack validate       -> offline rule-pack structure check
 //
-// Exit codes: 0 = ok (or findings below failOn); 1 = findings at/above failOn; 2 = config/usage error.
+// Exit codes (run): 0 = ok (or findings below failOn); 1 = findings at/above failOn; 2 = config/usage error.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -26,11 +29,17 @@ const { CONFIG_TEMPLATE } = require('../lib/init');
 const { lintEnvelope } = require('../lib/validate');
 const { buildAdapterScaffold, ADAPTER_MODE_VALUES, ADAPTER_KIND_VALUES } = require('../lib/adapter-templates');
 const { renderDebugIo } = require('../lib/debug-io');
+const { renderEndpointReport } = require('../lib/endpoint');
+const { buildSubcommandHelp } = require('../lib/help');
 
 // Default scaffold directory for `zzop init adapter` — sibling to DEFAULT_CONFIG_FILENAME, mirrors how
 // `zzop init` always writes to a fixed, unconfigurable target in the current directory.
 const DEFAULT_ADAPTER_DIR = 'zzop-adapter';
 
+// This literal is the single source of truth for ALL help text: `zzop <command> --help` prints a
+// focused slice of it (lib/help.js), and scripts/check-cli-readme-sync.sh greps this block for
+// flag-token parity with README.md. Editing a Usage entry's first line or a section header? The
+// slice anchors in lib/help.js must keep matching — test/help.test.js trips if one breaks.
 const USAGE = `zzop — multi-language SAST/architecture analysis, one \`zzop init\` away
 
 Usage:
@@ -42,8 +51,23 @@ Usage:
                                     --kind selects which side's extraction TODOs are stubbed in. See
                                     docs/adapters/README.md.
   zzop [run] [options]             Analyze using the config file (default command).
+  zzop endpoint <pattern>          Definitive io-key query: is <pattern> (a case-insensitive substring
+                                    of any io key — http routes, env keys, DB tables, topics) provided, consumed,
+                                    or joined? Runs the same config-driven analysis as \`zzop run\` (the
+                                    cache makes the re-run cheap) and prints ONE verdict — linked |
+                                    provided-only | consumed-unprovided | external | unresolved-only |
+                                    ambiguous | mixed | not-found — with the matching sites and, on
+                                    not-found, key suggestions. Honors --config; --json prints the raw
+                                    query JSON. Exits 0 regardless of verdict (a query is not a gate);
+                                    2 = config/usage error.
   zzop adapter validate <path>     Offline check of an external-parser envelope (docs/NORMALIZED_AST.md)
                                     against the v1 contract, plus semantic hints. No config/root needed.
+  zzop pack validate <path>        Offline structure check of a DSL rule-pack JSON file
+                                    (docs/rules/dsl-reference.md) — the same judgments the engine's
+                                    pack loader makes at load time (bad JSON, missing field, wrong
+                                    type, too-new schema_version, a matcher regex that cannot
+                                    compile), surfaced before loading. Shape only — never judges
+                                    rule quality or semantics. No config/root needed.
 
 Options (run):
   --config <path>                  Config file to use (default ./${DEFAULT_CONFIG_FILENAME}).
@@ -71,6 +95,7 @@ Exit codes (zzop [run]):
   1   At least one finding at or above failOn.
   2   Config or usage error.
 \`zzop adapter validate\` ignores failOn: 0 = envelope structurally valid, 1 = invalid, 2 = usage error.
+\`zzop pack validate\` ignores failOn: 0 = pack structurally valid, 1 = invalid, 2 = usage error.
 `;
 
 // Valid `--severity` values. Exact match only (no friendly aliases like the config's "warn") — this is a
@@ -89,6 +114,9 @@ function fail(message, code = 2) {
 function parseArgs(argv) {
   const opts = {
     command: null,
+    // Whether a command was named on the argv at all — distinguishes bare `zzop --help` (full
+    // usage) from `zzop run --help` (focused run help) after `command` defaults to 'run' below.
+    commandGiven: false,
     config: null,
     format: null,
     force: false,
@@ -101,6 +129,11 @@ function parseArgs(argv) {
     // `adapter validate <path>` only:
     subcommand: null,
     envelopePath: null,
+    // `pack validate <path>` only:
+    packSubcommand: null,
+    packPath: null,
+    // `endpoint <pattern>` only:
+    pattern: null,
     // `init adapter --mode <a|b> --kind <consume|provide>` only:
     initSubcommand: null,
     mode: null,
@@ -126,7 +159,8 @@ function parseArgs(argv) {
         break;
       case '--json':
         opts.format = 'json';
-        scoped.push({ flag: arg, scope: 'run' });
+        // `run|endpoint`: valid under both commands — the cross-check below splits on `|`.
+        scoped.push({ flag: arg, scope: 'run|endpoint' });
         break;
       case '-a':
       case '--all':
@@ -136,7 +170,7 @@ function parseArgs(argv) {
       case '--config':
         opts.config = argv[++i];
         if (opts.config === undefined) throw new ConfigError('--config requires a <path> argument.');
-        scoped.push({ flag: arg, scope: 'run' });
+        scoped.push({ flag: arg, scope: 'run|endpoint' });
         break;
       case '--format':
         opts.format = argv[++i];
@@ -194,6 +228,7 @@ function parseArgs(argv) {
     }
   }
 
+  opts.commandGiven = rest.length > 0;
   opts.command = rest[0] || 'run';
   if (opts.command === 'adapter') {
     // `zzop adapter validate <path>` — a second positional (subcommand) plus a third (the envelope
@@ -201,12 +236,27 @@ function parseArgs(argv) {
     // `--help`/`--version` can still read `opts.command` before the escape-hatch-gated checks below run.
     opts.subcommand = rest[1];
     opts.envelopePath = rest[2];
+  } else if (opts.command === 'pack') {
+    // `zzop pack validate <path>` — same two-extra-positionals shape as `adapter validate`, same
+    // "stash regardless of validity" escape-hatch reasoning for `--help`/`--version`.
+    opts.packSubcommand = rest[1];
+    opts.packPath = rest[2];
   } else if (opts.command === 'init') {
     // `zzop init adapter --mode <a|b> --kind <consume|provide>` — a second positional (`adapter`),
     // unlike bare `init`'s zero positionals. Stashed regardless of validity, same escape-hatch reasoning
     // as `adapter`'s subcommand above.
     opts.initSubcommand = rest[1];
-    if (rest.length > 2) {
+    // Same help/version escape hatch as `adapter`/`pack`'s positional-shape checks below — a
+    // trailing `--help` must print help, not trip on the extra positional it is escaping.
+    if (!opts.help && !opts.version && rest.length > 2) {
+      throw new ConfigError(`Unexpected argument "${rest[2]}". Run \`zzop --help\`.`);
+    }
+  } else if (opts.command === 'endpoint') {
+    // `zzop endpoint <pattern>` — a second positional (the pattern). Stashed regardless of
+    // validity, same `--help`/`--version` escape-hatch reasoning as `adapter`'s subcommand above
+    // (the escape hatch also gates the extra-positional check, mirroring `adapter`/`pack`).
+    opts.pattern = rest[1];
+    if (!opts.help && !opts.version && rest.length > 2) {
       throw new ConfigError(`Unexpected argument "${rest[2]}". Run \`zzop --help\`.`);
     }
   } else if (rest.length > 1) {
@@ -224,7 +274,11 @@ function parseArgs(argv) {
   if (
     !opts.help &&
     !opts.version &&
-    (opts.command === 'init' || opts.command === 'run' || opts.command === 'adapter')
+    (opts.command === 'init' ||
+      opts.command === 'run' ||
+      opts.command === 'adapter' ||
+      opts.command === 'pack' ||
+      opts.command === 'endpoint')
   ) {
     for (const { flag, scope } of scoped) {
       if (scope === 'init-adapter') {
@@ -233,7 +287,9 @@ function parseArgs(argv) {
         }
         continue;
       }
-      if (scope !== opts.command) {
+      // A scope may name several valid commands, `|`-separated (`--config`/`--json` are shared by
+      // `run` and `endpoint`); a single-command scope degenerates to the old equality check.
+      if (!scope.split('|').includes(opts.command)) {
         throw new ConfigError(
           `"${flag}" is not valid for the \`${opts.command}\` command. Run \`zzop --help\`.`
         );
@@ -255,6 +311,27 @@ function parseArgs(argv) {
     if (!opts.envelopePath) {
       throw new ConfigError('"zzop adapter validate" requires a <envelope.json> path argument.');
     }
+  }
+
+  // `pack` positional-shape checks — mirror `adapter`'s exactly (its scoped-flag rejection is handled
+  // by the shared cross-check above, where `pack` scopes no flags of its own); same escape hatch.
+  if (!opts.help && !opts.version && opts.command === 'pack') {
+    if (rest.length > 3) {
+      throw new ConfigError(`Unexpected argument "${rest[3]}". Run \`zzop --help\`.`);
+    }
+    if (opts.packSubcommand !== 'validate') {
+      throw new ConfigError(
+        `Unknown "pack" subcommand "${opts.packSubcommand || ''}" — only "pack validate <path>" is supported. Run \`zzop --help\`.`
+      );
+    }
+    if (!opts.packPath) {
+      throw new ConfigError('"zzop pack validate" requires a <pack.json> path argument.');
+    }
+  }
+
+  // `endpoint` positional-shape check — the pattern is required; same help/version escape hatch.
+  if (!opts.help && !opts.version && opts.command === 'endpoint' && !opts.pattern) {
+    throw new ConfigError('"zzop endpoint" requires a <pattern> argument. Run `zzop endpoint --help`.');
   }
 
   // `init adapter` positional-shape + required-flags checks (its scoped-flag rejection is handled by the
@@ -392,6 +469,59 @@ function runAdapterValidate(opts) {
   process.exit(report.valid ? 0 : 1);
 }
 
+/**
+ * `zzop pack validate <path>` — offline structure check of a DSL rule-pack JSON file, mirroring
+ * `runAdapterValidate` exactly (read file -> lazy native load -> `{valid, issues}` report -> exit
+ * 0/1/2). The verdicts are the engine pack loader's own load-time judgments plus non-compiling
+ * matcher regexes, surfaced via the native `validateRulePackOnly` (see `crates/facade/src/rule_pack.rs`)
+ * — shape only, never rule-quality semantics. No semantic hints layer here (unlike the envelope
+ * validator): the loader's judgments ARE the whole contract.
+ * @param {object} opts  parsed CLI opts (`packPath`)
+ */
+function runPackValidate(opts) {
+  const resolvedPath = path.resolve(process.cwd(), opts.packPath);
+  let raw;
+  try {
+    raw = fs.readFileSync(resolvedPath, 'utf8');
+  } catch (err) {
+    fail(`Failed to read "${opts.packPath}": ${err && err.message}`, 2);
+    return;
+  }
+
+  // Load the native engine lazily, same as `runAdapterValidate` — a missing addon must be a clear
+  // message, not a stack trace.
+  let native;
+  try {
+    native = require('@zzop/native');
+  } catch (err) {
+    fail(
+      `Failed to load the @zzop/native engine: ${err && err.message}\n` +
+        `Ensure @zzop/native is installed for this platform (it is a dependency of zzop).`,
+      2
+    );
+    return;
+  }
+
+  let reportJson;
+  try {
+    reportJson = native.validateRulePackOnly(raw);
+  } catch (err) {
+    fail(`Rule-pack validation failed: ${err && err.message}`, 2);
+    return;
+  }
+
+  let report;
+  try {
+    report = JSON.parse(reportJson);
+  } catch (err) {
+    fail(`Engine returned malformed JSON: ${err && err.message}`, 2);
+    return;
+  }
+
+  process.stdout.write(`${formatValidateReport(opts.packPath, report, [])}\n`);
+  process.exit(report.valid ? 0 : 1);
+}
+
 function resolveFormat(opts, config) {
   const format = opts.format || config.format || 'pretty';
   if (format !== 'pretty' && format !== 'json') {
@@ -480,6 +610,66 @@ function runAnalyze(opts) {
   process.exit(computeExitCode(findings, failOn));
 }
 
+/**
+ * `zzop endpoint <pattern>` — the definitive io-key query. Same config discovery and analysis
+ * pipeline as `zzop [run]` (a `cacheDir` in the config makes the re-run cheap), then the shared
+ * facade query core (`@zzop/native`'s `queryIo` — the exact core the zzop-mcp `check_endpoint`
+ * tool uses, so both hosts give the identical answer). The analysis ALWAYS routes through
+ * `analyzeTrees`, even for a single-tree config: a verdict is a cross-layer JOIN fact and the
+ * query core rejects a plain single-tree `analyze` output as pre-join — one tree passed through
+ * `analyzeTrees` still gets the join, intra-tree edges included. Exit 0 regardless of verdict
+ * (a query is not a gate); 2 = config/usage/engine error.
+ * @param {object} opts  parsed CLI opts (`pattern`, `config`, `format`)
+ */
+function runEndpoint(opts) {
+  const configPath = opts.config || DEFAULT_CONFIG_FILENAME;
+  const rawConfig = loadConfig(configPath);
+  const { config, warnings: autoTreeWarnings } = expandAutoTrees(rawConfig, process.cwd());
+  emitWarnings(autoTreeWarnings);
+  emitWarnings(collectConfigWarnings(config));
+  const { method, request } = configToRequest(config);
+  const treesRequest = method === 'analyzeTrees' ? request : { trees: [request] };
+
+  // Load the native engine lazily, same as `runAnalyze`.
+  let native;
+  try {
+    native = require('@zzop/native');
+  } catch (err) {
+    fail(
+      `Failed to load the @zzop/native engine: ${err && err.message}\n` +
+        `Ensure @zzop/native is installed for this platform (it is a dependency of zzop).`,
+      2
+    );
+    return;
+  }
+
+  let resultJson;
+  try {
+    const analysisJson = native.analyzeTrees(JSON.stringify(treesRequest));
+    // The engine's self-reported warnings keep their stderr honesty channel here too.
+    emitWarnings(collectWarnings(JSON.parse(analysisJson)));
+    resultJson = native.queryIo(analysisJson, JSON.stringify({ pattern: opts.pattern }));
+  } catch (err) {
+    fail(`Endpoint query failed: ${err && err.message}`, 2);
+    return;
+  }
+
+  if (opts.format === 'json') {
+    // Raw query JSON, verbatim from the shared core — the machine-readable surface.
+    process.stdout.write(`${resultJson}\n`);
+  } else {
+    let result;
+    try {
+      result = JSON.parse(resultJson);
+    } catch (err) {
+      fail(`Engine returned malformed JSON: ${err && err.message}`, 2);
+      return;
+    }
+    process.stdout.write(`${renderEndpointReport(result)}\n`);
+  }
+  process.exit(0);
+}
+
 // Base report directory when neither `--out` nor config `report.dir` names one — reports are written by
 // default now (markdown is meant to be the delivery surface for a cross-repo review), so this always
 // applies unless report writing is explicitly disabled (see `report.enabled` below).
@@ -549,7 +739,9 @@ function main() {
   }
 
   if (opts.help) {
-    process.stdout.write(USAGE);
+    // `zzop <command> --help` prints a focused slice of USAGE for that command; a bare
+    // `zzop --help` (or an unknown command) falls back to the full text.
+    process.stdout.write(buildSubcommandHelp(USAGE, opts) || USAGE);
     process.exit(0);
   }
 
@@ -574,8 +766,12 @@ function main() {
       }
     } else if (opts.command === 'run') {
       runAnalyze(opts);
+    } else if (opts.command === 'endpoint') {
+      runEndpoint(opts);
     } else if (opts.command === 'adapter') {
       runAdapterValidate(opts);
+    } else if (opts.command === 'pack') {
+      runPackValidate(opts);
     } else {
       fail(`Unknown command "${opts.command}". Run \`zzop --help\`.`, 2);
     }
@@ -592,4 +788,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { parseArgs };
+module.exports = { parseArgs, USAGE };

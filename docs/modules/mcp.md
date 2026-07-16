@@ -3,13 +3,14 @@
 The Node-free host: one self-contained binary that runs the zzop analysis engine with no Node.js
 runtime at all. Where [`zzop-napi`](napi.md) is the Node binding (a `.node` addon plus a JS loader
 package), `zzop-mcp` is the other side of the same `zzop-facade` contract — it calls
-`analyze_json`/`analyze_trees_json`/`validate_envelope_only_json` (`crates/facade/src/lib.rs`) directly,
+`analyze_json`/`analyze_trees_json`/`validate_envelope_only_json`/`validate_rule_pack_json`/`query_io_json`
+(`crates/facade/src/lib.rs`) directly,
 with no napi and no JS in between. It serves two front ends over that one engine call path:
 
 - an **MCP server** over stdio (`zzop-mcp mcp`) — for MCP clients (`.mcp.json` pointing at this
   executable);
-- a **CLI** (`zzop-mcp analyze <path>` / `zzop-mcp cross <path>...`) — for direct terminal/CI use, no
-  MCP client required.
+- a **CLI** (`zzop-mcp analyze <path>` / `zzop-mcp cross <path>...` / `zzop-mcp endpoint <pattern>
+  <path>...`) — for direct terminal/CI use, no MCP client required.
 
 Both share the exact same handlers (`packages/mcp/src/tools.rs`), so a CLI run and an MCP `tools/call`
 against the same path produce the same analysis through the same code.
@@ -18,9 +19,9 @@ against the same path produce the same analysis through the same code.
 
 | Module | Responsibility |
 |---|---|
-| `main.rs` | Thin argument dispatch: `analyze` / `cross` / `mcp` subcommands over the library below. |
+| `main.rs` | Thin argument dispatch: `analyze` / `cross` / `endpoint` / `contract` / `version` / `mcp` subcommands over the library below. |
 | `server.rs` | The stdio JSON-RPC 2.0 loop (`initialize`, `tools/*`, `resources/*`). |
-| `tools.rs` | MCP tool definitions (`tools/list`) + handlers (`tools/call`), reused by the CLI subcommands. |
+| `tools.rs` | MCP tool definitions (`tools/list`) + handlers (`tools/call`), reused by the CLI subcommands. `tools/endpoint.rs` holds the `check_endpoint` handler (tree resolution + the shared facade query core). |
 | `resources.rs` | MCP resource handlers (`resources/list`, `resources/read`) over the embedded authoring contracts. |
 | `embedded.rs` | The embedded contract documents themselves — compiled into the binary via `include_str!`. |
 | `output.rs` | Tool-output shaping: full counts, capped lists, explicit truncation disclosure (see [Output contract](#output-contract) below). |
@@ -37,15 +38,39 @@ identically. `zzop-mcp`'s own `Cargo.toml` depends on `zzop-facade` (the engine 
 zzop-mcp analyze <path>                  # analyze ONE repo/tree, print a JSON findings summary
 zzop-mcp cross <path>...                 # analyze 2+ trees, print the cross-layer join (paths mode)
 zzop-mcp cross --config <zzop.config.jsonc>  # same, but the config's `trees` define the join
+zzop-mcp endpoint <pattern> <path>...    # definitive "is io key X provided/consumed/joined?" query
+zzop-mcp endpoint <pattern> --config <zzop.config.jsonc>  # same query, the config's `trees` define the join
+zzop-mcp contract                        # list the embedded authoring contracts (name, mime, description)
+zzop-mcp contract <name>                 # print that contract document to stdout (raw bytes, pipe-safe)
+zzop-mcp version                         # print this binary's version (also: --version)
 zzop-mcp mcp                             # the MCP server over stdio (newline-delimited JSON-RPC 2.0)
+zzop-mcp help                            # print the usage line, exit 0 (also: --help, -h)
 ```
 
-`analyze`/`cross` print pretty-printed JSON to stdout on success (exit `0`); a failure prints
-`zzop-mcp: <message>` to stderr and exits `1`. A missing/malformed argument (no `<path>`, `cross
---config` with no path following it) exits `2` with a usage line. Both subcommands run the unfiltered
-default view (no `severity`/`rule`/`limit` narrowing — that's an MCP-tool-only argument surface today).
+`analyze`/`cross`/`endpoint` print pretty-printed JSON to stdout on success (exit `0`); a failure
+prints `zzop-mcp: <message>` to stderr and exits `1`. A missing/malformed argument (no `<path>`,
+`--config` with no path following it, `endpoint` with no pattern or no path, a flag-looking argument
+in a path/pattern position — the only recognized flag there is `--config`, so `analyze --help` is a
+usage error, never the path `--help`) exits `2` with a usage line. `zzop-mcp help`/`--help`/`-h`
+prints the same usage line to stdout and exits `0`. Path arguments (tree roots and `--config` files
+alike) are absolutized against the invocation cwd before any config handling, so `zzop-mcp analyze .`
+and relative `--config` paths work from anywhere. The analysis subcommands run the unfiltered default view (no `severity`/`rule`/`limit`
+narrowing — that's an MCP-tool-only argument surface today). `endpoint` with ONE path is the
+`check_endpoint` tool's `path` mode, with 2+ paths its config-free `paths` mode, and with `--config`
+its config-first `configPath` mode — the exact same handler each way, so a CLI query and a tool call
+give the identical answer. `contract` with no name lists every embedded authoring contract (one
+human-readable line each: name, mime, description); `contract <name>` prints that document's exact
+embedded bytes to stdout (pipe-safe — the same bytes MCP `resources/read` serves for
+`zzop://contract/<name>`, resolved through the same lookup, so the two surfaces cannot drift); an
+unknown name exits `1` with an error naming every valid contract. `version`/`--version` prints
+`zzop-mcp <version>` (exit `0`) — the exact value MCP `initialize` reports as `serverInfo.version`
+(see below), so the two surfaces can never disagree.
 
 ## MCP surface
+
+`initialize` replies with `serverInfo: { name: "zzop", version }` — release binaries report the release
+version (stamped at build time from the same tag source as the npm packages, so it matches `@zzop/cli`);
+in-tree dev builds report the `0.0.0` workspace placeholder.
 
 ### Tools (`tools/list` / `tools/call`)
 
@@ -53,7 +78,9 @@ default view (no `severity`/`rule`/`limit` narrowing — that's an MCP-tool-only
 |---|---|
 | `analyze_repo` | Analyze ONE repo/tree path. |
 | `cross_repo` | Analyze 2+ repos/trees and join them across the cross-layer (kind, key) boundary — zzop's headline capability (e.g. a frontend `fetch` call matched against a backend route, a shared DB table, route drift). |
+| `check_endpoint` | DEFINITIVE answer to "is io key X provided/consumed/joined?" — matches a pattern against ANY cross-layer io key (http routes, env keys, DB tables, topics) as a case-insensitive substring and returns ONE verdict from the sealed vocabulary `linked` / `provided-only` / `consumed-unprovided` / `external` / `unresolved-only` / `ambiguous` / `mixed` / `not-found`, plus full counts, capped match lists, related findings, and key suggestions on `not-found`. Runs the same shared facade query core as the JS CLI's `zzop endpoint` — identical answers from both hosts (see [napi.md](napi.md#endpoint-queries-queryio) for the full output contract). |
 | `validate_envelope` | Validate a Normalized AST envelope against the v1 contract WITHOUT running an analysis — the authoring feedback loop. Returns `{valid, issues[]}`; never fails on bad input (same contract as `zzop-napi`'s `validateEnvelopeOnly` — see [napi.md](napi.md#validation-only-validateenvelopeonly)). |
+| `validate_rule_pack` | Validate a DSL rule pack's STRUCTURE before loading it — the exact judgments the engine's pack loader makes at load time (bad JSON, missing field, wrong type, too-new `schema_version`) plus every matcher regex that fails to compile (such a rule would load but silently never fire). Shape only, never rule-quality semantics. Returns `{valid, issues[]}`; never fails on bad input (same contract as `zzop-napi`'s `validateRulePackOnly`). Pair with the `rule-pack-schema` resource below. |
 
 `analyze_repo` and `cross_repo` share three optional drill-down arguments, described in
 [Output contract](#output-contract) below: `severity` (`"critical" | "warning" | "info"`, minimum
@@ -70,6 +97,20 @@ a guided error telling the caller to use `cross_repo` with `configPath` instead,
 define the join; the config-first way) **or** `paths` (2+ explicit tree roots; config-free — each tree
 tagged by its directory name). Passing both, or neither, is a named argument error. See
 [Config semantics](#config-semantics) for what paths mode discloses.
+
+`check_endpoint({ pattern, ... })` requires `pattern` plus exactly ONE of `path` (a single tree,
+resolved like `analyze_repo` — config auto-discovery included), `paths` (2+ config-free tree roots,
+resolved like `cross_repo`'s paths mode, disclosure warnings included), or `configPath`. Every mode
+runs `analyzeTrees` — even a single `path` — because a verdict is a cross-layer JOIN fact, and the
+join runs fine over one tree (intra-tree edges included). The reply is the shared query core's JSON
+(pretty-printed): `{pattern, verdict, counts, matches, truncated?, relatedFindings,
+truncatedFindings?, suggestions?, disclosure}` — see [napi.md](napi.md#endpoint-queries-queryio) for
+every field and the sealed verdict vocabulary — plus this host's two honesty channels stamped on
+top, same as the other tree-resolving tools (`analyze_repo`/`cross_repo`; the two validators take
+no config, so they carry neither field): `config` (which config file was honored, or null) and
+`configWarnings` (the config front-end's own disclosures, e.g. paths mode's ignored-config
+warning). The query-core fields are pinned and shared with the JS CLI's `zzop endpoint --json`,
+which carries the same config disclosures on stderr instead.
 
 Tool-level failures (bad path, malformed envelope config, an unknown severity value) come back as a
 normal MCP result with `isError: true` and a `zzop error: <message>` text block — the MCP convention.
@@ -96,9 +137,9 @@ couldn't even dispatch.
 
 ### Resources (`resources/list` / `resources/read`)
 
-Seven embedded authoring contracts, addressed as `zzop://contract/<name>` — the documents a custom-parser
-or DSL-rule author needs, with no zzop source checkout and no Node required, since they are compiled
-into the binary (`embedded.rs`, `include_str!` over the repo's own committed public docs, ~105KB total):
+Nine embedded authoring contracts, addressed as `zzop://contract/<name>` — the documents a custom-parser,
+DSL-rule, or config author needs, with no zzop source checkout and no Node required, since they are compiled
+into the binary (`embedded.rs`, `include_str!` over the repo's own committed public docs, ~130KB total):
 
 | `<name>` | Content |
 |---|---|
@@ -108,12 +149,16 @@ into the binary (`embedded.rs`, `include_str!` over the repo's own committed pub
 | `adapter-guide` | Adapter authoring README: key-normalization parity rules, schema/versioning policy, adapter-kit pointers (`docs/adapters/README.md`). |
 | `dsl-reference` | DSL rule-pack reference: pack/rule fields and all four matchers (`docs/rules/dsl-reference.md`). |
 | `dsl-authoring-guide` | DSL rule authoring guide: placement, a worked example, testing conventions (`docs/rules/authoring-guide.md`). |
+| `rule-pack-schema` | JSON Schema (draft-07) for the DSL rule-pack shape — pack id, rules[], the four matcher kinds, severity, every property documented (`docs/contracts/rule-pack.schema.json`; the machine-readable twin of the `validate_rule_pack` tool). |
 | `example-envelope` | Minimal valid Mode-A envelope example (a crude JSP parser's output). |
+| `config-surface` | Machine-verified config vocabulary — every config key, dotted path, CLI flag, and embedder field zzop accepts (`packages/cli/lib/config-surface.json`, the same file `zzop-config` embeds for unknown-key warnings; its `_docs` sections self-describe). |
 
 `resources/list` returns every entry above (in this order) with its `uri`/`name`/`description`/
 `mimeType`; `resources/read` returns the full text verbatim. Deterministic: same binary, same list, same
 bytes every time. An unknown `uri` is a named error listing every valid resource — an agent should never
-have to guess the name.
+have to guess the name. The same nine documents are reachable without an MCP client via
+`zzop-mcp contract [<name>]` (see [CLI surface](#cli-surface)) — both surfaces resolve names through the
+one embedded lookup, so they can never disagree on what exists.
 
 ## Config semantics
 
@@ -166,9 +211,29 @@ built to never lie by omission.
   incomplete — its absence is itself the "you have everything" signal, so a cap is never silent.
 - **Cross-layer edges** (`cross_repo`) get the same treatment via a plain list cap (`edgesTruncated`,
   default cap 200 — edges are small rows, so most joins fit uncapped).
+- **`bucketKeys`** (`cross_repo`) — alongside the numeric `buckets` counts, each of the five non-edge
+  join buckets (`unconsumedProvides`, `unprovidedConsumes`, `unresolvedConsumes`, `externalConsumes`,
+  `ambiguousConsumes`) lists up to 20 DISTINCT keys (deduped, engine order preserved; an unresolved
+  consume contributes its `raw` expression when recorded), so an agent sees WHICH keys sit in a bucket
+  instead of only how many. A capped bucket discloses its remainder in `bucketKeysTruncated`
+  (`{bucket: remainingDistinctCount}`, present only when something was capped) — for the definitive
+  per-key answer, follow up with `check_endpoint`.
 - **`warnings` (engine) and `configWarnings` (config front-end) are never capped** — the honest
   self-report channels outrank brevity, on the theory that a truncated warning list is worse than a long
   one.
+- **`packsLoaded`** — the engine's positive pack-load confirmation (`{id, rules, source}[]`, id-sorted;
+  see [napi.md](napi.md)'s `AnalyzeOutputView` table) rides through whole on every `analyze_repo` reply and per-source
+  on `cross_repo` — one entry per loaded pack, bounded by the pack count, so it needs no cap. In this
+  host's zero-config paths the bundled packs are injected as inline `packDefs`, so they report
+  `source: "inline"` (the JS wrapper's bundled packs arrive as `"dir"` instead — a packaging difference,
+  not a behavior one).
+- **`coverage`** — the engine's per-tree structural coverage census (`files`, `symbols`, `importEdges`,
+  `ioProvides`, `ioConsumesKeyed`, `ioConsumesUnresolved`, `degraded`, `joinContributionZero` — see
+  [napi.md](napi.md)'s `AnalyzeOutputView` table for field semantics) rides through whole on every
+  `analyze_repo` reply and per-source on `cross_repo`'s `sources[]` entries — a handful of scalars, no
+  cap needed. `joinContributionZero` is the engine's own blindness ASSERTION (this tree extracted no io
+  while analyzing `files > 0`, so it is invisible to the cross-layer join) and must reach the summary
+  reader — a "0 findings" tree that contributed nothing to the join is not a clean tree.
 - **`disclosure`** — the engine's run-global, pinned silent-failure-class registry (identical every run;
   see [napi.md](napi.md#disclosure--silent-failure-class-registry-run-global) for the full field
   contract) rides through unfiltered on every `analyze_repo`/`cross_repo` reply, the same meta-honesty
@@ -185,7 +250,8 @@ cargo build -p zzop-mcp --release
 
 The binary lands at `target/release/zzop-mcp` (`target/release/zzop-mcp.exe` on Windows); drop `--release`
 for a debug build at `target/debug/zzop-mcp` during local iteration. `cargo test -p zzop-mcp` runs the
-crate's own unit tests (`output.rs`, `resources.rs`) with no addon feature flags to worry about.
+crate's own unit tests (`output.rs`, `resources.rs`, `server.rs`, and the end-to-end tool tests in
+`tools/tests.rs`) with no addon feature flags to worry about.
 
 ## Distribution status
 

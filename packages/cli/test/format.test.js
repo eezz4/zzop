@@ -509,3 +509,101 @@ test('formatPretty shows no trim notice when no message has foldable detail', ()
   const out = formatPretty(output, { color: false });
   assert.ok(!out.includes('pass --all for full guidance'));
 });
+
+// --- packsLoaded — the positive pack-load confirmation (`--all` only) --------------------------------
+
+const packsLoadedSingle = {
+  fileCount: 1,
+  findings: [],
+  packsLoaded: [
+    { id: 'be-security', rules: 3, source: 'dir' },
+    { id: 'custom', rules: 1, source: 'inline' },
+  ],
+};
+
+test('collectPacksLoaded: single-tree passes the array through; missing field is null', () => {
+  const { collectPacksLoaded } = require('../lib/format');
+  assert.deepEqual(collectPacksLoaded(packsLoadedSingle), packsLoadedSingle.packsLoaded);
+  assert.equal(collectPacksLoaded({ fileCount: 1, findings: [] }), null, 'older output -> null');
+  assert.equal(collectPacksLoaded(null), null);
+});
+
+test('collectPacksLoaded: multi-tree dedupes by id and sorts; all-trees-missing is null', () => {
+  const { collectPacksLoaded } = require('../lib/format');
+  const output = {
+    trees: [
+      { sourceId: 'api', output: { packsLoaded: [{ id: 'zz', rules: 2, source: 'dir' }] } },
+      {
+        sourceId: 'web',
+        output: {
+          packsLoaded: [
+            { id: 'zz', rules: 2, source: 'dir' },
+            { id: 'aa', rules: 1, source: 'inline' },
+          ],
+        },
+      },
+    ],
+    crossLayer: {},
+  };
+  assert.deepEqual(collectPacksLoaded(output), [
+    { id: 'aa', rules: 1, source: 'inline' },
+    { id: 'zz', rules: 2, source: 'dir' },
+  ]);
+  assert.equal(collectPacksLoaded({ trees: [{ output: {} }], crossLayer: {} }), null);
+});
+
+test('collectPacksLoaded: a same-id pack that DIFFERS between trees keeps both, sourceId-tagged', () => {
+  const { collectPacksLoaded, packsLoadedLine } = require('../lib/format');
+  const output = {
+    trees: [
+      // Each tree may declare its own packsDir/packDefs — same id, different rules/source must not
+      // silently collapse into the first tree's values (per-tree truth, like collectWarnings).
+      { sourceId: 'api', output: { packsLoaded: [{ id: 'custom', rules: 5, source: 'dir' }] } },
+      { sourceId: 'web', output: { packsLoaded: [{ id: 'custom', rules: 2, source: 'inline' }] } },
+    ],
+    crossLayer: {},
+  };
+  const packs = collectPacksLoaded(output);
+  assert.deepEqual(packs, [
+    { id: 'custom', rules: 5, source: 'dir', sourceId: 'api' },
+    { id: 'custom', rules: 2, source: 'inline', sourceId: 'web' },
+  ]);
+  const line = packsLoadedLine(packs, false);
+  assert.ok(line.includes('2 packs loaded (7 rules)'), line);
+  assert.ok(line.includes('custom [api]') && line.includes('custom [web]'), line);
+});
+
+test('formatPretty prints the packs-loaded line ONLY under --all', () => {
+  const quiet = formatPretty(packsLoadedSingle, { color: false });
+  assert.ok(!quiet.includes('packs loaded'), 'default output stays quiet');
+  const all = formatPretty(packsLoadedSingle, { color: false, showAllInfo: true });
+  assert.ok(
+    all.includes('2 packs loaded (4 rules): be-security, custom'),
+    `expected the one-line pack summary under --all, got:\n${all}`
+  );
+});
+
+test('formatPretty --all with findings still carries the packs-loaded line', () => {
+  const output = {
+    ...packsLoadedSingle,
+    findings: [{ ruleId: 'r', severity: 'warning', file: 'a.ts', line: 1, message: 'm' }],
+  };
+  const all = formatPretty(output, { color: false, showAllInfo: true });
+  assert.ok(all.includes('2 packs loaded (4 rules): be-security, custom'), `got:\n${all}`);
+});
+
+test('formatPretty --all on an older output (no packsLoaded field) prints no pack line', () => {
+  const out = formatPretty(
+    { fileCount: 1, findings: [] },
+    { color: false, showAllInfo: true }
+  );
+  assert.ok(!out.includes('packs loaded'));
+});
+
+test('formatPretty --all prints the honest zero state for an empty packsLoaded array', () => {
+  const out = formatPretty(
+    { fileCount: 1, findings: [], packsLoaded: [] },
+    { color: false, showAllInfo: true }
+  );
+  assert.ok(out.includes('0 packs loaded (0 rules)'), `got:\n${out}`);
+});

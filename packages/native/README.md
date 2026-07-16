@@ -67,12 +67,12 @@ targeting those would need their own prebuild-matrix entry (see `.github/workflo
 
 A `v*` git tag is the only trigger and the only source of the published version — pushing e.g. `v0.1.0`
 runs `.github/workflows/prebuild.yml`'s `publish` job, which builds all 5 platform targets, overwrites
-every package's `0.0.0` placeholder with `0.1.0`, and runs `npm publish --provenance` for each of the 6
-packages (`@zzop/native` plus the 5 `npm/<platform>/` sub-packages).
+every package's `0.0.0` placeholder with `0.1.0`, and runs `npm publish --provenance` for each of the 7
+packages (`@zzop/native`, the 5 `npm/<platform>/` sub-packages, plus `@zzop/cli`).
 
 Publishing uses npm's OIDC **trusted publishing** — the workflow authenticates via GitHub Actions'
 `id-token`, no `NPM_TOKEN` secret is stored anywhere. One-time setup required on npmjs.com before the
-first tag, for **each of the 6 package names**: package Settings → Trusted Publisher → GitHub Actions,
+first tag, for **each of the 7 package names**: package Settings → Trusted Publisher → GitHub Actions,
 repo `eezz4/zzop`, workflow file `.github/workflows/prebuild.yml`. If a package name has never been
 published before, npm may require it to exist first — publish it once manually (`npm login && npm
 publish --access public` from that package's directory) to claim the name, then attach the trusted

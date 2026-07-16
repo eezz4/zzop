@@ -1,0 +1,58 @@
+{
+  "format": "zzop-normalized-ast",
+  "version": 1,
+  "parser": "java-imports-adapter/1",
+  "source": "java",
+  "files": [
+    {
+      "path": "src/main/java/com/example/app/App.java",
+      "loc": 14,
+      "symbols": [],
+      "imports": {
+        "TextUtil": {
+          "specifier": "../util/TextUtil.java",
+          "original": "TextUtil"
+        },
+        "trimAll": {
+          "specifier": "../util/TextUtil.java",
+          "original": "trimAll"
+        }
+      },
+      "re_exports": [],
+      "dynamic_imports": [],
+      "used_names": [],
+      "const_map_fragment": {},
+      "procedure_router_fragments": [],
+      "router_mount_fragments": [],
+      "io": {
+        "provides": [],
+        "consumes": []
+      },
+      "degraded": false,
+      "is_entry": false
+    },
+    {
+      "path": "src/main/java/com/example/util/TextUtil.java",
+      "loc": 18,
+      "symbols": [],
+      "imports": {
+        "Config": {
+          "specifier": "../model/Config.java",
+          "original": "Config"
+        }
+      },
+      "re_exports": [],
+      "dynamic_imports": [],
+      "used_names": [],
+      "const_map_fragment": {},
+      "procedure_router_fragments": [],
+      "router_mount_fragments": [],
+      "io": {
+        "provides": [],
+        "consumes": []
+      },
+      "degraded": false,
+      "is_entry": false
+    }
+  ]
+}

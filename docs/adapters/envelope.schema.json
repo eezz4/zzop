@@ -3,7 +3,7 @@
   "$id": "https://zzop.dev/schema/envelope.v1.json",
   "title": "zzop NormalizedEnvelope v1",
   "description": "External-parser / adapter-overlay envelope contract (docs/NORMALIZED_AST.md; crates/core/src/normalized.rs). Field names, required-ness, and nullability below mirror the Rust serde types field-for-field — a field is 'required' here exactly when its Rust struct field has no #[serde(default)], and 'nullable' exactly when its Rust type is Option<T> deserialized without #[serde(default)] (present key, value may be null) as opposed to omittable-and-defaulting.",
-  "$comment": "TOLERANCE CONTRACT: additionalProperties is true at every object level in this schema except the two externally-tagged enum wrapper objects (procedureRouterEntry, routerMountEntry), whose single-discriminator shape is closed. The engine silently ignores fields it does not recognize — it never hard-fails on an unknown field, AND never warns about one either (serde drops unrecognized fields by default; no unknown-field warning code exists anywhere in this crate's envelope/overlay ingestion path). Same tolerant-input philosophy as zzop's config surface (see docs/adapters/README.md's 'Envelope schema & versioning policy'), just without the warning that surface's own deny_unknown_fields config types emit. A producer emitting a field ahead of this schema, or omitting any field marked optional below, still produces a valid v1 envelope. Only a BREAKING change (removing, renaming, or re-typing a REQUIRED field) needs a new envelope `version`; additive fields never do.",
+  "$comment": "TOLERANCE CONTRACT: additionalProperties is true at every object level in this schema except the three externally-tagged enum wrapper objects (procedureRouterEntry, routerMountEntry, entityRef), whose single-discriminator shape is closed. The engine silently ignores fields it does not recognize — it never hard-fails on an unknown field, AND never warns about one either (serde drops unrecognized fields by default; no unknown-field warning code exists anywhere in this crate's envelope/overlay ingestion path). Same tolerant-input philosophy as zzop's config surface (see docs/adapters/README.md's 'Envelope schema & versioning policy'), except that the config surface additionally WARNS on an unknown key via an explicit vocabulary walk (crates/config/src/mapper.rs, warn_unknown_keys) — the envelope path has no such warning layer. A producer emitting a field ahead of this schema, or omitting any field marked optional below, still produces a valid v1 envelope. Only a BREAKING change (removing, renaming, or re-typing a REQUIRED field) needs a new envelope `version`; additive fields never do.",
   "type": "object",
   "required": ["format", "version", "parser", "source", "files"],
   "additionalProperties": true,
@@ -368,7 +368,7 @@
       }
     },
     "routerMountEntry": {
-      "description": "Externally-tagged Rust enum (RouterMountEntry, crates/core/src/fragments.rs) — exactly one of Verb/Mount present per entry.",
+      "description": "Externally-tagged Rust enum (RouterMountEntry, crates/core/src/fragments.rs) — exactly one of Verb/Mount/ScopedAttr present per entry.",
       "type": "object",
       "additionalProperties": false,
       "minProperties": 1,
@@ -382,7 +382,8 @@
             "method": { "type": "string", "description": "UPPERCASE HTTP method." },
             "path": { "type": "string", "description": "Verbatim string-literal first argument; :param normalized later by the key normalizer, not here." },
             "handler": { "type": ["string", "null"], "description": "Last argument's name, if identifiable. Omittable — see ioConsume's `$comment` on this schema's `required` convention for Option<T> fields with no #[serde(default)]." },
-            "line": { "type": "integer", "minimum": 1 }
+            "line": { "type": "integer", "minimum": 1 },
+            "attr_keys": { "type": "array", "items": { "type": "string" }, "description": "Attribute keys the producer attaches to this route's composed IoKey (open vocabulary, value implicitly true — e.g. \"auth-guarded\"). #[serde(default)]: omit when empty." }
           }
         },
         "Mount": {
@@ -392,7 +393,18 @@
           "properties": {
             "prefix": { "type": "string" },
             "ident": { "type": "string" },
-            "specifier": { "type": ["string", "null"], "description": "null = the mounted router is a same-file (local) binding. Omittable — see ioConsume's `$comment` on this schema's `required` convention for Option<T> fields with no #[serde(default)]." }
+            "specifier": { "type": ["string", "null"], "description": "null = the mounted router is a same-file (local) binding. Omittable — see ioConsume's `$comment` on this schema's `required` convention for Option<T> fields with no #[serde(default)]." },
+            "attr_keys": { "type": "array", "items": { "type": "string" }, "description": "Producer-judged attribute keys used only when this mount does NOT resolve to a router fragment (an unresolved mount becomes a PathScope attribute per key). #[serde(default)]: omit when empty." }
+          }
+        },
+        "ScopedAttr": {
+          "type": "object",
+          "required": ["prefix", "key", "line"],
+          "additionalProperties": true,
+          "properties": {
+            "prefix": { "type": "string", "description": "Router-local literal path prefix the attribute covers (\"/\" = the whole router)." },
+            "key": { "type": "string", "description": "Open-vocabulary attribute key (producer-owned, e.g. \"auth-guarded\"); the value is implicitly true." },
+            "line": { "type": "integer", "minimum": 1, "description": "1-based line of the registration call." }
           }
         }
       }

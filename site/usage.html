@@ -131,12 +131,15 @@ npx zzop          # analyzes using that config and prints a report</code></pre>
           </thead>
           <tbody>
             <tr><td><code>zzop init [--force]</code></td><td>Write an annotated <code>zzop.config.jsonc</code> to the current directory.</td></tr>
+            <tr><td><code>zzop init adapter --mode &lt;a|b&gt; --kind &lt;consume|provide&gt; [--force]</code></td><td>Scaffold a self-contained starter adapter into <code>./zzop-adapter/</code>. <code>--mode a</code> = full envelope (replaces native analysis for the tree); <code>--mode b</code> = io-only overlay (merged via the <code>overlays</code> config key). <code>--kind</code> selects which side's extraction TODOs are stubbed in.</td></tr>
             <tr><td><code>zzop [run]</code></td><td>Load the config, analyze, and print. The default command.</td></tr>
+            <tr><td><code>zzop adapter validate &lt;path&gt;</code></td><td>Offline check of an external-parser envelope against the v1 contract, plus semantic lint hints (unnormalized keys, host-carrying provide keys, duplicate provides, absolute paths). Exits non-zero only if the envelope is structurally invalid; hints never affect the exit code. No config/root needed.</td></tr>
             <tr><td><code>--config &lt;path&gt;</code></td><td>Config file to load (default <code>./zzop.config.jsonc</code>).</td></tr>
             <tr><td><code>--format &lt;pretty|json&gt;</code>, <code>--json</code></td><td>Output format, overriding the config's <code>format</code>.</td></tr>
             <tr><td><code>--out &lt;dir&gt;</code></td><td>Override the report base directory (default <code>./zzop-reports</code>; reports are written by default regardless of this flag). Each run writes to <code>&lt;dir&gt;/zzop.&lt;epoch&gt;/</code> — a fresh subdir per run, markdown by default. Same as config <code>report.dir</code>.</td></tr>
             <tr><td><code>-a, --all</code></td><td>Expand info-level findings (folded to per-rule counts by default so warnings stay visible).</td></tr>
             <tr><td><code>--severity &lt;critical|warning|info|off&gt;</code></td><td>Only display findings at or above this severity (default <code>off</code>, show all). Display-only — the exit code still uses the unfiltered findings, so <code>failOn</code> is unaffected.</td></tr>
+            <tr><td><code>--debug-io</code></td><td>After the normal output, dump every cross-layer join bucket (<code>edges</code>, <code>unconsumedProvides</code>, <code>unprovidedConsumes</code>, <code>unresolvedConsumes</code>, <code>externalConsumes</code>, <code>ambiguousConsumes</code>) as deterministic plain text — the join-debug surface for troubleshooting an adapter/overlay.</td></tr>
             <tr><td><code>-h, --help</code> / <code>--version</code></td><td>Show help / the CLI and engine versions.</td></tr>
           </tbody>
         </table>
@@ -163,7 +166,7 @@ npx zzop          # analyzes using that config and prints a report</code></pre>
     <section id="embedding">
       <span class="eyebrow eyebrow--sm">Programmatic / embedding</span>
       <h2>Embedding the engine</h2>
-      <p>Building a tool on top of zzop rather than running it as a CLI? Depend on <code>@zzop/native</code> directly and call it JSON-in / JSON-out — the same engine the CLI drives. The <a href="sdk.html">SDK reference</a> documents the four functions, the request/output shapes, and multi-repo (<code>analyzeTrees</code>) analysis.</p>
+      <p>Building a tool on top of zzop rather than running it as a CLI? Depend on <code>@zzop/native</code> directly and call it JSON-in / JSON-out — the same engine the CLI drives. The <a href="sdk.html">SDK reference</a> documents the seven functions, the request/output shapes, and multi-repo (<code>analyzeTrees</code>) analysis.</p>
     </section>
 
   </main>

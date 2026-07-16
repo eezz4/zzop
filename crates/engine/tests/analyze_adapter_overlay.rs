@@ -176,6 +176,7 @@ fn composed_provide_is_joinable_with_a_native_consume() {
             prefix: "/api/auth/two-factor".to_string(),
             ident: "twoFactorRoute".to_string(),
             specifier: Some("./twoFactor".to_string()),
+            attr_keys: vec![],
         }],
     });
     let mut sub = projection("src/routes/twoFactor.ts", 1);
@@ -186,6 +187,7 @@ fn composed_provide_is_joinable_with_a_native_consume() {
             path: "/setup".to_string(),
             handler: None,
             line: 1,
+            attr_keys: vec![],
         }],
     });
 

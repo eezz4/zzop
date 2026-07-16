@@ -56,7 +56,7 @@ test('auth-overlay-adapter: envelope matches committed snapshot', () => {
       format: 'zzop-normalized-ast',
       version: 1,
       parser: 'auth-overlay-adapter/1',
-      source: 'web',
+      source: 'backend',
       files: [
         fileProjection({
           path: 'src/app.ts',

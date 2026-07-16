@@ -14,14 +14,9 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADAPTER = path.join(__dirname, '..', 'adapter.mjs');
 
-// Post-refactor, every file entry goes through adapter-kit's EnvelopeBuilder, which always emits the
-// full FileProjection shape (symbols/re_exports/dynamic_imports/used_names/const_map_fragment/
-// procedure_router_fragments/router_mount_fragments/degraded/io, all at their zero values when unset)
-// instead of the pre-refactor adapter's sparse `{path, loc, imports, is_entry}` object — notably `io`
-// (`{provides: [], consumes: []}`) is now present where it was previously omitted entirely (this
-// adapter never projects `io`). Verified (pre-refactor run of this same test) that this padding is the
-// ONLY diff — `imports`/`is_entry` are byte-identical to the pre-refactor output. Flagged, documented
-// consequence of adopting the kit.
+// adapter-kit's EnvelopeBuilder always emits the full FileProjection shape (all fields present, at
+// their zero values when unset — including `io: {provides: [], consumes: []}`, which this adapter
+// never populates); this helper pads the sparse expectation to that shape.
 function fileProjection({ path: p, loc, imports, is_entry }) {
   return {
     path: p,
@@ -72,7 +67,7 @@ test('svelte-adapter: envelope matches committed snapshot', () => {
     assert.deepEqual(envelope, {
       format: 'zzop-normalized-ast',
       version: 1,
-      parser: 'svelte-adapter',
+      parser: 'svelte-adapter/1',
       source: 'web',
       files: [
         fileProjection({ path: 'src/routes/+page.ts', loc: 2, imports: {}, is_entry: true }),

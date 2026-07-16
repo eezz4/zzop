@@ -1,17 +1,8 @@
 #!/usr/bin/env node
-// Reference "Mode B" adapter for zzop: makes a Svelte / SvelteKit frontend's dep graph complete, so
-// TypeScript modules used only from `.svelte` files (invisible to zzop's TS parser) and SvelteKit
-// framework entry files stop false-positiving `dead-candidates`.
-//
-// WHY THIS EXISTS
-// zzop parses `.ts`/`.tsx` natively but not `.svelte`. A TS module imported ONLY by a `.svelte`
-// component (e.g. a Svelte action `use:clickOutside`) therefore has fan-in 0 in the TS dep graph and
-// looks dead. And SvelteKit convention files (`hooks.*`, `+page`/`+layout`/`+server`/`+error`) are
-// loaded by the framework by filename, never imported, so their fan-in 0 is expected. Both are
-// framework-specific, so — per zzop's direction — they are resolved by an INJECTED adapter, not by
-// teaching the engine Svelte vocabulary. This adapter projects, per file, a FileProjection carrying
-// dep-graph `imports` (giving the imported TS targets fan-in) and/or `is_entry` (exempting entries),
-// fed to the engine via `adapterOverlays` (Mode B).
+// Mode B adapter: completes a Svelte / SvelteKit frontend's dep graph by projecting, per file, a
+// FileProjection carrying dep-graph `imports` (giving TS modules imported only from `.svelte` files
+// real fan-in) and/or `is_entry` (exempting SvelteKit framework entry files from `dead-candidates`),
+// fed to the engine via `adapterOverlays`. Rationale and measured result: README.md.
 //
 // USAGE:  node adapter.mjs --root <webRoot> [--lib-alias '$lib=src/lib']  > overlay.json
 import { readFileSync } from 'node:fs';
@@ -85,7 +76,7 @@ function resolveSpecifier(spec, importerRel) {
   return rel;
 }
 
-const builder = new EnvelopeBuilder({ parser: 'svelte-adapter', source: 'web' });
+const builder = new EnvelopeBuilder({ parser: 'svelte-adapter/1', source: 'web' });
 let fileCount = 0;
 let edgeCount = 0;
 let entryCount = 0;

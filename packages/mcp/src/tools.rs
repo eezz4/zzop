@@ -1,71 +1,26 @@
 //! MCP tool surface: definitions (`tools/list`) and dispatch (`tools/call`), plus the CLI entry points
-//! (`zzop-mcp analyze|cross`) that share the same handlers. Handlers are config-driven: `zzop-config`
+//! (`zzop-mcp analyze|cross|endpoint`) that share the same handlers. Handlers are config-driven: `zzop-config`
 //! turns `zzop.config.jsonc` (or its absence) into the facade request, `zzop-facade` runs the same
 //! engine code path the Node addon uses, and `crate::output` shapes the reply (full counts + capped
-//! lists + explicit truncation disclosure). Every reply says which config file was honored (`config`:
-//! path or null) and carries the config front-end's own warnings (`configWarnings`) separately from
-//! the engine's `warnings` — two different honesty channels, never merged.
+//! lists + explicit truncation disclosure). Every tree-resolving reply (`analyze_repo`/`cross_repo`/
+//! `check_endpoint` — the two validators take no config, so they carry neither field) says which
+//! config file was honored (`config`: path or null) and carries the config front-end's own warnings
+//! (`configWarnings`) separately from the engine's `warnings` — two different honesty channels,
+//! never merged.
+
+mod definitions;
+mod endpoint;
+mod paths;
+mod siblings;
+#[cfg(test)]
+mod tests;
+mod trees;
 
 use crate::output::{self, FindingFilters};
-use std::path::{Path, PathBuf};
+use trees::zero_config_trees;
 
-/// `tools/list` result: every tool this server exposes, with input JSON Schemas. Shared filter
-/// arguments (`severity`/`rule`/`limit`) are the drill-down knobs the truncation hint points at.
-pub fn list() -> serde_json::Value {
-    let filter_props = serde_json::json!({
-        "severity": { "type": "string", "enum": ["critical", "warning", "info"], "description": "Minimum severity to include in the findings list (counts always cover everything)." },
-        "rule": { "type": "string", "description": "Exact rule id to include in the findings list." },
-        "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Findings list cap (default 50). Truncation is always disclosed." }
-    });
-    serde_json::json!({
-        "tools": [
-            {
-                "name": "analyze_repo",
-                "description": "Run zzop's deterministic analysis on ONE repository/tree path. Auto-discovers <path>/zzop.config.jsonc (rules, packs, overlays, mounts — the reply's `config` field says whether one was honored); without one, zero-config defaults apply (bundled rule packs + git signals included). Returns a summary (full counts by severity/rule, engine warnings) plus a capped findings list — truncation is always disclosed. A config declaring multiple trees is redirected to cross_repo.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string", "description": "Absolute path to the repo/tree to analyze." },
-                        "severity": filter_props["severity"],
-                        "rule": filter_props["rule"],
-                        "limit": filter_props["limit"]
-                    },
-                    "required": ["path"]
-                }
-            },
-            {
-                "name": "cross_repo",
-                "description": "Analyze 2+ repos/trees and join them across the layer boundary — the cross-layer (kind,key) join (e.g. a React consume matching a Spring provide, a shared DB table, route drift). Pass EITHER `configPath` (a zzop.config.jsonc — its `trees`, including \"auto\", define the join; the config-first way) OR `paths` (explicit tree roots; config-free, each tagged by directory name — any zzop.config.jsonc inside them is NOT loaded and says so in configWarnings). Returns per-tree summaries with engine warnings, the join buckets, matched edges, and cross-layer findings (capped lists disclose truncation).",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "paths": {
-                            "type": "array",
-                            "items": { "type": "string" },
-                            "description": "Absolute paths to the repos/trees to join (config-free mode).",
-                            "minItems": 2
-                        },
-                        "configPath": { "type": "string", "description": "Path to a zzop.config.jsonc (or a directory containing one) whose trees define the join (config-first mode)." },
-                        "severity": filter_props["severity"],
-                        "rule": filter_props["rule"],
-                        "limit": filter_props["limit"]
-                    }
-                }
-            },
-            {
-                "name": "validate_envelope",
-                "description": "Validate a Normalized AST envelope (a custom parser's output) against the v1 contract WITHOUT running an analysis — the authoring feedback loop. Returns {valid, issues[]}; never fails on bad input. Pair with the zzop://contract/* resources (schema, guide, key-normalization fixture).",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "envelopeJson": { "type": "string", "description": "The envelope JSON text to validate." }
-                    },
-                    "required": ["envelopeJson"]
-                }
-            }
-        ]
-    })
-}
+pub use definitions::list;
+pub use endpoint::check_endpoint;
 
 /// `tools/call` dispatch. Tool-level failures return a normal MCP result with `isError: true` (the MCP
 /// convention — protocol errors are only for malformed JSON-RPC, which `server` handles before us).
@@ -106,6 +61,7 @@ pub fn call(params: Option<&serde_json::Value>) -> serde_json::Value {
                     .and_then(|filters| cross_repo_with_filters(&paths, config_path, &filters)),
             }
         }
+        "check_endpoint" => endpoint::call_from_args(args),
         "validate_envelope" => {
             match args
                 .and_then(|a| a.get("envelopeJson"))
@@ -113,6 +69,15 @@ pub fn call(params: Option<&serde_json::Value>) -> serde_json::Value {
             {
                 Some(envelope) => Ok(zzop_facade::validate_envelope_only_json(envelope)),
                 None => Err("missing `envelopeJson` argument".into()),
+            }
+        }
+        "validate_rule_pack" => {
+            match args
+                .and_then(|a| a.get("packJson"))
+                .and_then(|v| v.as_str())
+            {
+                Some(pack) => Ok(zzop_facade::validate_rule_pack_json(pack)),
+                None => Err("missing `packJson` argument".into()),
             }
         }
         other => Err(format!("unknown tool: {other}")),
@@ -148,7 +113,8 @@ fn default_filters() -> FindingFilters {
 /// engine code path as the Node addon), summary-first shaping. A config declaring multiple trees is a
 /// guided error — that analysis is `cross_repo`'s job.
 fn analyze_with_filters(path: &str, filters: &FindingFilters) -> Result<String, String> {
-    let root = PathBuf::from(path);
+    // Absolutized at the host boundary (see `paths`): `zzop-config` requires an absolute root.
+    let root = paths::absolutize(path);
     if !root.exists() {
         return Err(format!("path does not exist: {path}"));
     }
@@ -192,8 +158,15 @@ fn analyze_with_filters(path: &str, filters: &FindingFilters) -> Result<String, 
         "config": loaded.config_path.as_deref().map(|p| p.display().to_string()),
         "fileCount": output_view["fileCount"],
         "degraded": output_view["degraded"],
+        // Positive pack-load confirmation ({id, rules, source}[], id-sorted, small and bounded — one
+        // entry per loaded pack, never per finding) — forwarded whole, no cap needed.
+        "packsLoaded": output_view["packsLoaded"],
         "findings": output::shape_findings(&findings, filters),
         "warnings": output_view["warnings"],
+        // Per-tree structural coverage census, forwarded whole (a handful of scalars) — carries the
+        // `joinContributionZero` blindness ASSERTION; a summary that drops the engine's own "this
+        // tree contributed nothing to the join" fact is not a disclosure.
+        "coverage": output_view["coverage"],
         "configWarnings": loaded.warnings,
         "disclosure": disclosure,
     });
@@ -210,7 +183,10 @@ fn cross_repo_with_filters(
 ) -> Result<String, String> {
     let loaded = match config_path {
         Some(cp) => {
-            let loaded = zzop_config::load_config_file(Path::new(cp)).map_err(|e| e.to_string())?;
+            // Absolutized like every path argument (see `paths`), so a relative `--config` works
+            // from any cwd and the config's own directory resolves absolute for the mapper.
+            let loaded =
+                zzop_config::load_config_file(&paths::absolutize(cp)).map_err(|e| e.to_string())?;
             if loaded.method != zzop_config::Method::AnalyzeTrees {
                 return Err(format!(
                     "the config at {} defines a single tree — use analyze_repo for it, or declare `trees` (2+, or \"auto\") for a cross-layer join",
@@ -230,6 +206,18 @@ fn cross_repo_with_filters(
 
     let empty = Vec::new();
     let trees = v["trees"].as_array().unwrap_or(&empty);
+    // Sibling-directory scope disclosure (both modes — the engine echoes each tree's absolute root):
+    // when every analyzed root sits under one common parent, that parent's unanalyzed immediate
+    // subdirectories are enumerated as a configWarnings entry — the join never silently narrows to
+    // "only the trees you happened to pass" (see `siblings`).
+    let mut config_warnings = loaded.warnings;
+    let roots: Vec<std::path::PathBuf> = trees
+        .iter()
+        .filter_map(|t| t["root"].as_str().map(std::path::PathBuf::from))
+        .collect();
+    if let Some(w) = siblings::sibling_scope_warning(&roots) {
+        config_warnings.push(w);
+    }
     let sources: Vec<serde_json::Value> = trees
         .iter()
         .map(|t| {
@@ -238,7 +226,11 @@ fn cross_repo_with_filters(
                 "path": t["root"],
                 "fileCount": t["output"]["fileCount"],
                 "findingCount": t["output"]["findings"].as_array().map(Vec::len).unwrap_or(0),
+                // Per-tree pack-load confirmation — bounded like analyze_repo's (see there).
+                "packsLoaded": t["output"]["packsLoaded"],
                 "warnings": t["output"]["warnings"],
+                // Per-tree coverage census incl. `joinContributionZero` — see analyze_with_filters.
+                "coverage": t["output"]["coverage"],
             })
         })
         .collect();
@@ -250,6 +242,9 @@ fn cross_repo_with_filters(
         .as_array()
         .cloned()
         .unwrap_or_default();
+    // WHICH keys sit in each non-edge bucket, not just how many — capped per bucket with the
+    // remainder disclosed (`bucketKeysTruncated`), same never-silent stance as `edgesTruncated`.
+    let (bucket_keys, bucket_keys_truncated) = output::bucket_keys(cl);
 
     let mut summary = serde_json::json!({
         "config": loaded.config_path.as_deref().map(|p| p.display().to_string()),
@@ -262,59 +257,18 @@ fn cross_repo_with_filters(
             "externalConsumes": bucket_len("externalConsumes"),
             "ambiguousConsumes": bucket_len("ambiguousConsumes"),
         },
+        "bucketKeys": bucket_keys,
         "edges": edges_shown,
         "crossLayerFindings": output::shape_findings(&cl_findings, filters),
-        "configWarnings": loaded.warnings,
+        "configWarnings": config_warnings,
         // Run-global blindness-class registry — the meta-honesty channel (see analyze_with_filters).
         "disclosure": v["disclosure"],
     });
     if let Some(truncated) = edges_truncated {
         summary["edgesTruncated"] = truncated;
     }
+    if let Some(truncated) = bucket_keys_truncated {
+        summary["bucketKeysTruncated"] = truncated;
+    }
     serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())
-}
-
-/// Paths mode: one zero-config tree request per path (an empty `{}` config mapped against that root —
-/// bundled `packDefs` + default `git` ride along), `sourceId` = the directory name. A
-/// `zzop.config.jsonc` sitting inside a path is deliberately NOT loaded in this mode — silently
-/// ignoring it would be worse than saying so, so it lands in the warnings.
-fn zero_config_trees(paths: &[String]) -> Result<zzop_config::LoadedRequest, String> {
-    if paths.len() < 2 {
-        return Err(
-            "cross_repo needs at least 2 paths (e.g. the frontend and the backend)".to_string(),
-        );
-    }
-    let mut trees: Vec<serde_json::Value> = Vec::with_capacity(paths.len());
-    let mut warnings: Vec<String> = Vec::new();
-    for p in paths {
-        let root = PathBuf::from(p);
-        if !root.exists() {
-            return Err(format!("path does not exist: {p}"));
-        }
-        let mapped = zzop_config::mapper::config_to_request(&serde_json::json!({}), &root)
-            .map_err(|e| e.to_string())?;
-        // The mapper's own warnings must survive this mode too (e.g. a bundled pack that failed to
-        // parse) — dropping them here would make paths mode the one silent sibling.
-        warnings.extend(mapped.warnings);
-        let mut req = mapped.request;
-        let source_id = root
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or(p.as_str())
-            .to_string();
-        req["sourceId"] = serde_json::Value::String(source_id);
-        if root.join(zzop_config::DEFAULT_CONFIG_FILENAME).is_file() {
-            warnings.push(format!(
-                "{p} contains a {} that paths mode does NOT load — pass configPath to honor it",
-                zzop_config::DEFAULT_CONFIG_FILENAME
-            ));
-        }
-        trees.push(req);
-    }
-    Ok(zzop_config::LoadedRequest {
-        method: zzop_config::Method::AnalyzeTrees,
-        request: serde_json::json!({ "trees": trees }),
-        warnings,
-        config_path: None,
-    })
 }

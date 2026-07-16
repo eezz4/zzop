@@ -17,12 +17,15 @@ members = [
   # Parser frontends (former lang/ + dsl/, merged) — source -> Normalized AST / Common IR
   "parser/parser-typescript",
   "parser/parser-prisma",
-  "parser/parser-java",
+  "parser/parser-python-3",
+  "parser/parser-rust",
+  "parser/parser-go",
+  "parser/parser-java-21",
 
-  # Python/JSP support arrives via the external-parser envelope protocol (docs/NORMALIZED_AST.md),
-  # not an in-workspace crate — no placeholder crate needed (see parser/README.md).
+  # JSP support arrives via the external-parser envelope protocol (docs/NORMALIZED_AST.md), not an
+  # in-workspace crate — no placeholder crate needed (see parser/README.md).
 
-  # Native rules — whole-graph, statically linked into core
+  # Native rules — whole-graph, statically linked into the engine (composed by register_all_native)
   "rules/native/rules-graph",
   "rules/native/rules-http",
   "rules/native/rules-cross-layer",
@@ -39,9 +42,9 @@ version = "0.0.0"
 edition = "2021"
 license = "MIT"
 
-# Pin shared dependency versions here. swc version isolation: swc dependencies are pinned here and
-# confined to parser-typescript, so an upgrade's re-verification scope is one crate, not the whole
-# workspace.
+# Pin shared dependency versions here. swc version isolation: swc is pinned in
+# parser/parser-typescript/Cargo.toml and confined to that crate, so an upgrade's re-verification
+# scope is one crate, not the whole workspace (enforced by scripts/check-swc-isolation.sh).
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

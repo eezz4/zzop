@@ -129,6 +129,11 @@ pub mod unprovided_mutation_call;
 pub mod unresolved_consume_ratio;
 pub mod version_skew;
 
+// Root-file helpers moved out purely for file-size layout, re-exported below so every existing
+// `super::`/crate-root path still resolves (see each module's own doc).
+mod external_url;
+mod trpc_mount;
+
 pub use ambiguous_consume::ambiguous_consume_findings;
 pub use body_field_drift::body_field_drift_findings;
 pub use cross_tree_route_shadowing::cross_tree_route_shadowing_findings;
@@ -154,6 +159,10 @@ pub use unconsumed_procedure::unconsumed_procedure_findings;
 pub use unprovided_mutation_call::unprovided_mutation_call_findings;
 pub use unresolved_consume_ratio::unresolved_consume_ratio_findings;
 pub use version_skew::version_skew_findings;
+
+pub(crate) use external_url::split_external_key;
+pub(crate) use trpc_mount::is_trpc_mount_route_key;
+pub use trpc_mount::trpc_mount_route_suppression_notes;
 
 /// One `http` provide site, tagged with its source tree — the flat "provide-key universe" `method_mismatch`/
 /// `version_skew`/`path_near_miss` need (see module doc). Deliberately a plain local struct, not a reuse of
@@ -191,99 +200,6 @@ pub(crate) fn path_segments(path: &str) -> Vec<&str> {
 /// `app.get('/:page')`) and remains a legitimate suggestion target.
 pub(crate) fn is_all_slot_path(segments: &[&str]) -> bool {
     segments.iter().all(|s| *s == "{}")
-}
-
-/// An `http` provide whose path carries a literal `trpc` segment (`/api/trpc/{}`, `/trpc/{}`, ...) —
-/// the shape `file_routes`'s Next.js `pages/api/**`/app-router conventions produce for a tRPC adapter
-/// mount file (`createNextApiHandler`/`fetchRequestHandler`, ...).
-///
-/// **Why string-based, not structural**: `compose_trpc_provides` (the engine's assembly pass) composes
-/// `trpc`-kind PROVIDEs from each file's own `ProcedureRouterFragment` — the router-definition file(s). The
-/// mount file's `http`-kind PROVIDE comes from an entirely separate, content-blind pass
-/// (`zzop_engine::file_routes`'s pure filesystem-path convention scan): it never reads what the file's
-/// default export actually calls, so there is no shared file/symbol/import-edge between a `trpc` PROVIDE
-/// and the `http` PROVIDE naming its mount route to key off of. The literal `trpc` path segment is the
-/// narrowest real signal this analysis has. It is deliberately gated by callers on "THIS TREE participates
-/// in at least one `trpc`-kind edge, on either side" (see [`unconsumed_endpoint::unconsumed_endpoint_findings`]/
-/// [`unconsumed_mutation_endpoint::unconsumed_mutation_endpoint_findings`]'s `trpc_participating_sources`
-/// parameter) before a match is treated as a real mount — the segment alone cannot rule out a
-/// coincidentally-named route in a codebase with no tRPC at all. Per-tree, not run-global: a run-global
-/// `trpc_edge_count >= 1` gate would suppress a literal `/trpc/`-segment route in tree B purely because
-/// SOME OTHER tree in the run has tRPC edges, even though tree B has none of its own — the mount-IS-transport
-/// justification only holds for the tree whose own edges actually flow through that route.
-pub(crate) fn is_trpc_mount_route_key(key: &str) -> bool {
-    let Some((_, path)) = split_key(key) else {
-        return false;
-    };
-    path_segments(path)
-        .iter()
-        .any(|seg| seg.eq_ignore_ascii_case("trpc"))
-}
-
-/// One line per source tree that has 1+ `http` unconsumed provide [`is_trpc_mount_route_key`] identifies
-/// as a tRPC mount route, suppressed from `cross-layer/unconsumed-endpoint`/
-/// `cross-layer/unconsumed-mutation-endpoint` reporting because THAT TREE participates in at least one
-/// `trpc`-kind edge (on either side — `trpc_edge_counts_by_source`, keyed by source id) — the mount route
-/// IS the transport those edges flow through, so reporting it unconsumed is tone noise, not signal
-/// (dogfood round 9: a fully-joined tRPC starter's only "findings" were its own GET/POST mount routes).
-/// A source with no entry in `trpc_edge_counts_by_source` contributes nothing here — no edges means no
-/// evidence the segment match is a real mount FOR THAT TREE, so nothing is suppressed and this function has
-/// nothing to disclose for it (see [`is_trpc_mount_route_key`]'s doc for the per-tree gating rationale;
-/// this was a run-global `trpc_edge_count: usize` gate before — a tree with zero tRPC edges of its own
-/// would still have its literal `/trpc/`-segment routes suppressed, and misattributed, purely because some
-/// OTHER tree in the run had tRPC edges).
-///
-/// This is the disclosure half of the suppression (`output-philosophy.md` §0/§1: no silent suppression —
-/// a finding a rule would otherwise emit must never simply vanish). Returned as `(source, note)` pairs,
-/// sorted by source, for the caller (`zzop_engine::analyze_trees`) to push onto that source tree's own
-/// `AnalyzeOutput::warnings` — the same per-tree self-report channel every other engine-level silent-
-/// failure disclosure uses. Each note's edge count is THAT SOURCE's own participating-edge count
-/// (`trpc_edge_counts_by_source[source]`), never the run-global total.
-pub fn trpc_mount_route_suppression_notes(
-    unconsumed_provides: &[zzop_core::io::TaggedProvide],
-    trpc_edge_counts_by_source: &std::collections::BTreeMap<String, usize>,
-) -> Vec<(String, String)> {
-    let mut by_source: std::collections::BTreeMap<String, Vec<&str>> =
-        std::collections::BTreeMap::new();
-    for p in unconsumed_provides {
-        // Same test-file filter the two unconsumed rules apply BEFORE suppression: a test-file provide
-        // was never a candidate finding, so counting it here would disclose a suppression that never
-        // happened (a phantom note is its own honesty defect). Gated per-tree on the provide's OWN source
-        // having 1+ trpc edge — a provide in a tree with zero trpc edges of its own was never suppressed
-        // (see this fn's doc), so it must not be counted here either.
-        if p.provide.kind == "http"
-            && trpc_edge_counts_by_source.contains_key(&p.source)
-            && is_trpc_mount_route_key(&p.provide.key)
-            && !zzop_core::is_test_file(&p.provide.file)
-        {
-            by_source
-                .entry(p.source.clone())
-                .or_default()
-                .push(p.provide.key.as_str());
-        }
-    }
-    by_source
-        .into_iter()
-        .map(|(source, mut keys)| {
-            keys.sort_unstable();
-            keys.dedup();
-            let n = keys.len();
-            let (route_word, pronoun) = if n == 1 {
-                ("route", "its")
-            } else {
-                ("routes", "their")
-            };
-            // Present (non-empty by construction: `by_source` only gains an entry via the `contains_key`
-            // filter above, so `source` is always a key of `trpc_edge_counts_by_source`).
-            let trpc_edge_count = trpc_edge_counts_by_source[&source];
-            let edge_word = if trpc_edge_count == 1 { "edge" } else { "edges" };
-            let note = format!(
-                "{n} tRPC mount {route_word} ({}) treated as consumed by {trpc_edge_count} tRPC {edge_word} — {pronoun} HTTP surface is the tRPC transport",
-                keys.join(", ")
-            );
-            (source, note)
-        })
-        .collect()
 }
 
 /// A version-shaped path segment: `v1`, `V2`, `v1.2`, ... — shared by `version_skew` (dangling-vs-provide
@@ -361,43 +277,6 @@ pub struct PackageImportSite {
 /// egress extraction (only the 5 verbs `parser-typescript/src/egress.rs` recognizes reach a consume key).
 pub(crate) fn is_write_method(method: &str) -> bool {
     matches!(method, "POST" | "PUT" | "PATCH" | "DELETE")
-}
-
-/// An `external_consumes`-bucket consume key decomposed: `"GET https://api.vendor.com:8443/v1/users?key=x"` ->
-/// method `GET`, host `api.vendor.com:8443` (port kept — port drift IS config drift), path `/v1/users`
-/// (leading slash kept; `"/"` when the URL has no path), query `Some("key=x")`.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct ExternalUrl<'a> {
-    pub method: &'a str,
-    pub host: &'a str,
-    pub path: &'a str,
-    pub query: Option<&'a str>,
-}
-
-/// Splits an external consume key (`"METHOD scheme://host[/path][?query]"`) into its parts, or `None` when
-/// the key doesn't carry the host-marker shape the join's external gate keys on (defensive — every key the
-/// `external_consumes` bucket holds does contain `"://"`).
-pub(crate) fn split_external_key(key: &str) -> Option<ExternalUrl<'_>> {
-    let (method, url) = key.split_once(' ')?;
-    let scheme_end = url.find("://")?;
-    let rest = &url[scheme_end + 3..];
-    let (host, path_query) = match rest.find('/') {
-        Some(i) => (&rest[..i], &rest[i..]),
-        None => (rest, "/"),
-    };
-    if host.is_empty() {
-        return None;
-    }
-    let (path, query) = match path_query.split_once('?') {
-        Some((p, q)) => (p, Some(q)),
-        None => (path_query, None),
-    };
-    Some(ExternalUrl {
-        method,
-        host,
-        path,
-        query,
-    })
 }
 
 #[cfg(test)]

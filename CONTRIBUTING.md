@@ -38,6 +38,8 @@ A PR must pass every job in [`.github/workflows/ci.yml`](.github/workflows/ci.ym
   English-only, and must not reference internal (unpublished) paths.
 - **swc-isolation-guard** — swc dependencies and `swc_core` usage must stay confined to
   `parser/parser-typescript`; no other crate may hold an swc AST.
+- **ruff-isolation-guard** — the same discipline for the Python parser: `ruff_*` dependencies
+  and AST usage stay confined to `parser/parser-python-3`.
 - **rules-catalog-sync-guard** — `docs/rules/catalog.md` and `site/rules.html` must stay in sync
   (rule/analysis ids and source paths).
 - **cli-readme-sync-guard** — `packages/cli/README.md` must stay in sync with the `--help` text
@@ -45,9 +47,31 @@ A PR must pass every job in [`.github/workflows/ci.yml`](.github/workflows/ci.ym
 - **docs-rule-ids-guard** — every bare/`{pack}/{rule}` id used in a user-facing `rules:` config
   example (README, init template, getting-started doc, marketing site) must resolve against the rule
   catalog, so a stale example can't silently become a no-op.
+- **docs-link-graph-guard** — every `docs/**/*.md` page must be referenced from the docs hub
+  (`docs/README.md`), and every `examples/` entry from `examples/README.md`, so a new page cannot
+  ship orphaned from the surfaces readers start at.
+- **site-sdk-tokens-guard** — `site/sdk.html` must stay in sync with the real `@zzop/native`
+  surface (`packages/native/index.d.ts`): every exported function appears as a `<code>` token,
+  the page's stated function count matches the real export count, and the function table lists
+  only real exports.
+- **io-key-vocab-guard** — the io-key kind vocabulary ("http routes, env keys, DB tables,
+  topics") stated in `packages/cli/README.md`'s `zzop endpoint` row and `packages/mcp/README.md`'s
+  `check_endpoint` row must match its SSOT, the `check_endpoint` tool description in
+  `packages/mcp/src/tools/definitions.rs`.
+- **napi-request-fields-guard** — `docs/modules/napi.md`'s `AnalyzeRequest` field table must
+  list exactly the pub fields of `crates/facade/src/request.rs`'s `AnalyzeRequest` struct
+  (camelCase wire names, bidirectional set comparison — a rename fails as one missing plus one
+  extra).
+- **max-file-lines-guard** — Rust **source** files stay under 300 lines (oversized files are
+  split into directory modules). Test files are exempt and may grow freely — keep unit tests
+  out of the source file, paired beside it (`foo.rs` + `foo_test.rs`, or `foo/tests.rs`);
+  `tests/` directories and `rules/dsl` pack tests are exempt by path. Pre-existing source
+  violations are frozen in `scripts/max-file-lines-baseline.txt` and may only shrink (ratchet).
 - **drift-guards** — a parser-fingerprint-bump guard (a parser crate's `src/**` changed without
-  bumping its `PARSER_FINGERPRINT` const) and a policy-value census guard (a new policy-shaped
-  constant must be triaged into `scripts/policy-census.txt`).
+  bumping its `PARSER_FINGERPRINT` const; a parser crate with a `src/` but no such const at all
+  fails outright; a change to `crates/core`'s shared projected-type surface without a
+  `CACHE_SCHEMA_VERSION` bump also fails — see the script's core section) and a policy-value
+  census guard (a new policy-shaped constant must be triaged into `scripts/policy-census.txt`).
 - **test** — `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
   `cargo test --workspace`.
 - **napi-addon-build** — builds the `zzop-napi` crate with the `addon` feature and runs its smoke
@@ -58,11 +82,24 @@ The guard scripts live under `scripts/*.sh` and can be run locally with bash bef
 ```sh
 bash scripts/check-english-source.sh
 bash scripts/check-swc-isolation.sh
+bash scripts/check-ruff-isolation.sh
 bash scripts/check-rules-catalog-sync.sh
 bash scripts/check-cli-readme-sync.sh
 bash scripts/check-docs-rule-ids.sh
+bash scripts/check-docs-link-graph.sh
+bash scripts/check-site-sdk-tokens.sh
+bash scripts/check-io-key-vocab.sh
+bash scripts/check-napi-request-fields.sh
+bash scripts/check-max-file-lines.sh
 bash scripts/check-parser-fingerprint-bump.sh
 bash scripts/check-policy-census.sh
+```
+
+To run the fast guards automatically before every commit, enable the committed git hooks once per
+clone (plain git, no husky or npm dependency):
+
+```sh
+git config core.hooksPath .githooks
 ```
 
 ## Conventions

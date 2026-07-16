@@ -33,13 +33,17 @@ directly.
 Both directions can be extended by an **external adapter** without touching this workspace — a
 producer of a Normalized AST envelope that either stands in for an entire tree (Mode A,
 `analyzeEnvelope`) or overlays extra `io`/router facts — and generic entity attributes (open-vocab
-cross-cutting annotations a rule consumes by key, e.g. an injected `auth-guarded` marker) — onto a
+cross-cutting annotations a rule consumes by key, e.g. an `auth-guarded` marker) — onto a
 natively-parsed tree (Mode B, the Rust
 `EngineConfig::adapter_overlays` field, also reachable via any host's `adapterOverlays` config field —
 `packages/native`'s napi bindings directly, or `packages/mcp`'s `zzop-mcp` host through
 `zzop.config.jsonc`'s `overlays` key, mapped by the shared `zzop-config` crate) — see
 [NORMALIZED_AST.md](NORMALIZED_AST.md)'s "Adapter overlays" section and
-`crates/engine/examples/fastapi_overlay_adapter.rs` for a runnable FastAPI/Python demo.
+`crates/engine/examples/fastapi_overlay_adapter/main.rs` for a runnable FastAPI/Python demo. A native
+producer can emit the same generic entity attributes directly, with no overlay involved at all — the
+native TypeScript parser's router-mounts recognizer does this for a common Express middleware guard; see
+[NORMALIZED_AST.md](NORMALIZED_AST.md)'s `router_mount_fragments` section for the composed shape both
+paths share.
 
 ## Degraded files
 
@@ -72,16 +76,63 @@ one entry per file) naming the count and a sample of the affected paths.
 
 ## Language support
 
-| Extension(s) | Structural support |
-|---|---|
-| `.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts` | Full: symbols, imports, calls, HTTP routes/egress |
-| `.prisma` | Schema models/fields (structural + usage-aware schema rules) |
-| `.java` | Method/class body spans only (lexical, not a full grammar) — enough for `method-scan` rules |
-| anything else | Lexical fallback: line count + `line-scan` rules only, no symbols/imports/IO |
+This is the canonical precision-tier table — support is disclosed per language, not as a flat yes/no,
+because each tier stands behind a different, honestly-scoped set of structural facts:
 
-`.jsp`/Python sources can still participate as first-class analysis input via a hand-written external
-parser adapter conforming to [NORMALIZED_AST.md](NORMALIZED_AST.md) — that path doesn't depend on
-in-tree structural support for the language.
+| Language | Tier | Extension(s) | What it extracts |
+|---|---|---|---|
+| TypeScript / JavaScript | Full AST (native, swc) | `.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts` | Symbols, imports/dep graph, calls, HTTP provides/consumes across Express/Hono/NestJS/Next.js/tRPC and more, router-mount fragments, middleware guard attributes |
+| Python | Full AST (native, ruff) | `.py, .pyi` | **Python 3** syntax (ruff's parser linked as a Rust library — no Python runtime required; Python-2-only syntax degrades to the lexical fallback like any parse failure; the crate path (`parser-python-3`) names that supported major version, the same convention as `parser-java-21`). Symbols (`def`/`class`/methods, `__all__`-aware exports), imports/dep graph (incl. relative `from .x import y`), FastAPI route provides (decorators, `APIRouter` literal prefix, cross-file `include_router` composition), `requests`/`httpx` literal egress consumes |
+| Rust | Full AST (native, syn 2) | `.rs` | Symbols (top-level fn/struct/enum/trait/type-alias/const/static/union, plus `impl` block methods/assoc consts), imports/dep graph (`use`/`mod` items, `crate::`/`super::`/`self::` module-path resolution, plus same-workspace crate resolution via `Cargo.toml` manifest scan), axum router provides (builder chains, `.nest`/`.merge` cross-file composition), `reqwest` literal egress consumes |
+| Go | Full CST (native, tree-sitter-go 0.25) | `.go` | Symbols (top-level func/method/type/const/var, grouped declarations expanded one symbol per spec-name), imports/dep graph (`import` declarations, `go.mod` `module` directive resolution — an import path resolves to its whole PACKAGE directory, so every file directly in that package gets a real dep-graph edge, not just one guessed file), gin and `net/http` router provides (route groups, Go 1.22 `"METHOD /path"` mux pattern syntax), `net/http` literal egress consumes (including `fmt.Sprintf`-reassembled path literals); an ERROR CST region is never guessed past — extraction stops at the boundary of what actually parsed |
+| Java | Full CST (native, tree-sitter-java 0.23.5) | `.java` | Symbols (top-level + nested class/interface/enum/record/annotation-type declarations, methods/constructors as dot-qualified `Outer.Inner.method` with body spans, `static final`/interface-constant fields), imports/dep graph (`import` declarations — plain/glob/static — resolved via an in-tree `(package, type)` index; a glob import fans out to every file in the target package, the same package-directory-wide fanout Go's own resolver uses), Spring MVC HTTP route provides (`@RestController`/`@Controller`, class + method-level `@RequestMapping`/`@GetMapping`/etc., cross-file `extends`-chain and constant-prefix resolution via the whole-corpus project pass) — Java 21 grammar coverage (records/sealed classes/pattern-switch parse as ordinary CST, though sealed-permits and pattern-switch carry no dedicated symbol extraction of their own in v1); the crate path (`parser-java-21`) names the pinned grammar version, the representative Java release this frontend targets, not a hard floor on the source dialect it can parse |
+| Prisma | Lexical schema (native) | `.prisma` | Schema models/fields — structural, plus usage-aware schema rules |
+| Everything else | External adapter | any | First-class via the Normalized AST envelope protocol — Mode A (`analyzeEnvelope`, stands in for a whole tree) or Mode B (overlays facts onto a natively-parsed tree); see [NORMALIZED_AST.md](NORMALIZED_AST.md) |
+
+A file that falls outside what its tier extracts (a `.py`/`.ts`/`.rs` file that fails to parse, or any
+extension in the "everything else" row with no adapter attached) still gets the **degraded lexical
+fallback**: line count and `line-scan` DSL rules run against the raw text rather than a hard failure —
+see "Degraded files" above.
+
+Python's v1 scope is deliberate, not an oversight: Flask/Django routes, FastAPI `Depends` auth
+attributes, `requests`/`httpx` `Session`/`Client` instances, and SQLAlchemy/Django ORM table facts are
+roadmap. The Mode-B overlay path already covers this shape today — see
+`crates/engine/examples/fastapi_overlay_adapter/main.rs`, the reference FastAPI/Python overlay adapter,
+which remains the escape hatch for exactly what native v1 skips.
+
+Rust's v1 scope is similarly deliberate: Rocket/warp/actix-web decorator- or macro-attribute-style route
+registration, axum `Extension`/`State`-based auth guards, and Diesel/SQLx ORM table facts are roadmap —
+only axum's builder-chain route registration and `reqwest` literal egress are extracted natively today.
+`macro_rules!`-defined items and identifiers used only inside a macro invocation's argument tokens are
+also out of scope (syn parses macro arguments as an opaque token stream, not a structured tree) — see
+`zzop_parser_rust`'s own crate doc for the exact v1 gaps.
+
+Go's v1 scope is deliberate too: echo/chi/fiber decorator-free route registration idioms, a router
+received as a function parameter (`func setup(r *gin.Engine) { ... }`, no local `:=`/`=` binding to
+anchor on), `&http.Client{}`/`client.Do(req)` request dispatch, and `embed`/`cgo`-loaded files are all
+roadmap — only gin route groups, `net/http`'s `DefaultServeMux`/`NewServeMux` (including Go 1.22's
+`"METHOD /path"` pattern syntax), and `net/http`'s package-level free-function egress (`http.Get`/`Post`/
+`PostForm`/`Head`, with `fmt.Sprintf` template reassembly) are extracted natively today. `tree-sitter-go`
+is a full CST (not merely lexical), but this crate never guesses past an `ERROR`/`MISSING` region: a
+single malformed statement skips just that subtree, extracting from every other still-valid region of the
+same file — see `zzop_parser_go`'s own crate doc for the exact v1 gaps and the never-guess discipline.
+
+Java's v1 scope is deliberate too, same shape as Python's/Rust's/Go's own: this engine has no Java-side
+HTTP-egress extractor yet (`RestTemplate`/`WebClient` consumes are not extracted — see
+`framework_silence`'s `org.springframework.web.client` disclosure vocab, the escape hatch for exactly this
+gap), functional/lambda `RouterFunction` route registration and non-Spring frameworks (JAX-RS, Micronaut,
+Quarkus) are roadmap, and record-component accessors/annotation-type elements are not projected as method
+symbols (structurally implicit, never a written declaration — see `zzop_parser_java_21`'s own crate doc
+for the exact v1 gaps). `tree-sitter-java` is a full CST (not merely lexical), and — like `zzop_parser_go`
+— never guesses past an `ERROR`/`MISSING` region.
+
+Each native parser carries its own internal `PARSER_FINGERPRINT` (technique + version, e.g.
+`zzop-parser-python-3`'s `python3/ruff-0.0.4/v2`, `zzop-parser-prisma`'s `prisma/v1`,
+`zzop-parser-rust`'s `rust/syn-2/v1`, `zzop-parser-go`'s `go/tree-sitter-go-0.25.0/v1`,
+`zzop-parser-java-21`'s `java21/tree-sitter-java-0.23.5/v1`) that keys the per-file cache; the
+TypeScript, Prisma, Python, Java, Rust, and Go fingerprints are additionally surfaced in `zzop
+--version`'s output today, so a given build's actual parser identity is machine-checkable, not just
+asserted by this table.
 
 A normal-sized file whose extension has no native parser is not counted in `degraded` (that's a
 size-cap/parse-failure fact, not a coverage one) — instead it self-reports as a per-extension entry in

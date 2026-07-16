@@ -1,0 +1,18 @@
+[package]
+name = "zzop-parser-python-3"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+ruff_python_parser = "=0.0.4"
+ruff_python_ast = "=0.0.4"
+# Not in the task brief's pin list, but required to name `ruff_text_size::Ranged`/`TextRange` in this
+# crate's own code: `ruff_python_ast` re-exports the ruff AST node TYPES (which carry `range: TextRange`
+# fields) but does not re-export the `ruff_text_size` crate itself, so calling `.start()`/`.end()` on an
+# `Expr`/`Stmt` (whose range comes from the `Ranged` trait, not a field) requires this crate to be a
+# direct dependency of ITS OWN accord. Pinned to the exact same "=0.0.4" release ruff_python_ast/
+# ruff_python_parser 0.0.4 were built against (see their own Cargo.toml), so there is no version drift
+# risk — this is the same artifact already in the dependency graph, just named directly.
+ruff_text_size = "=0.0.4"
+zzop-core = { version = "0.0.0", path = "../../crates/core" }

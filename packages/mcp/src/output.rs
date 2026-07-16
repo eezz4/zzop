@@ -10,6 +10,8 @@
 pub const DEFAULT_FINDINGS_LIMIT: usize = 50;
 /// Default cap for cross-layer edge lists (edges are small rows; agents usually want them all).
 pub const DEFAULT_EDGES_LIMIT: usize = 200;
+/// Cap per bucket for `cross_repo`'s `bucketKeys` distinct-key lists (see `bucket_keys`).
+pub const DEFAULT_BUCKET_KEYS_LIMIT: usize = 20;
 /// Upper bound for a caller-supplied `limit` — keeps a single tool reply bounded no matter what.
 pub const MAX_LIMIT: usize = 1000;
 
@@ -67,7 +69,7 @@ fn severity_rank(severity: &str) -> u8 {
     }
 }
 
-/// Shapes a findings array into `{total, bySeverity, byRule, matching, shown, truncated?}`.
+/// Shapes a findings array into `{total, bySeverity, byRule, shown, truncated?}`.
 /// Counts are ALWAYS over the full set (the summary never shrinks with the filter); `shown` is the
 /// filtered, severity-desc-sorted, capped list; `truncated` appears ONLY when `shown` is incomplete.
 pub fn shape_findings(
@@ -145,6 +147,59 @@ fn truncation(shown: usize, total_matching: usize) -> serde_json::Value {
         "totalMatching": total_matching,
         "hint": "narrow with the severity/rule tool arguments or raise limit",
     })
+}
+
+/// The five non-edge cross-layer buckets, in engine (`CrossLayerResult`) field order.
+const KEY_BUCKETS: [&str; 5] = [
+    "unconsumedProvides",
+    "unprovidedConsumes",
+    "unresolvedConsumes",
+    "externalConsumes",
+    "ambiguousConsumes",
+];
+
+/// `cross_repo`'s `bucketKeys`: per non-edge bucket, up to `DEFAULT_BUCKET_KEYS_LIMIT` DISTINCT keys
+/// (deduped, engine order preserved) so an agent can see WHICH keys sit in a bucket instead of only
+/// how many. An unresolved consume (`key: null`) contributes its `raw` expression when recorded —
+/// nothing otherwise (never guessed). Returns `(bucketKeys, bucketKeysTruncated?)`; the second is
+/// `Some({bucket: remainingDistinctCount})` only when a bucket's distinct-key list was capped —
+/// the same explicit-truncation-disclosure stance as `shape_list`, in a per-bucket remainder shape.
+pub fn bucket_keys(
+    cross_layer: &serde_json::Value,
+) -> (serde_json::Value, Option<serde_json::Value>) {
+    let mut keys_out = serde_json::Map::new();
+    let mut truncated = serde_json::Map::new();
+    for bucket in KEY_BUCKETS {
+        let mut seen = std::collections::HashSet::new();
+        let mut distinct: Vec<&str> = Vec::new();
+        for item in cross_layer[bucket]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+        {
+            let key = item
+                .get("key")
+                .and_then(|v| v.as_str())
+                .or_else(|| item.get("raw").and_then(|v| v.as_str()));
+            if let Some(k) = key {
+                if seen.insert(k) {
+                    distinct.push(k);
+                }
+            }
+        }
+        if distinct.len() > DEFAULT_BUCKET_KEYS_LIMIT {
+            truncated.insert(
+                bucket.to_string(),
+                serde_json::json!(distinct.len() - DEFAULT_BUCKET_KEYS_LIMIT),
+            );
+            distinct.truncate(DEFAULT_BUCKET_KEYS_LIMIT);
+        }
+        keys_out.insert(bucket.to_string(), serde_json::json!(distinct));
+    }
+    (
+        serde_json::Value::Object(keys_out),
+        (!truncated.is_empty()).then_some(serde_json::Value::Object(truncated)),
+    )
 }
 
 #[cfg(test)]

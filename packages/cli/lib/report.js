@@ -251,6 +251,16 @@ function buildTreeMarkdown(sourceId, root, treeOutput, singleTreeRun = false) {
   lines.push(
     `- Findings: ${findings.length} (${counts.critical} critical, ${counts.warning} warning, ${counts.info} info)`
   );
+  // Positive pack-load confirmation (`packsLoaded`, id-sorted by the engine). Absent field = an output
+  // from an older engine, so the bullet is skipped rather than printed as a fake "0 loaded".
+  const packsLoaded = Array.isArray(treeOutput.packsLoaded) ? treeOutput.packsLoaded : null;
+  if (packsLoaded) {
+    const packRules = packsLoaded.reduce((n, p) => n + (Number(p && p.rules) || 0), 0);
+    const packIds = packsLoaded.map((p) => `\`${p && p.id}\``).join(', ');
+    lines.push(
+      `- Rule packs loaded: ${packsLoaded.length} (${packRules} rules)${packIds ? ` — ${packIds}` : ''}`
+    );
+  }
   lines.push('');
 
   if (warnings.length > 0) {

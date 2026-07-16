@@ -94,11 +94,8 @@ export function baseRelativePath(url) {
  * is dropped, never valued); base-relative resolves via `baseRelativePath`; anything else is
  * unresolved (`null`) — reported, never guessed.
  *
- * This is the exact veto-list + dispatch shape every hand-rolled JS adapter in this repo
- * (wrapper-adapter, react-query-adapter) re-derives slightly differently inline — use this instead of
- * re-deriving it.
- *
- * Ported from `consume_key_for` in `parser/parser-typescript/src/adapters/egress.rs`.
+ * Extracted from the veto-list + dispatch shape the JS adapters formerly re-derived inline; they
+ * now import this. Ported from `consume_key_for` in `parser/parser-typescript/src/adapters/egress.rs`.
  */
 export function resolveConsumeKey(method, url) {
   if (url.startsWith('/')) {

@@ -1,7 +1,5 @@
-// Deterministic recursive file walk for adapters. Every existing example adapter in this repo
-// (openapi-sdk-adapter, react-query-adapter, wrapper-adapter, svelte-adapter, rust-parser-adapter)
-// hand-rolls a near-identical recursive walk that skips `node_modules`/`.git` and filters by
-// extension — this is that boilerplate, extracted once.
+// Deterministic recursive file walk for adapters — extracted from the example adapters' formerly
+// hand-rolled, near-identical copies; the JS adapters now import this one.
 
 import { readdirSync } from 'node:fs';
 import path from 'node:path';

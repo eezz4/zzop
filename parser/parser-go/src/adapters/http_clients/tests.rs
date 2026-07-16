@@ -1,0 +1,79 @@
+use super::*;
+
+#[test]
+fn literal_relative_path_keys_via_http_consume_interface_key() {
+    let src = "package main\n\nimport \"net/http\"\n\nfunc f() {\n\thttp.Get(\"/users\")\n}\n";
+    let out = extract_go_http_consumes("a.go", src);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].key.as_deref(), Some("GET /users"));
+    assert_eq!(out[0].raw, None);
+}
+
+#[test]
+fn absolute_url_keys_as_external() {
+    let src = "package main\n\nimport \"net/http\"\n\nfunc f() {\n\thttp.Get(\"https://api.example.com/v1/ping\")\n}\n";
+    let out = extract_go_http_consumes("a.go", src);
+    assert_eq!(
+        out[0].key.as_deref(),
+        Some("GET https://api.example.com/v1/ping")
+    );
+}
+
+#[test]
+fn query_suffix_is_dropped() {
+    let src =
+        "package main\n\nimport \"net/http\"\n\nfunc f() {\n\thttp.Get(\"/users?limit=10\")\n}\n";
+    let out = extract_go_http_consumes("a.go", src);
+    assert_eq!(out[0].key.as_deref(), Some("GET /users"));
+}
+
+#[test]
+fn sprintf_reassembly_collapses_verbs() {
+    let src = "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc f(id int) {\n\thttp.Get(fmt.Sprintf(\"/users/%d\", id))\n}\n";
+    let out = extract_go_http_consumes("a.go", src);
+    assert_eq!(out[0].key.as_deref(), Some("GET /users/{}"));
+}
+
+#[test]
+fn sprintf_headed_by_interpolation_is_unresolved() {
+    let src = "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc f(base string) {\n\thttp.Get(fmt.Sprintf(\"%s/users\", base))\n}\n";
+    let out = extract_go_http_consumes("a.go", src);
+    assert_eq!(out[0].key, None);
+    assert!(out[0].raw.is_some());
+    assert_eq!(out[0].method.as_deref(), Some("GET"));
+}
+
+#[test]
+fn post_and_postform_and_head_verbs() {
+    let src = "package main\n\nimport \"net/http\"\n\nfunc f() {\n\thttp.Post(\"/users\", \"application/json\", nil)\n\thttp.PostForm(\"/submit\", nil)\n\thttp.Head(\"/status\")\n}\n";
+    let out = extract_go_http_consumes("a.go", src);
+    let keys: Vec<_> = out.iter().map(|c| c.key.clone().unwrap()).collect();
+    assert!(keys.contains(&"POST /users".to_string()));
+    assert!(keys.contains(&"POST /submit".to_string()));
+    assert!(keys.contains(&"HEAD /status".to_string()));
+}
+
+#[test]
+fn nested_call_site_inside_helper_function_is_reachable() {
+    let src = "package main\n\nimport \"net/http\"\n\nfunc fetch() {\n\tif true {\n\t\thttp.Get(\"/nested\")\n\t}\n}\n";
+    let out = extract_go_http_consumes("a.go", src);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].key.as_deref(), Some("GET /nested"));
+}
+
+#[test]
+fn unresolved_bare_name_argument_is_witnessed_not_dropped() {
+    let src = "package main\n\nimport \"net/http\"\n\nfunc f(u string) {\n\thttp.Get(u)\n}\n";
+    let out = extract_go_http_consumes("a.go", src);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].key, None);
+    assert_eq!(out[0].raw.as_deref(), Some("u"));
+    assert_eq!(out[0].method.as_deref(), Some("GET"));
+}
+
+#[test]
+fn no_import_gate_negative() {
+    let src = "package main\n\nfunc f() {\n\thttp.Get(\"/users\")\n}\n";
+    let out = extract_go_http_consumes("a.go", src);
+    assert!(out.is_empty());
+}

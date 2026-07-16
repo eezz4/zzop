@@ -5,7 +5,7 @@ serves an MCP server over stdio for MCP clients, and doubles as a plain CLI for 
 share the same analysis path. Full reference: [docs/modules/mcp.md](../../docs/modules/mcp.md).
 
 This release ships in-tree only — build it from a source checkout (below). Prebuilt per-platform
-binaries are planned but not part of this release.
+binaries (`zzop-mcp-<platform>[.exe]`) attach to GitHub Releases starting with the next release.
 
 ## Build
 
@@ -21,6 +21,9 @@ The binary lands at `target/release/zzop-mcp` (`target/release/zzop-mcp.exe` on 
 zzop-mcp analyze ./my-repo
 zzop-mcp cross ./frontend ./backend
 zzop-mcp cross --config ./zzop.config.jsonc
+zzop-mcp endpoint users ./frontend ./backend
+zzop-mcp contract                 # list the embedded authoring contracts
+zzop-mcp contract config-surface  # print one to stdout (raw bytes, pipe-safe)
 ```
 
 Prints pretty-printed JSON to stdout; a failure prints to stderr and exits non-zero.
@@ -50,11 +53,14 @@ has a `zzop.config.jsonc`, it's auto-discovered and honored; otherwise zero-conf
 |---|---|
 | `analyze_repo` | Analyze one repository/tree path. |
 | `cross_repo` | Analyze 2+ repos/trees and join them across the layer boundary (frontend calls matched against backend routes, shared DB tables, route drift). |
+| `check_endpoint` | Definitive answer to "is io key X provided/consumed/joined?" — case-insensitive substring match over every io key (http routes, env keys, DB tables, topics), one sealed verdict (`linked` / `provided-only` / `consumed-unprovided` / `external` / `unresolved-only` / `ambiguous` / `mixed` / `not-found`) instead of bucket counts to eyeball. |
 | `validate_envelope` | Validate a Normalized AST envelope (a custom parser's output) against the v1 contract, offline. |
+| `validate_rule_pack` | Validate a DSL rule pack's structure before loading it — the pack loader's own load-time judgments (shape only, never rule-quality semantics), offline. |
 
-Plus a `resources/*` surface exposing seven embedded authoring-contract documents
-(`zzop://contract/<name>`) for writing a custom parser adapter or DSL rule pack with nothing but this
-binary.
+Plus a `resources/*` surface exposing nine embedded authoring-contract documents
+(`zzop://contract/<name>`) for writing a custom parser adapter, a DSL rule pack, or a
+`zzop.config.jsonc` with nothing but this binary. The same documents print to a terminal via
+`zzop-mcp contract [<name>]` — no MCP client required.
 
 See [docs/modules/mcp.md](../../docs/modules/mcp.md) for the full tool/resource/config reference,
 including exact argument shapes, the output-truncation contract, and the config-resolution deviation

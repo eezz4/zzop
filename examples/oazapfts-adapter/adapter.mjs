@@ -1,17 +1,8 @@
 #!/usr/bin/env node
-// Reference "Mode B" adapter for zzop: resolve oazapfts-generated OpenAPI SDK call sites into
-// cross-layer IO facts, emitted as a NormalizedEnvelope overlay for zzop's `adapterOverlays` config.
+// Mode B adapter: resolve oazapfts-generated OpenAPI SDK call sites into cross-layer IO facts,
+// emitted as a NormalizedEnvelope overlay for zzop's `adapterOverlays` config (docs/NORMALIZED_AST.md).
 //
-// WHY THIS EXISTS
-// oazapfts (https://github.com/oazapfts/oazapfts) generates a thin fetch wrapper per OpenAPI
-// operation: `oazapfts.fetchJson('/activities', { ...opts })`. This call family used to be recognized
-// NATIVELY by zzop's TypeScript egress extractor (`parser/parser-typescript/src/adapters/egress.rs`),
-// but a generated-SDK's call shape is app-specific wiring, not engine vocabulary — same reasoning that
-// already put react-query's queryKey idiom and generated-class-method SDK clients behind adapters (see
-// `../react-query-adapter/` and `../openapi-sdk-adapter/`). This adapter reproduces the retired native
-// behavior entirely in userland: the engine no longer needs to know oazapfts exists.
-//
-// RECOGNIZED CALL FAMILY (mirrors the removed native `oazapfts-v1` recognizer exactly)
+// RECOGNIZED CALL FAMILY
 //   oazapfts.fetchJson(url, opts?)
 //   oazapfts.fetchText(url, opts?)
 //   oazapfts.fetchBlob(url, opts?)
@@ -24,31 +15,24 @@
 //   interpolation that is not the trailing piece still collapses to `{}` like any other.
 // - Method: `GET` by default; overridden by a literal `method: "..."` property found either directly in
 //   the 2nd-arg options object, or inside an `oazapfts.<helper>({ ... })` wrapper call passed as the 2nd
-//   arg (`oazapfts.json(...)`, `oazapfts.form(...)`, `oazapfts.multipart(...)`, or any other helper name
-//   — the wrapper is recognized by its `oazapfts.` receiver, not a helper allowlist, matching the
-//   removed native `method_from_options`). The captured method value is upper-cased.
+//   arg — the wrapper is recognized by its `oazapfts.` receiver, not a helper allowlist. The captured
+//   method value is upper-cased.
 // - A call nested inside `oazapfts.ok(...)` is still detected — `ok(...)` itself is not special-cased;
 //   the scan simply finds `oazapfts.fetchJson(...)` wherever it appears in the file text.
 //
 // USAGE
 //   node adapter.mjs --root <tree-root> [--source <id>] > overlay.json
-// Writes the overlay envelope JSON to stdout; a one-line summary to stderr. Feed stdout to a tree's
-// `adapterOverlays` array on an `analyze`/`analyzeTrees` request (see docs/NORMALIZED_AST.md).
+// Overlay envelope JSON to stdout; one-line summary to stderr. Feed stdout to a tree's
+// `adapterOverlays` array on an `analyze`/`analyzeTrees` request.
 //
-// LIMITATIONS (intentional — a real adapter can go further; see README.md for the full list):
-// - Call detection is lexical over the whole file text (not a real AST), using a bracket/quote/template
-//   -aware balanced scanner to find each call's argument list and the `method:`/wrapper shape inside its
-//   2nd argument — a step beyond the single-line regex the other reference adapters in this repo use,
-//   required because method resolution needs to look INSIDE a (possibly nested) options object rather
-//   than just match a call site's leading argument.
-// - Request-body shape (`IoConsume.body`) is NOT captured. The removed native recognizer witnessed a
-//   sibling `body:` property's literal shape, but `adapter-kit`'s `EnvelopeBuilder.addConsume` does not
-//   accept a `body` option (only `kind`/`key`/`line`/`raw`/`method`) — extending the kit is out of scope
-//   here (this adapter must not modify adapter-kit). A `body:` property next to `method:` is simply
-//   ignored; the consume is still emitted with its resolved key.
-// - `client: 'oazapfts'` is attached to every emitted consume by post-processing the built envelope
-//   (the same reason as above: `addConsume` has no `client` option). Every consume this adapter can
-//   possibly emit is oazapfts-flavored, so this is unconditional and exact, not an approximation.
+// CONTRACT LIMITATIONS (see README.md):
+// - Call detection is lexical over the whole file text (not a real AST), via a bracket/quote/template
+//   -aware balanced scanner — method resolution must look INSIDE a (possibly wrapped) options object.
+// - Request-body shape (`IoConsume.body`) is NOT captured: `adapter-kit`'s `EnvelopeBuilder.addConsume`
+//   accepts only `kind`/`key`/`line`/`raw`/`method`, and this adapter must not modify adapter-kit. A
+//   `body:` property next to `method:` is ignored; the consume is still emitted with its resolved key.
+// - `client: 'oazapfts'` is attached by post-processing the built envelope (`addConsume` has no
+//   `client` option). Unconditional and exact: every consume this adapter can emit is oazapfts-flavored.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { walk, EnvelopeBuilder, resolveConsumeKey } from '../adapter-kit/index.js';
@@ -66,12 +50,10 @@ if (!treeRoot) {
 }
 
 // --- Balanced lexical scanning helpers ---
-//
 // A hand-rolled, bracket/quote/template-literal-aware scanner — NOT a full JS parser (no regex/ASI/
-// tagged-template/optional-chaining edge cases modeled), but enough to reliably find the matching close
-// of a call's argument list and split it into top-level arguments, even when a template literal argument
-// itself contains nested `${ ... }` expressions with their own brackets (exactly the oazapfts `QS.`
-// helper shape: `` `/x${QS.query(QS.explode({ y }))}` ``).
+// tagged-template/optional-chaining edge cases modeled). It finds the matching close of a call's
+// argument list and splits top-level arguments, including template literals with nested `${ ... }`
+// expressions carrying their own brackets (the oazapfts `QS.` helper shape).
 
 const OPEN = new Set(['(', '[', '{']);
 const CLOSE_FOR = { '(': ')', '[': ']', '{': '}' };
@@ -335,13 +317,12 @@ function collapseOazapftsTemplate(inner) {
 }
 
 // A whole argument that is exactly one string OR template literal: `'...'` / `"..."` / `` `...` ``,
-// nothing else around it. Captures the quote char and the raw inner text (unescaped — matches every
-// other adapter in this repo, which also keeps literal text raw rather than resolving escapes).
+// nothing else around it. Captures the quote char and the raw inner text (escapes are kept raw,
+// never resolved).
 const LITERAL_RE = /^(['"`])([\s\S]*)\1$/;
 
 /** Resolves a call's first-argument text to a raw URL path, or `null` when it is not a bare string/
- * template literal (never guessed — same "only emit from visible literals" convention every adapter in
- * this repo follows). */
+ * template literal — only emit from visible literals, never guess. */
 function resolveUrlArg(argText) {
   const m = LITERAL_RE.exec(argText.trim());
   if (!m) return null;
@@ -349,14 +330,13 @@ function resolveUrlArg(argText) {
   return quote === '`' ? collapseOazapftsTemplate(inner) : inner;
 }
 
-// Any `oazapfts.<helper>({ ... })` wrapper call — receiver matched, not a helper allowlist (mirrors the
-// removed native `method_from_options`'s doc: "Any oazapfts.<helper>({ ... }) wrapper counts").
+// Any `oazapfts.<helper>({ ... })` wrapper call — receiver matched, not a helper allowlist.
 const OAZAPFTS_WRAPPER_RE = /^oazapfts\s*\.\s*[A-Za-z_$][\w$]*\s*\(/;
 
 /** Reads a literal `method: "..."` property from a 2nd-arg options object — either directly, or from
  * the object literal passed to an `oazapfts.<helper>(...)` wrapper. Returns the raw method string as
  * written (the caller upper-cases it), or `null` when no literal `method:` property is visible (a
- * `...spread` never resolves one — never guessed). Mirrors the removed native `method_from_options`. */
+ * `...spread` never resolves one — never guessed). */
 function methodFromOptionsArg(argText) {
   const objText = objectLiteralFromOptionsArg(argText);
   if (objText === null) return null;
@@ -392,15 +372,12 @@ function readStringProp(objText, name) {
 }
 
 // `oazapfts.fetchJson` / `oazapfts.fetchText` / `oazapfts.fetchBlob` — receiver matched EXACTLY (the
-// lookbehind rejects `client.fetchJson(` / `myoazapfts.fetchJson(`, same boundary discipline every
-// other adapter in this repo uses via its own `(?:^|[^.\w$])` prefix).
+// lookbehind rejects `client.fetchJson(` / `myoazapfts.fetchJson(`).
 const CALL_RE = /(?<![.\w$])oazapfts\.(fetchJson|fetchText|fetchBlob)\b/g;
 
 /** Skips an optional generic type-argument list (`<{ status: 200 }>`) between a method name and its
  * call's opening paren. Depth-counts `<`/`>` only — sufficient for the type-literal shapes oazapfts'
- * generated clients actually emit; does not understand `<`/`>` used as comparison operators (not valid
- * in this position anyway) or string/template content inside the generic (undocumented edge case, not
- * exercised by any known oazapfts codegen output). */
+ * generated clients emit; no string/template content inside the generic is modeled. */
 function skipGenericsAndWhitespace(text, idx) {
   let i = idx;
   while (i < text.length && /\s/.test(text[i])) i++;
@@ -430,8 +407,7 @@ function lineOf(text, index) {
 }
 
 /** Finds every recognized oazapfts call site in `text`, returning `{ line, key }` for each one whose URL
- * resolved to a key (unresolvable URLs are counted in `skipped`, never emitted — matches every other
- * adapter's "never guess" convention). */
+ * resolved to a key (unresolvable URLs are counted in `skipped`, never emitted — never guess). */
 function scanFile(text, counters) {
   const consumes = [];
   CALL_RE.lastIndex = 0;
@@ -479,9 +455,8 @@ for (const rel of walk(treeRoot, {
 
 const envelope = builder.toEnvelope();
 // `client: 'oazapfts'` on every emitted consume — `EnvelopeBuilder.addConsume` has no `client` option
-// (see the LIMITATIONS note at the top of this file), so it is attached by post-processing the built
-// envelope instead. Safe unconditionally: every consume this adapter can possibly emit came from an
-// `oazapfts.*` call site, so there is no other client this could be.
+// (see CONTRACT LIMITATIONS above), so it is attached by post-processing the built envelope. Safe
+// unconditionally: every consume this adapter can emit came from an `oazapfts.*` call site.
 for (const file of envelope.files) {
   for (const consume of file.io.consumes) consume.client = 'oazapfts';
 }

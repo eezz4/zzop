@@ -45,11 +45,31 @@ pub fn analyze_envelope(envelope_json: String, config_json: String) -> Result<St
     catch(move || zzop_facade::analyze_envelope_json(&envelope_json, &config_json))
 }
 
+/// `queryIo(analysisJson: string, queryJson: string) -> string` — the definitive endpoint/io-key
+/// query over an ALREADY-PRODUCED `analyzeTrees` output (pure post-processing, no re-analysis).
+/// See `zzop_facade::query_io_json` for the query shape, the sealed verdict vocabulary, and the
+/// guided error a single-tree `analyze` output produces.
+#[napi(js_name = "queryIo")]
+pub fn query_io(analysis_json: String, query_json: String) -> Result<String> {
+    catch(move || zzop_facade::query_io_json(&analysis_json, &query_json))
+}
+
 /// `version() -> string` — crate version + parser fingerprints (diagnostics). See
 /// `zzop_facade::version_string`.
 #[napi]
 pub fn version() -> String {
     zzop_facade::version_string()
+}
+
+/// `validateRulePackOnly(packJson: string) -> string` — pre-load, structure-only `{valid, issues}`
+/// check for a DSL rule-pack JSON (the same loader judgments `packsDir`/`packDefs` apply at load
+/// time, surfaced beforehand; never rule-quality semantics). See
+/// `zzop_facade::validate_rule_pack_json`; like `validateEnvelopeOnly` it never itself returns
+/// `Err` (an invalid pack is a normal `{"valid": false, ...}` report), so `catch` only guards
+/// against an actual panic.
+#[napi(js_name = "validateRulePackOnly")]
+pub fn validate_rule_pack_only(pack_json: String) -> Result<String> {
+    catch(move || Ok(zzop_facade::validate_rule_pack_json(&pack_json)))
 }
 
 /// `validateEnvelopeOnly(envelopeJson: string) -> string` — fast offline `{valid, issues}` check for a

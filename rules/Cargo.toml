@@ -10,7 +10,7 @@ publish = false
 # end-to-end from right next to the pack's own JSON. One `[[test]]` entry per pack folder that ships rules
 # (stub packs with 0 rules — see rules/README.md's "Stub packs" — have no <pack>.rs yet and no entry here).
 #
-# `rule_contracts.rs` (crates/engine/tests/rule_contracts.rs) machine-checks that this list stays in
+# The `rule_contracts` meta-test (crates/engine/tests/rule_contracts/) machine-checks that this list stays in
 # sync with rules/dsl/*/<pack>.rs on disk — a pack that ships rules but has no [[test]] entry here (or vice
 # versa) fails that contract test.
 

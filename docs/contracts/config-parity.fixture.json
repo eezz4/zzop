@@ -1,0 +1,149 @@
+{
+  "_docs": {
+    "purpose": "JS<->Rust config-front-end parity contract: each case maps one zzop.config.jsonc object to the exact facade request JSON the PURE mapper must emit. Both implementations assert against this one committed file — packages/cli/lib/mapper.js via packages/cli/test/config-parity.test.js (direct deep-equal: the expected shapes below ARE its output), and crates/config/src/mapper.rs via crates/config/tests/config_parity.rs (deep-equal after reversing its two documented deltas, listed under normalization). Same committed-fixture pattern as docs/adapters/key-normalization.fixture.json.",
+    "normalization": [
+      "Path resolution (the ONE documented behavioral deviation, crates/config/src/lib.rs): the JS CLI leaves root/cacheDir/packsDir as literal strings for the process cwd to resolve; the Rust port resolves them against the config file's directory. Expected values below are the RAW (JS) form; the Rust test maps its resolved absolute paths back to this form against its known base directory (base itself -> \".\") before comparing, so any OTHER path difference still fails.",
+      "withDefaults fold-in (a packaging difference, not a behavioral one, crates/config/src/mapper.rs module doc): the Rust mapper folds packages/native/index.js's withDefaults layer in — bundled packs as inline packDefs on every tree, plus git: {} when the config has no git key. The JS mapper emits neither (its CLI applies withDefaults later, as a bundled packsDir prepend). The Rust test asserts both injections happened (one packDefs entry per BUNDLED_PACK_SOURCES pack; git exactly {}) and strips them before comparing.",
+      "Object key order is not part of the contract (serde_json BTreeMap vs JS insertion order); both tests compare as parsed JSON values, which is key-order-insensitive for objects and order-SENSITIVE for arrays. Fixture rule ids are written in alphabetical order so derived array order (disabledRules, suppressions) is identical on both sides by construction."
+    ],
+    "scope": "The pure config->request mapping only. Discovery (zzop.config.jsonc lookup), JSONC stripping, trees:\"auto\" expansion, overlay file reads (filesystem-dependent, warnings-channel), and warning texts are covered by each side's own tests, not this fixture."
+  },
+  "cases": [
+    {
+      "name": "empty config maps to a single-tree analyze of the current root",
+      "config": {},
+      "expected": {
+        "method": "analyze",
+        "request": { "root": "." }
+      }
+    },
+    {
+      "name": "packs extraDirs and disabled map to packsDir and disabledRules",
+      "config": {
+        "packs": {
+          "extraDirs": ["extra-packs", "more-packs"],
+          "disabled": ["security"]
+        }
+      },
+      "expected": {
+        "method": "analyze",
+        "request": {
+          "root": ".",
+          "packsDir": ["extra-packs", "more-packs"],
+          "disabledRules": ["security"]
+        }
+      }
+    },
+    {
+      "name": "git knobs, cacheDir and sizeCap pass through",
+      "config": {
+        "git": {
+          "since": "2026-01-01",
+          "recentDays": 14,
+          "commitTypePatterns": [{ "pattern": "^fix\\b", "tag": "FIX" }]
+        },
+        "cacheDir": ".zzop-cache",
+        "sizeCap": 2000000
+      },
+      "expected": {
+        "method": "analyze",
+        "request": {
+          "root": ".",
+          "git": {
+            "since": "2026-01-01",
+            "recentDays": 14,
+            "commitTypePatterns": [{ "pattern": "^fix\\b", "tag": "FIX" }]
+          },
+          "cacheDir": ".zzop-cache",
+          "sizeCap": 2000000
+        }
+      }
+    },
+    {
+      "name": "multi-tree with sourceIds, mountedAt, mounts and hosts (sourceId defaults to the raw root)",
+      "config": {
+        "trees": [
+          {
+            "root": "apps/web",
+            "sourceId": "web",
+            "mountedAt": "/app",
+            "hosts": ["api.internal.example.com"]
+          },
+          {
+            "root": "services/api",
+            "mounts": [{ "dir": "src/admin", "at": "/admin" }]
+          }
+        ]
+      },
+      "expected": {
+        "method": "analyzeTrees",
+        "request": {
+          "trees": [
+            {
+              "root": "apps/web",
+              "sourceId": "web",
+              "mountedAt": "/app",
+              "hosts": ["api.internal.example.com"]
+            },
+            {
+              "root": "services/api",
+              "sourceId": "services/api",
+              "mounts": [{ "dir": "src/admin", "at": "/admin" }]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "rule excludes split glob vs substring; top-level exclude maps to globalExcludes",
+      "config": {
+        "rules": {
+          "circular": { "exclude": ["legacy/", "src/**/*.gen.ts"] }
+        },
+        "exclude": ["vendor/", "**/*.min.js"]
+      },
+      "expected": {
+        "method": "analyze",
+        "request": {
+          "root": ".",
+          "suppressions": [
+            { "rule": "circular", "path": "legacy/" },
+            { "rule": "circular", "glob": "src/**/*.gen.ts" }
+          ],
+          "globalExcludes": [{ "path": "vendor/" }, { "glob": "**/*.min.js" }]
+        }
+      }
+    },
+    {
+      "name": "severity aliases normalize; off routes to disabledRules",
+      "config": {
+        "rules": {
+          "a-rule": "error",
+          "b-rule": "off",
+          "circular": { "severity": "warn" }
+        }
+      },
+      "expected": {
+        "method": "analyze",
+        "request": {
+          "root": ".",
+          "disabledRules": ["b-rule"],
+          "severityOverrides": { "a-rule": "critical", "circular": "warning" }
+        }
+      }
+    },
+    {
+      "name": "multiple roots map to analyzeTrees with each raw root as its sourceId",
+      "config": { "roots": ["fe", "be"] },
+      "expected": {
+        "method": "analyzeTrees",
+        "request": {
+          "trees": [
+            { "root": "fe", "sourceId": "fe" },
+            { "root": "be", "sourceId": "be" }
+          ]
+        }
+      }
+    }
+  ]
+}
