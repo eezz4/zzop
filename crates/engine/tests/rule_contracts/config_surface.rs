@@ -43,6 +43,12 @@ pub(crate) struct ConfigSurface {
     pub(crate) embedder_field_shapes: std::collections::BTreeMap<String, String>,
     pub(crate) external_tool_flags: Vec<String>,
     pub(crate) allowlisted_tokens: Vec<String>,
+    /// The MCP host's tool-surface vocabulary (tool argument names + the reply fields its
+    /// self-description text backticks) — a DIFFERENT dialect from config keys, vouched separately
+    /// so `packages/mcp/src` joined the CHECK B scan set (2026-07-17) without allowlist-noise.
+    /// `default` for the same older-file degradation contract as `embedder_field_shapes`.
+    #[serde(default)]
+    pub(crate) mcp_tool_tokens: Vec<String>,
 }
 
 /// Loads and parses `config-surface.json`, failing loudly (not silently skipping) on a missing/malformed
@@ -216,6 +222,9 @@ pub(crate) fn unknown_config_context_tokens(
         .iter()
         .map(String::as_str)
         .collect();
+    // The MCP tool-surface dialect (tool argument names + backticked reply fields) — a distinct
+    // vocabulary vouched by `mcpToolTokens`, added when `packages/mcp/src` joined the scan set.
+    let mcp: BTreeSet<&str> = vocab.mcp_tool_tokens.iter().map(String::as_str).collect();
 
     tokens
         .iter()
@@ -234,7 +243,8 @@ pub(crate) fn unknown_config_context_tokens(
                 !(top.contains(t.as_str())
                     || nested.contains(t.as_str())
                     || embedder.contains(t.as_str())
-                    || allow.contains(t.as_str()))
+                    || allow.contains(t.as_str())
+                    || mcp.contains(t.as_str()))
             }
         })
         .cloned()

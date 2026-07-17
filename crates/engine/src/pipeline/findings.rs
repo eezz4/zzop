@@ -20,6 +20,19 @@ use crate::dispatch::Language;
 /// `profile` mirrors `EngineConfig::profile_rules`: `false` calls `eval_pack` (no timing overhead);
 /// `true` calls `eval_pack_profiled` and concatenates every pack's `RuleTiming`s, summed later across
 /// every artifact by `analyze::assemble`.
+///
+/// D13①: every DSL finding this returns has `zzop_core::disable_hint`'s config-disable fragment appended
+/// to its `message`, AFTER the pack's own suppress-marker sentence — the same hint native findings carry
+/// (see `disable_hint`'s doc), built from the SAME helper (never a second hand-written template). This is
+/// the single per-file DSL finding-construction site in the engine's fused pass — `envelope::file_pass`
+/// (Mode B's own `eval_pack` call site) appends identically, via the same helper, since it never routes
+/// through this function. `Finding::rule_id` is already `"<pack>/<rule>"` (stamped inside `eval_pack`
+/// itself), so no extra id plumbing is needed here.
+///
+/// This runs BEFORE the caller (`fresh::compute_fresh_artifact` / `artifact::process_file`) hands
+/// `findings` to `AnalysisCache::put_findings` — the hint text is therefore part of the cached findings
+/// entry's `message` field, not appended fresh on every cache hit. See `cache.rs`'s `CACHE_SCHEMA_VERSION`
+/// doc for the schema bump this required.
 pub(super) fn eval_packs(
     packs: &[&RulePackDef],
     rel: &str,
@@ -54,7 +67,23 @@ pub(super) fn eval_packs(
             }
         }
     }
+    append_disable_hints(&mut out);
     (out, timings, false)
+}
+
+/// Appends `zzop_core::disable_hint(&finding.rule_id)` to every finding's `message` — the one place both
+/// DSL finding-construction call sites (this module's `eval_packs`, and `envelope::file_pass`'s direct
+/// `eval_pack` call) route through the SAME hint text, never a hand-rolled second copy. Every element of
+/// `findings` here is a freshly-built DSL finding (this function is only ever called on an `eval_pack`/
+/// `eval_pack_profiled` result), so `rule_id` is always the `"<pack>/<rule>"` shape the hint expects.
+pub(crate) fn append_disable_hints(findings: &mut [zzop_core::Finding]) {
+    for finding in findings.iter_mut() {
+        finding.message = format!(
+            "{} {}",
+            finding.message,
+            zzop_core::disable_hint(&finding.rule_id)
+        );
+    }
 }
 
 /// Whether a Prisma file's schema-structural rules (`schema_findings`) should run — shared by

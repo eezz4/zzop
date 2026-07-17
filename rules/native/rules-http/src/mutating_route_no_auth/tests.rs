@@ -537,6 +537,140 @@ fn injected_auth_guarded_attribute_on_the_route_iokey_exempts_it() {
 }
 
 #[test]
+fn java_route_reaching_an_authorization_service_static_guard_is_not_flagged() {
+    // Real-shape regression for corpus/oss/be-spring's CommentsApi.deleteComment now that `.java` is
+    // inside `CALL_GRAPH_COVERED_EXTENSIONS` (`java21/tree-sitter-java-0.23.5/v2`'s `RawCall` extractor +
+    // `run_callgraph_rules`'s Java wiring). The inline guard `AuthorizationService.canWriteComment(...)`
+    // resolves to an id whose TAIL alone (`canWriteComment`) does NOT match `DEFAULT_AUTH_GUARD_PATTERN`
+    // — it's the QUALIFIER (`AuthorizationService`, containing `auth`) that carries the guard evidence,
+    // which `is_guard_id`'s two-segment check (module doc "Match granularity") now reaches. This edge
+    // shape (`<opaque-specifier>#AuthorizationService.canWriteComment`) is exactly what
+    // `run_callgraph_rules`'s Java `resolve_file_fn` produces for a statically-imported guard call.
+    let provides = vec![provide(
+        "DELETE /articles/{}/comments/{}",
+        "src/main/java/io/spring/api/CommentsApi.java",
+        67,
+        "deleteComment",
+    )];
+    let symbols = vec![sym(
+        "src/main/java/io/spring/api/CommentsApi.java",
+        "CommentsApi.deleteComment",
+        67,
+    )];
+    let graph = vec![edge(
+        "src/main/java/io/spring/api/CommentsApi.java#CommentsApi.deleteComment",
+        "io.spring.core.service.AuthorizationService#AuthorizationService.canWriteComment",
+    )];
+    let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+        io_provides: &provides,
+        symbols: &symbols,
+        symbol_graph: &graph,
+        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        nest_guarded: &std::collections::HashSet::new(),
+        route_attr_store: &zzop_core::AttributeStore::default(),
+    });
+    assert!(out.is_empty(), "{:?}", out);
+}
+
+#[test]
+fn java_route_reaching_only_a_domain_noun_class_stays_flagged() {
+    // The opus-review recall-regression class: a qualifier that merely CONTAINS a guard substring
+    // (`AuthorRepository` ⊃ `auth`) must NOT clear the route — exact-token qualifier matching
+    // (`qualifier::qualifier_is_guard`) sees [author, repository], no vocabulary hit, and the
+    // unguarded mutating route stays a finding.
+    let provides = vec![provide(
+        "POST /articles",
+        "src/main/java/io/spring/api/ArticlesApi.java",
+        28,
+        "createArticle",
+    )];
+    let symbols = vec![sym(
+        "src/main/java/io/spring/api/ArticlesApi.java",
+        "ArticlesApi.createArticle",
+        28,
+    )];
+    let graph = vec![edge(
+        "src/main/java/io/spring/api/ArticlesApi.java#ArticlesApi.createArticle",
+        "io.spring.core.author.AuthorRepository#AuthorRepository.save",
+    )];
+    let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+        io_provides: &provides,
+        symbols: &symbols,
+        symbol_graph: &graph,
+        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        nest_guarded: &std::collections::HashSet::new(),
+        route_attr_store: &zzop_core::AttributeStore::default(),
+    });
+    assert_eq!(out.len(), 1, "{:?}", out);
+}
+
+#[test]
+fn java_route_with_no_reachable_guard_is_flagged_now_that_java_is_covered() {
+    // Real-shape regression for corpus/oss/be-spring's CurrentUserApi.updateProfile: no guard anywhere
+    // reachable in the call graph (it calls only `userService.updateUser(...)`, an unresolvable instance
+    // receiver — dropped, never guessed). `.java` being inside `CALL_GRAPH_COVERED_EXTENSIONS` means this
+    // is now a genuine finding rather than an accidental exemption.
+    let provides = vec![provide(
+        "PUT /user",
+        "src/main/java/io/spring/api/CurrentUserApi.java",
+        40,
+        "updateProfile",
+    )];
+    let symbols = vec![sym(
+        "src/main/java/io/spring/api/CurrentUserApi.java",
+        "CurrentUserApi.updateProfile",
+        40,
+    )];
+    let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+        io_provides: &provides,
+        symbols: &symbols,
+        symbol_graph: &Vec::new(),
+        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        nest_guarded: &std::collections::HashSet::new(),
+        route_attr_store: &zzop_core::AttributeStore::default(),
+    });
+    assert_eq!(out.len(), 1, "{:?}", out);
+    assert_eq!(
+        out[0].file,
+        "src/main/java/io/spring/api/CurrentUserApi.java"
+    );
+}
+
+#[test]
+fn java_ambiguous_handler_name_is_still_skipped_not_guessed() {
+    // Same "do not guess" ambiguity bailout as `ambiguous_handler_name_defined_in_two_files_is_skipped`,
+    // exercised on a Java-flavored shape: `.java` becoming call-graph-covered doesn't touch the
+    // `resolve_handler` ambiguity gate, which runs BEFORE the BFS ever sees the (here, empty) graph.
+    let provides = vec![provide(
+        "DELETE /articles/{}",
+        "src/main/java/io/spring/api/ArticleApi.java",
+        66,
+        "deleteArticle",
+    )];
+    let symbols = vec![
+        sym(
+            "src/main/java/io/spring/api/ArticleApi.java",
+            "ArticleApi.deleteArticle",
+            66,
+        ),
+        sym(
+            "src/main/java/io/spring/other/Other.java",
+            "Other.deleteArticle",
+            10,
+        ),
+    ];
+    let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+        io_provides: &provides,
+        symbols: &symbols,
+        symbol_graph: &Vec::new(),
+        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        nest_guarded: &std::collections::HashSet::new(),
+        route_attr_store: &zzop_core::AttributeStore::default(),
+    });
+    assert!(out.is_empty(), "{:?}", out);
+}
+
+#[test]
 fn injected_pathscope_auth_guarded_exempts_every_route_under_the_prefix() {
     // A router-level middleware guards `/admin/*`; injected as a PathScope, it clears both routes
     // under it without naming each — while a route OUTSIDE the scope still fires.

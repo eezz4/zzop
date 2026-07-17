@@ -224,12 +224,77 @@ function oneSidedIoFixLines(providerScope) {
   ];
 }
 
+// Render the compact "## Architecture / churn signals" section: the git-derived health/recommendations/
+// hotspot half of a tree's output, which otherwise lives ONLY in report.json/--json (see this module's
+// header doc — `report.md` is the default persisted format, so omitting this section entirely made the
+// pretty-teaser's "details in report/--json" pointer (`lib/format.js`'s `architectureSummaryLines`) false
+// for the md half of that promise). Each of the three parts (health, recommendations, hotspots) degrades
+// independently — an absent/malformed field renders that part as nothing, never "undefined" — and the
+// whole section is omitted (returns `[]`) when NONE of the three has anything to show, e.g. an
+// envelope-only run or a tree analyzed with no `git` config. Field names/shapes are the exact
+// `AnalyzeOutputView` wire shapes (see `crates/facade/src/output.rs` / `docs/modules/napi.md`):
+// `health: { pain, contributors: [{ metric, contribution, ... }] }`, `recommendations: [{ id, severity,
+// items: [{ path, note, ... }] }]` (items sorted by descending ROI, so `items[0]` is the top target), and
+// `nodes: [{ path, changeCount, hotspotScore, ... }]`.
+function architectureSectionLines(treeOutput) {
+  const healthLines = [];
+  const health = treeOutput.health;
+  if (health && typeof health.pain === 'number') {
+    healthLines.push(`- Health pain: ${health.pain}`);
+    const contributors = Array.isArray(health.contributors) ? health.contributors : [];
+    for (const c of contributors.slice(0, 3)) {
+      if (!c || typeof c.contribution !== 'number') continue;
+      healthLines.push(`  - ${c.metric}: ${c.contribution}`);
+    }
+  }
+
+  const recLines = [];
+  const recs = Array.isArray(treeOutput.recommendations) ? treeOutput.recommendations : [];
+  if (recs.length > 0) {
+    recLines.push('- Top recommendations:');
+    for (const r of recs.slice(0, 3)) {
+      if (!r) continue;
+      const items = Array.isArray(r.items) ? r.items : [];
+      const top = items[0];
+      const path = top && top.path ? ` — ${top.path}` : '';
+      const note = top && top.note ? ` (${top.note})` : '';
+      recLines.push(`  - **${r.severity || 'info'}** \`${r.id || ''}\`${path}${note}`);
+    }
+  }
+
+  const hotspotLines = [];
+  const nodes = Array.isArray(treeOutput.nodes) ? treeOutput.nodes : [];
+  const hotspots = nodes
+    .filter((n) => n && typeof n.hotspotScore === 'number' && n.hotspotScore > 0)
+    .slice()
+    .sort((a, b) => cmpNum(b.hotspotScore, a.hotspotScore) || cmpStr(a.path, b.path))
+    .slice(0, 5);
+  if (hotspots.length > 0) {
+    hotspotLines.push('- Top hotspots (changeCount x loc):');
+    hotspotLines.push('| Path | Changes | Hotspot |');
+    hotspotLines.push('|---|---|---|');
+    for (const n of hotspots) {
+      hotspotLines.push(`| ${n.path} | ${Number(n.changeCount) || 0} | ${n.hotspotScore} |`);
+    }
+  }
+
+  if (healthLines.length === 0 && recLines.length === 0 && hotspotLines.length === 0) return [];
+
+  return [
+    '## Architecture / churn signals',
+    ...healthLines,
+    ...recLines,
+    ...hotspotLines,
+    'Full detail (all metrics, every recommendation item, every node) in report.json/--json.',
+  ];
+}
+
 /**
  * Render one tree's markdown report body (used both for a multi-tree run's per-tree file and for a
  * single-tree run's only file). Deterministic: same inputs -> byte-identical output.
  * @param {string} sourceId
  * @param {string} [root]
- * @param {object} treeOutput  a PerTree `output` (single-tree shape): `{ findings, fileCount, warnings, ir }`
+ * @param {object} treeOutput  a PerTree `output` (single-tree shape): `{ findings, fileCount, warnings, configWarnings, ir }`
  * @param {boolean} [singleTreeRun]  true when this tree IS the whole run — gates the one-sided-IO
  *   guidance, which would be a false alarm on a per-tree file in a multi-tree run (a consume-only FE
  *   tree is healthy there; the run-level check lives in `buildCrossRepoMarkdown`).
@@ -238,7 +303,10 @@ function oneSidedIoFixLines(providerScope) {
 function buildTreeMarkdown(sourceId, root, treeOutput, singleTreeRun = false) {
   const findings = Array.isArray(treeOutput.findings) ? treeOutput.findings : [];
   const fileCount = Number(treeOutput.fileCount) || 0;
-  const warnings = Array.isArray(treeOutput.warnings) ? treeOutput.warnings : [];
+  const warnings = [
+    ...(Array.isArray(treeOutput.warnings) ? treeOutput.warnings : []),
+    ...(Array.isArray(treeOutput.configWarnings) ? treeOutput.configWarnings : []),
+  ];
   const counts = countBySeverity(findings);
   const io = treeIo(treeOutput);
   const provides = (Array.isArray(io.provides) ? io.provides : []).filter((p) => p && p.kind === 'http');
@@ -287,13 +355,15 @@ function buildTreeMarkdown(sourceId, root, treeOutput, singleTreeRun = false) {
   );
   if (cov.joinContributionZero) {
     lines.push(
-      `- Blindness: no IO surface was extracted from this tree (0 provides, 0 consumes across ${covFiles} files), so it is invisible to the cross-layer join — discount any "unconsumed"/"unprovided" verdict that references it. If this tree does call an API, the calls flow through a client the extractor cannot see; project them with a Mode B adapter and attach it via the \`overlays: ["./my-adapter/envelope.json"]\` config key to restore visibility.`
+      `- Blindness: no JOINABLE io surface was extracted from this tree (0 provides, 0 keyed consumes across ${covFiles} files — unresolved consumes cannot join), so it is invisible to the cross-layer join — discount any "unconsumed"/"unprovided" verdict that references it. If this tree does call an API, the calls flow through a client the extractor cannot see; project them with a Mode B adapter and attach it via the \`overlays: ["./my-adapter/envelope.json"]\` config key to restore visibility.`
     );
   }
-  // One-sided IO — the single-tree analog of the run-level check in `buildCrossRepoMarkdown`. Mutually
-  // exclusive with the joinContributionZero bullet above (this one requires consumes > 0).
+  // One-sided IO — the single-tree analog of the run-level check in `buildCrossRepoMarkdown`. Skipped
+  // when the joinContributionZero bullet above already fired: an unresolved-only tree satisfies both
+  // predicates (0 provides, unresolved consumes > 0), and the blindness bullet's Mode B guidance
+  // supersedes the provider-side-missing guidance here.
   const covConsumesTotal = covConsumesKeyed + covConsumesUnresolved;
-  if (singleTreeRun && covProvides === 0 && covConsumesTotal > 0) {
+  if (singleTreeRun && !cov.joinContributionZero && covProvides === 0 && covConsumesTotal > 0) {
     lines.push(
       `- One-sided IO (no provides): ${covConsumesTotal} consumes were extracted but 0 provides, so every consume in this run is structurally guaranteed to look unprovided — that usually means the provider side is missing from the run, not that the API drifted. In order of likelihood:`
     );
@@ -351,6 +421,9 @@ function buildTreeMarkdown(sourceId, root, treeOutput, singleTreeRun = false) {
     lines.push('');
   }
 
+  const arch = architectureSectionLines(treeOutput);
+  if (arch.length > 0) lines.push(...arch, '');
+
   // Run-global disclosure registry footer — present on a single-tree run's only file; absent (skipped)
   // on a per-tree file in a multi-tree run, where the cross-repo.md footer carries it once instead.
   const disc = disclosureLines(treeOutput.disclosure);
@@ -380,6 +453,18 @@ function buildCrossRepoMarkdown(output) {
     lines.push(`- \`${t && t.sourceId}\` — ${Number(treeOutput.fileCount) || 0} files (${t && t.root})`);
   }
   lines.push('');
+
+  // Run-level warnings (distinct from per-tree warnings — e.g. the parallel-implementation
+  // tripwire: "0 cross-source edges but N duplicate/ambiguous findings"). Surface-parity registry
+  // caught this section missing: the field existed on the wire but no markdown surface read it.
+  const runWarnings = Array.isArray(output.warnings) ? output.warnings : [];
+  if (runWarnings.length > 0) {
+    lines.push('## Run warnings');
+    for (const w of runWarnings) {
+      lines.push(`- ${w}`);
+    }
+    lines.push('');
+  }
 
   lines.push('## Coverage & blindness');
 
@@ -417,7 +502,7 @@ function buildCrossRepoMarkdown(output) {
   } else {
     for (const bt of blindTrees) {
       lines.push(
-        `- BLIND: \`${bt.sourceId}\` contributed no IO to the join (0 provides, 0 consumes across ${bt.files} files) — join findings that reference it are structurally weak; see its per-tree report for guidance.`
+        `- BLIND: \`${bt.sourceId}\` contributed no JOINABLE io to the join (0 provides, 0 keyed consumes across ${bt.files} files) — join findings that reference it are structurally weak; see its per-tree report for guidance.`
       );
     }
   }

@@ -6,6 +6,23 @@ extractor) computes that key even slightly differently than the engine does, the
 silently. There is no error: the consume just lands in `unprovidedConsumes` / the provide in
 `unconsumedProvides` instead of forming an edge. Byte-identical keys are the whole contract.
 
+## Availability — Mode A vs Mode B
+
+An adapter can reach the engine two ways (see `docs/NORMALIZED_AST.md`'s "Adapter overlays" section for
+the full contract) — and the two are NOT available in the same places. **Mode B (adapter overlays)**
+works everywhere: the config-file `overlays`/`trees[].overlays` key and the napi `adapterOverlays` field
+it maps to are honored by every host, including both `zzop` CLI commands (`@zzop/cli`) and the Node-free
+`zzop-mcp` binary. **Mode A (full envelope, `analyze_envelope`/napi `analyzeEnvelope`)** is reachable
+from Rust, from a host application embedding `@zzop/native` directly, AND from the Node-free `zzop-mcp`
+binary — its `analyze_envelope` MCP tool and `zzop-mcp analyze-envelope <envelope.json>` CLI subcommand
+run the same facade call path (zero-config only; an envelope has no filesystem location for a config
+file to auto-discover). The `@zzop/cli` `zzop` command does NOT run Mode A: its only envelope-shaped
+subcommands are `zzop adapter validate <path>` (structural validation only) and `zzop init adapter --mode
+a|b` (scaffolds starter FILES, does not run an analysis) — `zzop-mcp`'s `validate_envelope` tool is the
+same structural-validation-only story, distinct from its own `analyze_envelope` tool. Write a Mode B
+overlay for a `zzop`-CLI-hosted workflow; use `zzop-mcp`'s `analyze_envelope` (tool or CLI subcommand) or
+a direct `@zzop/native` embedding to actually RUN a Mode A envelope.
+
 ## The fixture
 
 [`key-normalization.fixture.json`](key-normalization.fixture.json) is a table of
@@ -59,6 +76,16 @@ place: `consume_key_for` (`parser/parser-typescript/src/adapters/egress.rs`) che
 `format!("{} {}", method.to_uppercase(), url)` — the raw URL, untouched. An external adapter must do
 the same: detect `://` in the resolved target first, and if present, key it as `"<METHOD> <url>"` with
 the URL exactly as resolved, skipping every normalization rule in this document entirely.
+
+### Self-calls / loopback
+
+A call site targeting the SAME service — a test script's `curl http://localhost:8080/api/ping`, a
+health-check hitting your own base URL — still has a host, so the bypass rule above still applies by
+shape: it keys as an absolute URL and lands in `externalConsumes`, never joining that tree's own `GET
+/api/ping` provide. If you control the extraction, strip the origin and key it as the plain relative path
+instead (`"GET /api/ping"`), same as any other in-tree call. If you can't special-case it at the adapter,
+declare the tree's own host in its `hosts` config instead (see `docs/modules/napi.md`'s `hosts` field) —
+cross-layer linking re-keys a matching absolute-URL consume back to internal at link time.
 
 (Note: [`key-normalization.fixture.json`](key-normalization.fixture.json) deliberately carries no
 `"://"` row. That fixture pins `http_interface_key`/`http_consume_interface_key`'s own output on a

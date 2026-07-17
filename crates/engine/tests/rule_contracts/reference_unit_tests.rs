@@ -27,6 +27,7 @@ fn tiny_synthetic_vocab() -> ConfigSurface {
         embedder_field_shapes: std::collections::BTreeMap::new(),
         external_tool_flags: vec!["--unshallow".to_string(), "--depth".to_string()],
         allowlisted_tokens: vec![],
+        mcp_tool_tokens: vec![],
     }
 }
 

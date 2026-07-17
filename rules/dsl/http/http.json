@@ -10,7 +10,7 @@
       "suppress_marker": "read-model-ok",
       "matcher": {
         "type": "line-scan",
-        "file_pattern": "(?:^|/)api/|/routes/|/controllers/|[Hh]andler\\.ts$|[Cc]ontroller\\.ts$",
+        "file_pattern": "(?:^|/)api/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|/routes/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|/controllers/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|[Hh]andler\\.ts$|[Cc]ontroller\\.ts$",
         "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "require_file": "apiRoutes\\.get\\(",
         "skip_comment_lines": true,
@@ -26,7 +26,7 @@
       "suppress_marker": "auth-gate-ok",
       "matcher": {
         "type": "line-scan",
-        "file_pattern": "(?:^|/)api/|/routes/|/controllers/|[Hh]andler\\.ts$|[Cc]ontroller\\.ts$",
+        "file_pattern": "(?:^|/)api/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|/routes/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|/controllers/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|[Hh]andler\\.ts$|[Cc]ontroller\\.ts$",
         "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "require_file": "apiRoutes\\.(?:get|post|put|patch|delete)\\(",
         "skip_comment_lines": true,
@@ -42,7 +42,7 @@
       "suppress_marker": "route-exposure-ok",
       "matcher": {
         "type": "line-scan",
-        "file_pattern": "(?:^|/)api/|/routes/|/controllers/|[Hh]andler\\.ts$|[Cc]ontroller\\.ts$",
+        "file_pattern": "(?:^|/)api/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|/routes/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|/controllers/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|[Hh]andler\\.ts$|[Cc]ontroller\\.ts$",
         "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "require_file": "apiRoutes\\.(?:get|post|put|patch|delete)\\(",
         "skip_comment_lines": true,

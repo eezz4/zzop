@@ -14,12 +14,21 @@ fn disabled_rules_typo_self_reports_in_envelope_mode() {
     let mut cfg = config();
     cfg.rule_config.disabled_rules = vec!["no-such-rule".to_string()];
     let out = analyze_envelope(&envelope(vec![projection("a.jsp", 5)]), &cfg);
+    // Config-channel diagnostic — rides `config_warnings`, not `warnings` (parity with `assemble`'s
+    // native path — see `zzop_engine::AnalyzeOutput::config_warnings`'s doc).
     assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("matching no known rule id")),
+        "must NOT duplicate into warnings, got: {:?}",
         out.warnings
+    );
+    assert!(
+        out.config_warnings
             .iter()
             .any(|w| w.contains("matching no known rule id") && w.contains("no-such-rule")),
         "got: {:?}",
-        out.warnings
+        out.config_warnings
     );
 }
 
@@ -59,11 +68,16 @@ fn matched_filters_and_valid_disabled_rules_stay_silent_in_envelope_mode() {
     }];
     let out = analyze_envelope(&envelope(vec![projection("a.jsp", 5)]), &cfg);
     assert!(
-        !out.warnings
-            .iter()
-            .any(|w| w.contains("matching no known rule id") || w.contains("matched no files")),
+        !out.warnings.iter().any(|w| w.contains("matched no files")),
         "got: {:?}",
         out.warnings
+    );
+    assert!(
+        !out.config_warnings
+            .iter()
+            .any(|w| w.contains("matching no known rule id")),
+        "got: {:?}",
+        out.config_warnings
     );
 }
 

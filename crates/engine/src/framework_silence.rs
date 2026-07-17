@@ -1,5 +1,5 @@
-//! Coverage self-report: five lexical, extractor-independent tripwires that flag when a tree LOOKS like
-//! it carries a framework surface zzop cannot see, so cross-layer joins would otherwise go silently dark
+//! Coverage self-report: lexical, extractor-independent tripwires that flag when a tree LOOKS like it
+//! carries a framework surface zzop cannot see, so cross-layer joins would otherwise go silently dark
 //! with NO honesty channel firing at all (the gap dogfood round 9 found: a whole vue<->express pair went
 //! ~totally blind and nothing in `warnings` said so).
 //!
@@ -26,24 +26,42 @@
 //!   tree's js/ts sources, gated on near-zero KEYED `http` consumes. Closes the gap S4's own doc names:
 //!   builtin `fetch` is a global, not a module specifier, so a hand-rolled wrapper over `fetch` has no
 //!   import for S4 to anchor on — a live tree extracted 1 of ~10 fetch-style consumes with NO warning.
+//! - S6 [`orm_schema_silence_warning`]: an ORM-schema package/import (TypeORM, Sequelize, Drizzle, JPA,
+//!   SQLAlchemy, GORM) present while zero `db-table` io facts (provides + consumes) were extracted
+//!   tree-wide — EXACT zero, not near-zero, matching the observed gap verbatim: a live NestJS repo full of
+//!   TypeORM `@Entity` decorators produced zero db-table facts and no warning at all. Deliberately
+//!   excludes Prisma (this engine's native db-table path already covers it) — see that module's doc.
+//! - S7 [`fetch_wrapper_call_site_warning`]: the wrapper-indirection dual of S5 — a lexical two-pass
+//!   census that finds a hand-rolled fetch-wrapper module (exports `get`/`post`/`put`/`del`-shaped
+//!   bindings over one internal `fetch(` call) and counts cross-file call sites of those exports from
+//!   OTHER files that import it, gated on the same near-zero KEYED `http` consumes floor S5 uses. Closes
+//!   the gap S5's own tree-wide token count structurally cannot: a tree that funnels 20+ real call sites
+//!   through one wrapper still shows only ONE literal `fetch(` token tree-wide (inside the wrapper
+//!   itself), which can sit below S5's own `FETCH_CALL_SITES_MIN` floor even though the real call-site
+//!   surface is large (blind-field test R10's fe-svelte: `src/lib/api.js`, 20+ callers under
+//!   `src/routes/**`).
 //!
-//! All five are per-tree self-report `warnings: Vec<String>` strings (not `Finding`s — no rule id, no
+//! All seven are per-tree self-report `warnings: Vec<String>` strings (not `Finding`s — no rule id, no
 //! catalog sync needed); over-disclosure is safe, silence is fatal (the coverage-disclosure decision doc's
 //! governing principle) — each function is additive and may fire independently of the others.
 //!
-//! Module layout — one file per tripwire (S1/S2/S3/S4/S5), `MIN_PROVIDES_FLOOR` defined once in
-//! `controller_silence` (S1) and shared by the other four:
+//! Module layout — one file per tripwire (S1/S2/S3/S4/S5/S6/S7), `MIN_PROVIDES_FLOOR` defined once in
+//! `controller_silence` (S1) and shared by S2/S3/S4/S5/S7 (S6 uses its own exact-zero gate, no floor):
 //! - [`controller_silence`](self) — S1 + `MIN_PROVIDES_FLOOR`.
 //! - [`server_framework_import`](self) — S2 + [`provide_blind_sources`], the run-wide severity-gate helper
 //!   `cross-layer/unprovided-mutation-call` also reuses.
 //! - [`committed_spec_io_silence`](self) — S3 + `IO_NEAR_ZERO_FLOOR`.
 //! - [`client_library_import`](self) — S4.
-//! - [`builtin_fetch`](self) — S5 + `FETCH_CALL_SITES_MIN`.
+//! - [`builtin_fetch`](self) — S5 + `FETCH_CALL_SITES_MIN` (also reused by S7).
+//! - [`orm_schema_silence`](self) — S6.
+//! - [`fetch_wrapper`](self) — S7.
 
 mod builtin_fetch;
 mod client_library_import;
 mod committed_spec_io_silence;
 mod controller_silence;
+mod fetch_wrapper;
+mod orm_schema_silence;
 mod server_framework_import;
 #[cfg(test)]
 mod tests;
@@ -54,4 +72,6 @@ pub use committed_spec_io_silence::committed_spec_io_silence_warning;
 pub(crate) use committed_spec_io_silence::IO_NEAR_ZERO_FLOOR;
 pub use controller_silence::controller_silence_warning;
 pub(crate) use controller_silence::MIN_PROVIDES_FLOOR;
+pub use fetch_wrapper::fetch_wrapper_call_site_warning;
+pub use orm_schema_silence::orm_schema_silence_warning;
 pub use server_framework_import::{provide_blind_sources, server_framework_import_warning};

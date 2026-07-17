@@ -1,0 +1,157 @@
+{
+  "_doc": "SURFACE PARITY REGISTRY. This contract exists because zzop has shipped the same bug class three times: (1) the engine computed configWarnings but packages/cli/lib/format.js never read the string, so a config typo produced zero terminal feedback; (2) crates/facade computed git-derived health/recommendations/critical but packages/mcp's analyze_repo reply carried none of it, contradicting the tool's own zero-config-git-signals description; (3) MultiAnalyzeOutput::warnings (the run-level, join-scoped self-report channel, e.g. the parallel-implementation tripwire) needed a deliberate, easy-to-forget forwarding step at every delivery surface. Every top-level field of AnalyzeOutputView and MultiAnalyzeOutputView (crates/facade/src/output.rs) must get exactly one row below, naming what each of the three delivery surfaces (the MCP analyze_repo/cross_repo reply, the JS CLI's pretty terminal render, the markdown report) does with it: 'carry' (forwarded/rendered unconditionally), 'carry-conditional' (forwarded/rendered only in some shaped/capped/gated form, or only when a precondition holds), or 'omit' (never surfaced by that lane). Every 'omit'/'carry-conditional' row MUST carry a non-empty 'note' explaining why and where the data IS available (usually '--json'/'report.json', or a named compact summary). WORKFLOW FOR FUTURE BATCH AGENTS: adding a field to AnalyzeOutputView or MultiAnalyzeOutputView? Add this registry's row for it IN THE SAME COMMIT — crates/engine/tests/rule_contracts/surface_parity.rs's completeness test fails the build otherwise, by design. This file documents TODAY's truth, not an aspiration: a row reflects what the code actually does, not what it should eventually do.",
+  "analyzeOutputView": {
+    "cache": {
+      "mcpAnalyzeReply": "omit",
+      "jsCliRender": "omit",
+      "mdReport": "omit",
+      "note": "Internal engine cache-hit/miss diagnostic (CacheStatsView). Not referenced anywhere in packages/mcp/src, lib/format.js, or lib/report.js. Available only via the full --json/report.json passthrough — a deliberate internal-only performance diagnostic, not part of any curated summary."
+    },
+    "configWarnings": {
+      "mcpAnalyzeReply": "carry",
+      "jsCliRender": "carry",
+      "mdReport": "carry",
+      "note": ""
+    },
+    "coverage": {
+      "mcpAnalyzeReply": "carry",
+      "jsCliRender": "carry-conditional",
+      "mdReport": "carry",
+      "note": "jsCliRender: lib/format.js's architectureSummaryLines folds coverage down to one io line (provides/keyed-consumes totals only) — the full census (files/symbols/importEdges/degraded/joinContributionZero) is not shown in the pretty terminal view (see report.md or --json for the whole object)."
+    },
+    "critical": {
+      "mcpAnalyzeReply": "carry-conditional",
+      "jsCliRender": "omit",
+      "mdReport": "omit",
+      "note": "mcpAnalyzeReply: only the top 3 paths (engine's own blast-radius ranking) ride the compact `architecture.criticalTop` summary (crates/summary/src/analyze/mod.rs::architecture_summary); the full CriticalFile list (with contributing metrics) is --json/report.json only. jsCliRender/mdReport: neither lib/format.js's architectureSummaryLines nor lib/report.js's architectureSectionLines reads `critical` at all (they read health/recommendations/coverage/nodes instead) — full list --json only."
+    },
+    "degraded": {
+      "mcpAnalyzeReply": "carry-conditional",
+      "jsCliRender": "omit",
+      "mdReport": "omit",
+      "note": "mcpAnalyzeReply: the raw degraded-path list is capped (DEFAULT_DEGRADED_LIMIT=50) with an explicit `degradedTruncated` disclosure when capped (crates/summary/src/analyze/mod.rs) — `coverage.degraded` already carries the full uncapped count. jsCliRender/mdReport: neither reads the top-level `degraded` path list at all; lib/report.js only reads the aggregate `coverage.degraded` count (a different field), never the per-file list. Full list --json only."
+    },
+    "disclosure": {
+      "mcpAnalyzeReply": "carry",
+      "jsCliRender": "omit",
+      "mdReport": "carry",
+      "note": "jsCliRender: lib/format.js's formatPretty never renders the disclosure registry — the terminal view has no disclosure-coverage teaser. Fully rendered in report.md ('## Disclosure coverage', disclosureLines) and --json."
+    },
+    "fileCount": {
+      "mcpAnalyzeReply": "carry",
+      "jsCliRender": "carry",
+      "mdReport": "carry",
+      "note": ""
+    },
+    "findings": {
+      "mcpAnalyzeReply": "carry-conditional",
+      "jsCliRender": "carry",
+      "mdReport": "carry",
+      "note": "mcpAnalyzeReply: shaped via output::shape_findings into {total, bySeverity, byRule, shown (severity-desc, capped at DEFAULT_FINDINGS_LIMIT=50 unless the caller supplies `limit`), truncated?} — never the raw findings array verbatim."
+    },
+    "folders": {
+      "mcpAnalyzeReply": "omit",
+      "jsCliRender": "omit",
+      "mdReport": "omit",
+      "note": "FolderAggregates is never referenced anywhere in packages/mcp/src, lib/format.js, or lib/report.js — no folder-level rollup rides any surface today. --json/report.json only. Flagged during this registry's authoring pass: unlike nodes/health/recommendations/critical (which at least get a partial 'architecture summary' cameo), folders has ZERO representation on any of the three surfaces — worth a follow-up decision on whether it deserves at least a compact summary line."
+    },
+    "gitWindow": {
+      "mcpAnalyzeReply": "carry-conditional",
+      "jsCliRender": "omit",
+      "mdReport": "omit",
+      "note": "mcpAnalyzeReply: forwarded verbatim via a `.get()`-defensive check, only when the key is present (crates/summary/src/analyze/mod.rs) — the facade itself always serializes this field (null when git did not run), but the MCP forwarding step is conditional on presence rather than being an unconditional index. jsCliRender/mdReport: neither renders gitWindow at all — a consumer diffing two runs' health/scores over time has no in-terminal or in-report way to see which recentDays/since window produced them; --json or the MCP reply only."
+    },
+    "health": {
+      "mcpAnalyzeReply": "carry-conditional",
+      "jsCliRender": "carry-conditional",
+      "mdReport": "carry-conditional",
+      "note": "mcpAnalyzeReply: only `health.pain` (the scalar) rides `architecture.pain`; `contributors` (the per-metric breakdown) never reaches the reply. jsCliRender: architectureSummaryLines prints only `pain` plus the single top recommendation id ('architecture: pain N, top recommendation: id') — contributors never shown. mdReport: architectureSectionLines prints `pain` plus up to the top 3 contributors (health.contributors.slice(0,3)) — the full contributor list is --json only. All three gate on `health` being non-null (git signals ran this tree)."
+    },
+    "ir": {
+      "mcpAnalyzeReply": "omit",
+      "jsCliRender": "omit",
+      "mdReport": "carry-conditional",
+      "note": "mcpAnalyzeReply: deliberate token-shaping decision — the full CommonIr (dep graph, per-file tags/loc/symbols) never rides any MCP reply; an AI consumer gets io facts through report.md's HTTP-interface section or the @zzop/cli --json / @zzop/native napi lane instead (per this tool's own description). jsCliRender: lib/format.js never reads `output.ir` at all — the pretty terminal render has no IR/IO-facts section. mdReport: lib/report.js's treeIo() reads only `ir.io` (provides/consumes) for the '## HTTP interface' section — the rest of CommonIr (dep graph, per-file tagCounts/loc/symbols) is never rendered; --json only for the rest."
+    },
+    "layerCoChurn": {
+      "mcpAnalyzeReply": "omit",
+      "jsCliRender": "omit",
+      "mdReport": "omit",
+      "note": "Never referenced anywhere in packages/mcp/src, lib/format.js, or lib/report.js. --json only. Flagged alongside `folders`/`ruleTimings`/`scores`/`seams` as a field with zero representation across all three surfaces."
+    },
+    "nodes": {
+      "mcpAnalyzeReply": "omit",
+      "jsCliRender": "omit",
+      "mdReport": "carry-conditional",
+      "note": "mcpAnalyzeReply: the FileNode list is never forwarded (`architecture.criticalTop` derives from `critical`, a separately-ranked view, not from `nodes`). jsCliRender: lib/format.js never reads `output.nodes` — no hotspot line in the pretty terminal render, unlike report.md. mdReport: architectureSectionLines renders only the top 5 hotspots (by hotspotScore, ties broken by path) as a table — the full per-file node list (tagCounts, loc, every metric) is --json only."
+    },
+    "packsLoaded": {
+      "mcpAnalyzeReply": "carry",
+      "jsCliRender": "carry-conditional",
+      "mdReport": "carry",
+      "note": "jsCliRender: the pretty terminal render only prints the pack-load confirmation line behind `--all` (showAllInfo) via collectPacksLoaded/packsLoadedLine (lib/format.js) — the default view stays quiet. Always present in --json regardless of the flag."
+    },
+    "recommendations": {
+      "mcpAnalyzeReply": "carry-conditional",
+      "jsCliRender": "carry-conditional",
+      "mdReport": "carry-conditional",
+      "note": "mcpAnalyzeReply: only recommendations[0] (the top ROI-ranked entry) rides `architecture.topRecommendation` ({id, severity, topItem}) — remaining recommendations and each one's full items list are --json only. jsCliRender: architectureSummaryLines prints only the top recommendation's id inline with the pain line — no severity, no items, no other recommendations. mdReport: architectureSectionLines prints up to the top 3 recommendations, each showing only its own top-ROI item (path + note) — remaining items per recommendation, and any recommendation past the third, are --json only."
+    },
+    "ruleTimings": {
+      "mcpAnalyzeReply": "omit",
+      "jsCliRender": "omit",
+      "mdReport": "omit",
+      "note": "Per-rule performance-timing diagnostic, never referenced in packages/mcp/src, lib/format.js, or lib/report.js. --json only — not meant for a curated AI-consumer or human-facing summary."
+    },
+    "scores": {
+      "mcpAnalyzeReply": "omit",
+      "jsCliRender": "omit",
+      "mdReport": "omit",
+      "note": "The raw per-metric Scores struct (which feeds health/recommendations) is never forwarded directly by any surface — only the DERIVED `health.pain` and top `recommendations[0]` reach the MCP reply/pretty render/report.md via the architecture summary/section. Raw scores --json only."
+    },
+    "seams": {
+      "mcpAnalyzeReply": "omit",
+      "jsCliRender": "omit",
+      "mdReport": "omit",
+      "note": "SeamCandidate list never referenced in packages/mcp/src, lib/format.js, or lib/report.js. --json only."
+    },
+    "warnings": {
+      "mcpAnalyzeReply": "carry",
+      "jsCliRender": "carry",
+      "mdReport": "carry",
+      "note": ""
+    }
+  },
+  "multiAnalyzeOutputView": {
+    "trees": {
+      "mcpAnalyzeReply": "carry-conditional",
+      "jsCliRender": "carry",
+      "mdReport": "carry",
+      "note": "mcpAnalyzeReply: cross_repo reshapes each tree entry into a compact `sources[]` row ({sourceId, path, fileCount, findingCount, packsLoaded, warnings, coverage, ruleOverridesApplied?}) — the raw per-tree AnalyzeOutputView (nodes/scores/health/critical/ir/...) is never forwarded whole; see analyzeOutputView's own rows for what any one nested field gets on its own. jsCliRender/mdReport carry: format.js and report.js both fully iterate `output.trees`, extracting findings/warnings/packsLoaded/coverage/health/recommendations per tree (report.js additionally emits one markdown file per tree)."
+    },
+    "crossLayer": {
+      "mcpAnalyzeReply": "carry-conditional",
+      "jsCliRender": "omit",
+      "mdReport": "carry",
+      "note": "mcpAnalyzeReply: cross_repo shapes crossLayer into bucket counts (`buckets.*`), capped edges (`edges`, DEFAULT_EDGES_LIMIT=200, with `edgesTruncated` disclosure), and capped distinct bucket keys (`bucketKeys`/`bucketKeySites`, DEFAULT_BUCKET_KEYS_LIMIT=20, with `bucketKeysTruncated`) — never the raw CrossLayerResult object verbatim. jsCliRender: lib/format.js never reads `output.crossLayer` directly (only `crossLayerFindings`, the native-rule findings computed over it) — the raw edges/unprovidedConsumes/unconsumedProvides/unresolvedConsumes/externalConsumes/ambiguousConsumes buckets have no terminal pretty-render surface; fully rendered in report.md's cross-repo.md (buildCrossRepoMarkdown) and --json."
+    },
+    "crossLayerFindings": {
+      "mcpAnalyzeReply": "carry-conditional",
+      "jsCliRender": "carry",
+      "mdReport": "carry",
+      "note": "mcpAnalyzeReply: shaped via output::shape_findings identically to per-tree findings (total/bySeverity/byRule/shown+truncated) — never the raw array verbatim."
+    },
+    "warnings": {
+      "mcpAnalyzeReply": "carry-conditional",
+      "jsCliRender": "carry",
+      "mdReport": "carry-conditional",
+      "note": "mcpAnalyzeReply: forwarded to `summary.warnings` only when the top-level key is present AND non-empty (`v.get(\"warnings\")` in the cross summary handler) — unlike the always-serialized per-tree warnings/configWarnings fields, this run-level channel is presence-gated, not an unconditional index. mdReport: rendered as a '## Run warnings' section in cross-repo.md when non-empty (buildCrossRepoMarkdown). History: this row was the registry's first catch — when first authored, buildCrossRepoMarkdown never read the run-level field at all (the parallel-implementation-tripwire self-report had NO markdown surface), the exact silent-drop shape this registry exists to prevent; fixed in the same batch."
+    },
+    "disclosure": {
+      "mcpAnalyzeReply": "carry",
+      "jsCliRender": "omit",
+      "mdReport": "carry",
+      "note": "jsCliRender: lib/format.js never renders the disclosure registry for a multi-tree run either (same gap as the single-tree case) — --json/report.md only. mdReport: buildCrossRepoMarkdown's disclosureLines footer is emitted once for the whole run (per-tree files omit it by design, since it is run-global, not per-tree)."
+    }
+  }
+}

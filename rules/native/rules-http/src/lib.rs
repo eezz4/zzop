@@ -42,7 +42,8 @@ pub use http_scan::{
     ScanUnsafeReadEndpointInput,
 };
 pub use mutating_route_no_auth::{
-    scan_mutating_route_no_auth, ScanMutatingRouteNoAuthInput, DEFAULT_AUTH_GUARD_PATTERN,
+    scan_mutating_route_no_auth, ScanMutatingRouteNoAuthInput, CALL_GRAPH_COVERED_EXTENSIONS,
+    DEFAULT_AUTH_GUARD_PATTERN,
 };
 pub use route_shadowing::route_shadowing_findings;
 pub use unprovided_consume::unprovided_consume_findings;

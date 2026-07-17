@@ -33,6 +33,7 @@ fn healthy() -> DiagnosticsInput {
 fn a_healthy_run_produces_no_warnings_and_echoes_the_counts() {
     let d = build_diagnostics(healthy());
     assert!(d.warnings.is_empty());
+    assert!(d.config_warnings.is_empty());
     assert_eq!(d.files, 100);
     assert_eq!(d.git.as_ref().unwrap().fix_changes, 110);
 }
@@ -263,24 +264,37 @@ fn git_none_suppresses_every_git_window_warning_even_with_pathological_file_coun
 
 #[test]
 fn warns_when_a_disabled_rules_entry_matches_no_known_id() {
+    // Config-channel diagnostic — rides `config_warnings`, NOT `warnings` (2026-07-17 split; see
+    // `AnalysisDiagnostics::config_warnings`'s doc).
     let d = build_diagnostics(DiagnosticsInput {
         unknown_disabled_rule_ids: vec!["typescript/as-cast-typo".to_string()],
         ..healthy()
     });
+    assert!(
+        !d.warnings
+            .iter()
+            .any(|w| w.contains("matching no known rule id")),
+        "must NOT duplicate into warnings, got: {:?}",
+        d.warnings
+    );
     let w = d
-        .warnings
+        .config_warnings
         .iter()
         .find(|w| w.contains("matching no known rule id"))
-        .expect("expected an unknown-disabled-rule-id warning");
+        .expect("expected an unknown-disabled-rule-id config warning");
     assert!(w.contains("typescript/as-cast-typo"));
     assert!(w.contains("did NOT disable anything"));
+    assert!(
+        w.contains("1 entry matching"),
+        "singular count must read '1 entry', not '1 entries' or the old '1 entry/entries', got: {w:?}"
+    );
 }
 
 #[test]
 fn does_not_warn_about_unknown_disabled_rules_when_the_list_is_empty() {
     let d = build_diagnostics(healthy());
     assert!(!d
-        .warnings
+        .config_warnings
         .iter()
         .any(|w| w.contains("matching no known rule id")));
 }
@@ -296,25 +310,33 @@ fn unknown_disabled_rule_ids_are_sorted_and_deduplicated_in_the_warning() {
         ..healthy()
     });
     let w = d
-        .warnings
+        .config_warnings
         .iter()
         .find(|w| w.contains("matching no known rule id"))
-        .expect("expected an unknown-disabled-rule-id warning");
-    assert!(w.contains("2 entry/entries"));
+        .expect("expected an unknown-disabled-rule-id config warning");
+    assert!(w.contains("2 entries"));
     assert!(w.contains("a-pack/typo, z-pack/typo"));
 }
 
 #[test]
 fn warns_when_a_severity_override_entry_matches_no_known_id() {
+    // Config-channel diagnostic — rides `config_warnings`, NOT `warnings` (see above).
     let d = build_diagnostics(DiagnosticsInput {
         unknown_severity_override_ids: vec!["n-plus-one".to_string()],
         ..healthy()
     });
+    assert!(
+        !d.warnings
+            .iter()
+            .any(|w| w.contains("matching no known rule id")),
+        "must NOT duplicate into warnings, got: {:?}",
+        d.warnings
+    );
     let w = d
-        .warnings
+        .config_warnings
         .iter()
         .find(|w| w.contains("matching no known rule id") && w.contains("severityOverrides"))
-        .expect("expected an unknown-severity-override-id warning");
+        .expect("expected an unknown-severity-override-id config warning");
     assert!(w.contains("n-plus-one"));
     assert!(w.contains("did NOT remap"));
 }
@@ -323,7 +345,7 @@ fn warns_when_a_severity_override_entry_matches_no_known_id() {
 fn does_not_warn_about_unknown_severity_overrides_when_the_list_is_empty() {
     let d = build_diagnostics(healthy());
     assert!(!d
-        .warnings
+        .config_warnings
         .iter()
         .any(|w| w.contains("severityOverrides") && w.contains("matching no known rule id")));
 }
@@ -339,11 +361,11 @@ fn unknown_severity_override_ids_are_sorted_and_deduplicated_in_the_warning() {
         ..healthy()
     });
     let w = d
-        .warnings
+        .config_warnings
         .iter()
         .find(|w| w.contains("severityOverrides") && w.contains("matching no known rule id"))
-        .expect("expected an unknown-severity-override-id warning");
-    assert!(w.contains("2 entry/entries"));
+        .expect("expected an unknown-severity-override-id config warning");
+    assert!(w.contains("2 entries"));
     assert!(w.contains("a-pack/typo, z-pack/typo"));
 }
 
@@ -386,6 +408,6 @@ fn unknown_suppression_rule_ids_are_sorted_and_deduplicated_in_the_warning() {
         .iter()
         .find(|w| w.contains("suppressions have") && w.contains("matches no known rule id"))
         .expect("expected an unknown-suppression-rule-id warning");
-    assert!(w.contains("2 entry/entries"));
+    assert!(w.contains("2 entries"));
     assert!(w.contains("a-pack/typo, z-pack/typo"));
 }

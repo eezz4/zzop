@@ -2006,6 +2006,7 @@ dependencies = [
  "zzop-parser-prisma",
  "zzop-parser-python-3",
  "zzop-parser-rust",
+ "zzop-parser-sql",
  "zzop-parser-typescript",
  "zzop-rules-cross-layer",
  "zzop-rules-graph",
@@ -2047,7 +2048,7 @@ version = "0.0.0"
 dependencies = [
  "serde_json",
  "zzop-config",
- "zzop-facade",
+ "zzop-summary",
 ]
 
 [[package]]
@@ -2118,6 +2119,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "zzop-parser-sql"
+version = "0.0.0"
+dependencies = [
+ "regex",
+ "zzop-core",
+]
+
+[[package]]
 name = "zzop-parser-typescript"
 version = "0.0.0"
 dependencies = [
@@ -2174,4 +2183,13 @@ dependencies = [
  "serde",
  "serde_json",
  "zzop-core",
+]
+
+[[package]]
+name = "zzop-summary"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "zzop-config",
+ "zzop-facade",
 ]

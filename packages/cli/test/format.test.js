@@ -237,6 +237,20 @@ test('collectWarnings gathers engine warnings, tagging multi-tree entries by sou
   assert.deepEqual(collectWarnings({}), []);
 });
 
+test('collectWarnings surfaces configWarnings (unknown-rule-id diagnostics) after warnings', () => {
+  assert.deepEqual(
+    collectWarnings({ warnings: ['w'], configWarnings: ['typo did NOT disable anything'] }),
+    ['w', 'typo did NOT disable anything']
+  );
+  assert.deepEqual(
+    collectWarnings({
+      trees: [{ sourceId: 'api', output: { warnings: ['x'], configWarnings: ['cw'] } }],
+      warnings: ['top'],
+    }),
+    ['[api] x', '[api] cw', 'top']
+  );
+});
+
 test('formatJson pretty-prints the raw output', () => {
   const out = formatJson(singleOutput);
   assert.equal(out, JSON.stringify(singleOutput, null, 2));
@@ -606,4 +620,190 @@ test('formatPretty --all prints the honest zero state for an empty packsLoaded a
     { color: false, showAllInfo: true }
   );
   assert.ok(out.includes('0 packs loaded (0 rules)'), `got:\n${out}`);
+});
+
+// --- ruleOverridesApplied — the D13③ positive disable/remap acknowledgment (item 1) ------------------
+
+const { collectRuleOverridesApplied, ruleOverridesAppliedLines, architectureSummaryLines } = require('../lib/format');
+
+test('collectRuleOverridesApplied: single-tree passes the object through as a one-entry array', () => {
+  const out = collectRuleOverridesApplied({
+    fileCount: 1,
+    findings: [],
+    ruleOverridesApplied: { disabled: ['be-reliability/body-limit-missing'], severityRemapped: [] },
+  });
+  assert.deepEqual(out, [{ disabled: ['be-reliability/body-limit-missing'], severityRemapped: [] }]);
+});
+
+test('collectRuleOverridesApplied: absent field (older engine, or nothing requested) is null', () => {
+  assert.equal(collectRuleOverridesApplied({ fileCount: 1, findings: [] }), null);
+  assert.equal(collectRuleOverridesApplied(null), null);
+  assert.equal(collectRuleOverridesApplied({}), null);
+});
+
+test('collectRuleOverridesApplied: multi-tree identical entries merge into one untagged entry', () => {
+  const output = {
+    trees: [
+      { sourceId: 'api', output: { ruleOverridesApplied: { disabled: ['x'], severityRemapped: [] } } },
+      { sourceId: 'web', output: { ruleOverridesApplied: { disabled: ['x'], severityRemapped: [] } } },
+    ],
+    crossLayer: {},
+  };
+  assert.deepEqual(collectRuleOverridesApplied(output), [{ disabled: ['x'], severityRemapped: [] }]);
+});
+
+test('collectRuleOverridesApplied: multi-tree entries that DIFFER keep both, sourceId-tagged', () => {
+  const output = {
+    trees: [
+      { sourceId: 'api', output: { ruleOverridesApplied: { disabled: ['x'], severityRemapped: [] } } },
+      { sourceId: 'web', output: { ruleOverridesApplied: { disabled: ['y'], severityRemapped: ['z'] } } },
+    ],
+    crossLayer: {},
+  };
+  assert.deepEqual(collectRuleOverridesApplied(output), [
+    { disabled: ['x'], severityRemapped: [], sourceId: 'api' },
+    { disabled: ['y'], severityRemapped: ['z'], sourceId: 'web' },
+  ]);
+});
+
+test('collectRuleOverridesApplied: multi-tree with the field on no tree at all is null', () => {
+  const output = { trees: [{ sourceId: 'api', output: {} }], crossLayer: {} };
+  assert.equal(collectRuleOverridesApplied(output), null);
+});
+
+test('ruleOverridesAppliedLines: renders the compact acknowledgment line with a config-path suffix', () => {
+  const lines = ruleOverridesAppliedLines(
+    [{ disabled: ['be-reliability/body-limit-missing'], severityRemapped: [] }],
+    false,
+    'zzop.config.jsonc'
+  );
+  assert.deepEqual(lines, [
+    'config: 1 rule disabled (be-reliability/body-limit-missing), 0 severities remapped — zzop.config.jsonc',
+  ]);
+});
+
+test('ruleOverridesAppliedLines: skips an entry where nothing actually applied (both lists empty)', () => {
+  assert.deepEqual(ruleOverridesAppliedLines([{ disabled: [], severityRemapped: [] }], false), []);
+});
+
+test('ruleOverridesAppliedLines: multi-tree tags each differing entry and pluralizes correctly', () => {
+  const lines = ruleOverridesAppliedLines(
+    [
+      { disabled: ['a', 'b'], severityRemapped: [], sourceId: 'api' },
+      { disabled: [], severityRemapped: ['c'], sourceId: 'web' },
+    ],
+    false
+  );
+  assert.deepEqual(lines, [
+    'config: [api] 2 rules disabled (a, b), 0 severities remapped',
+    'config: [web] 0 rules disabled, 1 severity remapped (c)',
+  ]);
+});
+
+test('formatPretty prints the acknowledgment line in the DEFAULT view (not gated on --all)', () => {
+  const output = {
+    fileCount: 1,
+    findings: [],
+    ruleOverridesApplied: { disabled: ['be-reliability/body-limit-missing'], severityRemapped: [] },
+  };
+  const out = formatPretty(output, { color: false, configPath: 'zzop.config.jsonc' });
+  assert.match(out, /config: 1 rule disabled \(be-reliability\/body-limit-missing\), 0 severities remapped — zzop\.config\.jsonc/);
+});
+
+test('formatPretty prints nothing extra when ruleOverridesApplied is absent (regression guard)', () => {
+  const out = formatPretty(singleOutput, { color: false });
+  assert.doesNotMatch(out, /^config: /m);
+});
+
+// --- architecture/io summary block (item 2) ------------------------------------------------------------
+
+test('architectureSummaryLines: single-tree renders an io line and a pain/top-recommendation line', () => {
+  const output = {
+    fileCount: 1,
+    findings: [],
+    coverage: { ioProvides: 20, ioConsumesKeyed: 1 },
+    health: { pain: 47.8, contributors: [] },
+    recommendations: [{ id: 'circular', severity: 'critical', items: [] }],
+  };
+  const lines = architectureSummaryLines(output);
+  assert.deepEqual(lines, [
+    'io: 20 provides / 1 keyed consume (see report or --json ir.io)',
+    'architecture: pain 47.8, top recommendation: circular (details in report/--json)',
+  ]);
+});
+
+test('architectureSummaryLines: degrades to [] when health/coverage/recommendations are entirely absent', () => {
+  assert.deepEqual(architectureSummaryLines({ fileCount: 1, findings: [] }), []);
+  assert.deepEqual(architectureSummaryLines(null), []);
+});
+
+test('architectureSummaryLines: prints the io line even with no health (e.g. git disabled), never "undefined"', () => {
+  const output = { fileCount: 1, findings: [], coverage: { ioProvides: 0, ioConsumesKeyed: 0 } };
+  const lines = architectureSummaryLines(output);
+  assert.deepEqual(lines, ['io: 0 provides / 0 keyed consumes (see report or --json ir.io)']);
+  assert.ok(!lines.some((l) => l.includes('undefined')));
+});
+
+test('architectureSummaryLines: multi-tree sums io across trees and tags one architecture line per tree', () => {
+  const output = {
+    trees: [
+      {
+        sourceId: 'fe-vue',
+        output: { coverage: { ioProvides: 5, ioConsumesKeyed: 2 }, health: { pain: 39.8 }, recommendations: [{ id: 'circular' }] },
+      },
+      {
+        sourceId: 'be-express',
+        output: { coverage: { ioProvides: 20, ioConsumesKeyed: 1 }, health: { pain: 47.8 }, recommendations: [{ id: 'fat-fanout' }] },
+      },
+    ],
+    crossLayer: {},
+  };
+  const lines = architectureSummaryLines(output);
+  assert.deepEqual(lines, [
+    'io: 25 provides / 3 keyed consumes (see report or --json ir.io)',
+    'architecture: [fe-vue] pain 39.8, top recommendation: circular (details in report/--json)',
+    'architecture: [be-express] pain 47.8, top recommendation: fat-fanout (details in report/--json)',
+  ]);
+});
+
+test('architectureSummaryLines: multi-tree skips a tree with no health, tags only the ones that have it', () => {
+  const output = {
+    trees: [
+      { sourceId: 'fe-vue', output: { coverage: { ioProvides: 5, ioConsumesKeyed: 2 } } },
+      { sourceId: 'be-express', output: { coverage: { ioProvides: 20, ioConsumesKeyed: 1 }, health: { pain: 47.8 }, recommendations: [] } },
+    ],
+    crossLayer: {},
+  };
+  const lines = architectureSummaryLines(output);
+  assert.deepEqual(lines, [
+    'io: 25 provides / 3 keyed consumes (see report or --json ir.io)',
+    'architecture: [be-express] pain 47.8 (details in report/--json)',
+  ]);
+});
+
+test('formatPretty prints the architecture/io summary block in the DEFAULT view, after the findings', () => {
+  const output = {
+    fileCount: 1,
+    findings: [{ ruleId: 'r', severity: 'warning', file: 'a.ts', line: 1, message: 'm' }],
+    coverage: { ioProvides: 20, ioConsumesKeyed: 1 },
+    health: { pain: 47.8 },
+    recommendations: [{ id: 'circular' }],
+  };
+  const out = formatPretty(output, { color: false });
+  assert.match(out, /io: 20 provides \/ 1 keyed consume \(see report or --json ir\.io\)/);
+  assert.match(out, /architecture: pain 47\.8, top recommendation: circular \(details in report\/--json\)/);
+  assert.ok(out.indexOf('a.ts') < out.indexOf('io: 20 provides'), 'summary block comes after the findings section');
+});
+
+test('formatJson: ruleOverridesApplied on the raw output is passed through untouched (item 1a)', () => {
+  const output = {
+    fileCount: 1,
+    findings: [],
+    ruleOverridesApplied: { disabled: ['be-reliability/body-limit-missing'], severityRemapped: [] },
+  };
+  const parsed = JSON.parse(formatJson(output));
+  assert.deepEqual(parsed.ruleOverridesApplied, {
+    disabled: ['be-reliability/body-limit-missing'],
+    severityRemapped: [],
+  });
 });

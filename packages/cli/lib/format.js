@@ -76,9 +76,11 @@ function collectFindings(output) {
 }
 
 /**
- * Collect the engine's self-reported `warnings` (non-fatal issues + capability self-report notes) from a
- * parsed native output, tagging multi-tree entries with their sourceId. The engine reports a narrowed scope
- * here rather than failing or silently degrading; the CLI must surface these, not swallow them.
+ * Collect the engine's self-reported `warnings` (non-fatal issues + capability self-report notes) AND
+ * `configWarnings` (engine-side config diagnostics, e.g. unknown-rule-id overrides that did NOT apply)
+ * from a parsed native output, tagging multi-tree entries with their sourceId. The engine reports a
+ * narrowed scope here rather than failing or silently degrading; the CLI must surface these, not swallow
+ * them — a dropped configWarning means a config typo produces zero feedback.
  *
  * @param {object} output  parsed native output
  * @returns {string[]}
@@ -93,10 +95,13 @@ function collectWarnings(output) {
   if (Array.isArray(output.trees)) {
     for (const tree of output.trees) {
       push(tree && tree.output && tree.output.warnings, tree && tree.sourceId);
+      push(tree && tree.output && tree.output.configWarnings, tree && tree.sourceId);
     }
     push(output.warnings);
+    push(output.configWarnings);
   } else {
     push(output.warnings);
+    push(output.configWarnings);
   }
   return out;
 }
@@ -170,6 +175,143 @@ function packsLoadedLine(packs, color) {
     })
     .join(', ');
   return paint(ids ? `${head}: ${ids}` : head, ANSI.dim, color);
+}
+
+/**
+ * Collect the engine's D13③ positive rule-override confirmation (`ruleOverridesApplied`,
+ * `{disabled, severityRemapped}` — both known-id-only string arrays, see `crates/engine/src/output.rs`'s
+ * `RuleOverridesApplied` doc) from a parsed native output. Mirrors `collectPacksLoaded`'s multi-tree
+ * merge/tag convention exactly: single-tree returns the one entry as-is; multi-tree entries that are
+ * IDENTICAL across every tree (the common one-shared-config case — this CLI's `disabledRules`/
+ * `severityOverrides` are always config-wide, never per-tree) merge into one untagged entry, while a
+ * genuine per-tree difference (a future per-tree override, or a DSL id only known to one tree's loaded
+ * packs) keeps each tree's own entry, tagged `sourceId`, so the summary never states a value that matches
+ * no actual tree. Returns `null` when NO tree/run reports the field at all (an output from an older
+ * engine, or a run that requested no override at all — see the field's own "omitted, never `{}`, when
+ * nothing was requested" contract) so callers can tell "engine did not report" apart from a real
+ * requested-but-matched-nothing `{disabled: [], severityRemapped: []}`.
+ *
+ * @param {object} output  parsed native output
+ * @returns {{ disabled: string[], severityRemapped: string[], sourceId?: string }[] | null}
+ */
+function collectRuleOverridesApplied(output) {
+  if (!output || typeof output !== 'object') return null;
+
+  const normalize = (applied) => ({
+    disabled: Array.isArray(applied && applied.disabled) ? applied.disabled : [],
+    severityRemapped: Array.isArray(applied && applied.severityRemapped) ? applied.severityRemapped : [],
+  });
+
+  if (Array.isArray(output.trees)) {
+    let seenField = false;
+    const perTree = [];
+    for (const tree of output.trees) {
+      const applied = tree && tree.output && tree.output.ruleOverridesApplied;
+      if (!applied || typeof applied !== 'object') continue;
+      seenField = true;
+      perTree.push({ ...normalize(applied), sourceId: tree && tree.sourceId });
+    }
+    if (!seenField) return null;
+    const same = (a, b) =>
+      JSON.stringify(a.disabled) === JSON.stringify(b.disabled) &&
+      JSON.stringify(a.severityRemapped) === JSON.stringify(b.severityRemapped);
+    if (perTree.every((e) => same(e, perTree[0]))) {
+      const { sourceId: _dropped, ...rest } = perTree[0];
+      return [rest];
+    }
+    return perTree;
+  }
+
+  const applied = output.ruleOverridesApplied;
+  if (!applied || typeof applied !== 'object') return null;
+  return [normalize(applied)];
+}
+
+/**
+ * Render `collectRuleOverridesApplied`'s result as the pretty-mode positive acknowledgment line(s) —
+ * the D13③ "this disable/remap actually took effect" confirmation, one line per distinct entry (usually
+ * just one; see `collectRuleOverridesApplied`'s per-tree-tag doc). Entries where NOTHING actually applied
+ * (both lists empty — every requested id was unknown, already covered by the `configWarnings` typo
+ * channel) are skipped: this line only fires "when overrides applied", not on every run that merely
+ * requested one. `configPath`, when given, is appended so the line names which config file is responsible.
+ *
+ * @param {{disabled: string[], severityRemapped: string[], sourceId?: string}[]} entries
+ * @param {boolean} color
+ * @param {string} [configPath]
+ * @returns {string[]}
+ */
+function ruleOverridesAppliedLines(entries, color, configPath) {
+  const lines = [];
+  for (const entry of entries) {
+    const disabledN = entry.disabled.length;
+    const remappedN = entry.severityRemapped.length;
+    if (disabledN === 0 && remappedN === 0) continue;
+    const disabledPart = `${disabledN} rule${disabledN === 1 ? '' : 's'} disabled${
+      disabledN > 0 ? ` (${entry.disabled.join(', ')})` : ''
+    }`;
+    const remappedPart = `${remappedN} severit${remappedN === 1 ? 'y' : 'ies'} remapped${
+      remappedN > 0 ? ` (${entry.severityRemapped.join(', ')})` : ''
+    }`;
+    const tag = entry.sourceId ? `[${entry.sourceId}] ` : '';
+    const suffix = configPath ? ` — ${configPath}` : '';
+    lines.push(paint(`config: ${tag}${disabledPart}, ${remappedPart}${suffix}`, ANSI.dim, color));
+  }
+  return lines;
+}
+
+/**
+ * Compact "architecture half" summary block for the default pretty output (the route surface + the
+ * structural-health index), built ONLY from fields already present in the JSON output
+ * (`coverage`/`health`/`recommendations`) — never a re-derivation. Degrades to `[]` (nothing printed)
+ * when the relevant fields are entirely absent (an envelope-only run with no git-derived health, or an
+ * output that predates a field), never a printed "undefined".
+ *
+ * `io` sums every tree's `coverage.ioProvides`/`ioConsumesKeyed` on a multi-tree run — an honest
+ * run-level total, the same per-metric sum `lib/report.js`'s `buildCrossRepoMarkdown` already computes
+ * for its own census table. `architecture` (`health.pain` + the top ROI-ranked recommendation id) is
+ * inherently PER-TREE — health/recommendations are git-derived per source tree, never rolled up at the
+ * run level (`crates/facade/src/output.rs`'s `MultiAnalyzeOutputView` carries neither field on itself) —
+ * so a multi-tree run prints one architecture line per tree that has a `health` value, tagged `[sourceId]`
+ * exactly like `collectWarnings`/`collectRuleOverridesApplied`, rather than inventing a combined score.
+ *
+ * @param {object} output  parsed native output
+ * @returns {string[]}
+ */
+function architectureSummaryLines(output) {
+  if (!output || typeof output !== 'object') return [];
+  const lines = [];
+
+  const coverages = Array.isArray(output.trees)
+    ? output.trees.map((t) => t && t.output && t.output.coverage).filter((c) => c && typeof c === 'object')
+    : output.coverage && typeof output.coverage === 'object'
+      ? [output.coverage]
+      : [];
+  if (coverages.length > 0) {
+    const provides = coverages.reduce((n, c) => n + (Number(c.ioProvides) || 0), 0);
+    const keyed = coverages.reduce((n, c) => n + (Number(c.ioConsumesKeyed) || 0), 0);
+    lines.push(
+      `io: ${provides} provide${provides === 1 ? '' : 's'} / ${keyed} keyed consume${keyed === 1 ? '' : 's'} (see report or --json ir.io)`
+    );
+  }
+
+  const treeHealth = Array.isArray(output.trees)
+    ? output.trees.map((t) => ({
+        sourceId: t && t.sourceId,
+        health: t && t.output && t.output.health,
+        recommendations: t && t.output && t.output.recommendations,
+      }))
+    : [{ health: output.health, recommendations: output.recommendations }];
+
+  for (const t of treeHealth) {
+    if (!t.health || typeof t.health.pain !== 'number') continue;
+    const recs = Array.isArray(t.recommendations) ? t.recommendations : [];
+    const top = recs.length > 0 && recs[0] ? recs[0].id : null;
+    const tag = t.sourceId ? `[${t.sourceId}] ` : '';
+    const recPart = top ? `, top recommendation: ${top}` : '';
+    lines.push(`architecture: ${tag}pain ${t.health.pain}${recPart} (details in report/--json)`);
+  }
+
+  return lines;
 }
 
 /**
@@ -324,8 +466,13 @@ function renderFindingLine(f, color, verbose) {
  * path can legitimately exist in two different trees in a multi-tree run, so grouping a two-tree join
  * finding under a bare file header (already used by that OTHER tree's own findings) would misattribute it.
  *
+ * The config-override acknowledgment (`ruleOverridesApplied`) and the compact architecture/io summary
+ * block (`health`/`recommendations`/`coverage`) print in the DEFAULT view too (unlike `packsLoaded`,
+ * which stays `--all`-only) — see `ruleOverridesAppliedLines`/`architectureSummaryLines`'s own docs.
+ * Both degrade to nothing when their fields are absent, so an older/envelope output is unaffected.
+ *
  * @param {object} output  parsed native output
- * @param {{ color?: boolean, showAllInfo?: boolean, minSeverity?: 'critical'|'warning'|'info'|'off'|null }} [opts]
+ * @param {{ color?: boolean, showAllInfo?: boolean, minSeverity?: 'critical'|'warning'|'info'|'off'|null, configPath?: string }} [opts]
  * @returns {string}
  */
 function formatPretty(output, opts = {}) {
@@ -336,10 +483,19 @@ function formatPretty(output, opts = {}) {
   // in the JSON output regardless). `null` = the output predates the field; print nothing.
   const packs = showAllInfo ? collectPacksLoaded(output) : null;
 
+  // Positive config-override acknowledgment + the architecture/io summary block — both always-on (not
+  // gated on `--all`), both empty arrays (nothing printed) when their source fields are absent.
+  const overrideEntries = collectRuleOverridesApplied(output);
+  const summaryLines = [
+    ...(overrideEntries ? ruleOverridesAppliedLines(overrideEntries, color, opts.configPath) : []),
+    ...architectureSummaryLines(output),
+  ];
+
   if (findings.length === 0) {
     const ok = paint('No findings.', ANSI.dim, color);
     const packsBlock = packs ? `${packsLoadedLine(packs, color)}\n` : '';
-    return `${ok}\n\n${packsBlock}${summaryFooter(findings, fileCount, color)}`;
+    const summaryBlock = summaryLines.length > 0 ? `${summaryLines.join('\n')}\n` : '';
+    return `${ok}\n\n${packsBlock}${summaryBlock}${summaryFooter(findings, fileCount, color)}`;
   }
 
   // Split info (foldable, hygiene-tier) from elevated (warning/critical/other — always shown inline).
@@ -394,6 +550,9 @@ function formatPretty(output, opts = {}) {
 
   if (packs) {
     lines.push(packsLoadedLine(packs, color));
+  }
+  if (summaryLines.length > 0) {
+    lines.push(...summaryLines);
   }
   lines.push(summaryFooter(findings, fileCount, color));
   return lines.join('\n');
@@ -489,6 +648,9 @@ module.exports = {
   collectFindings,
   collectPacksLoaded,
   collectWarnings,
+  collectRuleOverridesApplied,
+  ruleOverridesAppliedLines,
+  architectureSummaryLines,
   packsLoadedLine,
   groupByFile,
   countBySeverity,

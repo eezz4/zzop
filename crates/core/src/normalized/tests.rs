@@ -288,3 +288,29 @@ fn collects_multiple_errors_at_once() {
     let errors = validate_envelope(&json).unwrap_err();
     assert_eq!(errors.len(), 2);
 }
+
+#[test]
+fn a_json_array_root_reports_the_array_diagnosis_not_a_field_type_mismatch() {
+    // Before the fix, a JSON array root fell into serde's struct-from-sequence fallback, reporting a
+    // misleading field-level message ("invalid type: integer `1`, expected a string") instead of
+    // naming the real problem — the root itself is the wrong shape.
+    let errors = validate_envelope("[1,2,3]").unwrap_err();
+    assert_eq!(
+        errors,
+        vec!["expected a JSON object envelope, got an array"]
+    );
+}
+
+#[test]
+fn non_array_non_object_roots_keep_their_already_clear_serde_message() {
+    // string/number/bool/null all already hit serde's "invalid type: X, expected struct
+    // NormalizedEnvelope" branch (unlike an array, they are never accepted as a positional fallback),
+    // so these must NOT be rerouted through the array-only diagnosis.
+    for json in ["\"hello\"", "42", "true", "null"] {
+        let errors = validate_envelope(json).unwrap_err();
+        assert!(
+            errors[0].contains("expected struct NormalizedEnvelope"),
+            "expected the original clear serde message for {json}, got: {errors:?}"
+        );
+    }
+}

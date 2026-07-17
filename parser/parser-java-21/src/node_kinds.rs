@@ -33,6 +33,10 @@ pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     "scoped_identifier",
     "scoped_type_identifier",
     "generic_type",
+    // Calls (`lang::calls`)
+    "method_invocation",
+    "local_variable_declaration",
+    "formal_parameter",
     // Literals/annotations (`util`)
     "string_literal",
     "annotation",

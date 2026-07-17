@@ -8,6 +8,45 @@ use zzop_engine::{EngineConfig, GitOptions, MountRule, PackSource, DEFAULT_SIZE_
 
 use crate::request::{AnalyzeRequest, MountEntryRequest, PacksDir};
 
+/// Renders a rule count with correct pluralization ("1 rule" / "2 rules") — mirrors
+/// `zzop_metrics::diagnostics`'s private `entry_count` helper's pattern (that one is not `pub`, so it
+/// is not importable from here; this is a small local copy over "rule" instead of "entry", not a
+/// duplication of any importable API).
+fn rule_count(n: usize) -> String {
+    if n == 1 {
+        "1 rule".to_string()
+    } else {
+        format!("{n} rules")
+    }
+}
+
+/// The shadow-warning text for [`base_engine_config`]'s same-id collision branches (both the
+/// `pack_defs` loop and the `packs_dirs` loop): a same-id pack from ANY later source silently
+/// replaces an earlier one WHOLE (never a rule-level merge — see this function's callers' doc), and
+/// that replacement itself is unchanged/intentional (the override path `docs/modules/napi.md`'s
+/// "Defaults" section documents). What was missing before this warning existed is the SIGNAL — a
+/// custom pack shipped via `packs.extraDirs`/`packDefs` reusing a bundled (or any other already-loaded)
+/// pack's id silently dropped every rule the earlier pack contributed, with zero acknowledgment
+/// anywhere in `packsLoaded`/`warnings`. `new_source_desc` names where the WINNING (later) pack came
+/// from ("from a packs directory" | "from a later packDefs entry"); the earlier, shadowed pack is
+/// deliberately not claimed to be "the bundled pack" here — this chokepoint sees only `PackSource::
+/// {Dir,Inline}`, not "bundled vs caller-supplied", so a caller's own inline def can just as easily be
+/// the one that gets shadowed by another caller entry or a directory pack.
+fn pack_shadow_warning(
+    id: &str,
+    new_source_desc: &str,
+    old_rules: usize,
+    new_rules: usize,
+) -> String {
+    format!(
+        "pack '{id}' {new_source_desc} replaces an earlier-loaded pack of the same id whole \
+         ({} -> replacement: {}) — rename the pack id if you meant to ADD rules alongside the \
+         earlier ones.",
+        rule_count(old_rules),
+        rule_count(new_rules)
+    )
+}
+
 /// The shared "seed `pack_defs`, load `packs_dir`, build the DSL-pack list + `RuleConfig`" step both
 /// `build_engine_config` (tree-rooted requests) and `analyze_envelope_json` (envelope requests) need.
 ///
@@ -30,6 +69,14 @@ use crate::request::{AnalyzeRequest, MountEntryRequest, PacksDir};
 ///    unreadable directory) are pushed onto `warnings` rather than failing the whole call — same "surface,
 ///    don't crash" contract `load_dsl_packs` itself documents; the caller folds `warnings` into the
 ///    corresponding `AnalyzeOutput`.
+///
+/// Every same-id collision in EITHER loop above (step 1 among `pack_defs` themselves, step 2 among
+/// `packs_dirs`, or step 2 against a step-1 seed) also pushes ONE `pack_shadow_warning` onto
+/// `warnings` — the replacement semantics are unchanged (still later-wins-whole), but before this
+/// warning existed the shadowing was completely silent: `packsLoaded` simply showed the winning
+/// pack's (often smaller) rule count with no trace that another same-id pack had just been dropped
+/// whole. A normal, non-colliding load (every pack id distinct) never hits this — see
+/// `pack_shadow_warning`'s doc for the exact wording and why it does not claim "bundled" specifically.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn base_engine_config(
     source_id: &str,
@@ -61,7 +108,17 @@ pub(crate) fn base_engine_config(
         }
         pack_sources.insert(def.id.clone(), PackSource::Inline);
         match packs.iter_mut().find(|existing| existing.id == def.id) {
-            Some(slot) => *slot = def.clone(), // later inline def wins whole on a same-id collision
+            Some(slot) => {
+                // Later inline def wins whole on a same-id collision — see `pack_shadow_warning`'s
+                // doc for why this fires regardless of which side is "bundled".
+                warnings.push(pack_shadow_warning(
+                    &def.id,
+                    "from a later packDefs entry",
+                    slot.rules.len(),
+                    def.rules.len(),
+                ));
+                *slot = def.clone();
+            }
             None => packs.push(def.clone()),
         }
     }
@@ -82,7 +139,19 @@ pub(crate) fn base_engine_config(
             let _ = path; // load order already deterministic (sorted by file name) — path not needed here.
             pack_sources.insert(pack.id.clone(), PackSource::Dir);
             match packs.iter_mut().find(|existing| existing.id == pack.id) {
-                Some(slot) => *slot = pack, // later directory wins whole-pack on a same-id collision
+                Some(slot) => {
+                    // Later directory wins whole-pack on a same-id collision — this is the
+                    // "silent bundled-pack replacement" case: a `packs.extraDirs`/`packsDir` entry
+                    // reusing an already-loaded id (bundled or otherwise) previously vanished the
+                    // earlier pack with zero acknowledgment.
+                    warnings.push(pack_shadow_warning(
+                        &pack.id,
+                        "from a packs directory",
+                        slot.rules.len(),
+                        pack.rules.len(),
+                    ));
+                    *slot = pack;
+                }
                 None => packs.push(pack),
             }
         }

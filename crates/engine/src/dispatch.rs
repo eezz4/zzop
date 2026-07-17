@@ -24,6 +24,12 @@
 //! `.go` routes to `Language::Go`, a real structural parser (`zzop_parser_go`, tree-sitter-backed) at the
 //! same grade as `TypeScript`/`Python`/`Rust` — see `pipeline::parse_go`'s own doc for the fused-pipeline
 //! wiring. Nothing else maps to `Language::Go`.
+//!
+//! `.sql` routes to `Language::Sql`, a line/regex-level frontend (`zzop_parser_sql` — deliberately no
+//! tree-sitter/`sqlparser` dependency, see that crate's own doc) extracting `CREATE TABLE` statements into
+//! `db-table` io PROVIDEs only. No symbols/imports project for `.sql` (it never joins the shared dep
+//! graph, same as `Prisma`) and no consumes (this engine has no SQL DML/egress extractor). Nothing else
+//! maps to `Language::Sql`.
 
 use std::path::Path;
 
@@ -49,11 +55,16 @@ pub enum Language {
     Python,
     Rust,
     Go,
+    Sql,
 }
 
 /// Directory names skipped entirely during the tree walk: common Node-ecosystem build/dependency dirs,
 /// plus this workspace's own build output dir (`target`). `.yarn` covers Yarn Berry's vendored
-/// package-manager bundle, which is not project source.
+/// package-manager bundle, which is not project source. `zzop-reports` and `.zzop-cache` are zzop's OWN
+/// default output dirs (the JS CLI's `zzop init` template writes `"cacheDir": ".zzop-cache"` and reports
+/// default to `<root>/zzop-reports/` — see `packages/cli/lib/init.js`) — without this entry, a run's own
+/// report/cache output sitting inside the analyzed tree gets walked as source on the NEXT run (self-scan
+/// pollution: the reports dir's file count grows every run, observed live in a blind field test).
 const DEFAULT_SKIP_DIRS: &[&str] = &[
     "node_modules",
     "dist",
@@ -62,6 +73,8 @@ const DEFAULT_SKIP_DIRS: &[&str] = &[
     ".git",
     "target",
     ".yarn",
+    "zzop-reports",
+    ".zzop-cache",
 ];
 
 /// Extensions this engine deliberately never names in the "bring an adapter" per-extension disclosure
@@ -199,6 +212,7 @@ fn dispatch_by_extension(rel_path: &str) -> Option<Language> {
         "py" | "pyi" => Some(Language::Python),
         "rs" => Some(Language::Rust),
         "go" => Some(Language::Go),
+        "sql" => Some(Language::Sql),
         _ => None,
     }
 }

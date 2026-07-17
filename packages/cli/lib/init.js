@@ -91,6 +91,14 @@ const CONFIG_TEMPLATE = `{
   "git": {
     // Window, in days, for each file's recent-activity fields (default 30).
     "recentDays": 30
+    // "since": "1.year", // git-log-style time filter for history collection; omit for full history.
+    // commitTypePatterns: teaches a non-English/non-conventional commit convention. Shape is an ARRAY
+    // of { "tag": "FIX", "pattern": "<regex>" } objects, checked in array order (earlier entries win —
+    // mirrors the built-in REVERT-before-FIX ordering). When present and non-empty it REPLACES the
+    // default FIX/FEAT/REVERT/.../STYLE classifier table entirely, not merges with it. An entry whose
+    // "pattern" fails to compile as a regex is skipped (matches nothing) and reported as a warning,
+    // never a crash. Example:
+    // "commitTypePatterns": [{ "tag": "FIX", "pattern": "^hotfix:" }]
   },
 
   // ── Performance / caching ──────────────────────────────────────────────────

@@ -16,6 +16,7 @@ zzop-parser-java-21 = { path = "../../parser/parser-java-21" }
 zzop-parser-python-3 = { path = "../../parser/parser-python-3" }
 zzop-parser-rust = { path = "../../parser/parser-rust" }
 zzop-parser-go = { path = "../../parser/parser-go" }
+zzop-parser-sql = { path = "../../parser/parser-sql" }
 zzop-rules-graph = { path = "../../rules/native/rules-graph" }
 zzop-rules-http = { path = "../../rules/native/rules-http" }
 zzop-rules-cross-layer = { path = "../../rules/native/rules-cross-layer" }

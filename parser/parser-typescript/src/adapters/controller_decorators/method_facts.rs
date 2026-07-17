@@ -187,3 +187,19 @@ fn method_name(key: &PropName) -> Option<String> {
 pub(super) fn str_value(s: &Str) -> String {
     s.value.as_str().unwrap_or_default().to_string()
 }
+
+#[cfg(test)]
+mod verb_pin {
+    // T2 subset pin: every verb METHOD_DECORATORS emits must be a core join verb — a decorator
+    // mapped to a verb outside `zzop_core::HTTP_KEY_VERBS` would produce permanently unjoinable
+    // provides (the cross-layer key vocabulary is exactly that set).
+    #[test]
+    fn method_decorator_verbs_are_a_subset_of_core_http_key_verbs() {
+        for (_, verb) in super::METHOD_DECORATORS {
+            assert!(
+                zzop_core::HTTP_KEY_VERBS.contains(verb),
+                "METHOD_DECORATORS emits {verb}, not a core HTTP_KEY_VERBS member"
+            );
+        }
+    }
+}

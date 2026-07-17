@@ -81,7 +81,9 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         // consumes composed attributes today.
         let (composed, _attrs) = crate::analyze::compose_router_mount_provides(
             router_mount_pairs,
-            |specifier, from_file| resolve_envelope_specifier(specifier, from_file, &all_paths),
+            |specifier, from_file, _ident| {
+                resolve_envelope_specifier(specifier, from_file, &all_paths)
+            },
         );
         io_provides.extend(composed);
     }
@@ -126,14 +128,10 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     // envelope mode only (the "envelope diagnostics asymmetry" gap). `commits` is empty and `git_active`
     // false: envelope mode never has history, and `build_diagnostics` skips every git-window warning on
     // that gate, so only the structural coverage-gap + unknown-`disabled_rules` self-reports fire.
-    warnings.extend(crate::analyze::run_diagnostics(
-        file_count,
-        &dep,
-        &all_symbols,
-        &[],
-        config,
-        false,
-    ));
+    let diagnostics_report =
+        crate::analyze::run_diagnostics(file_count, &dep, &all_symbols, &[], config, false);
+    warnings.extend(diagnostics_report.warnings);
+    let config_warnings = diagnostics_report.config_warnings;
     let rels: Vec<&str> = loc_by_path.keys().map(String::as_str).collect();
     warnings.extend(crate::analyze::unmatched_suppression_warnings(
         config, &rels,
@@ -141,6 +139,12 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     warnings.extend(crate::analyze::unmatched_global_exclude_warnings(
         config, &rels,
     ));
+    // One census, two consumers — same seam as `analyze::assemble`'s (see `compute_dsl_scope`'s doc):
+    // the zero-applicability warning below and `packs_loaded`'s per-pack `files_in_scope` count.
+    let dsl_scope = crate::analyze::compute_dsl_scope(&config.packs, &rels);
+    if let Some(w) = crate::analyze::no_applicable_dsl_rule_warning(&config.packs, &dsl_scope) {
+        warnings.push(w);
+    }
 
     let mut global_findings = Vec::new();
     if is_enabled(&config.rule_config, "circular") {
@@ -245,9 +249,14 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         seams: Vec::new(),
         folders,
         layer_co_churn: None,
-        packs_loaded: crate::PackLoaded::from_config(config),
+        packs_loaded: crate::PackLoaded::from_config(config, &dsl_scope.files_in_scope_by_pack),
         warnings,
+        config_warnings,
         cache: None,
         rule_timings: None,
+        rule_overrides_applied: crate::analyze::rule_overrides_applied(config),
+        // Envelope mode (Mode A) never runs git collection — no real tree to walk — so this stays
+        // `None` exactly like `scores`/`health`/`critical`/`seams` above.
+        git_window: None,
     }
 }

@@ -72,8 +72,7 @@ use crate::{CacheStats, EngineConfig};
 /// `@Controller(RouteKey.Asset)`-shaped controller's routes on every warm run instead of projecting them.
 ///
 /// `v17` -> `v18`: `FileIrSlice` gains `loop_spans` (`loop-spans-v1`) — a stale entry defaulting it to
-/// empty would silently starve `Matcher::MethodScan::trigger_in_loop` of loop evidence for this file on
-/// every warm run instead of projecting it.
+/// empty would silently starve `Matcher::MethodScan::trigger_in_loop` of loop evidence for this file on every warm run instead of projecting it.
 ///
 /// `v18` -> `v19`: `FileIrSlice` gains `class_shape_fragments` and its `io` payload gains the optional
 /// `IoConsume::body`/`IoProvide::body` shapes (`body-shape-v1`) — a stale entry defaulting them to
@@ -111,7 +110,46 @@ use crate::{CacheStats, EngineConfig};
 /// AST-derived, dot-qualified (`Outer.Inner.method`), REAL-visibility (`exported` reflects
 /// public/protected/package-private/private, not always `true`) symbols — none of which a `#[serde(
 /// default)]`-style migration could safely backfill from an old entry.
-pub const CACHE_SCHEMA_VERSION: &str = "zzop-cache-v25";
+/// `v25` -> `v26`: no field gained/renamed/removed, but every cached DSL finding's `message` content
+/// changed — `pipeline::findings::eval_packs` now appends `zzop_core::disable_hint`'s config-disable
+/// fragment to each DSL finding's message before it reaches `AnalysisCache::put_findings` (D13①). A
+/// pre-existing cache entry's `findings` still deserializes cleanly (same `Finding` shape, `message` is
+/// still a plain `String`) — the usual "old entry satisfies the new shape" case this doc's opening
+/// paragraph says does NOT need a bump — except here staleness is invisible AND user-facing: a warm run
+/// would silently serve the OLD hint-less message forever for any unchanged file, while a cold run (or
+/// any file whose content changes even slightly) gets the new hint, splitting one tree's findings between
+/// two message shapes depending on cache luck. The bump forces every existing entry to recompute once.
+///
+/// `v26` -> `v27`: batch-wide cached-content changes (2026-07-17) — (1) the unknown-`disabledRules`/
+/// `severityOverrides`-id diagnostics moved from the `warnings` channel to the new `configWarnings`
+/// channel, (2) DSL rule message texts in `rules/dsl` were revised, and (3) `packsLoaded` entries
+/// gained the per-pack `filesInScope` count. Same invisible-staleness class as `v25` -> `v26`: an old
+/// entry still deserializes, but a warm run would serve pre-change message text forever, splitting one
+/// tree's output between two shapes depending on cache luck.
+///
+/// `v27` -> `v28`: second blind-round-3 fix batch (2026-07-17) — (1) the unresolved-rule-id diagnostics'
+/// "N entry/entries" double-word form was replaced with correctly-pluralized text, (2) several
+/// `ir.io`-pointing disclosure texts gained a "where it's actually reachable" parenthetical, (3) the
+/// `cross-layer/unconsumed-endpoint`/`unconsumed-mutation-endpoint` findings gained an appended
+/// extraction-blindness caveat sentence when a sibling tree contributed zero joinable io, and (4) a new
+/// framework-silence tripwire (S6, `orm_schema_silence_warning`) can now fire a brand-new warning class
+/// that never existed in any older cache entry. Same invisible-staleness class as `v25` -> `v26`/`v26` ->
+/// `v27`: a warm run would otherwise serve pre-change text (or simply never emit the new S6 warning at
+/// all) forever for any unchanged file.
+///
+/// `v28` -> `v29`: blind-field-test fix batch W2 (2026-07-17) — (1) several DSL pack `file_pattern`s
+/// were narrowed to stop over-broad cross-language false-fires (a pack scope change can change which
+/// files a rule even considers, so a cached finding computed under the OLD broader scope may no
+/// longer be correct), and (2) `zzop-facade`'s pack-merge chokepoint now emits a new shadow-warning
+/// class when a same-id pack replaces an already-loaded one whole. Same invisible-staleness class as
+/// the prior bumps: a warm run would otherwise keep serving findings scoped/warned under the old
+/// rules forever for any unchanged file.
+///
+/// `v29` -> `v30`: blind-field-test fix batch W3-A (2026-07-17) — the overlay synthetic-entry warning
+/// text changed and the unparsed-extension warning's Mode A/B wording was corrected; same
+/// invisible-staleness class as the prior bumps (a warm run would otherwise keep serving OLD text).
+/// `v30` -> `v31`: `Language` gains `Sql` (`.sql` -> `zzop_parser_sql` db-table provides) — same bump class as Rust/Go above.
+pub const CACHE_SCHEMA_VERSION: &str = "zzop-cache-v31";
 
 /// Fingerprint for files that never reach a structural parser crate in the fused pass: no `Language` match
 /// (`dispatch::dispatch` returned `None` — unrecognized extension), or the size-cap lexical fallback
@@ -194,6 +232,7 @@ pub(crate) fn parser_fingerprint(language: Option<Language>, config: &EngineConf
         Some(Language::Python) => zzop_parser_python_3::PARSER_FINGERPRINT.to_string(),
         Some(Language::Rust) => zzop_parser_rust::PARSER_FINGERPRINT.to_string(),
         Some(Language::Go) => zzop_parser_go::PARSER_FINGERPRINT.to_string(),
+        Some(Language::Sql) => zzop_parser_sql::PARSER_FINGERPRINT.to_string(),
         None => LEXICAL_FALLBACK_FINGERPRINT.to_string(),
     };
     format!("{base}+size_cap={}", config.size_cap)

@@ -18,7 +18,7 @@ use crate::cache::CacheCounters;
 use crate::EngineConfig;
 
 mod artifact;
-mod findings;
+pub(crate) mod findings;
 mod fresh;
 mod go_module;
 mod java_index;

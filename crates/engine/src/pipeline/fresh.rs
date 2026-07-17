@@ -24,9 +24,8 @@ pub(super) fn compute_fresh_artifact(
     if bytes.len() > config.size_cap {
         // Oversized: loc counted lexically, no symbols/imports/io, but the text is still scanned by
         // line-scan DSL rules (lexical-only files are excluded from structural projection, not rule
-        // evaluation). `store_bound_models`/`field_usage_tokens` are both raw-text regex scans, never an
-        // AST parse, so — like the removed `scan_store_map`/`scan_field_usage` filesystem walks they
-        // replace — they run here too, unaffected by the size cap.
+        // evaluation). `store_bound_models`/`field_usage_tokens` are raw-text regex scans, never an AST
+        // parse, so they run here too (like the removed `scan_store_map`/`scan_field_usage` walks), unaffected by the size cap.
         let loc = lexical_loc(text);
         let (findings, rule_timings, minified_or_generated) =
             eval_packs(packs, rel, text, &[], None, &[], config.profile_rules);
@@ -66,6 +65,7 @@ pub(super) fn compute_fresh_artifact(
         Some(Language::Python) => parse_python(rel, text),
         Some(Language::Rust) => parse_rust(rel, text),
         Some(Language::Go) => parse_go(rel, text),
+        Some(Language::Sql) => (Vec::new(), None, lexical_loc(text), false, Vec::new()),
         None => (Vec::new(), None, lexical_loc(text), false, Vec::new()),
     };
     // IO projection: TypeScript (HTTP egress consumes + Hono route provides) for a well-formed,
@@ -79,8 +79,8 @@ pub(super) fn compute_fresh_artifact(
     // axum route provides arrive via `router_mount_fragments`, same composition path as Python's FastAPI)
     // for a well-formed, in-size-cap `.rs` file; Go (`net/http` literal HTTP egress consumes only — gin
     // and `net/http` route provides arrive via `router_mount_fragments`, same composition path) for a
-    // well-formed, in-size-cap `.go` file. A degraded/oversized/dispatch-`None` file has no adapter to
-    // run.
+    // well-formed, in-size-cap `.go` file; SQL (`CREATE TABLE` -> `db-table` provides only) for any
+    // `.sql` file. A degraded/oversized/dispatch-`None` file has no adapter to run.
     let io = match language {
         Some(Language::TypeScript) if !degraded => {
             crate::io::extract_file_io(rel, text, &config.io)
@@ -119,16 +119,21 @@ pub(super) fn compute_fresh_artifact(
                 })
             }
         }
+        Some(Language::Sql) => {
+            let provides = zzop_parser_sql::extract_db_table_provides(rel, text);
+            (!provides.is_empty()).then(|| IoFacts {
+                provides,
+                consumes: Vec::new(),
+            })
+        }
         _ => None,
     };
-    // The next projections are all TypeScript-only, reusing `text` already in hand (an extra parse
-    // of already-read text, not a second file read): const-map fragment (feeds `analyze::assemble`'s
-    // merge + late consume re-resolution), tRPC router fragment (`analyze::compose_trpc_provides`),
-    // router-mount fragment (Hono chained builders / cross-file mounts, for
-    // `analyze::compose_router_mount_provides`), wrapper def/call fragments (`analyze`'s assemble-time
-    // wrapper-consume join, defs indexed by `(file, name)`), controller-prefix route fragment
-    // (`analyze`'s assemble-time controller-prefix composer, resolved against the same const map),
-    // and query-call-site facts (`analyze`'s `run_schema_join_rules` substrate).
+    // The next projections are all TypeScript-only, reusing `text` already in hand (no second file read):
+    // const-map fragment (feeds `analyze::assemble`'s merge + late consume re-resolution), tRPC router
+    // fragment (`analyze::compose_trpc_provides`), router-mount fragment (Hono builders/cross-file mounts,
+    // for `analyze::compose_router_mount_provides`), wrapper def/call fragments (assemble-time
+    // wrapper-consume join, defs indexed by `(file, name)`), controller-prefix route fragment (assemble-time
+    // controller-prefix composer, against the same const map), and query-call-site facts (`run_schema_join_rules` substrate).
     let const_map_fragment = match language {
         Some(Language::TypeScript) if !degraded => {
             zzop_parser_typescript::const_map_fragment(rel, text)

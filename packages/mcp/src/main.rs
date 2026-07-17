@@ -1,19 +1,26 @@
 //! `zzop-mcp` binary entry — thin argument dispatch over the library (`zzop_mcp::*`):
 //!
 //!   zzop-mcp analyze <path>            — analyze ONE repo/tree, print a JSON findings summary (Node-free).
+//!   zzop-mcp analyze-envelope <file>   — Mode A: analyze a Normalized-AST envelope file in place of native parsing.
 //!   zzop-mcp cross <path>...           — analyze 2+ trees and print the cross-layer join (zzop's headline).
 //!   zzop-mcp endpoint <pattern> <path>... — definitive "is io key X provided/consumed/joined?" query.
 //!   zzop-mcp endpoint <pattern> --config <path> — same query, trees defined by a zzop.config.jsonc.
 //!   zzop-mcp contract [<name>]         — list the embedded authoring contracts / print one to stdout.
 //!   zzop-mcp version | --version       — print this binary's version (the MCP serverInfo.version value).
 //!   zzop-mcp mcp                       — the MCP server over stdio (newline-delimited JSON-RPC 2.0).
-//!   zzop-mcp help | --help | -h        — print the usage line (exit 0).
+//!   zzop-mcp help | --help | -h        — print the usage line plus one elaboration per subcommand (exit 0).
 //!
 //! See `lib.rs` for the module map and the mcp-distribution decision doc for the host design.
 
 /// The one usage line — printed to stdout by `--help` (exit 0) and to stderr by every malformed
 /// invocation (exit 2), so the two surfaces can never drift apart.
-const USAGE: &str = "usage: zzop-mcp <analyze <path> | cross <path>... | cross --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | contract [<name>] | version | mcp>";
+const USAGE: &str = "usage: zzop-mcp <analyze <path> | analyze-envelope <envelope.json> | cross <path>... | cross --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | contract [<name>] | version | mcp>";
+
+/// A one-line pointer at the bare-invocation/unknown-subcommand error path (exit 2) — two field agents
+/// stumbled on exactly this gap: a bare `zzop-mcp` gave no hint that `help` exists, or that `mcp` is the
+/// stdio JSON-RPC server mode (not, say, an alias for `analyze`). Kept to one short line by design (see
+/// the `help` branch below's own doc comment on why the error path itself stays bare beyond this).
+const BARE_INVOCATION_HINT: &str = "(run 'zzop-mcp help' for details; 'mcp' serves MCP over stdio)";
 
 /// A dash-leading argument in a path/pattern position is NEVER swallowed as a path or pattern —
 /// `zzop-mcp analyze --help` must be a usage error, not "path does not exist: --help". The only
@@ -48,6 +55,40 @@ fn main() {
             }
             reject_flag_like_args([path.as_str()], "usage: zzop-mcp analyze <path>");
             match zzop_mcp::tools::analyze(path) {
+                Ok(json) => println!("{json}"),
+                Err(e) => {
+                    eprintln!("zzop-mcp: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        // Mode A: the file's content REPLACES native parsing entirely for this run (contrast
+        // `analyze`, which walks a real tree) — same handler as the `analyze_envelope` MCP tool, so
+        // this CLI form and a tool call give the identical answer.
+        Some("analyze-envelope") => {
+            let Some(path) = args.get(2) else {
+                eprintln!("usage: zzop-mcp analyze-envelope <envelope.json>");
+                std::process::exit(2);
+            };
+            if args.len() > 3 {
+                eprintln!(
+                    "usage: zzop-mcp analyze-envelope <envelope.json> (one file — got {})",
+                    args.len() - 2
+                );
+                std::process::exit(2);
+            }
+            reject_flag_like_args(
+                [path.as_str()],
+                "usage: zzop-mcp analyze-envelope <envelope.json>",
+            );
+            let envelope_json = match std::fs::read_to_string(path) {
+                Ok(text) => text,
+                Err(e) => {
+                    eprintln!("zzop-mcp: failed to read {path}: {e}");
+                    std::process::exit(1);
+                }
+            };
+            match zzop_mcp::tools::analyze_envelope(&envelope_json) {
                 Ok(json) => println!("{json}"),
                 Err(e) => {
                     eprintln!("zzop-mcp: {e}");
@@ -154,7 +195,7 @@ fn main() {
                 }
             }
         }
-        // The embedded authoring contracts, reachable from a terminal — the same nine documents MCP
+        // The embedded authoring contracts, reachable from a terminal — the same ten documents MCP
         // `resources/read` serves, resolved through the same `embedded::find` lookup, so the two
         // surfaces cannot drift. No name lists them (name + one-line description + mime, one per
         // line); a name prints that document's exact embedded bytes (raw, pipe-safe — no trailing
@@ -199,11 +240,33 @@ fn main() {
             println!("zzop-mcp {}", zzop_mcp::server::version());
         }
         Some("mcp") => zzop_mcp::server::run_stdio(),
-        // The polite lane: an explicit help REQUEST prints the usage line to stdout and exits 0 —
-        // only an invocation the dispatch cannot honor is the exit-2 stderr lane below.
-        Some("help") | Some("--help") | Some("-h") => println!("{USAGE}"),
+        // The polite lane: an explicit help REQUEST prints the usage line plus one elaboration line
+        // per subcommand (D17: a bare usage line left `contract`/`mcp` a guessing game — what
+        // `contract` with no args does, and that `mcp` speaks newline-delimited JSON-RPC over stdio)
+        // to stdout and exits 0 — only an invocation the dispatch cannot honor is the exit-2 stderr
+        // lane below, which stays a bare usage line plus `BARE_INVOCATION_HINT` (a pointer AT `help`,
+        // never a repeat of it — an error is not a tutorial).
+        Some("help") | Some("--help") | Some("-h") => {
+            println!("{USAGE}");
+            println!("  analyze <path> — analyze ONE repo/tree, print a JSON findings summary");
+            println!(
+                "  analyze-envelope <envelope.json> — Mode A: a Normalized-AST envelope file REPLACES native parsing, print the same JSON findings summary"
+            );
+            println!("  cross <path>... | cross --config <path> — analyze 2+ trees, print the cross-layer join");
+            println!(
+                "  endpoint <pattern> <path>... | endpoint <pattern> --config <path> — definitive \"is io key X provided/consumed/joined?\" query"
+            );
+            println!(
+                "  contract [<name>] — no args lists the embedded doc resources; `contract <name>` prints one"
+            );
+            println!("  version — print this binary's version (the MCP serverInfo.version value)");
+            println!(
+                "  mcp — serve MCP over stdio (JSON-RPC, for MCP client configs; no other subcommand speaks this protocol)"
+            );
+        }
         _ => {
             eprintln!("{USAGE}");
+            eprintln!("{BARE_INVOCATION_HINT}");
             std::process::exit(2);
         }
     }

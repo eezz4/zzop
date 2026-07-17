@@ -361,7 +361,17 @@ function expandAutoTrees(config, baseDir) {
   }
 
   // Replace `trees` with the concrete array; preserve every other key (overlays, packs, rules, git, ...).
-  return { config: { ...config, trees }, warnings };
+  // Shadowed-key honesty (parity with crates/config's expand_auto_trees): `roots` never steers the auto
+  // scan — warn and strip it so the inert key can't silently look load-bearing downstream.
+  const expanded = { ...config, trees };
+  if (config.roots !== undefined) {
+    warnings.push(
+      'config has both "roots" and "trees": "auto" — auto wins and scans the config file\'s directory ' +
+        'for workspace members; "roots" is ignored in auto mode (remove one).'
+    );
+    delete expanded.roots;
+  }
+  return { config: expanded, warnings };
 }
 
 module.exports = { expandAutoTrees };

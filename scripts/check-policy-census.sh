@@ -10,10 +10,12 @@
 # are metric eligibility/presentation floors, not rule/extraction policy vocab — the one value that
 # overlaps rule thresholds is adjudicated T3 coincidental equality in the inventory + its doc comment.
 #
-# crates/facade/src and packages/mcp/src are likewise DELIBERATELY out of scope (2026-07-16): their
-# census-regex-matching consts (QUERY_*_LIMIT / DEFAULT_*_LIMIT / MAX_LIMIT) are result-truncation /
-# presentation caps on already-computed output — how much of an answer is shown, never what the
-# engine extracts or which rules fire — not rule/extraction policy vocabulary.
+# crates/facade/src stays out of scope (2026-07-16): its QUERY_*_LIMIT consts are result-truncation
+# caps on already-computed output. crates/summary/src JOINED the scan (2026-07-17, facade-thinning
+# batch): the shared summary layer's DEFAULT_*_LIMIT / MAX_LIMIT caps moved there from packages/mcp
+# (previously excluded as per-host presentation) — now that every host shares them, a silent cap
+# change alters what EVERY agent-facing surface shows, so they get the same triage moment as policy
+# vocab (inventoried as presentation-cap tier, not rule policy).
 #
 # Regex is intentionally narrow: `^\s*(pub[(vis)] )?const NAME: (&[&str]|[&str; N]|usize|u32|i32|f64) = ...`.
 # This is tighter than "every const" on purpose — it's scoped to the shapes that actually carry policy
@@ -53,10 +55,12 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 census_file="scripts/policy-census.txt"
-pattern='^[[:space:]]*(pub(\((crate|super|in [^)]+)\))? )?const [A-Z_][A-Z0-9_]*: (&\[&str\]|\[&str;[[:space:]]*[0-9]+\]|usize|u32|i32|f64)'
+# Tuple-shaped vocab (`&[(&str, &str)]`) joined 2026-07-17: the ORM-silence marker table matched the
+# spirit of SERVER_FRAMEWORK_SPECIFIERS but its tuple element type escaped the census regex entirely.
+pattern='^[[:space:]]*(pub(\((crate|super|in [^)]+)\))? )?const [A-Z_][A-Z0-9_]*: (&\[&str\]|&\[\(&str,[[:space:]]*&str\)\]|\[&str;[[:space:]]*[0-9]+\]|usize|u32|i32|f64)'
 
 dirs=()
-for d in crates/engine/src crates/core/src parser/*/src rules/native/*/src; do
+for d in crates/engine/src crates/core/src crates/summary/src parser/*/src rules/native/*/src; do
   [ -d "$d" ] && dirs+=("$d")
 done
 

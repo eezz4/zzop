@@ -128,7 +128,7 @@ fn endpoint_config_flag_with_trailing_paths_is_a_usage_error() {
 
 #[test]
 fn contract_with_no_name_lists_every_embedded_resource() {
-    // The terminal lane to the embedded authoring contracts: `contract` with no name lists all nine
+    // The terminal lane to the embedded authoring contracts: `contract` with no name lists all ten
     // (name + description + mime, human-readable lines) — a terminal user must never have to
     // reverse-engineer the config surface from error messages while the docs sit inside the binary.
     let out = run(&["contract"]);
@@ -316,6 +316,58 @@ fn endpoint_relative_path_resolves_against_the_cwd_and_dir_names_its_source() {
     );
 }
 
+/// `docs/NORMALIZED_AST.md`'s worked example (also the `example-envelope` MCP contract resource) —
+/// copied to a real file here since the CLI subcommand reads a path, not inline JSON text.
+const EXAMPLE_ENVELOPE: &str = include_str!("../../../examples/jsp-envelope.example.json");
+
+#[test]
+fn analyze_envelope_subcommand_runs_mode_a_over_a_file_and_prints_the_summary() {
+    let dir = TempDir::new("zzop-mcp-analyze-envelope");
+    dir.write("envelope.json", EXAMPLE_ENVELOPE);
+    let path = dir.path().join("envelope.json");
+
+    let out = run(&["analyze-envelope", path.to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "expected exit 0, stderr: {}",
+        stderr(&out)
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(&out)).expect("stdout must be the analyze summary JSON");
+    assert!(v.get("findings").is_some(), "got: {v}");
+    assert!(v.get("coverage").is_some(), "got: {v}");
+    assert!(
+        v.get("path").is_none(),
+        "envelope mode has no filesystem root to echo, got: {v}"
+    );
+}
+
+#[test]
+fn analyze_envelope_subcommand_reports_an_unreadable_file_as_a_runtime_error() {
+    let out = run(&["analyze-envelope", "/no/such/envelope.json"]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "unreadable file is a runtime error, not a usage error"
+    );
+    assert!(
+        stderr(&out).contains("failed to read"),
+        "got: {}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn analyze_envelope_subcommand_requires_a_file_argument() {
+    let out = run(&["analyze-envelope"]);
+    assert_eq!(out.status.code(), Some(2), "usage errors exit 2");
+    assert!(
+        stderr(&out).contains("usage: zzop-mcp analyze-envelope"),
+        "got: {}",
+        stderr(&out)
+    );
+}
+
 #[test]
 fn fixed_arity_subcommands_reject_trailing_extra_args_instead_of_dropping_them() {
     // A silently-dropped trailing arg means the user believes it was analyzed — both fixed-arity
@@ -326,6 +378,13 @@ fn fixed_arity_subcommands_reject_trailing_extra_args_instead_of_dropping_them()
         .expect("spawn");
     assert_eq!(out.status.code(), Some(2), "analyze with 2 paths");
     assert!(String::from_utf8_lossy(&out.stderr).contains("one path"));
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_zzop-mcp"))
+        .args(["analyze-envelope", "a.json", "b.json"])
+        .output()
+        .expect("spawn");
+    assert_eq!(out.status.code(), Some(2), "analyze-envelope with 2 files");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("one file"));
 
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_zzop-mcp"))
         .args(["cross", "--config", "x.jsonc", "./extra"])

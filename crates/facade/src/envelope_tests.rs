@@ -46,6 +46,42 @@ fn analyze_envelope_json_suppressions_drop_a_finding() {
     );
 }
 
+/// Config-diagnostics parity with the `analyze` path (`analyze_tests.rs`'s twin test): a typo'd
+/// `disabledRules`/`severityOverrides` entry must land in `configWarnings` in envelope mode too, not
+/// `warnings` — the envelope pipeline computes this via the same `run_diagnostics` call the tree
+/// pipeline uses.
+#[test]
+fn analyze_envelope_json_unknown_rule_overrides_land_in_config_warnings_not_warnings() {
+    let config = r#"{"sourceId": "legacy", "severityOverrides": {"n-plus-one-typo": "critical"}}"#;
+    let out = analyze_envelope_json(&tiny_envelope_json(), config)
+        .expect("analyze_envelope_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+    let config_warnings: Vec<&str> = value["configWarnings"]
+        .as_array()
+        .expect("configWarnings array")
+        .iter()
+        .filter_map(|w| w.as_str())
+        .collect();
+    assert!(
+        config_warnings
+            .iter()
+            .any(|w| w.contains("severity overrides") && w.contains("n-plus-one-typo")),
+        "expected the unknown-severity-override-id self-report in configWarnings, got: {config_warnings:?}"
+    );
+    let warnings: Vec<&str> = value["warnings"]
+        .as_array()
+        .expect("warnings array")
+        .iter()
+        .filter_map(|w| w.as_str())
+        .collect();
+    assert!(
+        !warnings
+            .iter()
+            .any(|w| w.contains("matching no known rule id")),
+        "must NOT duplicate into warnings, got: {warnings:?}"
+    );
+}
+
 #[test]
 fn analyze_envelope_json_round_trips_a_tiny_envelope() {
     let config = r#"{"sourceId": "legacy"}"#;
@@ -148,6 +184,24 @@ fn validate_envelope_only_json_lists_issues_for_a_broken_envelope() {
             .iter()
             .any(|i| i.as_str().unwrap().contains("unknown format")),
         "expected an 'unknown format' issue, got: {value}"
+    );
+}
+
+#[test]
+fn validate_envelope_only_json_names_an_array_root_instead_of_a_field_type_mismatch() {
+    // A blind field test fed a JSON ARRAY as `envelopeJson` and got serde's struct-from-sequence
+    // fallback error ("invalid type: integer `1`, expected a string ...") — a field-level message that
+    // masks the real problem (the root itself is the wrong shape).
+    let out = validate_envelope_only_json("[1,2,3]");
+    let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+    assert_eq!(value["valid"], false);
+    let issues = value["issues"].as_array().expect("issues array");
+    assert_eq!(
+        issues,
+        &vec![serde_json::json!(
+            "expected a JSON object envelope, got an array"
+        )],
+        "got: {value}"
     );
 }
 

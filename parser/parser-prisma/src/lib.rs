@@ -7,9 +7,14 @@
 /// Cache key ingredient for `zzop-cache` (see `zzop_parser_typescript::PARSER_FINGERPRINT`'s doc for the
 /// scheme this mirrors). This crate has no external version pin to track (the parser is a local regex/line
 /// scanner, not a wrapped third-party crate) — bump the trailing `/vN` counter whenever `parse_schema`'s
-/// projection logic changes in a way that changes `SchemaModel`/`SourceSymbol` output for the same schema
-/// text.
-pub const PARSER_FINGERPRINT: &str = "prisma/v1";
+/// projection logic OR `build_common_ir`'s bridge output changes for the same schema text.
+///
+/// - `v2`: `build_common_ir` now ALSO emits a `(kind="db-table", key="table:<accessor-cased name>")` io
+///   PROVIDE per model (see `analysis::accessor_casing`'s doc for the canonical casing choice, joined
+///   against `zzop_parser_typescript::adapters::db_table_consume`'s bare-receiver consume follow-up).
+///   Strictly additive (new `MinimalIr::io` field populated, no existing field's output changes), but
+///   cached entries from before this marker must not be served as fresh since they lack the new facts.
+pub const PARSER_FINGERPRINT: &str = "prisma/v2";
 
 mod analysis;
 mod discover;

@@ -34,9 +34,16 @@ judgments — structure only, never rule quality — before you ship it.
 |---|---|---|---|
 | `id` | string | — | Rule id within the pack. |
 | `severity` | `"critical"` \| `"warning"` \| `"info"` | — | Default severity (overridable per-id via `RuleConfig::severity_overrides`). |
-| `message` | string | — | Human-facing cause/fix-hint, copied verbatim into every finding. |
+| `message` | string | — | Human-facing cause/fix-hint, copied verbatim into every finding — but NOT the whole of what ships: the engine auto-appends a disable hint at runtime (see the note right below this table). |
 | `matcher` | `Matcher` | — | One of the four matcher shapes below (`type` tag, kebab-case). |
 | `suppress_marker` | string \| null | `null` | Inline ok-marker name — see [Suppress-marker semantics](#suppress-marker-semantics). |
+
+**Do not hand-write a disable hint in `message`.** At runtime the engine appends one more sentence to
+every DSL finding's `message`, after whatever you write: `` Disable via config `rules: { "<pack>/<rule>": "off" }` (embedders: `disabled_rules`) `` (`zzop_core::disable_hint`, appended by
+`crates/engine/src/pipeline/findings.rs::append_disable_hints`) — the exact same fragment native findings
+carry, built from the one shared helper. Write the cause, the fix, and your rule's own `suppress_marker`
+name in `message`; a hand-written "disable via config ..." sentence renders TWICE. See
+[authoring-guide.md](authoring-guide.md#the-auto-appended-disable-hint) for the full contract.
 
 ## Matchers
 

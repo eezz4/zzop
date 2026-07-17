@@ -195,7 +195,7 @@
           "type": "string",
           "description": "The boundary an interface crosses (\"http\", \"db-table\", ...). Open-ended — an adapter may introduce its own kind. RESERVED: \"nest-global-prefix\" is an engine-internal sentinel kind (crates/engine/src/envelope.rs is_reserved_provide_kind) produced only by the native TypeScript parser's NestJS setGlobalPrefix() recognizer and consumed only by the native compose seam that applies + strips it. A producer emitting this kind is out of contract: in envelope ingestion (analyze_envelope) it is dropped at ingestion with no rewrite, with one aggregate warning per envelope naming the producer-forbidden kinds; in adapter-overlay application (apply_adapter_overlays) it is likewise dropped before the merge, with one aggregate warning per overlay naming the producer-forbidden kinds. It never reaches output, findings, or the cross-layer linker."
         },
-        "key": { "type": "string", "description": "Adapter-normalized interface identity, e.g. \"GET /users/{}\". Must be byte-identical to what the consuming side computes for the exact join to succeed — see lib/keys.js in examples/adapter-kit." },
+        "key": { "type": "string", "description": "Adapter-normalized interface identity, e.g. \"GET /users/{}\". Must be byte-identical to what the consuming side computes for the exact join to succeed — see lib/keys.js in examples/adapter-kit (embedded: `zzop-mcp contract key-normalization-fixture` pins the exact bytes)." },
         "file": { "type": "string" },
         "line": { "type": "integer", "minimum": 1 },
         "symbol": { "type": ["string", "null"], "description": "Handler/owner symbol id (e.g. the controller method) for richer edges. Omittable, or explicit null." },

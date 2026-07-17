@@ -149,6 +149,23 @@ pub struct FileProjection {
 // guessed" per this crate's convention, but also never a hard error for a shape this validator cannot
 // know is wrong.
 pub fn validate_envelope(json: &str) -> Result<NormalizedEnvelope, Vec<String>> {
+    // A JSON ARRAY root is a special case: serde's derived `Deserialize` for a struct accepts a
+    // sequence as well as a map (the positional-fields fallback other serde formats rely on), so a
+    // top-level array is NOT rejected as "wrong shape" the way a string/number/bool/null root already
+    // is (those hit the ordinary "invalid type: X, expected struct NormalizedEnvelope" branch, which is
+    // clear on its own). Instead each array element gets deserialized against the next declared field
+    // in turn, so `["a"]` against a `format: String` first field fails with a field-level type mismatch
+    // ("invalid type: integer `1`, expected a string") that reads like ONE field is wrong rather than
+    // "this isn't an envelope at all" — a blind field test hit exactly this passing a JSON array as
+    // `envelopeJson`. Caught here, before the struct deserialize, with the honest diagnosis.
+    if matches!(
+        serde_json::from_str::<serde_json::Value>(json),
+        Ok(serde_json::Value::Array(_))
+    ) {
+        return Err(vec![
+            "expected a JSON object envelope, got an array".to_string()
+        ]);
+    }
     let envelope: NormalizedEnvelope =
         serde_json::from_str(json).map_err(|e| vec![format!("invalid JSON: {e}")])?;
 

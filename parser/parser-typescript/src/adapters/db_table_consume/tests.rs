@@ -101,3 +101,74 @@ fn test_files_are_skipped_by_both_extractors() {
     assert!(extract_db_table_consumes("src/order.test.ts", src).is_empty());
     assert!(extract_query_call_sites("src/order.test.ts", src).is_empty());
 }
+
+// --- bare-receiver consumes (BARE-SINGLETON CONSUMES follow-up) ---
+
+#[test]
+fn be_express_local_prisma_client_import_matches() {
+    // The exact be-express idiom: a route/service file imports the default export of a LOCAL module
+    // whose specifier contains "prisma" and calls `prisma.<model>.<method>(...)` directly (no
+    // `getPrisma()` anchor at all).
+    let src = "import prisma from '../../../prisma/prisma-client';\n\nexport const getArticles = async () => {\n  const c = await prisma.article.count({});\n  const a = await prisma.article.findMany({});\n  return { c, a };\n};\n";
+    assert_eq!(
+        keys("src/app/routes/article/article.service.ts", src),
+        vec!["table:article", "table:article"]
+    );
+}
+
+#[test]
+fn in_file_new_prisma_client_matches() {
+    // `import { PrismaClient } from '@prisma/client'; const prisma = new PrismaClient();` — the
+    // single-file setup idiom, receiver bound via `new PrismaClient(...)`.
+    let src = "import { PrismaClient } from '@prisma/client';\nconst prisma = new PrismaClient();\nasync function f() {\n  await prisma.user.create({});\n}\n";
+    assert_eq!(keys("a.ts", src), vec!["table:user"]);
+}
+
+#[test]
+fn global_fallback_new_prisma_client_matches() {
+    // The `global.prisma || new PrismaClient()` fallback idiom (be-express's own
+    // `src/prisma/prisma-client.ts` shape) still counts as `new PrismaClient(...)` evidence.
+    let src = "import { PrismaClient } from '@prisma/client';\nconst prisma = global.prisma || new PrismaClient();\nasync function f() {\n  await prisma.order.findMany({});\n}\n";
+    assert_eq!(keys("a.ts", src), vec!["table:order"]);
+}
+
+#[test]
+fn no_prisma_evidence_bare_receiver_does_not_match() {
+    // A bare `prisma.article.findMany()` with NO import evidence anywhere in the file must never match
+    // — the precision guard this whole follow-up hinges on.
+    let src =
+        "async function f() {\n  const a = await prisma.article.findMany({});\n  return a;\n}\n";
+    assert!(keys("a.ts", src).is_empty());
+}
+
+#[test]
+fn unrelated_local_import_does_not_grant_evidence() {
+    // A relative import whose specifier does NOT mention "prisma" grants no evidence, even though the
+    // call shape otherwise matches.
+    let src = "import prisma from '../db/client';\nasync function f() {\n  await prisma.article.findMany({});\n}\n";
+    assert!(keys("a.ts", src).is_empty());
+}
+
+#[test]
+fn type_only_prisma_client_import_grants_no_evidence() {
+    // `import type { PrismaClient }` has no runtime value — using the type name as a bare receiver
+    // (impossible in real code, but exercised here as a boundary check) must not match.
+    let src = "import type { PrismaClient } from '@prisma/client';\nasync function f() {\n  await PrismaClient.article.findMany({});\n}\n";
+    assert!(keys("a.ts", src).is_empty());
+}
+
+#[test]
+fn getprisma_and_bare_receiver_both_recognized_in_same_file() {
+    // Both anchor forms coexist without interference.
+    let src = "import prisma from '../prisma/prisma-client';\nasync function f() {\n  await getPrisma().order.findMany({});\n  await prisma.user.create({});\n}\n";
+    assert_eq!(keys("a.ts", src), vec!["table:order", "table:user"]);
+}
+
+#[test]
+fn bare_receiver_widens_query_call_sites_too() {
+    let src = "import prisma from '../prisma/prisma-client';\nexport function list() {\n  return prisma.item.findMany({ where: { ownerId: 1 } });\n}\n";
+    let out = sites("src/domains/item/repo.ts", src);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].model, "Item");
+    assert_eq!(out[0].method, "findMany");
+}

@@ -333,7 +333,7 @@ test('buildMarkdownReports: per-tree file renders the Blindness bullet when join
   const web = files.find((f) => f.name === 'web.md').content;
   assert.match(
     web,
-    /- Blindness: no IO surface was extracted from this tree \(0 provides, 0 consumes across 2 files\), so it is invisible to the cross-layer join — discount any "unconsumed"\/"unprovided" verdict that references it\. If this tree does call an API, the calls flow through a client the extractor cannot see; project them with a Mode B adapter and attach it via the `overlays: \["\.\/my-adapter\/envelope\.json"\]` config key to restore visibility\./
+    /- Blindness: no JOINABLE io surface was extracted from this tree \(0 provides, 0 keyed consumes across 2 files — unresolved consumes cannot join\), so it is invisible to the cross-layer join — discount any "unconsumed"\/"unprovided" verdict that references it\. If this tree does call an API, the calls flow through a client the extractor cannot see; project them with a Mode B adapter and attach it via the `overlays: \["\.\/my-adapter\/envelope\.json"\]` config key to restore visibility\./
   );
 });
 
@@ -418,6 +418,20 @@ test('buildMarkdownReports: no coverage-rule bullets when no self-report finding
   assert.match(crossRepo.content, /- `api`: 3 files, 2 provides, 0 consumes \(0 keyed \/ 0 unresolved\), 0 degraded/);
 });
 
+test('buildMarkdownReports: cross-repo.md renders run-level warnings (parallel-impl tripwire class) when present, omits the section when absent', () => {
+  const output = multiTreeOutput();
+  output.warnings = [
+    'this join produced 0 cross-source edges but 7 duplicate-route/ambiguous-consume findings — the trees may be parallel implementations',
+  ];
+  const [crossRepo] = buildMarkdownReports(output);
+  assert.match(crossRepo.content, /## Run warnings/);
+  assert.match(crossRepo.content, /parallel implementations/);
+
+  const clean = multiTreeOutput();
+  const [cleanCrossRepo] = buildMarkdownReports(clean);
+  assert.doesNotMatch(cleanCrossRepo.content, /## Run warnings/);
+});
+
 test('buildMarkdownReports: BLIND assertion for a joinContributionZero tree, placed before Cross-repo edges', () => {
   const output = multiTreeOutput();
   output.trees[1].output.coverage.joinContributionZero = true;
@@ -425,7 +439,7 @@ test('buildMarkdownReports: BLIND assertion for a joinContributionZero tree, pla
   const content = crossRepo.content;
 
   const blindIdx = content.indexOf(
-    '- BLIND: `web` contributed no IO to the join (0 provides, 0 consumes across 2 files) — join findings that reference it are structurally weak; see its per-tree report for guidance.'
+    '- BLIND: `web` contributed no JOINABLE io to the join (0 provides, 0 keyed consumes across 2 files) — join findings that reference it are structurally weak; see its per-tree report for guidance.'
   );
   const edgesIdx = content.indexOf('## Cross-repo edges');
   assert.ok(blindIdx > -1 && edgesIdx > blindIdx);
@@ -520,8 +534,8 @@ test('buildMarkdownReports: single-tree one-sided IO guidance absent when provid
   const [healthy] = buildMarkdownReports(withProvides, { sourceId: 'app', root: '.' });
   assert.doesNotMatch(healthy.content, /One-sided IO/);
 
-  // 0 provides AND 0 consumes is the joinContributionZero case — the Blindness bullet owns it; the
-  // one-sided guidance (which requires consumes > 0) must not double-fire.
+  // 0 provides AND 0 keyed consumes is the joinContributionZero case — the Blindness bullet owns it;
+  // the one-sided guidance must not double-fire.
   const blind = singleTreeConsumeOnlyOutput();
   blind.coverage.ioConsumesKeyed = 0;
   blind.coverage.ioConsumesUnresolved = 0;
@@ -529,6 +543,19 @@ test('buildMarkdownReports: single-tree one-sided IO guidance absent when provid
   const [blindFile] = buildMarkdownReports(blind, { sourceId: 'app', root: '.' });
   assert.match(blindFile.content, /- Blindness:/);
   assert.doesNotMatch(blindFile.content, /One-sided IO/);
+
+  // Unresolved-only tree (0 provides, 0 keyed, N unresolved): joinContributionZero is TRUE under the
+  // engine's semantics (unresolved consumes cannot join) — the Blindness bullet fires alone and its
+  // text must not claim "0 consumes" while the Coverage line above shows unresolved ones.
+  const unresolvedOnly = singleTreeConsumeOnlyOutput();
+  unresolvedOnly.coverage.ioConsumesKeyed = 0;
+  unresolvedOnly.coverage.ioConsumesUnresolved = 3;
+  unresolvedOnly.coverage.joinContributionZero = true;
+  const [unresolvedFile] = buildMarkdownReports(unresolvedOnly, { sourceId: 'app', root: '.' });
+  assert.match(unresolvedFile.content, /- Blindness: no JOINABLE io surface/);
+  assert.match(unresolvedFile.content, /0 keyed consumes/);
+  assert.match(unresolvedFile.content, /unresolved consumes cannot join/);
+  assert.doesNotMatch(unresolvedFile.content, /One-sided IO/);
 });
 
 test('buildMarkdownReports: per-tree file in a multi-tree run never renders the one-sided IO guidance (consume-only FE tree is healthy there)', () => {
@@ -594,4 +621,69 @@ test('buildMarkdownReports: no Rule packs bullet for an older output without pac
   const output = { fileCount: 1, findings: [], warnings: [] };
   const [file] = buildMarkdownReports(output, { sourceId: 'app', root: '/repo' });
   assert.ok(!file.content.includes('Rule packs loaded'), `got:\n${file.content}`);
+});
+
+test('buildMarkdownReports: "## Architecture / churn signals" renders health/recommendations/hotspots when present', () => {
+  const output = {
+    fileCount: 3,
+    findings: [],
+    health: {
+      pain: 13.4,
+      contributors: [
+        { metric: 'fsd', weight: 2.5, gap: 0.328, contribution: 8.2 },
+        { metric: 'godFile', weight: 1.5, gap: 0.2, contribution: 3.0 },
+        { metric: 'circular', weight: 3.0, gap: 1.0, contribution: 30 }, // 4th place after slice(0,3) below
+      ],
+    },
+    recommendations: [
+      {
+        id: 'bug-prone',
+        severity: 'critical',
+        items: [{ path: 'src/checkout.ts', note: 'FIX 8 · risk 120', estimatedReduction: 12, estimatedCost: 10, roi: 1.2, actionHintKey: 'bug-prone-shared', fanIn: 4 }],
+      },
+      {
+        id: 'hot-churn',
+        severity: 'warning',
+        items: [{ path: 'src/cart.ts', estimatedReduction: 5, estimatedCost: 10, roi: 0.5, actionHintKey: 'hot-churn-core', fanIn: 2 }],
+      },
+    ],
+    nodes: [
+      { path: 'src/checkout.ts', changeCount: 40, hotspotScore: 40000 },
+      { path: 'src/cart.ts', changeCount: 20, hotspotScore: 12000 },
+      { path: 'src/quiet.ts', changeCount: 1, hotspotScore: 0 },
+    ],
+  };
+  const [file] = buildMarkdownReports(output, { sourceId: 'app', root: '.' });
+  const content = file.content;
+  assert.match(content, /## Architecture \/ churn signals/);
+  assert.match(content, /- Health pain: 13\.4/);
+  assert.match(content, /- fsd: 8\.2/);
+  assert.match(content, /- godFile: 3/);
+  assert.match(content, /- Top recommendations:/);
+  assert.match(content, /\*\*critical\*\* `bug-prone` — src\/checkout\.ts \(FIX 8 · risk 120\)/);
+  assert.match(content, /\*\*warning\*\* `hot-churn` — src\/cart\.ts/);
+  assert.match(content, /\| src\/checkout\.ts \| 40 \| 40000 \|/);
+  assert.match(content, /\| src\/cart\.ts \| 20 \| 12000 \|/);
+  // zero-hotspot node excluded from the top-hotspots table.
+  assert.doesNotMatch(content, /src\/quiet\.ts/);
+  assert.match(content, /Full detail \(all metrics, every recommendation item, every node\) in report\.json\/--json\./);
+});
+
+test('buildMarkdownReports: "## Architecture / churn signals" absent when health/recommendations/nodes are all absent', () => {
+  const output = { fileCount: 1, findings: [], warnings: [] };
+  const [file] = buildMarkdownReports(output, { sourceId: 'app', root: '/repo' });
+  assert.ok(!file.content.includes('Architecture / churn signals'), `got:\n${file.content}`);
+});
+
+test('buildMarkdownReports: "## Architecture / churn signals" degrades one part at a time (only recommendations present)', () => {
+  const output = {
+    fileCount: 1,
+    findings: [],
+    recommendations: [{ id: 'fat-fanout', severity: 'warning', items: [{ path: 'src/x.ts' }] }],
+  };
+  const [file] = buildMarkdownReports(output, { sourceId: 'app', root: '.' });
+  assert.match(file.content, /## Architecture \/ churn signals/);
+  assert.match(file.content, /\*\*warning\*\* `fat-fanout` — src\/x\.ts/);
+  assert.doesNotMatch(file.content, /Health pain/);
+  assert.doesNotMatch(file.content, /Top hotspots/);
 });

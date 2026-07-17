@@ -3,10 +3,70 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use zzop_core::{Finding, RuleConfig, SourceIo};
+use zzop_core::{Finding, IoFacts, RuleConfig, SourceIo};
 
 use crate::cross_layer_findings::compute_cross_layer_findings;
 use crate::{analyze_tree, AnalyzeOutput, EngineConfig};
+
+mod parallel_impl;
+
+pub use parallel_impl::MIN_PARALLEL_IMPL_SIGNALS;
+
+/// Per-tree drop counts + a capped file-path sample from [`filter_join_io`] — substrate for that
+/// function's caller's own per-tree warning (see the call site's doc for the disclosure rationale).
+/// `examples` combines BOTH dropped provides and dropped consumes (provides first, in their original
+/// order, then consumes), capped at 3 total — the same "up to 3 example paths" convention
+/// `unparsed_extension_warning` already uses for its own per-extension sample. DISTINCT file paths
+/// only: one test file usually carries several dropped facts, and "a.go, a.go, a.go" tells the
+/// reader nothing the count didn't (observed in the first live run of this warning).
+#[derive(Default)]
+struct JoinIoDrop {
+    provides: usize,
+    consumes: usize,
+    examples: Vec<String>,
+}
+
+/// Cross-layer JOIN input filter: drops every provide/consume whose `file` is test-classified
+/// (`zzop_core::is_test_file`) before it ever reaches `link_cross_layer_io`/`compute_cross_layer_findings`.
+/// The published disclosure (`disclosure.rs`'s "classified-skip" class) claims test-classified io is
+/// excluded from the cross-layer join — before this filter existed that claim was false: the join input
+/// was built straight from each tree's raw `output.ir.ir.io`, so e.g. a Go `unit_test.go` route
+/// registration became an ordinary production "provide" and could join a real cross-tree edge (observed
+/// live: 4 of 5 provides on a real repo were test-harness routes). Deliberately does NOT touch
+/// `output.ir` — the per-file raw facts (test-classified included) must stay visible in that tree's own
+/// single-tree output; only the JOIN input built here is narrowed.
+fn filter_join_io(io: IoFacts) -> (IoFacts, JoinIoDrop) {
+    let mut drop = JoinIoDrop::default();
+    let provides = io
+        .provides
+        .into_iter()
+        .filter(|p| {
+            let is_test = zzop_core::is_test_file(&p.file);
+            if is_test {
+                drop.provides += 1;
+                if drop.examples.len() < 3 && !drop.examples.contains(&p.file) {
+                    drop.examples.push(p.file.clone());
+                }
+            }
+            !is_test
+        })
+        .collect();
+    let consumes = io
+        .consumes
+        .into_iter()
+        .filter(|c| {
+            let is_test = zzop_core::is_test_file(&c.file);
+            if is_test {
+                drop.consumes += 1;
+                if drop.examples.len() < 3 && !drop.examples.contains(&c.file) {
+                    drop.examples.push(c.file.clone());
+                }
+            }
+            !is_test
+        })
+        .collect();
+    (IoFacts { provides, consumes }, drop)
+}
 
 /// One `analyze_tree` call's output, per tree, plus the cross-layer join over every tree's IoFacts.
 pub struct MultiAnalyzeOutput {
@@ -18,6 +78,13 @@ pub struct MultiAnalyzeOutput {
     /// call runs these (most find nothing, since e.g. `shared-db-table`/`duplicate-route` need 2+
     /// distinct source trees to ever fire).
     pub cross_layer_findings: Vec<Finding>,
+    /// Run-level self-reports that belong to the JOIN itself, not any one tree — currently only the
+    /// parallel-implementation tripwire (see `parallel_impl::maybe_warn`'s doc). ALWAYS populated (no
+    /// skip-if-empty upstream), same "empty is the honest signal" convention every other warnings
+    /// channel in this crate uses. Distinct from any tree's own `AnalyzeOutput::warnings` (which blame
+    /// one config-declaring tree) and from `cross_layer_findings` (which are per-finding native-rule
+    /// output, not free-text self-reports).
+    pub warnings: Vec<String>,
 }
 
 /// Cross-layer multi-tree API: runs `analyze_tree` once per `(root, config)` pair, then joins every
@@ -37,10 +104,30 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
     let mut outputs = Vec::with_capacity(trees.len());
     let mut source_ios = Vec::with_capacity(trees.len());
     for (root, config) in trees {
-        let output = analyze_tree(root, config);
+        let mut output = analyze_tree(root, config);
+        let raw_io = output.ir.ir.io.clone().unwrap_or_default();
+        let (join_io, dropped) = filter_join_io(raw_io);
+        // Honest-disclosure side of `filter_join_io`'s exclusion (see that function's doc): when it
+        // dropped anything, self-report it on the OWNING tree's own per-tree warnings channel — the same
+        // "this tree's own config/facts had a filtered effect" precedent the topology-host tripwire and
+        // tRPC mount-route suppression note below both use.
+        if dropped.provides > 0 || dropped.consumes > 0 {
+            let sample = dropped.examples.join(", ");
+            output.warnings.push(format!(
+                "cross-layer join input dropped {} test-classified provide(s) and {} test-classified \
+                 consume(s) (file paths matching `zzop_core::is_test_file`, e.g. Go `_test.go`, TS \
+                 `.test.ts`/`.spec.tsx`, Python `test_*.py`) before the cross-tree join, since a route or \
+                 call registered only in test/fixture code is not real deployed surface: {sample}. Raw \
+                 per-file facts still remain visible in this tree's own `ir.io` (the JS CLI's `--json`/ \
+                 `--format json` output; MCP tool replies and the `zzop-mcp` CLI subcommands omit `ir`) — \
+                 only the JOIN input (`analyze_trees`' cross-layer output) is narrowed.",
+                dropped.provides,
+                dropped.consumes,
+            ));
+        }
         source_ios.push(SourceIo {
             source: config.source_id.clone(),
-            io: output.ir.ir.io.clone().unwrap_or_default(),
+            io: join_io,
         });
         outputs.push((root.clone(), config.source_id.clone(), output));
     }
@@ -129,6 +216,11 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
         &trpc_participating_sources,
     );
 
+    // Severity overrides for cross-layer findings are applied INSIDE `compute_cross_layer_findings`'s
+    // final merge (union of every tree's overrides, first-declaring tree wins — see its doc): applying
+    // them out here, after the merge's sort, would leave a remapped finding in its pre-override
+    // position and break the documented (severity, file, line, ruleId) order (opus review, 2026-07-17).
+
     // tRPC mount-route suppression disclosure — `unconsumed-endpoint`/`unconsumed-mutation-endpoint`
     // (inside `compute_cross_layer_findings` above) silently excluded any http provide identified as a
     // tRPC mount route whose OWN source tree is in `trpc_participating_sources`; per `output-philosophy.md`
@@ -159,9 +251,15 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
         }
     }
 
+    let mut warnings = Vec::new();
+    if let Some(w) = parallel_impl::maybe_warn(&cross_layer, &cross_layer_findings) {
+        warnings.push(w);
+    }
+
     MultiAnalyzeOutput {
         trees: outputs,
         cross_layer,
         cross_layer_findings,
+        warnings,
     }
 }

@@ -205,6 +205,38 @@ fn default_skip_dirs_are_still_skipped_without_any_gitignore() {
     assert_eq!(out.file_count, 1, "{walked:?}");
 }
 
+// --- 4b. self-scan pollution: zzop's OWN default report/cache output dirs must not be rescanned ---
+//
+// The JS CLI writes reports into `<repo>/zzop-reports/` and defaults `cacheDir` to `.zzop-cache` in its
+// `zzop init` template (both, by default, land INSIDE the analyzed tree) — without a default exclusion the
+// NEXT analysis walks a prior run's own output as source, growing the file count every run (observed live
+// in a blind field test). `DEFAULT_SKIP_DIRS` (`dispatch.rs`) must exclude both by name.
+
+#[test]
+fn zzops_own_report_and_cache_dirs_are_not_rescanned_as_source() {
+    let dir = TempDir::new("zzop-gi-selfscan");
+    dir.write(
+        "zzop-reports/zzop.1700000000/be.md",
+        "# be\n\nsome prior report content\n",
+    );
+    dir.write(".zzop-cache/deadbeef.json", "{}");
+    dir.write("src/app.ts", "export function app() { return 1; }\n");
+
+    let out = scan(&dir);
+    let walked = walked_files(&out);
+
+    assert!(walked.contains("src/app.ts"), "{walked:?}");
+    assert!(
+        !walked.iter().any(|f| f.starts_with("zzop-reports/")),
+        "a prior run's own reports must not be rescanned as source: {walked:?}"
+    );
+    assert!(
+        !walked.iter().any(|f| f.starts_with(".zzop-cache/")),
+        "the default cache dir must not be rescanned as source: {walked:?}"
+    );
+    assert_eq!(out.file_count, 1, "{walked:?}");
+}
+
 // --- 5. ancestor .gitignore: root BELOW the git toplevel still honors the toplevel's .gitignore ---
 //
 // A monorepo where the analysis root (e.g. `repo/apps`) is a subdirectory of the git toplevel

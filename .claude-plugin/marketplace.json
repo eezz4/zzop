@@ -1,0 +1,14 @@
+{
+  "name": "zzop",
+  "owner": {
+    "name": "eezz4",
+    "url": "https://github.com/eezz4"
+  },
+  "plugins": [
+    {
+      "name": "zzop",
+      "source": "./",
+      "description": "Deterministic cross-repo contract analysis for AI agents: which frontend calls hit which backend endpoints (and which don't) — exact joins, disclosed blind spots, no guessing. Requires the zzop-mcp binary on PATH (single static binary, 5 platforms on GitHub Releases — no Node needed)."
+    }
+  ]
+}

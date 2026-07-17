@@ -499,6 +499,56 @@ fn analyze_json_packs_loaded_collision_reports_the_winning_directory_source() {
 }
 
 #[test]
+fn analyze_json_packs_loaded_carries_files_in_scope_zero_vs_nonzero() {
+    // D16 per-pack applicability through the JSON view (camelCase `filesInScope`, matching
+    // packsLoaded's other fields): a loaded pack scoped to an extension the tree lacks reports 0
+    // (its zero findings mean "out of scope", not "clean"); a pack whose scope matches reports the
+    // exact matching-file count.
+    let dir = cycle_fixture(); // a.ts + b.ts — no .py anywhere
+    let py_only_pack = r#"{
+        "id": "zz-python-only",
+        "framework": "any",
+        "rules": [
+            {
+                "id": "r1",
+                "severity": "warning",
+                "message": "msg",
+                "matcher": {
+                    "type": "line-scan",
+                    "file_pattern": "\\.py$",
+                    "line_pattern": "NEVER_MATCHES"
+                }
+            }
+        ]
+    }"#;
+    let config = format!(
+        r#"{{"root": {:?}, "packDefs": [{}, {}]}}"#,
+        dir.path().display(),
+        dsl_pack_json("aa-ts", "r1", "NEVER_MATCHES"),
+        py_only_pack
+    );
+    let out = analyze_json(&config).expect("analyze_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let loaded = value["packsLoaded"].as_array().expect("packsLoaded array");
+    let by_id = |id: &str| {
+        loaded
+            .iter()
+            .find(|p| p["id"] == id)
+            .unwrap_or_else(|| panic!("expected pack {id} in packsLoaded, got: {value}"))
+    };
+    assert_eq!(
+        by_id("aa-ts")["filesInScope"],
+        2,
+        "the .ts-scoped pack must count both fixture files, got: {value}"
+    );
+    assert_eq!(
+        by_id("zz-python-only")["filesInScope"],
+        0,
+        "the .py-scoped pack has no in-scope file in this tree, got: {value}"
+    );
+}
+
+#[test]
 fn analyze_json_packs_loaded_is_an_empty_array_when_no_packs_are_given() {
     // Always serialized — an empty ARRAY (not an absent field) is the honest zero-packs signal.
     let dir = cycle_fixture();
@@ -638,6 +688,111 @@ fn analyze_envelope_json_caller_pack_def_with_a_bundled_id_wins_the_collision_wh
             .iter()
             .any(|f| f["ruleId"] == "security/override-rule"),
         "the caller's override rule must fire, got: {value}"
+    );
+    // The replacement itself is silent no longer: a shadow warning must name the id and both
+    // sides' rule counts (bundled "security" ships 2 rules — see rules/dsl/security/security.json —
+    // the caller's def has 1).
+    let warnings = value["warnings"].as_array().expect("warnings array");
+    assert!(
+        warnings.iter().any(|w| {
+            let w = w.as_str().unwrap();
+            w.contains("security") && w.contains("2 rules") && w.contains("replacement: 1 rule")
+        }),
+        "expected a shadow warning naming 'security' and both rule counts (2 -> 1), got: {value}"
+    );
+}
+
+// --- Item 1 (blind field-test finding): silent bundled-pack replacement via `packs.extraDirs` ------
+// A custom pack loaded via a packs directory (the `packs.extraDirs` -> `packsDir` config surface) that
+// reuses an already-loaded pack's id used to replace it whole with ZERO acknowledgment anywhere in
+// `packsLoaded`/`warnings` — `base_engine_config`'s collision branches now push one `pack_shadow_warning`
+// each time this happens. These tests pin: (1) the warning fires and names the id + both rule counts
+// when a genuine cross-source collision happens (custom-over-bundled), (2) no warning fires for an
+// ordinary, non-colliding multi-pack load, and (3) the replacement behavior itself (custom pack's rules
+// win) is unchanged.
+
+#[test]
+fn analyze_envelope_json_extra_dir_pack_shadowing_the_bundled_security_pack_warns_with_both_counts()
+{
+    // Reproduces the blind-test scenario directly: a custom on-disk pack (loaded the same way
+    // `packs.extraDirs` ultimately reaches this engine — as a `packsDir` entry) declares `id:
+    // "security"`, colliding with the bundled 2-rule "security" pack the envelope path auto-seeds as
+    // inline `packDefs`. The custom 1-rule pack must win the collision whole (unchanged behavior) AND
+    // the collision must now be named in `warnings`.
+    let envelope = envelope_with_symbols(&["BadName"]);
+    let custom_security_dir = TempDir::new("zzop-facade-extra-dir-shadows-bundled");
+    custom_security_dir.write(
+        "security.json",
+        &symbol_scan_pack_json("security", "custom-rule", "^Bad"),
+    );
+    let config = format!(
+        r#"{{"sourceId": "legacy", "packsDir": {:?}}}"#,
+        custom_security_dir.path().display()
+    );
+    let out =
+        analyze_envelope_json(&envelope, &config).expect("analyze_envelope_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+
+    // Replacement behavior unchanged: one "security" entry, the custom 1-rule pack, sourced "dir".
+    let loaded = value["packsLoaded"].as_array().expect("packsLoaded array");
+    let security: Vec<&serde_json::Value> =
+        loaded.iter().filter(|p| p["id"] == "security").collect();
+    assert_eq!(security.len(), 1, "one entry per pack id, got: {value}");
+    assert_eq!(
+        security[0]["rules"], 1,
+        "the custom pack must win, got: {value}"
+    );
+    assert_eq!(security[0]["source"], "dir", "got: {value}");
+    let findings = value["findings"].as_array().expect("findings array");
+    assert!(
+        findings
+            .iter()
+            .any(|f| f["ruleId"] == "security/custom-rule"),
+        "the custom pack's rule must fire, got: {value}"
+    );
+
+    // The shadowing is no longer silent: one warning names the id and both rule counts (bundled: 2,
+    // replacement: 1), and identifies the winning side as coming from a packs directory.
+    let warnings = value["warnings"].as_array().expect("warnings array");
+    let shadow = warnings
+        .iter()
+        .filter_map(|w| w.as_str())
+        .find(|w| w.contains("security") && w.contains("packs directory"))
+        .unwrap_or_else(|| panic!("expected a shadow warning for 'security', got: {value}"));
+    assert!(
+        shadow.contains("2 rules") && shadow.contains("replacement: 1 rule"),
+        "expected both rule counts (bundled 2 -> replacement 1) in the shadow warning, got: {shadow:?}"
+    );
+}
+
+#[test]
+fn analyze_json_packs_dir_array_no_collision_produces_no_shadow_warning() {
+    // The ordinary, non-colliding multi-directory load (`analyze_json_packs_dir_array_loads_and_merges_
+    // every_directory`'s fixture, distinct pack ids) must NOT trip the new shadow warning — it only
+    // fires on an actual same-id replacement.
+    let dir = cycle_fixture();
+    dir.write("marker.ts", "// MARKER_A\n// MARKER_B\n");
+
+    let packs_a = TempDir::new("zzop-facade-no-collision-a");
+    packs_a.write("pack-a.json", &dsl_pack_json("pack-a", "r1", "MARKER_A"));
+    let packs_b = TempDir::new("zzop-facade-no-collision-b");
+    packs_b.write("pack-b.json", &dsl_pack_json("pack-b", "r1", "MARKER_B"));
+
+    let config = format!(
+        r#"{{"root": {:?}, "packsDir": [{:?}, {:?}]}}"#,
+        dir.path().display(),
+        packs_a.path().display(),
+        packs_b.path().display()
+    );
+    let out = analyze_json(&config).expect("analyze_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let warnings = value["warnings"].as_array().expect("warnings array");
+    assert!(
+        !warnings.iter().any(|w| w
+            .as_str()
+            .unwrap()
+            .contains("replaces an earlier-loaded pack")),
+        "distinct pack ids must never trip the shadow warning, got: {value}"
     );
 }
 

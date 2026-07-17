@@ -145,6 +145,54 @@ pub(super) fn resolve_go_import_package_dir(
     ))
 }
 
+/// Directory -> that directory's `(file, fragment names)` pairs, restricted to `.go` files carrying at
+/// least one router-mount fragment. The substrate `super::provides`'s Go resolver branch searches to
+/// disambiguate a package-directory-wide mount: `resolve_go_import_package_dir` above resolves a Go
+/// import path to a PACKAGE DIRECTORY (many files), never one file, so picking the ONE file that
+/// satisfies a `Mount` needs the mount's own `ident` matched against each candidate file's fragment
+/// names — information the generic `resolve(specifier, from_file, ident)` closure signature (shared
+/// with every other language branch) carries as `ident`, but the closure has no other way to see
+/// fragment names since `router_mount_pairs` is otherwise consumed whole by
+/// `compose_router_mount_provides`. Built once by the caller, from a borrow, before that move.
+/// Per-directory file lists are sorted by rel path so [`find_go_mount_target`] picks deterministically
+/// even in the (unexpected) case of an ident collision across two files in the same directory.
+pub(super) fn go_fragment_dirs(
+    router_mount_pairs: &[(String, Vec<zzop_core::RouterMountFragment>)],
+) -> std::collections::HashMap<String, Vec<(String, Vec<String>)>> {
+    let mut by_dir: std::collections::HashMap<String, Vec<(String, Vec<String>)>> =
+        std::collections::HashMap::new();
+    for (file, frags) in router_mount_pairs {
+        if !is_go_source_ext(file) {
+            continue;
+        }
+        let dir = match file.rfind('/') {
+            Some(idx) => file[..idx].to_string(),
+            None => String::new(),
+        };
+        let names = frags.iter().map(|f| f.name.clone()).collect();
+        by_dir.entry(dir).or_default().push((file.clone(), names));
+    }
+    for files in by_dir.values_mut() {
+        files.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+    by_dir
+}
+
+/// Finds the file, in `dirs`' bucket for `dir`, whose fragment-name set contains `ident` — the
+/// `go_fragment_dirs` doc above has the full rationale. `None` when `dir` has no bucket (no
+/// router-mount-bearing `.go` file in it) or no bucketed file's fragment set names `ident` — the
+/// caller treats this exactly like any other unresolvable mount (conservative: skip the subtree).
+pub(super) fn find_go_mount_target<'a>(
+    dirs: &'a std::collections::HashMap<String, Vec<(String, Vec<String>)>>,
+    dir: &str,
+    ident: &str,
+) -> Option<&'a str> {
+    dirs.get(dir)?
+        .iter()
+        .find(|(_, names)| names.iter().any(|n| n == ident))
+        .map(|(f, _)| f.as_str())
+}
+
 #[cfg(test)]
 mod go_helper_tests {
     use super::*;

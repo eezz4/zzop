@@ -43,6 +43,20 @@ fn unparseable_input_reports_invalid_without_erring() {
 }
 
 #[test]
+fn an_array_root_is_named_instead_of_a_field_type_mismatch() {
+    // A blind field test fed a JSON ARRAY as `packJson` and got serde's struct-from-sequence fallback
+    // error ("invalid type: integer `1`, expected a string ...") — a field-level message that masks the
+    // real problem (the root itself is the wrong shape).
+    let v = report("[1,2,3]");
+    assert_eq!(v["valid"], false);
+    assert_eq!(
+        v["issues"],
+        serde_json::json!(["expected a JSON object rule pack, got an array"]),
+        "got: {v}"
+    );
+}
+
+#[test]
 fn a_missing_required_field_is_a_named_issue() {
     // Drop `rules` — the loader's serde judgment, verbatim.
     let v = report(r#"{"id": "p"}"#);

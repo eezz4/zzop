@@ -110,7 +110,7 @@ mod tests {
     /// as JSON whose self-describing sections (promised by the resource description) really exist.
     #[test]
     fn config_surface_resource_is_the_self_describing_config_vocabulary() {
-        assert_eq!(crate::embedded::CONTRACT_DOCS.len(), 9);
+        assert_eq!(crate::embedded::CONTRACT_DOCS.len(), 10);
         let doc = crate::embedded::CONTRACT_DOCS
             .iter()
             .find(|d| d.name == "config-surface")
@@ -124,6 +124,28 @@ mod tests {
         assert!(
             json["_docs"]["purpose"].is_string(),
             "missing _docs.purpose"
+        );
+    }
+
+    /// Pins the tenth resource: `rule-catalog` serves the exact bytes of `docs/rules/catalog.md` — the
+    /// rule-id discoverability gap a live-fire round found (`packsLoaded` gives counts only, and the
+    /// dsl-reference resource points at this very file, which was NOT served over MCP before this).
+    #[test]
+    fn rule_catalog_resource_is_the_full_rule_id_catalog_markdown() {
+        let doc = crate::embedded::CONTRACT_DOCS
+            .iter()
+            .find(|d| d.name == "rule-catalog")
+            .expect("rule-catalog resource is embedded");
+        assert_eq!(doc.mime, "text/markdown");
+        assert!(doc.content.contains("# Rule catalog"));
+        // Every rule id table has an `id` column header — the catalog is machine-checked totals
+        // (crates/engine/tests/rule_contracts) elsewhere; this only pins that the SERVED bytes are
+        // the real catalog, not an empty/truncated stand-in.
+        assert!(doc.content.contains("Rule id"));
+        assert!(
+            doc.content.len() > 10_000,
+            "catalog.md should be substantial, got {} bytes",
+            doc.content.len()
         );
     }
 }

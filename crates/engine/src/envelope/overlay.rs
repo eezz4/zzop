@@ -178,9 +178,10 @@ pub(crate) fn apply_adapter_overlays(
             }
             warnings.push(format!(
                 "adapter overlay \"{}\" (parser {}): {synthetic_count} of {declared_n} declared file(s) \
-                 matched no file in this tree and were added as synthetic entries: {sample_str}. If these \
-                 paths are typos, fix the overlay's files[].path (tree-root-relative) so its facts merge \
-                 onto the real files.",
+                 matched no file in this tree and were added as synthetic entries: {sample_str} — their \
+                 io still merges and joins under the declared path (check for path typos), and they \
+                 count in coverage.files. If these paths are typos, fix the overlay's files[].path \
+                 (tree-root-relative) so its facts merge onto the real files.",
                 overlay.source, overlay.parser
             ));
         }

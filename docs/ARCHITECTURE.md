@@ -84,9 +84,10 @@ because each tier stands behind a different, honestly-scoped set of structural f
 | TypeScript / JavaScript | Full AST (native, swc) | `.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts` | Symbols, imports/dep graph, calls, HTTP provides/consumes across Express/Hono/NestJS/Next.js/tRPC and more, router-mount fragments, middleware guard attributes |
 | Python | Full AST (native, ruff) | `.py, .pyi` | **Python 3** syntax (ruff's parser linked as a Rust library — no Python runtime required; Python-2-only syntax degrades to the lexical fallback like any parse failure; the crate path (`parser-python-3`) names that supported major version, the same convention as `parser-java-21`). Symbols (`def`/`class`/methods, `__all__`-aware exports), imports/dep graph (incl. relative `from .x import y`), FastAPI route provides (decorators, `APIRouter` literal prefix, cross-file `include_router` composition), `requests`/`httpx` literal egress consumes |
 | Rust | Full AST (native, syn 2) | `.rs` | Symbols (top-level fn/struct/enum/trait/type-alias/const/static/union, plus `impl` block methods/assoc consts), imports/dep graph (`use`/`mod` items, `crate::`/`super::`/`self::` module-path resolution, plus same-workspace crate resolution via `Cargo.toml` manifest scan), axum router provides (builder chains, `.nest`/`.merge` cross-file composition), `reqwest` literal egress consumes |
-| Go | Full CST (native, tree-sitter-go 0.25) | `.go` | Symbols (top-level func/method/type/const/var, grouped declarations expanded one symbol per spec-name), imports/dep graph (`import` declarations, `go.mod` `module` directive resolution — an import path resolves to its whole PACKAGE directory, so every file directly in that package gets a real dep-graph edge, not just one guessed file), gin and `net/http` router provides (route groups, Go 1.22 `"METHOD /path"` mux pattern syntax), `net/http` literal egress consumes (including `fmt.Sprintf`-reassembled path literals); an ERROR CST region is never guessed past — extraction stops at the boundary of what actually parsed |
+| Go | Full CST (native, tree-sitter-go 0.25) | `.go` | Symbols (top-level func/method/type/const/var, grouped declarations expanded one symbol per spec-name), imports/dep graph (`import` declarations, `go.mod` `module` directive resolution — an import path resolves to its whole PACKAGE directory, so every file directly in that package gets a real dep-graph edge, not just one guessed file), gin and `net/http` router provides (route groups, cross-file mount composition — a router received as a function parameter is mounted from a call site in another file, including a multi-argument call resolved when exactly one argument is a mountable receiver — Go 1.22 `"METHOD /path"` mux pattern syntax), `net/http` literal egress consumes (including `fmt.Sprintf`-reassembled path literals); an ERROR CST region is never guessed past — extraction stops at the boundary of what actually parsed |
 | Java | Full CST (native, tree-sitter-java 0.23.5) | `.java` | Symbols (top-level + nested class/interface/enum/record/annotation-type declarations, methods/constructors as dot-qualified `Outer.Inner.method` with body spans, `static final`/interface-constant fields), imports/dep graph (`import` declarations — plain/glob/static — resolved via an in-tree `(package, type)` index; a glob import fans out to every file in the target package, the same package-directory-wide fanout Go's own resolver uses), Spring MVC HTTP route provides (`@RestController`/`@Controller`, class + method-level `@RequestMapping`/`@GetMapping`/etc., cross-file `extends`-chain and constant-prefix resolution via the whole-corpus project pass) — Java 21 grammar coverage (records/sealed classes/pattern-switch parse as ordinary CST, though sealed-permits and pattern-switch carry no dedicated symbol extraction of their own in v1); the crate path (`parser-java-21`) names the pinned grammar version, the representative Java release this frontend targets, not a hard floor on the source dialect it can parse |
-| Prisma | Lexical schema (native) | `.prisma` | Schema models/fields — structural, plus usage-aware schema rules |
+| Prisma | Lexical schema (native) | `.prisma` | Schema models/fields — structural, plus usage-aware schema rules; each model also projects a `db-table` io provide (accessor-cased `table:` key, joining the TS client-side `db-table` consumes) |
+| SQL (DDL) | Lexical DDL (native) | `.sql` | `CREATE TABLE` statements → `db-table` io provides only (`table:<name>`, quote-stripped, schema qualifier dropped, accessor-cased to match the Prisma/TS db-table key — same lower-first transform) — migration files (Flyway/Liquibase-style) light up the db-table channel for MyBatis/JDBC-style stacks; no symbols/imports/consumes |
 | Everything else | External adapter | any | First-class via the Normalized AST envelope protocol — Mode A (`analyzeEnvelope`, stands in for a whole tree) or Mode B (overlays facts onto a natively-parsed tree); see [NORMALIZED_AST.md](NORMALIZED_AST.md) |
 
 A file that falls outside what its tier extracts (a `.py`/`.ts`/`.rs` file that fails to parse, or any
@@ -107,15 +108,28 @@ only axum's builder-chain route registration and `reqwest` literal egress are ex
 also out of scope (syn parses macro arguments as an opaque token stream, not a structured tree) — see
 `zzop_parser_rust`'s own crate doc for the exact v1 gaps.
 
-Go's v1 scope is deliberate too: echo/chi/fiber decorator-free route registration idioms, a router
-received as a function parameter (`func setup(r *gin.Engine) { ... }`, no local `:=`/`=` binding to
-anchor on), `&http.Client{}`/`client.Do(req)` request dispatch, and `embed`/`cgo`-loaded files are all
-roadmap — only gin route groups, `net/http`'s `DefaultServeMux`/`NewServeMux` (including Go 1.22's
+Go's v1 scope is deliberate too: echo/chi/fiber decorator-free route registration idioms,
+`&http.Client{}`/`client.Do(req)` request dispatch, and `embed`/`cgo`-loaded files are all roadmap —
+only gin route groups, `net/http`'s `DefaultServeMux`/`NewServeMux` (including Go 1.22's
 `"METHOD /path"` pattern syntax), and `net/http`'s package-level free-function egress (`http.Get`/`Post`/
-`PostForm`/`Head`, with `fmt.Sprintf` template reassembly) are extracted natively today. `tree-sitter-go`
-is a full CST (not merely lexical), but this crate never guesses past an `ERROR`/`MISSING` region: a
-single malformed statement skips just that subtree, extracting from every other still-valid region of the
-same file — see `zzop_parser_go`'s own crate doc for the exact v1 gaps and the never-guess discipline.
+`PostForm`/`Head`, with `fmt.Sprintf` template reassembly) are extracted natively today. Gin's
+cross-file mount idiom — a router received as a function PARAMETER (`func setup(r *gin.RouterGroup) {
+... }`, no local `:=`/`=` binding to anchor on, unlike the local-binding case above) — is shipped: the
+parameter is tracked as a receiver whose fragment is named after the
+enclosing function, and a call-site mount (`pkg.Setup(r)`, or a same-file `Setup(r)`) composes that
+fragment onto the caller's own receiver, closing the dominant real-world cross-file registration gap.
+The call side also resolves a multi-argument call (`pkg.Register(db, api.Group("/admin"))`) as long as
+EXACTLY ONE argument is a mountable receiver (a bare tracked receiver or `<tracked>.Group("literal")`)
+— every other argument (a db handle, a config struct, a literal, ...) is ignored outright. Two or more
+mountable-receiver arguments in the same call (`pkg.Wire(a.Group("/a"), b.Group("/b"))`) is genuinely
+ambiguous — which one does `Wire` actually mount onto? — so the whole call is rejected rather than
+guessed. Receiver METHODS (`func (s *Server) Register(r *gin.RouterGroup)`, a struct-field-style
+receiver) remain the one documented blind spot in this idiom: `method_declaration` is a distinct
+grammar node this recognizer never matches against, so a router mounted from a method body is not
+recognized — roadmap, not attempted. `tree-sitter-go` is a full CST (not merely lexical), but this
+crate never guesses past an `ERROR`/`MISSING` region: a single malformed statement skips just that
+subtree, extracting from every other still-valid region of the same file — see `zzop_parser_go`'s own
+crate doc for the exact v1 gaps and the never-guess discipline.
 
 Java's v1 scope is deliberate too, same shape as Python's/Rust's/Go's own: this engine has no Java-side
 HTTP-egress extractor yet (`RestTemplate`/`WebClient` consumes are not extracted — see

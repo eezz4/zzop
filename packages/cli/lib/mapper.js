@@ -530,6 +530,15 @@ function collectConfigWarnings(config) {
   check(config.packs, KNOWN_KEYS.packs, 'packs.');
   check(config.git, KNOWN_KEYS.git, 'git.');
   check(config.report, KNOWN_KEYS.report, 'report.');
+  // Shadowed-key honesty (parity with crates/config's config_to_request): an explicit `trees` always
+  // wins over `roots`, so a config carrying both has one inert key — say so instead of silently
+  // ignoring it. The `trees: "auto"` variant warns in expandAutoTrees (which also strips `roots`), so
+  // it is excluded here to avoid a double warning.
+  if (config.roots !== undefined && config.trees !== undefined && config.trees !== 'auto') {
+    warnings.push(
+      'config has both "roots" and "trees" — "trees" wins and "roots" is silently ignored (remove one).'
+    );
+  }
   if (Array.isArray(config.trees)) {
     config.trees.forEach((tree, i) => {
       check(tree, KNOWN_KEYS.tree, `trees[${i}].`);

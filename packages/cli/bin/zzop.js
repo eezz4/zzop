@@ -28,7 +28,7 @@ const { buildReports } = require('../lib/report');
 const { CONFIG_TEMPLATE } = require('../lib/init');
 const { lintEnvelope } = require('../lib/validate');
 const { buildAdapterScaffold, ADAPTER_MODE_VALUES, ADAPTER_KIND_VALUES } = require('../lib/adapter-templates');
-const { renderDebugIo } = require('../lib/debug-io');
+const { renderDebugIo, debugIoTreeCountNote } = require('../lib/debug-io');
 const { renderEndpointReport } = require('../lib/endpoint');
 const { buildSubcommandHelp } = require('../lib/help');
 
@@ -588,7 +588,7 @@ function runAnalyze(opts) {
   } else {
     const color = Boolean(process.stdout.isTTY);
     process.stdout.write(
-      `${formatPretty(output, { color, showAllInfo: opts.all, minSeverity: opts.severity })}\n`
+      `${formatPretty(output, { color, showAllInfo: opts.all, minSeverity: opts.severity, configPath })}\n`
     );
   }
 
@@ -596,9 +596,13 @@ function runAnalyze(opts) {
   // regardless of `--format`/`--severity` — those are display filters over findings, not over the
   // cross-layer join data this dumps. `output.crossLayer` only exists on a multi-tree (`analyzeTrees`)
   // output; `renderDebugIo` treats an absent/empty one as "every bucket is empty" rather than throwing,
-  // so this is safe on a single-tree run too.
+  // so this is safe on a single-tree run too. A run of fewer than 2 trees means every bucket is
+  // STRUCTURALLY guaranteed empty (a join needs two sides) — `debugIoTreeCountNote` prefixes a one-line
+  // explainer for that case so the empty dump doesn't read as a silent failure; the buckets still print
+  // underneath regardless (never "instead of").
   if (opts.debugIo) {
-    process.stdout.write(`${renderDebugIo(output && output.crossLayer)}\n`);
+    const note = debugIoTreeCountNote(output);
+    process.stdout.write(`${note ? `${note}\n` : ''}${renderDebugIo(output && output.crossLayer)}\n`);
   }
 
   writeReports(opts, config, output, method, request);

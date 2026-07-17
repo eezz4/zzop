@@ -14,11 +14,12 @@ use crate::analyze::compose::{
     resolve_wrapper_consumes,
 };
 use crate::analyze::native_rules::run_java_provides_project_pass;
-use crate::pipeline::{PackageJsonScan, RustWorkspaceMap};
+use crate::pipeline::{GoModuleMap, PackageJsonScan, RustWorkspaceMap};
 use crate::EngineConfig;
 
 use super::helpers::{
-    is_python_source_ext, is_rust_source_ext, resolve_python_import, resolve_rust_import,
+    find_go_mount_target, go_fragment_dirs, is_go_source_ext, is_python_source_ext,
+    is_rust_source_ext, resolve_go_import_package_dir, resolve_python_import, resolve_rust_import,
 };
 
 /// Every output the provide/consume composition seam produces, consumed by the phases after it
@@ -51,6 +52,7 @@ pub(super) fn compose(
     controller_prefix_route_pairs: Vec<(String, Vec<zzop_core::ControllerPrefixRouteFragment>)>,
     class_shape_pairs: Vec<(String, Vec<zzop_core::ClassShapeFragment>)>,
     rust_workspace: &RustWorkspaceMap,
+    go_modules: &GoModuleMap,
 ) -> ProvidesResult {
     // The merged project-wide const map is computed BEFORE `late_resolve_cross_file_consumes` below
     // takes ownership of `fragment_pairs` (it only borrows here) — `compose_controller_prefix_provides`
@@ -137,8 +139,13 @@ pub(super) fn compose(
     // Mode-B overlay's own `attributes`.
     let mut native_attrs: Vec<zzop_core::Attribute> = Vec::new();
     if !router_mount_pairs.is_empty() {
+        // Built from a borrow, BEFORE `router_mount_pairs` moves into `compose_router_mount_provides`
+        // below — the Go branch inside the closure needs to search fragment names across every file in
+        // a resolved package directory, and `router_mount_pairs` is the only substrate that has them
+        // (see `go_fragment_dirs`'s own doc for why this can't instead live inside the composer).
+        let go_dirs = go_fragment_dirs(&router_mount_pairs);
         let (composed, attrs) =
-            compose_router_mount_provides(router_mount_pairs, |specifier, from_file| {
+            compose_router_mount_provides(router_mount_pairs, |specifier, from_file, ident| {
                 if loc_by_path.contains_key(specifier) {
                     return Some(specifier.to_string());
                 }
@@ -159,13 +166,24 @@ pub(super) fn compose(
                 if is_rust_source_ext(from_file) {
                     return resolve_rust_import(specifier, from_file, ts_paths, rust_workspace);
                 }
-                // No `.go` branch here, deliberately: this closure is only invoked when a `Mount` entry
-                // carries `specifier: Some(...)` (`compose_router_mount_provides`'s own `find_child`), and
-                // gin's own `Mount` entries never populate `specifier` in v1 — a `Group`'s prefix variable
-                // is a local binding, never an import (`zzop_parser_go::adapters::gin`'s own doc), so a
-                // gin same-file group/verb join resolves entirely through the `specifier: None` path above
-                // this closure, without ever reaching it. See `merge_go_dep_edges`'s doc (dep_graph.rs)
-                // for the related dep-graph-side Go resolution this closure has no analogue of.
+                // gin cross-package mounts (`from_file` a `.go`): `specifier` is a Go IMPORT PATH
+                // (`RouterMountEntry::Mount::specifier` — see `zzop_parser_go::adapters::gin`'s doc),
+                // resolving to a PACKAGE DIRECTORY rather than a single file
+                // (`resolve_go_import_package_dir`'s own doc) — many `.go` files can live there, so the
+                // mount's own `ident` (this closure's 3rd parameter, unused by every branch above) picks
+                // the ONE file whose fragment set actually names it (`go_dirs`/`find_go_mount_target`,
+                // built above from the same `router_mount_pairs` this composer consumes). Unresolvable
+                // (no governing module, external import, or no fragment names `ident` anywhere in the
+                // directory) returns `None` — same conservative "skip the subtree" every other language
+                // gets. A gin same-file group/verb join never reaches this branch at all: it resolves
+                // entirely through the `specifier: None` path in `find_child` (`gin`'s `Group` prefix is
+                // a local binding, never an import). See `merge_go_dep_edges`'s doc (dep_graph.rs) for
+                // the related dep-graph-side Go resolution this closure has no analogue of (that one
+                // fans out to every file in the directory; this one must pick exactly one).
+                if is_go_source_ext(from_file) {
+                    let dir = resolve_go_import_package_dir(specifier, from_file, go_modules)?;
+                    return find_go_mount_target(&go_dirs, &dir, ident).map(str::to_string);
+                }
                 zzop_parser_typescript::resolve_file_with_workspace(
                     specifier,
                     from_file,

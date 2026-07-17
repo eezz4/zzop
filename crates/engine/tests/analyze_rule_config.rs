@@ -150,8 +150,17 @@ fn unknown_severity_override_id_surfaces_a_self_report_warning() {
     };
     let out = analyze_tree(dir.path(), &cfg);
 
+    // Config-channel diagnostic — rides `config_warnings`, not `warnings` (see
+    // `zzop_engine::AnalyzeOutput::config_warnings`'s doc).
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("matching no known rule id")),
+        "must NOT duplicate into warnings, got: {:?}",
+        out.warnings
+    );
     let matches: Vec<&String> = out
-        .warnings
+        .config_warnings
         .iter()
         .filter(|w| w.contains("matching no known rule id") && w.contains("severityOverrides"))
         .collect();
@@ -159,7 +168,7 @@ fn unknown_severity_override_id_surfaces_a_self_report_warning() {
         matches.len(),
         1,
         "expected exactly one unknown-severity-override-id self-report, got: {:?}",
-        out.warnings
+        out.config_warnings
     );
     assert!(matches[0].contains("n-plus-one"));
 }
@@ -183,11 +192,11 @@ fn a_real_severity_override_id_does_not_trigger_the_unknown_id_warning() {
     let out = analyze_tree(dir.path(), &cfg);
 
     assert!(
-        !out.warnings
+        !out.config_warnings
             .iter()
             .any(|w| w.contains("severityOverrides") && w.contains("matching no known rule id")),
         "a real, known severity_overrides id must not be reported as unknown, got: {:?}",
-        out.warnings
+        out.config_warnings
     );
 }
 

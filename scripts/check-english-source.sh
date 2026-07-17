@@ -43,18 +43,21 @@ echo "English-only source guard: clean."
 # Internal-path guard: OSS-facing files must never point readers at .claude/ — those paths are not
 # published, so any "see .claude/context/..." reference is a broken pointer for anyone outside this
 # repo's working tree. Rationale belongs inline (summarized) or in docs/, not linked by internal path.
+# The pattern requires the trailing slash on purpose: `.claude-plugin/` (Claude Code's PUBLIC,
+# tracked plugin-manifest directory, added 2026-07-17) is a legitimate reference and must not trip
+# a guard about the PRIVATE untracked `.claude/` tree.
 # scripts/ is self-exempt here: guard machinery must name the very pattern it excludes (this
 # file's own grep -v lines, max-file-lines/swc scope filters), which is not a reader-facing
 # "see .claude/..." pointer. The Korean check above still covers scripts/.
 claude_ref_files=$(list_source_files \
   | grep -v '^scripts/' \
-  | xargs -d '\n' grep -lP '\.claude' 2>/dev/null \
+  | xargs -d '\n' grep -lP '\.claude/' 2>/dev/null \
   | grep -vE '(^|/)\.claude/' | grep -vE '(^|/)target/' | grep -vE '(^|/)node_modules/' || true)
 
 if [ -n "$claude_ref_files" ]; then
   echo "English-only source guard: .claude/ path references found in OSS files:"
   while IFS= read -r f; do
-    grep -nP '\.claude' "$f" | sed "s|^|  ${f#./}:|"
+    grep -nP '\.claude/' "$f" | sed "s|^|  ${f#./}:|"
   done <<< "$claude_ref_files"
   echo
   echo "OSS-facing files must not reference .claude/ paths — summarize the rationale inline instead."

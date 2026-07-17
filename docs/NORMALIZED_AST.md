@@ -78,6 +78,16 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
   of both is [`examples/adapter-kit/`](../examples/adapter-kit/)'s `lib/keys.js`. **Absolute-URL keys
   (`"://"` present) are the one case that must NOT go through that normalization at all** — see
   `adapters/README.md`'s "Absolute URLs bypass normalization entirely" section.
+  - **Self-calls / loopback.** A service calling ITSELF over HTTP (a smoke-test script, a health-check
+    hitting its own base URL) is still an absolute URL if written as `http://localhost:8080/api/ping` —
+    the bypass rule above applies by string shape (`"://"` present), not by "is this actually a
+    third-party host." Left as-is, that consume keys as the raw URL, lands in `externalConsumes`, and
+    never joins the tree's own `GET /api/ping` provide. Two fixes: (1) at the ADAPTER, strip the origin
+    and key it as the plain relative path (`"GET /api/ping"`) like any other in-tree call — the right
+    call when you control the extraction; or (2) at the CONFIG, declare the tree's own host in its
+    `hosts` list (a bare hostname, no scheme/path) — cross-layer linking then re-keys any absolute-URL
+    consume targeting a declared host to its internal joinable key at link time instead of routing it to
+    `externalConsumes` (see `docs/modules/napi.md`'s `hosts` field and `hostRekeyCounts`).
   - OPTIONAL client provenance (additive since `axios-defaults-base-v1`; omit and nothing changes):
     an `IoConsume` may carry `client: "axios"` naming the HTTP client that produced the call site.
     `client` is a free-form string (`Option<String>` in `crates/core/src/io.rs`), not a closed enum —
@@ -324,6 +334,24 @@ callers can refer to either unambiguously.
   same tree. Supplied via the Rust `EngineConfig::adapter_overlays: Vec<NormalizedEnvelope>` field
   (empty by default: zero behavior change for every existing caller).
 
+  **Availability — where each mode actually runs.** Mode B overlays work everywhere: the config-file
+  `overlays`/`trees[].overlays` key (`zzop.config.jsonc`, both the JS and Rust-hosted mapper), and the
+  napi `adapterOverlays` request field it compiles down to, are honored by every host — the `@zzop/cli`
+  `zzop` command AND the Node-free `zzop-mcp` binary both run a config's overlays through the exact same
+  `analyze`/`analyzeTrees` path. Mode A (full-envelope `analyze_envelope`/napi `analyzeEnvelope`) is
+  reachable from Rust (`zzop_engine::analyze_envelope`), from napi (`analyzeEnvelope` — a host app
+  calling `@zzop/native` directly), AND from the Node-free `zzop-mcp` binary — its `analyze_envelope`
+  MCP tool and `zzop-mcp analyze-envelope <envelope.json>` CLI subcommand both run the same
+  `zzop_summary::analyze_envelope_summary` call path (`crates/summary`, over
+  `zzop_facade::analyze_envelope_json`), zero-config only (an
+  envelope carries no filesystem location, so there is no config file to auto-discover). The `@zzop/cli`
+  `zzop` command (`packages/cli/bin/zzop.js`) does NOT run a Mode A envelope today — verified by reading
+  it, not assumed: its only envelope-shaped commands are `zzop adapter validate <path>` (structural
+  validation only, via `validateEnvelopeOnly`) and `zzop init adapter --mode a|b` (scaffolds a starter
+  adapter's FILES — `--mode a` scaffolds a Mode A shape, it does not run one). In short: to run a Mode A
+  envelope without embedding `@zzop/native` yourself, use the `zzop-mcp` binary (its tool or CLI
+  subcommand); the `@zzop/cli` `zzop` command still only authors Mode B overlays.
+
   Each overlay is validated with `validate_envelope` independently; an invalid overlay is skipped with
   one `AnalyzeOutput::warnings` entry naming its `parser` id — never a crash, never a failed analysis
   for the other overlays or for the native files. Per `FileProjection` in a valid overlay:
@@ -353,6 +381,17 @@ callers can refer to either unambiguously.
     A non-empty `source` that differs from that tree's own id triggers a warning — its facts will join
     as intra-source, not cross-source — UNLESS the overlay carries no join-relevant `io` (an
     attributes-/`is_entry`-only overlay is source-agnostic and never warns here).
+    **What to write for a single-tree overlay:** match whatever id the tree ACTUALLY resolves to for the
+    invocation you're using. Two different defaults apply depending on how the tree is invoked, and they
+    are NOT the same string: a `zzop.config.jsonc` `trees[]` entry with no explicit `sourceId` defaults
+    to that entry's own raw `root` string exactly as written (e.g. `root: "./api"` → `sourceId: "./api"`
+    — see `packages/cli/lib/config-surface.json`'s `treeFields` docs); a config-less/bare-path run (no
+    config file, no `trees[]` — e.g. a host app calling `@zzop/native`'s `analyze()` directly with `root`
+    only) instead defaults to the analyzed ROOT DIRECTORY's own basename (`apply_source_id_default`,
+    `crates/facade/src/analyze.rs` — the shared chokepoint every host funnels through: napi
+    `analyze`/`analyzeTrees`, and any embedder driving the facade with no config-file front end). Set an
+    explicit `sourceId` in your request/config when you want one fixed value regardless of which path
+    invokes the tree, rather than relying on either default.
   - A declared `files[].path` matching no file in the tree is still merged in, as a synthetic
     `FileArtifact` (the "not found" branch above) — but the overlay gets one warning naming how many
     of its declared paths were synthetic, with up to 3 sample paths. `path` must be tree-root-relative;
@@ -378,7 +417,9 @@ no imports at all — the native Java parser has since closed that specific gap,
 unchanged for any extension still missing a channel. Iterate against the embedded contract
 (`zzop-mcp contract envelope-guide` / `zzop-mcp contract envelope-schema` print this document and
 its JSON Schema straight from the binary), validate offline with `zzop adapter validate
-<envelope.json>`, and add further channels only when an analysis you care about needs them. The
+<envelope.json>` (zzop-mcp hosts: the `validate_envelope` MCP tool performs the same check;
+`zzop-mcp contract example-envelope` prints a complete valid sample), and add further channels only
+when an analysis you care about needs them. The
 per-extension "no native parser" warning and the consume-silence tripwires point here for exactly
 this reason.
 
@@ -442,6 +483,36 @@ resolution rule documented above for fragment specifiers.
 **Determinism/dedup.** Overlays are processed in a deterministic order — sorted by their `parser`
 field — so a multi-overlay run's output does not depend on caller-supplied `Vec` order. The io-entry
 dedup key is `(kind, key, file, line)`, applied to both `provides` and `consumes`.
+
+**Line anchoring.** Because `line` is part of the dedup key above, a multi-line call expression needs one
+unambiguous, reproducible rule or two adapters can double-count the same call site at two different
+lines. Anchor each `io` fact to the line where the call expression STARTS — the first token of the call
+chain, not the line the invoked method name happens to sit on — and emit exactly one fact per call site.
+For example:
+
+```ts
+api.articles
+  .createArticleComment(articleId, body);
+```
+
+anchors to the `api.articles` line, not the `.createArticleComment(...)` line. This matches how zzop's own
+native TypeScript parser attributes a call: every adapter in `parser/parser-typescript/src/adapters`
+(e.g. `egress/collector.rs`, `hono_client/consume.rs`, `trpc_consume.rs`) and the call-graph attributor
+(`lang/calls.rs`) all take the enclosing `CallExpr` node's own span start, which for a chained member-call
+callee is the position of the chain's first identifier — so anchoring to the call chain's first line is
+the verified, not merely conventional, behavior for native TypeScript/JavaScript extraction. Treat it as
+the normative rule for any other language/adapter.
+
+The same rule applies outside TypeScript too — a shell script's call site anchors to the line the command
+STARTS on, not a continuation line an option/URL happens to wrap onto:
+
+```sh
+curl \
+  http://localhost:8080/api/ping
+```
+
+anchors to the `curl \` line, not the `http://localhost:8080/api/ping` line — one fact for this call site,
+regardless of how many lines the invocation wraps across.
 
 **napi exposure.** Overlays are reachable from Rust (`EngineConfig::adapter_overlays`) AND from napi
 callers: `analyze`/`analyzeTrees`'s config accepts an `adapterOverlays` array of envelopes with this

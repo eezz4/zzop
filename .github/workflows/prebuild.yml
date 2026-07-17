@@ -118,6 +118,37 @@ jobs:
           name: zzop-mcp-${{ matrix.target }}
           path: dist-mcp/*
 
+  # Only runs on a `v*` tag push (job-level `if`, same gate as `publish` below). Unlike every npm
+  # package version (overwritten from the tag at publish time by the step below), the Claude Code
+  # plugin marketplace reads `.claude-plugin/plugin.json`'s "version" straight from the repo at
+  # whatever commit the tag points at — there is no sync-versions.mjs-style stamping step for it, so
+  # a forgotten bump would silently ship a stale plugin version forever. This job makes that mistake
+  # impossible: it fails the whole run before `publish` does anything if the committed version and
+  # the tag disagree. `.claude-plugin/marketplace.json` carries no "version" field today (checked
+  # here so this job starts failing loudly the day one is added without being wired into this check).
+  verify-plugin-version:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify .claude-plugin/plugin.json version matches the tag
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PLUGIN_VERSION=$(jq -r '.version' .claude-plugin/plugin.json)
+          if [ "$PLUGIN_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::.claude-plugin/plugin.json version ($PLUGIN_VERSION) does not match tag $GITHUB_REF_NAME (expected $TAG_VERSION) — bump .claude-plugin/plugin.json's \"version\" in the same commit as the release tag."
+            exit 1
+          fi
+          echo ".claude-plugin/plugin.json version ($PLUGIN_VERSION) matches tag $GITHUB_REF_NAME."
+          if jq -e 'has("version")' .claude-plugin/marketplace.json >/dev/null; then
+            MARKETPLACE_VERSION=$(jq -r '.version' .claude-plugin/marketplace.json)
+            if [ "$MARKETPLACE_VERSION" != "$TAG_VERSION" ]; then
+              echo "::error::.claude-plugin/marketplace.json version ($MARKETPLACE_VERSION) does not match tag $GITHUB_REF_NAME (expected $TAG_VERSION)."
+              exit 1
+            fi
+            echo ".claude-plugin/marketplace.json version ($MARKETPLACE_VERSION) matches tag $GITHUB_REF_NAME."
+          fi
+
   # Only runs on a `v*` tag push (job-level `if`, since the build matrix above must also run for
   # workflow_dispatch without publishing). The git tag is the single source of truth for the
   # published version: this job overwrites every package.json's committed version with the tag's,
@@ -128,7 +159,7 @@ jobs:
   # configured on npmjs.com pointing at this repo and this workflow file (packages/native/README.md
   # "Publishing").
   publish:
-    needs: build
+    needs: [build, verify-plugin-version]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

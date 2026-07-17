@@ -26,6 +26,10 @@ npm i -D @zzop/cli
 
 Requires Node.js >= 18.
 
+Prefer a single static binary with no Node.js runtime — an MCP server for MCP clients, or a Claude Code
+plugin? See [`zzop-mcp`](../mcp/README.md) ([full reference](../../docs/modules/mcp.md)): same analysis
+engine, no `npm install`.
+
 ## Quick start
 
 ```sh
@@ -59,7 +63,7 @@ Every command also answers `--help`/`-h` with a focused help block for that comm
 | `--out <dir>` | Override the report base directory (default `./zzop-reports`; equivalent to config `report.dir`). Each run writes to `<dir>/zzop.<epoch>/`, a fresh subdir per run so runs accumulate. |
 | `-a, --all` | Show everything expanded: info-level findings (folded to a per-rule count by default so warnings/errors stay visible) AND each finding's full message (folded to a one-line summary by default), plus a one-line rule-pack load confirmation (`N packs loaded (M rules): ...` — the output's `packsLoaded` field). The complete message is always in the JSON output and markdown reports regardless of this flag. |
 | `--severity <critical\|warning\|info\|off>` | Only display findings at or above this severity (default `off` = show all). This is a display filter only — the exit code is always computed from the unfiltered findings and the config's `failOn`, never from `--severity`. |
-| `--debug-io` | After the normal output, dump every cross-layer join bucket (`edges`, `unconsumedProvides`, `unprovidedConsumes`, `unresolvedConsumes`, `externalConsumes`, `ambiguousConsumes`) as deterministic plain text, one section per bucket and one line per entry — the join-debug surface for troubleshooting an adapter/overlay. A no-op single-tree run still prints every section, each at count 0. |
+| `--debug-io` | After the normal output, dump every cross-layer join bucket (`edges`, `unconsumedProvides`, `unprovidedConsumes`, `unresolvedConsumes`, `externalConsumes`, `ambiguousConsumes`) as deterministic plain text, one section per bucket and one line per entry — the join-debug surface for troubleshooting an adapter/overlay. A run of fewer than 2 trees prints a `note: cross-layer buckets need >= 2 trees; this run analyzed N tree(s)` line first (a join always needs two sides, so every bucket is structurally guaranteed empty there) — the buckets still print underneath, each at count 0. |
 | `-h, --help` | Show help. |
 | `--version` | Show the CLI and engine versions. |
 
@@ -85,6 +89,25 @@ warnings to **stderr** (stdout stays clean — pretty or JSON):
   version) is *ignored* (never rejected), but reported: `zzop: warning: unknown config key "rulez" …`.
 - **Engine self-reports** — a narrowed scope (git not requested, no rule packs found, a file that couldn't
   be parsed structurally, …) is surfaced rather than swallowed.
+
+### Default pretty output — always-on summary lines
+
+Beyond the findings themselves, the default (non-`--all`) pretty view always prints, when the underlying
+JSON fields are present:
+
+- **Rule-override acknowledgment** — when `rules: { "<id>": "off" | "<severity>" }` actually disabled or
+  remapped a known rule id, one line confirms it took effect: `config: 1 rule disabled
+  (be-reliability/body-limit-missing), 0 severities remapped — zzop.config.jsonc` (the output's
+  `ruleOverridesApplied` field). A config entry that matched no known id prints nothing here — that case is
+  already covered by the unknown-config-key/unknown-rule-id warnings above.
+- **Route surface + architecture** — one line summarizing the extracted HTTP interface (`io: N provides /
+  M keyed consumes (see report or --json ir.io)`, from `coverage`) and one summarizing structural health
+  (`architecture: pain <health.pain>, top recommendation: <id> (details in report/--json)`, from `health`/
+  `recommendations`). Both are silently omitted when their source fields are absent (an envelope-only run
+  with no git-derived health, for example) — never printed as `undefined`.
+
+A multi-tree run tags a line with `[sourceId]` when trees genuinely differ (same convention the `warnings`
+channel already uses); an identical value across every tree collapses to one untagged line.
 
 ### Exit codes
 

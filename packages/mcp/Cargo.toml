@@ -6,15 +6,20 @@ license.workspace = true
 publish = false
 
 # The Node-free host binary (MCP server over stdio + direct CLI subcommands). `src/lib.rs` carries the
-# modules so integration tests and the bin share one crate; the config front-end lives in the shared
-# `zzop-config` crate (a future full-CLI binary reuses it), and the engine facade lives in
-# `zzop-facade` (extracted from the cdylib crate `zzop-napi`, whose link step breaks under the local
-# gnu toolchain even for rlib dependents — see the mcp-distribution decision).
+# modules so integration tests and the bin share one crate. This crate is a THIN PROTOCOL FACADE: ALL
+# summary/shaping/filter/warning-merge logic lives in the shared `zzop-summary` crate (crates/summary)
+# so it cannot drift per-host (a future full-CLI binary reuses it too, and gets it for free instead of
+# reimplementing it). `zzop-config` stays a direct dependency only for the embedded config-surface
+# contract resource (`embedded.rs`) and end-to-end test fixtures (`zzop_config::BUNDLED_PACK_SOURCES`),
+# not for any shaping logic — `zzop-facade` is no longer a direct dependency at all: every facade call
+# this crate used to make directly now happens inside `zzop-summary` (extracted from the cdylib crate
+# `zzop-napi`, whose link step breaks under the local gnu toolchain even for rlib dependents — see the
+# mcp-distribution decision).
 [[bin]]
 name = "zzop-mcp"
 path = "src/main.rs"
 
 [dependencies]
-zzop-facade = { path = "../../crates/facade" }
+zzop-summary = { path = "../../crates/summary" }
 zzop-config = { path = "../../crates/config" }
 serde_json = { workspace = true }

@@ -1,5 +1,5 @@
 //! The call-graph-BFS HTTP native rules — see `run_callgraph_rules`'s doc for the engine-wiring route
-//! (a second, uncached TS re-parse off disk).
+//! (a second, uncached TS/Java re-parse off disk).
 
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -18,15 +18,39 @@ use crate::EngineConfig;
 /// `FileArtifact` carries no `RawCall`s — the fused pass's contract is "parse once, project, drop the
 /// AST", and `SourceSymbol`/`ImportMap` alone do not encode call sites. Rather than widen that contract,
 /// this function runs a **second, uncached pass**: it re-reads every already-dispatched TypeScript
-/// file's text off disk (`ts_paths`) and re-parses it with `zzop_parser_typescript::parse_calls`. This
-/// never consults `zzop_cache::AnalysisCache` — a full per-file cache hit still re-reads and re-parses
-/// every TS file here whenever either rule is enabled and at least one HTTP endpoint exists.
+/// file's text off disk (`ts_paths`) and re-parses it with `zzop_parser_typescript::parse_calls`, AND —
+/// symmetrically — every already-dispatched Java file's text off disk (`java_rels`), re-parsed with
+/// `zzop_parser_java_21::parse_calls`/`parse_imports` (this is the "lift the exemption" wiring
+/// `rules-http`'s `mutating_route_no_auth` module doc names as the completion of its own "Call-graph
+/// language coverage" gap — see that doc). Neither re-parse ever consults `zzop_cache::AnalysisCache` — a
+/// full per-file cache hit still re-reads and re-parses every TS/Java file here whenever any of the three
+/// call-graph-BFS rules is enabled and at least one HTTP endpoint exists.
+///
+/// Java's imports are ALSO re-parsed fresh here (unlike TS's, which arrive pre-computed via
+/// `ts_import_pairs` from the fused per-file pass) — no `java_import_pairs` equivalent is threaded into
+/// this function, so re-parsing both calls and imports together keeps the Java side self-contained
+/// rather than growing the caller's parameter list for a fact only this function needs.
 ///
 /// `api_endpoints` is reconstructed from the per-file `IoProvide` facts already collected (`kind ==
 /// "http"`) rather than a third route-extraction pass — `IoProvide::key` is the normalized
 /// `http_interface_key(method, path)` form (path params collapsed to `{}`), so a finding's displayed
 /// `path` is that normalized form, not the endpoint's literal source text. This only affects display;
 /// BFS correctness never depends on exact path spelling.
+///
+/// ## Java call resolution: an opaque-specifier `resolve_file`, not real package resolution
+/// The combined `resolve_file_fn` below dispatches on the CALLING file's own extension: a TS `from_file`
+/// keeps using the real `zzop_parser_typescript::resolve_file` (relative-specifier, `ts_paths`-aware); a
+/// Java `from_file` always resolves a specifier to itself (`Some(specifier.to_string())`) — Java import
+/// specifiers are dotted package/class names (`io.spring.core.service.AuthorizationService`), not
+/// relative paths, and no whole-corpus Java package/type index (`pipeline::JavaIndex`, used elsewhere for
+/// the dep-graph) is threaded into this function. Treating the specifier as its own opaque, stable target
+/// identity is sufficient for THIS graph's purpose — `bfs_reachable`'s predicate only needs a stable node
+/// id to visit and vocabulary-match (`mutating_route_no_auth::is_guard_id`), not a real cross-file
+/// resolution to another parsed Java file's own outgoing edges. Known limitation: a guard reachable only
+/// through a SECOND hop through Java code (handler -> helper method in another Java file -> guard) won't
+/// be found, since the first hop's target id is this opaque specifier string, not a real symbol id
+/// anything else in the graph has outgoing edges from — single-hop (handler directly calls the guard, or
+/// a same-file helper) is the coverage this wiring buys.
 #[allow(clippy::too_many_arguments)]
 pub(in crate::analyze) fn run_callgraph_rules(
     root: &std::path::Path,
@@ -35,6 +59,7 @@ pub(in crate::analyze) fn run_callgraph_rules(
     io_provides: &[zzop_core::IoProvide],
     ts_paths: &HashSet<String>,
     ts_import_pairs: &[(String, ImportMap)],
+    java_rels: &[String],
     all_symbols: &[zzop_core::SourceSymbol],
     profile: bool,
     rule_time: &mut HashMap<String, (u128, usize)>,
@@ -75,7 +100,18 @@ pub(in crate::analyze) fn run_callgraph_rules(
             file_texts.insert(rel.clone(), text);
         }
     }
-    let imports_by_file: HashMap<String, ImportMap> = ts_import_pairs.iter().cloned().collect();
+    let mut imports_by_file: HashMap<String, ImportMap> = ts_import_pairs.iter().cloned().collect();
+    // Java's own re-parse — module doc "Engine-wiring route taken". Deliberately NOT folded into
+    // `file_texts`: neither `unsafe-read-endpoint`/`non-idempotent-write`'s `is_whitelisted` lookback nor
+    // `mutating-route-no-auth`'s NestJS `@UseGuards` decorator scan (`extract_controller_guarded_lines`,
+    // below) has any Java-shaped signal to find, so adding Java text there would only be unread bytes.
+    for rel in java_rels {
+        if let Ok(bytes) = std::fs::read(root.join(rel)) {
+            let text = String::from_utf8_lossy(&bytes).into_owned();
+            raw_calls.extend(zzop_parser_java_21::parse_calls(rel, &text));
+            imports_by_file.insert(rel.clone(), zzop_parser_java_21::parse_imports(&text));
+        }
+    }
     let mut local_symbols_by_file: HashMap<String, HashSet<String>> = HashMap::new();
     for s in all_symbols {
         local_symbols_by_file
@@ -83,8 +119,14 @@ pub(in crate::analyze) fn run_callgraph_rules(
             .or_default()
             .insert(s.name.clone());
     }
+    // Combined resolver, dispatched by the CALLING file's own extension — module doc "Java call
+    // resolution".
     let resolve_file_fn = |specifier: &str, from_file: &str| {
-        zzop_parser_typescript::resolve_file(specifier, from_file, ts_paths)
+        if from_file.ends_with(".java") {
+            Some(specifier.to_string())
+        } else {
+            zzop_parser_typescript::resolve_file(specifier, from_file, ts_paths)
+        }
     };
     let symbol_graph = zzop_core::callgraph::build_symbol_graph(
         &raw_calls,

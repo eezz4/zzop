@@ -65,7 +65,22 @@ pub use lang::used_names::parse_local_identifier_refs;
 ///   declarations expanded one symbol per spec-name), imports (`import` declarations, plain/aliased/
 ///   dot/blank, grouped), `used_names`, `net/http`+`gin` router-mount fragments, and `net/http` client
 ///   literal HTTP egress consumes.
-pub const PARSER_FINGERPRINT: &str = "go/tree-sitter-go-0.25.0/v1";
+/// - `gin-group-param-v1`: `adapters::gin` now also recognizes a `*gin.RouterGroup`/`*gin.Engine`
+///   FUNCTION PARAMETER as a tracked receiver (fragment named after the enclosing function), plus the
+///   cross-file call-side `pkg.Fn(<tracked receiver>)` / `pkg.Fn(<tracked>.Group("<lit>"))` mount
+///   recognizer that closes the dominant real-world gin registration idiom (`adapters::gin`'s own module
+///   doc). Extraction output changes (new `Mount`/fragment shapes now emitted), so cached entries from
+///   before this marker must not be served as fresh.
+/// - `gin-group-param-v2`: fixes an arity asymmetry bug — the def-side function-parameter registration
+///   (previous marker) already handled MULTI-parameter registration functions (`func Register(db *DB, r
+///   *gin.RouterGroup)`), but the call-side `try_call_site` only ever considered a single-argument call,
+///   so a multi-arg call site (`pkg.Register(db, api.Group("/x"))`) registered a fragment that was never
+///   mounted, surfacing its routes unprefixed as an unmounted-fragment DFS root. `try_call_site` is now
+///   arity-agnostic: any call with EXACTLY ONE mountable-receiver argument (ignoring every other
+///   argument) is a candidate; two-or-more mountable-receiver arguments is rejected as ambiguous
+///   (`adapters::gin`'s own module doc). Extraction output changes for this previously-missed call
+///   shape, so cached entries from before this marker must not be served as fresh.
+pub const PARSER_FINGERPRINT: &str = "go/tree-sitter-go-0.25.0/v1+gin-group-param-v2";
 
 /// Every top-level declaration kind `lang::symbols`/`lang::imports` recognize, PLUS `package_clause`
 /// (never itself extracted, but still a sign the file has SOME real Go in it) — `parse_tree`'s

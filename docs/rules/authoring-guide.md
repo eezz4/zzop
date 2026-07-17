@@ -79,6 +79,27 @@ into source) — a small but realistic `line-scan` rule with a suppress marker:
 `http-conventions` fixture pack there is a full `symbol-scan` + `io-scan` end-to-end demo, kept test-only
 rather than shipped — it exists to demonstrate the matcher shapes, not because it detects anything real).
 
+## The auto-appended disable hint
+
+Every DSL finding's `message` gets one more sentence appended by the engine at runtime, AFTER your own
+`message` text — you never write it yourself. `zzop_core::disable_hint` (`crates/core/src/finding.rs`)
+builds:
+
+```
+Disable via config `rules: { "<pack>/<rule>": "off" }` (embedders: `disabled_rules`)
+```
+
+and `crates/engine/src/pipeline/findings.rs`'s `append_disable_hints` appends this to every finding built
+by `eval_packs` (the engine's fused per-file pass), and `envelope::file_pass`'s direct `eval_pack` call
+(Mode B) appends the identical fragment via the same helper — one shared builder, never a second
+hand-written copy. This happens once, before the finding reaches `AnalysisCache::put_findings`, so the
+hint text is baked into the cached `message` and is not re-appended on a warm cache hit.
+
+**What this means for your `message` field**: write the cause, the fix, and (per the "Message triple"
+contract below) your rule's own `suppress_marker` name — that is the full contract for what you author.
+Do NOT write your own "Disable via config ..." sentence in `message`: the engine adds the hint for you,
+and a hand-written copy renders TWICE in the finding a reader actually sees.
+
 ## Performance: `require_file`/`require_file_all` rare-token-first
 
 `require_file`/`require_file_all` are pre-skips evaluated against a file's **whole text** before the

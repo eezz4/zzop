@@ -13,11 +13,15 @@ use zzop_core::{normalize_http_path, IoProvide};
 /// sub-router must not surface its entries with a truncated (missing prefix) URL — under-reporting is
 /// honest, mis-keying is not.
 ///
-/// **Mount resolution**: same-file fragment named `ident` first; else `resolve(specifier)` →
-/// target file, preferring the fragment named `ident` and falling back to the file's SOLE fragment
-/// (covers `export default route` re-imported under an arbitrary local alias — the common
+/// **Mount resolution**: same-file fragment named `ident` first; else `resolve(specifier, from_file,
+/// ident)` → target file, preferring the fragment named `ident` and falling back to the file's SOLE
+/// fragment (covers `export default route` re-imported under an arbitrary local alias — the common
 /// one-router-per-file layout). Ambiguous (multi-fragment, no name match) or unresolvable mounts
-/// skip that subtree.
+/// skip that subtree. `ident` is threaded through to `resolve` (not just used by this function's own
+/// post-resolution fallback above) for languages whose specifier resolves to a whole DIRECTORY of
+/// candidate files rather than one file — Go's import-path-to-package-directory resolution is the
+/// first such case (`crate::analyze::assemble::provides`'s Go resolver branch); every other
+/// language's resolver ignores the parameter and resolves to a single file exactly as before.
 ///
 /// Provide anchors: `file`/`line` of the VERB registration (the leaf file, not the mount site),
 /// `symbol` = handler name — the place a reader would edit the route.
@@ -31,7 +35,7 @@ use zzop_core::{normalize_http_path, IoProvide};
 /// so a mounted-but-unreachable fragment's `ScopedAttr`s are silent exactly like its `Verb`s are.
 pub(crate) fn compose_router_mount_provides(
     fragments: Vec<(String, Vec<zzop_core::RouterMountFragment>)>,
-    resolve: impl Fn(&str, &str) -> Option<String>,
+    resolve: impl Fn(&str, &str, &str) -> Option<String>,
 ) -> (Vec<IoProvide>, Vec<zzop_core::Attribute>) {
     use zzop_core::{RouterMountEntry, RouterMountFragment};
 
@@ -62,7 +66,7 @@ pub(crate) fn compose_router_mount_provides(
         match specifier {
             None => candidates_in(from_file),
             Some(spec) => {
-                let target = resolve(spec, from_file)?;
+                let target = resolve(spec, from_file, ident)?;
                 candidates_in(&target)
             }
         }

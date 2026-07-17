@@ -5,7 +5,7 @@
     {
       "id": "async-route-no-catch",
       "severity": "warning",
-      "message": "Async Express/router handler with no surrounding try/catch, `next(err)`, or `.catch()` — on Express 4, an unhandled rejection in an async handler crashes or hangs the process; Express 5 forwards async rejections to error-handling middleware automatically, so there it's a style/consistency concern rather than a crash bug. Wrap in try/catch and call `next(err)`, or attach `.catch(next)`. Suppress a vetted case with `// route-catch-ok`.",
+      "message": "Async Express/router handler with no surrounding try/catch, `next(err)`, or `.catch()` — on Express 4, an unhandled rejection in an async handler crashes or hangs the process; Express 5 forwards async rejections to error-handling middleware automatically, so there it's a style/consistency concern rather than a crash bug. Wrap in try/catch and call `next(err)`, or attach `.catch(next)`. A route wrapped by error-handling middleware like `express-async-handler` or `express-async-errors` is also safe, but that wrapping isn't visible in the handler body this rule scans — the rule's biggest real-world false-positive source. Suppress a vetted case with `// route-catch-ok`.",
       "suppress_marker": "route-catch-ok",
       "matcher": {
         "type": "method-scan",
@@ -128,7 +128,7 @@
     {
       "id": "fetch-no-timeout",
       "severity": "warning",
-      "message": "Outbound HTTP call (`fetch`/`axios`/`got`) in server/worker code with no timeout or `AbortController` visible in the same function — `fetch` has no default timeout, so a hung upstream hangs the request and can exhaust the connection pool. Pass an explicit timeout (e.g. `AbortSignal.timeout(...)`) or wire up an `AbortController`. Suppress a vetted case with `// fetch-timeout-ok`.",
+      "message": "Outbound HTTP call (`fetch`/`axios`/`got`) in server/worker code with no timeout or `AbortController` visible in the same function — `fetch` has no default timeout, so a hung upstream hangs the request and can exhaust the connection pool. Pass an explicit timeout (e.g. `AbortSignal.timeout(...)`) or wire up an `AbortController`. A timeout set on a shared client instance in another file (e.g. `axios.create({ timeout })` in a helper module) isn't visible to this per-function check — this is the rule's biggest real-world false-positive vector. Suppress a vetted case with `// fetch-timeout-ok`.",
       "suppress_marker": "fetch-timeout-ok",
       "matcher": {
         "type": "method-scan",

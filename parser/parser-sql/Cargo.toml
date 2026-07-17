@@ -1,0 +1,9 @@
+[package]
+name = "zzop-parser-sql"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+zzop-core = { version = "0.0.0", path = "../../crates/core" }
+regex = { workspace = true }

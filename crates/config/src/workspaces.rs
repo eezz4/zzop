@@ -91,6 +91,22 @@ pub fn expand_auto_trees(
     }
 
     let mut warnings = Vec::new();
+
+    // Shadowed-key honesty gap (D-something, blind field test): `roots` has zero effect once
+    // `trees: "auto"` is in play — auto's workspace scan base is always `base_dir` (the config
+    // file's directory), never anything `roots` names. Without this warning a config author sees
+    // `roots` silently steer nothing. Remove the now-inert key so the generic `roots`+`trees`
+    // check in `mapper::config_to_request` (which runs on this function's OUTPUT, after "auto" has
+    // become a concrete array) doesn't also fire and double-warn about the same root cause.
+    if map.contains_key("roots") {
+        warnings.push(
+            "config has both \"roots\" and \"trees\": \"auto\" — auto wins and scans the config \
+             file's directory for workspace members; \"roots\" is ignored in auto mode (remove one)."
+                .to_string(),
+        );
+        map.remove("roots");
+    }
+
     let mut seen_source: HashMap<String, String> = HashMap::new();
     let mut trees: Vec<(String, String)> = Vec::with_capacity(dirs.len());
     for rel in &dirs {

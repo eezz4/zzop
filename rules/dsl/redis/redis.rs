@@ -91,6 +91,29 @@ fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {
         .collect()
 }
 
+// --- file_pattern language-scope regression ---
+
+#[test]
+fn java_file_is_out_of_scope_for_flushall_and_keys_glob() {
+    // Regression for a blind field-test finding on corpus/oss/be-spring (pure Java, zero redis usage):
+    // `flushall-in-code`/`keys-glob-scan` used to include `java` in `file_pattern` alongside the pack's
+    // JS/TS extensions, while the pack's third rule (`client-no-error-listener`, whose vocabulary is
+    // unambiguously ioredis/node-redis-specific: `createClient`/`.on('error', ...)`) already did not —
+    // an inconsistent, apparently-accidental inclusion within one pack. Java client libraries (Jedis/
+    // Lettuce) do expose similarly-named `.flushAll()`/`.keys()` methods, but `keys-glob-scan`'s bare
+    // `.keys(` shape in particular collides broadly with ordinary Java Map/Collection APIs that have
+    // nothing to do with Redis, and the confirmed corpus behavior was `filesInScope` inflated to every
+    // `.java` file with none of them actually using Redis. Narrowed to match `client-no-error-listener`'s
+    // JS/TS-only scope for pack-internal consistency.
+    let dir = TempDir::new("zzop-redis");
+    dir.write(
+        "src/main/java/com/example/CacheService.java",
+        "class CacheService {\n  void reset() { jedis.flushAll(); }\n  java.util.Set<String> allKeys() { return jedis.keys(\"*\"); }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(out.findings.is_empty(), "{:?}", out.findings);
+}
+
 mod client_no_error_listener;
 mod flushall_in_code;
 mod keys_glob_scan;

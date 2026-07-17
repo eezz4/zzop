@@ -16,6 +16,14 @@
 //! - S4 (`client_library_import_warning`): an http-client package (axios, `@angular/common/http`, ...) is
 //!   imported while extracted `http` consumes stay near-zero — the consume-side dual of S2 (round 14's
 //!   Angular-FE class: ~15 real `HttpClient` call sites, 0 extracted consumes).
+//! - S6 (`orm_schema_silence_warning`): an ORM-schema package (TypeORM, ...) is imported while ZERO
+//!   `db-table` io facts were extracted tree-wide — a live NestJS repo full of `@Entity` decorators
+//!   produced no db-table facts and no warning at all before this tripwire existed.
+//! - S7 (`fetch_wrapper_call_site_warning`): a hand-rolled fetch-wrapper module (`export function
+//!   get/post/put/del`, each delegating to one internal `fetch(` call) is imported and its exports called
+//!   20+ times across other files, while extracted KEYED `http` consumes stay near-zero — blind-field
+//!   test R10's fe-svelte class (`src/lib/api.js`, callers across `src/routes/**`), the wrapper-
+//!   indirection shape S5's own tree-wide token count structurally cannot see.
 //!
 //! Each covers the NEXT unknown framework/idiom at least getting a warning instead of silent
 //! cross-layer-join darkness.
@@ -71,6 +79,8 @@ const WARNING_SUBSTRING: &str = "route decorators/annotations but only";
 const S2_WARNING_SUBSTRING: &str = "server-framework package(s) imported but only";
 const S3_WARNING_SUBSTRING: &str = "committed OpenAPI/Swagger spec exists at";
 const S4_WARNING_SUBSTRING: &str = "http-client package(s) imported but only";
+const S6_WARNING_SUBSTRING: &str = "ORM schema marker(s) detected but zero db-table io facts";
+const S7_WARNING_SUBSTRING: &str = "exports a fetch-wrapper idiom";
 
 /// 3 files carrying an invented `@FastController`/`@FastGet` decorator shape — structurally identical
 /// (class-level gate + method-level verb) to Nest's own idiom, but under decorator NAMES that
@@ -521,6 +531,155 @@ fn a_real_nest_tree_never_fires_the_s4_warning() {
             .iter()
             .any(|w| w.contains(S4_WARNING_SUBSTRING)),
         "a tree with no http-client package import must never get the S4 warning, got: {:?}",
+        out.warnings
+    );
+}
+
+/// A NestJS-style repo with TypeORM `@Entity` decorators (the live gap this tripwire was built from) but
+/// no Prisma-shaped query call anywhere — this tree's real db-table io fact count is genuinely zero.
+fn typeorm_entity_zero_db_facts_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-coverage-typeorm");
+    dir.write(
+        "src/user.entity.ts",
+        concat!(
+            "import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';\n\n",
+            "@Entity()\n",
+            "export class User {\n",
+            "  @PrimaryGeneratedColumn()\n",
+            "  id: number;\n\n",
+            "  @Column()\n",
+            "  name: string;\n",
+            "}\n",
+        ),
+    );
+    dir
+}
+
+/// Same TypeORM `@Entity` marker as above, PLUS a real Prisma-shaped query call site elsewhere in the
+/// tree (`getPrisma().user.findMany()`) — extracts one real `db-table` io fact, so S6 must go silent even
+/// though the ORM marker is still present (nonzero db-table facts always short-circuit).
+fn typeorm_marker_with_prisma_provided_db_facts_tree() -> TempDir {
+    let dir = typeorm_entity_zero_db_facts_tree();
+    dir.write(
+        "src/users.service.ts",
+        "export function listUsers() { return getPrisma().user.findMany(); }\n",
+    );
+    dir
+}
+
+#[test]
+fn typeorm_marker_with_zero_db_table_facts_fires_the_s6_warning() {
+    let dir = typeorm_entity_zero_db_facts_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains(S6_WARNING_SUBSTRING) && w.contains("TypeORM")),
+        "expected the S6 ORM-schema-silence warning naming TypeORM, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn a_tree_with_prisma_provided_db_facts_never_fires_the_s6_warning_even_with_an_orm_marker() {
+    let dir = typeorm_marker_with_prisma_provided_db_facts_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        out.ir
+            .ir
+            .io
+            .as_ref()
+            .is_some_and(|io| io.consumes.iter().any(|c| c.kind == "db-table")),
+        "expected at least one real db-table consume from the Prisma-shaped call, got: {:?}",
+        out.ir.ir.io
+    );
+    assert!(
+        !out.warnings.iter().any(|w| w.contains(S6_WARNING_SUBSTRING)),
+        "nonzero db-table facts must short-circuit S6 even with a TypeORM marker present, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn a_pure_fe_tree_with_no_orm_marker_never_fires_the_s6_warning() {
+    // `angular_fe_tree` carries no ORM-schema import at all — S6 must stay silent regardless of its
+    // (also zero) db-table fact count.
+    let dir = angular_fe_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains(S6_WARNING_SUBSTRING)),
+        "a tree with no ORM-schema marker must never get the S6 warning, got: {:?}",
+        out.warnings
+    );
+}
+
+/// blind-field test R10's fe-svelte class, distilled: `src/lib/api.js` exports `get`/`post`/`put`/`del`,
+/// each delegating to one internal `fetch(` call, and 5 other files import it (`import * as api from
+/// '$lib/api'`, SvelteKit's alias for `src/lib/api.js`) and call its exports across `src/routes/**` —
+/// this tree's real extracted keyed `http`-consume count is genuinely near-zero (the literal-call-site
+/// consume extractor sees `api.get(...)`, not a recognized http-client shape, at every call site).
+fn fetch_wrapper_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-coverage-fetch-wrapper");
+    dir.write(
+        "src/lib/api.js",
+        concat!(
+            "const base = 'https://api.example.com';\n\n",
+            "async function send(method, path) {\n",
+            "  return fetch(`${base}/${path}`, { method });\n",
+            "}\n\n",
+            "export function get(path) {\n  return send('GET', path);\n}\n",
+            "export function post(path, data) {\n  return send('POST', path, data);\n}\n",
+            "export function put(path, data) {\n  return send('PUT', path, data);\n}\n",
+            "export function del(path) {\n  return send('DELETE', path);\n}\n",
+        ),
+    );
+    dir.write(
+        "src/routes/a.js",
+        "import * as api from '$lib/api';\nexport async function load() {\n  await api.get('a');\n  await api.post('b', {});\n}\n",
+    );
+    dir.write(
+        "src/routes/b.js",
+        "import * as api from '$lib/api';\nexport async function load() {\n  await api.put('c', {});\n  await api.del('d');\n}\n",
+    );
+    dir.write(
+        "src/routes/c.js",
+        "import * as api from '$lib/api';\nexport async function load() {\n  await api.get('e');\n  await api.get('f');\n}\n",
+    );
+    dir
+}
+
+#[test]
+fn fetch_wrapper_module_with_enough_cross_file_call_sites_fires_the_s7_warning() {
+    let dir = fetch_wrapper_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        out.warnings.iter().any(|w| w.contains(S7_WARNING_SUBSTRING)
+            && w.contains("src/lib/api.js")
+            && w.contains("zzop-mcp contract envelope-guide")
+            && w.contains("partial envelope")),
+        "expected the S7 fetch-wrapper warning naming src/lib/api.js, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn a_real_nest_tree_never_fires_the_s7_warning() {
+    // No fetch-wrapper module anywhere in this tree — S7 must stay silent regardless of the tree's
+    // (also near-zero) keyed http-consume count.
+    let dir = real_nest_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains(S7_WARNING_SUBSTRING)),
+        "a tree with no fetch-wrapper module must never get the S7 warning, got: {:?}",
         out.warnings
     );
 }

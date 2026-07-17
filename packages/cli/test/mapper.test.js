@@ -179,6 +179,19 @@ test('top-level exclude rejects non-array / non-string entries', () => {
   assert.throws(() => configToRequest({ roots: ['.'], exclude: [123] }), ConfigError);
 });
 
+test('collectConfigWarnings warns when an explicit trees array shadows roots (parity with Rust port)', () => {
+  const { collectConfigWarnings } = require('../lib/mapper');
+  const warnings = collectConfigWarnings({ roots: ['./a'], trees: [{ root: './b' }] });
+  assert.ok(
+    warnings.some((w) => /config has both "roots" and "trees"/.test(w) && /"trees" wins/.test(w)),
+    `expected the shadowed-roots warning, got: ${warnings.join(' | ')}`
+  );
+  // Only one of the two keys -> silent. trees:"auto" is expandAutoTrees' warning, not this one.
+  assert.ok(!collectConfigWarnings({ roots: ['./a'] }).some((w) => /has both "roots"/.test(w)));
+  assert.ok(!collectConfigWarnings({ trees: [{ root: './b' }] }).some((w) => /has both "roots"/.test(w)));
+  assert.ok(!collectConfigWarnings({ roots: ['./a'], trees: 'auto' }).some((w) => /"trees" wins/.test(w)));
+});
+
 test('collectConfigWarnings flags unknown keys (never rejects) but stays silent on known ones', () => {
   const { collectConfigWarnings } = require('../lib/mapper');
   // all-known config -> no warnings

@@ -14,8 +14,10 @@ use super::controller_silence::MIN_PROVIDES_FLOOR;
 /// `.fetch(` on non-window receivers: the call-site-count threshold below does the noise control, and
 /// a heuristic exclusion list would be its own silent blindness. Same "independent of the extractor's
 /// own vocabulary" stance as S1's decorator regex: this tripwire exists to catch what extraction
-/// missed, so it must not share extraction's judgment.
-fn fetch_call_re() -> &'static Regex {
+/// missed, so it must not share extraction's judgment. `pub(super)` (not just private) so S7
+/// (`fetch_wrapper`) can reuse the exact same matcher for its own PASS 1 "does this file call builtin
+/// `fetch(` at all" check, rather than re-deriving a second, possibly-diverging regex for the same idiom.
+pub(super) fn fetch_call_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"\bfetch\s*\(").unwrap())
 }
@@ -42,8 +44,10 @@ const MAX_SAMPLES: usize = 3;
 /// documented over-disclosure tolerance includes `.d.ts` ambient declarations (`declare function
 /// fetch(` — `.d.ts` has extension `ts`) and comment/string occurrences — a types-only tree with 5+
 /// such lines and zero keyed consumes fires a warning it does not strictly merit; over-disclosure
-/// is safe, silence is fatal (same stance as S1's decorator line-scan).
-fn is_js_ts_family(rel: &str) -> bool {
+/// is safe, silence is fatal (same stance as S1's decorator line-scan). `pub(super)` so S7
+/// (`fetch_wrapper`) walks the identical file-family filter over the identical candidate list — one
+/// extension policy for "can this file carry a js-runtime `fetch` idiom", not two.
+pub(super) fn is_js_ts_family(rel: &str) -> bool {
     Path::new(rel)
         .extension()
         .and_then(|e| e.to_str())

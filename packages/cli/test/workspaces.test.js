@@ -230,6 +230,23 @@ test('other config keys survive expansion', () => {
   assert.equal(config.trees.length, 2);
 });
 
+test('roots alongside trees:"auto" warns and is stripped (parity with the Rust config port)', () => {
+  const base = makeFixture({
+    'pnpm-workspace.yaml': 'packages:\n  - "p/*"\n',
+    'p/a/package.json': pkg('a'),
+    'p/b/package.json': pkg('b'),
+  });
+  const { config, warnings } = expandAutoTrees({ trees: 'auto', roots: ['./x'] }, base);
+  assert.ok(
+    warnings.some((w) => /config has both "roots" and "trees": "auto"/.test(w) && /ignored in auto mode/.test(w)),
+    `expected the shadowed-roots warning, got: ${warnings.join(' | ')}`
+  );
+  assert.ok(!('roots' in config), 'inert roots key must be stripped from the expanded config');
+
+  const clean = expandAutoTrees({ trees: 'auto' }, base);
+  assert.ok(!clean.warnings.some((w) => /has both "roots"/.test(w)));
+});
+
 // ---------------------------------------------------------------------------------------------------
 // Error paths: no manifest, or a manifest that yields no packages.
 // ---------------------------------------------------------------------------------------------------

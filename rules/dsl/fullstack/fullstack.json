@@ -20,7 +20,7 @@
     {
       "id": "localhost-egress-committed",
       "severity": "warning",
-      "message": "Committed localhost/private-IP endpoint — breaks outside the dev machine. Move it to env/config; if this file is genuinely dev-only, exclude it via config instead. Suppress a vetted case with `// localhost-ok`.",
+      "message": "Committed localhost/private-IP endpoint — breaks outside the dev machine. Move it to env/config; if this file is genuinely dev-only, add it to this rule's config `exclude` list (a path substring or glob) instead of disabling the rule everywhere. Suppress a vetted case with `// localhost-ok`.",
       "suppress_marker": "localhost-ok",
       "matcher": {
         "type": "line-scan",

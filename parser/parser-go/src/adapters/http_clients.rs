@@ -44,6 +44,12 @@ use crate::util::{node_text, string_literal_text, valid_named_children};
 
 use super::nth_arg;
 
+/// `net/http` client helper name -> emitted key verb. Every verb is a `zzop_core::HTTP_KEY_VERBS`
+/// member EXCEPT `HEAD` — a deliberate T3 divergence (do not unify): `http.Head(...)` is a real
+/// client-side egress fact worth recording, but no provider-side extractor keys HEAD routes (the
+/// core key vocabulary is the 5 join verbs), so a HEAD consume is honest-but-unjoinable by design
+/// (it lands in unconsumed/external buckets, never edges). Pinned by
+/// `verb_methods_verbs_are_core_key_verbs_plus_deliberate_head` below.
 const VERB_METHODS: &[(&str, &str)] = &[
     ("Get", "GET"),
     ("Post", "POST"),

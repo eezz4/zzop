@@ -125,6 +125,11 @@ fn healthy_small_fixture_produces_no_diagnostics_warnings() {
         "healthy fixture should be diagnostics-warning-free (excluding capability notes), got: {:?}",
         out.warnings
     );
+    assert!(
+        out.config_warnings.is_empty(),
+        "healthy fixture should have no config-channel diagnostics either, got: {:?}",
+        out.config_warnings
+    );
 }
 
 #[test]
@@ -203,12 +208,21 @@ fn typo_d_disabled_rules_entry_surfaces_a_self_report_warning() {
     };
     let out = analyze_tree(dir.path(), &cfg);
 
+    // Config-channel diagnostic — rides `config_warnings`, not `warnings` (see
+    // `zzop_engine::AnalyzeOutput::config_warnings`'s doc).
     assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("matching no known rule id")),
+        "must NOT duplicate into warnings, got: {:?}",
         out.warnings
+    );
+    assert!(
+        out.config_warnings
             .iter()
             .any(|w| w.contains("matching no known rule id") && w.contains("circular-typo")),
         "expected an unknown-disabled-rule-id self-report, got: {:?}",
-        out.warnings
+        out.config_warnings
     );
 }
 
@@ -235,11 +249,11 @@ fn a_real_disabled_rules_entry_does_not_trigger_the_unknown_id_warning() {
     let out = analyze_tree(dir.path(), &cfg);
 
     assert!(
-        !out.warnings
+        !out.config_warnings
             .iter()
             .any(|w| w.contains("matching no known rule id")),
         "a real, known disabled_rules id must not be reported as unknown, got: {:?}",
-        out.warnings
+        out.config_warnings
     );
 }
 

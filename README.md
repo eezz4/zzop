@@ -46,6 +46,17 @@ import zzop from '@zzop/native';
 const report = JSON.parse(zzop.analyze(JSON.stringify({ root: '.' })));
 ```
 
+### Use in Claude Code (MCP plugin)
+
+Prefer no Node install at all? `zzop-mcp` is a self-contained binary with an MCP server built in:
+
+1. Download the `zzop-mcp-<platform>[.exe]` asset for your platform from [GitHub
+   Releases](https://github.com/eezz4/zzop/releases) and put it on `PATH` under the exact name
+   `zzop-mcp` (`zzop-mcp.exe` on Windows).
+2. In Claude Code: `/plugin marketplace add eezz4/zzop`, then `/plugin install zzop@zzop`.
+
+See [packages/mcp/README.md](packages/mcp/README.md) for the full install/build reference.
+
 ### Result (abridged)
 
 Every finding carries a rule id, severity, and a `file:line` location, e.g.:
@@ -78,9 +89,10 @@ route joins — which has no single-tree equivalent.
 | TypeScript / JavaScript (`.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts`) | Native, full AST (swc): symbols, imports, calls, HTTP routes/egress |
 | Python (`.py, .pyi`) | Native, full AST (ruff, Python 3 — Python-2-only syntax falls back to lexical): symbols, imports, FastAPI route provides, `requests`/`httpx` consumes — v1 scope |
 | Rust (`.rs`) | Native, full AST (syn 2): symbols, imports/`mod` tree (incl. same-workspace crate resolution), axum route provides, `reqwest` consumes — v1 scope |
-| Go (`.go`) | Native, full CST (tree-sitter-go 0.25): symbols, imports/dep graph (`go.mod` module resolution, package-directory-wide edges), gin + `net/http` route provides (incl. Go 1.22 `"METHOD /path"` mux syntax), `net/http` literal egress consumes — v1 scope |
-| Java (`.java`) | Native, full CST (tree-sitter-java 0.23.5): symbols (incl. nested types, dot-qualified method names, real visibility), imports/dep graph (`(package, type)`-indexed resolution, glob package-directory-wide edges), Spring MVC route provides (cross-file `extends`-chain + constant-prefix resolution) — v1 scope |
-| Prisma schema (`.prisma`) | Native, lexical schema: models/fields (structural + usage-aware schema rules) |
+| Go (`.go`) | Native, full CST (tree-sitter-go 0.25): symbols, imports/dep graph (`go.mod` module resolution, package-directory-wide edges), gin + `net/http` route provides (cross-file mount composition — a function-parameter router mounted from another file's call site — incl. Go 1.22 `"METHOD /path"` mux syntax), `net/http` literal egress consumes — v1 scope |
+| Java (`.java`) | Native, full CST (tree-sitter-java 0.23.5, Java 21 grammar): symbols (incl. nested types, dot-qualified method names, real visibility), imports/dep graph (`(package, type)`-indexed resolution, glob package-directory-wide edges), Spring MVC route provides (cross-file `extends`-chain + constant-prefix resolution) — v1 scope |
+| Prisma schema (`.prisma`) | Native, lexical schema: models/fields (structural + usage-aware schema rules) + `db-table` provides joining the client-side consumes |
+| SQL DDL (`.sql`) | Native, lexical DDL: `CREATE TABLE` → `db-table` provides (migration files light up the db-table channel for MyBatis/JDBC-style stacks) |
 | Anything else (Ruby, JSP, ...) | Lexical fallback in-tree (line count + `line-scan` rules only), or first-class support via an external parser adapter conforming to the [Normalized AST protocol](docs/NORMALIZED_AST.md) |
 
 Full precision-tier breakdown — exactly what each native parser extracts, Python's v1 scope note, and
@@ -103,7 +115,7 @@ Semantic Versioning and a maintained changelog begin at `1.0.0`. Full policy:
   DSL interpreter (line/method/symbol/io matchers), unified rule registry + gating
 - `crates/metrics` — score channels consumed by `engine`: roi/health/criticality/coupling/
   seams/recommendations/diagnostics
-- `crates/engine` — fused execution pipeline: language dispatch (TS/Prisma/Python/Rust/Go/Java) → rayon
+- `crates/engine` — fused execution pipeline: language dispatch (TS/Prisma/Python/Rust/Go/Java/SQL) → rayon
   per-file parse + per-file rules → AST drop → whole-graph passes; graceful degrade, cache
   consumption, git/scores integration, multi-tree cross-layer join, rule profiling
 - `crates/git` — git history collection (single `git log --numstat` pass → per-file stats +

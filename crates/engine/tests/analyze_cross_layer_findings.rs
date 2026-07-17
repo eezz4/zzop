@@ -202,6 +202,19 @@ fn provide_blind_be_tree() -> TempDir {
     dir
 }
 
+/// A tree that analyzes one real file but extracts ZERO io facts either way (no route registration, no
+/// http call) — the extraction-blindness caveat's "contributed no joinable io at all" substrate. Stands in
+/// for a tree whose sources failed to parse/extract for real (e.g. an unsupported framework idiom), without
+/// needing an actually-broken fixture: zero joinable io is the FACT the caveat gates on, regardless of why.
+fn zero_io_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-xlf-zero-io");
+    dir.write(
+        "src/util.ts",
+        "export function add(a: number, b: number) { return a + b; }\n",
+    );
+    dir
+}
+
 fn config(source_id: &str) -> EngineConfig {
     EngineConfig {
         source_id: source_id.to_string(),
@@ -915,4 +928,80 @@ fn both_mutation_rules_downgrade_together_when_their_respective_side_is_blind() 
         "unprovided-mutation-call must downgrade on its own provide-blind source: {:?}",
         unprovided_mutation[0]
     );
+}
+
+/// Extraction-blindness caveat (item 3, blind-round-3 fix batch): a sibling tree that contributed ZERO
+/// joinable io (0 provides AND 0 keyed consumes) means an "unconsumed" verdict elsewhere in the run may be
+/// that sibling's own extraction blindness, not a genuinely dead endpoint — both `unconsumed-endpoint` and
+/// `unconsumed-mutation-endpoint` must carry the shared caveat, naming the blind tree's source id.
+#[test]
+fn unconsumed_findings_carry_the_extraction_blindness_caveat_when_a_sibling_tree_has_zero_joinable_io(
+) {
+    let blind = zero_io_tree();
+    let be = write_only_be_tree();
+    let trees = vec![
+        (blind.path().to_path_buf(), config("blind-fe")),
+        (be.path().to_path_buf(), config("write-be")),
+    ];
+    let out = analyze_trees(&trees);
+
+    let unconsumed = find(&out.cross_layer_findings, "cross-layer/unconsumed-endpoint");
+    assert!(
+        !unconsumed.is_empty(),
+        "expected an unconsumed-endpoint finding for POST /api/group"
+    );
+    for f in &unconsumed {
+        assert!(
+            f.message.contains("'blind-fe'")
+                && f.message.contains("contributed no joinable io facts")
+                && f.message
+                    .contains("extraction blindness rather than a dead endpoint"),
+            "expected the extraction-blindness caveat naming 'blind-fe', got: {}",
+            f.message
+        );
+    }
+
+    let unconsumed_mutation = find(
+        &out.cross_layer_findings,
+        "cross-layer/unconsumed-mutation-endpoint",
+    );
+    assert!(
+        !unconsumed_mutation.is_empty(),
+        "expected an unconsumed-mutation-endpoint finding for POST /api/group"
+    );
+    for f in &unconsumed_mutation {
+        assert!(
+            f.message.contains("'blind-fe'")
+                && f.message.contains("contributed no joinable io facts"),
+            "expected the extraction-blindness caveat naming 'blind-fe', got: {}",
+            f.message
+        );
+    }
+}
+
+/// Control: when EVERY tree in the join contributed joinable io, `unconsumed-endpoint`/
+/// `unconsumed-mutation-endpoint` findings must NOT carry the caveat — it is only for the specific
+/// zero-joinable-io case, never a blanket addition.
+#[test]
+fn unconsumed_findings_carry_no_caveat_when_every_tree_contributes_joinable_io() {
+    let fe = fe_tree();
+    let be = write_only_be_tree();
+    let trees = vec![
+        (fe.path().to_path_buf(), config("fe")),
+        (be.path().to_path_buf(), config("write-be")),
+    ];
+    let out = analyze_trees(&trees);
+
+    let unconsumed = find(&out.cross_layer_findings, "cross-layer/unconsumed-endpoint");
+    assert!(
+        !unconsumed.is_empty(),
+        "expected an unconsumed-endpoint finding for POST /api/group"
+    );
+    for f in &unconsumed {
+        assert!(
+            !f.message.contains("contributed no joinable io facts"),
+            "unexpected extraction-blindness caveat when every tree contributes io: {}",
+            f.message
+        );
+    }
 }

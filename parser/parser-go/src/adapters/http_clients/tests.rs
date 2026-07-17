@@ -77,3 +77,19 @@ fn no_import_gate_negative() {
     let out = extract_go_http_consumes("a.go", src);
     assert!(out.is_empty());
 }
+
+#[test]
+fn verb_methods_verbs_are_core_key_verbs_plus_deliberate_head() {
+    // T2 subset pin with one T3 carve-out (see VERB_METHODS's doc): every emitted verb must be a
+    // core join verb, except the deliberate HEAD divergence — honest-but-unjoinable client fact.
+    for (_, verb) in super::VERB_METHODS {
+        assert!(
+            zzop_core::HTTP_KEY_VERBS.contains(verb) || *verb == "HEAD",
+            "VERB_METHODS emits {verb}, which is neither a core HTTP_KEY_VERBS member nor the pinned HEAD carve-out"
+        );
+    }
+    assert!(
+        super::VERB_METHODS.iter().any(|(_, v)| *v == "HEAD"),
+        "the HEAD carve-out disappeared — update the doc + this pin together"
+    );
+}

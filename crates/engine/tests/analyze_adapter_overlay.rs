@@ -773,6 +773,19 @@ fn synthetic_entry_sample_caps_at_three_with_a_plus_n_more_suffix() {
         "{synthetic_line}"
     );
     assert!(synthetic_line.contains("+2 more"), "{synthetic_line}");
+    // The warning must not under-disclose what a synthetic entry actually DOES: its io still merges
+    // and joins under the (possibly typo'd) declared path, and it counts in coverage.files — a config
+    // author checking only the file count would otherwise never learn a phantom file is inflating it.
+    assert!(
+        synthetic_line.contains(
+            "their io still merges and joins under the declared path (check for path typos)"
+        ),
+        "{synthetic_line}"
+    );
+    assert!(
+        synthetic_line.contains("they count in coverage.files"),
+        "{synthetic_line}"
+    );
 }
 
 #[test]
@@ -854,14 +867,17 @@ fn symbols_only_overlay_is_zero_fact_and_does_not_count_as_coverage() {
     // symbols-only overlay must trip the zero-fact census AND keep the per-extension "no native
     // parser" disclosure alive for its file — counting symbols as coverage would mask the disclosure
     // for data the engine silently drops.
+    // `.rb` stands in for "a real source extension with no native parser frontend" — `.sql` used to fill
+    // this role, but `zzop-parser-sql` now gives `.sql` a real `Language::Sql` dispatch (`db-table`
+    // provides from `CREATE TABLE`), so it no longer belongs in this fixture.
     let dir = TempDir::new("zzop-adapter-overlay");
     dir.write("src/app.ts", "export function noop() { return 1; }\n");
-    dir.write("a.sql", "SELECT 1;\n");
+    dir.write("a.rb", "def handler\n  1\nend\n");
 
-    let mut proj = projection("a.sql", 1);
+    let mut proj = projection("a.rb", 1);
     proj.symbols.push(SourceSymbol {
-        id: "a.sql#getReport".to_string(),
-        file: "a.sql".to_string(),
+        id: "a.rb#getReport".to_string(),
+        file: "a.rb".to_string(),
         name: "getReport".to_string(),
         kind: SourceSymbolKind::Function,
         line: 1,
@@ -872,7 +888,7 @@ fn symbols_only_overlay_is_zero_fact_and_does_not_count_as_coverage() {
         write_sites: Vec::new(),
     });
     let mut cfg = config();
-    cfg.adapter_overlays = vec![overlay("sql-adapter/1", vec![proj])];
+    cfg.adapter_overlays = vec![overlay("rb-adapter/1", vec![proj])];
 
     let out = analyze_tree(dir.path(), &cfg);
     assert!(
@@ -885,7 +901,7 @@ fn symbols_only_overlay_is_zero_fact_and_does_not_count_as_coverage() {
     assert!(
         out.warnings
             .iter()
-            .any(|w| w.contains("no native parser") && w.contains("a.sql")),
+            .any(|w| w.contains("no native parser") && w.contains("a.rb")),
         "symbols-only coverage must not suppress the unparsed-extension disclosure: {:?}",
         out.warnings
     );
@@ -936,21 +952,24 @@ fn reserved_io_only_overlay_is_zero_fact_not_coverage() {
     // `drop_reserved_io` strips), so a projection whose only io is a reserved sentinel is zero-fact at
     // BOTH call sites (census and the unparsed-extension exclusion set) — raw vs cleaned input cannot
     // judge differently, and a reserved-only overlay cannot mask the disclosure.
+    // `.rb` stands in for "a real source extension with no native parser frontend" — see the identical
+    // note on `symbols_only_overlay_is_zero_fact_and_does_not_count_as_coverage` above (`.sql` graduated
+    // out of this fixture once `zzop-parser-sql` gave it a real dispatch).
     let dir = TempDir::new("zzop-adapter-overlay");
     dir.write("src/app.ts", "export function noop() { return 1; }\n");
-    dir.write("a.sql", "SELECT 1;\n");
+    dir.write("a.rb", "def handler\n  1\nend\n");
 
-    let mut proj = projection("a.sql", 1);
+    let mut proj = projection("a.rb", 1);
     proj.io.provides.push(IoProvide {
         body: None,
         kind: "nest-global-prefix".to_string(),
         key: "api".to_string(),
-        file: "a.sql".to_string(),
+        file: "a.rb".to_string(),
         line: 1,
         symbol: None,
     });
     let mut cfg = config();
-    cfg.adapter_overlays = vec![overlay("sql-adapter/1", vec![proj])];
+    cfg.adapter_overlays = vec![overlay("rb-adapter/1", vec![proj])];
 
     let out = analyze_tree(dir.path(), &cfg);
     assert!(
@@ -963,7 +982,7 @@ fn reserved_io_only_overlay_is_zero_fact_not_coverage() {
     assert!(
         out.warnings
             .iter()
-            .any(|w| w.contains("no native parser") && w.contains("a.sql")),
+            .any(|w| w.contains("no native parser") && w.contains("a.rb")),
         "reserved-io-only coverage must not suppress the unparsed-extension disclosure: {:?}",
         out.warnings
     );

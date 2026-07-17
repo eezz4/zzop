@@ -89,6 +89,7 @@ mod pack_loading;
 mod policy_pins;
 mod reference_unit_tests;
 mod reference_validation;
+mod surface_parity;
 
 // ---------------------------------------------------------------------------------------------
 // Shared fixtures — every test loads the SAME real data the engine loads at runtime, never a

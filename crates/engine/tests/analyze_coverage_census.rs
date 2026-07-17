@@ -133,6 +133,39 @@ fn consume_only_tree_has_keyed_consumes_and_is_not_join_contribution_zero() {
     assert!(!fe_coverage.join_contribution_zero, "{fe_coverage:?}");
 }
 
+/// A tree whose only io fact is an UNRESOLVED consume (dynamic URL argument, no literal to key on) — 0
+/// provides, 0 KEYED consumes, but 1 unresolved consume.
+fn unresolved_only_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-cov-unresolved");
+    dir.write(
+        "src/Api.tsx",
+        "export function call(x: string) { return axios.get(buildUrl(x)); }\n",
+    );
+    dir
+}
+
+/// Pins the 2026-07-17 redefinition of `join_contribution_zero`: an unresolved consume proves the
+/// extractor SAW a call site, but it can never join anything either way (no key to match a provide
+/// against), so a tree with 0 provides, 0 keyed consumes, and 1+ unresolved consumes must still count as
+/// "no JOINABLE contribution" — before this redefinition the flag also required
+/// `io_consumes_unresolved == 0`, which under-fired (stayed `false`) on exactly this tree shape.
+#[test]
+fn unresolved_only_tree_is_still_join_contribution_zero() {
+    let dir = unresolved_only_tree();
+    let trees = vec![(dir.path().to_path_buf(), config("unresolved-only"))];
+    let out = analyze_trees(&trees);
+
+    let coverage = &out.trees[0].2.coverage;
+    assert_eq!(coverage.io_provides, 0, "{coverage:?}");
+    assert_eq!(coverage.io_consumes_keyed, 0, "{coverage:?}");
+    assert!(coverage.io_consumes_unresolved > 0, "{coverage:?}");
+    assert!(
+        coverage.join_contribution_zero,
+        "an unresolved-only consume can never join anything either way — must still count as zero \
+joinable contribution: {coverage:?}"
+    );
+}
+
 #[test]
 fn import_edges_and_symbols_are_nonzero_for_a_tree_with_an_import_and_a_symbol() {
     let dark = dark_tree();

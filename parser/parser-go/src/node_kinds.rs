@@ -31,6 +31,7 @@ pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     "parameter_declaration",
     "variadic_parameter_declaration",
     "pointer_type",
+    "qualified_type",
     "statement_list",
     // Identifiers/literals (`lang::used_names`, `util::string_literal_text`)
     "identifier",

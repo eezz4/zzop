@@ -82,6 +82,21 @@ fn trees_wins_over_roots_silently_when_both_are_present() {
     let trees = mapped.request["trees"].as_array().unwrap();
     assert_eq!(trees.len(), 1);
     assert_eq!(trees[0]["sourceId"], "./api");
+    // The precedence is unchanged (asserted above), but it must no longer be SILENT: a config
+    // author who wrote both keys gets a warning naming the shadowed one.
+    assert!(mapped.warnings.iter().any(|w| w
+        == "config has both \"roots\" and \"trees\" — \"trees\" wins and \"roots\" is silently \
+            ignored (remove one)."));
+}
+
+#[test]
+fn roots_only_or_trees_only_produce_no_shadowed_key_warning() {
+    let roots_only = config_to_request(&json!({"roots": ["."]}), Path::new("/base")).unwrap();
+    assert!(!roots_only.warnings.iter().any(|w| w.contains("roots")));
+
+    let trees_only =
+        config_to_request(&json!({"trees": [{"root": "./api"}]}), Path::new("/base")).unwrap();
+    assert!(!trees_only.warnings.iter().any(|w| w.contains("roots")));
 }
 
 #[test]

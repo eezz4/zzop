@@ -10,7 +10,7 @@
       "suppress_marker": "redis-flush-ok",
       "matcher": {
         "type": "line-scan",
-        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|java)$",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
         "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "require_file": "(?i)flush(all|db)",
         "skip_comment_lines": true,
@@ -24,7 +24,7 @@
       "suppress_marker": "redis-keys-ok",
       "matcher": {
         "type": "line-scan",
-        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|java)$",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
         "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
         "require_file": "(?i)(\\.keys\\s*\\(|['\"`]KEYS['\"`])",
         "skip_comment_lines": true,

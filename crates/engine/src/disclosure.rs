@@ -65,7 +65,9 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
         group: EXTRACTION_BLIND,
         summary: "A tree whose egress was not extracted contributes no consumes, so another tree's routes \
                   look dead. Asserted as `coverage.joinContributionZero` when a tree analyzed files but \
-                  produced zero io. Also detected self-report: a recognized http-client package import \
+                  produced no JOINABLE io (zero provides AND zero keyed consumes — an unresolved consume \
+                  proves the extractor saw a call site but can never join anything, so it does not count \
+                  as a contribution). Also detected self-report: a recognized http-client package import \
                   (axios, @angular/common/http, ...) while extracted `http` consumes stay near-zero (<3) \
                   self-reports the likely wrapper/DI call-idiom gap on the consume side. A lexical census \
                   of builtin `fetch(` call tokens (a global — no import to key on) likewise self-reports \
@@ -105,8 +107,11 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
     BlindnessClass {
         id: "classified-skip",
         group: EXTRACTION_BLIND,
-        summary: "Files skipped as minified/generated are reported once as a warning; test-classified \
-                  files are excluded without a per-reason skip census.",
+        summary: "Files skipped as minified/generated are reported once as a warning (a heuristic content \
+                  match, not exhaustive); test-classified files' io facts are excluded from the \
+                  cross-layer join and disclosed per tree via a warning naming the dropped counts when \
+                  nonzero — raw per-file facts still remain visible in `ir.io` (the JS CLI's `--json`/ \
+                  `--format json` output; MCP tool replies and the `zzop-mcp` CLI subcommands omit `ir`).",
         status: DisclosureStatus::Partial,
     },
     BlindnessClass {

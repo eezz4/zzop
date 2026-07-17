@@ -1,4 +1,4 @@
-//! Coverage for all five framework-silence tripwires (S1-S5) and `provide_blind_sources`.
+//! Coverage for all seven framework-silence tripwires (S1-S7) and `provide_blind_sources`.
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
@@ -8,10 +8,13 @@ use super::builtin_fetch::builtin_fetch_lexical_warning;
 use super::client_library_import::client_library_import_warning;
 use super::committed_spec_io_silence::{committed_spec_io_silence_warning, IO_NEAR_ZERO_FLOOR};
 use super::controller_silence::{controller_silence_warning, MIN_PROVIDES_FLOOR};
+use super::fetch_wrapper::fetch_wrapper_call_site_warning;
+use super::orm_schema_silence::orm_schema_silence_warning;
 use super::server_framework_import::{provide_blind_sources, server_framework_import_warning};
 
 /// Policy-value divergence pin: `coverage::CoverageCensus::join_contribution_zero` asserts on
-/// EXACT zero (an unconditional structural fact — files > 0 with literally no io either way),
+/// EXACT zero JOINABLE io (an unconditional structural fact — files > 0 with 0 provides and 0
+/// KEYED consumes; unresolved consumes don't count, they cannot join),
 /// while the S1/S2/S4 tripwires here gate on this near-zero floor, because a heuristic
 /// self-report must still fire at 1-2 extracted facts (round 9's be-express: 1 provide; round
 /// 14's be-spring: 2) where the census assertion is already structurally false. Unifying the two
@@ -679,5 +682,245 @@ fn lookalike_identifiers_do_not_count_as_fetch_calls() {
     );
     let rels = vec!["a.ts".to_string()];
     let warning = builtin_fetch_lexical_warning(dir.path(), &rels, 0);
+    assert!(warning.is_none(), "got: {warning:?}");
+}
+
+// --- S6 -----------------------------------------------------------------------------------------
+
+#[test]
+fn typeorm_marker_with_zero_db_table_facts_warns_naming_typeorm() {
+    let map = package_import_files(&[("typeorm", &["src/user.entity.ts"])]);
+    let warning = orm_schema_silence_warning(&map, 0);
+    assert!(
+        warning.as_deref().is_some_and(|w| w.contains("TypeORM")
+            && w.contains("src/user.entity.ts")
+            && w.contains("zero db-table io facts")
+            && w.contains("a partial envelope covering just the db-table channel is enough")
+            && w.contains("zzop-mcp contract envelope-guide")
+            && w.contains("docs/NORMALIZED_AST.md")),
+        "got: {warning:?}"
+    );
+}
+
+#[test]
+fn jpa_marker_at_java_census_grain_warns_naming_jpa() {
+    // Java's own F5 census drains to the first-two-dotted-segments grain (`java_census_key`'s doc) —
+    // a real `jakarta.persistence.Entity` import censuses as exactly this key.
+    let map = package_import_files(&[("jakarta.persistence", &["Order.java"])]);
+    let warning = orm_schema_silence_warning(&map, 0);
+    assert!(
+        warning
+            .as_deref()
+            .is_some_and(|w| w.contains("Jakarta Persistence (JPA)") && w.contains("Order.java")),
+        "got: {warning:?}"
+    );
+}
+
+#[test]
+fn sqlalchemy_marker_with_zero_db_table_facts_warns() {
+    let map = package_import_files(&[("sqlalchemy", &["models.py"])]);
+    let warning = orm_schema_silence_warning(&map, 0);
+    assert!(
+        warning.as_deref().is_some_and(|w| w.contains("SQLAlchemy")),
+        "got: {warning:?}"
+    );
+}
+
+#[test]
+fn gorm_marker_with_zero_db_table_facts_warns() {
+    let map = package_import_files(&[("gorm.io/gorm", &["model.go"])]);
+    let warning = orm_schema_silence_warning(&map, 0);
+    assert!(
+        warning.as_deref().is_some_and(|w| w.contains("GORM")),
+        "got: {warning:?}"
+    );
+}
+
+#[test]
+fn nonzero_db_table_facts_short_circuit_even_with_an_orm_marker() {
+    // A Prisma repo whose native path DID extract db-table facts (or any tree with adapter-overlaid
+    // db-table facts) must stay silent even if an unrelated ORM marker is also present.
+    let map = package_import_files(&[("typeorm", &["src/user.entity.ts"])]);
+    let warning = orm_schema_silence_warning(&map, 3);
+    assert!(warning.is_none(), "got: {warning:?}");
+}
+
+#[test]
+fn prisma_import_with_zero_db_table_facts_warns_naming_prisma() {
+    // Round-10 dogfood reversal: the native Prisma path only recognizes the `getPrisma()` accessor
+    // idiom — a bare-singleton `prisma.<model>.<method>` repo (be-express) extracts ZERO db-table
+    // facts, and excluding prisma from the vocab masked exactly that gap. The exact-zero gate keeps
+    // the entry self-correcting (see the vocab doc + the nonzero short-circuit test below).
+    let map = package_import_files(&[("@prisma/client", &["src/db.ts"])]);
+    let warning = orm_schema_silence_warning(&map, 0);
+    assert!(
+        warning
+            .as_deref()
+            .is_some_and(|w| w.contains("Prisma") && w.contains("src/db.ts")),
+        "got: {warning:?}"
+    );
+}
+
+#[test]
+fn prisma_import_with_extracted_db_table_facts_stays_silent() {
+    // The getPrisma()-idiom repo where the native path DID extract facts: nonzero count short-circuits.
+    let map = package_import_files(&[("@prisma/client", &["src/db.ts"])]);
+    let warning = orm_schema_silence_warning(&map, 2);
+    assert!(warning.is_none(), "got: {warning:?}");
+}
+
+#[test]
+fn no_orm_marker_never_warns() {
+    let map = package_import_files(&[("react", &["src/App.tsx"]), ("lodash", &["src/x.ts"])]);
+    let warning = orm_schema_silence_warning(&map, 0);
+    assert!(warning.is_none(), "got: {warning:?}");
+}
+
+#[test]
+fn an_orm_lookalike_specifier_does_not_match_via_substring() {
+    let map = package_import_files(&[("typeorm-extension", &["src/x.ts"])]);
+    let warning = orm_schema_silence_warning(&map, 0);
+    assert!(warning.is_none(), "got: {warning:?}");
+}
+
+#[test]
+fn a_subpath_import_of_an_orm_still_matches() {
+    let map = package_import_files(&[("typeorm/decorator/Entity", &["src/user.entity.ts"])]);
+    let warning = orm_schema_silence_warning(&map, 0);
+    assert!(warning.is_some(), "got: {warning:?}");
+}
+
+// --- S7 -----------------------------------------------------------------------------------------
+
+/// `src/lib/api.js`-shaped wrapper module: a private `send` helper wraps the one internal `fetch(`
+/// call, and `get`/`post`/`put`/`del` are the only names re-exported — mirrors blind-field test R10's
+/// fe-svelte class verbatim (`send` itself is deliberately NOT exported, and must not count).
+fn wrapper_module_src() -> &'static str {
+    "const base = 'https://api.example.com';\n\
+async function send(method, path) { return fetch(base + '/' + path); }\n\
+export function get(path) { return send('GET', path); }\n\
+export function post(path, data) { return send('POST', path, data); }\n\
+export function put(path, data) { return send('PUT', path, data); }\n\
+export function del(path) { return send('DELETE', path); }\n"
+}
+
+#[test]
+fn wrapper_module_with_enough_cross_file_call_sites_fires() {
+    let dir = TempDir::new("zzop-coverage-fetch-wrapper-fires");
+    dir.write("src/lib/api.js", wrapper_module_src());
+    // `$lib/api` is SvelteKit's own alias for `src/lib/api.js` — the loose suffix match resolves it via
+    // the shared trailing segment `api`, with no bundler-alias table involved.
+    dir.write(
+        "src/routes/a.js",
+        "import * as api from '$lib/api';\nexport async function load() {\n  await api.get('a');\n  await api.post('b', {});\n}\n",
+    );
+    dir.write(
+        "src/routes/b.js",
+        "import * as api from '$lib/api';\nexport async function load() {\n  await api.put('c', {});\n  await api.del('d');\n  await api.get('e');\n}\n",
+    );
+    let rels = vec![
+        "src/lib/api.js".to_string(),
+        "src/routes/a.js".to_string(),
+        "src/routes/b.js".to_string(),
+    ];
+    let warning = fetch_wrapper_call_site_warning(dir.path(), &rels, 0);
+    assert!(
+        warning
+            .as_deref()
+            .is_some_and(|w| w.contains("src/lib/api.js")
+            && w.contains("5 cross-file call site(s)")
+            && w.contains("src/routes/a.js")
+            && w.contains("src/routes/b.js")
+            && w.contains("Mode B overlay adapter")
+            // D9 funnel tail — same chain-to-creation convention as every sibling tripwire.
+            && w.contains("a partial envelope covering just the consume channel is enough")
+            && w.contains("zzop-mcp contract envelope-guide")
+            && w.contains("docs/NORMALIZED_AST.md")),
+        "got: {warning:?}"
+    );
+}
+
+#[test]
+fn healthy_keyed_consumes_short_circuit_without_even_reading_files_s7() {
+    // Paths don't exist on disk — verifies the cheap short-circuit path returns `None` once the keyed
+    // consume count clears the shared S5/S7 floor, same style as S5's own short-circuit test.
+    let rels = vec!["does/not/exist/api.js".to_string()];
+    let warning = fetch_wrapper_call_site_warning(Path::new("."), &rels, MIN_PROVIDES_FLOOR);
+    assert!(warning.is_none());
+}
+
+#[test]
+fn wrapper_call_sites_below_the_floor_stay_silent() {
+    let dir = TempDir::new("zzop-coverage-fetch-wrapper-below-floor");
+    dir.write("src/lib/api.js", wrapper_module_src());
+    dir.write(
+        "src/routes/a.js",
+        "import * as api from '$lib/api';\nexport async function load() {\n  await api.get('a');\n  await api.post('b', {});\n}\n",
+    );
+    dir.write(
+        "src/routes/b.js",
+        "import * as api from '$lib/api';\nexport async function load() {\n  await api.put('c', {});\n  await api.del('d');\n}\n",
+    );
+    let rels = vec![
+        "src/lib/api.js".to_string(),
+        "src/routes/a.js".to_string(),
+        "src/routes/b.js".to_string(),
+    ];
+    // 4 total cross-file call sites — one short of FETCH_CALL_SITES_MIN (5).
+    let warning = fetch_wrapper_call_site_warning(dir.path(), &rels, 0);
+    assert!(warning.is_none(), "got: {warning:?}");
+}
+
+#[test]
+fn no_wrapper_export_names_stays_silent() {
+    // `helper` is not in WRAPPER_EXPORT_NAMES — a plain re-exported fetch helper (unlike an http-verby
+    // sender) is a resolution gap S5 already covers, not this tripwire's target.
+    let dir = TempDir::new("zzop-coverage-fetch-wrapper-no-export");
+    dir.write(
+        "src/lib/util.js",
+        "export function helper(path) { return fetch(path); }\n",
+    );
+    dir.write(
+        "src/routes/a.js",
+        "import { helper } from '../lib/util';\nhelper('a'); helper('b'); helper('c'); helper('d'); helper('e');\n",
+    );
+    let rels = vec!["src/lib/util.js".to_string(), "src/routes/a.js".to_string()];
+    let warning = fetch_wrapper_call_site_warning(dir.path(), &rels, 0);
+    assert!(warning.is_none(), "got: {warning:?}");
+}
+
+#[test]
+fn class_methods_named_like_the_vocab_are_not_exported_bindings() {
+    // A class whose METHODS happen to be named `get`/`post` (Angular's typed-HttpClient idiom) must not
+    // be mistaken for a wrapper-defining file even when the file also calls builtin `fetch(` elsewhere —
+    // PASS 1 requires an actual top-level EXPORTED binding (`export function`/`export const`/
+    // `export {}`), never a class method, however the method happens to be named.
+    let dir = TempDir::new("zzop-coverage-fetch-wrapper-class-methods");
+    dir.write(
+        "src/app/articles.service.ts",
+        "export class ArticlesService {\n  ping() { return fetch('/health'); }\n  get(id) { return this.raw(id); }\n  post(x) { return this.raw(x); }\n}\n",
+    );
+    let rels = vec!["src/app/articles.service.ts".to_string()];
+    let warning = fetch_wrapper_call_site_warning(dir.path(), &rels, 0);
+    assert!(warning.is_none(), "got: {warning:?}");
+}
+
+#[test]
+fn a_non_importing_file_with_the_same_names_does_not_count() {
+    // A file that never imports the wrapper (no matching `from '...'` specifier) must not contribute
+    // call sites even though it happens to call functions with the same vocab names — PASS 2's
+    // importer gate, not just the name match, is what attributes a call site to the wrapper.
+    let dir = TempDir::new("zzop-coverage-fetch-wrapper-non-importer");
+    dir.write("src/lib/api.js", wrapper_module_src());
+    dir.write(
+        "src/unrelated/map-utils.js",
+        "export function get(m, k) { return m.get ? m.get(k) : m[k]; }\n\
+get({}, 'a'); get({}, 'b'); get({}, 'c'); get({}, 'd'); get({}, 'e');\n",
+    );
+    let rels = vec![
+        "src/lib/api.js".to_string(),
+        "src/unrelated/map-utils.js".to_string(),
+    ];
+    let warning = fetch_wrapper_call_site_warning(dir.path(), &rels, 0);
     assert!(warning.is_none(), "got: {warning:?}");
 }

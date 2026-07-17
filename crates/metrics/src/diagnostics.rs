@@ -98,6 +98,18 @@ pub struct AnalysisDiagnostics {
     pub input: DiagnosticsInput,
     /// Human-readable warnings for degenerate signals — empty when the run looks healthy.
     pub warnings: Vec<String>,
+    /// The `unknown_disabled_rule_ids`/`unknown_severity_override_ids` self-reports — split OUT of
+    /// `warnings` (2026-07-17) because these are config problems (a typo'd `disabled_rules`/
+    /// `severity_overrides` entry did nothing), not degenerate-output signals, and belong on the
+    /// consumer's config-warnings channel even though this module (not the config front-end) is what
+    /// computes them — only analysis time has the known-rule-id set a config parser never sees. The
+    /// caller (`zzop-engine`'s `analyze::assemble`/`envelope::analyze_envelope`) routes this into
+    /// `AnalyzeOutput::config_warnings` instead of `AnalyzeOutput::warnings`. Deliberately does NOT
+    /// include `unknown_suppression_rule_ids`'s self-report — that one stays in `warnings` (unchanged,
+    /// out of this split's scope). Empty when every entry matched a known id, or none were given.
+    /// `#[serde(default)]` so a pre-split serialized form (which has no such field) still deserializes.
+    #[serde(default)]
+    pub config_warnings: Vec<String>,
 }
 
 impl std::ops::Deref for AnalysisDiagnostics {
@@ -107,8 +119,19 @@ impl std::ops::Deref for AnalysisDiagnostics {
     }
 }
 
+/// Renders a count with the correctly-pluralized noun ("1 entry" / "2 entries") — replaces the old
+/// "N entry/entries" double-word form, which rendered literally (unresolved) in user-facing warning text.
+fn entry_count(n: usize) -> String {
+    if n == 1 {
+        "1 entry".to_string()
+    } else {
+        format!("{n} entries")
+    }
+}
+
 pub fn build_diagnostics(i: DiagnosticsInput) -> AnalysisDiagnostics {
     let mut warnings: Vec<String> = Vec::new();
+    let mut config_warnings: Vec<String> = Vec::new();
 
     // Degenerate dep graph = 0 edges OR pathologically few relative to file count (< 1 edge per 20 files in a
     // non-tiny repo). A healthy graph has ~1+ edges/file; near-zero means imports went unresolved (custom module
@@ -192,28 +215,31 @@ pub fn build_diagnostics(i: DiagnosticsInput) -> AnalysisDiagnostics {
 
     // Unlike every other check above, this one is not "empty/degenerate output" — it flags a config entry
     // that had NO effect at all (a typo'd/stale `disabled_rules` id), which is otherwise indistinguishable
-    // from a working exclusion (see `unknown_disabled_rule_ids`'s doc).
+    // from a working exclusion (see `unknown_disabled_rule_ids`'s doc). This is a CONFIG problem, not a
+    // degenerate-output signal, so it rides `config_warnings` (not `warnings`) — see `AnalysisDiagnostics::
+    // config_warnings`'s doc for why this module still computes it despite the split.
     if !i.unknown_disabled_rule_ids.is_empty() {
         let mut ids = i.unknown_disabled_rule_ids.clone();
         ids.sort();
         ids.dedup();
-        warnings.push(format!(
-            "disabled rules have {} entry/entries matching no known rule id: {} — these did NOT disable anything (check for a typo; a valid id is a bare pack id, a native analysis id, or a \"<pack>/<rule>\" id; config dialect `rules: {{ \"<id>\": \"off\" }}` for a rule id, or `packs.disabled` for a bare pack id; embedders: `disabledRules`).",
-            ids.len(),
+        config_warnings.push(format!(
+            "disabled rules have {} matching no known rule id: {} — these did NOT disable anything (check for a typo; a valid id is a bare pack id, a native analysis id, or a \"<pack>/<rule>\" id; config dialect `rules: {{ \"<id>\": \"off\" }}` for a rule id, or `packs.disabled` for a bare pack id; embedders: `disabledRules`).",
+            entry_count(ids.len()),
             ids.join(", ")
         ));
     }
 
     // Same "config entry had NO effect at all" class as `unknown_disabled_rule_ids` above, over
     // `severity_overrides` instead — see that field's doc and `unknown_severity_override_ids`'s doc for why
-    // the valid-id enumeration named here (no bare pack id) differs from the disabled-rules one.
+    // the valid-id enumeration named here (no bare pack id) differs from the disabled-rules one. Also
+    // `config_warnings`, same reasoning as `unknown_disabled_rule_ids` just above.
     if !i.unknown_severity_override_ids.is_empty() {
         let mut ids = i.unknown_severity_override_ids.clone();
         ids.sort();
         ids.dedup();
-        warnings.push(format!(
-            "severity overrides have {} entry/entries matching no known rule id: {} — these did NOT remap any finding's severity (check for a typo; a valid id is a native analysis id or a \"<pack>/<rule>\" id; config dialect `rules: {{ \"<id>\": \"<severity>\" }}`, embedders: `severityOverrides`).",
-            ids.len(),
+        config_warnings.push(format!(
+            "severity overrides have {} matching no known rule id: {} — these did NOT remap any finding's severity (check for a typo; a valid id is a native analysis id or a \"<pack>/<rule>\" id; config dialect `rules: {{ \"<id>\": \"<severity>\" }}`, embedders: `severityOverrides`).",
+            entry_count(ids.len()),
             ids.join(", ")
         ));
     }
@@ -227,13 +253,17 @@ pub fn build_diagnostics(i: DiagnosticsInput) -> AnalysisDiagnostics {
         ids.sort();
         ids.dedup();
         warnings.push(format!(
-            "suppressions have {} entry/entries whose rule matches no known rule id: {} — these did NOT suppress anything (check for a typo; a valid id is a native analysis id or a \"<pack>/<rule>\" id; config dialect `rules: {{ \"<id>\": {{ \"exclude\": [...] }} }}`, embedders: `suppressions`).",
-            ids.len(),
+            "suppressions have {} whose rule matches no known rule id: {} — these did NOT suppress anything (check for a typo; a valid id is a native analysis id or a \"<pack>/<rule>\" id; config dialect `rules: {{ \"<id>\": {{ \"exclude\": [...] }} }}`, embedders: `suppressions`).",
+            entry_count(ids.len()),
             ids.join(", ")
         ));
     }
 
-    AnalysisDiagnostics { input: i, warnings }
+    AnalysisDiagnostics {
+        input: i,
+        warnings,
+        config_warnings,
+    }
 }
 
 #[cfg(test)]

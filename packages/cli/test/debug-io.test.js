@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { renderDebugIo, BUCKETS } = require('../lib/debug-io');
+const { renderDebugIo, debugIoTreeCount, debugIoTreeCountNote, BUCKETS } = require('../lib/debug-io');
 
 // A fabricated crossLayer object covering all six buckets, deliberately fed OUT of sorted order so the
 // tests also assert renderDebugIo sorts deterministically rather than echoing input order.
@@ -131,4 +131,40 @@ test('every bucket renders at count 0, nothing thrown, when crossLayer is absent
       assert.match(output, new RegExp(`${b} \\(0\\)`));
     }
   }
+});
+
+// --- debugIoTreeCount / debugIoTreeCountNote — item 3's "<2 trees" explainer ---------------------------
+
+test('debugIoTreeCount: single-tree analyze() shape (no trees array) is 1', () => {
+  assert.equal(debugIoTreeCount({ findings: [], fileCount: 1 }), 1);
+  assert.equal(debugIoTreeCount(undefined), 1);
+  assert.equal(debugIoTreeCount(null), 1);
+});
+
+test('debugIoTreeCount: multi-tree shape counts trees[], including an explicit single-entry trees[]', () => {
+  assert.equal(debugIoTreeCount({ trees: [{ sourceId: 'api' }], crossLayer: {} }), 1);
+  assert.equal(debugIoTreeCount({ trees: [{ sourceId: 'api' }, { sourceId: 'web' }], crossLayer: {} }), 2);
+});
+
+test('debugIoTreeCountNote: fires for a single-tree run, naming the actual count', () => {
+  assert.equal(
+    debugIoTreeCountNote({ findings: [], fileCount: 1 }),
+    'note: cross-layer buckets need >= 2 trees; this run analyzed 1 tree'
+  );
+  assert.equal(
+    debugIoTreeCountNote({ trees: [{ sourceId: 'api' }], crossLayer: {} }),
+    'note: cross-layer buckets need >= 2 trees; this run analyzed 1 tree'
+  );
+});
+
+test('debugIoTreeCountNote: null (no note) once the run analyzed >= 2 trees', () => {
+  assert.equal(
+    debugIoTreeCountNote({ trees: [{ sourceId: 'api' }, { sourceId: 'web' }], crossLayer: {} }),
+    null
+  );
+});
+
+test('debugIoTreeCountNote: degrades gracefully (assumes 1) on an absent/malformed output', () => {
+  assert.match(debugIoTreeCountNote(undefined), /analyzed 1 tree$/);
+  assert.match(debugIoTreeCountNote(null), /analyzed 1 tree$/);
 });

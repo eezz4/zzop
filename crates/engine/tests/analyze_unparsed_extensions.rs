@@ -9,6 +9,12 @@
 //! (`envelope::overlay_file_carries_facts`) — a zero-fact overlay entry (every channel empty, `is_entry:
 //! false`) does NOT exempt its file: see `zero_fact_overlay_does_not_suppress_the_unparsed_warning` below,
 //! the G8 "unmask" regression guard.
+//!
+//! Fixture extensions: `.vb` and `.rb` stand in for "a real source extension with no native parser frontend
+//! in this workspace" — `.sql` used to fill that role here, but `zzop-parser-sql` now gives `.sql` a real
+//! `Language::Sql` dispatch (`db-table` provides from `CREATE TABLE`), so it graduated out of this fixture
+//! (see `crates/engine/tests/analyze_unparsed_extensions.rs`'s own git history / `zzop-parser-sql`'s own
+//! integration test for `.sql`'s new, no-longer-unparsed coverage).
 
 use std::collections::HashMap;
 use std::fs;
@@ -59,17 +65,17 @@ fn config() -> EngineConfig {
     }
 }
 
-/// The shared fixture: two `.sql` files, one `.rb` file (all dispatch-`None`, real source signal), a
+/// The shared fixture: two `.vb` files, one `.rb` file (all dispatch-`None`, real source signal), a
 /// `README.md` (non-source extension), an `img.png` (non-source extension), a native `src/x.ts` (has a
 /// real parser), a native `native.py` (also has a real parser — `zzop-parser-python-3`; asserted absent
 /// from the warning below, same as `.ts`, not merely omitted from the "expected present" list), a native
 /// `native.rs` (also has a real parser — `zzop-parser-rust`; same assertion), and a native `native.go`
-/// (also has a real parser — `zzop-parser-go`; same assertion). Only `.sql`/`.rb` are expected to ever
+/// (also has a real parser — `zzop-parser-go`; same assertion). Only `.vb`/`.rb` are expected to ever
 /// appear in the per-extension warning.
 fn fixture_tree() -> TempDir {
     let dir = TempDir::new("zzop-engine-unparsed-ext");
-    dir.write("a.sql", "SELECT * FROM users;\n");
-    dir.write("b.sql", "SELECT * FROM orders;\n");
+    dir.write("a.vb", "Public Function Users()\nEnd Function\n");
+    dir.write("b.vb", "Public Function Orders()\nEnd Function\n");
     dir.write("c.rb", "def handler\n  1\nend\n");
     dir.write("README.md", "# not real source\n");
     dir.write("img.png", "not a real png, just bytes\n");
@@ -151,17 +157,17 @@ fn unparsed_source_extensions_warn_exactly_once_each_non_source_and_native_exten
     );
     assert!(rb_line.contains("c.rb"), "{rb_line}");
 
-    let sql_line = out
+    let vb_line = out
         .warnings
         .iter()
-        .find(|w| w.contains("extension .sql"))
-        .unwrap_or_else(|| panic!("expected a .sql warning, got: {:?}", out.warnings));
+        .find(|w| w.contains("extension .vb"))
+        .unwrap_or_else(|| panic!("expected a .vb warning, got: {:?}", out.warnings));
     assert!(
-        sql_line.starts_with("2 file(s) with extension .sql"),
-        "{sql_line}"
+        vb_line.starts_with("2 file(s) with extension .vb"),
+        "{vb_line}"
     );
-    assert!(sql_line.contains("a.sql"), "{sql_line}");
-    assert!(sql_line.contains("b.sql"), "{sql_line}");
+    assert!(vb_line.contains("a.vb"), "{vb_line}");
+    assert!(vb_line.contains("b.vb"), "{vb_line}");
 
     // Exactly one line per extension.
     assert_eq!(
@@ -174,25 +180,25 @@ fn unparsed_source_extensions_warn_exactly_once_each_non_source_and_native_exten
     assert_eq!(
         out.warnings
             .iter()
-            .filter(|w| w.contains("extension .sql"))
+            .filter(|w| w.contains("extension .vb"))
             .count(),
         1
     );
 
-    // BTreeMap key order: "rb" sorts before "sql".
+    // BTreeMap key order: "rb" sorts before "vb".
     let rb_idx = out
         .warnings
         .iter()
         .position(|w| w.contains("extension .rb"))
         .unwrap();
-    let sql_idx = out
+    let vb_idx = out
         .warnings
         .iter()
-        .position(|w| w.contains("extension .sql"))
+        .position(|w| w.contains("extension .vb"))
         .unwrap();
     assert!(
-        rb_idx < sql_idx,
-        "expected .rb before .sql: {:?}",
+        rb_idx < vb_idx,
+        "expected .rb before .vb: {:?}",
         out.warnings
     );
 
@@ -237,42 +243,39 @@ fn adapter_overlay_coverage_excludes_a_file_from_its_extension_count() {
 
     let mut cfg = config();
     // The overlay's own `path` matches the native artifact's `rel` exactly, so this hits the
-    // merge-onto-existing-artifact branch of `apply_adapter_overlays` — `a.sql` is now "covered" by an
-    // adapter, and must drop out of the `.sql` count entirely. Uses `projection_with_io` (a real fact),
+    // merge-onto-existing-artifact branch of `apply_adapter_overlays` — `a.vb` is now "covered" by an
+    // adapter, and must drop out of the `.vb` count entirely. Uses `projection_with_io` (a real fact),
     // not the zero-fact `projection` — see `zero_fact_overlay_does_not_suppress_the_unparsed_warning`
     // below for the case where the overlay carries no facts at all.
-    cfg.adapter_overlays = vec![overlay("sql-adapter/1", vec![projection_with_io("a.sql")])];
+    cfg.adapter_overlays = vec![overlay("vb-adapter/1", vec![projection_with_io("a.vb")])];
     let out = analyze_tree(dir.path(), &cfg);
 
-    let sql_line = out
+    let vb_line = out
         .warnings
         .iter()
-        .find(|w| w.contains("extension .sql"))
-        .unwrap_or_else(|| panic!("expected a .sql warning, got: {:?}", out.warnings));
+        .find(|w| w.contains("extension .vb"))
+        .unwrap_or_else(|| panic!("expected a .vb warning, got: {:?}", out.warnings));
     assert!(
-        sql_line.starts_with("1 file(s) with extension .sql"),
-        "{sql_line}"
+        vb_line.starts_with("1 file(s) with extension .vb"),
+        "{vb_line}"
     );
-    assert!(!sql_line.contains("a.sql"), "{sql_line}");
-    assert!(sql_line.contains("b.sql"), "{sql_line}");
+    assert!(!vb_line.contains("a.vb"), "{vb_line}");
+    assert!(vb_line.contains("b.vb"), "{vb_line}");
 }
 
 #[test]
 fn adapter_overlay_covering_the_only_file_of_an_extension_makes_that_line_disappear() {
     let dir = TempDir::new("zzop-engine-unparsed-ext-single");
-    dir.write("only.sql", "SELECT 1;\n");
+    dir.write("only.vb", "Dim x = 1\n");
     dir.write("src/x.ts", "export const x = 1;\n");
 
     let mut cfg = config();
-    cfg.adapter_overlays = vec![overlay(
-        "sql-adapter/1",
-        vec![projection_with_io("only.sql")],
-    )];
+    cfg.adapter_overlays = vec![overlay("vb-adapter/1", vec![projection_with_io("only.vb")])];
     let out = analyze_tree(dir.path(), &cfg);
 
     assert!(
-        !out.warnings.iter().any(|w| w.contains("extension .sql")),
-        "the overlay covers the only .sql file, so the line must disappear entirely: {:?}",
+        !out.warnings.iter().any(|w| w.contains("extension .vb")),
+        "the overlay covers the only .vb file, so the line must disappear entirely: {:?}",
         out.warnings
     );
 }
@@ -283,30 +286,30 @@ fn adapter_overlay_covering_a_path_with_no_native_file_is_excluded_via_the_synth
     // (the merge-onto-existing branch of `apply_adapter_overlays`). Here the overlay's `path` matches no
     // file on disk at all, so `apply_adapter_overlays` pushes a brand-new SYNTHETIC `FileArtifact` for it
     // instead — that artifact is still `dispatch(...) == None` with an unparsed, non-non-source extension,
-    // so without the overlay-exclusion check it would ALSO count toward the `.sql` total.
+    // so without the overlay-exclusion check it would ALSO count toward the `.vb` total.
     let dir = TempDir::new("zzop-engine-unparsed-ext-synthetic");
-    // A real, on-disk, unparsed .sql file — NOT covered by the overlay.
-    dir.write("native.sql", "SELECT 1;\n");
+    // A real, on-disk, unparsed .vb file — NOT covered by the overlay.
+    dir.write("native.vb", "Dim x = 1\n");
     dir.write("src/x.ts", "export const x = 1;\n");
 
     let mut cfg = config();
     cfg.adapter_overlays = vec![overlay(
-        "sql-adapter/1",
-        vec![projection_with_io("external/legacy.sql")],
+        "vb-adapter/1",
+        vec![projection_with_io("external/legacy.vb")],
     )];
     let out = analyze_tree(dir.path(), &cfg);
 
-    let sql_line = out
+    let vb_line = out
         .warnings
         .iter()
-        .find(|w| w.contains("extension .sql"))
-        .unwrap_or_else(|| panic!("expected a .sql warning, got: {:?}", out.warnings));
+        .find(|w| w.contains("extension .vb"))
+        .unwrap_or_else(|| panic!("expected a .vb warning, got: {:?}", out.warnings));
     assert!(
-        sql_line.starts_with("1 file(s) with extension .sql"),
-        "the synthetic overlay-covered file must not be counted: {sql_line}"
+        vb_line.starts_with("1 file(s) with extension .vb"),
+        "the synthetic overlay-covered file must not be counted: {vb_line}"
     );
-    assert!(sql_line.contains("native.sql"), "{sql_line}");
-    assert!(!sql_line.contains("legacy.sql"), "{sql_line}");
+    assert!(vb_line.contains("native.vb"), "{vb_line}");
+    assert!(!vb_line.contains("legacy.vb"), "{vb_line}");
 
     // G8a — the declared path matched no file in this tree at all, so it landed via the synthetic branch;
     // that must self-report as a synthetic-entry warning too (independent of the fact-carrying rule above
@@ -322,11 +325,21 @@ fn adapter_overlay_covering_a_path_with_no_native_file_is_excluded_via_the_synth
             )
         });
     assert!(
-        synthetic_line.starts_with("adapter overlay \"adapter\" (parser sql-adapter/1): 1 of 1 declared file(s) matched no file in this tree"),
+        synthetic_line.starts_with("adapter overlay \"adapter\" (parser vb-adapter/1): 1 of 1 declared file(s) matched no file in this tree"),
         "{synthetic_line}"
     );
     assert!(
-        synthetic_line.contains("external/legacy.sql"),
+        synthetic_line.contains("external/legacy.vb"),
+        "{synthetic_line}"
+    );
+    assert!(
+        synthetic_line.contains(
+            "their io still merges and joins under the declared path (check for path typos)"
+        ),
+        "{synthetic_line}"
+    );
+    assert!(
+        synthetic_line.contains("they count in coverage.files"),
         "{synthetic_line}"
     );
 }
@@ -336,25 +349,25 @@ fn zero_fact_overlay_does_not_suppress_the_unparsed_warning() {
     // The G8 "unmask" regression guard: an overlay whose entry carries NO extracted facts at all (every
     // channel empty, `is_entry: false`) used to still count as "adapter coverage" and suppress the
     // per-extension unparsed-extension disclosure for its file. It must no longer do either — the covered
-    // `.sql` file keeps its unparsed-extension warning, AND the overlay itself gets a zero-fact warning.
+    // `.vb` file keeps its unparsed-extension warning, AND the overlay itself gets a zero-fact warning.
     let dir = fixture_tree();
 
     let mut cfg = config();
-    cfg.adapter_overlays = vec![overlay("sql-adapter/1", vec![projection("a.sql")])];
+    cfg.adapter_overlays = vec![overlay("vb-adapter/1", vec![projection("a.vb")])];
     let out = analyze_tree(dir.path(), &cfg);
 
-    // The unmask: a.sql is NOT exempted, so both .sql files (a.sql and b.sql) still count.
-    let sql_line = out
+    // The unmask: a.vb is NOT exempted, so both .vb files (a.vb and b.vb) still count.
+    let vb_line = out
         .warnings
         .iter()
-        .find(|w| w.contains("extension .sql"))
-        .unwrap_or_else(|| panic!("expected a .sql warning, got: {:?}", out.warnings));
+        .find(|w| w.contains("extension .vb"))
+        .unwrap_or_else(|| panic!("expected a .vb warning, got: {:?}", out.warnings));
     assert!(
-        sql_line.starts_with("2 file(s) with extension .sql"),
-        "zero-fact overlay coverage must not exempt a.sql from the disclosure: {sql_line}"
+        vb_line.starts_with("2 file(s) with extension .vb"),
+        "zero-fact overlay coverage must not exempt a.vb from the disclosure: {vb_line}"
     );
-    assert!(sql_line.contains("a.sql"), "{sql_line}");
-    assert!(sql_line.contains("b.sql"), "{sql_line}");
+    assert!(vb_line.contains("a.vb"), "{vb_line}");
+    assert!(vb_line.contains("b.vb"), "{vb_line}");
 
     // The G8b zero-fact self-report on the overlay itself.
     let zero_fact_line = out
@@ -369,7 +382,7 @@ fn zero_fact_overlay_does_not_suppress_the_unparsed_warning() {
         });
     assert!(
         zero_fact_line.starts_with(
-            "adapter overlay \"adapter\" (parser sql-adapter/1): none of its 1 file entry carries any extracted facts"
+            "adapter overlay \"adapter\" (parser vb-adapter/1): none of its 1 file entry carries any extracted facts"
         ),
         "{zero_fact_line}"
     );
@@ -384,32 +397,32 @@ fn oversized_unparsed_extension_file_appears_in_both_degraded_and_the_extension_
     // orthogonal: `degraded` states a SIZE fact, the per-extension warning states a COVERAGE fact — this
     // file legitimately belongs in both, not either/or.
     let dir = TempDir::new("zzop-engine-unparsed-ext-oversized");
-    let big_sql = "SELECT * FROM users;\n".repeat(50);
-    dir.write("big.sql", &big_sql);
+    let big_vb = "Public Function Users()\nEnd Function\n".repeat(50);
+    dir.write("big.vb", &big_vb);
     dir.write("src/x.ts", "export const x = 1;\n");
 
     let mut cfg = config();
-    cfg.size_cap = 100; // big.sql is well over this; src/x.ts is not.
+    cfg.size_cap = 100; // big.vb is well over this; src/x.ts is not.
     let out = analyze_tree(dir.path(), &cfg);
 
     assert!(
-        out.degraded.contains(&"big.sql".to_string()),
-        "expected big.sql to be size-cap-degraded: {:?}",
+        out.degraded.contains(&"big.vb".to_string()),
+        "expected big.vb to be size-cap-degraded: {:?}",
         out.degraded
     );
-    let sql_line = out
+    let vb_line = out
         .warnings
         .iter()
-        .find(|w| w.contains("extension .sql"))
+        .find(|w| w.contains("extension .vb"))
         .unwrap_or_else(|| {
             panic!(
-                "expected a .sql warning even for the oversized file, got: {:?}",
+                "expected a .vb warning even for the oversized file, got: {:?}",
                 out.warnings
             )
         });
     assert!(
-        sql_line.starts_with("1 file(s) with extension .sql"),
-        "{sql_line}"
+        vb_line.starts_with("1 file(s) with extension .vb"),
+        "{vb_line}"
     );
-    assert!(sql_line.contains("big.sql"), "{sql_line}");
+    assert!(vb_line.contains("big.vb"), "{vb_line}");
 }

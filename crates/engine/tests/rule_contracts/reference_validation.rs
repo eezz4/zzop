@@ -55,6 +55,56 @@ fn metrics_src_files() -> Vec<PathBuf> {
     out
 }
 
+/// `crates/config/src/**/*.rs`, recursively — the Rust config front-end's warnings/errors are
+/// user-facing (mapper shape errors, mount validation, workspaces quirks) and name config keys and
+/// flags exactly like engine messages do. Added 2026-07-17: the scan-set expansion trigger
+/// ("before the next message-adding batch") had been bypassed twice — user-facing messages kept
+/// landing here unscanned.
+fn config_src_files() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    collect_rs_files(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../config/src"),
+        &mut out,
+    );
+    out
+}
+
+/// `crates/facade/src/**/*.rs`, recursively — facade errors (queryIo argument errors, request
+/// validation) are host-forwarded verbatim and name request fields/config vocabulary.
+fn facade_src_files() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    collect_rs_files(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../facade/src"),
+        &mut out,
+    );
+    out
+}
+
+/// `packages/mcp/src/**/*.rs`, recursively — the MCP host's tool descriptions, guided errors, usage
+/// text, and embedded-resource glue are the FIRST surface a binary-only user reads; they name config
+/// keys (`configPath`, `packsDir`, ...) and must stay inside the vouched vocabulary.
+fn mcp_src_files() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    collect_rs_files(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/mcp/src"),
+        &mut out,
+    );
+    out
+}
+
+/// `crates/summary/src/**/*.rs`, recursively — the shared summary/shaping crate behind every host
+/// (`zzop-mcp` today): its guided errors, tool-argument validation messages, and disclosure/warning
+/// text carry exactly the same config-key/flag references `packages/mcp/src` used to own alone before
+/// this logic moved out into its own crate (2026-07-17 zzop-summary extraction).
+fn summary_src_files() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    collect_rs_files(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../summary/src"),
+        &mut out,
+    );
+    out
+}
+
 /// `packages/cli/lib/*.js` — direct children ONLY (not recursive: `packages/cli/lib` has no subdirectories
 /// today, and the task's own scanned-file set names this one non-recursively, unlike every `.rs` glob
 /// above).
@@ -75,12 +125,18 @@ fn cli_lib_js_files() -> Vec<PathBuf> {
 }
 
 /// The full scanned-file set for contract 11's two real-tree checks: `rules/native/**/src/**/*.rs` +
-/// `crates/engine/src/**/*.rs` + `crates/metrics/src/**/*.rs` + `packages/cli/lib/*.js`, sorted so a
-/// failing assertion's offender list has a stable, diffable order across runs.
+/// `crates/engine/src/**/*.rs` + `crates/metrics/src/**/*.rs` + `crates/config/src/**/*.rs` +
+/// `crates/facade/src/**/*.rs` + `crates/summary/src/**/*.rs` + `packages/mcp/src/**/*.rs` +
+/// `packages/cli/lib/*.js`, sorted so a failing assertion's offender list has a stable, diffable order
+/// across runs.
 fn reference_validation_scanned_files() -> Vec<PathBuf> {
     let mut out = native_rule_src_rs_files();
     out.extend(engine_src_files());
     out.extend(metrics_src_files());
+    out.extend(config_src_files());
+    out.extend(facade_src_files());
+    out.extend(summary_src_files());
+    out.extend(mcp_src_files());
     out.extend(cli_lib_js_files());
     out.sort();
     out

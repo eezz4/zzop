@@ -10,7 +10,8 @@
 use zzop_core::{merge_findings, CommonIr, IoFacts, MinimalIr};
 
 use crate::analyze::diagnostics::{
-    minified_files_warning, run_diagnostics, unmatched_global_exclude_warnings,
+    compute_dsl_scope, minified_files_warning, no_applicable_dsl_rule_warning,
+    rule_overrides_applied, run_diagnostics, unmatched_global_exclude_warnings,
     unmatched_suppression_warnings, unparsed_extension_warning,
 };
 use crate::pipeline::FileArtifact;
@@ -91,6 +92,7 @@ pub(crate) fn assemble(
         controller_prefix_route_pairs,
         class_shape_pairs,
         &rust_workspace,
+        &go_modules,
     );
 
     let dep_graph::DepGraphResult {
@@ -126,6 +128,7 @@ pub(crate) fn assemble(
         &tsconfigs,
         &ts_paths,
         &ts_import_pairs,
+        &java_rels,
         &all_symbols,
         &used_names_by_file,
         &prisma_rels,
@@ -151,6 +154,12 @@ pub(crate) fn assemble(
     let rels: Vec<&str> = loc_by_path.keys().map(String::as_str).collect();
     warnings.extend(unmatched_suppression_warnings(config, &rels));
     warnings.extend(unmatched_global_exclude_warnings(config, &rels));
+    // One census, two consumers: the zero-applicability warning below and `packs_loaded`'s per-pack
+    // `files_in_scope` count (see `compute_dsl_scope`'s doc for the cost model).
+    let dsl_scope = compute_dsl_scope(&config.packs, &rels);
+    if let Some(w) = no_applicable_dsl_rule_warning(&config.packs, &dsl_scope) {
+        warnings.push(w);
+    }
     io_provides.sort_by(|a, b| {
         a.kind
             .cmp(&b.kind)
@@ -203,14 +212,10 @@ pub(crate) fn assemble(
         &mut rule_time,
     );
 
-    warnings.extend(run_diagnostics(
-        file_count,
-        &dep,
-        &all_symbols,
-        &commits,
-        config,
-        git_active,
-    ));
+    let diagnostics_report =
+        run_diagnostics(file_count, &dep, &all_symbols, &commits, config, git_active);
+    warnings.extend(diagnostics_report.warnings);
+    let config_warnings = diagnostics_report.config_warnings;
 
     // `root.is_dir()` gates this so it doesn't duplicate `analyze_tree`'s more specific "root does not
     // exist or is not a directory" self-report (`lib.rs`'s `scope_warnings`) — that one already states
@@ -244,6 +249,16 @@ pub(crate) fn assemble(
 
     let coverage = crate::CoverageCensus::compute(file_count, &ir, degraded.len());
 
+    // Gated exactly like `scores`/`health`/`critical`/`seams`: `Some` only when git collection actually
+    // ran, so a consumer never sees a window echoed for numbers that stayed empty.
+    let git_window = git_active
+        .then_some(config.git.as_ref())
+        .flatten()
+        .map(|g| crate::GitWindow {
+            recent_days: g.recent_days,
+            since: g.since.clone(),
+        });
+
     let package_imports = package_import_files
         .into_iter()
         .map(|(specifier, files)| crate::PackageImportSummary {
@@ -269,11 +284,14 @@ pub(crate) fn assemble(
         seams,
         folders,
         layer_co_churn,
-        packs_loaded: crate::PackLoaded::from_config(config),
+        packs_loaded: crate::PackLoaded::from_config(config, &dsl_scope.files_in_scope_by_pack),
         warnings,
+        config_warnings,
         // Set by `analyze_tree` after this call returns (needs the counters that `pipeline::run_file_pass`
         // updated during the fused pass, which are private to that call, not `assemble`'s).
         cache: None,
         rule_timings,
+        rule_overrides_applied: rule_overrides_applied(config),
+        git_window,
     }
 }

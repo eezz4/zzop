@@ -117,6 +117,18 @@ pub fn config_to_request(
             ));
         };
 
+        // Shadowed-key honesty gap, general form (the `trees:"auto"`-specific case is caught and
+        // stripped earlier by `workspaces::expand_auto_trees`, so this only fires for an explicit
+        // `trees: [...]` array written alongside `roots` — see the module doc's "`trees` wins over
+        // `roots` silently" contract note, which this makes visible instead of silent).
+        if config.get("roots").is_some() {
+            warnings.push(
+                "config has both \"roots\" and \"trees\" — \"trees\" wins and \"roots\" is silently \
+                 ignored (remove one)."
+                    .to_string(),
+            );
+        }
+
         for (i, tree_val) in arr.iter().enumerate() {
             let tree_obj = tree_val.as_object();
             let raw_root = tree_obj

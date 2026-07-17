@@ -60,6 +60,19 @@ pub struct LoadResult {
 /// the `validate_rule_pack` MCP tool / `zzop pack validate` CLI) surfaces the SAME verdicts the
 /// loader would produce at load time — one path, no forked logic.
 pub fn parse_dsl_pack(text: &str) -> Result<RulePackDef, String> {
+    // A JSON ARRAY root is a special case — see `zzop_core::normalized::validate_envelope`'s identical
+    // guard for the full rationale. `RulePackDef`'s derived `Deserialize` accepts a sequence as well as
+    // a map, so a top-level array like `[1,2,3]` deserializes positionally against the struct's
+    // declared fields instead of being rejected as "not an object": `1` lands on the first field
+    // (`id: String`) and fails with a field-level "invalid type: integer `1`, expected a string" that
+    // reads like one field is wrong, not "this isn't a rule pack at all". Caught here, before the
+    // struct deserialize, with the honest diagnosis.
+    if matches!(
+        serde_json::from_str::<serde_json::Value>(text),
+        Ok(serde_json::Value::Array(_))
+    ) {
+        return Err("expected a JSON object rule pack, got an array".to_string());
+    }
     match serde_json::from_str::<RulePackDef>(text) {
         Ok(pack) => check_dsl_schema_version(&pack).map(|()| pack),
         Err(err) => Err(err.to_string()),

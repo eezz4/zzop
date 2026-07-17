@@ -5,6 +5,21 @@ use zzop_metrics::{build_diagnostics, DiagnosticsInput, GitDiagnosticsInput};
 
 use crate::EngineConfig;
 
+/// `run_diagnostics`' result, split by output channel: `warnings` folds into
+/// `AnalyzeOutput::warnings` (degenerate-output self-reports, plus the `unknown_suppression_rule_ids`
+/// self-report — deliberately NOT split out, see that field's doc); `config_warnings` folds into
+/// `AnalyzeOutput::config_warnings` instead — the `unknown_disabled_rule_ids`/
+/// `unknown_severity_override_ids` self-reports (a typo'd `disabledRules`/`severityOverrides` entry did
+/// nothing). Those two are config problems, not degenerate-output signals, so they belong on the same
+/// honesty channel as `crates/config`'s parse-time config-mapper warnings even though THIS module (not
+/// the config front-end) computes them — only analysis time has the known-rule-id set a config parser
+/// never sees; this struct is the "merge at assembly" seam the caller (`assemble`/
+/// `envelope::analyze_envelope`) folds into the two `AnalyzeOutput` fields.
+pub(crate) struct DiagnosticsReport {
+    pub(crate) warnings: Vec<String>,
+    pub(crate) config_warnings: Vec<String>,
+}
+
 /// Builds `zzop_metrics::diagnostics`' coverage-gap self-report from data `assemble` already has in
 /// scope — no extra pass. `symbols` filters on `SourceSymbol::exported` since `all_symbols` also
 /// carries unexported top-level declarations. `concrete_modules`/`total_modules` are always `0` — no
@@ -22,7 +37,7 @@ pub(crate) fn run_diagnostics(
     commits: &[zzop_core::CommitFileSet],
     config: &EngineConfig,
     git_active: bool,
-) -> Vec<String> {
+) -> DiagnosticsReport {
     let dep_edges: u32 = dep.values().map(|targets| targets.len() as u32).sum();
     let exported_symbols = symbols.iter().filter(|s| s.exported).count() as u32;
 
@@ -62,7 +77,10 @@ pub(crate) fn run_diagnostics(
         unknown_suppression_rule_ids: unknown_suppression_rule_ids(config),
     });
 
-    diagnostics.warnings
+    DiagnosticsReport {
+        warnings: diagnostics.warnings,
+        config_warnings: diagnostics.config_warnings,
+    }
 }
 
 /// Every native-analysis id (built fresh here since the engine keeps no live `RuleRegistry` of its own)
@@ -139,4 +157,51 @@ fn unknown_suppression_rule_ids(config: &EngineConfig) -> Vec<String> {
         .filter(|s| !known.contains(s.rule.as_str()))
         .map(|s| s.rule.clone())
         .collect()
+}
+
+/// `AnalyzeOutput::rule_overrides_applied`'s substrate (D13③) — the positive complement of
+/// `unknown_disabled_rule_ids`/`unknown_severity_override_ids` just above: requested ids that DID match a
+/// known id, so the disable/remap actually took effect this run. Reuses the exact same `known_rule_ids`
+/// sets those two functions use (`true`/`false` `include_bare_pack_ids` splits identically, for the same
+/// reasons documented on each) — never a second "known" definition to drift out of sync.
+///
+/// `None` when neither `disabled_rules` nor `severity_overrides` has any entry — nothing was requested,
+/// so there is nothing to positively confirm (the quieter of the two conventions
+/// `AnalyzeOutput::rule_overrides_applied`'s own doc allows). A request that matched NOTHING (every entry
+/// a typo) still yields `Some` with empty lists rather than `None`: something was requested, and
+/// confirming "none of it took effect" is exactly this field's job — collapsing that into `None` would
+/// make it indistinguishable from "the caller never touched these knobs".
+pub(crate) fn rule_overrides_applied(config: &EngineConfig) -> Option<crate::RuleOverridesApplied> {
+    if config.rule_config.disabled_rules.is_empty()
+        && config.rule_config.severity_overrides.is_empty()
+    {
+        return None;
+    }
+    let known_with_bare = known_rule_ids(config, true);
+    let known_without_bare = known_rule_ids(config, false);
+
+    let mut disabled: Vec<String> = config
+        .rule_config
+        .disabled_rules
+        .iter()
+        .filter(|id| known_with_bare.contains(id.as_str()))
+        .cloned()
+        .collect();
+    disabled.sort();
+    disabled.dedup();
+
+    let mut severity_remapped: Vec<String> = config
+        .rule_config
+        .severity_overrides
+        .keys()
+        .filter(|id| known_without_bare.contains(id.as_str()))
+        .cloned()
+        .collect();
+    severity_remapped.sort();
+    severity_remapped.dedup();
+
+    Some(crate::RuleOverridesApplied {
+        disabled,
+        severity_remapped,
+    })
 }

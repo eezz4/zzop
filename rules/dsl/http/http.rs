@@ -86,6 +86,26 @@ fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {
         .collect()
 }
 
+// --- file_pattern language-scope regression ---
+
+#[test]
+fn java_file_under_an_api_directory_is_out_of_scope() {
+    // Regression: the `(?:^|/)api/`/`/routes/`/`/controllers/` alternatives used to match ANY file
+    // extension sitting under such a directory (a bare path-fragment match with no extension anchor),
+    // so a Java Spring controller living at `.../io/spring/api/CommentsApi.java` (the be-spring corpus
+    // shape) fell into this pack's scope even though every rule's matcher vocabulary
+    // (`apiRoutes.get/post/put/patch/delete(...)`) is a JS/TS-only router-wrapper idiom no Java file can
+    // ever contain. Each alternative now also requires a JS/TS extension, same as `[Hh]andler.ts$`/
+    // `[Cc]ontroller.ts$` already did.
+    let dir = TempDir::new("zzop-http");
+    dir.write(
+        "src/main/java/io/spring/api/CommentsApi.java",
+        "apiRoutes.get(\"/api/admin/users\", api.userList);\napiRoutes.get(\"/api/dev/config\", api.devConfig);\n",
+    );
+    let out = scan(&dir);
+    assert!(out.findings.is_empty(), "{:?}", out.findings);
+}
+
 mod auth_gates;
 mod read_model;
 mod route_exposure;

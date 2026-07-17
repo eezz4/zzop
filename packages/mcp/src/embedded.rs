@@ -2,7 +2,8 @@
 //! served over MCP `resources/*` as `zzop://contract/<name>`. Embedding (vs. reading from disk) is
 //! what makes the "author an adapter with only the binary" promise hold: no zzop source checkout, no
 //! sidecar files, no install-location assumptions. All sources are committed, English, CI-guarded repo
-//! files — the public docs plus the machine-verified config-surface vocabulary — ~130KB total.
+//! files — the public docs plus the machine-verified config-surface vocabulary and the rule catalog —
+//! ~180KB total.
 
 /// One embedded contract document.
 pub struct ContractDoc {
@@ -85,5 +86,11 @@ pub static CONTRACT_DOCS: &[ContractDoc] = &[
         // Reused from `zzop-config` (this crate already depends on it), which embeds the same
         // `packages/cli/lib/config-surface.json` for unknown-key warnings — one embed, one truth.
         content: zzop_config::CONFIG_SURFACE_JSON,
+    },
+    ContractDoc {
+        name: "rule-catalog",
+        description: "Every rule id the engine ships today (14 DSL packs + all native analysis ids), with severity/matcher/suppress-marker/detection prose per rule — the ONE place a rule id can be looked up without a source checkout. Pair with the `rule` tool argument on analyze_repo/cross_repo/check_endpoint (an id absent here never fires) and the dsl-reference resource for matcher semantics.",
+        mime: "text/markdown",
+        content: include_str!("../../../docs/rules/catalog.md"),
     },
 ];

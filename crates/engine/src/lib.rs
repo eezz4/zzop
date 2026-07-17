@@ -59,8 +59,10 @@ pub use disclosure::{blindness_registry, BlindnessClass, DisclosureStatus};
 pub use dispatch::{DispatchConfig, Language};
 pub use envelope::analyze_envelope;
 pub use io::IoOptions;
-pub use output::{AnalyzeOutput, CacheStats, PackLoaded};
-pub use trees::{analyze_trees, MultiAnalyzeOutput, PackageImportSummary};
+pub use output::{AnalyzeOutput, CacheStats, GitWindow, PackLoaded, RuleOverridesApplied};
+pub use trees::{
+    analyze_trees, MultiAnalyzeOutput, PackageImportSummary, MIN_PARALLEL_IMPL_SIGNALS,
+};
 
 /// Composes every crate's own `register_native_analyses` into one `RuleRegistry` — the engine aggregator
 /// half of the extensibility contract (`rules/README.md`'s "Adding a rule" section). The kernel

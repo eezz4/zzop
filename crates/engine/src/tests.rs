@@ -238,6 +238,61 @@ fn disabling_circular_removes_the_circular_finding() {
 }
 
 #[test]
+fn dsl_finding_message_carries_the_config_disable_hint_for_its_own_id() {
+    // D13①: every DSL finding's message must end with `zzop_core::disable_hint`'s fragment for that
+    // finding's OWN `rule_id` — appended by `pipeline::findings::append_disable_hints` after the pack's
+    // own suppress-marker sentence (already present in the raw pack message).
+    let dir = fixture_tree();
+    let out = analyze_tree(dir.path(), &config(DEFAULT_SIZE_CAP));
+    let hit = out
+        .findings
+        .iter()
+        .find(|f| f.rule_id == "be-security/sql-taint")
+        .expect("expected a be-security/sql-taint finding");
+    let hint = zzop_core::disable_hint("be-security/sql-taint");
+    assert!(
+        hit.message.ends_with(&hint),
+        "expected the DSL finding's message to end with disable_hint's fragment {hint:?}, got: {:?}",
+        hit.message
+    );
+}
+
+#[test]
+fn rule_overrides_applied_lists_only_ids_that_actually_matched() {
+    // D13③: a typo'd `disabled_rules` entry must appear in NEITHER list — only the existing
+    // unknown-id diagnostic names it (covered elsewhere) — while a correct disable/remap shows up here
+    // as the positive "this actually took effect" confirmation.
+    let dir = fixture_tree();
+    let mut cfg = config(DEFAULT_SIZE_CAP);
+    cfg.rule_config
+        .disabled_rules
+        .push("be-security/sql-taint".to_string());
+    cfg.rule_config
+        .disabled_rules
+        .push("no-such-rule-typo".to_string());
+    cfg.rule_config
+        .severity_overrides
+        .insert("circular".to_string(), zzop_core::Severity::Info);
+    let out = analyze_tree(dir.path(), &cfg);
+    let applied = out
+        .rule_overrides_applied
+        .expect("expected Some — disabled_rules/severity_overrides were both non-empty");
+    assert_eq!(applied.disabled, vec!["be-security/sql-taint".to_string()]);
+    assert_eq!(applied.severity_remapped, vec!["circular".to_string()]);
+    assert!(!applied.disabled.contains(&"no-such-rule-typo".to_string()));
+    assert!(!applied
+        .severity_remapped
+        .contains(&"no-such-rule-typo".to_string()));
+}
+
+#[test]
+fn rule_overrides_applied_is_none_when_nothing_was_requested() {
+    let dir = fixture_tree();
+    let out = analyze_tree(dir.path(), &config(DEFAULT_SIZE_CAP));
+    assert!(out.rule_overrides_applied.is_none());
+}
+
+#[test]
 fn two_runs_over_the_same_tree_are_byte_for_byte_identical() {
     let dir = fixture_tree();
     let cfg = config(500); // exercise the oversized path too
@@ -417,6 +472,41 @@ fn packs_loaded_counts_rules_as_loaded_even_when_the_pack_is_disabled() {
     assert_eq!(out.packs_loaded.len(), 1);
     assert_eq!(out.packs_loaded[0].id, "be-security");
     assert_eq!(out.packs_loaded[0].rules, 3);
+}
+
+#[test]
+fn packs_loaded_reports_per_pack_files_in_scope_zero_vs_nonzero() {
+    // The D16 per-pack applicability signal: a loaded pack whose rules' `file_pattern`s match no
+    // analyzed file reports `files_in_scope: 0` (its zero findings mean "out of scope", not "clean"),
+    // while a pack whose scope matches reports the exact matching-file count.
+    let dir = fixture_tree();
+    let mut cfg = config(DEFAULT_SIZE_CAP);
+    // A pack scoped to an extension the fixture tree does not contain at all.
+    let out_of_scope: RulePackDef = serde_json::from_str(
+        r#"{"id":"zz-python-only","framework":"any","rules":[{"id":"r1","severity":"info","message":"m","matcher":{"type":"line-scan","file_pattern":"\\.py$","line_pattern":"NEVER_MATCHES"}}]}"#,
+    )
+    .unwrap();
+    cfg.packs.push(out_of_scope);
+    let out = analyze_tree(dir.path(), &cfg);
+
+    let by_id = |id: &str| {
+        out.packs_loaded
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap_or_else(|| panic!("expected pack {id} in packs_loaded: {:?}", out.packs_loaded))
+    };
+    assert_eq!(
+        by_id("zz-python-only").files_in_scope,
+        0,
+        "a pack whose scope matches no analyzed file must report filesInScope 0"
+    );
+    // `be-security`'s rules include a `(?i)\.java$`-scoped rule — exactly one fixture file
+    // (`legacy/C.java`) is in scope, and the count is exact per-file, not extension-bucket-wide.
+    assert!(
+        by_id("be-security").files_in_scope >= 1,
+        "the matching pack must report a nonzero in-scope file count, got: {:?}",
+        out.packs_loaded
+    );
 }
 
 #[test]

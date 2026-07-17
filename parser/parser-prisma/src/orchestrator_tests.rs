@@ -111,3 +111,61 @@ fn build_common_ir_projects_models_as_symbols() {
     assert_eq!(user.line, 3); // `model User {` sits on line 3 of SAMPLE (leading newline + comment)
     assert!(ir.ir.loc["db/schema.prisma"] > 0);
 }
+
+// --- build_common_ir: db-table PROVIDES ---
+
+#[test]
+fn build_common_ir_emits_db_table_provide_per_model() {
+    let schema =
+        "\n// user table\nmodel User {\n  id String @id\n}\n\nmodel Post {\n  id String @id\n}\n";
+    let ir = build_common_ir(
+        "svc",
+        &[("db/schema.prisma".to_string(), schema.to_string())],
+    );
+    let io = ir.ir.io.expect("provides expected for a non-empty schema");
+    assert!(io.consumes.is_empty());
+    let user_provide = io
+        .provides
+        .iter()
+        .find(|p| p.key == "table:user")
+        .expect("User model provides table:user");
+    assert_eq!(user_provide.kind, "db-table");
+    assert_eq!(user_provide.file, "db/schema.prisma");
+    assert_eq!(user_provide.line, 3); // same declaration line as the symbol above
+    assert!(io.provides.iter().any(|p| p.key == "table:post"));
+}
+
+#[test]
+fn build_common_ir_lower_firsts_multi_word_pascal_model_names() {
+    // `UserProfile` -> `userProfile`, matching Prisma's own client-accessor casing (first char only).
+    let schema = "model UserProfile {\n  id String @id\n}\n";
+    let ir = build_common_ir("svc", &[("schema.prisma".to_string(), schema.to_string())]);
+    let io = ir.ir.io.expect("provides expected");
+    assert_eq!(io.provides[0].key, "table:userProfile");
+}
+
+#[test]
+fn build_common_ir_emits_no_io_for_schema_with_no_models() {
+    // An (unrealistic but honest) schema with zero models must not emit an empty-but-`Some` IoFacts —
+    // mirrors the parser-typescript `build_common_ir`'s empty-consumes -> `None` convention.
+    let ir = build_common_ir("svc", &[("schema.prisma".to_string(), "".to_string())]);
+    assert!(ir.ir.io.is_none());
+}
+
+#[test]
+fn provide_key_matches_hand_built_bare_receiver_consume_key() {
+    // Cross-side key-equality: the PROVIDE key `build_common_ir` emits for `model Article` must be
+    // BYTE-IDENTICAL to the CONSUME key `zzop_parser_typescript::adapters::db_table_consume` would
+    // produce for a call site like `prisma.article.findMany(...)` or `getPrisma().article.findMany(...)`
+    // — that extractor keys off the accessor exactly as written at the call site
+    // (`format!("table:{}", m.accessor)`, no re-casing), so for the join to work the schema side must
+    // independently land on the same string. This crate does not depend on parser-typescript (no
+    // cross-parser-crate edge for one string), so the expectation is a hand-built literal rather than a
+    // call into that crate — kept honest by being exactly what a human reading `prisma.article.findMany`
+    // would type as the accessor: the lower-camel Prisma client accessor for `model Article`.
+    let schema = "model Article {\n  id String @id\n}\n";
+    let ir = build_common_ir("svc", &[("schema.prisma".to_string(), schema.to_string())]);
+    let provide_key = ir.ir.io.expect("provides expected").provides[0].key.clone();
+    let hand_built_consume_key = format!("table:{}", "article"); // == literal accessor text in `prisma.article.findMany(...)`
+    assert_eq!(provide_key, hand_built_consume_key);
+}

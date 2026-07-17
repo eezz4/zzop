@@ -1,18 +1,27 @@
 //! Zero-config tree building for the config-free "paths mode" shared by `cross_repo` and
 //! `check_endpoint` (`paths` argument / trailing CLI paths) — split out of `tools.rs` for size,
-//! same contract.
+//! same contract. Because this helper is shared, any error text it produces must take the calling
+//! tool's own name as a parameter rather than hardcoding one sibling's name (a live-fire misfire:
+//! `check_endpoint` with a single `paths` entry reported "cross_repo needs at least 2 paths").
 
-use super::paths;
+use crate::paths;
 
 /// Paths mode: one zero-config tree request per path (an empty `{}` config mapped against that root —
 /// bundled `packDefs` + default `git` ride along), `sourceId` = the directory name. A
 /// `zzop.config.jsonc` sitting inside a path is deliberately NOT loaded in this mode — silently
 /// ignoring it would be worse than saying so, so it lands in the warnings.
-pub(super) fn zero_config_trees(paths: &[String]) -> Result<zzop_config::LoadedRequest, String> {
+///
+/// `tool_name` is the CALLER's own MCP tool name (`cross_repo`, `check_endpoint`, ...) — this helper
+/// is shared, so the "at least 2 paths" error must name whichever tool the caller actually is, never
+/// a hardcoded sibling (see the module doc for the live-fire misattribution this parameter fixes).
+pub(crate) fn zero_config_trees(
+    tool_name: &str,
+    paths: &[String],
+) -> Result<zzop_config::LoadedRequest, String> {
     if paths.len() < 2 {
-        return Err(
-            "cross_repo needs at least 2 paths (e.g. the frontend and the backend)".to_string(),
-        );
+        return Err(format!(
+            "{tool_name} needs at least 2 paths (e.g. the frontend and the backend)"
+        ));
     }
     let mut trees: Vec<serde_json::Value> = Vec::with_capacity(paths.len());
     let mut warnings: Vec<String> = Vec::new();

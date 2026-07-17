@@ -294,3 +294,26 @@ fn applies_to_is_false_for_a_pack_with_no_rules() {
     };
     assert!(!applies_to(&pack, "anything.java"));
 }
+
+#[test]
+fn a_json_array_root_reports_the_array_diagnosis_not_a_field_type_mismatch() {
+    // Before the fix, a JSON array root fell into serde's struct-from-sequence fallback, reporting a
+    // misleading field-level message ("invalid type: integer `1`, expected a string") instead of
+    // naming the real problem — the root itself is the wrong shape.
+    let err = parse_dsl_pack("[1,2,3]").unwrap_err();
+    assert_eq!(err, "expected a JSON object rule pack, got an array");
+}
+
+#[test]
+fn non_array_non_object_roots_keep_their_already_clear_serde_message() {
+    // string/number/bool/null all already hit serde's "invalid type: X, expected struct RulePackDef"
+    // branch (unlike an array, they are never accepted as a positional fallback), so these must NOT be
+    // rerouted through the array-only diagnosis.
+    for json in ["\"hello\"", "42", "true", "null"] {
+        let err = parse_dsl_pack(json).unwrap_err();
+        assert!(
+            err.contains("expected struct RulePackDef"),
+            "expected the original clear serde message for {json}, got: {err}"
+        );
+    }
+}

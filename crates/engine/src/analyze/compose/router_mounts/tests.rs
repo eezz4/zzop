@@ -70,15 +70,19 @@ fn frag(name: &str, entries: Vec<RouterMountEntry>) -> RouterMountFragment {
     }
 }
 
-fn no_resolver() -> impl Fn(&str, &str) -> Option<String> {
-    |_: &str, _: &str| None
+fn no_resolver() -> impl Fn(&str, &str, &str) -> Option<String> {
+    |_: &str, _: &str, _: &str| None
 }
 
-/// Maps (specifier, from_file) pairs to target rel paths.
+/// Maps (specifier, from_file) pairs to target rel paths. `ident` (the resolver's 3rd parameter,
+/// carrying the mount's own ident — see `compose_router_mount_provides`'s doc for why it exists) is
+/// unused by every one of these fixtures: they model TS/Python/Rust-shaped one-file resolution, where
+/// disambiguation happens entirely in `candidates_in` AFTER `resolve` returns. The Go-shaped tests
+/// below use a bespoke inline resolver instead, since Go's resolution genuinely depends on `ident`.
 fn resolver<'a>(
     map: &'a [(&'a str, &'a str, &'a str)],
-) -> impl Fn(&str, &str) -> Option<String> + 'a {
-    move |spec: &str, from: &str| {
+) -> impl Fn(&str, &str, &str) -> Option<String> + 'a {
+    move |spec: &str, from: &str, _ident: &str| {
         map.iter()
             .find(|(s, f, _)| *s == spec && *f == from)
             .map(|(_, _, t)| t.to_string())
@@ -497,4 +501,62 @@ fn attribute_composition_is_deterministic_across_repeated_calls() {
     let (_out_b, attrs_b) = compose_router_mount_provides(fragments, no_resolver());
     assert_eq!(attrs_a, attrs_b);
     assert_eq!(attrs_a.len(), 2, "{attrs_a:?}");
+}
+
+// --- Go (gin) mounts: a specifier is a Go IMPORT PATH resolving to a PACKAGE DIRECTORY (many
+// candidate files), so disambiguation genuinely needs `ident` — unlike the TS/Python/Rust fixtures
+// above, which resolve `specifier` to a single file and never touch the resolver's 3rd parameter.
+
+#[test]
+fn go_mount_resolves_via_specifier_and_ident_together() {
+    // Mirrors the real Go resolver built in `assemble::provides`: `specifier` ("app/users") alone
+    // does not name one file — it names a package directory that could hold several router-mount
+    // fragments, so the mock resolver here only succeeds when BOTH the specifier/from_file pair AND
+    // the mount's own `ident` ("UsersRegister") line up with the def-side fragment, exactly like the
+    // real engine's `resolve_go_import_package_dir` + fragment-name search.
+    let fragments = vec![
+        (
+            "cmd/main.go".to_string(),
+            vec![frag(
+                "main",
+                vec![mount("/users", "UsersRegister", Some("app/users"))],
+            )],
+        ),
+        (
+            "users/routers.go".to_string(),
+            vec![frag(
+                "UsersRegister",
+                vec![verb("GET", "/list", "listUsers", 12)],
+            )],
+        ),
+    ];
+    let go_resolver = |spec: &str, from: &str, ident: &str| -> Option<String> {
+        if spec == "app/users" && from == "cmd/main.go" && ident == "UsersRegister" {
+            Some("users/routers.go".to_string())
+        } else {
+            None
+        }
+    };
+    let (out, _attrs) = compose_router_mount_provides(fragments, go_resolver);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].key, "GET /users/list");
+    assert_eq!(out[0].file, "users/routers.go");
+    assert_eq!(out[0].line, 12);
+    assert_eq!(out[0].symbol.as_deref(), Some("listUsers"));
+}
+
+#[test]
+fn go_mount_with_unresolvable_specifier_stays_conservative() {
+    // The import path names no package the resolver recognizes (e.g. an external module, or a
+    // `go.mod`-less tree) — same conservative "skip the subtree" behavior every other language's
+    // unresolvable-mount case gets, never a truncated-prefix guess.
+    let fragments = vec![(
+        "cmd/main.go".to_string(),
+        vec![frag(
+            "main",
+            vec![mount("/users", "UsersRegister", Some("app/unknown"))],
+        )],
+    )];
+    let (out, _attrs) = compose_router_mount_provides(fragments, no_resolver());
+    assert!(out.is_empty());
 }

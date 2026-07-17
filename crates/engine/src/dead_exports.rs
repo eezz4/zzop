@@ -34,6 +34,9 @@ pub(crate) fn is_ts_source_ext(rel: &str) -> bool {
             .and_then(|e| e.to_str())
             .map(|e| e.to_ascii_lowercase())
             .as_deref(),
+        // If you add/remove an extension here, also update the reverse-direction snapshot in
+        // `call_graph_covered_extensions_pin` below AND `mutating_route_no_auth::CALL_GRAPH_COVERED_EXTENSIONS`
+        // — this predicate has no enumerable set to check live, so that pin guards the duplicate by hand.
         Some("ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "mts" | "cts")
     )
 }
@@ -127,4 +130,46 @@ pub(crate) fn dead_export_findings(
     });
 
     zzop_rules_graph::dead_export_findings(dead, &symbol_lines)
+}
+
+/// T2 policy-value pin (rule-quality.md §6 substitute for a T1 shared symbol): `rules-http`'s
+/// `mutating_route_no_auth::CALL_GRAPH_COVERED_EXTENSIONS` is a hand-maintained duplicate of
+/// [`is_ts_source_ext`]'s accepted extension set, plus `"java"` (that crate depends on `zzop_core`
+/// only, so it cannot call this private fn directly — its own doc says as much). Lives here, not in
+/// `crates/engine/tests/`, because [`is_ts_source_ext`] is `pub(crate)`: an external integration-test
+/// crate cannot see it, only a unit test inside this same module can. If this fails, either
+/// `is_ts_source_ext` grew/shrank an extension and the rule's list needs the same edit, or the rule's
+/// list drifted on its own — either way, re-justify both sides together.
+#[cfg(test)]
+mod call_graph_covered_extensions_pin {
+    use super::is_ts_source_ext;
+
+    #[test]
+    fn call_graph_covered_extensions_equals_is_ts_source_ext_plus_java() {
+        let rule_list = zzop_rules_http::mutating_route_no_auth::CALL_GRAPH_COVERED_EXTENSIONS;
+        assert!(
+            rule_list.contains(&"java"),
+            "the rule's list must still carry its one deliberate addition beyond \
+             is_ts_source_ext, got: {rule_list:?}"
+        );
+        for ext in rule_list {
+            if *ext == "java" {
+                continue; // the one deliberate, documented addition beyond is_ts_source_ext
+            }
+            assert!(
+                is_ts_source_ext(&format!("x.{ext}")),
+                "rule's CALL_GRAPH_COVERED_EXTENSIONS lists {ext:?}, but is_ts_source_ext does not \
+                 accept it — the two hand-kept duplicates have drifted apart"
+            );
+        }
+        // The reverse direction: every extension is_ts_source_ext accepts (enumerated from its own
+        // match arm — see that fn's source) must also be in the rule's list.
+        for ext in ["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"] {
+            assert!(
+                rule_list.contains(&ext),
+                "is_ts_source_ext accepts {ext:?}, but rule's CALL_GRAPH_COVERED_EXTENSIONS does \
+                 not list it — the two hand-kept duplicates have drifted apart: {rule_list:?}"
+            );
+        }
+    }
 }

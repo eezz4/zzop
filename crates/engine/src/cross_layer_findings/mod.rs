@@ -1,30 +1,38 @@
 //! The 23 `cross-layer/*` native rules run over one `analyze_trees` join — see
 //! `compute_cross_layer_findings`'s doc for the gating/derivation/sort contract.
 
+mod blindness_caveat;
+mod merge_config;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use zzop_core::{ConsumeBodyShape, Finding, ProvideBodyShape, RuleConfig, SourceIo};
+use zzop_core::{ConsumeBodyShape, Finding, ProvideBodyShape, SourceIo};
 
 use crate::EngineConfig;
 
 /// Runs the 23 `cross-layer/*` native rules (`zzop_rules_cross_layer::cross_layer`) over `cross_layer` and
 /// returns their merged, sorted findings.
 ///
-/// ## disabledRules gating: union, exclude-only
-/// A cross-layer rule is disabled if its id appears in ANY tree's `EngineConfig::rule_config.disabled_rules`
-/// — the union, not the intersection: this is a joint-analysis output no single tree fully owns, so any
-/// one tree opting out is treated as the whole cross-layer run opting that rule out.
+/// ## disabledRules gating and severity overrides
+/// Both union across trees — see `merge_config::union_configs`'s doc for the exclude-only gating
+/// rationale and the first-declarer conflict rule.
 ///
 /// ## The provide-key universe
 /// `method_mismatch`/`version_skew`/`path_near_miss` need every `http` provide across every tree, not
 /// just what `CrossLayerResult` exposes — derived here (`http_provides`) from the same `source_ios` the
 /// join itself was built from.
 ///
-/// ## Sort
+/// ## Sort and severity overrides
 /// `zzop_core::merge_findings`, the same (severity, file, line, ruleId) order `AnalyzeOutput::findings`
-/// uses, called with a default `RuleConfig` purely for that shared sort/merge primitive (disabling is
-/// the only lever for cross-layer findings, handled above via `is_enabled`).
+/// uses. The config passed to it carries the severity-overrides union so the override runs INSIDE
+/// the merge, before its sort — see `merge_config::union_configs`'s doc for why applying it after
+/// would break the order.
+///
+/// ## Extraction-blindness caveat
+/// `blindness_caveat::build`/`append` (split out to keep this file under the line-count ratchet) append
+/// a shared caveat sentence to `unconsumed-endpoint`/`unconsumed-mutation-endpoint` findings when at
+/// least one OTHER source in this join contributed zero joinable io — see that module's doc.
 pub(crate) fn compute_cross_layer_findings(
     source_ios: &[SourceIo],
     cross_layer: &zzop_core::CrossLayerResult,
@@ -32,14 +40,9 @@ pub(crate) fn compute_cross_layer_findings(
     package_imports: &[zzop_rules_cross_layer::PackageImportSite],
     trpc_participating_sources: &BTreeSet<String>,
 ) -> Vec<Finding> {
-    let mut disabled_union: Vec<String> = Vec::new();
-    for (_, config) in trees {
-        disabled_union.extend(config.rule_config.disabled_rules.iter().cloned());
-    }
-    let gate = RuleConfig {
-        disabled_rules: disabled_union,
-        ..RuleConfig::default()
-    };
+    let (gate, merge_config) = merge_config::union_configs(trees);
+
+    let extraction_blindness_caveat = blindness_caveat::build(source_ios);
 
     let http_provides: Vec<zzop_rules_cross_layer::HttpProvideSite> = source_ios
         .iter()
@@ -114,12 +117,14 @@ pub(crate) fn compute_cross_layer_findings(
         .unwrap_or_default();
 
     if zzop_core::is_enabled(&gate, "cross-layer/unconsumed-endpoint") {
-        sources.push(zzop_rules_cross_layer::unconsumed_endpoint_findings(
+        let mut findings = zzop_rules_cross_layer::unconsumed_endpoint_findings(
             &cross_layer.unconsumed_provides,
             &cross_layer.unresolved_consumes,
             &near_miss_targets,
             trpc_participating_sources,
-        ));
+        );
+        blindness_caveat::append(&mut findings, &extraction_blindness_caveat);
+        sources.push(findings);
     }
     if zzop_core::is_enabled(&gate, "cross-layer/method-mismatch") {
         sources.push(zzop_rules_cross_layer::method_mismatch_findings(
@@ -222,15 +227,15 @@ pub(crate) fn compute_cross_layer_findings(
             &cross_layer.unresolved_consumes,
             &http_consume_totals,
         );
-        sources.push(
-            zzop_rules_cross_layer::unconsumed_mutation_endpoint_findings(
-                &cross_layer.unconsumed_provides,
-                &cross_layer.unresolved_consumes,
-                &blind_sources,
-                &near_miss_targets,
-                trpc_participating_sources,
-            ),
+        let mut findings = zzop_rules_cross_layer::unconsumed_mutation_endpoint_findings(
+            &cross_layer.unconsumed_provides,
+            &cross_layer.unresolved_consumes,
+            &blind_sources,
+            &near_miss_targets,
+            trpc_participating_sources,
         );
+        blindness_caveat::append(&mut findings, &extraction_blindness_caveat);
+        sources.push(findings);
     }
     if zzop_core::is_enabled(&gate, "cross-layer/unprovided-mutation-call") {
         // Provide-side blindness gate — the symmetric mirror of `unconsumed-mutation-endpoint`'s
@@ -288,5 +293,5 @@ pub(crate) fn compute_cross_layer_findings(
         ));
     }
 
-    zzop_core::merge_findings(sources, &RuleConfig::default())
+    zzop_core::merge_findings(sources, &merge_config)
 }

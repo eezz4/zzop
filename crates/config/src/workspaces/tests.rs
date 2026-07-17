@@ -268,6 +268,35 @@ fn exact_expansion_warning_text_composition() {
     assert!(warnings.iter().any(|w| w == expected));
 }
 
+// --- shadowed-key honesty: `roots` + `trees: "auto"` --------------------------------------
+
+#[test]
+fn roots_alongside_auto_warns_and_is_stripped() {
+    let dir = TempDir::new("zzop-ws-roots-and-auto");
+    dir.write("pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n");
+    dir.write("packages/a/package.json", &pkg_json(Some("pkg-a")));
+
+    let config = json!({ "trees": "auto", "roots": ["./ignored"] });
+    let (out, warnings) = expand_auto_trees(config, dir.path()).unwrap();
+    assert!(warnings.iter().any(|w| {
+        w == "config has both \"roots\" and \"trees\": \"auto\" — auto wins and scans the config \
+              file's directory for workspace members; \"roots\" is ignored in auto mode (remove one)."
+    }));
+    // `roots` had zero effect and is now confirmed dead — stripped so no downstream layer can
+    // re-derive a second, redundant "shadowed" warning for the same root cause.
+    assert!(out.get("roots").is_none());
+}
+
+#[test]
+fn auto_without_roots_produces_no_shadowed_key_warning() {
+    let dir = TempDir::new("zzop-ws-auto-no-roots");
+    dir.write("pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n");
+    dir.write("packages/a/package.json", &pkg_json(Some("pkg-a")));
+
+    let (_config, warnings) = expand_auto_trees(auto_config(), dir.path()).unwrap();
+    assert!(!warnings.iter().any(|w| w.contains("roots")));
+}
+
 // --- pass-through for non-"auto" configs ------------------------------------------------
 
 #[test]

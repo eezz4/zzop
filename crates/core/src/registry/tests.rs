@@ -290,6 +290,37 @@ fn severity_override_leaves_unmatched_rule_unchanged() {
 }
 
 #[test]
+fn merge_findings_sorts_by_the_overridden_severity_not_the_original() {
+    // Pin for the "transform applied after the sort whose key it mutates" class (opus review,
+    // 2026-07-17 cross-layer batch): the severity override runs INSIDE merge_findings, before its
+    // sort — a caller that re-applied overrides after merging would emit a remapped finding stuck
+    // in its pre-override position. An info finding overridden to critical must sort FIRST.
+    let mut overrides = BTreeMap::new();
+    overrides.insert("pack/promoted".to_string(), Severity::Critical);
+    let config = RuleConfig {
+        severity_overrides: overrides,
+        ..Default::default()
+    };
+    let merged = merge_findings(
+        vec![vec![
+            finding("pack/steady", Severity::Warning, "a.ts", 1),
+            finding("pack/promoted", Severity::Info, "z.ts", 9),
+        ]],
+        &config,
+    );
+    assert_eq!(
+        merged
+            .iter()
+            .map(|f| (f.rule_id.as_str(), f.severity))
+            .collect::<Vec<_>>(),
+        vec![
+            ("pack/promoted", Severity::Critical),
+            ("pack/steady", Severity::Warning),
+        ],
+    );
+}
+
+#[test]
 fn merge_findings_drops_suppressed_and_sorts_severity_file_line_rule() {
     let config = RuleConfig {
         suppressions: vec![suppress("noisy", None)],

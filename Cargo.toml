@@ -9,6 +9,7 @@ members = [
   "crates/cache",
   "crates/facade",
   "crates/config",
+  "crates/summary",
 
   # Published artifacts — packages/ holds ONLY externally-published artifacts
   "packages/native",
@@ -21,6 +22,7 @@ members = [
   "parser/parser-rust",
   "parser/parser-go",
   "parser/parser-java-21",
+  "parser/parser-sql",
 
   # JSP support arrives via the external-parser envelope protocol (docs/NORMALIZED_AST.md), not an
   # in-workspace crate — no placeholder crate needed (see parser/README.md).

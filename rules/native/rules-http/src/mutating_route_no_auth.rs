@@ -1,13 +1,12 @@
 //! `mutating-route-no-auth` — flags a POST/PUT/PATCH/DELETE `IoProvide` (an HTTP route) whose handler
 //! symbol, walked via call-graph BFS (`zzop_core::callgraph::bfs_reachable` over the whole-repo
-//! `SymbolGraph`), never reaches a callee whose NAME looks like an auth guard. Unlike the DSL
-//! `http/auth-gates` rule (`rules/dsl/http/http.json`), which only inspects the registration line's handler
-//! identifier text, this rule follows the handler's actual downstream calls.
+//! `SymbolGraph`), never reaches a callee whose NAME looks like an auth guard — unlike the DSL
+//! `http/auth-gates` rule (registration-line handler-identifier text only), this follows actual calls.
 //!
 //! ## Guard vocabulary
-//! [`DEFAULT_AUTH_GUARD_PATTERN`] is matched against the TAIL name (after the last `#`/`.`) of every symbol
-//! id `bfs_reachable` visits — a name-vocabulary check, not a body inspector. `access` is guarded to
-//! `(has|can|check|require)access` only, since bare `access` also clears on non-auth names like
+//! [`DEFAULT_AUTH_GUARD_PATTERN`] is matched against (name-segment shape below — see "Match granularity")
+//! every symbol id `bfs_reachable` visits — a name-vocabulary check, not a body inspector. `access` is
+//! guarded to `(has|can|check|require)access` only, since bare `access` also clears on non-auth names like
 //! `accessLog`/`dataAccess`. A blanket `require[A-Z]\w*` fragment was considered and rejected: it would
 //! clear pure input-validation middleware (`requireBody`/`requireJson`/`requireQuery`) and silently
 //! suppress genuine missing-auth findings; for a security rule the recall loss outweighs the
@@ -21,6 +20,26 @@
 //! (`http_scan::resolve_handler`'s "do not guess" contract) — an unresolved or ambiguous handler is
 //! skipped. `bfs_reachable` can match the handler's own symbol id at depth 0, so a self-describing handler
 //! name alone is enough to clear this check.
+//!
+//! ## Call-graph language coverage (the OTHER half of the decidable subset)
+//! `symbol_graph` is built from re-parsed TypeScript/JavaScript source AND (as of
+//! `java21/tree-sitter-java-0.23.5/v2`) re-parsed Java source (`run_callgraph_rules`, which loops
+//! `ts_paths`/`java_rels` — see that function's own module doc). No OTHER language parser in this
+//! workspace produces the `RawCall` sites `bfs_reachable` walks, so for a handler outside
+//! [`CALL_GRAPH_COVERED_EXTENSIONS`], `symbol_graph` restricted to that ecosystem is provably EMPTY — the
+//! BFS can never find a guard there. [`is_call_graph_covered`] makes this explicit and load-bearing: a
+//! mutating provide outside the covered set is exempt from the BFS entirely, same "do not guess" spirit
+//! as the unresolved/ambiguous-handler skip above — recall for an uncovered ecosystem is zero until real
+//! coverage exists, honest given the mechanism has no evidence for it, vs. a naming-accident-gated mix of
+//! false positives/negatives (skipped only when `resolve_handler` happens to fail on an unrelated name
+//! collision) that looks like a bug and is one — exactly what happened before Java's own coverage below.
+//! Lifting the exemption for a language needs two additions outside this crate: (1) a `RawCall`-producing
+//! extractor (`RawCall`'s own doc, `crates/core/src/callgraph.rs`); (2) engine wiring in
+//! `run_callgraph_rules` to gather that language's calls. Java is the first to have done both: its
+//! extractor is `zzop_parser_java_21::lang::calls::parse_calls`; its `resolve_file` is an
+//! opaque-specifier stand-in, not real package resolution (see `run_callgraph_rules`'s doc for why
+//! that's sound here). Neither addition is this crate's call to make (`rules/**` cannot depend on
+//! `zzop_parser_typescript`/`zzop_parser_java_21`/engine internals) — see its dependency boundary.
 //!
 //! ## Precision limit (and its injection completion)
 //! This is a vocabulary-based reachability check over the CALL graph only. Route-level middleware —
@@ -41,6 +60,15 @@
 //! [`ScanMutatingRouteNoAuthInput::route_attr_store`]); the native vocab BFS and the injected evidence
 //! COMPOSE (either clears the route). This is one consumer of a general channel, not a bespoke auth path.
 //!
+//! ## Match granularity: tail name PLUS the immediate qualifier
+//! [`is_guard_id`] checks TWO trailing segments of a visited id (`<file>#<Receiver>.<method>`), with
+//! deliberately DIFFERENT matchers: the tail (method name) keeps the substring
+//! [`DEFAULT_AUTH_GUARD_PATTERN`] (verb-shaped names); the qualifier (class name) uses exact
+//! camel-token matching against [`qualifier::QUALIFIER_GUARD_TOKENS`] — this is what makes a Java
+//! static-utility guard visible (`AuthorizationService.canWriteComment`: `auth` lives only in the
+//! qualifier) WITHOUT substring's domain-noun false-clears (`AuthorRepository` ⊃ `auth` — see
+//! `qualifier.rs`). A BARE call id's qualifier is its file-extension token — harmless either way.
+//!
 //! ## Auth-acquisition exemption
 //! A provide whose PATH sits on the auth-acquisition surface is exempt entirely, never entering the BFS —
 //! that surface IS how a caller gets credentials, so it cannot require pre-existing auth to reach itself.
@@ -50,15 +78,13 @@
 //!   ARE the auth surface regardless of what else is in the path.
 //! - **Conditional tier** ([`AUTH_ACQUISITION_CONDITIONAL_PATTERN`]): exempt only when an auth-family
 //!   segment ([`AUTH_FAMILY_PATH_PATTERN`]) also appears in the same path — e.g. `/auth/register` is
-//!   exempt, but `/devices/register` is not.
-//!
-//! Every segment list is matched `/`-delimited on whole path segments only, never as a bare substring —
-//! `/author/profile` does not match `auth`.
+//!   exempt, but `/devices/register` is not. Every segment list is matched `/`-delimited on whole path
+//!   segments only, never as a bare substring — `/author/profile` does not match `auth`.
 //!
 //! ## Test-fixture exemption
 //! A provide registered in a test/fixture file (`is_test_file` — the same predicate `unreachable`'s
-//! dead-island check uses) is skipped outright: a route only ever defined and invoked from a test is not
-//! exposed application surface.
+//! dead-island check uses) is skipped outright: a route only defined/invoked from a test isn't exposed
+//! application surface.
 //!
 //! ## NestJS `@UseGuards` decorator exemption
 //! A provide extracted by the NestJS adapter whose registration line carries `@UseGuards(...)` coverage
@@ -111,6 +137,25 @@ const AUTH_FAMILY_PATH_PATTERN: &str = r"(?i)/(auth|login|signin|signup|session|
 
 use crate::http_scan::WRITE_HTTP_METHODS;
 
+/// Extensions the whole-repo call-graph BFS actually has `RawCall` edges for — module doc "Call-graph
+/// language coverage". Duplicated from `zzop_engine`'s `dead_exports::is_ts_source_ext` list plus
+/// `"java"` rather than shared (this crate depends on `zzop_core` only). Adding `"java"` here is the
+/// wiring-completion step this constant's own doc predicted: `zzop_parser_java_21::lang::calls::
+/// parse_calls` now feeds `symbol_graph` real Java call-site edges. `pub`: pinned against `is_ts_source_ext`.
+pub const CALL_GRAPH_COVERED_EXTENSIONS: &[&str] =
+    &["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "java"];
+
+/// True when `file`'s extension is one the call-graph BFS has evidence for — module doc "Call-graph
+/// language coverage". A file outside this set (Python, Go, Rust, ...) is exempt: `symbol_graph`
+/// restricted to its ecosystem is provably empty, so "never reaches a guard" is guaranteed, not evidence.
+fn is_call_graph_covered(file: &str) -> bool {
+    std::path::Path::new(file)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .is_some_and(|e| CALL_GRAPH_COVERED_EXTENSIONS.contains(&e.as_str()))
+}
+
 /// Input for [`scan_mutating_route_no_auth`]. Takes `io_provides` directly (not the `ApiEndpoint` shape
 /// `http_scan`'s two rules take) so the emitted `Finding` can anchor on the route's own registration
 /// `file`/`line` — `ApiEndpoint` carries no line number (see `zzop_engine::io`'s module doc, "`ApiEndpoint`
@@ -148,6 +193,10 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
         .iter()
         .filter(|p| p.kind == "http")
         .filter(|p| !is_test_file(&p.file))
+        // The call-graph BFS below has zero evidence for a non-TS/JS ecosystem — module doc "Call-graph
+        // language coverage". Exempt before resolving/BFS-ing, the same "do not guess" spirit as the
+        // unresolved/ambiguous-handler skip.
+        .filter(|p| is_call_graph_covered(&p.file))
         .filter(|p| !input.nest_guarded.contains(&(p.file.clone(), p.line)))
         // Injected auth-guard evidence (route-level middleware the call-graph BFS can't see) — see
         // `AUTH_GUARDED_ATTR`. Exempt BEFORE the BFS, like `nest_guarded`: this IS how the route is guarded.
@@ -173,8 +222,9 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
     let guard_re = Regex::new(input.auth_guard_pattern)
         .unwrap_or_else(|_| Regex::new(DEFAULT_AUTH_GUARD_PATTERN).unwrap());
     let is_guard_id = |id: &str| -> bool {
-        let tail = id.rsplit(['#', '.']).next().unwrap_or(id);
-        guard_re.is_match(tail)
+        let mut segments = id.rsplit(['#', '.']);
+        let tail = segments.next().unwrap_or(id);
+        guard_re.is_match(tail) || segments.next().is_some_and(qualifier::qualifier_is_guard)
     };
 
     // Memoizes the per-handler BFS across every mutating endpoint sharing a handler symbol.
@@ -243,6 +293,8 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
     out.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
     out
 }
+
+mod qualifier;
 
 #[cfg(test)]
 mod tests;

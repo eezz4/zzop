@@ -15,12 +15,14 @@ mod unmatched_suppression_tests;
 #[cfg(test)]
 mod unparsed_extension_tests;
 
-pub(crate) use capability::zero_packs_warning;
+pub(crate) use capability::{
+    compute_dsl_scope, no_applicable_dsl_rule_warning, zero_packs_warning,
+};
 pub(super) use capability::{git_not_requested_warning, unparsed_extension_warning};
 pub(crate) use config_filters::{
     unmatched_global_exclude_warnings, unmatched_suppression_warnings,
 };
-pub(crate) use coverage_report::run_diagnostics;
+pub(crate) use coverage_report::{rule_overrides_applied, run_diagnostics};
 pub(super) use git_collect::collect_git;
 
 /// Capability self-report: how many files this run classified minified/generated and were therefore
@@ -42,7 +44,7 @@ pub(super) fn minified_files_warning(sorted_rels: &[String]) -> Option<String> {
         sample_str.push_str(&format!(", +{} more", sorted_rels.len() - SAMPLE));
     }
     Some(format!(
-        "{} minified/generated file(s) skipped for ALL DSL rule-pack rules (long-line-dominated or 5000+ byte single lines; native structural analyses still cover them): {sample_str}",
+        "{} minified/generated file(s) skipped for ALL DSL rule-pack rules (long-line-dominated, 5000+ byte single lines, or binary-looking content; native structural analyses still cover them): {sample_str}",
         sorted_rels.len()
     ))
 }

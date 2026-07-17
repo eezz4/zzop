@@ -8,7 +8,8 @@
 //! ## Layout
 //! - `lang` — CST -> Common-IR LANGUAGE projection: `SourceSymbol` extraction (`symbols`, including
 //!   method/constructor BODY SPANS — the `zzop-parser-java` method-scan parity surface), `ImportMap`
-//!   extraction (`imports`), and identifier-reference collection (`used_names`).
+//!   extraction (`imports`), identifier-reference collection (`used_names`), and same-file call-site
+//!   extraction (`calls`, `RawCall`s feeding the whole-repo call-graph `SymbolGraph`).
 //! - `provides` — Spring MVC HTTP route PROVIDES, AST-grade reimplementation of the old lexical
 //!   `zzop-parser-java::provides` extractor (parity-first: same annotation vocabulary, same keying,
 //!   same never-guess rules; ported as this module's own test fixtures).
@@ -35,6 +36,7 @@ mod util;
 #[cfg(test)]
 mod node_kinds;
 
+pub use lang::calls::parse_calls;
 pub use lang::imports::parse_imports;
 pub use lang::symbols::parse_symbols;
 pub use lang::used_names::parse_local_identifier_refs;
@@ -47,7 +49,12 @@ pub use provides::extract_http_provides;
 ///   methods/constructors as `Type.method` with body spans, `static final` fields as `Const`), imports
 ///   (plain/glob/static, `ImportMap`), `used_names`, per-file Spring HTTP provides, and the whole-corpus
 ///   Spring provides pass.
-pub const PARSER_FINGERPRINT: &str = "java21/tree-sitter-java-0.23.5/v1";
+/// - `v2`: added `lang::calls::parse_calls` — same-file `RawCall` extraction (method-invocation call
+///   sites attributed to their enclosing method/constructor body, lambda bodies included via body-span
+///   containment, field/local/parameter receiver typing) feeding the whole-repo call-graph `SymbolGraph`
+///   the `mutating-route-no-auth`/`unsafe-read-endpoint`/`non-idempotent-write` native rules BFS over —
+///   see `crates/engine/src/analyze/native_rules/callgraph.rs`'s module doc.
+pub const PARSER_FINGERPRINT: &str = "java21/tree-sitter-java-0.23.5/v2";
 
 /// Every top-level declaration kind this crate recognizes, PLUS `module_declaration` (never itself
 /// extracted, but still a sign the file has SOME real Java in it) — the root-hopeless gate's "is there

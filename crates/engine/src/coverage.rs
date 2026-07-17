@@ -24,17 +24,22 @@ pub struct CoverageCensus {
     pub io_consumes_unresolved: usize,
     /// Files that degraded to a lexical fallback.
     pub degraded: usize,
-    /// FACT, not a heuristic: this tree contributed NO io to the join (`io_provides == 0` AND both
-    /// consume counts 0) while it DID analyze files (`files > 0`). The mode-1 active-blindness signal:
-    /// such a tree is invisible to the cross-layer join, so join findings that reference it are
-    /// structurally weak. Renderers turn this bool into the human "blind/dark" label (kernel stays fact-
-    /// only). A pure UI library with no io legitimately trips this too — that over-disclosure is
-    /// intentional (disclosure-only, never suppresses findings).
+    /// FACT, not a heuristic: this tree contributed NO JOINABLE io to the join (`io_provides == 0` AND
+    /// `io_consumes_keyed == 0`) while it DID analyze files (`files > 0`). Redefined 2026-07-17 (was
+    /// `io_provides == 0 AND io_consumes_keyed == 0 AND io_consumes_unresolved == 0`): an unresolved
+    /// consume proves the extractor SAW a call site, it just could not resolve the target key, so it can
+    /// never join anything either way — counting it toward "contributed" under-fired the flag on a tree
+    /// with 0 provides, 0 keyed consumes, and 1+ unresolved consumes, which is still fully join-blind. The
+    /// mode-1 active-blindness signal: such a tree is invisible to the cross-layer join, so join findings
+    /// that reference it are structurally weak. Renderers turn this bool into the human "blind/dark"
+    /// label (kernel stays fact-only). A pure UI library with no io legitimately trips this too — that
+    /// over-disclosure is intentional (disclosure-only, never suppresses findings).
     ///
-    /// EXACT zero is deliberate and must NOT be "unified" with `framework_silence`'s near-zero floor
-    /// (a pinned policy-value divergence, see that module's tests): this is an unconditional structural
-    /// ASSERTION (always true when it fires), while the tripwires are heuristic self-reports that may
-    /// fire at 1-2 extracted facts. Widening this to near-zero would turn the assertion into a heuristic.
+    /// EXACT zero (over `io_provides`/`io_consumes_keyed`) is deliberate and must NOT be "unified" with
+    /// `framework_silence`'s near-zero floor (a pinned policy-value divergence, see that module's tests):
+    /// this is an unconditional structural ASSERTION (always true when it fires), while the tripwires are
+    /// heuristic self-reports that may fire at 1-2 extracted facts. Widening this to near-zero would turn
+    /// the assertion into a heuristic.
     pub join_contribution_zero: bool,
 }
 
@@ -54,10 +59,11 @@ impl CoverageCensus {
             None => (0, 0, 0),
         };
 
-        let join_contribution_zero = file_count > 0
-            && io_provides == 0
-            && io_consumes_keyed == 0
-            && io_consumes_unresolved == 0;
+        // "No JOINABLE contribution" (redefined 2026-07-17 — see `join_contribution_zero`'s doc):
+        // unresolved consumes are deliberately EXCLUDED from this gate — they can never join anything
+        // either way, so a tree with 0 provides, 0 keyed consumes, and 1+ unresolved consumes is still
+        // fully join-blind, not "contributed something."
+        let join_contribution_zero = file_count > 0 && io_provides == 0 && io_consumes_keyed == 0;
 
         CoverageCensus {
             files: file_count,

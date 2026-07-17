@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "zzop": {
+      "command": "zzop-mcp",
+      "args": ["mcp"]
+    }
+  }
+}

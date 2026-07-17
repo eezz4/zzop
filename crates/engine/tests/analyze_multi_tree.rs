@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use zzop_core::{FileProjection, IoConsume, IoFacts, NormalizedEnvelope, NORMALIZED_AST_FORMAT};
-use zzop_engine::{analyze_trees, EngineConfig};
+use zzop_engine::{analyze_trees, EngineConfig, MIN_PARALLEL_IMPL_SIGNALS};
 
 struct TempDir(PathBuf);
 
@@ -321,4 +321,125 @@ fn overlay_injected_consume_joins_a_native_provide_across_trees() {
 
     assert!(out.cross_layer.unprovided_consumes.is_empty());
     assert!(out.cross_layer.unconsumed_provides.is_empty());
+}
+
+// --- parallel-implementation tripwire (blind field test: trees:"auto" wiring 5 competing frontend
+// reimplementations + 2 backends of the same API into one join produced 0 cross-source edges and 86
+// pure duplicate-route/ambiguous-consume findings, presented with no run-level context) --------------
+
+fn backend_with_routes(prefix: &str, handler_prefix: &str) -> TempDir {
+    let dir = TempDir::new(prefix);
+    dir.write(
+        "routes/apiRoutes.ts",
+        &format!(
+            "const apiRoutes = new Hono();\n\
+             apiRoutes.get(\"/api/a\", {handler_prefix}.a);\n\
+             apiRoutes.get(\"/api/b\", {handler_prefix}.b);\n\
+             apiRoutes.get(\"/api/c\", {handler_prefix}.c);\n\
+             apiRoutes.get(\"/api/d\", {handler_prefix}.d);\n\
+             apiRoutes.get(\"/api/e\", {handler_prefix}.e);\n"
+        ),
+    );
+    dir
+}
+
+#[test]
+fn parallel_implementation_tripwire_fires_on_zero_edges_plus_enough_duplicate_routes() {
+    // Two trees registering the SAME 5 routes, consumed by nobody: 5 `cross-layer/duplicate-route`
+    // findings (one per shared key), 0 cross-source edges (nothing ever consumes any of them) — exactly
+    // the "parallel reimplementations of one API" shape, at the `MIN_PARALLEL_IMPL_SIGNALS` threshold.
+    let svc_a = backend_with_routes("zzop-engine-parallel-impl-a", "api");
+    let svc_b = backend_with_routes("zzop-engine-parallel-impl-b", "api2");
+    let out = analyze_trees(&[
+        (svc_a.path().to_path_buf(), config("svc-a")),
+        (svc_b.path().to_path_buf(), config("svc-b")),
+    ]);
+
+    assert_eq!(
+        out.cross_layer
+            .edges
+            .iter()
+            .filter(|e| e.cross_source)
+            .count(),
+        0,
+        "fixture must have zero cross-source edges: {:?}",
+        out.cross_layer.edges
+    );
+    let duplicate_route_count = out
+        .cross_layer_findings
+        .iter()
+        .filter(|f| f.rule_id == "cross-layer/duplicate-route")
+        .count();
+    assert_eq!(duplicate_route_count, MIN_PARALLEL_IMPL_SIGNALS);
+
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains("0 cross-source edges")
+                && w.contains("parallel implementations of the same API surface")),
+        "expected the parallel-implementation tripwire to fire, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn parallel_implementation_tripwire_is_silent_on_a_healthy_joined_run() {
+    // A real FE/BE pair with a clean cross-source edge must never trip the tripwire, even though (as
+    // it happens) this fixture also has zero duplicate/ambiguous findings — the "healthy joined"
+    // control case.
+    let fe = fe_tree();
+    let be = be_tree();
+    let out = analyze_trees(&[
+        (fe.path().to_path_buf(), config("fe")),
+        (be.path().to_path_buf(), config("be")),
+    ]);
+    assert!(
+        out.cross_layer.edges.iter().any(|e| e.cross_source),
+        "sanity: fixture must have a real cross-source edge"
+    );
+    assert!(
+        out.warnings.is_empty(),
+        "a healthy joined run must not trip the parallel-implementation tripwire, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn parallel_implementation_tripwire_is_silent_when_edges_are_zero_but_no_duplicate_signals_exist() {
+    // The "blind tree" control case: 0 cross-source edges (nobody consumes anything), but the two
+    // trees' routes don't even overlap — so 0 duplicate-route/ambiguous-consume findings either. This
+    // must stay silent: 0 edges alone is not the signal, only 0 edges PLUS a pile of duplicate/
+    // ambiguity noise is.
+    let svc_a = TempDir::new("zzop-engine-blind-a");
+    svc_a.write(
+        "routes/apiRoutes.ts",
+        "const apiRoutes = new Hono();\napiRoutes.get(\"/api/only-a\", api.a);\n",
+    );
+    let svc_b = TempDir::new("zzop-engine-blind-b");
+    svc_b.write(
+        "routes/apiRoutes.ts",
+        "const apiRoutes = new Hono();\napiRoutes.get(\"/api/only-b\", api.b);\n",
+    );
+    let out = analyze_trees(&[
+        (svc_a.path().to_path_buf(), config("svc-a")),
+        (svc_b.path().to_path_buf(), config("svc-b")),
+    ]);
+    assert_eq!(
+        out.cross_layer
+            .edges
+            .iter()
+            .filter(|e| e.cross_source)
+            .count(),
+        0
+    );
+    assert!(out
+        .cross_layer_findings
+        .iter()
+        .all(|f| f.rule_id != "cross-layer/duplicate-route"
+            && f.rule_id != "cross-layer/ambiguous-consume"));
+    assert!(
+        out.warnings.is_empty(),
+        "0 edges with no duplicate/ambiguous signal must not trip the tripwire, got: {:?}",
+        out.warnings
+    );
 }

@@ -43,15 +43,33 @@ fn message_shape_names_count_extension_sample_and_the_overlays_config_knob() {
 fn message_chains_the_gap_to_creation_with_the_minimal_on_ramp_and_embedded_contract() {
     // The funnel principle (output-philosophy, gap-to-creation): a gap warning must not end at disclosure —
     // it chains the user to BUILDING an adapter, and the default on-ramp is a minimal Mode B
-    // partial envelope, never a full parser. Host-dialect aware: the contract docs ship inside the
+    // overlay, never a full parser. Host-dialect aware: the contract docs ship inside the
     // binary (`zzop-mcp contract <name>`) for MCP-host users; repo users get the docs path.
     let mut unparsed = BTreeMap::new();
     unparsed.insert("py".to_string(), (1, vec!["c.py".to_string()]));
     let w = &unparsed_extension_warning(&unparsed)[0];
-    assert!(w.contains("partial Mode B envelope"), "{w}");
+    assert!(w.contains("partial overlay"), "{w}");
+    // Dual-audience pointers: every repo path carries an embedded-contract twin (a blind binary-only
+    // MCP user has no examples/ or docs/ checkout), including the MCP resource URI form for hosts
+    // without CLI access.
     assert!(w.contains("examples/ adapters"), "{w}");
+    assert!(w.contains("zzop-mcp contract adapter-guide"), "{w}");
     assert!(w.contains("zzop-mcp contract envelope-guide"), "{w}");
+    assert!(w.contains("zzop://contract/envelope-guide"), "{w}");
     assert!(w.contains("zzop-mcp contract envelope-schema"), "{w}");
+    // Reachability honesty, both directions: a 2026-07-17 blind agent burned time hunting for a
+    // Mode A entry point the binary then lacked (wording was corrected to "embedder API only");
+    // the binary now HAS one (`zzop-mcp analyze-envelope` / MCP tool `analyze_envelope`), so the
+    // wording names every reachable surface — a reword that drops one of them regresses to a
+    // partial claim and fails here.
+    assert!(w.contains("Mode A full-envelope analysis:"), "{w}");
+    assert!(w.contains("napi `analyzeEnvelope`"), "{w}");
+    assert!(w.contains("analyze-envelope"), "{w}");
+    assert!(w.contains("`analyze_envelope`"), "{w}");
+    assert!(
+        !w.contains("Mode A/B"),
+        "overlays must be correctly labeled Mode B only, got: {w}"
+    );
 }
 
 #[test]

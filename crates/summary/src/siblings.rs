@@ -19,7 +19,7 @@ const MAX_NAMED_SIBLINGS: usize = 5;
 /// share a single parent (never guess a scope), the parent is unreadable, or the analyzed set
 /// already covers every sibling. Names are sorted for determinism (`read_dir` order is
 /// OS-dependent) and capped at `MAX_NAMED_SIBLINGS` with the remainder counted.
-pub(super) fn sibling_scope_warning(roots: &[PathBuf]) -> Option<String> {
+pub(crate) fn sibling_scope_warning(roots: &[PathBuf]) -> Option<String> {
     let parent = roots.first()?.parent()?;
     if roots.iter().any(|r| r.parent() != Some(parent)) {
         return None;
@@ -67,8 +67,12 @@ pub(super) fn sibling_scope_warning(roots: &[PathBuf]) -> Option<String> {
     } else {
         ("directories", "are")
     };
+    // Non-prescriptive by design: a live-fire misfire showed this firing on ALTERNATIVE-STACK repos
+    // (parallel demo implementations) where following the old "pass them / add them" imperative would
+    // have wrecked the join. State only what exists (a knowable fact) and leave the judgment call —
+    // same system or not — to the reader.
     Some(format!(
-        "{} sibling {noun} under {} {verb} not part of this join: {named} — pass them as paths or add them to the config's trees",
+        "{} sibling {noun} under {} {verb} not part of this join: {named}. Add them to the config's trees only if they are part of the same system as the analyzed roots; unrelated or alternative-stack repos (e.g. a parallel demo implementation) should stay out.",
         siblings.len(),
         parent.display()
     ))
@@ -121,12 +125,12 @@ mod tests {
             "dot-dirs and node_modules never count: {w}"
         );
         assert!(
-            w.contains(": e2e, pkg-a, pkg-b, pkg-c, pkg-d (+2 more) — "),
+            w.contains(": e2e, pkg-a, pkg-b, pkg-c, pkg-d (+2 more). Add them to the config's trees only if"),
             "sorted, capped at 5, remainder counted: {w}"
         );
         assert!(
-            w.ends_with("pass them as paths or add them to the config's trees"),
-            "got: {w}"
+            w.ends_with("unrelated or alternative-stack repos (e.g. a parallel demo implementation) should stay out."),
+            "wording must be conditional/non-prescriptive, never an imperative to always pass/add: {w}"
         );
         assert!(
             !w.contains(".git") && !w.contains("node_modules"),

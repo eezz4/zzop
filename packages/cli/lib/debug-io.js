@@ -135,4 +135,36 @@ function renderDebugIo(crossLayer) {
   return sections.map((lines) => lines.join('\n')).join('\n\n');
 }
 
-module.exports = { renderDebugIo, BUCKETS };
+/**
+ * How many trees a parsed native output analyzed — 1 for a single-tree `analyze()` shape (no `trees`
+ * array at all: there is exactly one tree, itself), `output.trees.length` for a multi-tree
+ * `analyzeTrees()` shape (which can legitimately be a single explicit `trees: [...]` entry, not just
+ * >= 2 — see `packages/cli/lib/mapper.js`'s `configToRequest`: an explicit `trees` config always takes
+ * the `analyzeTrees` method even with one entry). Falls back to 1 for anything else absent/malformed —
+ * the same "assume the least-crossed-over shape" default as `renderDebugIo`'s own `{}` fallback.
+ *
+ * @param {object} [output]  parsed native output
+ * @returns {number}
+ */
+function debugIoTreeCount(output) {
+  if (output && Array.isArray(output.trees)) return output.trees.length;
+  return 1;
+}
+
+/**
+ * `--debug-io`'s "why is every bucket empty" explainer: every cross-layer bucket is join output, and a
+ * join needs at least two trees to have anything to join — a single-tree run's buckets are ALWAYS empty,
+ * which reads as a bug/silent failure unless labeled. Returns `null` when the run analyzed >= 2 trees (no
+ * note needed — the buckets speak for themselves); otherwise a one-line, deterministic note naming the
+ * actual tree count analyzed.
+ *
+ * @param {object} [output]  parsed native output
+ * @returns {string | null}
+ */
+function debugIoTreeCountNote(output) {
+  const treeCount = debugIoTreeCount(output);
+  if (treeCount >= 2) return null;
+  return `note: cross-layer buckets need >= 2 trees; this run analyzed ${treeCount} tree${treeCount === 1 ? '' : 's'}`;
+}
+
+module.exports = { renderDebugIo, debugIoTreeCount, debugIoTreeCountNote, BUCKETS };

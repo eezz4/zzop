@@ -1,0 +1,20 @@
+{
+  "name": "zzop",
+  "version": "0.18.0",
+  "description": "Deterministic cross-repo contract analysis for AI agents: which frontend calls hit which backend endpoints (and which don't) — exact joins, disclosed blind spots, no guessing. TypeScript/JavaScript, Python, Java, Rust, Go, Prisma, SQL natively; anything else via a documented adapter envelope.",
+  "author": {
+    "name": "eezz4",
+    "url": "https://github.com/eezz4/zzop"
+  },
+  "homepage": "https://eezz4.github.io/zzop/",
+  "repository": "https://github.com/eezz4/zzop",
+  "license": "MIT",
+  "keywords": [
+    "static-analysis",
+    "cross-repo",
+    "api-contract",
+    "mcp",
+    "endpoints",
+    "architecture"
+  ]
+}

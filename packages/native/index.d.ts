@@ -139,7 +139,8 @@ export type AnalyzeOutputJson = Record<string, unknown>;
 /**
  * Runs the fused engine over one tree and returns its JSON-serialized `AnalyzeOutput`
  * (`{ir, findings, degraded, fileCount, nodes, scores, health, recommendations, critical, seams,
- * folders, layerCoChurn, packsLoaded, warnings, coverage, disclosure, cache, ruleTimings}`) — every
+ * folders, layerCoChurn, packsLoaded, warnings, configWarnings, ruleOverridesApplied, coverage,
+ * disclosure, cache, ruleTimings}`) — every
  * field, and every nested type's own
  * fields, are camelCase (see `docs/modules/napi.md` for the one documented exception, `Finding.data`).
  * Throws on malformed `configJson` or a missing `root` — never returns a panic.

@@ -337,6 +337,124 @@ fn nestjs_route_with_no_use_guards_anywhere_still_fires() {
     assert_eq!(found[0].file, "items.controller.ts");
 }
 
+// --- Java call-graph coverage (CALL_GRAPH_COVERED_EXTENSIONS lift) ---------------------------
+//
+// Real-shape regressions distilled from `corpus/oss/be-spring`'s `io.spring.api` package — the ground
+// truth `mutating_route_no_auth`'s module doc names for the Java `RawCall` wiring
+// (`zzop_parser_java_21::lang::calls::parse_calls` + `run_callgraph_rules`'s Java loop).
+
+/// `CommentsApi.deleteComment`-shaped: a `RequestMapping(method = RequestMethod.DELETE)` handler whose
+/// inline guard (`AuthorizationService.canWriteComment(...)`) sits inside a `.map(lambda -> {...})` body.
+fn java_comments_api_fixture(dir: &TempDir) {
+    dir.write(
+        "src/main/java/io/spring/api/CommentsApi.java",
+        concat!(
+            "package io.spring.api;\n\n",
+            "import io.spring.core.service.AuthorizationService;\n",
+            "import org.springframework.http.ResponseEntity;\n",
+            "import org.springframework.web.bind.annotation.PathVariable;\n",
+            "import org.springframework.web.bind.annotation.RequestMapping;\n",
+            "import org.springframework.web.bind.annotation.RequestMethod;\n",
+            "import org.springframework.web.bind.annotation.RestController;\n\n",
+            "@RestController\n",
+            "@RequestMapping(path = \"/articles/{slug}/comments\")\n",
+            "public class CommentsApi {\n",
+            "  private CommentRepository commentRepository;\n\n",
+            "  @RequestMapping(path = \"{id}\", method = RequestMethod.DELETE)\n",
+            "  public ResponseEntity deleteComment(\n",
+            "      @PathVariable(\"slug\") String slug, @PathVariable(\"id\") String commentId) {\n",
+            "    return commentRepository\n",
+            "        .findById(slug, commentId)\n",
+            "        .map(\n",
+            "            comment -> {\n",
+            "              if (!AuthorizationService.canWriteComment(null, null, comment)) {\n",
+            "                throw new RuntimeException();\n",
+            "              }\n",
+            "              commentRepository.remove(comment);\n",
+            "              return ResponseEntity.noContent().build();\n",
+            "            })\n",
+            "        .orElseThrow(RuntimeException::new);\n",
+            "  }\n",
+            "}\n"
+        ),
+    );
+}
+
+/// `CurrentUserApi.updateProfile`-shaped: a `@PutMapping` handler with NO guard anywhere in its call
+/// graph — the one true positive in the be-spring ground truth.
+fn java_current_user_api_fixture(dir: &TempDir) {
+    dir.write(
+        "src/main/java/io/spring/api/CurrentUserApi.java",
+        concat!(
+            "package io.spring.api;\n\n",
+            "import org.springframework.http.ResponseEntity;\n",
+            "import org.springframework.web.bind.annotation.PutMapping;\n",
+            "import org.springframework.web.bind.annotation.RequestMapping;\n",
+            "import org.springframework.web.bind.annotation.RestController;\n\n",
+            "@RestController\n",
+            "@RequestMapping(path = \"/user\")\n",
+            "public class CurrentUserApi {\n",
+            "  private UserService userService;\n\n",
+            "  @PutMapping\n",
+            "  public ResponseEntity updateProfile() {\n",
+            "    userService.updateUser(null);\n",
+            "    return ResponseEntity.ok().build();\n",
+            "  }\n",
+            "}\n"
+        ),
+    );
+}
+
+#[test]
+fn java_handler_reaching_an_authorization_service_lambda_guard_is_not_flagged() {
+    // CommentsApi.deleteComment: the guard is inline inside a `.map(comment -> {...})` lambda — the
+    // exact shape `zzop_parser_java_21::lang::calls::parse_calls`'s "lambda bodies ARE covered" doc
+    // exists to handle. Must NOT be flagged.
+    let dir = TempDir::new("zzop-mutating-no-auth-java-comments");
+    java_comments_api_fixture(&dir);
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "mutating-route-no-auth").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn java_handler_with_no_reachable_guard_is_flagged() {
+    // CurrentUserApi.updateProfile: no guard anywhere reachable — the one true positive in the
+    // be-spring ground truth this wiring was built to catch.
+    let dir = TempDir::new("zzop-mutating-no-auth-java-current-user");
+    java_current_user_api_fixture(&dir);
+    let out = scan(&dir);
+    let found = hits(&out, "mutating-route-no-auth");
+    assert_eq!(found.len(), 1, "{:?}", out.findings);
+    assert_eq!(
+        found[0].file,
+        "src/main/java/io/spring/api/CurrentUserApi.java"
+    );
+    assert_eq!(found[0].data.as_ref().unwrap()["method"], "PUT");
+}
+
+#[test]
+fn java_call_graph_coverage_does_not_disturb_the_ambiguous_handler_bailout() {
+    // Both fixtures together: `deleteComment`/`updateProfile` are each unique in this small tree, so
+    // both resolve — proving `.java` becoming call-graph-covered doesn't touch the separate
+    // `resolve_handler` ambiguity gate (item (c) of the task's validation list). The guarded handler
+    // stays silent, the unguarded one still fires — same outcome as the two tests above, now run
+    // together in one tree.
+    let dir = TempDir::new("zzop-mutating-no-auth-java-both");
+    java_comments_api_fixture(&dir);
+    java_current_user_api_fixture(&dir);
+    let out = scan(&dir);
+    let found = hits(&out, "mutating-route-no-auth");
+    assert_eq!(found.len(), 1, "{:?}", out.findings);
+    assert_eq!(
+        found[0].file,
+        "src/main/java/io/spring/api/CurrentUserApi.java"
+    );
+}
+
 #[test]
 fn safe_get_routes_are_never_checked_for_missing_auth() {
     let dir = TempDir::new("zzop-mutating-no-auth-get");

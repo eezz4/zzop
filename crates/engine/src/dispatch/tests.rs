@@ -52,6 +52,14 @@ fn dispatches_go_extension() {
 }
 
 #[test]
+fn dispatches_sql_extension() {
+    assert_eq!(
+        dispatch("db/migrations/001_init.sql", &cfg()),
+        Some(Language::Sql)
+    );
+}
+
+#[test]
 fn extension_match_is_case_insensitive() {
     assert_eq!(dispatch("src/Foo.TS", &cfg()), Some(Language::TypeScript));
 }
@@ -102,6 +110,17 @@ fn default_skip_dirs_cover_common_build_and_vcs_output() {
         assert!(is_skip_dir(name, &config), "{name}");
     }
     assert!(!is_skip_dir("src", &config));
+}
+
+/// `zzop-reports` (the JS CLI's default report output dir) and `.zzop-cache` (its default `cacheDir`
+/// template value) must be self-scan-excluded by default — a run that writes its own reports/cache inside
+/// the analyzed tree must not have the NEXT run walk that output as source (regression pin for the
+/// self-scan-pollution fix, blind field test round 3).
+#[test]
+fn default_skip_dirs_exclude_zzops_own_report_and_cache_output_dirs() {
+    let config = cfg();
+    assert!(is_skip_dir("zzop-reports", &config));
+    assert!(is_skip_dir(".zzop-cache", &config));
 }
 
 /// T2 policy pin: the exact `NON_SOURCE_EXTENSIONS` contents. Any edit to this list changes which
