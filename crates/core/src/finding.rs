@@ -90,7 +90,7 @@ mod disable_hint_tests {
 /// Normalized rule output. Narrow on `rule_id` to recover the concrete shape (a pack's native shape lives in `data`).
 /// `#[serde(rename_all = "camelCase")]`: this is an output-only type (never deserialized from an external
 /// input contract), so its JSON shape is free to use the same camelCase convention as every other
-/// napi-boundary output type — see `crates/facade/src/lib.rs`'s `AnalyzeOutputView` doc for the full
+/// wire-boundary output type — see `crates/facade/src/lib.rs`'s `AnalyzeOutputView` doc for the full
 /// casing-unification rationale. Only `rule_id` -> `ruleId` actually changes; every other field is a
 /// single word.
 #[derive(Debug, Clone, Serialize, Deserialize)]

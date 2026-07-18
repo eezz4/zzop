@@ -20,7 +20,7 @@
 pub fn version_string() -> String {
     format!(
         "zzop-napi/{} zzop-parser-typescript={} zzop-parser-prisma={} zzop-parser-python-3={} \
-         zzop-parser-java-21={} zzop-parser-rust={} zzop-parser-go={}",
+         zzop-parser-java-21={} zzop-parser-rust={} zzop-parser-go={} zzop-parser-sql={}",
         option_env!("ZZOP_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")),
         zzop_parser_typescript::PARSER_FINGERPRINT,
         zzop_parser_prisma::PARSER_FINGERPRINT,
@@ -28,5 +28,6 @@ pub fn version_string() -> String {
         zzop_parser_java_21::PARSER_FINGERPRINT,
         zzop_parser_rust::PARSER_FINGERPRINT,
         zzop_parser_go::PARSER_FINGERPRINT,
+        zzop_parser_sql::PARSER_FINGERPRINT,
     )
 }

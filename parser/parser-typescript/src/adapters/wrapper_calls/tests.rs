@@ -65,6 +65,63 @@ fn fixed_method_wrapper_via_endpoint_suffix_param_name() {
 }
 
 #[test]
+fn file_private_request_wrapper_below_exported_callers_is_collected_and_keys() {
+    // The ping-hub `features/group/api.ts` shape: exported callers pass a method + literal path
+    // template to a file-PRIVATE `request(method, path, opts)` wrapper that funnels through `fetch`.
+    // Pre-`intra-file-wrapper-v1` the def was export-gated and dropped, so these consumes never keyed.
+    let src = concat!(
+        "import { apiBase } from '@/lib/apiBase.js';\n",
+        "\n",
+        "export function getGroupInfo(id: string): Promise<{ name: string }> {\n",
+        "  return request('GET', `/api/group/${encodeURIComponent(id)}/info`);\n",
+        "}\n",
+        "export function extendGroup(id: string, token: string): Promise<{ ok: boolean }> {\n",
+        "  return request('POST', `/api/group/${encodeURIComponent(id)}/extend`, { token });\n",
+        "}\n",
+        "\n",
+        "// --- private ---\n",
+        "async function request<T>(method: 'GET' | 'POST', path: string, opts = {}): Promise<T> {\n",
+        "  const res = await fetch(`${apiBase()}${path}`, { method });\n",
+        "  return res.json();\n",
+        "}\n"
+    );
+    let (defs, calls) = extract_wrapper_fragments("features/group/api.ts", src);
+
+    let d = def(&defs, "request");
+    assert_eq!(d.method_param, Some(0));
+    assert_eq!(d.path_param, 1);
+    assert_eq!(d.fixed_method, None);
+
+    // Both callers emit a same-file (specifier: None) call fragment carrying the literal method + path.
+    let get = calls
+        .iter()
+        .find(|c| c.args.first() == Some(&Some("GET".into())))
+        .unwrap_or_else(|| panic!("no GET request(...) call in {calls:?}"));
+    assert_eq!(get.callee, "request");
+    assert_eq!(get.specifier, None);
+    assert_eq!(get.args[1].as_deref(), Some("/api/group/{}/info"));
+
+    let post = calls
+        .iter()
+        .find(|c| c.args.first() == Some(&Some("POST".into())))
+        .unwrap_or_else(|| panic!("no POST request(...) call in {calls:?}"));
+    assert_eq!(post.args[1].as_deref(), Some("/api/group/{}/extend"));
+}
+
+#[test]
+fn file_private_non_wrapper_helper_with_path_param_but_no_sink_stays_uncollected() {
+    // Broadening def collection to private decls must NOT sweep in a private path-shaped helper that
+    // never reaches a fetch/axios/ky sink — the sink gate is the guard against false wrapper defs.
+    let src = concat!(
+        "function normalizePath(path: string): string {\n",
+        "  return path.replace(/\\/+$/, '');\n",
+        "}\n"
+    );
+    let (defs, _) = extract_wrapper_fragments("util.ts", src);
+    assert!(defs.is_empty(), "{defs:?}");
+}
+
+#[test]
 fn exported_fn_with_url_param_but_no_sink_is_not_a_wrapper() {
     let src = concat!(
         "export function buildUrl(base: string, url: string): string {\n",

@@ -25,7 +25,7 @@ pub enum DisclosureStatus {
 }
 
 impl DisclosureStatus {
-    /// The camelCase wire token (the output contract; the napi view serializes this verbatim).
+    /// The camelCase wire token (the output contract; the wire output view serializes this verbatim).
     pub fn as_str(self) -> &'static str {
         match self {
             DisclosureStatus::Asserted => "asserted",

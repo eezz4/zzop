@@ -1,5 +1,5 @@
 # The Rust port of the JS config front-end (packages/cli/lib/{config,jsonc,mapper,workspaces}.js plus
-# the napi wrapper's default-injection layer): zzop.config.jsonc discovery -> JSONC stripping -> the
+# the @zzop/native JS wrapper's default-injection layer): zzop.config.jsonc discovery -> JSONC stripping -> the
 # config->facade-request mapper -> `trees: "auto"` workspace expansion. A shared rlib so every native
 # host maps configs identically — the zzop-mcp binary today, and the binary's own CLI surface if it
 # subsumes the JS CLI later (mcp-distribution decision, "MCP-first, CLI later"). The JS CLI keeps its

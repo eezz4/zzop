@@ -24,6 +24,7 @@ crates/engine/src/framework_silence/committed_spec_io_silence.rs:MAX_SPEC_PROBES
 crates/engine/src/framework_silence/controller_silence.rs:MAX_SAMPLES
 crates/engine/src/framework_silence/controller_silence.rs:MIN_FILES
 crates/engine/src/framework_silence/controller_silence.rs:MIN_PROVIDES_FLOOR
+crates/engine/src/framework_silence/egress_intent.rs:ARG_SCAN_CAP
 crates/engine/src/framework_silence/fetch_wrapper.rs:MAX_EXAMPLES
 crates/engine/src/framework_silence/fetch_wrapper.rs:WRAPPER_EXPORT_NAMES
 crates/engine/src/framework_silence/orm_schema_silence.rs:MAX_EXAMPLES

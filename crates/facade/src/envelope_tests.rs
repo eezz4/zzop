@@ -225,6 +225,7 @@ fn version_string_includes_parser_fingerprints() {
     assert!(v.contains("zzop-parser-java-21="));
     assert!(v.contains("zzop-parser-rust="));
     assert!(v.contains("zzop-parser-go="));
+    assert!(v.contains("zzop-parser-sql="));
 }
 
 // `ZZOP_RELEASE_VERSION` is a compile-time env (`option_env!`), so only the fallback path is

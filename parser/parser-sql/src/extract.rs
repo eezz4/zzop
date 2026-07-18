@@ -87,10 +87,8 @@ fn bare_table_name(raw: &str) -> Option<String> {
     }
     let stripped = strip_quotes(last);
     let mut chars = stripped.chars();
-    Some(match chars.next() {
-        Some(first) => first.to_lowercase().collect::<String>() + chars.as_str(),
-        None => return None,
-    })
+    let first = chars.next()?;
+    Some(first.to_lowercase().collect::<String>() + chars.as_str())
 }
 
 /// Strips a matching `"..."` / `` `...` `` / `[...]` quote pair; returns the input unchanged for a plain

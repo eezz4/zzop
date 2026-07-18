@@ -141,12 +141,12 @@ for the exact v1 gaps). `tree-sitter-java` is a full CST (not merely lexical), a
 — never guesses past an `ERROR`/`MISSING` region.
 
 Each native parser carries its own internal `PARSER_FINGERPRINT` (technique + version, e.g.
-`zzop-parser-python-3`'s `python3/ruff-0.0.4/v2`, `zzop-parser-prisma`'s `prisma/v1`,
-`zzop-parser-rust`'s `rust/syn-2/v1`, `zzop-parser-go`'s `go/tree-sitter-go-0.25.0/v1`,
-`zzop-parser-java-21`'s `java21/tree-sitter-java-0.23.5/v1`) that keys the per-file cache; the
-TypeScript, Prisma, Python, Java, Rust, and Go fingerprints are additionally surfaced in `zzop
---version`'s output today, so a given build's actual parser identity is machine-checkable, not just
-asserted by this table.
+`zzop-parser-python-3`'s `python3/ruff-0.0.4/v2`, `zzop-parser-prisma`'s `prisma/v2`,
+`zzop-parser-rust`'s `rust/syn-2/v1`, `zzop-parser-go`'s `go/tree-sitter-go-0.25.0/v1+gin-group-param-v2`,
+`zzop-parser-java-21`'s `java21/tree-sitter-java-0.23.5/v2`, `zzop-parser-sql`'s `sql/v1`) that keys the
+per-file cache; the TypeScript, Prisma, Python, Java, Rust, Go, and SQL fingerprints are additionally
+surfaced in `zzop --version`'s output today, so a given build's actual parser identity is
+machine-checkable, not just asserted by this table.
 
 A normal-sized file whose extension has no native parser is not counted in `degraded` (that's a
 size-cap/parse-failure fact, not a coverage one) — instead it self-reports as a per-extension entry in

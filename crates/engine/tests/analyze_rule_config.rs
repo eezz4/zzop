@@ -1,6 +1,6 @@
 //! End-to-end coverage that `EngineConfig::rule_config`'s `severity_overrides` and `suppressions` fields
 //! take effect through a real `analyze_tree` run (not just `zzop_core::registry`'s unit tests). These are
-//! the two knobs the napi `analyze()` request surface (`severityOverrides`/`suppressions`) populates and
+//! the two knobs the facade `analyze()` request surface (`severityOverrides`/`suppressions`) populates and
 //! threads into `RuleConfig`; this file proves the engine's finalize path (`merge_findings`'s
 //! `apply_severity_override` / `is_suppressed`) honors them against real findings.
 //!

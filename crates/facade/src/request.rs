@@ -65,20 +65,20 @@ pub struct AnalyzeRequest {
     /// wins when both filters are set). Reuses
     /// `zzop_core::Suppression`/`RuleConfig::suppressions` directly. Default: empty (nothing suppressed).
     pub suppressions: Vec<Suppression>,
-    /// Config-wide, rule-agnostic finding-level filter — the top-level `"exclude"` config key's napi
+    /// Config-wide, rule-agnostic finding-level filter — the top-level `"exclude"` config key's wire
     /// exposure (camelCase `globalExcludes`). `{path?, glob?}` entries drop matching findings from EVERY
     /// rule at once (the file is still analyzed; only findings are filtered). Reuses
     /// `zzop_core::GlobalExclude`/`RuleConfig::global_excludes` directly. Default: empty (nothing globally
     /// excluded).
     pub global_excludes: Vec<GlobalExclude>,
     /// Mode-B adapter overlays: partial `NormalizedEnvelope`s (typically just `io` + fragment channels
-    /// for a handful of files) merged ON TOP of native TypeScript analysis for this tree — the napi
+    /// for a handful of files) merged ON TOP of native TypeScript analysis for this tree — the wire
     /// exposure of `EngineConfig::adapter_overlays`. Each overlay is re-validated and soft-skipped with a
     /// warning if invalid (see `envelope::apply_adapter_overlays`); a structurally-unparseable overlay
     /// fails request deserialization (producer's contract to emit well-formed envelopes). Overlays are
     /// re-applied every run AFTER the native cache, so they need no cache-key participation.
     pub adapter_overlays: Vec<zzop_core::NormalizedEnvelope>,
-    /// Deployment-topology "whole-tree" mount point — the napi exposure of an implicit
+    /// Deployment-topology "whole-tree" mount point — the wire exposure of an implicit
     /// `zzop_engine::MountRule { dir: String::new(), at: mounted_at }` covering the entire tree (the
     /// engine's own longest-`dir`-wins rule makes this the lowest-specificity entry: any `mounts[]` entry
     /// with a non-empty `dir` beats it on a match). `None` (the default) adds no implicit whole-tree
@@ -88,13 +88,13 @@ pub struct AnalyzeRequest {
     /// `analyze::compose::apply_config_mounts` defensively warns and skips a malformed value as a
     /// last-resort backstop.
     pub mounted_at: Option<String>,
-    /// Deployment-topology mounts, in array order — the napi exposure of
+    /// Deployment-topology mounts, in array order — the wire exposure of
     /// `zzop_engine::EngineConfig::mounts` (see that field's doc for the longest-`dir`-wins matching rule
     /// `apply_config_mounts` applies at assemble time). Empty (the default) declares no mounts beyond
-    /// `mounted_at`. Same "mapper validates, napi passes through, engine defensively backstops" contract
+    /// `mounted_at`. Same "mapper validates, the facade passes through, engine defensively backstops" contract
     /// as `mounted_at`.
     pub mounts: Vec<MountEntryRequest>,
-    /// Hosts this tree owns — the napi exposure of `zzop_engine::EngineConfig::hosts` (absolute-URL
+    /// Hosts this tree owns — the wire exposure of `zzop_engine::EngineConfig::hosts` (absolute-URL
     /// consumes to these hosts are re-keyed internal at cross-layer link time, see
     /// `zzop_core::LinkOptions::internal_hosts`). Empty (the default) declares no hosts.
     pub hosts: Vec<String>,
@@ -112,7 +112,7 @@ where
     Deserialize::deserialize(deserializer).map(Some)
 }
 
-/// One `AnalyzeRequest::mounts` entry: `{dir, at}` — the napi exposure of `zzop_engine::MountRule`,
+/// One `AnalyzeRequest::mounts` entry: `{dir, at}` — the wire exposure of `zzop_engine::MountRule`,
 /// field-for-field. `#[serde(rename_all = "camelCase")]` is a no-op today (`dir`/`at` are already single
 /// lowercase words) but kept for consistency with every other request struct at this boundary. No shape
 /// validation happens here (empty/leading-slash/scheme/backslash/etc.) — see `AnalyzeRequest::mounts`'s
@@ -130,7 +130,7 @@ pub struct MountEntryRequest {
 pub struct GitOptionsRequest {
     pub since: Option<String>,
     pub recent_days: Option<u32>,
-    /// Custom commit-type classifier table — the napi exposure of config `git.commitTypePatterns`.
+    /// Custom commit-type classifier table — the wire exposure of config `git.commitTypePatterns`.
     /// REPLACES `zzop_metrics::default_commit_type_patterns()` entirely when present and non-empty (match
     /// order = array order); absent or an empty array falls back to the default table. See
     /// `zzop_engine::GitOptions::commit_type_patterns`'s doc for the full contract, including how an

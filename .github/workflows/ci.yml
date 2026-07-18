@@ -6,119 +6,63 @@ on:
   pull_request:
 
 jobs:
-  english-source-guard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: English-only source guard
-        run: bash scripts/check-english-source.sh
-
-  swc-isolation-guard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: swc isolation guard
-        run: bash scripts/check-swc-isolation.sh
-
-  ruff-isolation-guard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: ruff isolation guard
-        run: bash scripts/check-ruff-isolation.sh
-
-  syn-isolation-guard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: syn isolation guard
-        run: bash scripts/check-syn-isolation.sh
-
-  tree-sitter-isolation-guard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: tree-sitter isolation guard
-        run: bash scripts/check-tree-sitter-isolation.sh
-
-  rules-catalog-sync-guard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: rules catalog ↔ site sync guard
-        run: bash scripts/check-rules-catalog-sync.sh
-
-  cli-readme-sync-guard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: CLI README ↔ --help sync guard
-        run: bash scripts/check-cli-readme-sync.sh
-
-  docs-rule-ids-guard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: docs rule-id ↔ catalog sync guard
-        run: bash scripts/check-docs-rule-ids.sh
-
-  docs-link-graph-guard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: docs link-graph guard
-        run: bash scripts/check-docs-link-graph.sh
-
-  site-sdk-tokens-guard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: site SDK-page ↔ napi surface sync guard
-        run: bash scripts/check-site-sdk-tokens.sh
-
-  io-key-vocab-guard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: io-key kind-vocabulary sync guard
-        run: bash scripts/check-io-key-vocab.sh
-
-  napi-request-fields-guard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: napi AnalyzeRequest field-table sync guard
-        run: bash scripts/check-napi-request-fields.sh
-
-  max-file-lines-guard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: max file lines ratchet guard
-        run: bash scripts/check-max-file-lines.sh
-
-  shell-pipe-sigpipe-guard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: shell pipe-to-grep-q SIGPIPE seal
-        run: bash scripts/check-shell-pipe-sigpipe.sh
-
-  drift-guards:
-    # Two mechanical drift guards. Both need `fetch-depth: 0` (unlike the other guard jobs above,
-    # which only read the working tree): the fingerprint guard diffs against the PR base / previous
-    # commit, which a shallow (depth-1) checkout would not have fetched.
+  # One job runs every mechanical guard as a named step, instead of one fresh ubuntu runner per
+  # guard (the old shape spun up ~15 runners, each doing checkout + a single sub-second shell script).
+  # The step NAMES preserve per-guard diagnosability — a failing run still points at the exact guard,
+  # same as the local pre-commit hook (which is also fail-fast). Wall-clock does not regress: the guard
+  # scripts sum to far less than the `test` job's compile, which stays the critical path; we trade
+  # unused per-guard parallelism for ~14 fewer runner spin-ups and one checkout instead of fifteen.
+  #
+  # Step order MIRRORS `.githooks/pre-commit`'s GUARDS array so CI and the local hook agree. The parser
+  # fingerprint-bump guard is the one CI-only addition (the hook omits it — it diffs against a base
+  # commit): it runs last and is the sole reason this job needs `fetch-depth: 0` (a strict superset of
+  # the shallow checkout the other guards need, which is why the two former drift-guards fold in here).
+  #
+  # NOTE for maintainers: consolidating renames the required status checks. Any branch-protection rule
+  # on `main` listing the old per-guard job names must be updated to `{ guards, test, napi-addon-build }`
+  # or the gate silently voids.
+  guards:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: English-only source guard
+        run: bash scripts/check-english-source.sh
+      - name: max file lines ratchet guard
+        run: bash scripts/check-max-file-lines.sh
+      - name: swc isolation guard
+        run: bash scripts/check-swc-isolation.sh
+      - name: ruff isolation guard
+        run: bash scripts/check-ruff-isolation.sh
+      - name: syn isolation guard
+        run: bash scripts/check-syn-isolation.sh
+      - name: tree-sitter isolation guard
+        run: bash scripts/check-tree-sitter-isolation.sh
+      - name: rules catalog ↔ site sync guard
+        run: bash scripts/check-rules-catalog-sync.sh
+      - name: CLI README ↔ --help sync guard
+        run: bash scripts/check-cli-readme-sync.sh
+      - name: docs rule-id ↔ catalog sync guard
+        run: bash scripts/check-docs-rule-ids.sh
+      - name: docs link-graph guard
+        run: bash scripts/check-docs-link-graph.sh
+      - name: site SDK-page ↔ native SDK surface sync guard
+        run: bash scripts/check-site-sdk-tokens.sh
+      - name: io-key kind-vocabulary sync guard
+        run: bash scripts/check-io-key-vocab.sh
+      - name: napi AnalyzeRequest field-table sync guard
+        run: bash scripts/check-napi-request-fields.sh
+      - name: policy-value census guard
+        run: bash scripts/check-policy-census.sh
+      - name: shell pipe-to-grep-q SIGPIPE seal
+        run: bash scripts/check-shell-pipe-sigpipe.sh
       - name: parser fingerprint bump guard
+        # CI-only (the pre-commit hook omits it): diffs against the PR base / previous commit, which
+        # the `fetch-depth: 0` checkout above is what makes available.
         env:
           FINGERPRINT_DIFF_RANGE: ${{ github.event_name == 'pull_request' && format('origin/{0}...HEAD', github.base_ref) || 'HEAD~1...HEAD' }}
         run: bash scripts/check-parser-fingerprint-bump.sh
-      - name: policy-value census guard
-        run: bash scripts/check-policy-census.sh
 
   test:
     runs-on: ubuntu-latest

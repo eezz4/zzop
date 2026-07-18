@@ -1,7 +1,7 @@
 //! zzop-config — the Rust port of the JS config front-end, shared by every native host (the zzop-mcp
 //! binary today; the binary's own CLI surface if it subsumes the JS CLI later). It turns a
 //! `zzop.config.jsonc` (or its absence) into the SAME facade request JSON the JS CLI's
-//! `mapper.js` + the napi wrapper's default-injection layer produce, so the Node path and the
+//! `mapper.js` + the `@zzop/native` JS wrapper's default-injection layer produce, so the Node path and the
 //! Node-free path drive one engine code path (`zzop-facade`'s `build_engine_config`) with
 //! machine-comparable inputs.
 //!

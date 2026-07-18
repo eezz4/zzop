@@ -121,7 +121,7 @@ pub struct RouterMountFragment {
 /// invocations out of it. See `zzop_parser_typescript::adapters::wrapper_calls` for the recognizer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WrapperDefFragment {
-    /// The exported function name.
+    /// The wrapper function name (top-level, exported or file-private).
     pub name: String,
     /// 0-based parameter index carrying the HTTP verb; `None` when hardcoded (see `fixed_method`).
     pub method_param: Option<u32>,

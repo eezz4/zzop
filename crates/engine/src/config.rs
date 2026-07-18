@@ -132,7 +132,7 @@ pub struct GitOptions {
     /// Window, in days, for each `FileNode`'s `recent_*` fields.
     pub recent_days: u32,
     /// Custom commit-type classifier table (regex source, TAG pairs, in match order) — the config-file
-    /// wire path for `git.commitTypePatterns` (napi `GitOptionsRequest::commit_type_patterns`). When
+    /// wire path for `git.commitTypePatterns` (the wire `GitOptionsRequest::commit_type_patterns`). When
     /// `Some` and non-empty, this REPLACES `zzop_metrics::default_commit_type_patterns()` entirely (same
     /// "later table wins whole, not merged" semantics the default table's own REVERT-first ordering
     /// depends on) — match order is array order. `None`, or `Some(vec![])`, falls back to the default

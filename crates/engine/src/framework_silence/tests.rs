@@ -597,22 +597,26 @@ fn a_subpath_import_of_a_http_client_still_matches() {
 
 use super::builtin_fetch::FETCH_CALL_SITES_MIN;
 
-/// One js source line holding a single dynamic (non-literal-URL) `fetch(` call site.
+/// One js source line holding a single dynamic-but-INTERNAL-intent `fetch(` call site: a computed
+/// template literal (`fetch(`${base}q<i>`)`) with no absolute-URL scheme — the computed-internal dark
+/// shape the extractor leaves unresolved, which the internal-intent census filter counts. (A bare-var
+/// `fetch(BASE + p)` shape carries no string literal and no longer counts under the intent filter.)
 fn dynamic_fetch_lines(n: usize) -> String {
     (0..n)
-        .map(|i| format!("export const c{i} = (p: string) => fetch(BASE + p + {i});\n"))
+        .map(|i| format!("export const c{i} = (base: string) => fetch(`${{base}}q{i}`);\n"))
         .collect()
 }
 
 #[test]
 fn wrapper_style_fetch_call_sites_with_near_zero_keyed_consumes_warn() {
     // The live shape this tripwire was built from: many lexical fetch call sites, near-none keyed —
-    // window./globalThis. prefixed calls count too (`\b` sits between `.` and `fetch`).
+    // window./globalThis. prefixed calls count too (`\b` sits between `.` and `fetch`). Each fetch
+    // carries an internal-relative (non-absolute) literal URL so the intent filter counts it.
     let dir = TempDir::new("zzop-coverage-builtin-fetch");
     dir.write("src/api.ts", &dynamic_fetch_lines(3));
     dir.write(
         "src/wrap.ts",
-        "export const w = (p) => window.fetch(p);\nexport const g = (p) => globalThis.fetch(p);\n",
+        "export const w = (b) => window.fetch(`${b}/w`);\nexport const g = (b) => globalThis.fetch(`${b}/g`);\n",
     );
     let rels = vec!["src/api.ts".to_string(), "src/wrap.ts".to_string()];
     let warning = builtin_fetch_lexical_warning(dir.path(), &rels, 1);
@@ -683,6 +687,43 @@ fn lookalike_identifiers_do_not_count_as_fetch_calls() {
     let rels = vec!["a.ts".to_string()];
     let warning = builtin_fetch_lexical_warning(dir.path(), &rels, 0);
     assert!(warning.is_none(), "got: {warning:?}");
+}
+
+#[test]
+fn absolute_url_and_bare_const_fetch_sites_do_not_count() {
+    // The internal-intent filter's whole job: a tree whose `fetch(` tokens are ALL either absolute-URL
+    // (`fetch("https://cdn…")` — a CDN/third-party service, nothing internal to join) or bare-const
+    // (`fetch(ENDPOINT_URL)` — the external-corpus `fetch(URL)` idiom, no string literal at all) stays
+    // SILENT even at FETCH_CALL_SITES_MIN+ tokens, because none show internal-relative intent.
+    let dir = TempDir::new("zzop-coverage-fetch-external-intent");
+    let mut src = String::new();
+    for i in 0..FETCH_CALL_SITES_MIN {
+        src.push_str(&format!(
+            "export const a{i} = () => fetch('https://cdn.example.com/x{i}.json');\n"
+        ));
+    }
+    for i in 0..FETCH_CALL_SITES_MIN {
+        src.push_str(&format!("export const b{i} = () => fetch(ENDPOINT_URL);\n"));
+    }
+    dir.write("src/ext.ts", &src);
+    let rels = vec!["src/ext.ts".to_string()];
+    let warning = builtin_fetch_lexical_warning(dir.path(), &rels, 0);
+    assert!(warning.is_none(), "got: {warning:?}");
+}
+
+#[test]
+fn computed_relative_template_fetch_sites_do_count() {
+    // The census's real target: `fetch(`${base}q<i>`)` — a template literal with no absolute scheme
+    // (the computed-internal dark shape the extractor leaves unresolved) DOES count as internal-intent.
+    let dir = TempDir::new("zzop-coverage-fetch-computed-intent");
+    dir.write("src/api.ts", &dynamic_fetch_lines(FETCH_CALL_SITES_MIN));
+    let rels = vec!["src/api.ts".to_string()];
+    let warning = builtin_fetch_lexical_warning(dir.path(), &rels, 0);
+    assert!(
+        warning.as_deref().is_some_and(|w| w
+            .contains("5 builtin `fetch(` call site(s) appear lexically across 1 js/ts file(s)")),
+        "got: {warning:?}"
+    );
 }
 
 // --- S6 -----------------------------------------------------------------------------------------

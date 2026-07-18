@@ -173,8 +173,8 @@ fn folder_of(path: &str, depth: usize) -> String {
 //
 // Casing note: unlike every other type in this file, `ActionUse`/`ActionDepSummary` do NOT carry
 // `#[serde(rename_all = "camelCase")]` — neither `aggregate_action_deps` nor these two types is wired
-// into `AnalyzeOutputView` (no caller in `zzop-engine`/`zzop-napi` today), so they never reach the napi
-// JSON boundary this casing unification covers. Add the attribute when/if this aggregate is wired up.
+// into `AnalyzeOutputView` (nothing builds them into the facade output view today), so they never reach
+// the JSON wire boundary this casing unification covers. Add the attribute when/if this aggregate is wired up.
 // ---------------------------------------------------------------------------------------------
 
 /// A single `uses:` reference extracted from a GitHub Actions workflow file (see module doc above

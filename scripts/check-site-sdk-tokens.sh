@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Site SDK-page token guard — fails when site/sdk.html's prose drifts from the real @zzop/native
-# napi surface (packages/native/index.d.ts).
+# SDK surface (packages/native/index.d.ts).
 #
 # The drift class (bitten twice): sdk.html said "four functions" when the addon exported five, and
 # still said "five" after queryIo made it six — a prose count and a hand-written function table
-# have no compiler, so they rot silently on every napi-surface addition.
+# have no compiler, so they rot silently on every SDK-surface addition.
 #
 # Three containment checks (token-level, same idiom as the other sync guards):
 #   1. completeness — every `export function X(` name in packages/native/index.d.ts must appear as

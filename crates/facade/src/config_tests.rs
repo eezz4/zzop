@@ -5,7 +5,7 @@ use crate::AnalyzeRequest;
 
 #[test]
 fn analyze_request_adapter_overlays_flow_into_engine_config() {
-    // Plumbing-only: proves the napi-facing `adapterOverlays` JSON field deserializes into
+    // Plumbing-only: proves the wire-facing `adapterOverlays` JSON field deserializes into
     // `AnalyzeRequest::adapter_overlays` and survives `build_engine_config` into
     // `EngineConfig::adapter_overlays` unchanged. The overlay MERGE itself (into a real
     // `analyze_tree` run) is already covered end-to-end by
@@ -59,7 +59,7 @@ fn analyze_request_adapter_overlays_flow_into_engine_config() {
 #[test]
 fn analyze_request_git_commit_type_patterns_flow_into_engine_config() {
     // Plumbing-only, same spirit as `analyze_request_adapter_overlays_flow_into_engine_config`: proves
-    // the napi-facing `git.commitTypePatterns` JSON field deserializes into
+    // the wire-facing `git.commitTypePatterns` JSON field deserializes into
     // `GitOptionsRequest::commit_type_patterns` and survives `build_engine_config` into
     // `EngineConfig::git`'s `GitOptions::commit_type_patterns` unchanged, as `(String, String)` tuple
     // pairs. The end-to-end tagging behavior (a custom table actually reclassifying a commit) is

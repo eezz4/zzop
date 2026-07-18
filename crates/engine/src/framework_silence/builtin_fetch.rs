@@ -1,12 +1,15 @@
 //! S5: builtin-fetch lexical census tripwire (consume side).
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use std::sync::OnceLock;
 
 use regex::Regex;
 
+use super::app_buckets::nearest_app_root;
 use super::controller_silence::MIN_PROVIDES_FLOOR;
+use super::egress_intent::{arg_region, region_is_internal_intent, ArgSpan};
 
 /// Word-boundary `fetch(`-style call-token matcher: `\bfetch\s*\(` covers bare `fetch(`,
 /// `window.fetch(`, and `globalThis.fetch(` alike (`.` is a non-word char, so `\b` sits between it
@@ -86,36 +89,168 @@ pub fn builtin_fetch_lexical_warning(
     if http_consumes_keyed_count >= MIN_PROVIDES_FLOOR {
         return None;
     }
-    let re = fetch_call_re();
-    let mut total = 0usize;
-    let mut matched_files: Vec<&str> = Vec::new();
-    for rel in candidate_rels.iter().filter(|rel| is_js_ts_family(rel)) {
-        let Ok(text) = fs::read_to_string(root.join(rel)) else {
-            continue;
-        };
-        let count = re.find_iter(&text).count();
-        if count > 0 {
-            total += count;
-            matched_files.push(rel.as_str());
-        }
-    }
+    let (total, matched_files) = count_internal_fetch_sites(root, candidate_rels);
     if total < FETCH_CALL_SITES_MIN {
         return None;
     }
+    let refs: Vec<&str> = matched_files.iter().map(String::as_str).collect();
+    Some(format_tree_wide(total, http_consumes_keyed_count, &refs))
+}
+
+/// The internal-intent funnel tail shared verbatim by the tree-wide and per-app S5 warnings (and the
+/// tree-wide fallback the census may emit) — the adapter-creation on-ramp (D9): a Mode B partial
+/// envelope over just the consume channel, plus the embedded-contract pointer. Split into a `const` so
+/// the tree-wide wording stays BYTE-IDENTICAL to its pre-census form while the new app-scoped wording
+/// reuses the exact same tail.
+const FUNNEL_TAIL: &str = "builtin fetch has no package import for the http-client tripwire to anchor on, and the call idiom is likely a hand-rolled wrapper whose computed URLs this extraction pass cannot key; cross-layer joins will be near-silent from this tree's consume side — project this tree's consumes with a Mode B overlay adapter (see the adapter examples) to restore cross-layer visibility: a partial envelope covering just the consume channel is enough; contract: `zzop-mcp contract envelope-guide` on MCP hosts, docs/NORMALIZED_AST.md in the repo.";
+
+/// Counts INTERNAL-INTENT builtin `fetch(` call sites (per [`region_is_internal_intent`], classifying
+/// each match's first-argument region via [`ArgSpan::First`] so a later options-object literal cannot
+/// mark a bare-const external `fetch(CONST, …)` as internal) across `rels`'s js/ts-family files, and
+/// returns `(total token count, matched-file rels in input order)`. Skips files that don't read (cheap:
+/// no read at all for a non-js/ts rel). The intent filter is the discriminator that keeps absolute-URL
+/// / bare-const egress (a CDN, a third-party API — nothing internal to join) OUT of the census.
+fn count_internal_fetch_sites(root: &Path, rels: &[String]) -> (usize, Vec<String>) {
+    let re = fetch_call_re();
+    let mut total = 0usize;
+    let mut matched_files: Vec<String> = Vec::new();
+    for rel in rels.iter().filter(|rel| is_js_ts_family(rel)) {
+        let Ok(text) = fs::read_to_string(root.join(rel)) else {
+            continue;
+        };
+        let count = re
+            .find_iter(&text)
+            .filter(|m| region_is_internal_intent(arg_region(&text, m.end(), ArgSpan::First)))
+            .count();
+        if count > 0 {
+            total += count;
+            matched_files.push(rel.clone());
+        }
+    }
+    (total, matched_files)
+}
+
+/// The `MAX_SAMPLES`-capped, `, +N more`-suffixed example-file list shared by every S5 warning shape.
+fn sample_of(matched_files: &[&str]) -> String {
     let sample: Vec<&str> = matched_files.iter().take(MAX_SAMPLES).copied().collect();
     let mut sample_str = sample.join(", ");
     if matched_files.len() > MAX_SAMPLES {
         sample_str.push_str(&format!(", +{} more", matched_files.len() - MAX_SAMPLES));
     }
-    Some(format!(
+    sample_str
+}
+
+/// The tree-wide S5 warning string — BYTE-IDENTICAL to the pre-census wording. Reused both by
+/// [`builtin_fetch_lexical_warning`] (single-package / tests) and by the census's tree-wide FALLBACK
+/// (an internal-fetch mass that split across packages and fell below every per-app floor, but whose
+/// aggregate still clears [`FETCH_CALL_SITES_MIN`]).
+fn format_tree_wide(total: usize, keyed: usize, matched_files: &[&str]) -> String {
+    let sample_str = sample_of(matched_files);
+    format!(
         "{total} builtin `fetch(` call site(s) appear lexically across {} js/ts file(s) but only \
-{http_consumes_keyed_count} keyed http consume(s) were extracted tree-wide (e.g. {sample_str}) — builtin \
-fetch has no package import for the http-client tripwire to anchor on, and the call idiom is likely a \
-hand-rolled wrapper whose computed URLs this extraction pass cannot key; cross-layer joins will be \
-near-silent from this tree's consume side — project this tree's consumes with a Mode B overlay adapter \
-(see the adapter examples) to restore cross-layer visibility: a partial envelope covering just the \
-consume channel is enough; contract: `zzop-mcp contract envelope-guide` on MCP hosts, \
-docs/NORMALIZED_AST.md in the repo.",
+{keyed} keyed http consume(s) were extracted tree-wide (e.g. {sample_str}) — {FUNNEL_TAIL}",
         matched_files.len()
-    ))
+    )
+}
+
+/// The per-app S5 warning string — names the below-floor app bucket whose internal-relative `fetch(`
+/// mass a healthy sibling app would otherwise MASK under a tree-wide gate. Same [`FUNNEL_TAIL`] as the
+/// tree-wide wording.
+fn format_app_scoped(
+    app_root: &str,
+    total: usize,
+    keyed: usize,
+    matched_files: &[String],
+) -> String {
+    let refs: Vec<&str> = matched_files.iter().map(String::as_str).collect();
+    let sample_str = sample_of(&refs);
+    format!(
+        "{total} builtin `fetch(` call site(s) with internal-relative URLs appear lexically across {} \
+js/ts file(s) within app `{app_root}` but only {keyed} keyed http consume(s) were extracted for that \
+app (e.g. {sample_str}) — {FUNNEL_TAIL}",
+        matched_files.len()
+    )
+}
+
+/// The per-app builtin-`fetch(` internal-intent census — the de-masking dual of
+/// [`builtin_fetch_lexical_warning`]. A monorepo tree gates a healthy sibling app's keyed consumes over
+/// the WHOLE tree, so a dark app's silent FE<->BE contract hides under the tree-wide floor; this census
+/// gates per app-root instead and NAMES the dark app.
+///
+/// - Single-package (`app_roots == [""]`): reduces exactly to the tree-wide path — healthy => empty,
+///   else delegate to [`builtin_fetch_lexical_warning`] (a 0/1-element vec).
+/// - Multi-package: partition the js/ts rels by [`nearest_app_root`], read ONLY below-floor buckets'
+///   files (healthy buckets are never touched), and accumulate each bucket's internal-intent total.
+///   Per-app fire: every below-floor bucket clearing [`FETCH_CALL_SITES_MIN`] pushes one app-scoped
+///   warning (iterated in sorted `app_roots` order). Tree fallback: if NOTHING fired per-app, yet the
+///   tree-wide keyed sum is below floor AND the below-floor buckets' aggregate internal total clears
+///   [`FETCH_CALL_SITES_MIN`], push ONE tree-wide-worded warning — recovering an internal-fetch mass
+///   that split across packages and slipped below every per-app floor.
+pub fn builtin_fetch_census(
+    root: &Path,
+    all_rels: &[String],
+    keyed_by_root: &BTreeMap<String, usize>,
+    app_roots: &[String],
+) -> Vec<String> {
+    if app_roots.len() == 1 && app_roots[0].is_empty() {
+        let keyed = keyed_by_root.get("").copied().unwrap_or(0);
+        if keyed >= MIN_PROVIDES_FLOOR {
+            return Vec::new();
+        }
+        return builtin_fetch_lexical_warning(root, all_rels, keyed)
+            .into_iter()
+            .collect();
+    }
+
+    let re = fetch_call_re();
+    let mut per_bucket: BTreeMap<&str, (usize, Vec<String>)> = BTreeMap::new();
+    for rel in all_rels.iter().filter(|rel| is_js_ts_family(rel)) {
+        let bucket = nearest_app_root(rel, app_roots);
+        if keyed_by_root.get(bucket).copied().unwrap_or(0) >= MIN_PROVIDES_FLOOR {
+            continue; // healthy bucket: never read
+        }
+        let Ok(text) = fs::read_to_string(root.join(rel)) else {
+            continue;
+        };
+        let count = re
+            .find_iter(&text)
+            .filter(|m| region_is_internal_intent(arg_region(&text, m.end(), ArgSpan::First)))
+            .count();
+        if count > 0 {
+            let entry = per_bucket.entry(bucket).or_default();
+            entry.0 += count;
+            entry.1.push(rel.clone());
+        }
+    }
+
+    let mut warnings = Vec::new();
+    let mut any_fired = false;
+    for bucket in app_roots {
+        let keyed = keyed_by_root.get(bucket).copied().unwrap_or(0);
+        if keyed >= MIN_PROVIDES_FLOOR {
+            continue;
+        }
+        if let Some((total, files)) = per_bucket.get(bucket.as_str()) {
+            if *total >= FETCH_CALL_SITES_MIN {
+                warnings.push(format_app_scoped(bucket, *total, keyed, files));
+                any_fired = true;
+            }
+        }
+    }
+
+    if !any_fired {
+        let tree_keyed: usize = keyed_by_root.values().sum();
+        let agg_total: usize = per_bucket.values().map(|(t, _)| *t).sum();
+        if tree_keyed < MIN_PROVIDES_FLOOR && agg_total >= FETCH_CALL_SITES_MIN {
+            let mut all_files: Vec<&str> = Vec::new();
+            for bucket in app_roots {
+                if let Some((_, files)) = per_bucket.get(bucket.as_str()) {
+                    all_files.extend(files.iter().map(String::as_str));
+                }
+            }
+            warnings.push(format_tree_wide(agg_total, tree_keyed, &all_files));
+        }
+    }
+
+    warnings
 }

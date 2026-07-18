@@ -67,17 +67,11 @@ use crate::{CacheStats, EngineConfig};
 /// instead. Bump whenever `FileIrSlice` (or the cached findings shape) gains, renames, or removes a
 /// field.
 ///
-/// `v16` -> `v17`: `FileIrSlice` gains `controller_prefix_route_fragments`
-/// (`controller-prefix-ref-v1`) — a stale entry defaulting it to empty would silently drop a
-/// `@Controller(RouteKey.Asset)`-shaped controller's routes on every warm run instead of projecting them.
+/// `v16` -> `v17`: `FileIrSlice` gains `controller_prefix_route_fragments` (`controller-prefix-ref-v1`) — a stale entry defaulting it to empty would silently drop a `@Controller(RouteKey.Asset)`-shaped controller's routes on every warm run.
 ///
-/// `v17` -> `v18`: `FileIrSlice` gains `loop_spans` (`loop-spans-v1`) — a stale entry defaulting it to
-/// empty would silently starve `Matcher::MethodScan::trigger_in_loop` of loop evidence for this file on every warm run instead of projecting it.
+/// `v17` -> `v18`: `FileIrSlice` gains `loop_spans` (`loop-spans-v1`) — a stale entry defaulting it to empty would silently starve `Matcher::MethodScan::trigger_in_loop` of loop evidence on every warm run.
 ///
-/// `v18` -> `v19`: `FileIrSlice` gains `class_shape_fragments` and its `io` payload gains the optional
-/// `IoConsume::body`/`IoProvide::body` shapes (`body-shape-v1`) — a stale entry defaulting them to
-/// empty/`None` would silently starve `cross-layer/body-field-drift` of both sides' evidence on every
-/// warm run instead of projecting them.
+/// `v18` -> `v19`: `FileIrSlice` gains `class_shape_fragments` and its `io` payload gains optional `IoConsume::body`/`IoProvide::body` shapes (`body-shape-v1`) — a stale entry defaulting them to empty/`None` would silently starve `cross-layer/body-field-drift` of both sides' evidence.
 ///
 /// `v19` -> `v20`: the `io` payload's `IoConsume` gains the optional `client` provenance tag
 /// (`axios-defaults-base-v1`) — a stale entry defaulting it to `None` would silently exempt that
@@ -149,7 +143,13 @@ use crate::{CacheStats, EngineConfig};
 /// text changed and the unparsed-extension warning's Mode A/B wording was corrected; same
 /// invisible-staleness class as the prior bumps (a warm run would otherwise keep serving OLD text).
 /// `v30` -> `v31`: `Language` gains `Sql` (`.sql` -> `zzop_parser_sql` db-table provides) — same bump class as Rust/Go above.
-pub const CACHE_SCHEMA_VERSION: &str = "zzop-cache-v31";
+///
+/// `v31` -> `v32`: the S5/S7 framework-silence tripwires gained a PER-APP census (`builtin_fetch_census`/
+/// `fetch_wrapper_census`) + internal-intent recount — a brand-new app-scoped warning CLASS and a changed
+/// set of counted `fetch(`/wrapper sites (absolute-URL/bare-const egress no longer counts; per-app gating
+/// now fires on a dark app a healthy sibling used to mask). Same invisible-staleness class as v27 -> v28's
+/// S6 bump: a warm run would otherwise serve pre-change (or entirely missing) warnings forever.
+pub const CACHE_SCHEMA_VERSION: &str = "zzop-cache-v32";
 
 /// Fingerprint for files that never reach a structural parser crate in the fused pass: no `Language` match
 /// (`dispatch::dispatch` returned `None` — unrecognized extension), or the size-cap lexical fallback

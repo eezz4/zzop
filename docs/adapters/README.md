@@ -10,7 +10,7 @@ silently. There is no error: the consume just lands in `unprovidedConsumes` / th
 
 An adapter can reach the engine two ways (see `docs/NORMALIZED_AST.md`'s "Adapter overlays" section for
 the full contract) — and the two are NOT available in the same places. **Mode B (adapter overlays)**
-works everywhere: the config-file `overlays`/`trees[].overlays` key and the napi `adapterOverlays` field
+works everywhere: the config-file `overlays`/`trees[].overlays` key and the `adapterOverlays` field
 it maps to are honored by every host, including both `zzop` CLI commands (`@zzop/cli`) and the Node-free
 `zzop-mcp` binary. **Mode A (full envelope, `analyze_envelope`/napi `analyzeEnvelope`)** is reachable
 from Rust, from a host application embedding `@zzop/native` directly, AND from the Node-free `zzop-mcp`

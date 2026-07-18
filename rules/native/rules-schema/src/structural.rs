@@ -27,7 +27,7 @@ pub struct SchemaIssue {
 }
 
 /// Not `#[serde(rename_all = "camelCase")]`: `analyze_schema` is only used by this crate's own tests and
-/// never crosses the napi JSON boundary, so `model_risk` stays as declared. Add the attribute if that changes.
+/// never crosses the JSON wire boundary, so `model_risk` stays as declared. Add the attribute if that changes.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SchemaAnalysis {
     pub models: Vec<SchemaModel>,

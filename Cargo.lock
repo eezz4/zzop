@@ -2029,6 +2029,7 @@ dependencies = [
  "zzop-parser-prisma",
  "zzop-parser-python-3",
  "zzop-parser-rust",
+ "zzop-parser-sql",
  "zzop-parser-typescript",
 ]
 

@@ -164,7 +164,7 @@ finding counts across 1+ tree roots; set `ZZOP_DUMP_MESSAGES=<n>` to print sampl
 `fastapi_overlay_adapter` (reference external adapter — a lexical FastAPI/Python router scanner feeding
 `EngineConfig::adapter_overlays`, Mode B; now the reference for what native Python v1 deliberately skips
 — non-literal prefixes, Flask/Django, custom conventions — since native FastAPI extraction covers the
-common literal shapes directly; also reachable via napi's `adapterOverlays` config field; see
+common literal shapes directly; also reachable via the `adapterOverlays` config field; see
 [`docs/NORMALIZED_AST.md`](docs/NORMALIZED_AST.md)'s "Adapter overlays" section).
 
 Run the English-only source guard (OSS-facing files must be English; Korean is confined to the internal

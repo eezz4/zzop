@@ -71,7 +71,7 @@
     "adapterOverlays": "NormalizedEnvelope[] — mode-B io overlays (partial envelopes, typically io + fragment channels for a few files) merged on top of native analysis for the tree; an invalid overlay is skipped with a warning",
     "disabled_rules": "string[] of rule ids — the snake_case spelling native-rule disable-hints use for the same list as disabledRules",
     "disabledRules": "string[] of rule ids — those rules never run/report",
-    "packsDir": "string | string[] — DSL rule-pack directory path(s), loaded in order (a later same-id pack replaces the earlier one whole); explicit null opts out of every DSL pack, bundled included. Config-file dialect: `packs.extraDirs` — `packsDir` is the embedder/napi request field, not a valid zzop.config.jsonc key.",
+    "packsDir": "string | string[] — DSL rule-pack directory path(s), loaded in order (a later same-id pack replaces the earlier one whole); explicit null opts out of every DSL pack, bundled included. Config-file dialect: `packs.extraDirs` — `packsDir` is the embedder request field, not a valid zzop.config.jsonc key.",
     "severityOverrides": "{ \"<ruleId>\": \"critical\" | \"warning\" | \"info\" } — per-rule severity remap",
     "suppressions": "{ rule, path?, glob? }[] — drops findings for one rule (path = substring match, glob = full-path anchored; glob wins when both are set)"
   },

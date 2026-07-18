@@ -9,7 +9,9 @@ use std::collections::BTreeMap;
 /// Runs all seven framework-silence tripwires (S1-S7) and returns every warning that fired, in push
 /// order S1/S2/S4/S6/S3/S5/S7 (S6 slotted after S4 at introduction; S3/S5 keep their pre-split tail
 /// positions; S7 slotted after S5 at introduction, sharing S5's precheck block) — order matters for
-/// `AnalyzeOutput::warnings`' documented stability, not correctness (each tripwire is independent).
+/// `AnalyzeOutput::warnings`' documented stability, not correctness (each tripwire is independent). S5
+/// and S7 are now per-app censuses: each may contribute MULTIPLE entries (one per below-floor app-root,
+/// in sorted `app_roots` order) plus an optional tree-wide fallback, all of S5's before all of S7's.
 pub(super) fn framework_silence_warnings(
     root: &std::path::Path,
     io_provides: &[zzop_core::IoProvide],
@@ -72,31 +74,35 @@ pub(super) fn framework_silence_warnings(
         warnings.push(w);
     }
 
-    // S3/S5/S7 prechecks — each mirrors its own function's internal gate (S3: io near-zero in BOTH
-    // directions; S5 and S7 share one gate: keyed http consumes near-zero), done here too so the
-    // sorted-walked-rel-list build below (`loc_by_path.keys()` — same source as `file_count`, per that
-    // field's own doc) is skipped entirely when neither precheck can pass.
+    // S3/S5/S7 prechecks. S3 mirrors its own function's internal gate (io near-zero in BOTH
+    // directions). S5/S7 now run a PER-APP census: the sorted walked-rel list must be built FIRST so the
+    // app-root set (`app_roots`) and the per-app keyed-http counts (`keyed_by_root`) agree on the same
+    // package.json set and bucket membership the census will use. The `all_walked_rels` build/sort and
+    // the two pure map passes are cheap (no disk IO); the census's file reads stay guarded behind
+    // `census_gate`, so a healthy single-package tree still does no IO.
     let io_provides_count = io_provides.len();
     let io_consumes_keyed_count = io_consumes.iter().filter(|c| c.key.is_some()).count();
     let s3_gate = io_provides_count < crate::framework_silence::IO_NEAR_ZERO_FLOOR
         && io_consumes_keyed_count < crate::framework_silence::IO_NEAR_ZERO_FLOOR;
-    // S5/S7 gate substrate: KEYED `http` consumes only — deliberately narrower than S4's all-records
-    // count, per `builtin_fetch_lexical_warning`'s own doc (fetch is a recognized extraction shape,
-    // so unresolved records would silence the tripwire on exactly the join-blind trees it targets). S7
-    // (`fetch_wrapper_call_site_warning`) reuses this identical gate rather than computing its own —
-    // it targets the same join-blind shape S5 does (near-zero keyed http consumes), just via a
-    // wrapper-indirection census instead of a tree-wide token count; see that function's own doc.
-    let http_consumes_keyed_count = io_consumes
-        .iter()
-        .filter(|c| c.kind == "http" && c.key.is_some())
-        .count();
-    let s5_gate = http_consumes_keyed_count < crate::framework_silence::MIN_PROVIDES_FLOOR;
-    // The sorted walked-rel list every prechecked tripwire below needs — built at most once, and not
-    // at all on a tree with healthy io (the "cheap on the success path" convention, extended past
-    // disk IO to the rel-list sort itself — see IO_NEAR_ZERO_FLOOR's doc).
-    if s3_gate || s5_gate {
-        let mut all_walked_rels: Vec<String> = loc_by_path.keys().cloned().collect();
-        all_walked_rels.sort();
+
+    let mut all_walked_rels: Vec<String> = loc_by_path.keys().cloned().collect();
+    all_walked_rels.sort();
+    // Per-app bucketing: app-root dirs (parent of each package.json, plus the always-present `""` root
+    // remainder) and the per-root count of KEYED `http` consumes. Deliberately KEYED-only — narrower
+    // than S4's all-records count, per `builtin_fetch_lexical_warning`'s own doc (fetch is a recognized
+    // extraction shape, so unresolved records would silence the tripwire on the join-blind trees it
+    // targets). A single-package tree collapses to `[""]`, so `keyed_by_root[""]` reduces the gate below
+    // to the exact pre-per-app tree-wide `keyed < MIN_PROVIDES_FLOOR` behavior.
+    let roots = crate::framework_silence::app_roots(&all_walked_rels);
+    let keyed_by_root = crate::framework_silence::keyed_http_by_root(io_consumes, &roots);
+    // ANY below-floor app-root bucket can carry a dark app (a healthy sibling no longer masks it) — so
+    // the census must run if any bucket is below floor. Single-package => identical to the old
+    // tree-wide `keyed < MIN_PROVIDES_FLOOR` gate.
+    let census_gate = keyed_by_root
+        .values()
+        .any(|&k| k < crate::framework_silence::MIN_PROVIDES_FLOOR);
+
+    if s3_gate || census_gate {
         // S3 — committed-spec io-silence tripwire (consume side): a committed OpenAPI/Swagger spec
         // present while this tree's io stays near-zero in BOTH directions (the generated-client
         // blind spot).
@@ -110,28 +116,24 @@ pub(super) fn framework_silence_warnings(
                 warnings.push(w);
             }
         }
-        // S5 — builtin-fetch lexical census (consume side): many lexical `fetch(` call tokens while
-        // KEYED http consumes stay near-zero — the no-import gap S4 structurally cannot cover
-        // (builtin fetch is a global, not a module specifier). Additive to S1-S4 above.
-        if s5_gate {
-            if let Some(w) = crate::framework_silence::builtin_fetch_lexical_warning(
+        // S5 — builtin-fetch internal-intent census (consume side), PER-APP: many lexical internal
+        // `fetch(` call sites within an app whose keyed http consumes stay near-zero. May push multiple
+        // per-app entries + an optional tree-wide fallback. Additive to S1-S4 above.
+        if census_gate {
+            warnings.extend(crate::framework_silence::builtin_fetch_census(
                 root,
                 &all_walked_rels,
-                http_consumes_keyed_count,
-            ) {
-                warnings.push(w);
-            }
-            // S7 — fetch-wrapper call-site census (consume side): the wrapper-indirection dual of S5,
-            // sharing S5's exact gate (a tree that funnels all its egress through one hand-rolled
-            // wrapper module still shows only ONE literal `fetch(` token tree-wide, so it needs the
-            // same near-zero keyed-consumes precheck, not a separate one). Additive to S1-S6 above.
-            if let Some(w) = crate::framework_silence::fetch_wrapper_call_site_warning(
+                &keyed_by_root,
+                &roots,
+            ));
+            // S7 — fetch-wrapper call-site census (consume side), PER-APP: the wrapper-indirection dual
+            // of S5, sharing S5's exact per-app gate. Additive to S1-S6 above.
+            warnings.extend(crate::framework_silence::fetch_wrapper_census(
                 root,
                 &all_walked_rels,
-                http_consumes_keyed_count,
-            ) {
-                warnings.push(w);
-            }
+                &keyed_by_root,
+                &roots,
+            ));
         }
     }
 

@@ -683,3 +683,125 @@ fn a_real_nest_tree_never_fires_the_s7_warning() {
         out.warnings
     );
 }
+
+// --- S5 per-app census: de-masking + internal-intent filter --------------------------------------
+
+/// A three-app monorepo proving the per-app S5 census both DE-MASKS a dark app (a healthy sibling no
+/// longer lifts the whole tree above the keyed-consume floor) AND applies the internal-intent filter
+/// (an app that only ever hits ABSOLUTE external services has nothing internal to join, so stays
+/// silent):
+/// - `apps/healthy` — 5 static-relative `fetch('/api/h<n>')` calls the extractor keys (keyed >= floor,
+///   healthy, silent).
+/// - `apps/dark` — 5 computed-internal `fetch(`${apiBase}query<n>`)` calls (`apiBase` a function param,
+///   so genuinely unresolved => keyed 0; each carries an internal-relative template literal => the
+///   census counts it) — this app must WARN, naming `apps/dark`.
+/// - `apps/external` — 5 `fetch(CDN)` calls to an absolute-URL const (`https://cdn.example.com/…`); a
+///   bare-const arg carries no string literal so the intent filter excludes it (and even if the
+///   extractor const-resolves + keys it, the app is then healthy) — silent either way.
+fn multi_app_demasking_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-coverage-multi-app-demask");
+    dir.write("apps/healthy/package.json", "{ \"name\": \"healthy\" }\n");
+    let healthy: String = (0..5)
+        .map(|n| format!("export const h{n} = () => fetch('/api/h{n}');\n"))
+        .collect();
+    dir.write("apps/healthy/src/h.ts", &healthy);
+
+    dir.write("apps/dark/package.json", "{ \"name\": \"dark\" }\n");
+    let dark: String = (0..5)
+        .map(|n| format!("export const d{n} = (apiBase) => fetch(`${{apiBase}}query{n}`);\n"))
+        .collect();
+    dir.write("apps/dark/src/d.ts", &dark);
+
+    dir.write("apps/external/package.json", "{ \"name\": \"external\" }\n");
+    dir.write(
+        "apps/external/src/config.ts",
+        "export const CDN = \"https://cdn.example.com/m.json\";\n",
+    );
+    let mut external = String::from("import { CDN } from './config';\n");
+    for n in 0..5 {
+        external.push_str(&format!("export const e{n} = () => fetch(CDN);\n"));
+    }
+    dir.write("apps/external/src/e.ts", &external);
+    dir
+}
+
+#[test]
+fn per_app_census_names_the_dark_app_and_masks_neither_healthy_nor_external() {
+    let dir = multi_app_demasking_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    // The dark app fires an APP-SCOPED S5 warning naming its own bucket.
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains("within app `apps/dark`") && w.contains("internal-relative URLs")),
+        "expected an app-scoped S5 warning naming apps/dark, got: {:?}",
+        out.warnings
+    );
+    // Neither the healthy nor the external app may be named by ANY warning.
+    assert!(
+        !out.warnings.iter().any(|w| w.contains("apps/healthy")),
+        "the keyed (healthy) app must not be named by any warning, got: {:?}",
+        out.warnings
+    );
+    assert!(
+        !out.warnings.iter().any(|w| w.contains("apps/external")),
+        "the absolute-URL-only (external) app must not be named by any warning, got: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn per_app_census_is_deterministic_across_two_runs() {
+    let dir = multi_app_demasking_tree();
+    let cfg = config();
+    let out1 = analyze_tree(dir.path(), &cfg);
+    let out2 = analyze_tree(dir.path(), &cfg);
+    assert_eq!(out1.warnings, out2.warnings);
+}
+
+/// A two-package tree where the internal-fetch mass SPLITS across packages below every per-app floor,
+/// but its aggregate still clears the call-site floor — proving the census's tree-wide FALLBACK path:
+/// `pkgs/x` and `pkgs/y` each hold 3 computed-internal `fetch(`${base}q<n>`)` calls (each 3 < 5, so no
+/// per-app warning fires), yet 6 >= 5 tree-wide, so ONE tree-wide-worded fallback warning is emitted.
+fn split_below_floor_fallback_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-coverage-split-fallback");
+    dir.write("pkgs/x/package.json", "{ \"name\": \"x\" }\n");
+    let x: String = (0..3)
+        .map(|n| format!("export const x{n} = (base) => fetch(`${{base}}q{n}`);\n"))
+        .collect();
+    dir.write("pkgs/x/src/x.ts", &x);
+
+    dir.write("pkgs/y/package.json", "{ \"name\": \"y\" }\n");
+    let y: String = (0..3)
+        .map(|n| format!("export const y{n} = (base) => fetch(`${{base}}q{n}`);\n"))
+        .collect();
+    dir.write("pkgs/y/src/y.ts", &y);
+    dir
+}
+
+#[test]
+fn split_internal_fetch_mass_fires_one_tree_wide_fallback_not_a_per_app_warning() {
+    let dir = split_below_floor_fallback_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    let census_warnings: Vec<&String> = out
+        .warnings
+        .iter()
+        .filter(|w| w.contains("builtin `fetch(` call site(s)"))
+        .collect();
+    // Exactly one S5 census warning, and it is the TREE-WIDE fallback wording (`extracted tree-wide`),
+    // NOT an app-scoped one (`within app ...`). The `pkgs/x`/`pkgs/y` substrings legitimately appear in
+    // the sample-file list, so the app-vs-tree discriminator is the wording, not path presence.
+    assert_eq!(
+        census_warnings.len(),
+        1,
+        "expected exactly one S5 census warning (the tree-wide fallback), got: {:?}",
+        out.warnings
+    );
+    let w = census_warnings[0];
+    assert!(
+        w.contains("extracted tree-wide") && !w.contains("within app"),
+        "the fallback must use the tree-wide wording and not name any app bucket, got: {w:?}"
+    );
+}

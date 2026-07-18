@@ -178,7 +178,14 @@ pub use symbols::parse_symbols;
 ///   `import prisma from '../prisma/prisma-client'` idiom, previously invisible (`getPrisma()`-only).
 ///   Strictly additive (more call shapes recognized, no existing shape's output changes), but cached
 ///   entries from before this marker must not be served as fresh since they lack the new facts.
-pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-removed-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2+angular-httpclient-v1+str-concat-url-v1+loop-spans-v1+pathname-dispatch-v1+base-carrier-drop-v1+body-shape-v1+axios-defaults-base-v1+oazapfts-removed-v1+express-middleware-v1+db-table-bare-receiver-v1";
+/// - `intra-file-wrapper-v1`: the wrapper-def recognizer now ALSO collects file-PRIVATE top-level
+///   wrapper functions/const-arrows (a `Stmt::Decl`, not just `export`ed decls) — the common idiom of
+///   a private `function request(method, path) { fetch(base + path) }` below a `// --- private ---`
+///   line, called only by same-file callers (`getGroupInfo() → request("GET", ` + a path template)).
+///   Their same-file consume join already worked; only def-collection was export-gated. Strictly
+///   additive (new keyed http consumes appear for these shapes, no existing shape changes), but cached
+///   entries from before this marker must not be served as fresh since they lack the new facts.
+pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-removed-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2+angular-httpclient-v1+str-concat-url-v1+loop-spans-v1+pathname-dispatch-v1+base-carrier-drop-v1+body-shape-v1+axios-defaults-base-v1+oazapfts-removed-v1+express-middleware-v1+db-table-bare-receiver-v1+intra-file-wrapper-v1";
 
 /// POLICY VOCABULARY — array-iteration callback methods whose first function-shaped argument runs once
 /// per element (`Array.prototype` iteration methods only; `Map`/`Set`/`for...in` etc. are out of scope).

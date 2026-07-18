@@ -336,7 +336,7 @@ callers can refer to either unambiguously.
 
   **Availability — where each mode actually runs.** Mode B overlays work everywhere: the config-file
   `overlays`/`trees[].overlays` key (`zzop.config.jsonc`, both the JS and Rust-hosted mapper), and the
-  napi `adapterOverlays` request field it compiles down to, are honored by every host — the `@zzop/cli`
+  `adapterOverlays` request field it compiles down to, are honored by every host — the `@zzop/cli`
   `zzop` command AND the Node-free `zzop-mcp` binary both run a config's overlays through the exact same
   `analyze`/`analyzeTrees` path. Mode A (full-envelope `analyze_envelope`/napi `analyzeEnvelope`) is
   reachable from Rust (`zzop_engine::analyze_envelope`), from napi (`analyzeEnvelope` — a host app
@@ -514,8 +514,8 @@ curl \
 anchors to the `curl \` line, not the `http://localhost:8080/api/ping` line — one fact for this call site,
 regardless of how many lines the invocation wraps across.
 
-**napi exposure.** Overlays are reachable from Rust (`EngineConfig::adapter_overlays`) AND from napi
-callers: `analyze`/`analyzeTrees`'s config accepts an `adapterOverlays` array of envelopes with this
+**Wire exposure.** Overlays are reachable from Rust (`EngineConfig::adapter_overlays`) AND from every wire
+host: `analyze`/`analyzeTrees`'s config accepts an `adapterOverlays` array of envelopes with this
 same shape (`AnalyzeRequest::adapter_overlays` in `crates/facade/src/lib.rs`, `Array<Record<string,
 unknown>>` in `packages/native/index.d.ts`'s `AnalyzeConfig`), e.g.:
 

@@ -141,7 +141,7 @@ function multiTreeOutput() {
             degraded: 0,
             joinContributionZero: false,
           },
-          // Single-nested `ir.io` — the real napi wire shape (see crates/core/src/ir.rs's serde
+          // Single-nested `ir.io` — the real wire shape (see crates/core/src/ir.rs's serde
           // flatten). The sibling tree above uses the doubly-nested `ir.ir.io` shape to exercise the
           // defensive fallback; both must resolve to the same HTTP-interface behavior.
           ir: {

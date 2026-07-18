@@ -217,7 +217,7 @@ one embedded lookup, so they can never disagree on what exists.
 ## Config semantics
 
 All config handling is delegated to the shared `zzop-config` crate (`crates/config`) — the same Rust
-port of the JS CLI's config front-end (`config.js` discovery + `mapper.js` mapping + the napi wrapper's
+port of the JS CLI's config front-end (`config.js` discovery + `mapper.js` mapping + the `@zzop/native` JS wrapper's
 `withDefaults` layer) that a future full-CLI Rust binary would reuse. Three things to know about how it
 behaves here specifically:
 

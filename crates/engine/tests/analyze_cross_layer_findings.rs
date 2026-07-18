@@ -4,7 +4,7 @@
 //! real — not hand-built `Finding`s) and exercises at least 3 of the 6 rules end to end:
 //! `cross-layer/unconsumed-endpoint`, `cross-layer/method-mismatch`, and `cross-layer/duplicate-route`, plus
 //! `cross-layer/version-skew` — 4 of 6, all through one small 3-tree fixture. `crossLayerFindings`
-//! serialization casing (camelCase, matching every other output-facing type at the napi boundary — see
+//! serialization casing (camelCase, matching every other output-facing type at the wire boundary — see
 //! `Finding`'s own `#[serde(rename_all = "camelCase")]`) is asserted directly on `serde_json::to_value`, and
 //! `disabledRules` union gating (disabling a cross-layer rule id in only ONE tree's config still drops that
 //! rule from the joint output) is asserted by re-running the same fixture with one tree's `disabled_rules`

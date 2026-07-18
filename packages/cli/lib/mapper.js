@@ -27,7 +27,7 @@ class ConfigError extends Error {
 //
 // CONFIRMED against the engine: `crates/core/src/finding.rs` declares
 //   #[serde(rename_all = "lowercase")] enum Severity { Critical, Warning, Info }
-// so the engine's JSON `Severity` strings are exactly "critical" / "warning" / "info". The napi
+// so the engine's JSON `Severity` strings are exactly "critical" / "warning" / "info". The facade
 // `AnalyzeRequest.severityOverrides` (crates/facade/src/lib.rs) reuses that same enum. If the engine's
 // Severity serde ever changes, adjust ONLY the ENGINE_SEVERITY values below.
 // ---------------------------------------------------------------------------------------------------
@@ -117,11 +117,11 @@ function isGlobPattern(value) {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// Adapter overlays — closes the loop for the napi `adapterOverlays` request field
+// Adapter overlays — closes the loop for the facade `adapterOverlays` request field
 // (`crates/facade/src/lib.rs`'s `AnalyzeRequest::adapter_overlays`, itself per-tree). Config key
 // `overlays: ["path/to/envelope.json", ...]` names Mode-B overlay envelope FILES (partial
 // `NormalizedEnvelope` JSON); the CLI reads and parses each one and inlines the parsed object into the
-// request's `adapterOverlays` array — the napi layer has no notion of "a path to an overlay file", only
+// request's `adapterOverlays` array — the wire layer has no notion of "a path to an overlay file", only
 // inline objects.
 //
 // This is the one place this module is not I/O-free: reading these files is unavoidable disk access.
@@ -237,7 +237,7 @@ function collectOverlayWarnings(config) {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// Connection topology — closes the loop for the napi `mountedAt`/`mounts`/`hosts` per-tree request
+// Connection topology — closes the loop for the facade `mountedAt`/`mounts`/`hosts` per-tree request
 // fields (`crates/facade/src/lib.rs`'s `AnalyzeRequest`). Config keys `trees[i].mountedAt` (a single
 // whole-tree gateway prefix), `trees[i].mounts` (an array of `{dir, at}` deployment-topology mounts), and
 // `trees[i].hosts` (hosts this tree owns, for cross-layer absolute-URL re-keying) are ONLY accepted on
@@ -353,7 +353,7 @@ function validateHostsArray(value, label) {
 /**
  * Build the per-tree option bundle shared by every tree/root — the rule/pack/git/cache knobs that are
  * global to the config (not per-tree). Returns an object with only the fields that are actually set, so
- * omitted config keys fall through to the engine/napi-wrapper defaults.
+ * omitted config keys fall through to the engine/`@zzop/native`-wrapper defaults.
  *
  * @param {object} config
  * @returns {object}
@@ -361,7 +361,7 @@ function validateHostsArray(value, label) {
 function buildSharedOptions(config) {
   const shared = {};
 
-  // --- packs.extraDirs -> packsDir (user dirs only; the napi wrapper PREPENDS the bundled dir). ---
+  // --- packs.extraDirs -> packsDir (user dirs only; the `@zzop/native` JS wrapper PREPENDS the bundled dir). ---
   // `config.packs || {}`: an absent or falsy `packs` defaults to empty (no error); a present, truthy,
   // non-object `packs` (e.g. an array) is a shape error — failing loudly like `rules` below instead of
   // silently mapping to nothing.

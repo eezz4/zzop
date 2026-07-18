@@ -537,14 +537,17 @@ fn fetch_wrapper_tree_fires_the_builtin_fetch_lexical_self_report() {
     // computed URLs — extraction keys (near-)none of them, and before S5 nothing said so (builtin
     // fetch has no import for the S4 http-client tripwire to anchor on).
     let dir = TempDir::new("zzop-engine-fetch-wrapper");
+    // Computed URLs the extractor keys (near-)none of — a template literal whose base is a runtime
+    // param, so it stays unresolved (keyed 0) while still carrying an internal-relative literal the
+    // S5 intent filter counts (a bare-var `fetch(BASE + p)` shape carries no literal and no longer
+    // counts under the intent filter).
     dir.write(
         "src/http.ts",
-        "const BASE = '/api';\n\
-         export const get = (p: string) => fetch(BASE + p);\n\
-         export const post = (p: string, b: unknown) => fetch(BASE + p, { method: 'POST', body: JSON.stringify(b) });\n\
-         export const put = (p: string, b: unknown) => fetch(BASE + p, { method: 'PUT', body: JSON.stringify(b) });\n\
-         export const patch = (p: string, b: unknown) => fetch(BASE + p, { method: 'PATCH', body: JSON.stringify(b) });\n\
-         export const del = (p: string) => fetch(BASE + p, { method: 'DELETE' });\n",
+        "export const get = (base: string, p: string) => fetch(`${base}${p}`);\n\
+         export const post = (base: string, p: string, b: unknown) => fetch(`${base}${p}`, { method: 'POST', body: JSON.stringify(b) });\n\
+         export const put = (base: string, p: string, b: unknown) => fetch(`${base}${p}`, { method: 'PUT', body: JSON.stringify(b) });\n\
+         export const patch = (base: string, p: string, b: unknown) => fetch(`${base}${p}`, { method: 'PATCH', body: JSON.stringify(b) });\n\
+         export const del = (base: string, p: string) => fetch(`${base}${p}`, { method: 'DELETE' });\n",
     );
     let out = analyze_tree(
         dir.path(),

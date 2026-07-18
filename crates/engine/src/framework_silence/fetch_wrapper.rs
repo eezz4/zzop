@@ -15,6 +15,7 @@ use regex::Regex;
 
 use super::builtin_fetch::{fetch_call_re, is_js_ts_family, FETCH_CALL_SITES_MIN};
 use super::controller_silence::MIN_PROVIDES_FLOOR;
+use super::egress_intent::{arg_region, region_is_internal_intent, ArgSpan};
 
 /// "http-verby" or generic-sender exported binding names — a file that exports one of these AND itself
 /// calls builtin `fetch(` looks like a hand-rolled http wrapper module (round-10 blind-field test R10's
@@ -136,10 +137,19 @@ fn imports_the_wrapper(importer_text: &str, wrapper_stem: &str) -> bool {
 /// (`api.get(...)`, `client.post(...)`) alike in ONE pass, the identical `\b`-boundary mechanism
 /// `fetch_call_re` uses for the same reason (`.` is a non-word char, so `\b` sits between it and the
 /// name) — this avoids double-counting a single `api.get(` call site under two separate patterns.
+///
+/// Counts ONLY internal-intent call sites: each `<name>(` match's WHOLE argument region ([`ArgSpan::All`]
+/// — a wrapper call carries its path in a later positional arg, e.g. `request("GET", "/api/x")`) is
+/// classified by [`region_is_internal_intent`], so a wrapper export called with only absolute-URL /
+/// bare-const args (nothing internal to join) does not inflate the census.
 fn call_site_count(text: &str, name: &str) -> usize {
     let pattern = format!(r"\b{}\s*\(", regex::escape(name));
     Regex::new(&pattern)
-        .map(|re| re.find_iter(text).count())
+        .map(|re| {
+            re.find_iter(text)
+                .filter(|m| region_is_internal_intent(arg_region(text, m.end(), ArgSpan::All)))
+                .count()
+        })
         .unwrap_or(0)
 }
 
@@ -172,27 +182,8 @@ pub fn fetch_wrapper_call_site_warning(
         .filter(|rel| is_js_ts_family(rel))
         .collect();
 
-    let mut wrapper: Option<(&str, Vec<&'static str>)> = None;
-    for &rel in &js_rels {
-        let Ok(text) = fs::read_to_string(root.join(rel)) else {
-            continue;
-        };
-        if !fetch_call_re().is_match(&text) {
-            continue;
-        }
-        let matched = matched_wrapper_export_names(&text);
-        if !matched.is_empty() {
-            wrapper = Some((rel, matched));
-            break;
-        }
-    }
-    let (wrapper_rel, matched_names) = wrapper?;
-    let wrapper_stem = strip_known_js_ext(
-        Path::new(wrapper_rel)
-            .file_name()
-            .and_then(|f| f.to_str())
-            .unwrap_or(wrapper_rel),
-    );
+    let (wrapper_rel, matched_names) = find_wrapper(root, &js_rels)?;
+    let wrapper_stem = wrapper_stem_of(wrapper_rel);
 
     let mut total = 0usize;
     let mut matched_files: Vec<&str> = Vec::new();
@@ -218,20 +209,84 @@ pub fn fetch_wrapper_call_site_warning(
     if total < FETCH_CALL_SITES_MIN {
         return None;
     }
+    let name_list = matched_names.join("/");
+    Some(format_tree_wide_s7(
+        wrapper_rel,
+        &name_list,
+        total,
+        http_consumes_keyed_count,
+        &matched_files,
+    ))
+}
+
+/// The wrapper-indirection funnel tail shared verbatim by the tree-wide and per-app S7 warnings (and
+/// the tree-wide fallback the census may emit) — same adapter-creation on-ramp (D9) as S5's, worded for
+/// the wrapper case. Split into a `const` so the tree-wide wording stays BYTE-IDENTICAL to its
+/// pre-census form while the new app-scoped wording reuses the exact same tail.
+const WRAPPER_FUNNEL_TAIL: &str = "wrapper indirection over builtin fetch is not followed by this extraction pass, so cross-layer joins will be near-silent from this tree's consume side — project this tree's consumes with a Mode B overlay adapter (see the adapter examples) to restore cross-layer visibility: a partial envelope covering just the consume channel is enough; contract: `zzop-mcp contract envelope-guide` on MCP hosts, docs/NORMALIZED_AST.md in the repo.";
+
+/// PASS 1, TREE-WIDE and unchanged from the pre-census behavior: the FIRST (sorted-order) js/ts file
+/// that both calls builtin `fetch(` and lexically exports a [`WRAPPER_EXPORT_NAMES`] binding, with the
+/// vocab-ordered subset of names it exports. Deliberately NOT intent-filtered on the wrapper's own
+/// internal `fetch(` — the wrapper's URL is the internal call sites' concern (PASS 2), not PASS 1's.
+fn find_wrapper<'a>(root: &Path, js_rels: &[&'a str]) -> Option<(&'a str, Vec<&'static str>)> {
+    for &rel in js_rels {
+        let Ok(text) = fs::read_to_string(root.join(rel)) else {
+            continue;
+        };
+        if !fetch_call_re().is_match(&text) {
+            continue;
+        }
+        let matched = matched_wrapper_export_names(&text);
+        if !matched.is_empty() {
+            return Some((rel, matched));
+        }
+    }
+    None
+}
+
+/// The wrapper file's basename, extension stripped — the stem [`imports_the_wrapper`] matches on.
+fn wrapper_stem_of(wrapper_rel: &str) -> &str {
+    strip_known_js_ext(
+        Path::new(wrapper_rel)
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or(wrapper_rel),
+    )
+}
+
+/// The `MAX_EXAMPLES`-capped, `, +N more`-suffixed example-file list shared by every S7 warning shape.
+fn sample_of(matched_files: &[&str]) -> String {
     let sample: Vec<&str> = matched_files.iter().take(MAX_EXAMPLES).copied().collect();
     let mut sample_str = sample.join(", ");
     if matched_files.len() > MAX_EXAMPLES {
         sample_str.push_str(&format!(", +{} more", matched_files.len() - MAX_EXAMPLES));
     }
-    let name_list = matched_names.join("/");
-    Some(format!(
-        "{wrapper_rel} exports a fetch-wrapper idiom ({name_list}) with {total} cross-file call site(s) \
-across {} file(s) that import it (e.g. {sample_str}) but only {http_consumes_keyed_count} keyed http \
-consume(s) were extracted tree-wide — wrapper indirection over builtin fetch is not followed by this \
-extraction pass, so cross-layer joins will be near-silent from this tree's consume side — project this \
-tree's consumes with a Mode B overlay adapter (see the adapter examples) to restore cross-layer \
-visibility: a partial envelope covering just the consume channel is enough; contract: `zzop-mcp contract \
-envelope-guide` on MCP hosts, docs/NORMALIZED_AST.md in the repo.",
-        matched_files.len()
-    ))
+    sample_str
 }
+
+/// The tree-wide S7 warning string — BYTE-IDENTICAL to the pre-census wording. Reused both by
+/// [`fetch_wrapper_call_site_warning`] (single-package / tests) and by the census's tree-wide FALLBACK.
+fn format_tree_wide_s7(
+    wrapper_rel: &str,
+    name_list: &str,
+    total: usize,
+    keyed: usize,
+    matched_files: &[&str],
+) -> String {
+    let sample_str = sample_of(matched_files);
+    format!(
+        "{wrapper_rel} exports a fetch-wrapper idiom ({name_list}) with {total} cross-file call site(s) \
+across {} file(s) that import it (e.g. {sample_str}) but only {keyed} keyed http \
+consume(s) were extracted tree-wide — {WRAPPER_FUNNEL_TAIL}",
+        matched_files.len()
+    )
+}
+
+/// PASS 1's wrapper detection + PASS 2's per-importer internal-intent call-site count, wired into the
+/// per-app + fallback composition. Split into a submodule to keep this root file under the source
+/// line-length cap; it reuses this module's private PASS 1/PASS 2 helpers (`find_wrapper`,
+/// `wrapper_stem_of`, `imports_the_wrapper`, `call_site_count`) and formatting (`format_tree_wide_s7`,
+/// `sample_of`, `WRAPPER_FUNNEL_TAIL`) via `super::`.
+mod census;
+pub use census::fetch_wrapper_census;

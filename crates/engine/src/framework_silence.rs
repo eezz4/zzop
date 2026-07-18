@@ -45,6 +45,14 @@
 //! catalog sync needed); over-disclosure is safe, silence is fatal (the coverage-disclosure decision doc's
 //! governing principle) — each function is additive and may fire independently of the others.
 //!
+//! S5 and S7 are additionally PER-APP: in a monorepo tree (one `package.json` per app) the census gates
+//! per app-root, so a healthy sibling app's keyed consumes no longer MASK a dark app — the fired warning
+//! NAMES the below-floor app. Both also apply an internal-intent filter (`egress_intent`) so an app that
+//! only ever calls ABSOLUTE external services (a CDN, a third-party API — nothing internal to join) stays
+//! silent. `builtin_fetch_census`/`fetch_wrapper_census` may each emit MULTIPLE per-app entries plus an
+//! optional tree-wide FALLBACK (an internal-egress mass that split across packages below every per-app
+//! floor but whose aggregate still clears the call-site floor).
+//!
 //! Module layout — one file per tripwire (S1/S2/S3/S4/S5/S6/S7), `MIN_PROVIDES_FLOOR` defined once in
 //! `controller_silence` (S1) and shared by S2/S3/S4/S5/S7 (S6 uses its own exact-zero gate, no floor):
 //! - [`controller_silence`](self) — S1 + `MIN_PROVIDES_FLOOR`.
@@ -52,26 +60,36 @@
 //!   `cross-layer/unprovided-mutation-call` also reuses.
 //! - [`committed_spec_io_silence`](self) — S3 + `IO_NEAR_ZERO_FLOOR`.
 //! - [`client_library_import`](self) — S4.
-//! - [`builtin_fetch`](self) — S5 + `FETCH_CALL_SITES_MIN` (also reused by S7).
+//! - [`builtin_fetch`](self) — S5 + `FETCH_CALL_SITES_MIN` (also reused by S7) + `builtin_fetch_census`.
 //! - [`orm_schema_silence`](self) — S6.
-//! - [`fetch_wrapper`](self) — S7.
+//! - [`fetch_wrapper`](self) — S7 + `fetch_wrapper_census`.
+//! - [`egress_intent`](self) — internal-intent classifier shared by the S5/S7 censuses.
+//! - [`app_buckets`](self) — per-app-root bucketing (`app_roots`/`nearest_app_root`/`keyed_http_by_root`).
 
+mod app_buckets;
 mod builtin_fetch;
 mod client_library_import;
 mod committed_spec_io_silence;
 mod controller_silence;
+mod egress_intent;
 mod fetch_wrapper;
 mod orm_schema_silence;
 mod server_framework_import;
 #[cfg(test)]
 mod tests;
 
-pub use builtin_fetch::builtin_fetch_lexical_warning;
+pub(crate) use app_buckets::{app_roots, keyed_http_by_root};
+// `builtin_fetch_lexical_warning`/`fetch_wrapper_call_site_warning` are NOT re-exported here: their
+// only in-crate consumer is now the census (which calls them on its single-package path via the local
+// module), and `framework_silence`'s own unit tests reach them via `super::builtin_fetch::` /
+// `super::fetch_wrapper::` directly. A crate-level re-export would be dead (`mod framework_silence` is
+// private, so there is no external API surface to keep them on).
+pub use builtin_fetch::builtin_fetch_census;
 pub use client_library_import::client_library_import_warning;
 pub use committed_spec_io_silence::committed_spec_io_silence_warning;
 pub(crate) use committed_spec_io_silence::IO_NEAR_ZERO_FLOOR;
 pub use controller_silence::controller_silence_warning;
 pub(crate) use controller_silence::MIN_PROVIDES_FLOOR;
-pub use fetch_wrapper::fetch_wrapper_call_site_warning;
+pub use fetch_wrapper::fetch_wrapper_census;
 pub use orm_schema_silence::orm_schema_silence_warning;
 pub use server_framework_import::{provide_blind_sources, server_framework_import_warning};
