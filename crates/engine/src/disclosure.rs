@@ -110,8 +110,9 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
         summary: "Files skipped as minified/generated are reported once as a warning (a heuristic content \
                   match, not exhaustive); test-classified files' io facts are excluded from the \
                   cross-layer join and disclosed per tree via a warning naming the dropped counts when \
-                  nonzero — raw per-file facts still remain visible in `ir.io` (the JS CLI's `--json`/ \
-                  `--format json` output; MCP tool replies and the `zzop-mcp` CLI subcommands omit `ir`).",
+                  nonzero — raw per-file facts still remain visible in `ir.io` (the raw `zzop-facade` \
+                  JSON output from embedding the engine directly; MCP tool replies and the `zzop-mcp` \
+                  CLI omit `ir`).",
         status: DisclosureStatus::Partial,
     },
     BlindnessClass {

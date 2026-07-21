@@ -11,7 +11,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "require_file": "\\b(?:alert|confirm|prompt)\\s*\\(",
         "skip_comment_lines": true,
         "line_pattern": "(?:^|[^.\\w])(?:alert|confirm|prompt)\\s*\\(|\\b(?:window|globalThis|self)\\.(?:alert|confirm|prompt)\\s*\\(",
@@ -27,7 +27,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "require_file": "\\bdocument\\.(?:write|writeln)\\s*\\(",
         "skip_comment_lines": true,
         "line_pattern": "(?:^|[^.\\w$])document\\.(?:write|writeln)\\s*\\(",
@@ -42,7 +42,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "postMessage\\s*\\(",
         "skip_comment_lines": true,
         "line_pattern": "postMessage\\s*\\([^)]*,\\s*['\"]\\*['\"]",
@@ -57,7 +57,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "innerHTML|outerHTML|insertAdjacentHTML|dangerouslySetInnerHTML",
         "skip_comment_lines": true,
         "any": [
@@ -77,7 +77,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "(?i)javascript:",
         "skip_comment_lines": true,
         "any": [
@@ -96,7 +96,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "\\blocation\\b",
         "skip_comment_lines": true,
         "exclude_pattern": "^\\s*(?:export\\s+)?(?:const|let|var)\\s+location\\b|\\+\\s*['\"`]/",
@@ -115,7 +115,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "(?i)jquery|\\$\\(",
         "skip_comment_lines": true,
         "line_pattern": "\\.(?:html|append|prepend|after|before|wrapAll)\\s*\\(\\s*[^'\"`)\\s]",
@@ -130,7 +130,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx|vue)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "v-html",
         "skip_comment_lines": true,
         "line_pattern": "v-html\\s*=",
@@ -145,7 +145,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx|vue)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\b(?:marked|markdownit|md\\.render|remark|showdown)\\s*\\(", "label": "md-render" },

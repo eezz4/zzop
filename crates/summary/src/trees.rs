@@ -1,6 +1,5 @@
 //! Zero-config tree building for the config-free "paths mode" shared by `cross_repo` and
-//! `check_endpoint` (`paths` argument / trailing CLI paths) — split out of `tools.rs` for size,
-//! same contract. Because this helper is shared, any error text it produces must take the calling
+//! `check_endpoint` (`paths` argument / trailing CLI paths). Because this helper is shared, any error text it produces must take the calling
 //! tool's own name as a parameter rather than hardcoding one sibling's name (a live-fire misfire:
 //! `check_endpoint` with a single `paths` entry reported "cross_repo needs at least 2 paths").
 

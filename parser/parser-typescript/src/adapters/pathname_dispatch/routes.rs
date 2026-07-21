@@ -1,6 +1,4 @@
-// ---------------------------------------------------------------------------------------------
 // Association: IfStmt / SwitchStmt -> IoProvide
-// ---------------------------------------------------------------------------------------------
 
 use swc_core::common::{BytePos, SourceMap};
 use swc_core::ecma::ast::{
@@ -136,9 +134,7 @@ fn emit_routes(
     }
 }
 
-// ---------------------------------------------------------------------------------------------
 // Fallback verb-mention scan (module doc: "recursively scanning the if's consequent block")
-// ---------------------------------------------------------------------------------------------
 
 fn scan_verb_mentions(stmt: &Stmt, ctx: &FnCtx) -> Vec<String> {
     let mut out = Vec::new();

@@ -7,12 +7,12 @@ use std::collections::{BTreeMap, HashSet};
 
 use zzop_core::{ir::DepGraph, ImportMap};
 
-use crate::pipeline::{GoModuleMap, JavaIndex, RustWorkspaceMap};
+use crate::pipeline::{CSharpIndex, GoModuleMap, JavaIndex, RustWorkspaceMap};
 
 use super::super::helpers::{
-    is_go_source_ext, is_go_test_file, is_java_source_ext, is_python_source_ext,
-    is_rust_source_ext, resolve_go_import_package_dir, resolve_java_import, resolve_python_import,
-    resolve_rust_import,
+    is_csharp_source_ext, is_go_source_ext, is_go_test_file, is_java_source_ext,
+    is_python_source_ext, is_rust_source_ext, resolve_csharp_import, resolve_go_import_package_dir,
+    resolve_java_import, resolve_python_import, resolve_rust_import,
 };
 
 /// Merges Python import edges into `dep`, in place — the dep-graph half of the resolver wiring
@@ -193,6 +193,39 @@ pub(super) fn merge_java_dep_edges(
         let mut seen: HashSet<String> = entry.iter().cloned().collect();
         for binding in imports.values() {
             for target in resolve_java_import(&binding.specifier, java_index) {
+                if seen.insert(target.clone()) {
+                    entry.push(target);
+                }
+            }
+        }
+    }
+}
+
+/// Merges C# import edges into `dep`, in place — the additive dep-graph twin of
+/// `merge_python_dep_edges`/`merge_rust_dep_edges`/`merge_go_dep_edges`/`merge_java_dep_edges` above, for
+/// `resolve_csharp_import`-resolved specifiers (`helpers::resolve_csharp_import`'s doc has the full
+/// resolution semantics: every C# `using` specifier is already namespace-shaped, so it fans out to every
+/// file declaring that namespace directly, no Java-style rightmost-split retry needed).
+///
+/// Every C# file already has a `dep` entry (possibly empty) from the `build_dep_with_workspace` call above
+/// (`ts_import_pairs` carries its `ImportMap` too, via `ts_slot`'s shared participation — see
+/// `pipeline::FileArtifact::imports`'s doc), and a C# dotted specifier never matches the TS resolver's own
+/// `try_ext`/tsconfig-`paths`/workspace-package machinery by sheer construction (no `.ts`/`.js` suffix, no
+/// relative-path shape), so this only adds edges, never removes what's there — same safety argument
+/// `merge_python_dep_edges`'s own doc makes.
+pub(super) fn merge_csharp_dep_edges(
+    dep: &mut DepGraph,
+    ts_import_pairs: &[(String, ImportMap)],
+    csharp_index: &CSharpIndex,
+) {
+    for (rel, imports) in ts_import_pairs {
+        if !is_csharp_source_ext(rel) {
+            continue;
+        }
+        let entry = dep.entry(rel.clone()).or_default();
+        let mut seen: HashSet<String> = entry.iter().cloned().collect();
+        for binding in imports.values() {
+            for target in resolve_csharp_import(&binding.specifier, csharp_index) {
                 if seen.insert(target.clone()) {
                     entry.push(target);
                 }

@@ -286,7 +286,7 @@ fn trpc_mount_route_write_verb_is_still_reported_when_only_a_different_tree_has_
     assert_eq!(out.len(), 1);
 }
 
-// --- Severity calibration (mono-hub field review) ---
+// --- Severity calibration ---
 
 #[test]
 fn message_states_the_unresolved_http_count_honestly() {

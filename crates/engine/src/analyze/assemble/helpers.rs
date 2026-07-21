@@ -7,11 +7,38 @@ use std::collections::HashSet;
 
 use crate::pipeline::{GoModuleMap, RustWorkspaceMap};
 
+mod csharp;
 mod java;
 
+pub(super) use csharp::{is_csharp_source_ext, is_csharp_std_import, resolve_csharp_import};
 pub(super) use java::{
     is_java_source_ext, is_java_std_import, java_census_key, resolve_java_import,
 };
+
+/// Deterministic `(kind, key, file, line)` total order for the tree's final IO provide array — applied
+/// right before `IoFacts` assembly in `super::assemble` so emitted order is stable across runs regardless
+/// of collection order. Its consume-side twin `sort_io_consumes` uses the identical key order.
+pub(super) fn sort_io_provides(provides: &mut [zzop_core::IoProvide]) {
+    provides.sort_by(|a, b| {
+        a.kind
+            .cmp(&b.kind)
+            .then_with(|| a.key.cmp(&b.key))
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.line.cmp(&b.line))
+    });
+}
+
+/// Consume-side twin of [`sort_io_provides`] — same `(kind, key, file, line)` order (`IoConsume::key` is
+/// `Option<String>`, whose `Ord` sorts `None` before `Some`, a stable and deterministic choice).
+pub(super) fn sort_io_consumes(consumes: &mut [zzop_core::IoConsume]) {
+    consumes.sort_by(|a, b| {
+        a.kind
+            .cmp(&b.kind)
+            .then_with(|| a.key.cmp(&b.key))
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.line.cmp(&b.line))
+    });
+}
 
 /// True for the extensions the dispatch table routes to `Language::Python` — mirrors
 /// `crate::dead_exports::is_ts_source_ext`'s own "extension-based and duplicated rather than threading
@@ -51,6 +78,21 @@ pub(super) fn resolve_python_import(
 /// threading the dispatch config" convention `is_python_source_ext` documents.
 pub(super) fn is_rust_source_ext(rel: &str) -> bool {
     rel.ends_with(".rs")
+}
+
+/// True for the extensions the SFC `<script>`-block pre-scan targets (`.vue`/`.svelte`, case-insensitive)
+/// — see `super::collect::Collected::sfc_rels`'s doc. Same "duplicated extension check rather than
+/// threading the dispatch config" convention `is_python_source_ext` documents, with the extra twist that
+/// these files dispatch to `None` by construction (`crate::dispatch` has no `.vue`/`.svelte` arm), so
+/// there is no `Language` variant to check against.
+pub(super) fn is_sfc_ext(rel: &str) -> bool {
+    let Some(ext) = std::path::Path::new(rel)
+        .extension()
+        .and_then(|e| e.to_str())
+    else {
+        return false;
+    };
+    matches!(ext.to_ascii_lowercase().as_str(), "vue" | "svelte")
 }
 
 /// Rust standard/compiler-provided crate family — never a genuinely external (third-party) package, so a

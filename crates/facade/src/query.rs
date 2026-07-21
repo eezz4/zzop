@@ -1,8 +1,8 @@
 //! `queryIo` — the shared endpoint-query core: a DEFINITIVE answer to "is io key X
 //! provided/consumed/joined?" computed by pure post-processing over an ALREADY-PRODUCED analysis
-//! output (no re-analysis, no cache interaction). Both hosts consume this one function — the JS CLI
-//! (`zzop endpoint`, via the napi `queryIo` export) and the Node-free `zzop-mcp` binary
-//! (`check_endpoint` tool) — so they give byte-identical answers for the same analysis.
+//! output (no re-analysis, no cache interaction). There is now ONE host consuming this one function —
+//! the Node-free `zzop-mcp` binary, via its `zzop-mcp endpoint` CLI subcommand and its
+//! `check_endpoint` MCP tool — so they give byte-identical answers for the same analysis.
 //!
 //! ## Sealed verdict vocabulary (wire contract — do not extend without a contract bump)
 //! The `verdict` field is one of exactly eight tokens, derived deterministically from which

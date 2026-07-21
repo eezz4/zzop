@@ -55,12 +55,47 @@ fn fan_in_positive_is_excluded() {
 }
 
 #[test]
+fn public_js_asset_with_bumped_fan_in_is_not_a_candidate() {
+    // A `public/`-served `.js` worklet is dead-candidate-ELIGIBLE (a TS-dispatch extension), so at
+    // fan_in 0 it is the exact FP mono-hub's `rnnoiseWorklet.js` was. The engine's asset-ref fan-in bump
+    // (`merge_asset_ref_fan_in`, from an `audioWorklet.addModule("/…")` string) is the SOLE lever that
+    // clears it — no entry/tool/exclude pattern independently exempts a `public/*.js` file, so this pins
+    // that the bump alone is both necessary (fan_in 0 still flags) and sufficient (fan_in 1 clears).
+    let asset = "ai-hub-fe/public/noise-suppressor/rnnoiseWorklet.js";
+    let flagged = find_dead_candidates(
+        &[n(asset, 0, 1)],
+        &empty_dep(),
+        DEAD_MAX_CHANGES,
+        &no_extra_entries(),
+    );
+    assert_eq!(
+        flagged.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+        vec![asset],
+        "public/*.js worklet at fan_in 0 must still be a candidate (the FP the bump fixes)"
+    );
+    let cleared = find_dead_candidates(
+        &[n(asset, 1, 1)],
+        &empty_dep(),
+        DEAD_MAX_CHANGES,
+        &no_extra_entries(),
+    );
+    assert!(
+        cleared.is_empty(),
+        "a bumped fan_in must clear the public/*.js worklet from dead-candidates"
+    );
+}
+
+#[test]
 fn entry_patterns_are_excluded() {
     let r = find_dead_candidates(
         &[
             n("pages/HomePage.tsx", 0, 1),
             n("App.tsx", 0, 1),
             n("features/x/index.ts", 0, 1),
+            // Vite React/JS entries — `main.jsx`/`App.jsx`/`main.js` are entry points too, loaded by
+            // index.html/the bundler, never imported (the `.jsx`/`.js` forms the pattern missed before).
+            n("src/main.jsx", 0, 1),
+            n("src/App.jsx", 0, 1),
         ],
         &empty_dep(),
         DEAD_MAX_CHANGES,
@@ -103,6 +138,27 @@ fn test_files_are_excluded() {
 }
 
 #[test]
+fn test_runner_directory_and_setup_files_are_excluded() {
+    // Files under a test-runner DIRECTORY (`playwright/`, `e2e/`) are runner-loaded, not imported —
+    // covered by the shared `zzop_core::is_test_file` SSOT. Config-loaded setup entries (`setup-tests.ts`
+    // via vitest `setupFiles`) are `is_tool_entry_file`. Both had zero fan-in and were false dead
+    // candidates before. A genuinely orphaned sibling still fires.
+    let r = find_dead_candidates(
+        &[
+            n("playwright/global.setup.ts", 0, 1),
+            n("playwright/utils/test-decorators.ts", 0, 1),
+            n("src/setup-tests.ts", 0, 1),
+            n("features/x/old-helper.ts", 0, 1),
+        ],
+        &empty_dep(),
+        DEAD_MAX_CHANGES,
+        &no_extra_entries(),
+    );
+    let paths: Vec<&str> = r.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(paths, vec!["features/x/old-helper.ts"], "{r:?}");
+}
+
+#[test]
 fn high_change_count_is_excluded() {
     let r = find_dead_candidates(
         &[n("features/x/Hot.ts", 0, 10)],
@@ -125,6 +181,11 @@ fn non_source_files_never_in_the_dep_graph_are_never_candidates() {
             n("assets/logo.svg", 0, 1),
             n("schema.prisma", 0, 1),
             n("Service.java", 0, 1),
+            // `.cs` is language-excluded like `.java`: ASP.NET controllers / MediatR handlers /
+            // `Program.cs` are framework-invoked with no `using`-import edge, so fan_in == 0 is not dead
+            // evidence.
+            n("Features/Favorites/FavoritesController.cs", 0, 1),
+            n("Program.cs", 0, 1),
         ],
         &empty_dep(),
         DEAD_MAX_CHANGES,

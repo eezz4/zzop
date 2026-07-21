@@ -26,7 +26,7 @@
 # files ending _test.rs or _tests.rs (the in-tree convention is the plural form), files named
 # tests.rs, and rules/dsl/** (pack dirs hold only [[test]] targets by construction).
 #
-# No deps beyond git + awk. Exit 1 on any violation.
+# No deps beyond git + awk + mktemp. Exit 1 on any violation.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -50,7 +50,25 @@ existing_only() {
 # One wc call for every in-scope file: lines "<path> <count>" (wc prints "<count> <path>";
 # the trailing "total" row is dropped). Assumes no spaces in repo paths (holds today; the
 # english guard's xargs scope shares the assumption).
-all_counts=$(list_rs_files | existing_only | xargs -d '\n' -r wc -l | awk '$2 != "total" {print $2, $1}')
+#
+# wc's raw output goes to a temp file, not straight into a `var=$(pipe | awk ...)` command
+# substitution: a mid-pipeline wc failure (a tracked file deleted or made unreadable between the
+# `git ls-files` snapshot and this `wc` call) would otherwise risk silently under-reporting the
+# census (an oversized file slipping the ratchet) if this line is ever refactored into a context
+# (e.g. `local var=$(...)`) where `set -o pipefail` no longer aborts the script on its own. Capture
+# PIPESTATUS explicitly instead of relying on that implicit propagation, and fail loud.
+wc_out="$(mktemp)"
+trap 'rm -f "$wc_out"' EXIT
+set +e
+list_rs_files | existing_only | xargs -d '\n' -r wc -l > "$wc_out"
+wc_pipestatus=("${PIPESTATUS[@]}")
+set -e
+if [ "${wc_pipestatus[2]}" -ne 0 ]; then
+  echo "max-file-lines guard: wc failed reading one or more tracked .rs files (deleted or became" >&2
+  echo "unreadable mid-scan) -- aborting rather than risk an under-reported census." >&2
+  exit 1
+fi
+all_counts=$(awk '$2 != "total" {print $2, $1}' "$wc_out")
 
 # Census of files over the limit.
 census=$(awk -v lim="$LIMIT" '$2 > lim' <<< "$all_counts")

@@ -18,7 +18,8 @@ feed the exact same shape in through the Normalized AST protocol; see
 HTTP `provides` are composed from two sources, merged together: **code-registered** routes
 (decorator-based — NestJS-style controllers; router-mount calls — Hono and Express, including
 cross-file mounts composed from router fragments; manual pathname dispatch — framework-less
-Workers/Node servers comparing `url.pathname` against literals, evidence-gated on URL provenance
+Workers/Node servers comparing `url.pathname` against literals or matching it with anchored
+`pathname.match(/…/)` regexes (parameterized routes), evidence-gated on URL provenance
 plus a Request-typed or -named parameter, with declared Durable-Object class bodies excluded —
 see the adapter's own doc for the exact gates and accepted limits) and **file-convention** routes
 inferred from the
@@ -36,7 +37,7 @@ producer of a Normalized AST envelope that either stands in for an entire tree (
 cross-cutting annotations a rule consumes by key, e.g. an `auth-guarded` marker) — onto a
 natively-parsed tree (Mode B, the Rust
 `EngineConfig::adapter_overlays` field, also reachable via any host's `adapterOverlays` config field —
-`packages/native`'s napi bindings directly, or `packages/mcp`'s `zzop-mcp` host through
+a direct `zzop-facade` embedding, or `packages/mcp`'s `zzop-mcp` host through
 `zzop.config.jsonc`'s `overlays` key, mapped by the shared `zzop-config` crate) — see
 [NORMALIZED_AST.md](NORMALIZED_AST.md)'s "Adapter overlays" section and
 `crates/engine/examples/fastapi_overlay_adapter/main.rs` for a runnable FastAPI/Python demo. A native
@@ -81,13 +82,14 @@ because each tier stands behind a different, honestly-scoped set of structural f
 
 | Language | Tier | Extension(s) | What it extracts |
 |---|---|---|---|
-| TypeScript / JavaScript | Full AST (native, swc) | `.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts` | Symbols, imports/dep graph, calls, HTTP provides/consumes across Express/Hono/NestJS/Next.js/tRPC and more, router-mount fragments, middleware guard attributes |
-| Python | Full AST (native, ruff) | `.py, .pyi` | **Python 3** syntax (ruff's parser linked as a Rust library — no Python runtime required; Python-2-only syntax degrades to the lexical fallback like any parse failure; the crate path (`parser-python-3`) names that supported major version, the same convention as `parser-java-21`). Symbols (`def`/`class`/methods, `__all__`-aware exports), imports/dep graph (incl. relative `from .x import y`), FastAPI route provides (decorators, `APIRouter` literal prefix, cross-file `include_router` composition), `requests`/`httpx` literal egress consumes |
+| TypeScript / JavaScript | Full AST (native, swc) | `.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts` | Symbols, imports/dep graph, calls, HTTP provides/consumes across Express/Hono/NestJS/Next.js/tRPC and more, router-mount fragments, middleware guard attributes, ORM `db-table` facts (Prisma client accessors and TypeORM `@Entity` classes / `@InjectRepository`/`getRepository` references) |
+| Python | Full AST (native, ruff) | `.py, .pyi` | **Python 3** syntax (ruff's parser linked as a Rust library — no Python runtime required; Python-2-only syntax degrades to the lexical fallback like any parse failure; the crate path (`parser-python-3`) names that supported major version, the same convention as `parser-java-21`). Symbols (`def`/`class`/methods, `__all__`-aware exports), imports/dep graph (incl. relative `from .x import y`), FastAPI route provides (decorators, `APIRouter` literal prefix, cross-file `include_router` composition), `requests`/`httpx` literal egress consumes (module-level calls plus `Session`/`Client`/`AsyncClient` instances bound by assignment or a `with`/`async with` block), and ORM `db-table` facts — SQLModel/SQLAlchemy model classes (`table=True` or a `__tablename__`) and Django models (field-driven, through any abstract base) project `db-table` provides, and their query sites (`select(X)`/`session.get(X)`; `X.objects…`) project `db-table` consumes resolved cross-file against the model class |
 | Rust | Full AST (native, syn 2) | `.rs` | Symbols (top-level fn/struct/enum/trait/type-alias/const/static/union, plus `impl` block methods/assoc consts), imports/dep graph (`use`/`mod` items, `crate::`/`super::`/`self::` module-path resolution, plus same-workspace crate resolution via `Cargo.toml` manifest scan), axum router provides (builder chains, `.nest`/`.merge` cross-file composition), `reqwest` literal egress consumes |
-| Go | Full CST (native, tree-sitter-go 0.25) | `.go` | Symbols (top-level func/method/type/const/var, grouped declarations expanded one symbol per spec-name), imports/dep graph (`import` declarations, `go.mod` `module` directive resolution — an import path resolves to its whole PACKAGE directory, so every file directly in that package gets a real dep-graph edge, not just one guessed file), gin and `net/http` router provides (route groups, cross-file mount composition — a router received as a function parameter is mounted from a call site in another file, including a multi-argument call resolved when exactly one argument is a mountable receiver — Go 1.22 `"METHOD /path"` mux pattern syntax), `net/http` literal egress consumes (including `fmt.Sprintf`-reassembled path literals); an ERROR CST region is never guessed past — extraction stops at the boundary of what actually parsed |
+| Go | Full CST (native, tree-sitter-go 0.25) | `.go` | Symbols (top-level func/method/type/const/var, grouped declarations expanded one symbol per spec-name), imports/dep graph (`import` declarations, `go.mod` `module` directive resolution — an import path resolves to its whole PACKAGE directory, so every file directly in that package gets a real dep-graph edge, not just one guessed file), gin and `net/http` router provides (route groups, cross-file mount composition — a router received as a function parameter is mounted from a call site in another file, including a multi-argument call resolved when exactly one argument is a mountable receiver — Go 1.22 `"METHOD /path"` mux pattern syntax), `net/http` literal egress consumes (package free functions plus the same convenience methods on a bound `http.Client` value, including `fmt.Sprintf`-reassembled path literals), and GORM ORM `db-table` facts (a `gorm.Model`-embedding or `gorm:`-tagged struct projects a `db-table` provide named by `TableName()` or GORM's default; a model composite-literal in a query method projects a `db-table` consume resolved cross-file against the struct); an ERROR CST region is never guessed past — extraction stops at the boundary of what actually parsed |
 | Java | Full CST (native, tree-sitter-java 0.23.5) | `.java` | Symbols (top-level + nested class/interface/enum/record/annotation-type declarations, methods/constructors as dot-qualified `Outer.Inner.method` with body spans, `static final`/interface-constant fields), imports/dep graph (`import` declarations — plain/glob/static — resolved via an in-tree `(package, type)` index; a glob import fans out to every file in the target package, the same package-directory-wide fanout Go's own resolver uses), Spring MVC HTTP route provides (`@RestController`/`@Controller`, class + method-level `@RequestMapping`/`@GetMapping`/etc., cross-file `extends`-chain and constant-prefix resolution via the whole-corpus project pass) — Java 21 grammar coverage (records/sealed classes/pattern-switch parse as ordinary CST, though sealed-permits and pattern-switch carry no dedicated symbol extraction of their own in v1); the crate path (`parser-java-21`) names the pinned grammar version, the representative Java release this frontend targets, not a hard floor on the source dialect it can parse |
+| C# | Full CST (native, tree-sitter-c-sharp 0.23.5) | `.cs` | Symbols (top-level + nested class/interface/struct/enum/record/delegate as dot-qualified `Outer.Inner` names, methods/constructors/properties with body spans, `const`/`static readonly` fields; `public`-modifier exports), imports/dep graph (`using` directives incl. `static`/alias/`global`, resolved by a namespace→files index — a `using Foo.Bar;` fans out to every file declaring namespace `Foo.Bar`, the same package-directory-fanout honesty Go/Java use), ASP.NET Core HTTP route provides (`[ApiController]`/`[Controller]` attribute controllers with class `[Route("api/[controller]")]` + method `[HttpGet]`/`[HttpPost("{id}")]`/… composition and the `[controller]` token, plus same-file Minimal-API `app.MapGet`/`MapGroup` literal routes), `HttpClient` literal HTTP egress consumes (`GetAsync`/`PostAsync`/`GetFromJsonAsync`/… with `$"…"` interpolation reassembly) |
 | Prisma | Lexical schema (native) | `.prisma` | Schema models/fields — structural, plus usage-aware schema rules; each model also projects a `db-table` io provide (accessor-cased `table:` key, joining the TS client-side `db-table` consumes) |
-| SQL (DDL) | Lexical DDL (native) | `.sql` | `CREATE TABLE` statements → `db-table` io provides only (`table:<name>`, quote-stripped, schema qualifier dropped, accessor-cased to match the Prisma/TS db-table key — same lower-first transform) — migration files (Flyway/Liquibase-style) light up the db-table channel for MyBatis/JDBC-style stacks; no symbols/imports/consumes |
+| SQL (DDL) | Lexical DDL (native) | `.sql` | `CREATE TABLE` statements → `db-table` io provides only (`table:<name>`, quote-stripped, schema qualifier dropped, accessor-cased to match the Prisma/TS db-table key — same lower-first transform; persistent tables only — a session-local `CREATE TEMP`/`TEMPORARY TABLE` mints no provide, since no other layer can join a connection-scoped name, while `UNLOGGED` — crash-unsafe but cross-connection — still provides) — migration files (Flyway/Liquibase-style) light up the db-table channel for MyBatis/JDBC-style stacks; no symbols/imports/consumes |
 | Everything else | External adapter | any | First-class via the Normalized AST envelope protocol — Mode A (`analyzeEnvelope`, stands in for a whole tree) or Mode B (overlays facts onto a natively-parsed tree); see [NORMALIZED_AST.md](NORMALIZED_AST.md) |
 
 A file that falls outside what its tier extracts (a `.py`/`.ts`/`.rs` file that fails to parse, or any
@@ -95,9 +97,13 @@ extension in the "everything else" row with no adapter attached) still gets the 
 fallback**: line count and `line-scan` DSL rules run against the raw text rather than a hard failure —
 see "Degraded files" above.
 
-Python's v1 scope is deliberate, not an oversight: Flask/Django routes, FastAPI `Depends` auth
-attributes, `requests`/`httpx` `Session`/`Client` instances, and SQLAlchemy/Django ORM table facts are
-roadmap. The Mode-B overlay path already covers this shape today — see
+Python's v1 scope is deliberate, not an oversight: Flask/Django routes and FastAPI `Depends` auth
+attributes are roadmap (SQLModel/SQLAlchemy and Django ORM *table* facts now ship — see the Python row
+above). (`requests`/`httpx` `Session`/`Client`/
+`AsyncClient` INSTANCES are now recognized — a name bound to a client constructor via assignment or a
+`with`/`async with` binding has its `.get()`/`.post()`/… keyed as egress, so the idiomatic async
+`async with httpx.AsyncClient() as c: await c.get(url)` lands natively.) The Mode-B overlay path already
+covers the remaining shapes today — see
 `crates/engine/examples/fastapi_overlay_adapter/main.rs`, the reference FastAPI/Python overlay adapter,
 which remains the escape hatch for exactly what native v1 skips.
 
@@ -109,10 +115,13 @@ also out of scope (syn parses macro arguments as an opaque token stream, not a s
 `zzop_parser_rust`'s own crate doc for the exact v1 gaps.
 
 Go's v1 scope is deliberate too: echo/chi/fiber decorator-free route registration idioms,
-`&http.Client{}`/`client.Do(req)` request dispatch, and `embed`/`cgo`-loaded files are all roadmap —
-only gin route groups, `net/http`'s `DefaultServeMux`/`NewServeMux` (including Go 1.22's
-`"METHOD /path"` pattern syntax), and `net/http`'s package-level free-function egress (`http.Get`/`Post`/
-`PostForm`/`Head`, with `fmt.Sprintf` template reassembly) are extracted natively today. Gin's
+`client.Do(req)` request dispatch (where the URL rides an `*http.Request` value built elsewhere), and
+`embed`/`cgo`-loaded files are all roadmap — only gin route groups, `net/http`'s
+`DefaultServeMux`/`NewServeMux` (including Go 1.22's `"METHOD /path"` pattern syntax), and `net/http`'s
+egress — both the package-level free functions (`http.Get`/`Post`/`PostForm`/`Head`, with `fmt.Sprintf`
+template reassembly) AND the same convenience methods on a bound `*http.Client`/`http.Client` value
+(`c := &http.Client{}`/`var c = http.Client{}`/`new(http.Client)`, then `c.Get(url)`/…) — are extracted
+natively today. Gin's
 cross-file mount idiom — a router received as a function PARAMETER (`func setup(r *gin.RouterGroup) {
 ... }`, no local `:=`/`=` binding to anchor on, unlike the local-binding case above) — is shipped: the
 parameter is tracked as a receiver whose fragment is named after the
@@ -140,13 +149,25 @@ symbols (structurally implicit, never a written declaration — see `zzop_parser
 for the exact v1 gaps). `tree-sitter-java` is a full CST (not merely lexical), and — like `zzop_parser_go`
 — never guesses past an `ERROR`/`MISSING` region.
 
-Each native parser carries its own internal `PARSER_FINGERPRINT` (technique + version, e.g.
-`zzop-parser-python-3`'s `python3/ruff-0.0.4/v2`, `zzop-parser-prisma`'s `prisma/v2`,
-`zzop-parser-rust`'s `rust/syn-2/v1`, `zzop-parser-go`'s `go/tree-sitter-go-0.25.0/v1+gin-group-param-v2`,
-`zzop-parser-java-21`'s `java21/tree-sitter-java-0.23.5/v2`, `zzop-parser-sql`'s `sql/v1`) that keys the
-per-file cache; the TypeScript, Prisma, Python, Java, Rust, Go, and SQL fingerprints are additionally
-surfaced in `zzop --version`'s output today, so a given build's actual parser identity is
-machine-checkable, not just asserted by this table.
+C#'s v1 scope is deliberate too, same shape as the others': attribute-controller + same-file Minimal-API
+route provides and `HttpClient` literal egress are extracted natively today; cross-file base-controller
+`[Route]` inheritance, cross-statement Minimal-API group variables (`var g = app.MapGroup("/api");
+g.MapGet(...)`), `HttpClient.SendAsync(HttpRequestMessage)`, conventional routing (`MapControllerRoute`),
+and SDK-injected implicit/`global` usings beyond what the source itself declares are roadmap. Namespace
+resolution is namespace-level: a `using` that targets a TYPE (via `using static`/alias) resolves to
+nothing — an accepted under-approximation with no by-type index, the same honesty argument the other
+fanout resolvers make. See `zzop_parser_csharp`'s own crate doc for the exact v1 gaps. `tree-sitter-c-sharp`
+is a full CST and, like the other tree-sitter frontends, never guesses past an `ERROR`/`MISSING` region.
+
+Each native parser carries its own internal `PARSER_FINGERPRINT` that keys the per-file cache. Each
+begins with a stable technique+grammar-version stem — `zzop-parser-python-3`'s `python3/ruff-0.0.4/…`,
+`zzop-parser-prisma`'s `prisma/…`, `zzop-parser-rust`'s `rust/syn-2/…`, `zzop-parser-go`'s
+`go/tree-sitter-go-0.25.0/…`, `zzop-parser-java-21`'s `java21/tree-sitter-java-0.23.5/…`,
+`zzop-parser-csharp`'s `csharp/tree-sitter-c-sharp-0.23.5/…`, `zzop-parser-sql`'s `sql/…` — followed by a
+`vN` and a chain of `+feature-vN` tags that grows with each projection-changing extraction bump (so a
+literal copy here would go stale on the next bump — deliberately elided). The TypeScript, Prisma, Python,
+Java, Rust, Go, C#, and SQL fingerprints are each surfaced in full in `zzop --version`'s output, so a
+given build's actual parser identity is machine-checkable there, not asserted by this table.
 
 A normal-sized file whose extension has no native parser is not counted in `degraded` (that's a
 size-cap/parse-failure fact, not a coverage one) — instead it self-reports as a per-extension entry in
@@ -189,12 +210,29 @@ The join itself carries three integrity gates on top of the raw `(kind, key)` ma
   many unrelated services legitimately share) is still emitted, but tagged so a consumer can discount it.
 
 A per-tree deployment-topology declaration (`mountedAt`/`mounts`/`hosts` — see
-[packages/cli/README.md](../packages/cli/README.md#connection-topology)) supplies the one class of join
+[modules/napi.md](modules/napi.md#functions)'s `AnalyzeRequest` field table) supplies the one class of join
 information that lives only in infra, not in either repo's source: a gateway/ingress mount prefix, and
 which hosts a tree owns. Mounts apply as the last provide-key transform, stacking on top of any
 code-extracted prefix (e.g. NestJS's `setGlobalPrefix`); a declared host re-keys a matching absolute-URL
 consume to an internal joinable key before the external-egress gate above ever applies. Both self-disclose
 via a `warnings` entry when they turn out to have zero effect on the join.
+
+Routing is resolved from **visible code literals on two axes — path and HTTP method (verb)**. A dynamic
+route on either axis is an injection boundary, never guessed. A computed/opaque URL path stays an
+unresolved consume (surfaced as a near-miss with a "verify manually" caveat); a route whose handler serves
+*any* method (a `pages/api` catch-all, a `pathname`-dispatch or Go `HandleFunc` block naming no method
+literal) is emitted as a single verb-unknown route and disclosed via `cross-layer/unknown-verb-route`
+rather than inventing a `{GET, POST}` pair. A route zzop cannot resolve from source this way — a
+verb-unknown handler, a non-literal path (`@GetMapping(ApiPaths.USERS)`), or a computed client URL — is
+completed by **injecting the concrete route fact**: either a full Normalized AST adapter overlay, or, for a
+handful of routes, the lightweight per-tree `routes: [{ key, role }]` declaration (see
+[modules/napi.md](modules/napi.md#functions)'s `AnalyzeRequest` field table), which expands into a
+synthetic overlay and joins through the identical path. **Deployment-config routing is the same boundary**: zzop does **not** read
+deployment config files (`next.config` `rewrites`/`redirects`, `vercel.json`, nginx/ingress). A uniform
+gateway/ingress prefix or host is injected via the `mountedAt`/`mounts`/`hosts` declaration above; an
+arbitrary path-rewrite map (`/legacy/* → /v2/*`) is **not** modeled in v1 — a deployment that rewrites
+paths this way can surface a near-miss/unprovided finding that the unseen rewrite would explain, so treat
+cross-layer route findings as "verify against your deployment topology," not ground truth.
 
 ## Sentinel-based tree rewrites
 

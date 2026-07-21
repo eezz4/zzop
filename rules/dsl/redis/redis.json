@@ -11,7 +11,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "(?i)flush(all|db)",
         "skip_comment_lines": true,
         "line_pattern": "(?i)(\\.flush(all|db)\\s*\\(|['\"`]flush(all|db)['\"`])"
@@ -25,7 +25,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "(?i)(\\.keys\\s*\\(|['\"`]KEYS['\"`])",
         "skip_comment_lines": true,
         "line_pattern": "\\.keys\\s*\\(\\s*['\"`]|['\"`]KEYS['\"`]"
@@ -39,7 +39,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "['\"](ioredis|redis|@redis/client)['\"]",
         "require_file_absent": ["\\.on\\s*\\(\\s*['\"`]error"],
         "skip_comment_lines": true,

@@ -12,10 +12,14 @@
 //! v1 scope decisions (deliberate; revisit with field data):
 //! - Emitted kind is plain `"http"` with `http_interface_key` keys, so these provides join the
 //!   existing `http` cross-layer rules with zero rule-layer changes.
-//! - No wildcard/ANY verb exists engine-wide. Verb-export conventions (app-router/Medusa
-//!   `export const GET/POST/...`, Remix `loader`→GET / `action`→POST) are exact. `pages/api`
-//!   default-export handlers serve any method, so their verb set comes from the lexical scan's
-//!   method-literal hints, falling back to {GET, POST} when the file body names no verb.
+//! - Verb-export conventions (app-router/Medusa `export const GET/POST/...`, Remix `loader`→GET /
+//!   `action`→POST) are exact. A `pages/api` default-export handler serves any method, so its verb set
+//!   comes from the lexical scan's method-literal hints; a handler that names NO method literal emits
+//!   ONE `zzop_core::UNKNOWN_VERB` sentinel provide (`"? <path>"`) rather than a fabricated {GET, POST}
+//!   — the `super::assemble` partition lifts it out of the exact-key join into the path-level
+//!   verb-unknown disclosure (`cross-layer/unknown-verb-route`). This reverses the former engine-wide
+//!   "no ANY/wildcard verb" stance (a deliberate v1 decision, superseded 2026-07-21): fabricating two
+//!   real verbs both mis-provided unwitnessed methods AND lost the real one.
 //! - Catch-all segments (`[...x]`, `[[...x]]`, Remix bare-`$` splat) produce NO provide: the
 //!   cross-layer join is an exact key match, and a phantom never-joined provide would misreport a
 //!   consumed route (e.g. `[...nextauth]`) as unconsumed.
@@ -37,9 +41,6 @@ use zzop_core::{http_interface_key, IoProvide, SourceSymbol};
 /// vocabulary). HEAD/OPTIONS are omitted — real but never fetch targets, so emitting them would
 /// only mint dead provides.
 const HTTP_VERB_EXPORTS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
-
-/// `pages/api` fallback when the handler body names no method literal (see module doc).
-const PAGES_API_FALLBACK_VERBS: [&str; 2] = ["GET", "POST"];
 
 /// Filename test for the `route.<ext>` module conventions (Next app router, Medusa).
 pub(super) fn is_route_module_filename(name: &str) -> bool {
@@ -190,7 +191,10 @@ pub(crate) fn compose_file_convention_provides<'a>(
             continue;
         };
         let verbs: Vec<&str> = if scan.verbs.is_empty() {
-            PAGES_API_FALLBACK_VERBS.to_vec()
+            // Serve-all handler naming no method literal: ONE UNKNOWN_VERB sentinel provide (not a
+            // fabricated GET+POST) — the assemble partition lifts the `"? <path>"` key into the
+            // path-level `cross-layer/unknown-verb-route` disclosure channel.
+            vec![zzop_core::UNKNOWN_VERB]
         } else {
             scan.verbs.iter().map(String::as_str).collect()
         };

@@ -15,9 +15,8 @@
 //! - Always emits an informational expansion warning; an extra one when only 1 tree resulted (the
 //!   cross-layer join needs 2+).
 //!
-//! Split for the 300-line source cap: manifest readers live in `workspaces/manifest.rs`, the glob
-//! expansion + matching engine in `workspaces/glob.rs`; this root keeps the census-pinned constants
-//! and the single public entry point.
+//! Manifest readers live in `workspaces/manifest.rs`, the glob expansion + matching engine in
+//! `workspaces/glob.rs`; this root keeps the census-pinned constants and the single public entry point.
 
 use std::collections::HashMap;
 use std::path::Path;

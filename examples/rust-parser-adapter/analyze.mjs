@@ -1,54 +1,80 @@
 #!/usr/bin/env node
-// Runs a NormalizedEnvelope (adapter.mjs's stdout) through zzop's Mode A entry point
-// (`analyzeEnvelope`) and prints a compact summary — the smallest possible "external language,
-// full analysis" round trip.
+// Runs a NormalizedEnvelope (adapter.mjs's stdout) through zzop's Mode A entry point by spawning the
+// Node-free `zzop-mcp` binary's `analyze-envelope` subcommand, and prints a compact summary — the
+// smallest possible "external language, full analysis" round trip.
+//
+// Node-free rewrite (2026-07-20): this script used to `require('@zzop/native')` (falling back to the
+// in-checkout `packages/native` addon) and call `analyzeEnvelope` in-process. The npm distribution
+// (the `@zzop/cli` JS CLI + the `@zzop/native` napi binding) was removed that day — zzop now ships as
+// a single Node-free binary, `zzop-mcp`, with no in-process JS embedding path at all. This script
+// spawns that binary as a child process and parses its JSON stdout instead of `require()`-ing a
+// native addon.
 //
 // USAGE
 //   node adapter.mjs --root <workspaceRoot> --source <id> > envelope.json
-//   node analyze.mjs envelope.json [--native <path-to-@zzop/native-or-checkout-packages/native>]
+//   node analyze.mjs envelope.json [--bin <path-to-zzop-mcp>]
 //
-// `--native` defaults to `@zzop/native` (npm install) and falls back to the in-checkout addon at
-// `../../packages/native/index.js` so the example runs inside the zzop repo without an install.
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
+// `--bin` defaults to `zzop-mcp` on PATH, falling back to an in-checkout `target/release/zzop-mcp` or
+// `target/debug/zzop-mcp` build (`cargo build -p zzop-mcp [--release]`) so the example runs inside the
+// zzop repo without a separate install.
+import { existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
+const exeName = process.platform === 'win32' ? 'zzop-mcp.exe' : 'zzop-mcp';
 
 const envelopePath = process.argv[2];
 if (!envelopePath || envelopePath.startsWith('--')) {
-  console.error('usage: node analyze.mjs <envelope.json> [--native <module-or-path>]');
+  console.error('usage: node analyze.mjs <envelope.json> [--bin <path-to-zzop-mcp>]');
   process.exit(2);
 }
-const nativeArgIdx = process.argv.indexOf('--native');
-const nativeSpec = nativeArgIdx >= 0 ? process.argv[nativeArgIdx + 1] : null;
+const binArgIdx = process.argv.indexOf('--bin');
+const binSpec = binArgIdx >= 0 ? process.argv[binArgIdx + 1] : null;
 
-let native;
-if (nativeSpec) {
-  native = require(path.resolve(nativeSpec));
-} else {
-  try {
-    native = require('@zzop/native');
-  } catch {
-    native = require(path.join(here, '..', '..', 'packages', 'native', 'index.js'));
+function resolveBinary() {
+  if (binSpec) return path.resolve(binSpec);
+  // In-checkout fallback so this example runs inside the zzop repo with no separate install —
+  // mirrors the old script's fallback to the in-checkout `packages/native` addon.
+  const checkoutCandidates = [
+    path.join(here, '..', '..', 'target', 'release', exeName),
+    path.join(here, '..', '..', 'target', 'debug', exeName),
+  ];
+  for (const candidate of checkoutCandidates) {
+    if (existsSync(candidate)) return candidate;
   }
+  return exeName; // rely on PATH
 }
 
-const envelopeJson = readFileSync(envelopePath, 'utf8');
-const out = JSON.parse(native.analyzeEnvelope(envelopeJson, '{}'));
+const bin = resolveBinary();
+const result = spawnSync(bin, ['analyze-envelope', path.resolve(envelopePath)], { encoding: 'utf8' });
 
-const byRule = new Map();
-for (const f of out.findings || []) {
-  byRule.set(f.ruleId, (byRule.get(f.ruleId) || 0) + 1);
+if (result.error) {
+  console.error(`failed to run '${bin}': ${result.error.message}`);
+  console.error(
+    'build it with `cargo build -p zzop-mcp --release`, put zzop-mcp on your PATH, or pass --bin <path>'
+  );
+  process.exit(1);
 }
+if (result.status !== 0) {
+  process.stderr.write(result.stderr);
+  process.exit(result.status ?? 1);
+}
+
+// `zzop-mcp analyze-envelope` prints the same compact summary shape the `analyze_envelope` MCP tool
+// returns (see docs/modules/mcp.md#output-contract): `findings` is `{total, bySeverity, byRule, shown,
+// truncated?}`, not a flat array — `byRule` already carries the per-rule counts the old script had to
+// tally itself from a raw `Finding[]`.
+const out = JSON.parse(result.stdout);
+
+const findings = out.findings || {};
 const cov = out.coverage || {};
 console.log(`files:        ${out.fileCount}`);
 console.log(`symbols:      ${cov.symbols}`);
 console.log(`import edges: ${cov.importEdges}`);
-console.log(`findings:     ${(out.findings || []).length}`);
-for (const [rule, n] of [...byRule.entries()].sort()) {
+console.log(`findings:     ${findings.total ?? 0}`);
+for (const [rule, n] of Object.entries(findings.byRule || {}).sort()) {
   console.log(`  - ${rule}: ${n}`);
 }
 console.log(`warnings:     ${(out.warnings || []).length}`);

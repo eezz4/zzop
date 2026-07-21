@@ -11,8 +11,9 @@ members = [
   "crates/config",
   "crates/summary",
 
-  # Published artifacts — packages/ holds ONLY externally-published artifacts
-  "packages/native",
+  # Published artifact — the single Node-free `zzop-mcp` binary (Claude Code plugin + Desktop MCPB).
+  # The npm distribution (JS CLI `@zzop/cli` + napi `@zzop/native`) was removed 2026-07-20 — see the
+  # mcp-distribution decision: Node-free native binary is the single runtime form.
   "packages/mcp",
 
   # Parser frontends (former lang/ + dsl/, merged) — source -> Normalized AST / Common IR
@@ -23,6 +24,7 @@ members = [
   "parser/parser-go",
   "parser/parser-java-21",
   "parser/parser-sql",
+  "parser/parser-csharp",
 
   # JSP support arrives via the external-parser envelope protocol (docs/NORMALIZED_AST.md), not an
   # in-workspace crate — no placeholder crate needed (see parser/README.md).

@@ -1,24 +1,21 @@
 //! `zzop-facade` — the engine's pure JSON facade: the actual `analyze` / `analyzeTrees` / `version`
 //! logic, kept napi-free (plain `&str -> Result<String, String>` / `-> String`) so it compiles and has
 //! a normal `#[test]` surface under the workspace's default `gnu` toolchain with no feature flags at
-//! all. Defaults live in the HOSTS (JS wrapper `withDefaults`, `zzop-config`'s mapper), not here —
+//! all. Defaults live in the HOST (`zzop-config`'s mapper), not here —
 //! with exactly one deliberate exception: the envelope bundled-pack seed (`envelope.rs`), because the
 //! envelope path is the one entry point no host config front-end covers. Corollary: `zzop-config` must
 //! never depend on this crate's request types (that edge would be a cycle) — if typed request sharing
 //! is ever wanted, the structs move DOWN (core or a small wire crate), never config -> facade.
 //!
-//! Two consumers share this crate:
-//! - `zzop-napi` re-exports every function from here and wraps each one with a thin `#[napi]` shim
-//!   under its default-off `addon` feature (`packages/native/src/addon.rs`) — the Node addon build.
-//! - `zzop-mcp`, a Node-free binary, calls these functions directly — no napi, no Node process.
-//!
-//! It lives in its own `rlib`-only crate, separate from `zzop-napi`, because cargo builds a
-//! dependency's `cdylib` target even on an `rlib` dependency edge: `zzop-napi`'s `cdylib` half (the
-//! Node addon artifact) fails to link under the local `gnu` toolchain with "export ordinal too large"
-//! once its `#[napi]` surface is compiled in, and that failure would poison any crate that merely
-//! depended on `zzop-napi` for its plain-Rust logic — even one, like `zzop-mcp`, that never touches
-//! napi at all. Splitting the napi-free logic into a separate `rlib` crate sidesteps the cdylib link
-//! step entirely for every consumer except the Node addon build itself.
+//! The consumer today is `zzop-mcp`, a Node-free binary that calls these functions directly — no napi,
+//! no Node process. (Until 2026-07-20 a second consumer, the removed `@zzop/native` napi addon
+//! `zzop-napi`, re-exported every function behind a thin `#[napi]` shim. This crate was split off as
+//! its own `rlib`-only crate because cargo builds a dependency's `cdylib` target even on an `rlib`
+//! edge: the addon's `cdylib` half failed to link under the local `gnu` toolchain once its `#[napi]`
+//! surface was compiled in, which would have poisoned any crate — like `zzop-mcp` — that depended on
+//! it only for the plain-Rust logic. The addon is gone, but keeping the facade a standalone napi-free
+//! `rlib` still gives every consumer a normal `#[test]` surface under the default toolchain with no
+//! feature flags.)
 //!
 //! Module layout (every public item is re-exported here, so consumers only ever see `zzop_facade::X`):
 //! - `request` — wire-contract request types (`AnalyzeRequest` and friends) + serde defaults.
@@ -27,9 +24,9 @@
 //! - `analyze` — the `analyze`/`analyzeTrees` entry points.
 //! - `envelope` — the `analyzeEnvelope`/`validateEnvelopeOnly` entry points.
 //! - `query` — the `queryIo` entry point (definitive endpoint/io-key queries over an
-//!   already-produced analysis output — the shared core behind `zzop endpoint` and `check_endpoint`).
+//!   already-produced analysis output — the shared core behind `zzop-mcp endpoint` and `check_endpoint`).
 //! - `rule_pack` — the `validateRulePackOnly` entry point (pre-load, structure-only DSL rule-pack
-//!   check — the shared core behind `validate_rule_pack` and `zzop pack validate`).
+//!   check — the shared core behind `validate_rule_pack` and `zzop-mcp validate-rule-pack`).
 //! - `version` — the `version()` entry point.
 
 mod analyze;
@@ -38,6 +35,7 @@ mod envelope;
 mod output;
 mod query;
 mod request;
+mod route_injection;
 mod rule_pack;
 mod version;
 

@@ -105,10 +105,25 @@ pub fn check_endpoint(
     zzop_summary::endpoint_summary(pattern, path, paths, config_path)
 }
 
+/// CLI `zzop-mcp validate-envelope <path>` — offline Normalized-AST envelope shape check (the
+/// `validate_envelope` MCP tool's answer, from a terminal). Returns the infallible
+/// `{"valid":bool,"issues":[…]}` report as a string; `main` reads `valid` for the exit code. Thin
+/// re-export: the check lives in `zzop_summary` (same function the tool dispatch calls above).
+pub fn validate_envelope(envelope_json: &str) -> String {
+    zzop_summary::validate_envelope_only_json(envelope_json)
+}
+
+/// CLI `zzop-mcp validate-rule-pack <path>` — offline DSL rule-pack shape + matcher-regex check (the
+/// `validate_rule_pack` MCP tool's answer). Same infallible report contract as [`validate_envelope`].
+pub fn validate_rule_pack(pack_json: &str) -> String {
+    zzop_summary::validate_rule_pack_json(pack_json)
+}
+
 fn default_filters() -> FindingFilters {
     FindingFilters {
         min_severity: None,
         rule: None,
         limit: None,
+        verbosity: Default::default(),
     }
 }

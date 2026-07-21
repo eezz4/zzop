@@ -59,6 +59,11 @@ pub struct ProjectProvidesReport {
     /// Simple class names declared in 2+ files in this corpus (cannot safely tell which declaration an
     /// `extends`/qualifier reference means) — a count of the individual duplicate declarations skipped.
     pub skipped_ambiguous_class_name: u32,
+    /// Routes whose own METHOD-level `@GetMapping(...)`/`@RequestMapping(value = ...)` path was a
+    /// non-literal constant reference that did not resolve against the corpus (out-of-corpus constant, or a
+    /// genuinely computed expression) — the method-path analog of `skipped_unresolved_prefix`. Skipped, never
+    /// keyed at the empty base.
+    pub skipped_unresolved_method_path: u32,
 }
 
 /// One class/interface/enum/record/annotation-type declaration's structural facts, collected once per
@@ -85,7 +90,16 @@ struct MethodRoute {
     line: u32,
     name: String,
     verb: String,
-    path: String,
+    path: MethodPath,
+}
+
+/// A method-level route path as collected per-file, before whole-corpus resolution — the method-path
+/// analog of the class-prefix `PrefixState`'s literal-vs-constant split. `Literal` (a quoted path, or the
+/// empty base for a bare `@GetMapping`) is emitted as-is; `Unresolved` carries the annotation's raw args so
+/// `walk::emit_class_routes` can resolve the path constant against the corpus (`resolve::resolve_method_path`).
+enum MethodPath {
+    Literal(String),
+    Unresolved(String),
 }
 
 /// A class-level `@RequestMapping` prefix's resolution state — module doc's "Determinism" section.

@@ -6,8 +6,9 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use super::super::helpers::{
-    is_go_source_ext, is_go_std_import, is_java_source_ext, is_java_std_import,
-    is_python_source_ext, is_rust_source_ext, rust_head, RUST_STD_CRATE_FAMILY,
+    is_csharp_source_ext, is_csharp_std_import, is_go_source_ext, is_go_std_import,
+    is_java_source_ext, is_java_std_import, is_python_source_ext, is_rust_source_ext, rust_head,
+    RUST_STD_CRATE_FAMILY,
 };
 
 /// "Bring an adapter" per-extension disclosure (`unparsed_extension_warning`)'s collection step: records
@@ -71,6 +72,8 @@ pub(super) fn record_unparsed_extension(
 /// - Java: a JDK-namespace import (`is_java_std_import` — `java`/`javax` head, `helpers`'s own doc) is
 ///   never staged, same treatment as Rust's/Go's std families; `jakarta.*` IS staged (external framework
 ///   family, not a JDK namespace).
+/// - C#: a BCL/framework `using` (`is_csharp_std_import` — `System`/`Microsoft` head, `helpers`'s own doc)
+///   is never staged, same treatment as Java's `java`/`javax` family.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn stage_package_import_candidate(
     specifier: &str,
@@ -80,13 +83,23 @@ pub(super) fn stage_package_import_candidate(
     is_rust: bool,
     is_go: bool,
     is_java: bool,
+    is_csharp: bool,
     python_candidates: &mut Vec<(String, Option<String>, String)>,
     rust_candidates: &mut Vec<(String, String)>,
     go_candidates: &mut Vec<(String, String)>,
     java_candidates: &mut Vec<(String, String)>,
+    csharp_candidates: &mut Vec<(String, String)>,
     package_import_files: &mut BTreeMap<String, BTreeSet<String>>,
 ) {
     if specifier.starts_with('.') || specifier.starts_with('/') {
+        return;
+    }
+    // Test-surface imports (`e2e/*.spec.ts`, `_test.go`, `Test*.java`, ...) are not deployed egress /
+    // provide surface, so they must not feed the framework-silence census: a tree whose ONLY http-client
+    // (S4), server-framework (S2), or ORM (S6) import lives in test code is not a dark app — the tripwire
+    // would false-fire. Same "not deployed, so not real surface" reasoning the cross-layer join already
+    // applies to test-classified io facts (`filter_join_io`, D11).
+    if zzop_core::is_test_file(rel) {
         return;
     }
     if is_python {
@@ -105,6 +118,10 @@ pub(super) fn stage_package_import_candidate(
         if !is_java_std_import(specifier) {
             java_candidates.push((specifier.to_string(), rel.to_string()));
         }
+    } else if is_csharp {
+        if !is_csharp_std_import(specifier) {
+            csharp_candidates.push((specifier.to_string(), rel.to_string()));
+        }
     } else {
         package_import_files
             .entry(specifier.to_string())
@@ -121,6 +138,7 @@ pub(super) struct LangGates {
     pub(super) is_rust: bool,
     pub(super) is_go: bool,
     pub(super) is_java: bool,
+    pub(super) is_csharp: bool,
 }
 
 impl LangGates {
@@ -130,6 +148,7 @@ impl LangGates {
             is_rust: is_rust_source_ext(rel),
             is_go: is_go_source_ext(rel),
             is_java: is_java_source_ext(rel),
+            is_csharp: is_csharp_source_ext(rel),
         }
     }
 }

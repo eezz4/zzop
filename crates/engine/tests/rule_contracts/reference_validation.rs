@@ -2,9 +2,9 @@
 //! not exist. This is the machine contract for the defect class a message audit found live: `--since=all`,
 //! `--repo=`, and `scanners.vocabulary.commitTypePatterns` were all recommended by real messages despite
 //! none of them being real knobs. Both checks below load
-//! `packages/cli/lib/config-surface.json` — the single vocabulary file also consumed by
-//! `packages/cli/lib/mapper.js`'s `KNOWN_KEYS` (see that file), so the CLI's own runtime and this test
-//! can never disagree about what a valid flag/config key is.
+//! `crates/config/config-surface.json` — the single vocabulary file also consumed by the Rust config
+//! front-end (`crates/config`)'s unknown-key drift warnings, so the config front-end's own runtime and
+//! this test can never disagree about what a valid flag/config key is.
 //!
 //! The vocabulary structs and the extraction/validation helpers live in `config_surface.rs`.
 
@@ -105,30 +105,12 @@ fn summary_src_files() -> Vec<PathBuf> {
     out
 }
 
-/// `packages/cli/lib/*.js` — direct children ONLY (not recursive: `packages/cli/lib` has no subdirectories
-/// today, and the task's own scanned-file set names this one non-recursively, unlike every `.rs` glob
-/// above).
-fn cli_lib_js_files() -> Vec<PathBuf> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/cli/lib");
-    let mut out = Vec::new();
-    let Ok(entries) = fs::read_dir(&dir) else {
-        return out;
-    };
-    for entry in entries.filter_map(Result::ok) {
-        let path = entry.path();
-        if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("js") {
-            out.push(path);
-        }
-    }
-    out.sort();
-    out
-}
-
 /// The full scanned-file set for contract 11's two real-tree checks: `rules/native/**/src/**/*.rs` +
 /// `crates/engine/src/**/*.rs` + `crates/metrics/src/**/*.rs` + `crates/config/src/**/*.rs` +
-/// `crates/facade/src/**/*.rs` + `crates/summary/src/**/*.rs` + `packages/mcp/src/**/*.rs` +
-/// `packages/cli/lib/*.js`, sorted so a failing assertion's offender list has a stable, diffable order
-/// across runs.
+/// `crates/facade/src/**/*.rs` + `crates/summary/src/**/*.rs` + `packages/mcp/src/**/*.rs`, sorted so a
+/// failing assertion's offender list has a stable, diffable order across runs. (The removed JS CLI's
+/// `packages/cli/lib/*.js` was dropped from this set when the npm distribution was removed 2026-07-20 —
+/// there is no non-Rust surface left to scan.)
 fn reference_validation_scanned_files() -> Vec<PathBuf> {
     let mut out = native_rule_src_rs_files();
     out.extend(engine_src_files());
@@ -137,7 +119,6 @@ fn reference_validation_scanned_files() -> Vec<PathBuf> {
     out.extend(facade_src_files());
     out.extend(summary_src_files());
     out.extend(mcp_src_files());
-    out.extend(cli_lib_js_files());
     out.sort();
     out
 }

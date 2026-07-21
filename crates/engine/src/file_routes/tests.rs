@@ -85,15 +85,14 @@ fn pages_api_uses_scanned_verb_hints() {
 }
 
 #[test]
-fn pages_api_without_method_literals_falls_back_to_get_post() {
+fn pages_api_without_method_literals_emits_unknown_verb_sentinel() {
     let rel = "apps/web/pages/api/auth/verify-email.ts";
     let out =
         compose_file_convention_provides([rel], &[], &|_| Some("export default handler;\n".into()));
+    // A serve-all handler naming no method literal emits ONE UNKNOWN_VERB sentinel (`?`), not a
+    // fabricated GET+POST pair — the engine partitions it into `cross-layer/unknown-verb-route`.
     let keys: Vec<&str> = out.iter().map(|p| p.key.as_str()).collect();
-    assert_eq!(
-        keys,
-        vec!["GET /api/auth/verify-email", "POST /api/auth/verify-email"]
-    );
+    assert_eq!(keys, vec!["? /api/auth/verify-email"]);
 }
 
 #[test]
@@ -117,35 +116,6 @@ fn remix_ui_page_with_default_export_is_not_a_provide() {
     assert!(out.is_empty());
 }
 
-/// Policy-value equality pin (T2): `PAGES_API_FALLBACK_VERBS` here and
-/// `zzop_parser_typescript::PATHNAME_DISPATCH_FALLBACK_VERBS` encode the same policy decision
-/// (the verb set assumed for a handler that names no method) but live on opposite sides of a
-/// crate boundary where symbol sharing is impossible. This pin forces a deliberate change on
-/// either side to be re-justified against the other rather than silently drifting apart.
-#[test]
-fn pathname_dispatch_fallback_verbs_pin() {
-    assert_eq!(
-        PAGES_API_FALLBACK_VERBS,
-        zzop_parser_typescript::PATHNAME_DISPATCH_FALLBACK_VERBS,
-        "PAGES_API_FALLBACK_VERBS and PATHNAME_DISPATCH_FALLBACK_VERBS must stay in lockstep \
-         (policy-value equality pin, T2)"
-    );
-}
-
-/// Same T2 equality pin for the Go side: parser-go cannot depend on this crate, so its
-/// `GO_HANDLEFUNC_FALLBACK_VERBS` (the verbs assumed for a `HandleFunc` pattern naming no
-/// method) carried documented parity only — this engine-side test (the dependency edge DOES
-/// exist in this direction) upgrades that prose to an executable pin (opus review F2).
-#[test]
-fn go_handlefunc_fallback_verbs_pin() {
-    assert_eq!(
-        PAGES_API_FALLBACK_VERBS,
-        zzop_parser_go::adapters::net_http::GO_HANDLEFUNC_FALLBACK_VERBS,
-        "PAGES_API_FALLBACK_VERBS and GO_HANDLEFUNC_FALLBACK_VERBS must stay in lockstep \
-         (policy-value equality pin, T2)"
-    );
-}
-
 /// Policy-value set-equality pin (T2): `HTTP_VERB_EXPORTS` (which export NAMES count as verb
 /// handlers in file-convention routing — deliberately omits HEAD/OPTIONS, see its doc) and
 /// core's `HTTP_KEY_VERBS` (the name-inferred verb keying vocabulary) are DIFFERENT policy
@@ -162,18 +132,6 @@ fn http_verb_exports_matches_core_key_verbs_set() {
         "HTTP_VERB_EXPORTS and zzop_core::HTTP_KEY_VERBS hold the same verb set today; a \
          deliberate change to either must be re-justified here (policy set-equality pin, T2)"
     );
-}
-
-/// Policy-value subset pin (T2): the no-method fallback verbs must always be drawn from the
-/// core verb vocabulary — a fallback verb core cannot key would mint unjoinable provides.
-#[test]
-fn pages_api_fallback_verbs_are_a_subset_of_core_key_verbs() {
-    for v in PAGES_API_FALLBACK_VERBS {
-        assert!(
-            zzop_core::HTTP_KEY_VERBS.contains(&v),
-            "fallback verb {v} is not in zzop_core::HTTP_KEY_VERBS (policy subset pin, T2)"
-        );
-    }
 }
 
 #[test]

@@ -2,7 +2,7 @@
 //!
 //! The small, single-type mirror views (`CacheStatsView`, `PackLoadedView`, `RuleOverridesAppliedView`,
 //! `GitWindowView`, `CoverageCensusView`, `BlindnessClassView`/`disclosure_views`) live in
-//! [`mirrors`] — split out once this file crossed the 300-line source cap. The composed views below
+//! [`mirrors`]. The composed views below
 //! (which reach into more than one engine type, and carry this boundary's casing-contract doc) stay
 //! here.
 

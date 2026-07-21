@@ -71,7 +71,9 @@ pub fn resolve_file_with_workspace(
             return Some(hit);
         }
     }
-    if specifier.starts_with("@/") {
+    if specifier.starts_with("@/") || specifier == "$lib" || specifier.starts_with("$lib/") {
+        // `@/` and SvelteKit's `$lib` are built-in root aliases resolved by `resolve_file` — after the
+        // governing tsconfig gets first say above (a project that explicitly remaps them wins).
         return resolve_file(specifier, from_file, all_paths);
     }
     let (pkg_name, subpath) = match_workspace_pkg(specifier, workspace_pkgs)?;

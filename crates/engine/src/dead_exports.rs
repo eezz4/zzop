@@ -48,6 +48,15 @@ pub(crate) fn is_ts_source_ext(rel: &str) -> bool {
 /// symbol exported from package A and consumed only via `import ... from '@scope/pkg-a'` (or a
 /// `compilerOptions.paths`-mapped specifier) in package B must resolve back to A's file, or the export
 /// looks dead even though it's used.
+/// `sfc_import_pairs`: `.vue`/`.svelte` SFC `<script>`-block import bindings (`crate::analyze::assemble::
+/// sfc::collect_sfc_import_pairs`'s output) — each is fed into `zzop_rules_graph::find_dead_exports` as
+/// an extra, SOURCE-ONLY `DeadExportInputFile` (empty `exports`, so it can never itself be flagged dead;
+/// only its `imports` count, marking whichever `.ts` export it names as imported). The `.vue`/`.svelte`
+/// file is never added to `ts_paths` — it stays invisible to every OTHER pass this function's own `files`
+/// loop below feeds (re-exports/dynamic-imports re-parse, `exports` collection), exactly the "no new
+/// dep-graph node for the SFC itself" pin `dep_graph::merge_sfc_fan_in`'s doc explains for the file-level
+/// (`dead-candidates`) side of the same win.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn dead_export_findings(
     root: &Path,
     ts_paths: &HashSet<String>,
@@ -56,6 +65,7 @@ pub(crate) fn dead_export_findings(
     used_names_by_file: &HashMap<String, Vec<String>>,
     workspace_pkgs: &HashMap<String, WorkspacePkg>,
     tsconfigs: &std::collections::BTreeMap<String, TsconfigPaths>,
+    sfc_import_pairs: &[(String, ImportMap)],
 ) -> Vec<Finding> {
     if ts_paths.is_empty() {
         return Vec::new();
@@ -76,17 +86,18 @@ pub(crate) fn dead_export_findings(
         if !is_ts_source_ext(rel) {
             continue; // non-TS overlay participant (e.g. .svelte) — not re-parseable as TypeScript
         }
-        let (re_exports, dynamic_imports) = match std::fs::read(root.join(rel)) {
+        let (re_exports, dynamic_imports, is_generated) = match std::fs::read(root.join(rel)) {
             Ok(bytes) => {
                 let text = String::from_utf8_lossy(&bytes).into_owned();
                 (
                     zzop_parser_typescript::parse_re_exports(rel, &text),
                     zzop_parser_typescript::parse_dynamic_imports(rel, &text),
+                    crate::generated_banner::has_generated_banner(&text),
                 )
             }
             // Unreadable (deleted/permission race) — treat as no re-exports/dynamic-imports rather
             // than failing the whole analysis.
-            Err(_) => (Vec::new(), Vec::new()),
+            Err(_) => (Vec::new(), Vec::new(), false),
         };
         let exports: Vec<DeadExportCandidate> = symbols_by_file
             .get(rel.as_str())
@@ -116,6 +127,24 @@ pub(crate) fn dead_export_findings(
             re_exports,
             dynamic_imports,
             used_names,
+            is_generated,
+        });
+    }
+
+    // SFC (`.vue`/`.svelte`) source-only contributions — see this function's own doc for
+    // `sfc_import_pairs`. Empty `exports`/`re_exports`/`dynamic_imports`/`used_names`: these entries exist
+    // purely to feed `find_dead_exports`' first (import-collecting) loop; its second (dead-checking) loop
+    // iterates each file's `exports`, which is empty here, so an SFC entry can never itself surface as a
+    // dead-export candidate.
+    for (rel, imports) in sfc_import_pairs {
+        files.push(DeadExportInputFile {
+            file: rel.clone(),
+            exports: Vec::new(),
+            imports: imports.clone(),
+            re_exports: Vec::new(),
+            dynamic_imports: Vec::new(),
+            used_names: HashSet::new(),
+            is_generated: false,
         });
     }
 

@@ -1,4 +1,4 @@
-//! `cross-layer/*` — 23 native rules that run over `zzop_core::CrossLayerResult`, the multi-tree join result
+//! `cross-layer/*` — 24 native rules that run over `zzop_core::CrossLayerResult`, the multi-tree join result
 //! `zzop_engine::analyze_trees` produces (see `crates/core/src/io.rs`'s module doc for the join itself:
 //! exact `(kind, key)` join with an ambiguity gate for keys provided by 2+ distinct source trees, an
 //! external-egress gate for host-carrying consume keys, and a low-confidence tag for generic paths).
@@ -77,6 +77,11 @@
 //!   body literal (`body-shape-v1`'s `ConsumeBodyShape`) disagrees with the BE handler's resolved DTO
 //!   (`ProvideBodyShape`): a missing required field, an undeclared extra key (only when the DTO's field
 //!   list is complete), or a missing `@Body('subKey')` wrapper (`cross-layer/body-field-drift`, warning).
+//! - [`unknown_verb_route`]: `unknown_verb_route_findings` — a route whose path is statically served but
+//!   whose HTTP method(s) could not be determined (an all-verb `pages/api` handler, a `pathname`-dispatch
+//!   block, or a Go `HandleFunc` with no method literal): the honest-disclosure half of the 1b fabrication
+//!   removal — the invented `[GET, POST]` verb pair is gone, replaced by an info disclosure that names the
+//!   served path and points at inject-to-confirm (`cross-layer/unknown-verb-route`, info).
 //!
 //! ## Suppression
 //! None of these rules honor an inline `// <marker>-ok` suppression comment. Checked against how the
@@ -125,12 +130,12 @@ pub mod shared_db_table;
 pub mod unconsumed_endpoint;
 pub mod unconsumed_mutation_endpoint;
 pub mod unconsumed_procedure;
+pub mod unknown_verb_route;
 pub mod unprovided_mutation_call;
 pub mod unresolved_consume_ratio;
 pub mod version_skew;
 
-// Root-file helpers moved out purely for file-size layout, re-exported below so every existing
-// `super::`/crate-root path still resolves (see each module's own doc).
+// Split out for file size; re-exported below (see each module's own doc).
 mod external_url;
 mod trpc_mount;
 
@@ -156,13 +161,14 @@ pub use shared_db_table::shared_db_table_findings;
 pub use unconsumed_endpoint::unconsumed_endpoint_findings;
 pub use unconsumed_mutation_endpoint::unconsumed_mutation_endpoint_findings;
 pub use unconsumed_procedure::unconsumed_procedure_findings;
+pub use unknown_verb_route::{unknown_verb_route_findings, UnknownVerbRouteSite};
 pub use unprovided_mutation_call::unprovided_mutation_call_findings;
 pub use unresolved_consume_ratio::unresolved_consume_ratio_findings;
 pub use version_skew::version_skew_findings;
 
 pub(crate) use external_url::split_external_key;
 pub(crate) use trpc_mount::is_trpc_mount_route_key;
-pub use trpc_mount::trpc_mount_route_suppression_notes;
+pub use trpc_mount::{is_trpc_mount_route_path, trpc_mount_route_suppression_notes};
 
 /// One `http` provide site, tagged with its source tree — the flat "provide-key universe" `method_mismatch`/
 /// `version_skew`/`path_near_miss` need (see module doc). Deliberately a plain local struct, not a reuse of
@@ -226,12 +232,9 @@ pub(crate) fn is_majority_unresolved(unresolved: usize, total: usize) -> bool {
 /// source) and the `unconsumed-*` rules (which must not over-claim a confident "unconsumed" verdict when a
 /// blind source could be the unseen caller). Integer math only — no floats reach output.
 ///
-/// Field defect (mono-hub review, first external v0.14.0 reviews): `cross-layer/unconsumed-mutation-endpoint`
-/// fired Warning on write routes that WERE actually called, just through URLs this run's egress extraction
-/// couldn't resolve (83% of one tree's http consumes, in the field case) — the highest-severity finding was
-/// the least trustworthy one. This helper is the shared predicate that lets both the disclosure rule
-/// (`unresolved_consume_ratio`) and the confidence-gated rules reason about blindness identically, so they
-/// can never silently drift apart on the definition again.
+/// This helper is the shared predicate that lets both the disclosure rule (`unresolved_consume_ratio`) and
+/// the confidence-gated rules reason about blindness identically, so they can never silently drift apart on
+/// the definition again.
 pub fn majority_unresolved_http_sources(
     unresolved_consumes: &[zzop_core::io::TaggedConsume],
     http_consume_totals: &[(String, usize)],

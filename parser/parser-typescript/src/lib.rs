@@ -11,6 +11,7 @@
 //!   Hono-style router mounts).
 
 pub mod adapters;
+mod asset_refs;
 mod cjs_exports;
 mod cjs_require;
 mod factory;
@@ -21,6 +22,7 @@ mod loop_spans;
 mod parse;
 mod project;
 mod re_exports;
+mod sfc_imports;
 mod symbol_shapes;
 mod symbols;
 #[cfg(test)]
@@ -40,15 +42,16 @@ pub use adapters::db_table_consume::{
 pub use adapters::egress::{
     base_relative_path, const_map_fragment, extract_http_egress, is_external_url, resolve_raw_path,
 };
+pub use adapters::entity_decorators::extract_entity_db_table_provides;
 pub use adapters::global_prefix::{extract_global_prefix_marker, NEST_GLOBAL_PREFIX_KIND};
 pub use adapters::hono_client::extract_hono_client_consumes;
+pub use adapters::nest_middleware::{extract_nest_forroutes_guarded, ForRoutesPattern};
 pub use adapters::next_pages_api::{scan_pages_api_handler, PagesApiHandlerScan};
-pub use adapters::pathname_dispatch::{
-    extract_pathname_dispatch_provides, PATHNAME_DISPATCH_FALLBACK_VERBS,
-};
+pub use adapters::pathname_dispatch::extract_pathname_dispatch_provides;
 pub use adapters::router_mounts::extract_router_mount_fragments;
 pub use adapters::trpc_consume::extract_trpc_consumes;
 pub use adapters::trpc_router::extract_procedure_router_fragments;
+pub use adapters::typeorm_repository::extract_typeorm_repository_consumes;
 pub use adapters::wrapper_calls::extract_wrapper_fragments;
 pub use lang::calls::parse_calls;
 pub use lang::resolve::{
@@ -59,6 +62,7 @@ pub use lang::write_site::{
     write_sites_for_symbol, DEFAULT_ORM_RECEIVER_PATTERN, DEFAULT_WRITE_METHODS,
 };
 
+pub use asset_refs::parse_asset_refs;
 pub use ident_refs::parse_local_identifier_refs;
 pub use imports::parse_imports;
 pub use loop_spans::extract_loop_spans;
@@ -66,6 +70,7 @@ pub use parse::parse_ok;
 pub(crate) use parse::{line_of, parse_module, parse_with_cm};
 pub use project::{build_common_ir, count_loc};
 pub use re_exports::{parse_dynamic_imports, parse_re_exports};
+pub use sfc_imports::extract_sfc_script_imports;
 pub use symbols::parse_symbols;
 
 /// Cache key ingredient for `zzop-cache`: parser id + pinned swc version + a logic-version counter, so an
@@ -88,6 +93,9 @@ pub use symbols::parse_symbols;
 /// - `hono-client-v1`: Hono's typed `hc<AppType>()` proxy-client call shape as HTTP consumes.
 /// - `router-mounts-v2`: router-mount fragments gain an Express vocabulary alongside Hono; the
 ///   fragment shape and engine-side compose pass are unchanged, only the recognizer's vocabulary grew.
+/// - `db-table-consume-v1`: `db_table_consume` — per-file `db-table` CONSUME facts from ORM/query-builder
+///   call sites (a Prisma model accessor `prisma.user.findMany()`, a `.from("table")` builder), the
+///   consumer side of the `db-table` cross-layer channel (a SQL/Prisma provide joins this consume).
 /// - `query-call-sites-v1`: `extract_query_call_sites` — per-file `zzop_core::QueryCallSite` facts for
 ///   the schema x usage JOIN rules, replacing `zzop_rules_schema::join`'s own filesystem re-walk.
 /// - `store-binding-removed-v1`: the per-file store-binding recognizer (`extract_store_bound_models`) was
@@ -111,6 +119,8 @@ pub use symbols::parse_symbols;
 ///   sentinel `IoProvide { kind: "nest-global-prefix", ... }`, ridden on the existing `provides` channel
 ///   (no cache-schema bump) so `zzop-engine`'s tree assembly can prepend the global prefix onto every
 ///   `http` provide key and then strip the sentinel before output.
+/// - `jsx-in-js-v1`: the parser now enables JSX syntax in `.js`/`.jsx` sources (not only `.tsx`), so
+///   egress/route call sites inside JSX-bearing `.js` files are extracted instead of failing to parse.
 /// - `base-relative-egress-v1`: a base-relative path literal on a recognized HTTP call
 ///   (`axios.get('users/login')` — the `baseURL` idiom) now keys as its root-normalized path
 ///   (`GET /users/login`) instead of falling unresolved; see `adapters::egress::base_relative_path`'s
@@ -126,10 +136,17 @@ pub use symbols::parse_symbols;
 ///   projected as `zzop_core::ControllerPrefixRouteFragment`s
 ///   (`extract_controller_prefix_route_fragments`), resolved against the merged const map at assemble
 ///   time instead of being dropped outright.
+/// - `cond-literal-fanout-v1`: HTTP egress URL/verb resolution fans a two-literal ternary
+///   (`cond ? "/a" : "/b"`, or a computed member with a two-literal bracket) out into BOTH literal
+///   variants instead of failing to key — see `adapters::egress::matchers`.
+/// - `express-router-vocab-v2`: a further expansion of the Express router-mount registration vocabulary
+///   (beyond `router-mounts-v2`'s initial Express set) recognized by `adapters::router_mounts`.
 /// - `angular-httpclient-v1`: HTTP egress now recognizes Angular's dependency-injected `HttpClient`
 ///   call shape (`this.<name>.get/post/put/delete/patch(url)` / `<name>.get/...(url)`), gated per-file
 ///   on an `@angular/common/http` import plus a proven HttpClient receiver (constructor param property,
 ///   class property, or `inject(HttpClient)`) — see `adapters::egress` module doc.
+/// - `str-concat-url-v1`: `+` string-concatenation URL resolution in HTTP egress (`base + "/x"`), the
+///   isomorphic counterpart to template-literal URL resolution — see `adapters::egress::concat`.
 /// - `loop-spans-v1`: `extract_loop_spans` — per-file loop-body line spans (`zzop_core::dsl::
 ///   SourceFile::loop_spans`), feeding `MethodScan::trigger_in_loop`: every `for`/`for-in`/`for-of`
 ///   (incl. `for await`)/`while`/`do-while` statement's whole span, plus the callback-argument-only span
@@ -185,7 +202,34 @@ pub use symbols::parse_symbols;
 ///   Their same-file consume join already worked; only def-collection was export-gated. Strictly
 ///   additive (new keyed http consumes appear for these shapes, no existing shape changes), but cached
 ///   entries from before this marker must not be served as fresh since they lack the new facts.
-pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-removed-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2+angular-httpclient-v1+str-concat-url-v1+loop-spans-v1+pathname-dispatch-v1+base-carrier-drop-v1+body-shape-v1+axios-defaults-base-v1+oazapfts-removed-v1+express-middleware-v1+db-table-bare-receiver-v1+intra-file-wrapper-v1";
+/// - `pathname-dispatch-regex-v1`: the pathname-dispatch adapter now ALSO extracts raw-Worker
+///   `pathname.match(/re/)` parameterized routes (a bound `const m = pathname.match(...)` referenced
+///   by a later `if (m && ...)`, or the match inline in the test), converting an anchored regex
+///   literal to a `{}`-param route path — closes the gap that previously forced a hand-written Mode B
+///   overlay for regex-dispatch Workers. Strictly additive (new provides for these shapes; no
+///   existing literal/switch shape's output changes), but cached entries from before this marker lack
+///   the new route facts and must not be served as fresh.
+/// - `typeorm-entity-provide-v1`: `adapters::entity_decorators::extract_entity_db_table_provides` —
+///   a TypeORM `@Entity('table_name')` (or `@Entity({ name: 'table_name' })`) class decorator now
+///   emits a `db-table` PROVIDE keyed `table:<db_table_channel_casing(name)>`, joining the same
+///   cross-layer channel `parser-prisma`'s PSL-model provide and `parser-sql`'s DDL provide already
+///   feed. Bare `@Entity()` (no literal table name) is never-guessed and stays unrecognized. New
+///   PROVIDES for previously-invisible entities, so cached entries from before this marker must not
+///   be served as fresh.
+/// - `deferred-default-export-v1`: `parse_symbols` now back-attributes `exported`/`is_default` onto a
+///   top-level decl exported by a SEPARATE trailing statement — `export default foo;` (bare-ident form)
+///   and local `export { foo }` / `export { foo as default }` (no `from` clause) — instead of only the
+///   INLINE forms (`export function foo`, `export default function foo`). A non-ident default
+///   (`export default makeThing()`) still fabricates nothing. Fixes a real under-detection bug (e.g.
+///   fe-vite's `export default useX;` idiom was previously invisible), so `exported`/`is_default` now
+///   flip `true` for symbols that were wrongly `false` before — cached entries from before this marker
+///   must not be served as fresh.
+/// - `typeorm-repo-consume-v1`: two linked shape changes. `entity_decorators` provides now carry the
+///   decorated class name in `symbol` (was `None`); and `typeorm_repository` adds per-file `db-table`
+///   CONSUME facts (`key: None`, `raw: <entity class>`) from `@InjectRepository(X)`/`getRepository(X)`,
+///   the TypeORM consumer side of the `db-table` channel — resolved engine-side against the entity-class
+///   index so intra-app `shared-db-table` can fire (previously only Prisma-accessor consumes existed).
+pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-removed-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2+angular-httpclient-v1+str-concat-url-v1+loop-spans-v1+pathname-dispatch-v1+base-carrier-drop-v1+body-shape-v1+axios-defaults-base-v1+oazapfts-removed-v1+express-middleware-v1+db-table-bare-receiver-v1+intra-file-wrapper-v1+pathname-dispatch-regex-v1+typeorm-entity-provide-v1+deferred-default-export-v1+express-all-verb-v1+typeorm-repo-consume-v1+asset-refs-v1+unknown-verb-sentinel-v1";
 
 /// POLICY VOCABULARY — array-iteration callback methods whose first function-shaped argument runs once
 /// per element (`Array.prototype` iteration methods only; `Map`/`Set`/`for...in` etc. are out of scope).

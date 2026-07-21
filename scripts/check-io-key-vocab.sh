@@ -36,7 +36,6 @@ check_row() { # $1 = file, $2 = table-row anchor (PCRE)
   done
 }
 
-check_row packages/cli/README.md '^\|\s*`zzop endpoint'
 check_row packages/mcp/README.md '^\|\s*`check_endpoint`'
 
 if [ "$fail" -ne 0 ]; then

@@ -1,8 +1,9 @@
 # `zzop-mcp`
 
 The Node-free host: one self-contained binary that runs the zzop analysis engine with no Node.js
-runtime at all. Where [`zzop-napi`](napi.md) is the Node binding (a `.node` addon plus a JS loader
-package), `zzop-mcp` is the other side of the same `zzop-facade` contract — it calls
+runtime at all. [`napi.md`](napi.md) documents the same `zzop-facade` JSON contract this binary drives —
+historically exposed to Node via the `@zzop/native` binding, part of the npm distribution removed
+2026-07-20. `zzop-mcp` is the Node-free side of that same contract — it calls
 `analyze_json`/`analyze_envelope_json`/`analyze_trees_json`/`validate_envelope_only_json`/`validate_rule_pack_json`/`query_io_json`
 (`crates/facade/src/lib.rs`) directly,
 with no napi and no JS in between. It serves two front ends over that one engine call path:
@@ -91,8 +92,9 @@ cmd instead, neither of which path-converts arguments.
 ## MCP surface
 
 `initialize` replies with `serverInfo: { name: "zzop", version }` — release binaries report the release
-version (stamped at build time from the same tag source as the npm packages, so it matches `@zzop/cli`);
-in-tree dev builds report the `0.0.0` workspace placeholder.
+version (stamped at build time from the release tag — `ZZOP_RELEASE_VERSION` in `prebuild.yml` — so it
+matches the tag and the plugin's `plugin.json` version); in-tree dev builds report the `0.0.0` workspace
+placeholder.
 
 ### Tools (`tools/list` / `tools/call`)
 
@@ -100,10 +102,10 @@ in-tree dev builds report the `0.0.0` workspace placeholder.
 |---|---|
 | `analyze_repo` | Analyze ONE repo/tree path. |
 | `cross_repo` | Analyze 2+ repos/trees and join them across the cross-layer (kind, key) boundary — zzop's headline capability (e.g. a frontend `fetch` call matched against a backend route, a shared DB table, route drift). |
-| `check_endpoint` | DEFINITIVE answer to "is io key X provided/consumed/joined?" — matches a pattern against ANY cross-layer io key (http routes, env keys, DB tables, topics) as a case-insensitive substring and returns ONE verdict from the sealed vocabulary `linked` / `provided-only` / `consumed-unprovided` / `external` / `unresolved-only` / `ambiguous` / `mixed` / `not-found`, plus full counts, capped match lists, related findings, and key suggestions on `not-found`. Runs the same shared facade query core as the JS CLI's `zzop endpoint` — identical answers from both hosts (see [napi.md](napi.md#endpoint-queries-queryio) for the full output contract). |
-| `analyze_envelope` | **Mode A**: a full Normalized AST envelope (a custom parser's output) REPLACES native parsing entirely for this run — contrast `validate_envelope` below, which only checks the envelope's shape and runs no analysis, and Mode B overlay/mount requests (`docs/NORMALIZED_AST.md`), which merge external symbols ON TOP of a natively-parsed tree instead of replacing it. Only symbol-scan/io-scan rules can fire (no source text ships in an envelope). Zero-config only — an envelope carries no filesystem location, so the reply has no `config`/`path`/`architecture`/`gitWindow` fields; otherwise the SAME shaped summary `analyze_repo` returns (findings, `packsLoaded`, `coverage`, warnings). Same `analyzeEnvelope` facade call path `zzop-napi` exposes (see [napi.md](napi.md#defaults-zero-config--full-analysis)). |
-| `validate_envelope` | Validate a Normalized AST envelope against the v1 contract WITHOUT running an analysis — the authoring feedback loop. Returns `{valid, issues[]}`; never fails on bad input (same contract as `zzop-napi`'s `validateEnvelopeOnly` — see [napi.md](napi.md#validation-only-validateenvelopeonly)). |
-| `validate_rule_pack` | Validate a DSL rule pack's STRUCTURE before loading it — the exact judgments the engine's pack loader makes at load time (bad JSON, missing field, wrong type, too-new `schema_version`) plus every matcher regex that fails to compile (such a rule would load but silently never fire). Shape only, never rule-quality semantics. Returns `{valid, issues[]}`; never fails on bad input (same contract as `zzop-napi`'s `validateRulePackOnly`). Pair with the `rule-pack-schema` resource below. |
+| `check_endpoint` | DEFINITIVE answer to "is io key X provided/consumed/joined?" — matches a pattern against ANY cross-layer io key (http routes, env keys, DB tables, topics) as a case-insensitive substring and returns ONE verdict from the sealed vocabulary `linked` / `provided-only` / `consumed-unprovided` / `external` / `unresolved-only` / `ambiguous` / `mixed` / `not-found`, plus full counts, capped match lists, related findings, and key suggestions on `not-found`. Runs the shared facade query core directly — the same core any embedder driving `zzop-facade`/`zzop-summary` gets identical answers from (see [napi.md](napi.md#endpoint-queries-queryio) for the full output contract). |
+| `analyze_envelope` | **Mode A**: a full Normalized AST envelope (a custom parser's output) REPLACES native parsing entirely for this run — contrast `validate_envelope` below, which only checks the envelope's shape and runs no analysis, and Mode B overlay/mount requests (`docs/NORMALIZED_AST.md`), which merge external symbols ON TOP of a natively-parsed tree instead of replacing it. Only symbol-scan/io-scan rules can fire (no source text ships in an envelope). Zero-config only — an envelope carries no filesystem location, so the reply has no `config`/`path`/`architecture`/`gitWindow` fields; otherwise the SAME shaped summary `analyze_repo` returns (findings, `packsLoaded`, `coverage`, warnings). Same `analyzeEnvelope` facade call path documented in [napi.md](napi.md#defaults-zero-config--full-analysis). |
+| `validate_envelope` | Validate a Normalized AST envelope against the v1 contract WITHOUT running an analysis — the authoring feedback loop. Returns `{valid, issues[]}`; never fails on bad input (same contract as the facade's `validateEnvelopeOnly` — see [napi.md](napi.md#validation-only-validateenvelopeonly)). |
+| `validate_rule_pack` | Validate a DSL rule pack's STRUCTURE before loading it — the exact judgments the engine's pack loader makes at load time (bad JSON, missing field, wrong type, too-new `schema_version`) plus every matcher regex that fails to compile (such a rule would load but silently never fire). Shape only, never rule-quality semantics. Returns `{valid, issues[]}`; never fails on bad input (same contract as the facade's `validateRulePackOnly`). Pair with the `rule-pack-schema` resource below. |
 
 `analyze_repo`, `cross_repo`, and `analyze_envelope` share three optional drill-down arguments, described in
 [Output contract](#output-contract) below: `severity` (`"critical" | "warning" | "info"`, minimum
@@ -162,8 +164,7 @@ top, same as the other tree-resolving tools (`analyze_repo`/`cross_repo`; `analy
 two validators take no filesystem-rooted config, so they carry neither field): `config` (which
 config file was honored, or null) and
 `configWarnings` (the config front-end's own disclosures, e.g. paths mode's ignored-config
-warning). The query-core fields are pinned and shared with the JS CLI's `zzop endpoint --json`,
-which carries the same config disclosures on stderr instead.
+warning). The query-core fields are pinned across every host that drives the shared facade query core.
 
 Tool-level failures (bad path, malformed envelope config, an unknown severity value) come back as a
 normal MCP result with `isError: true` and a `zzop error: <message>` text block — the MCP convention.
@@ -204,7 +205,7 @@ into the binary (`embedded.rs`, `include_str!` over the repo's own committed pub
 | `dsl-authoring-guide` | DSL rule authoring guide: placement, a worked example, testing conventions (`docs/rules/authoring-guide.md`). |
 | `rule-pack-schema` | JSON Schema (draft-07) for the DSL rule-pack shape — pack id, rules[], the four matcher kinds, severity, every property documented (`docs/contracts/rule-pack.schema.json`; the machine-readable twin of the `validate_rule_pack` tool). |
 | `example-envelope` | Minimal valid Mode-A envelope example (a crude JSP parser's output). |
-| `config-surface` | Machine-verified config vocabulary — every config key, dotted path, CLI flag, and embedder field zzop accepts (`packages/cli/lib/config-surface.json`, the same file `zzop-config` embeds for unknown-key warnings; its `_docs` sections self-describe). |
+| `config-surface` | Machine-verified config vocabulary — every config key, dotted path, CLI flag, and embedder field zzop accepts (`crates/config/config-surface.json`, the same file `zzop-config` embeds for unknown-key warnings; its `_docs` sections self-describe). |
 | `rule-catalog` | Every rule id the engine ships today — 14 DSL packs + all native analysis ids, with severity/matcher/suppress-marker/detection prose per rule (`docs/rules/catalog.md`) — the discoverability gap closed: `packsLoaded` gives counts only, and the `dsl-reference` resource pointed at this file without it ever being served over MCP. Pair with the `rule` tool argument on `analyze_repo`/`cross_repo`/`check_endpoint` (an id absent from this catalog never fires). |
 
 `resources/list` returns every entry above (in this order) with its `uri`/`name`/`description`/
@@ -216,20 +217,22 @@ one embedded lookup, so they can never disagree on what exists.
 
 ## Config semantics
 
-All config handling is delegated to the shared `zzop-config` crate (`crates/config`) — the same Rust
-port of the JS CLI's config front-end (`config.js` discovery + `mapper.js` mapping + the `@zzop/native` JS wrapper's
-`withDefaults` layer) that a future full-CLI Rust binary would reuse. Three things to know about how it
-behaves here specifically:
+All config handling is delegated to the shared `zzop-config` crate (`crates/config`) — the Rust-hosted
+config front end (discovery, mapping, and zero-config defaulting, ported from the removed JS CLI's
+`config.js`/`mapper.js`) that a future full-CLI Rust binary would reuse. Three things to know about how
+it behaves here specifically:
 
 - **Auto-discovery.** `analyze_repo`/`zzop-mcp analyze <path>` look for `<path>/zzop.config.jsonc`
-  (literal filename, no ancestor walk — same rule as the JS CLI). If present, it is parsed (JSONC:
-  comments and trailing commas allowed) and mapped exactly like the JS CLI's `mapper.js` would map it.
-- **Zero-config defaults.** Unlike the JS CLI (which errors without a config file), a missing config
-  produces the *same request an empty `{}` config would produce* — an MCP tool pointed at any repo must
-  still work. This still gets the full default treatment: the bundled DSL rule packs (embedded at
+  (literal filename, no ancestor walk — the same rule the removed JS CLI used). If present, it is parsed
+  (JSONC: comments and trailing commas allowed) and mapped by the same rules the JS CLI's `mapper.js`
+  used to, now ported to `zzop-config`'s Rust mapper.
+- **Zero-config defaults.** Unlike the removed JS CLI (which errored without a config file), a missing
+  config produces the *same request an empty `{}` config would produce* — an MCP tool pointed at any repo
+  must still work. This still gets the full default treatment: the bundled DSL rule packs (embedded at
   compile time by `zzop-config`'s `build.rs` and injected as inline `packDefs` — see
   [napi.md](napi.md#defaults-zero-config--full-analysis)'s note on this field) and default `git: {}`
-  collection (30-day recency) both apply, exactly as the JS wrapper's `withDefaults` would inject them.
+  collection (30-day recency) both apply, the same defaulting the removed JS wrapper's `withDefaults`
+  used to inject.
 - **`configPath` / paths-mode disclosure (`cross_repo`).** Config-first mode (`configPath`) loads that
   file directly (or a directory containing `zzop.config.jsonc`) and requires it to declare `trees` (2+,
   or `"auto"`) — a single-tree config there is a guided error pointing at `analyze_repo` instead.
@@ -239,12 +242,12 @@ behaves here specifically:
   paths mode does NOT load — pass configPath to honor it"`) rather than silently ignoring it, or
   silently loading it and surprising the caller with rules/overlays/mounts they never asked this call to
   apply.
-- **Path resolution deviates from the JS CLI in one documented way.** The JS CLI leaves `root`/
-  `cacheDir`/`packsDir` as literal strings for the analyzing process's cwd to resolve — which, in normal
-  CLI use, *is* the config file's own directory. A server host's cwd is meaningless (an MCP client can
-  invoke this binary from anywhere), so `zzop-config` resolves these path-ish config values against the
-  **config file's own directory** instead. Overlay paths are the one exception and keep JS parity
-  (resolved relative to each tree's own root, matching the JS mapper).
+- **Path resolution deviates from the removed JS CLI in one documented way.** The JS CLI used to leave
+  `root`/`cacheDir`/`packsDir` as literal strings for the analyzing process's cwd to resolve — which, in
+  normal CLI use, *was* the config file's own directory. A server host's cwd is meaningless (an MCP
+  client can invoke this binary from anywhere), so `zzop-config` resolves these path-ish config values
+  against the **config file's own directory** instead. Overlay paths are the one exception and keep the
+  same relative-to-tree-root resolution the JS mapper used.
 
 Every reply from `analyze_repo`/`cross_repo` carries `config` (the config file path honored, or `null`)
 and `configWarnings` (the config front-end's own non-fatal notes — unknown keys, a skipped/unreadable
@@ -307,8 +310,8 @@ built to never lie by omission.
   (e.g. a `be-security` pack reporting `filesInScope: 116` over an all-Java tree that trips none of its
   rules) means every one of those 116 files matched the pack's `file_pattern` scope, not that a finding
   was produced in any of them — read it as "eligible", never as a usage count. In this host's zero-config paths the bundled packs are
-  injected as inline `packDefs`, so they report `source: "inline"` (the JS wrapper's bundled packs
-  arrive as `"dir"` instead — a packaging difference, not a behavior one).
+  injected as inline `packDefs`, so they report `source: "inline"` (the removed JS wrapper's bundled
+  packs arrived as `"dir"` instead — a packaging difference, not a behavior one).
 - **`ruleOverridesApplied`** — rides through whole on every `analyze_repo` reply and per-source on
   `cross_repo`'s `sources[]` entries, same as `packsLoaded`, but omitted (not `null`) whenever the
   engine itself omits it (no `disabledRules`/`severityOverrides` requested) — see
@@ -324,7 +327,7 @@ built to never lie by omission.
 - **`disclosure`** — the engine's run-global, pinned silent-failure-class registry (identical every run;
   see [napi.md](napi.md#disclosure--silent-failure-class-registry-run-global) for the full field
   contract) rides through unfiltered on every `analyze_repo`/`cross_repo` reply, the same meta-honesty
-  channel `zzop-napi` exposes.
+  channel the shared facade exposes to every host.
 - **`architecture`** (`analyze_repo` only) — a compact, capped summary closing a disclosure asymmetry:
   the facade output carries full `health`/`recommendations`/`critical` (git-history-dependent
   structural-debt metrics — see [napi.md](napi.md)'s `AnalyzeOutputView` table), but this host's
@@ -336,8 +339,9 @@ built to never lie by omission.
   scalar); `topRecommendation` is `null`-safe `{id, severity, topItem}` built from
   `recommendations[0]` (`topItem` is that recommendation's top-ROI item's `path`, `null` when there is
   none); `criticalTop` is up to 3 file paths off the front of the engine's own blast-radius-ranked
-  `critical` list. The full arrays are never in this summary — only the `@zzop/cli` `--json` output or
-  the `@zzop/native` embedder result carries the complete per-file `recommendations`/`critical` detail.
+  `critical` list. The full arrays are never in this summary — only the raw `zzop-facade` JSON output,
+  reachable by embedding the engine (Rust crate) directly, carries the complete per-file
+  `recommendations`/`critical` detail; no shipped CLI/MCP surface emits it.
 - **`gitWindow`** (`analyze_repo` only) — the engine's own `{recentDays, since}` echo of which git
   window produced the run's numbers (always serialized by the engine, `null` when git signals did not
   run — see `crates/engine/src/output.rs`'s `GitWindow`), forwarded verbatim by name so a consumer
@@ -363,8 +367,8 @@ facade-thinning split — see the module map above).
 ## Distribution status
 
 Prebuilt, per-platform `zzop-mcp` binaries are attached to every tagged [GitHub
-Release](https://github.com/eezz4/zzop/releases) (`prebuild.yml`'s same tag-triggered build that drives
-`@zzop/native`'s npm publish — see [napi.md](napi.md#packaging-layout)): named `zzop-mcp-<platform>[.exe]`
+Release](https://github.com/eezz4/zzop/releases) (`prebuild.yml`'s tag-triggered build — see
+[napi.md](napi.md#packaging-layout)): named `zzop-mcp-<platform>[.exe]`
 for the 5 platforms `win32-x64-msvc`, `darwin-x64`, `darwin-arm64`, `linux-x64-gnu`, `linux-arm64-gnu` —
 a single static binary per platform, no Node required. Download the asset for your platform, rename/link
 it to `zzop-mcp` (`zzop-mcp.exe` on Windows), and point `.mcp.json` at it (see
@@ -372,7 +376,8 @@ it to `zzop-mcp` (`zzop-mcp.exe` on Windows), and point `.mcp.json` at it (see
 plugin install path). Building from a source checkout with the command above remains fully supported as
 an alternative to downloading a release asset.
 
-See also: [napi.md](napi.md) (the `zzop-facade` request/response contract this host drives directly, and
-the Node binding this host has no dependency on), [../NORMALIZED_AST.md](../NORMALIZED_AST.md) (the
+See also: [napi.md](napi.md) (the `zzop-facade` request/response contract this host drives directly —
+that page's own filename note explains the historical Node binding it once documented),
+[../NORMALIZED_AST.md](../NORMALIZED_AST.md) (the
 envelope contract behind `validate_envelope`/`envelope-guide`), [../adapters/README.md](../adapters/README.md)
 (adapter authoring, mirrored by the `adapter-guide` resource).

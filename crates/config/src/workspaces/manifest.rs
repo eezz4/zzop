@@ -1,4 +1,4 @@
-//! Manifest readers for `trees: "auto"` — pure move from `workspaces.rs` (300-line source cap).
+//! Manifest readers for `trees: "auto"`.
 //! Reads the workspace glob patterns from `pnpm-workspace.yaml` (minimal hand-rolled reader) or
 //! `package.json` `workspaces`, plus a package's own `name` for sourceId derivation. See the
 //! `workspaces` module doc for why this is a faithful JS port, not a general YAML/JSON parser.

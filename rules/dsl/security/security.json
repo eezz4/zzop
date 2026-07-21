@@ -11,16 +11,16 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "require_file": "\\b(?:eval|exec|spawn|new\\s+Function|dangerouslySetInnerHTML|innerHTML|document\\.write)\\b|\\$(?:query|execute)RawUnsafe\\b",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "c\\.req\\.(?:json|query|param|header|formData|text)\\s*\\(|\\b(?:req|request|_req)\\.(?:json|text|formData|arrayBuffer)\\s*\\(|searchParams\\.(?:get|getAll)\\s*\\(|\\b(?:req|request|_req)\\.(?:body|query|params|cookies)\\b|\\bprocess\\.argv\\b", "label": "source" },
-          { "pattern": "\\b(?:eval|exec|execSync|execFile|execFileSync|spawn|spawnSync)\\s*\\(|\\bnew\\s+Function\\s*\\(|\\$(?:query|execute)RawUnsafe\\b|\\bdangerouslySetInnerHTML\\b|\\bdocument\\.write\\s*\\(|\\.(?:innerHTML|outerHTML)\\s*=", "label": "sink" }
+          { "pattern": "\\b(?:eval|exec|execSync|execFile|execFileSync|spawn|spawnSync)\\s*\\(|\\bnew\\s+Function\\s*\\(|\\$(?:query|execute)RawUnsafe\\b|\\bdangerouslySetInnerHTML\\b|\\bdocument\\.write\\s*\\(|\\.(?:innerHTML|outerHTML)\\s*=[^=]", "label": "sink" }
         ],
         "trigger": "sink",
         "absent": [
-          { "pattern": "\\.parse\\s*\\(|\\b(?:escape|sanitize|validate)\\w*\\s*\\(", "label": "sanitizer" }
+          { "pattern": "\\.safeParse\\s*\\(|\\b(?:z|[A-Za-z]*[Ss]chema|[A-Za-z]*[Vv]alidator)\\s*\\.[A-Za-z]*parse\\s*\\(|\\b(?:escape|sanitize|validate)\\w*\\s*\\(", "label": "sanitizer" }
         ],
         "snippet_max": 160
       }
@@ -33,7 +33,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "\\beval\\s*\\(|\\bnew\\s+Function\\s*\\(",
         "skip_comment_lines": true,
         "any": [

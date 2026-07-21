@@ -20,6 +20,8 @@ The binary lands at `target/release/zzop-mcp` (`target/release/zzop-mcp.exe` on 
 ```sh
 zzop-mcp analyze ./my-repo
 zzop-mcp analyze-envelope ./envelope.json  # Mode A: envelope REPLACES native parsing
+zzop-mcp validate-envelope ./envelope.json # offline: well-formed? {valid,issues}, exit 0/1
+zzop-mcp validate-rule-pack ./pack.json    # offline: pack loads + regexes compile? exit 0/1
 zzop-mcp cross ./frontend ./backend
 zzop-mcp cross --config ./zzop.config.jsonc
 zzop-mcp endpoint users ./frontend ./backend
@@ -80,5 +82,6 @@ Plus a `resources/*` surface exposing ten embedded authoring-contract documents
 `zzop-mcp contract [<name>]` — no MCP client required.
 
 See [docs/modules/mcp.md](../../docs/modules/mcp.md) for the full tool/resource/config reference,
-including exact argument shapes, the output-truncation contract, and the config-resolution deviation
-from the JS CLI.
+including exact argument shapes, the output-truncation contract, and the config path-resolution rules
+(relative `path`/`configPath` arguments are resolved against the server process's cwd — pass absolute
+paths).

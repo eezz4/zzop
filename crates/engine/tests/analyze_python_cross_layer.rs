@@ -154,6 +154,72 @@ fn fe_fetch_call_joins_to_a_cross_file_fastapi_include_router_mount_across_trees
     assert!(out.cross_layer.unresolved_consumes.is_empty());
 }
 
+/// The canonical FastAPI structure: an aggregator router that mounts per-feature routers via the
+/// `import <mod>; router.include_router(<mod>.router, prefix=...)` ATTRIBUTE form, where every module
+/// conventionally names its router `router`. Pins two things at once: (1) the attribute-form mount
+/// resolves cross-file to the target module's sole router fragment, and (2) the shared `router` name
+/// does NOT poison root-exclusion — the un-mounted aggregator (also named `router`) stays a DFS root, so
+/// its whole subtree composes instead of collapsing to zero provides. Regression guard for the
+/// base-name-ident fix.
+fn attribute_form_be_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-py-attr-mount");
+    dir.write(
+        "app/api/routes/auth.py",
+        "from fastapi import APIRouter\n\nrouter = APIRouter()\n\n@router.post(\"/login\")\ndef login():\n    return {}\n",
+    );
+    dir.write(
+        "app/api/routes/items.py",
+        "from fastapi import APIRouter\n\nrouter = APIRouter()\n\n@router.get(\"/\")\ndef list_items():\n    return []\n",
+    );
+    // The aggregator: mounts BOTH feature routers via the module-attribute form, and is itself mounted by
+    // nothing (its would-be app-level mount is intentionally absent here, mirroring a non-literal-prefix
+    // skip). All three receivers are named `router`.
+    dir.write(
+        "app/api/routes/api.py",
+        concat!(
+            "from fastapi import APIRouter\n",
+            "from app.api.routes import auth, items\n",
+            "\n",
+            "router = APIRouter()\n",
+            "router.include_router(auth.router, prefix=\"/users\")\n",
+            "router.include_router(items.router, prefix=\"/items\")\n",
+        ),
+    );
+    dir
+}
+
+#[test]
+fn attribute_form_include_router_composes_without_shared_router_name_poisoning_roots() {
+    let dir = TempDir::new("zzop-engine-py-attr-fe");
+    dir.write(
+        "src/api.ts",
+        "export function login() { return fetch(\"/users/login\", { method: \"POST\" }); }\nexport function items() { return fetch(\"/items\"); }\n",
+    );
+    let be = attribute_form_be_tree();
+    let trees = vec![
+        (dir.path().to_path_buf(), config("fe")),
+        (be.path().to_path_buf(), config("be-python")),
+    ];
+    let out = analyze_trees(&trees);
+
+    let mut keys: Vec<&str> = out
+        .cross_layer
+        .edges
+        .iter()
+        .filter(|e| e.kind == "http")
+        .map(|e| e.key.as_str())
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec!["GET /items", "POST /users/login"],
+        "both attribute-form mounts must compose their prefixes; got edges {:?}",
+        out.cross_layer.edges
+    );
+    assert!(out.cross_layer.unprovided_consumes.is_empty());
+    assert!(out.cross_layer.unconsumed_provides.is_empty());
+}
+
 // --- Python dep-graph edge: `from .helpers import x` --------------------------------------------------
 
 #[test]

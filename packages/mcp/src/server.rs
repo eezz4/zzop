@@ -13,10 +13,10 @@ use std::io::{BufRead, Write};
 /// The version this binary reports as MCP `serverInfo.version`.
 ///
 /// Release builds are stamped at compile time: the prebuild workflow's zzop-mcp build step
-/// exports `ZZOP_RELEASE_VERSION` from the release tag (`v1.2.3` → `1.2.3`) — the same tag the
-/// publish job's `sync-versions.mjs` stamps into the npm packages — so the binary's reported
-/// version equals the `@zzop/cli` package version by construction. Everywhere else (local dev,
-/// CI tests, workflow_dispatch runs on a branch ref) the env var is unset and the version falls
+/// exports `ZZOP_RELEASE_VERSION` from the release tag (`v1.2.3` → `1.2.3`) — the same tag
+/// `verify-plugin-version` checks `.claude-plugin/plugin.json` against — so the binary's reported
+/// version equals the Claude Code plugin's published version by construction. Everywhere else (local
+/// dev, CI tests, workflow_dispatch runs on a branch ref) the env var is unset and the version falls
 /// back to `CARGO_PKG_VERSION`, the workspace-wide `0.0.0` placeholder.
 pub fn version() -> &'static str {
     option_env!("ZZOP_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))

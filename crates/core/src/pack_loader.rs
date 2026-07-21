@@ -54,11 +54,15 @@ pub struct LoadResult {
 }
 
 /// The single "pack JSON text -> loadable `RulePackDef`" judgment: serde deserialization (missing
-/// field / wrong type errors come back verbatim as serde's own message) followed by the
-/// schema-version gate above. This is the exact per-file step [`load_dsl_packs`] applies to every
-/// `rules/dsl/*.json`, extracted so a pre-load validator (`zzop_facade::validate_rule_pack_json`,
-/// the `validate_rule_pack` MCP tool / `zzop pack validate` CLI) surfaces the SAME verdicts the
-/// loader would produce at load time — one path, no forked logic.
+/// field / wrong type errors come back verbatim as serde's own message), the schema-version gate above,
+/// then `RulePackDef::expand_fragments` — an unknown or malformed `${NAME}` fragment reference fails the
+/// load exactly like a bad JSON body does, never a silent passthrough. This is the exact per-file step
+/// [`load_dsl_packs`] applies to every `rules/dsl/*.json`, extracted so a pre-load validator
+/// (`zzop_facade::validate_rule_pack_json`, the `validate_rule_pack` MCP tool / `zzop-mcp validate-rule-pack` CLI)
+/// surfaces the SAME verdicts the loader would produce at load time — one path, no forked logic. The
+/// returned pack's `fragments` map is always empty (see `expand_fragments`'s doc) — every pattern-bearing
+/// field already carries its resolved regex text, so nothing downstream (hashing, `RegexSet` prefilter,
+/// eval) needs to know fragments ever existed.
 pub fn parse_dsl_pack(text: &str) -> Result<RulePackDef, String> {
     // A JSON ARRAY root is a special case — see `zzop_core::normalized::validate_envelope`'s identical
     // guard for the full rationale. `RulePackDef`'s derived `Deserialize` accepts a sequence as well as
@@ -74,7 +78,9 @@ pub fn parse_dsl_pack(text: &str) -> Result<RulePackDef, String> {
         return Err("expected a JSON object rule pack, got an array".to_string());
     }
     match serde_json::from_str::<RulePackDef>(text) {
-        Ok(pack) => check_dsl_schema_version(&pack).map(|()| pack),
+        Ok(mut pack) => check_dsl_schema_version(&pack)
+            .and_then(|()| pack.expand_fragments().map_err(|e| e.to_string()))
+            .map(|()| pack),
         Err(err) => Err(err.to_string()),
     }
 }

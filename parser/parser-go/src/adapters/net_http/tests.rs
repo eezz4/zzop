@@ -26,29 +26,25 @@ fn handlefunc_with_go122_verb_pattern() {
 }
 
 #[test]
-fn handlefunc_without_leading_verb_uses_fallback_convention() {
+fn handlefunc_without_leading_verb_emits_unknown_verb_sentinel() {
     let src = "package main\n\nimport \"net/http\"\n\nfunc main() {\n\thttp.HandleFunc(\"/users\", h)\n}\n";
     let frags = extract_go_router_fragments("a.go", src);
-    let got = verb_paths(&frags, "http");
-    let want: Vec<(String, String)> = GO_HANDLEFUNC_FALLBACK_VERBS
-        .iter()
-        .map(|v| (v.to_string(), "/users".to_string()))
-        .collect();
-    assert_eq!(got, want);
-    // pinned to the same convention the task brief points at.
-    assert_eq!(GO_HANDLEFUNC_FALLBACK_VERBS, ["GET", "POST"]);
+    // No leading method token -> serves every method, statically unknown: ONE UNKNOWN_VERB sentinel
+    // entry (`?`), not fabricated GET+POST.
+    assert_eq!(
+        verb_paths(&frags, "http"),
+        vec![("?".to_string(), "/users".to_string())]
+    );
 }
 
 #[test]
 fn handle_call_is_recognized_like_handlefunc() {
     let src = "package main\n\nimport \"net/http\"\n\nfunc main() {\n\thttp.Handle(\"/static/\", handler)\n}\n";
     let frags = extract_go_router_fragments("a.go", src);
+    // No leading method token -> one UNKNOWN_VERB sentinel entry (`?`), not fabricated GET+POST.
     assert_eq!(
         verb_paths(&frags, "http"),
-        vec![
-            ("GET".to_string(), "/static/".to_string()),
-            ("POST".to_string(), "/static/".to_string())
-        ]
+        vec![("?".to_string(), "/static/".to_string())]
     );
 }
 

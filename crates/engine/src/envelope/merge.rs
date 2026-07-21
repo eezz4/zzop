@@ -118,6 +118,9 @@ pub(super) fn synthetic_artifact_from_projection(
         // through this struct.)
         re_exports: projection.re_exports.clone(),
         dynamic_imports: projection.dynamic_imports.clone(),
+        // Envelope/overlay-projected files carry no natively-captured runtime asset refs (the
+        // `parse_asset_refs` capture runs only in the fresh native pass) — always empty here.
+        asset_refs: Vec::new(),
         loc: projection.loc,
         findings: Vec::new(),
         degraded: false,

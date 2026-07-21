@@ -31,6 +31,24 @@ fn strict_equality_compare_of_a_non_secret_identifier_is_not_flagged() {
 }
 
 #[test]
+fn metadata_identifier_compared_to_a_string_literal_is_not_flagged() {
+    // `tokenType === 'Bearer'` compares a metadata/scheme identifier (whose name merely contains a
+    // secret-shaped word) against a PUBLIC string literal — no secret value on either side, so no
+    // timing signal. Regression pin for the string-literal-RHS false-positive.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "declare const tokenType: string;\nexport function isBearer() {\n  return tokenType === 'Bearer';\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "timing-unsafe-compare").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
 fn timing_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(

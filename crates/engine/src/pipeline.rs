@@ -18,6 +18,7 @@ use crate::cache::CacheCounters;
 use crate::EngineConfig;
 
 mod artifact;
+mod csharp_index;
 pub(crate) mod findings;
 mod fresh;
 mod go_module;
@@ -31,6 +32,7 @@ mod testutil;
 mod tsconfig;
 mod walking;
 
+pub(crate) use csharp_index::{scan_csharp_index, CSharpIndex};
 pub(crate) use findings::schema_usage_findings;
 pub(crate) use go_module::{
     governing_go_module, join_dir as go_module_join_dir, scan_go_modules, GoModuleMap,
@@ -78,6 +80,14 @@ pub(crate) struct FileArtifact {
     /// invisible to the dep graph and false-positived `dead-candidates`). Empty for non-TypeScript/degraded
     /// files, same convention as `re_exports`.
     pub dynamic_imports: Vec<String>,
+    /// This file's runtime asset-URL references (`parse_asset_refs`: `AudioWorklet.addModule`,
+    /// `new Worker`/`new SharedWorker`, `importScripts`, `new URL(<path>, import.meta.url)`) as RAW,
+    /// unresolved path strings — `analyze::assemble`'s substrate for `merge_asset_ref_fan_in`, which
+    /// resolves each against the tree's `public/`/`static/` root (or a relative module path) and bumps
+    /// the target's fan-in WITHOUT adding a dep node (mirroring the SFC fan-in bump), so a `public/*.js`
+    /// worklet/worker loaded only by URL string is not a `dead-candidates` false positive. Empty for
+    /// non-TypeScript/degraded files, same convention as `dynamic_imports`.
+    pub asset_refs: Vec<String>,
     pub loc: u32,
     pub findings: Vec<zzop_core::Finding>,
     pub degraded: bool,

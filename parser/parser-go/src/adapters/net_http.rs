@@ -25,11 +25,9 @@
 //! - **Pattern parsing (Go 1.22+ method-in-pattern syntax)**: a pattern literal may lead with an
 //!   UPPERCASE `zzop_core::HTTP_KEY_VERBS` token followed by a single space (`"GET /users"`) — split
 //!   into `(method, path)` and emit ONE `Verb` entry. A pattern with NO leading verb token serves
-//!   every method; per the task brief's own direction, this mirrors the engine's
-//!   `PAGES_API_FALLBACK_VERBS` / `zzop_parser_typescript::PATHNAME_DISPATCH_FALLBACK_VERBS`
-//!   established "no method visible" convention (`["GET", "POST"]`, pinned here as
-//!   [`GO_HANDLEFUNC_FALLBACK_VERBS`]) rather than guessing a single verb: TWO `Verb` entries are
-//!   emitted, one per fallback method, both carrying the SAME path. A pattern (after stripping any
+//!   every method, statically unknown: emit ONE [`zzop_core::UNKNOWN_VERB`] sentinel `Verb` entry (not
+//!   a fabricated `[GET, POST]`) — the engine lifts a `"? <path>"` key out of the exact-key join into
+//!   the `cross-layer/unknown-verb-route` disclosure channel. A pattern (after stripping any
 //!   leading verb token) that does not start with `/` — Go 1.22 patterns may ALSO lead with a host,
 //!   e.g. `"example.com/path"` or `"GET example.com/path"` — is skipped entirely: disambiguating a
 //!   host prefix from a rooted path without reimplementing `net/http`'s own pattern grammar would be
@@ -48,13 +46,6 @@ use zzop_core::{ImportMap, RouterMountEntry, RouterMountFragment, HTTP_KEY_VERBS
 use crate::util::{node_text, string_literal_text, valid_named_children};
 
 use super::{append_entries, bare_identifier, nth_arg, single_rhs_call, single_target_name};
-
-/// Verbs emitted for a `net/http` pattern that names no leading method token — module doc; mirrors
-/// the engine's `PAGES_API_FALLBACK_VERBS` / `zzop_parser_typescript::PATHNAME_DISPATCH_FALLBACK_VERBS`
-/// value exactly (documented parity only: this crate has no dependency edge to either of those crates
-/// to write an executable cross-crate equality pin against, unlike `crates/engine`'s own pin test
-/// against its `parser-typescript` dependency).
-pub const GO_HANDLEFUNC_FALLBACK_VERBS: [&str; 2] = ["GET", "POST"];
 
 const VERB_METHODS: &[&str] = &["HandleFunc", "Handle"];
 
@@ -192,10 +183,10 @@ fn pattern_entries(pattern: &str, handler: Option<String>, line: u32) -> Vec<Rou
     if !pattern.starts_with('/') {
         return Vec::new();
     }
-    GO_HANDLEFUNC_FALLBACK_VERBS
-        .iter()
-        .map(|v| verb_entry(v, pattern, handler.clone(), line))
-        .collect()
+    // Pattern names no leading method token -> serves every method, statically unknown. Emit ONE
+    // UNKNOWN_VERB sentinel entry (not fabricated GET+POST) — the engine lifts a `"? <path>"` key out
+    // of the exact-key join into the `cross-layer/unknown-verb-route` disclosure channel.
+    vec![verb_entry(zzop_core::UNKNOWN_VERB, pattern, handler, line)]
 }
 
 fn split_leading_verb(pattern: &str) -> Option<(&str, &str)> {

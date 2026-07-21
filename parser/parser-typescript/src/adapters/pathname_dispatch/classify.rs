@@ -1,12 +1,10 @@
-// ---------------------------------------------------------------------------------------------
 // Test/conjunct classification
-// ---------------------------------------------------------------------------------------------
 
 use swc_core::common::BytePos;
 use swc_core::ecma::ast::{BinaryOp, Expr, Lit};
 use zzop_core::HTTP_KEY_VERBS;
 
-use super::ctx::{is_method_receiver, is_pathname_receiver, FnCtx};
+use super::ctx::{is_method_receiver, is_pathname_receiver, pathname_match_route, FnCtx};
 use super::push_unique;
 
 fn unwrap_parens(mut expr: &Expr) -> &Expr {
@@ -86,6 +84,51 @@ fn path_test(expr: &Expr, ctx: &FnCtx) -> Option<(String, BytePos)> {
     Some((path, b.span.lo))
 }
 
+/// A `pathname.match(/re/)` path test: either a bare reference to a `const m = pathname.match(...)`
+/// binding (recorded in `ctx.pathname_match_routes` by the binding collector) or an inline
+/// `pathname.match(/re/)` call, in each case optionally compared `!== null`/`!= null`. Returns the
+/// converted route path and a span (the regex literal's, for `IoProvide::line`).
+fn match_path_test(expr: &Expr, ctx: &FnCtx) -> Option<(String, BytePos)> {
+    let e = strip_null_compare(unwrap_parens(expr));
+    match e {
+        // `if (verifyMatch && ...)` — a reference to the recorded match binding.
+        Expr::Ident(id) => ctx
+            .pathname_match_routes
+            .get(id.sym.as_str())
+            .map(|(path, pos)| (path.clone(), *pos)),
+        // `if (pathname.match(/re/) && ...)` — the match inline in the test (same recognizer the
+        // binding collector uses, applied with this function's own provenance sets).
+        Expr::Call(_) => pathname_match_route(e, &ctx.pathname_aliases, &ctx.url_provenanced),
+        _ => None,
+    }
+}
+
+/// Either a literal `pathname === "..."` path test or a `pathname.match(/re/)` one.
+fn path_test_any(expr: &Expr, ctx: &FnCtx) -> Option<(String, BytePos)> {
+    path_test(expr, ctx).or_else(|| match_path_test(expr, ctx))
+}
+
+/// Unwraps a `<x> !== null`/`<x> != null`/`<x> !== undefined` truthiness guard to `<x>` (either
+/// operand order); returns `expr` unchanged when it is not such a null comparison.
+fn strip_null_compare(expr: &Expr) -> &Expr {
+    let Expr::Bin(b) = expr else { return expr };
+    if !matches!(b.op, BinaryOp::NotEq | BinaryOp::NotEqEq) {
+        return expr;
+    }
+    let (l, r) = (unwrap_parens(&b.left), unwrap_parens(&b.right));
+    if is_null_or_undefined(r) {
+        l
+    } else if is_null_or_undefined(l) {
+        r
+    } else {
+        expr
+    }
+}
+
+fn is_null_or_undefined(e: &Expr) -> bool {
+    matches!(e, Expr::Lit(Lit::Null(_))) || matches!(e, Expr::Ident(id) if id.sym == "undefined")
+}
+
 /// A single verb mention: `===`/`==`/`!==`/`!=` (mentioned-verb semantics — module doc), either
 /// operand order, between a method-provenanced receiver and an `HTTP_KEY_VERBS` literal.
 fn verb_test(expr: &Expr, ctx: &FnCtx) -> Option<String> {
@@ -129,7 +172,7 @@ pub(super) fn classify_conjunct(expr: &Expr, ctx: &FnCtx) -> Conjunct {
             return classify_or_disjuncts(&split_or(e), ctx);
         }
     }
-    if let Some(p) = path_test(e, ctx) {
+    if let Some(p) = path_test_any(e, ctx) {
         return Conjunct::Paths(vec![p]);
     }
     if let Some(v) = verb_test(e, ctx) {
@@ -142,7 +185,7 @@ fn classify_or_disjuncts(disjuncts: &[&Expr], ctx: &FnCtx) -> Conjunct {
     let mut paths = Vec::new();
     let mut all_path = true;
     for d in disjuncts {
-        match path_test(d, ctx) {
+        match path_test_any(d, ctx) {
             Some(p) => paths.push(p),
             None => {
                 all_path = false;

@@ -139,7 +139,8 @@ fn zero_interpolation_template_literal_path_is_emitted() {
         "}\n"
     );
     let out = extract_pathname_dispatch_provides("w.ts", src);
-    assert_eq!(keys(&out), vec!["GET /t", "POST /t"]);
+    // No method comparison in the block -> one UNKNOWN_VERB sentinel provide (`?`), not fabricated GET+POST.
+    assert_eq!(keys(&out), vec!["? /t"]);
 }
 
 // -- Key normalization sanity: double slashes / trailing slash collapse via http_interface_key --

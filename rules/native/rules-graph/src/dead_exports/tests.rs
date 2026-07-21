@@ -39,6 +39,7 @@ fn file(name: &str, exports: Vec<DeadExportCandidate>) -> DeadExportInputFile {
         re_exports: Vec::new(),
         dynamic_imports: Vec::new(),
         used_names: HashSet::new(),
+        is_generated: false,
     }
 }
 
@@ -220,11 +221,68 @@ fn nextjs_app_router_convention_files_are_framework_entries() {
 }
 
 #[test]
+fn sveltekit_route_and_hook_convention_files_are_framework_entries() {
+    // SvelteKit invokes `load`/`actions` (`+page(.server)`/`+layout(.server)`), `handle`/`handleError`
+    // (`hooks.{server,client}`), and `GET`/`POST` (`+server`) by EXACT name via its file-based routing +
+    // hooks contract — zero in-repo importers, so they must not read as dead (dogfood fe-svelte: these
+    // were the dominant dead-export FP class). `.js` and `.ts` both.
+    let files = vec![
+        file(
+            "src/routes/+page.server.js",
+            vec![
+                export("load", SourceSymbolKind::Function),
+                export("actions", SourceSymbolKind::Const),
+            ],
+        ),
+        file(
+            "src/routes/+layout.server.ts",
+            vec![export("load", SourceSymbolKind::Function)],
+        ),
+        file(
+            "src/hooks.server.js",
+            vec![
+                export("handle", SourceSymbolKind::Function),
+                export("handleError", SourceSymbolKind::Function),
+            ],
+        ),
+        file(
+            "src/routes/api/articles/+server.ts",
+            vec![
+                export("GET", SourceSymbolKind::Function),
+                export("POST", SourceSymbolKind::Function),
+            ],
+        ),
+    ];
+    assert!(find_dead_exports(&files, resolve).is_empty());
+}
+
+#[test]
 fn test_and_mock_dirs_are_excluded_at_source_stage() {
     let files = vec![file(
         "src/__test__/x.test.ts",
         vec![export("fixture", SourceSymbolKind::Function)],
     )];
+    assert!(find_dead_exports(&files, resolve).is_empty());
+}
+
+#[test]
+fn test_runner_directory_and_setup_files_are_excluded_at_source_stage() {
+    // `playwright/`-dir files (shared `zzop_core::is_test_file` SSOT) and config-loaded setup entries
+    // (`is_tool_entry_file`) are runner/config-loaded, never imported — their exports are not dead.
+    let files = vec![
+        file(
+            "playwright/global.setup.ts",
+            vec![export("globalSetup", SourceSymbolKind::Function)],
+        ),
+        file(
+            "playwright/utils/test-decorators.ts",
+            vec![export("step", SourceSymbolKind::Function)],
+        ),
+        file(
+            "src/setup-tests.ts",
+            vec![export("setupVitest", SourceSymbolKind::Function)],
+        ),
+    ];
     assert!(find_dead_exports(&files, resolve).is_empty());
 }
 
@@ -543,6 +601,39 @@ fn ordinary_never_imported_export_in_a_normal_file_is_still_dead() {
             reason: DeadExportReason::Unused,
         }]
     );
+}
+
+#[test]
+fn generated_file_export_is_not_a_dead_candidate() {
+    // A file the engine flagged `is_generated` (author-declared `@generated`/"DO NOT EDIT" banner) is
+    // regenerated, never hand-edited — an un-export finding there is non-actionable, so it's skipped whole.
+    let files = vec![DeadExportInputFile {
+        is_generated: true,
+        ..file(
+            "src/client/sdk.gen.ts",
+            vec![
+                export("getUser", SourceSymbolKind::Function),
+                export("createUser", SourceSymbolKind::Function),
+            ],
+        )
+    }];
+    assert!(find_dead_exports(&files, resolve).is_empty());
+}
+
+#[test]
+fn generated_files_imports_still_keep_a_normal_files_export_alive() {
+    // The skip is dead-check-only: a generated file's imports must still count, or a symbol used solely
+    // by generated code would look dead. Here `a.ts#Foo` is imported only by the generated file.
+    let files = vec![
+        file("a.ts", vec![export("Foo", SourceSymbolKind::Function)]),
+        DeadExportInputFile {
+            is_generated: true,
+            imports: import_of("./a.ts", "Foo"),
+            ..file("gen.ts", vec![export("gened", SourceSymbolKind::Function)])
+        },
+    ];
+    // Neither `a.ts#Foo` (imported by the generated file) nor `gen.ts#gened` (generated) is reported.
+    assert!(find_dead_exports(&files, resolve).is_empty());
 }
 
 /// Pins the exact rendered message — regression coverage for the `disable_hint` splice

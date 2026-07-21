@@ -1,5 +1,5 @@
-//! Glob expansion + matching engine for `trees: "auto"` — pure move from `workspaces.rs` (300-line
-//! source cap). Resolves positive workspace patterns segment-by-segment against real directories and
+//! Glob expansion + matching engine for `trees: "auto"`. Resolves positive workspace patterns
+//! segment-by-segment against real directories and
 //! applies `!`-negations as whole-path filters; the census-pinned `SKIP_DIRS`/`MAX_GLOB_DEPTH`
 //! constants stay in the parent module. See the `workspaces` module doc for the JS-parity mandate.
 

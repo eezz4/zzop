@@ -1,5 +1,5 @@
 //! Controller-decorator-shape HTTP route PROVIDES extraction — swc-AST-based (mirrors
-//! `zzop_parser_java::provides`'s Spring extractor: class-level prefix + method-level verb/path,
+//! `zzop_parser_java_21::provides`'s Spring extractor: class-level prefix + method-level verb/path,
 //! class gated on a controller marker, ambiguous-verb decorators skipped rather than guess-emitted).
 //! Walks the real swc AST (`Class`/`Decorator`/`Function` nodes) instead of reconstructing an
 //! annotation block from text. Generic over any framework using this decorator SHAPE — recognizes
@@ -33,7 +33,7 @@
 //!   bare decorator (empty path), a string literal, or an array of string literals (one provide per
 //!   entry, mirroring Nest's own per-entry registration). A non-literal/mixed path skips the method.
 //! - `@All` is deliberately skipped rather than guess-emitting one of the five verbs — mirrors
-//!   `zzop_parser_java::provides`'s ambiguous bare `@RequestMapping` skip.
+//!   `zzop_parser_java_21::provides`'s ambiguous bare `@RequestMapping` skip.
 //! - Every decorator on a method is scanned for a route-verb name (or `@All`), not just the first,
 //!   so other decorators (`@UseGuards`, `@ApiTags`, ...) and decorator order never matter.
 //!
@@ -43,7 +43,7 @@
 //!   annotation extractor; the required double collision makes it vanishingly rare).
 //! - Method-level `@Version()` overrides are not read.
 //! - An array `path` prefix (`{ path: ['a','b'] }`) takes only the first literal entry, same
-//!   "first wins" simplification as `zzop_parser_java::provides`'s `first_quoted_string`.
+//!   "first wins" simplification as `zzop_parser_java_21::provides`'s `first_quoted_string`.
 //! - Nested/child controllers, nested classes, `applyDecorators`, and inherited/abstract controller
 //!   base classes are not detected — only a direct class-level decorator gates its own methods.
 //!

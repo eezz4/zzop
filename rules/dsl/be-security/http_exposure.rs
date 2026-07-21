@@ -31,6 +31,25 @@ fn cookie_set_with_httponly_option_is_not_flagged() {
 }
 
 #[test]
+fn cookie_set_with_httponly_false_is_flagged() {
+    // `httpOnly: false` is the WORST case — an explicitly script-readable session cookie — and must not be
+    // vetoed by the mere presence of the `httpOnly` token. Only `httpOnly: true` is the safe form.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "declare const res: any;\ndeclare const token: string;\nexport function login() {\n  res.cookie(\"session\", token, { httpOnly: false });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "insecure-cookie");
+    assert_eq!(
+        h.len(),
+        1,
+        "httpOnly: false must still flag: {:?}",
+        out.findings
+    );
+}
+
+#[test]
 fn cookie_ok_marker_above_the_cookie_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(

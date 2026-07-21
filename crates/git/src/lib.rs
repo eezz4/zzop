@@ -21,6 +21,16 @@ pub use parse::parse_git_log;
 
 use zzop_core::{CommitFileSet, GitStats};
 
+/// The single source of the `(?i)` prefix (+ any future flags) used to compile a caller-supplied
+/// `git.commitTypePatterns` regex. Both [`tags::CommitClassifiers::compile`] (this crate's own USE
+/// site) and `zzop_engine`'s `warn_on_invalid_commit_type_patterns` validator (the DETECT site, which
+/// cannot name `CommitClassifiers` — it is `pub(crate)` to this crate) call this so the two verdicts
+/// can never drift: whatever this function accepts/rejects is exactly what a commit tag classifier
+/// does with the same pattern.
+pub fn compile_commit_type_pattern(src: &str) -> Result<regex::Regex, regex::Error> {
+    regex::Regex::new(&format!("(?i){src}"))
+}
+
 /// One `git log --numstat` pass's output: per-file stats + per-commit file sets + the covered window.
 #[derive(Debug, Clone, Default)]
 pub struct GitCollection {

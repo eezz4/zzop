@@ -206,7 +206,7 @@ fn fetch_in_while_loop_condition_header_is_flagged() {
 /// REDDIT-shape data adapter: one fetch, then the JSON response is TRANSFORMED via `.map()` over a
 /// multi-line destructuring callback. The fetch line is not textually inside the map callback's span, so
 /// the trigger never satisfies inside a loop span and the rule stays silent — the universal false-positive
-/// shape (11/11 on the mono-hub corpus) this rewrite targets.
+/// shape this rewrite targets.
 #[test]
 fn single_fetch_then_response_array_map_transform_reddit_shape_is_not_flagged() {
     let f = scan(

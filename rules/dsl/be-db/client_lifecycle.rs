@@ -50,7 +50,7 @@ fn prisma_client_ok_marker_directly_above_the_new_client_line_suppresses_the_fin
 
 #[test]
 fn fetch_response_variable_named_res_is_not_handler_context_evidence() {
-    // Field FP fix (mono-hub 0.10.0): a bare `res` identifier bound to a fetch Response satisfied the old
+    // A bare `res` identifier bound to a fetch Response satisfied the old
     // naive handler-context vocabulary (`\b(req|res|ctx|request|reply)\b`), making a `new PrismaClient()`
     // call inside a plain data-fetching helper look like a request handler. The new evidence requires a
     // `req.`/`request.` member access or a response-API CALL fetch's own Response shape doesn't have

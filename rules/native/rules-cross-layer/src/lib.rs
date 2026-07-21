@@ -43,6 +43,7 @@ pub fn register_native_analyses(registry: &mut RuleRegistry) {
         ("cross-layer/sdk-import-no-visible-consume", Severity::Info),
         ("cross-layer/unconsumed-procedure", Severity::Info),
         ("cross-layer/body-field-drift", Severity::Warning),
+        ("cross-layer/unknown-verb-route", Severity::Info),
     ];
     for &(id, default_severity) in analyses {
         register_native_analysis_stub(registry, id, default_severity);
@@ -55,11 +56,12 @@ pub use cross_layer::{
     external_duplicated_integration_findings, external_host_fanout_findings,
     external_ip_literal_findings, external_secret_in_url_findings,
     external_shadow_internal_findings, external_version_inconsistent_findings,
-    majority_unresolved_http_sources, method_mismatch_findings, path_near_miss_findings,
-    prefix_drift_findings, retain_non_subsumed, route_near_miss_findings,
+    is_trpc_mount_route_path, majority_unresolved_http_sources, method_mismatch_findings,
+    path_near_miss_findings, prefix_drift_findings, retain_non_subsumed, route_near_miss_findings,
     sdk_import_no_visible_consume_findings, shared_db_table_findings,
     trpc_mount_route_suppression_notes, unconsumed_endpoint_findings,
     unconsumed_mutation_endpoint_findings, unconsumed_procedure_findings,
-    unprovided_mutation_call_findings, unresolved_consume_ratio_findings, version_skew_findings,
-    HttpProvideSite, PackageImportSite,
+    unknown_verb_route_findings, unprovided_mutation_call_findings,
+    unresolved_consume_ratio_findings, version_skew_findings, HttpProvideSite, PackageImportSite,
+    UnknownVerbRouteSite,
 };

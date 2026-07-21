@@ -4,6 +4,7 @@
 use super::*;
 
 mod guards;
+mod regex;
 mod shapes;
 
 fn keys(out: &[IoProvide]) -> Vec<String> {

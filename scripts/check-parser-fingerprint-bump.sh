@@ -162,6 +162,105 @@ if [ -n "$core_changed" ]; then
   fi
 fi
 
+# --- DSL interpreter surface (crates/core/src/dsl) ---
+# A DSL pack's own JSON content already self-invalidates via `{pack:?}` in the ruleset fingerprint,
+# but the *interpreter* that walks that JSON (matcher evaluation, the suppress-marker window,
+# MethodScan's trigger-in-loop containment gate, ...) is pure Rust logic with no pack content to
+# hash — a semantics-only change here alters findings for byte-identical source AND identical pack
+# content, invisible to every parser's own PARSER_FINGERPRINT and to a pack's own hash alike. The
+# invalidator for that gap is DSL_INTERPRETER_FINGERPRINT (crates/engine/src/cache.rs — see its own
+# doc comment for the bump scheme); CACHE_SCHEMA_VERSION (a bulk wipe) is also accepted, same as the
+# core shared-type-surface check above. Scope: the interpreter's own src tree only — rules/dsl/*.json
+# pack content and DSL rule catalogs elsewhere are not the interpreter itself.
+dsl_changed="$(printf '%s\n' "$changed_files" | grep -E '^crates/core/src/dsl/' || true)"
+if [ -n "$dsl_changed" ]; then
+  if grep -qF "[no-projection-change: dsl]" <<< "$commit_messages"; then
+    echo "check-parser-fingerprint-bump: dsl — crates/core/src/dsl/** changed but skipped via [no-projection-change: dsl] marker."
+  else
+    dsl_fp_files="$(grep -rlE '^[[:space:]]*(pub[[:space:]]+)?const DSL_INTERPRETER_FINGERPRINT' crates/*/src 2>/dev/null || true)"
+    dsl_fp_count="$(printf '%s' "$dsl_fp_files" | grep -c . || true)"
+    dsl_fp_file="$(printf '%s\n' "$dsl_fp_files" | head -n1)"
+    schema_files="$(grep -rlE '^[[:space:]]*pub const CACHE_SCHEMA_VERSION' crates/*/src 2>/dev/null || true)"
+    schema_count="$(printf '%s' "$schema_files" | grep -c . || true)"
+    schema_file="$(printf '%s\n' "$schema_files" | head -n1)"
+    if [ -z "$dsl_fp_file" ]; then
+      echo "check-parser-fingerprint-bump: dsl — no '(pub )const DSL_INTERPRETER_FINGERPRINT' found under crates/*/src; cannot verify the interpreter-semantics bump." >&2
+      fail=1
+    elif [ "$dsl_fp_count" -ne 1 ]; then
+      echo "check-parser-fingerprint-bump: dsl — expected exactly one 'const DSL_INTERPRETER_FINGERPRINT' under crates/*/src, found $dsl_fp_count:" >&2
+      printf '    %s\n' $dsl_fp_files >&2
+      fail=1
+    elif [ -z "$schema_file" ] || [ "$schema_count" -ne 1 ]; then
+      # Same exactly-one enforcement as the core shared-type-surface check above -- reuse its
+      # verdict instead of re-deriving a second, possibly-divergent judgment about CACHE_SCHEMA_VERSION.
+      echo "check-parser-fingerprint-bump: dsl — could not uniquely resolve CACHE_SCHEMA_VERSION under crates/*/src (found $schema_count); cannot check the escape valve." >&2
+      fail=1
+    else
+      dsl_fp_diff="$(git diff -U0 "$range" -- "$dsl_fp_file" 2>/dev/null | grep -E '^[+-][[:space:]]*(pub[[:space:]]+)?const DSL_INTERPRETER_FINGERPRINT' || true)"
+      schema_diff="$(git diff -U0 "$range" -- "$schema_file" 2>/dev/null | grep -E '^[+-][[:space:]]*pub const CACHE_SCHEMA_VERSION' || true)"
+      if [ -z "$dsl_fp_diff" ] && [ -z "$schema_diff" ]; then
+        echo "check-parser-fingerprint-bump: crates/core/src/dsl/** changed in $range but neither DSL_INTERPRETER_FINGERPRINT (in $dsl_fp_file) nor CACHE_SCHEMA_VERSION (in $schema_file) was bumped:" >&2
+        printf '    %s\n' $dsl_changed >&2
+        echo "  Stale-cache risk: the DSL interpreter's own semantics are not covered by any pack's content hash or any parser's" >&2
+        echo "  PARSER_FINGERPRINT -- an unbumped token means a change to how the interpreter matches/evaluates could keep being" >&2
+        echo "  served from a stale per-file findings cache entry." >&2
+        echo "  Fix: bump DSL_INTERPRETER_FINGERPRINT's trailing counter in $dsl_fp_file (see its own doc comment for the scheme)." >&2
+        echo "  Escape hatch: if this change provably does not alter any DSL rule's findings, add" >&2
+        echo "  '[no-projection-change: dsl]' to a commit message in the range." >&2
+        fail=1
+      fi
+    fi
+  fi
+fi
+
+# --- Structural rule-schema surface (rules/native/rules-schema/src) ---
+# zzop_rules_schema's native (non-DSL) Prisma rule logic has no pack JSON to hash into the ruleset
+# fingerprint the way a DSL pack does -- its version counter is STRUCTURAL_RULES_VERSION
+# (rules/native/rules-schema/src/structural.rs), folded into the fingerprint via
+# `schema_structural_fingerprint()` in crates/engine/src/cache.rs. A change anywhere under this
+# crate's src/** (a rule body, a MESSAGE template, disable-hint text, the shared schema IR types it
+# walks) can change `schema/*` finding content for byte-identical source without touching that
+# fingerprint unless STRUCTURAL_RULES_VERSION itself is bumped; CACHE_SCHEMA_VERSION (a bulk wipe)
+# is also accepted, same escape valve as the two checks above.
+schema_src_changed="$(printf '%s\n' "$changed_files" | grep -E '^rules/native/rules-schema/src/' || true)"
+if [ -n "$schema_src_changed" ]; then
+  if grep -qF "[no-projection-change: rules-schema]" <<< "$commit_messages"; then
+    echo "check-parser-fingerprint-bump: rules-schema — rules/native/rules-schema/src/** changed but skipped via [no-projection-change: rules-schema] marker."
+  else
+    struct_fp_files="$(grep -rlE '^[[:space:]]*pub const STRUCTURAL_RULES_VERSION' rules/native/*/src 2>/dev/null || true)"
+    struct_fp_count="$(printf '%s' "$struct_fp_files" | grep -c . || true)"
+    struct_fp_file="$(printf '%s\n' "$struct_fp_files" | head -n1)"
+    schema_files="$(grep -rlE '^[[:space:]]*pub const CACHE_SCHEMA_VERSION' crates/*/src 2>/dev/null || true)"
+    schema_count="$(printf '%s' "$schema_files" | grep -c . || true)"
+    schema_file="$(printf '%s\n' "$schema_files" | head -n1)"
+    if [ -z "$struct_fp_file" ]; then
+      echo "check-parser-fingerprint-bump: rules-schema — no 'pub const STRUCTURAL_RULES_VERSION' found under rules/native/*/src; cannot verify the bump." >&2
+      fail=1
+    elif [ "$struct_fp_count" -ne 1 ]; then
+      echo "check-parser-fingerprint-bump: rules-schema — expected exactly one 'pub const STRUCTURAL_RULES_VERSION' under rules/native/*/src, found $struct_fp_count:" >&2
+      printf '    %s\n' $struct_fp_files >&2
+      fail=1
+    elif [ -z "$schema_file" ] || [ "$schema_count" -ne 1 ]; then
+      echo "check-parser-fingerprint-bump: rules-schema — could not uniquely resolve CACHE_SCHEMA_VERSION under crates/*/src (found $schema_count); cannot check the escape valve." >&2
+      fail=1
+    else
+      struct_fp_diff="$(git diff -U0 "$range" -- "$struct_fp_file" 2>/dev/null | grep -E '^[+-][[:space:]]*pub const STRUCTURAL_RULES_VERSION' || true)"
+      schema_diff="$(git diff -U0 "$range" -- "$schema_file" 2>/dev/null | grep -E '^[+-][[:space:]]*pub const CACHE_SCHEMA_VERSION' || true)"
+      if [ -z "$struct_fp_diff" ] && [ -z "$schema_diff" ]; then
+        echo "check-parser-fingerprint-bump: rules/native/rules-schema/src/** changed in $range but neither STRUCTURAL_RULES_VERSION (in $struct_fp_file) nor CACHE_SCHEMA_VERSION (in $schema_file) was bumped:" >&2
+        printf '    %s\n' $schema_src_changed >&2
+        echo "  Stale-cache risk: zzop-cache folds STRUCTURAL_RULES_VERSION into the ruleset fingerprint for every" >&2
+        echo "  Prisma schema/* finding; an unbumped token means a rule-body/message/disable-hint change here could" >&2
+        echo "  keep being served from a stale per-file findings cache entry." >&2
+        echo "  Fix: bump STRUCTURAL_RULES_VERSION in $struct_fp_file." >&2
+        echo "  Escape hatch: if this change provably does not alter any schema/* finding's output, add" >&2
+        echo "  '[no-projection-change: rules-schema]' to a commit message in the range." >&2
+        fail=1
+      fi
+    fi
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "check-parser-fingerprint-bump: FAILED." >&2
   exit 1

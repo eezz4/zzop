@@ -6,12 +6,12 @@
 //! ## Guard vocabulary
 //! [`DEFAULT_AUTH_GUARD_PATTERN`] is matched against (name-segment shape below — see "Match granularity")
 //! every symbol id `bfs_reachable` visits — a name-vocabulary check, not a body inspector. `access` is
-//! guarded to `(has|can|check|require)access` only, since bare `access` also clears on non-auth names like
-//! `accessLog`/`dataAccess`. A blanket `require[A-Z]\w*` fragment was considered and rejected: it would
-//! clear pure input-validation middleware (`requireBody`/`requireJson`/`requireQuery`) and silently
-//! suppress genuine missing-auth findings; for a security rule the recall loss outweighs the
-//! false-positive savings, and `requireXxx` helpers with a real auth stem (`requireAuth`, `requireOwner`)
-//! still match via those stems. A real guard named outside this vocabulary still false-positives here —
+//! guarded to `(has|can|check|require)access` only (bare `access` clears `accessLog`/`dataAccess`). Two
+//! classes are EXCLUDED — clearing on a non-authorization name silently suppresses a real missing-auth
+//! finding (recall loss outweighs FP savings for a security rule): a blanket `require[A-Z]\w*` (clears
+//! `requireBody`-style validation; `requireAuth`/`requireOwner` still match via the stem), and env gates
+//! (`isProduction`/`isLocal`/`isDev` — WHERE code runs, not WHO calls it: route-EXPOSURE, not auth). A
+//! real guard named outside this vocabulary still false-positives here —
 //! the finding message points at config `rules: { "mutating-route-no-auth": "off" }` (embedders:
 //! `disabled_rules`) as the escape hatch, since this rule has no inline suppression marker.
 //!
@@ -32,7 +32,7 @@
 //! as the unresolved/ambiguous-handler skip above — recall for an uncovered ecosystem is zero until real
 //! coverage exists, honest given the mechanism has no evidence for it, vs. a naming-accident-gated mix of
 //! false positives/negatives (skipped only when `resolve_handler` happens to fail on an unrelated name
-//! collision) that looks like a bug and is one — exactly what happened before Java's own coverage below.
+//! collision) that looks like a bug and is one.
 //! Lifting the exemption for a language needs two additions outside this crate: (1) a `RawCall`-producing
 //! extractor (`RawCall`'s own doc, `crates/core/src/callgraph.rs`); (2) engine wiring in
 //! `run_callgraph_rules` to gather that language's calls. Java is the first to have done both: its
@@ -86,22 +86,23 @@
 //! dead-island check uses) is skipped outright: a route only defined/invoked from a test isn't exposed
 //! application surface.
 //!
-//! ## NestJS `@UseGuards` decorator exemption
-//! A provide extracted by the NestJS adapter whose registration line carries `@UseGuards(...)` coverage
-//! (class- or method-level) is exempt from the BFS entirely. NestJS's guard chain runs BEFORE the handler
-//! regardless of what the handler's own body calls, so the BFS's core assumption — the guard must be
-//! REACHABLE FROM the handler — doesn't apply to decorator-based auth: a decorator application is metadata,
-//! not a call edge (the same structural blind spot as route-level middleware, just a different guise of
-//! it). The exemption set is a side-channel `HashSet<(file, line)>` — see
-//! [`ScanMutatingRouteNoAuthInput::nest_guarded`] — computed independently by
-//! `zzop_parser_typescript::extract_controller_guarded_lines` and matched against each provide's own
-//! `(file, line)`.
+//! ## Decorator/annotation auth exemption
+//! A provide whose registration line carries decorator/annotation-based auth is exempt from the BFS
+//! entirely: such auth runs BEFORE the handler regardless of what its body calls, so the BFS assumption
+//! (the guard must be REACHABLE FROM the handler) doesn't apply — its application is metadata, not a call
+//! edge (the same blind spot as route-level middleware). The exemption is a framework-neutral side-channel
+//! `HashSet<(file, line)>` ([`ScanMutatingRouteNoAuthInput::decorator_guarded`]); four producers feed it:
+//! - **NestJS `@UseGuards(...)`** (class/method) — `zzop_parser_typescript::extract_controller_guarded_lines`.
+//! - **Spring method security** `@PreAuthorize`/`@PostAuthorize`/`@Secured`/`@RolesAllowed` (class/method, SpEL
+//!   never interpreted) — `zzop_parser_java_21::extract_spring_guarded_lines` (the route method's anchor line).
+//! - **NestJS route-scoped middleware** — an auth-named `consumer.apply(AuthX).forRoutes({path, method})`
+//!   (`extract_nest_forroutes_guarded`); engine matches each (method,path) pattern (exact, prefix-anchored).
+//! - **Spring global `SecurityFilterChain`** — a secure-by-default `authorizeRequests()...anyRequest()
+//!   .authenticated()` chain (`extract_spring_security_posture`); a route is authenticated iff it escapes
+//!   every `.permitAll()` matcher. Strict parse-all-or-nothing: bails on any scoped/unrecognized form.
 //!
-//! **Residual (not fixed here):** NestJS global guards (`app.useGlobalGuards(...)` in `main.ts`, or an
-//! `APP_GUARD` provider in a `*.module.ts`) apply to every route in the application, but are a file-level
-//! signal that cannot be mapped back to specific routes from the extractor's per-file, per-controller view
-//! — see `controller_decorators.rs`'s own module doc for the same residual. A controller relying ENTIRELY
-//! on a global guard (no local `@UseGuards`) still false-positives on this rule.
+//! **Residual:** NestJS global guards (`useGlobalGuards`/`APP_GUARD`) and Spring's lambda-DSL / path-scoped
+//! or `WebSecurity.ignoring()`-bearing configs aren't modeled — a route relying ENTIRELY on those fires.
 
 use std::collections::HashMap;
 
@@ -113,7 +114,7 @@ use crate::http_scan::{build_name_index, resolve_handler};
 use zzop_core::is_test_file;
 
 /// Default guard-name vocabulary — see module doc "Guard vocabulary".
-pub const DEFAULT_AUTH_GUARD_PATTERN: &str = r"(?i)(auth|guard|verify|session|token|permission|acl|owner|admin|role|(?:has|can|check|require)access|is(?:local|dev|production))";
+pub const DEFAULT_AUTH_GUARD_PATTERN: &str = r"(?i)(auth|guard|verify|session|token|permission|acl|owner|admin|role|(?:has|can|check|require)access)";
 
 /// The attribute key this rule reads off the generic entity-attribute channel (`zzop_core::AttributeStore`)
 /// to clear a route it cannot see a guard for. A producer/adapter that understands a project's middleware
@@ -165,14 +166,13 @@ pub struct ScanMutatingRouteNoAuthInput<'a> {
     pub symbols: &'a [SourceSymbol],
     pub symbol_graph: &'a SymbolGraph,
     pub auth_guard_pattern: &'a str,
-    /// NestJS decorator-based auth coverage (`@UseGuards(...)` at class or method level) — see module doc
-    /// "NestJS `@UseGuards` decorator exemption". `(file, line)` pairs matching an `IoProvide`'s own
-    /// `file`/`line` are exempt from the BFS entirely, the same way the test-fixture and
-    /// auth-acquisition-path exemptions already are: this IS how the route is guarded, just via a
-    /// decorator the call-graph BFS structurally cannot see (decorator application is metadata, not a
-    /// call edge — see "Precision limit" above). Pass an empty set for a non-Nest tree, or when the
-    /// caller doesn't compute this exemption — old behavior (no exemption) is preserved.
-    pub nest_guarded: &'a std::collections::HashSet<(String, u32)>,
+    /// Framework-neutral decorator/annotation-based auth coverage — see module doc "Decorator/annotation
+    /// auth exemption". `(file, line)` pairs matching an `IoProvide`'s own `file`/`line` are exempt from the
+    /// BFS entirely (like the test-fixture / auth-acquisition exemptions): this IS how the route is guarded,
+    /// via a decorator/annotation the BFS structurally can't see (metadata, not a call edge). Fed by NestJS
+    /// `@UseGuards` and Spring method security (`@PreAuthorize`/etc.) — see the module doc for the producers.
+    /// Pass an empty set when the caller computes no such exemption — old behavior (no exemption) preserved.
+    pub decorator_guarded: &'a std::collections::HashSet<(String, u32)>,
     /// Injected auth-guard evidence from the generic entity-attribute channel — a route whose
     /// [`AUTH_GUARDED_ATTR`] attribute resolves truthy (an exact `IoKey`, or a `PathScope` prefix a
     /// middleware guards) is exempt, the injection completion of the middleware "Precision limit". Pass an
@@ -197,9 +197,9 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
         // language coverage". Exempt before resolving/BFS-ing, the same "do not guess" spirit as the
         // unresolved/ambiguous-handler skip.
         .filter(|p| is_call_graph_covered(&p.file))
-        .filter(|p| !input.nest_guarded.contains(&(p.file.clone(), p.line)))
+        .filter(|p| !input.decorator_guarded.contains(&(p.file.clone(), p.line)))
         // Injected auth-guard evidence (route-level middleware the call-graph BFS can't see) — see
-        // `AUTH_GUARDED_ATTR`. Exempt BEFORE the BFS, like `nest_guarded`: this IS how the route is guarded.
+        // `AUTH_GUARDED_ATTR`. Exempt BEFORE the BFS, like `decorator_guarded`: this IS how the route is guarded.
         .filter(|p| {
             !input
                 .route_attr_store

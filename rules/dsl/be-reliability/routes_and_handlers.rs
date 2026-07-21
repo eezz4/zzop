@@ -93,7 +93,7 @@ fn sync_read_file_in_module_init_with_no_handler_context_is_not_flagged() {
 
 #[test]
 fn sync_fs_in_a_build_script_is_not_flagged() {
-    // Class fix (mono-hub 0.10.0 FP): a build-time data-collection script under scripts/ names its
+    // A build-time data-collection script under scripts/ names its
     // fetch response `const res = await fetch(...)`, which the `res` handler-context token matched even
     // though it's not an Express handler. Build/CLI/tooling paths (scripts/tools/bin) are off the
     // request path — sync fs there is fine — so they're excluded, mirroring `process-exit-in-lib`.
@@ -127,7 +127,7 @@ fn sync_io_ok_marker_above_the_sync_call_suppresses_the_finding() {
 
 #[test]
 fn fetch_response_variable_named_res_is_not_handler_context_evidence_outside_scripts_dir() {
-    // Field FP fix (mono-hub 0.10.0): a bare `res` identifier bound to a fetch Response satisfied the old
+    // A bare `res` identifier bound to a fetch Response satisfied the old
     // naive handler-context vocabulary (`\b(req|res|ctx|request|reply)\b`), so a data-fetching helper named
     // `res` looked like an Express handler even outside scripts/. The new evidence requires a `req.`/
     // `request.` member access or a response-API CALL fetch's own Response shape doesn't have

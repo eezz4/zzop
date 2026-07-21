@@ -101,15 +101,30 @@ pub(in crate::analyze) fn run_callgraph_rules(
         }
     }
     let mut imports_by_file: HashMap<String, ImportMap> = ts_import_pairs.iter().cloned().collect();
-    // Java's own re-parse — module doc "Engine-wiring route taken". Deliberately NOT folded into
-    // `file_texts`: neither `unsafe-read-endpoint`/`non-idempotent-write`'s `is_whitelisted` lookback nor
-    // `mutating-route-no-auth`'s NestJS `@UseGuards` decorator scan (`extract_controller_guarded_lines`,
-    // below) has any Java-shaped signal to find, so adding Java text there would only be unread bytes.
+    // Java's own re-parse — module doc "Engine-wiring route taken". Java text is NOT folded into
+    // `file_texts` (the TS-shaped `is_whitelisted` lookback and `extract_controller_guarded_lines` find
+    // nothing Java in it); its ONE `mutating-route-no-auth` signal — Spring method-security annotations —
+    // is read HERE into `java_decorator_guarded`, the Java half of the framework-neutral decorator-guard
+    // exemption set (the NestJS `@UseGuards` half is built from `file_texts` below).
+    let mut java_decorator_guarded: std::collections::HashSet<(String, u32)> =
+        std::collections::HashSet::new();
+    // Spring Security global authorization postures (secure-by-default `authorizeRequests` chains). One
+    // per config file; collected across the tree — applied below ONLY if exactly one exists (multiple =
+    // ambiguous scoping, unsafe to reason about, so left unapplied).
+    let mut spring_postures: Vec<(String, zzop_parser_java_21::SpringSecurityPosture)> = Vec::new();
     for rel in java_rels {
         if let Ok(bytes) = std::fs::read(root.join(rel)) {
             let text = String::from_utf8_lossy(&bytes).into_owned();
             raw_calls.extend(zzop_parser_java_21::parse_calls(rel, &text));
             imports_by_file.insert(rel.clone(), zzop_parser_java_21::parse_imports(&text));
+            if run_mutating_no_auth {
+                for line in zzop_parser_java_21::extract_spring_guarded_lines(rel, &text) {
+                    java_decorator_guarded.insert((rel.clone(), line));
+                }
+                if let Some(p) = zzop_parser_java_21::extract_spring_security_posture(rel, &text) {
+                    spring_postures.push((rel.clone(), p));
+                }
+            }
         }
     }
     let mut local_symbols_by_file: HashMap<String, HashSet<String>> = HashMap::new();
@@ -165,18 +180,67 @@ pub(in crate::analyze) fn run_callgraph_rules(
         // `api_endpoints`, since the `Finding` anchors on the route's own registration `file`/`line`,
         // which `ApiEndpoint` cannot carry.
         //
-        // `nest_guarded`: NestJS `@UseGuards(...)` decorator coverage, computed from the same
-        // `file_texts` already read off disk — no extra file I/O. The BFS needs this side-channel
-        // because a decorator application is metadata, not a call edge, so it's invisible to
-        // `bfs_reachable`.
-        let nest_guarded: std::collections::HashSet<(String, u32)> = file_texts
+        // `decorator_guarded`: framework-neutral decorator/annotation auth coverage the call-graph BFS
+        // can't see (a decorator/annotation application is metadata, not a call edge). Two producers feed
+        // the one `(file, line)` set: NestJS `@UseGuards(...)` from the TS `file_texts` already read off
+        // disk (no extra I/O), and Spring method-security annotations gathered above into
+        // `java_decorator_guarded`. Both key routes by the same `(file, line)` the provide anchors on.
+        let mut decorator_guarded = java_decorator_guarded;
+        for (rel, text) in &file_texts {
+            for line in zzop_parser_typescript::extract_controller_guarded_lines(rel, text) {
+                decorator_guarded.insert((rel.clone(), line));
+            }
+        }
+        // NestJS route-scoped auth middleware: `consumer.apply(AuthX).forRoutes({path, method})` in a
+        // module names its covered routes by (method, path) PATTERN, not a (file, line). Match each
+        // pattern against the actual route provides and exempt every match by its own registration line.
+        let forroutes: Vec<zzop_parser_typescript::ForRoutesPattern> = file_texts
             .iter()
             .flat_map(|(rel, text)| {
-                zzop_parser_typescript::extract_controller_guarded_lines(rel, text)
-                    .into_iter()
-                    .map(move |line| (rel.clone(), line))
+                zzop_parser_typescript::extract_nest_forroutes_guarded(rel, text)
             })
             .collect();
+        if !forroutes.is_empty() {
+            // The app's NestJS global prefix (`app.setGlobalPrefix('api')`), if any — a controller route
+            // provide's key already carries it (applied at assembly) but a forRoutes `path` is written
+            // WITHOUT it, so exact matching needs to prepend it. A non-literal / absent prefix leaves it
+            // `None` (exact match against the unprefixed pattern) — a miss then only fails to exempt.
+            let global_prefix: Option<String> = file_texts
+                .iter()
+                .find_map(|(rel, text)| {
+                    zzop_parser_typescript::extract_global_prefix_marker(rel, text)
+                })
+                .map(|p| p.key);
+            for p in io_provides.iter().filter(|p| p.kind == "http") {
+                let Some((method, path)) = p.key.split_once(' ') else {
+                    continue;
+                };
+                let covered = forroutes.iter().any(|(m, pat)| {
+                    (m == "*" || m == method)
+                        && forroutes_path_matches(path, pat, global_prefix.as_deref())
+                });
+                if covered {
+                    decorator_guarded.insert((p.file.clone(), p.line));
+                }
+            }
+        }
+        // Spring Security global posture — a secure-by-default chain governs its app's Java routes: one is
+        // authenticated (exempt) iff it escapes every `.permitAll()` matcher. Applied only when EXACTLY one
+        // posture exists tree-wide (else config-vs-config scoping is ambiguous), and SCOPED to the config's
+        // own source root (`spring_app_root`) so it never false-clears a sibling module's open routes.
+        if let [(config_file, posture)] = spring_postures.as_slice() {
+            let app_root = spring_app_root(config_file);
+            for p in io_provides.iter().filter(|p| {
+                p.kind == "http" && p.file.ends_with(".java") && p.file.starts_with(app_root)
+            }) {
+                let Some((method, path)) = p.key.split_once(' ') else {
+                    continue;
+                };
+                if posture.route_is_authenticated(method, path) {
+                    decorator_guarded.insert((p.file.clone(), p.line));
+                }
+            }
+        }
         // Generic entity-attribute channel — injected auth-guard evidence for routes the call-graph BFS
         // can't see (middleware). Built once by `analyze::assemble` from every Mode-B adapter overlay's
         // `attributes` and threaded in (shared with `schema_usage_findings`). Empty unless an adapter
@@ -188,11 +252,48 @@ pub(in crate::analyze) fn run_callgraph_rules(
                 symbols: all_symbols,
                 symbol_graph: &symbol_graph,
                 auth_guard_pattern: zzop_rules_http::DEFAULT_AUTH_GUARD_PATTERN,
-                nest_guarded: &nest_guarded,
+                decorator_guarded: &decorator_guarded,
                 route_attr_store: attribute_store,
             },
         );
         record_native_timing(rule_time, t0, "mutating-route-no-auth", found.len());
         global_findings.extend(found);
+    }
+}
+
+/// Whether a route provide's path (leading-slash, `http_interface_key`-normalized, and already carrying
+/// the app's NestJS global prefix if one exists — `/api/articles/{}/comments`) is EXACTLY the route a
+/// NestJS `forRoutes` PATTERN covers (controller-relative, no leading slash, no global prefix —
+/// `articles/{}/comments`). The pattern is reconciled to the provide's key space by prepending
+/// `global_prefix` (when a literal one was found) and comparing for EQUALITY — not a suffix match, which
+/// would over-clear (a `{path:'articles'}` pattern must not exempt an unrelated `/api/admin/articles`
+/// route in another module). Both sides already share the `{}` param normalization. When `global_prefix`
+/// is `None` (no `setGlobalPrefix`, or a non-literal one that can't be read), the pattern is matched
+/// unprefixed; if the app truly has a prefix we failed to read, the exemption is simply MISSED (the
+/// finding stays) — never an over-clear, the safe direction for a security rule.
+fn forroutes_path_matches(provide_path: &str, pattern: &str, global_prefix: Option<&str>) -> bool {
+    let pat = pattern.trim_start_matches('/');
+    let expected = match global_prefix {
+        Some(p) if !p.trim_matches('/').is_empty() => format!("/{}/{}", p.trim_matches('/'), pat),
+        _ => format!("/{pat}"),
+    };
+    provide_path == expected
+}
+
+/// The Java source-root prefix a Spring security config governs — everything up to and including the first
+/// `src/main/java/` segment (the Maven/Gradle convention), so a posture only exempts routes in its OWN
+/// module. A monorepo module lives at `<module>/src/main/java/...`, so `service-a`'s config yields prefix
+/// `service-a/src/main/java/` and can never match `service-b/src/main/java/...`. When the config isn't
+/// under a recognizable source root (unusual layout), falls back to the config file's own directory — the
+/// most conservative scope (only same-directory routes), never the whole tree.
+fn spring_app_root(config_file: &str) -> &str {
+    const SRC_ROOT: &str = "src/main/java/";
+    if let Some(idx) = config_file.find(SRC_ROOT) {
+        &config_file[..idx + SRC_ROOT.len()]
+    } else {
+        match config_file.rfind('/') {
+            Some(i) => &config_file[..=i],
+            None => "",
+        }
     }
 }

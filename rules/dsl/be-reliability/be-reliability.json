@@ -10,7 +10,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\b(app|router)\\.(get|post|put|patch|delete|all|use)\\s*\\(.*\\basync\\b", "label": "async-route" }
@@ -48,7 +48,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\.map\\s*\\(\\s*async\\b", "label": "map-async" }
@@ -67,7 +67,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.tsx?$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "line_pattern": "process\\.env\\.[A-Za-z0-9_]+!([^=]|$)"
       }
@@ -80,7 +80,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "any": [
           { "pattern": "\\bdebug\\s*:\\s*true\\b", "label": "debug-flag" },
@@ -92,12 +92,12 @@
     {
       "id": "promise-all-writes",
       "severity": "warning",
-      "message": "`Promise.all(...)` used with DB write calls on a DB-client-shaped receiver (`prisma`/`db`/`tx`/`client`/`repo`) — non-atomic: some writes land and others don't when one rejects, with no rollback for what committed. Wrap the writes in a transaction, or use `Promise.allSettled(...)` with compensation logic. Suppress a vetted case with `// promise-all-ok`.",
+      "message": "`Promise.all(...)` used with DB write calls on a DB-client-shaped receiver (`prisma`/`db`/`tx`/`client`/`repo`) — non-atomic: some writes land and others don't when one rejects, with no rollback for what committed. Wrap the writes in a transaction, or use `Promise.allSettled(...)` with compensation logic. Co-occurrence heuristic, not proof — it flags a `Promise.all(...)` and a write call in the same function, not that the writes are actually inside the `Promise.all(...)` array; confirm before acting. Suppress a vetted case with `// promise-all-ok`.",
       "suppress_marker": "promise-all-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "Promise\\.all\\s*\\(", "label": "pall" },
@@ -114,7 +114,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "JSON\\.parse\\s*\\(\\s*(?:await\\s+)?(?:req|request|body|params|query|payload|message|event)\\s*(?:[.,)]|\\?\\.)", "label": "parse" }
@@ -133,7 +133,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "require_file": "(?i)(from\\s+['\"](express|fastify|koa|hono|@nestjs)|require\\(\\s*['\"](express|fastify|koa|hono)|createServer\\s*\\(|\\.listen\\s*\\(\\s*[0-9]|itty-router|\\bD1Database\\b|\\bKVNamespace\\b|\\bExecutionContext\\b|\\.prepare\\s*\\(|export\\s+default\\s*\\{)",
         "patterns": [
@@ -156,6 +156,7 @@
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
         "file_exclude_pattern": "(?i)(^|/)(scripts?|tools|bin)/",
         "skip_comment_lines": true,
+        "strip_string_literals": true,
         "require_file_absent": ["process\\.on\\s*\\(\\s*['\"]SIG"],
         "patterns": [
           { "pattern": "process\\.exit\\s*\\(", "label": "exit" }
@@ -171,7 +172,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "line_pattern": "(express|bodyParser)\\.(json|urlencoded)\\s*\\(",
         "exclude_pattern": "limit\\s*:"
@@ -185,7 +186,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)(^|/)(api|server|backend|be|routes|controllers|services)/.*\\.(ts|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "line_pattern": "console\\.(log|error|warn|info)\\s*\\("
       }
@@ -198,7 +199,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "line_pattern": "\\bsetInterval\\s*\\(",
         "require_file_absent": ["\\bclearInterval\\s*\\("]

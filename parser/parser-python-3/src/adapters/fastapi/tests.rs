@@ -65,6 +65,77 @@ fn dotted_qualified_receiver_call_is_recognized() {
 }
 
 #[test]
+fn api_route_emits_one_entry_per_declared_method() {
+    // `@app.api_route(path, methods=[...])` is the generic form the verb shortcuts wrap — each listed
+    // method is a real route and must be emitted (not dropped for the unknown `api_route` attr name).
+    let src = concat!(
+        "from fastapi import FastAPI\n",
+        "app = FastAPI()\n",
+        "\n",
+        "@app.api_route(\"/items\", methods=[\"GET\", \"POST\"])\n",
+        "def items():\n",
+        "    return 1\n",
+    );
+    let out = extract_fastapi_router_fragments("a.py", src);
+    let mut methods: Vec<&str> = frag(&out, "app")
+        .entries
+        .iter()
+        .map(|e| match e {
+            RouterMountEntry::Verb { method, path, .. } => {
+                assert_eq!(path, "/items");
+                method.as_str()
+            }
+            _ => panic!("expected Verb"),
+        })
+        .collect();
+    methods.sort_unstable();
+    assert_eq!(methods, vec!["GET", "POST"]);
+}
+
+#[test]
+fn api_route_with_a_repeated_method_emits_that_verb_once() {
+    // `methods=["GET", "GET"]` (or a case-variant repeat) must mint ONE GET provide, not two — a single
+    // decorator can't be a real duplicate route, so `duplicate-route` must not see a phantom collision.
+    let src = concat!(
+        "from fastapi import FastAPI\n",
+        "app = FastAPI()\n",
+        "\n",
+        "@app.api_route(\"/items\", methods=[\"GET\", \"get\", \"POST\"])\n",
+        "def items():\n",
+        "    return 1\n",
+    );
+    let out = extract_fastapi_router_fragments("a.py", src);
+    let mut methods: Vec<&str> = frag(&out, "app")
+        .entries
+        .iter()
+        .map(|e| match e {
+            RouterMountEntry::Verb { method, path, .. } => {
+                assert_eq!(path, "/items");
+                method.as_str()
+            }
+            _ => panic!("expected Verb"),
+        })
+        .collect();
+    methods.sort_unstable();
+    assert_eq!(methods, vec!["GET", "POST"]);
+}
+
+#[test]
+fn keyword_path_argument_is_recognized() {
+    // `@app.get(path="/x")` — the keyword form of the route path (valid FastAPI) must not be dropped.
+    let src = concat!(
+        "from fastapi import FastAPI\n",
+        "app = FastAPI()\n",
+        "\n",
+        "@app.get(path=\"/kw\")\n",
+        "def h():\n",
+        "    return 1\n",
+    );
+    let out = extract_fastapi_router_fragments("a.py", src);
+    assert_eq!(frag(&out, "app").entries.len(), 1, "{out:?}");
+}
+
+#[test]
 fn api_router_literal_prefix_is_precomposed_onto_verb_paths() {
     let src = concat!(
         "from fastapi import APIRouter\n",
@@ -143,6 +214,43 @@ fn include_router_without_prefix_mounts_at_root() {
             attr_keys: vec![],
         }]
     );
+}
+
+#[test]
+fn include_router_with_module_attribute_child_resolves_to_the_target_module() {
+    // The canonical FastAPI form `import <mod>; router.include_router(<mod>.router, prefix=...)`. The
+    // `specifier` is the target module's full dotted path (base binding's specifier + "." + original) and
+    // `ident` is the BASE module name (`authentication`), not the `.router` attribute — the base name is
+    // distinct per module so it doesn't poison the composition's root-exclusion-by-name (every FastAPI
+    // router is named `router`). The engine resolves the module to its file and picks its sole fragment.
+    let src = concat!(
+        "from fastapi import APIRouter\n",
+        "from app.api.routes import authentication\n",
+        "router = APIRouter()\n",
+        "router.include_router(authentication.router, prefix=\"/users\")\n",
+    );
+    let out = extract_fastapi_router_fragments("a.py", src);
+    assert_eq!(
+        frag(&out, "router").entries,
+        vec![RouterMountEntry::Mount {
+            prefix: "/users".into(),
+            ident: "authentication".into(),
+            specifier: Some("app.api.routes.authentication".into()),
+            attr_keys: vec![],
+        }]
+    );
+}
+
+#[test]
+fn include_router_with_attribute_child_whose_base_is_not_imported_is_skipped() {
+    // `<base>.router` where `base` is not a known import can't be traced to a module — never guessed.
+    let src = concat!(
+        "from fastapi import APIRouter\n",
+        "router = APIRouter()\n",
+        "router.include_router(mystery.router, prefix=\"/x\")\n",
+    );
+    let out = extract_fastapi_router_fragments("a.py", src);
+    assert!(out.iter().all(|f| f.name != "router"), "{out:?}");
 }
 
 #[test]

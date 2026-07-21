@@ -38,15 +38,10 @@ use std::path::Path;
 /// module doc). JSP has no parser crate in this workspace at all: files that would route to it get no
 /// `Language` match.
 ///
-/// **Naming / serialization audit (Java21 vs the retired `JavaLexical`)**: `Language` derives no
-/// `Serialize`/`Deserialize` and is never written into `zzop_cache::FileIrSlice`, the cache envelope, or
-/// any wire-format enum — `CacheKey::parser_fingerprint` (the only cache-visible trace of "which language
-/// handled this file") is a plain `String` built from `PARSER_FINGERPRINT` constants, not this enum's own
-/// name. `zzop_core::ir::SourceSymbolKind`/`NormalizedEnvelope` (the two schemas that DO get serialized)
-/// carry no `Language`-shaped field either. So renaming the variant is safe on its own; the accompanying
-/// `CACHE_SCHEMA_VERSION` bump (`zzop-cache-v24` -> `zzop-cache-v25`, `cache.rs`) is required regardless,
-/// since `.java`'s projected `FileIrSlice` shape (real symbols/imports vs the old brace-matcher spans)
-/// changes for byte-identical content — the rename itself contributes nothing further to invalidate.
+/// **Serialization invariant**: `Language` derives no `Serialize`/`Deserialize` and is never written into
+/// `zzop_cache::FileIrSlice`, the cache envelope, or any wire-format enum, so renaming a variant is
+/// cache-safe on its own. A change to a language's projected `FileIrSlice` *shape*, however, still
+/// requires a `CACHE_SCHEMA_VERSION` bump (`cache.rs`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Language {
     TypeScript,
@@ -56,15 +51,16 @@ pub enum Language {
     Rust,
     Go,
     Sql,
+    CSharp,
 }
 
 /// Directory names skipped entirely during the tree walk: common Node-ecosystem build/dependency dirs,
 /// plus this workspace's own build output dir (`target`). `.yarn` covers Yarn Berry's vendored
 /// package-manager bundle, which is not project source. `zzop-reports` and `.zzop-cache` are zzop's OWN
-/// default output dirs (the JS CLI's `zzop init` template writes `"cacheDir": ".zzop-cache"` and reports
-/// default to `<root>/zzop-reports/` — see `packages/cli/lib/init.js`) — without this entry, a run's own
-/// report/cache output sitting inside the analyzed tree gets walked as source on the NEXT run (self-scan
-/// pollution: the reports dir's file count grows every run, observed live in a blind field test).
+/// output dir names (the removed JS CLI wrote reports to `<root>/zzop-reports/` and defaulted `cacheDir`
+/// to `.zzop-cache`, both inside the analyzed tree) — without this entry, such a dir sitting inside the
+/// analyzed tree gets walked as source on the NEXT run (self-scan pollution: the reports dir's file count
+/// grows every run, observed live in a blind field test).
 const DEFAULT_SKIP_DIRS: &[&str] = &[
     "node_modules",
     "dist",
@@ -213,6 +209,7 @@ fn dispatch_by_extension(rel_path: &str) -> Option<Language> {
         "rs" => Some(Language::Rust),
         "go" => Some(Language::Go),
         "sql" => Some(Language::Sql),
+        "cs" => Some(Language::CSharp),
         _ => None,
     }
 }

@@ -44,6 +44,7 @@ mod dispatch;
 mod envelope;
 mod file_routes;
 mod framework_silence;
+mod generated_banner;
 mod io;
 mod output;
 mod pipeline;

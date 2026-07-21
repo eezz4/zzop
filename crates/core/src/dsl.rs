@@ -11,24 +11,29 @@
 //! a parser falls back lexically and cannot produce spans, `symbols` is empty and method-scan silently
 //! skips that file (line-scan still runs).
 //!
-//! Module layout: `def` (serde rule-pack types), `source` (interpreter input + minified detection),
-//! `eval` (pack evaluation entry points), `prefilter` (RegexSet line-scan pre-filter), `markers`
+//! Module layout: `def` (serde rule-pack types), `fragments` (the `${NAME}` shared/reference mechanism
+//! `RulePackDef::expand_fragments` uses), `source` (interpreter input + minified detection), `eval` (pack
+//! evaluation entry points), `prefilter` (RegexSet line-scan pre-filter), `markers`
 //! (suppress-marker/require-file helpers), and one module per matcher family (`line_scan`,
 //! `method_scan`, `ir_scan`). Every public item stays importable at `crate::dsl::X`.
 
 mod def;
 mod eval;
+mod fragments;
 mod ir_scan;
 mod line_scan;
 mod markers;
 mod method_scan;
 mod prefilter;
 mod source;
+mod string_mask;
 
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]
 mod tests_eval;
+#[cfg(test)]
+mod tests_fragments;
 #[cfg(test)]
 mod tests_http_conventions;
 #[cfg(test)]
@@ -47,4 +52,5 @@ pub use def::{
     SymbolScan,
 };
 pub use eval::{eval_pack, eval_pack_profiled};
+pub use fragments::FragmentError;
 pub use source::{is_minified_or_generated, RuleContext, RuleTiming, SourceFile};

@@ -16,7 +16,12 @@
 //! Entry/index/framework-convention files, test/story/ambient-declaration files, `.storybook/` config
 //! files, and tool-entry files (config loaded by its own tool, not imported, e.g. `vite.config.ts` — see
 //! `unreachable::is_tool_entry_file`) never contribute a dead candidate; see `is_entry_or_test` for the
-//! full pattern list. A small named-export allowlist (`is_framework_contract_export`) additionally
+//! full pattern list. A file the engine marks `is_generated` (an author-declared `@generated` /
+//! "auto-generated" banner in its head, detected by the engine's `has_generated_banner`) is likewise skipped whole:
+//! its exports are regenerated, never hand-edited, so an "un-export the unused" finding there is
+//! non-actionable noise. The flag rides in from the engine because the rule crate stays free of file
+//! text; a generated file's *imports* still count (they keep other files' exports alive).
+//! A small named-export allowlist (`is_framework_contract_export`) additionally
 //! exempts individual exports — Next.js `getServerSideProps`/`getStaticProps`/`getStaticPaths`/
 //! `getInitialProps`/`generateMetadata`/`generateStaticParams` — that the framework consumes by exact
 //! identifier rather than by import, even in files that aren't otherwise excluded (e.g. Next.js Pages
@@ -67,6 +72,9 @@ pub struct DeadExportInputFile {
     pub dynamic_imports: Vec<String>,
     /// Identifier names referenced anywhere in the file (see module doc's `used_names` paragraph).
     pub used_names: HashSet<String>,
+    /// The engine detected an author-declared `@generated`/"DO NOT EDIT" banner in this file's head.
+    /// When set, the file's exports are skipped whole (its imports still count) — see module doc.
+    pub is_generated: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -140,6 +148,12 @@ where
     let mut dead: Vec<DeadExport> = Vec::new();
     for f in files {
         if is_entry_or_test(&f.file) {
+            continue;
+        }
+        // Author-declared generated file: its exports are regenerated, never hand-edited, so an
+        // un-export finding is non-actionable. Skipped in this dead-check loop only — the first loop
+        // above already consumed its imports/re-exports, keeping whatever it uses alive.
+        if f.is_generated {
             continue;
         }
         if wildcard_files.contains(&f.file) {

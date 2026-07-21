@@ -10,14 +10,14 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\.(?:updateMany|deleteMany)\\s*\\(", "label": "bulk-write" }
         ],
         "trigger": "bulk-write",
         "absent": [
-          { "pattern": "\\bwhere\\s*:", "label": "where-clause" },
+          { "pattern": "\\bwhere\\s*:\\s*(?:\\{\\s*[^}\\s]|\\{\\s*$|[^{\\s]|$)", "label": "where-clause" },
           { "pattern": "\\.(?:updateMany|deleteMany)\\s*\\(\\s*(?:\\([^)]*\\)\\s*=>|[A-Za-z_$][\\w$]*\\s*=>|function\\s*\\()", "label": "predicate-fn-arg" }
         ],
         "snippet_max": 160
@@ -31,7 +31,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\b(?:skip|take)\\s*:", "label": "pagination" },
@@ -39,7 +39,7 @@
         ],
         "trigger": "pagination",
         "absent": [
-          { "pattern": "\\borderBy\\s*:", "label": "order-by" }
+          { "pattern": "\\borderBy\\s*:\\s*(?:\\{\\s*[^}\\s]|\\{\\s*$|[^{\\s]|$)", "label": "order-by" }
         ],
         "snippet_max": 160
       }
@@ -52,7 +52,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\bnew\\s+PrismaClient\\s*\\(", "label": "new-client" },
@@ -70,7 +70,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\$transaction\\s*\\(", "label": "transaction" },
@@ -88,10 +88,10 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "line_pattern": "\\b(prisma|db|tx|client|repo(sitory|sitories)?s?)\\.(\\w+\\.)?(create|update|delete|upsert)\\s*\\(",
-        "exclude_pattern": "\\b(await|return)\\b|\\.then\\b|=\\s*\\w|=>",
+        "exclude_pattern": "\\b(await|return)\\b|\\.then\\b|[^=!<>]=[^=>]|=>",
         "snippet_max": 160
       }
     },
@@ -103,7 +103,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "any": [
           { "pattern": "\\b(take|limit)\\s*:\\s*\\+?\\s*(Number\\s*\\(\\s*)?req\\.(query|params|body)", "label": "take" }
@@ -119,7 +119,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\.(findFirst|findOne|findUnique)\\s*\\(", "label": "read" },
@@ -140,7 +140,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "any": [
           { "pattern": "(?i)\\b(price|amount|balance|fee|cost)\\w*\\s*[!=]==?\\s*[0-9]+\\.[0-9]", "label": "ident-vs-float" },
@@ -157,7 +157,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\.(create|update|delete|upsert|updateMany|deleteMany)\\s*\\(", "label": "write" },
@@ -175,7 +175,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\b(?:prisma|db|tx|client|repo(?:sitory|sitories)?s?)\\.(?:\\w+\\.)?(?:create|createMany|insert)\\s*\\(", "label": "create-write" },
@@ -198,7 +198,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\.(?:findUnique|findFirst|findOne|findById)\\s*\\(", "label": "read" },
@@ -222,7 +222,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\b(?:pool\\.connect|getConnection|acquireConnection)\\s*\\(", "label": "acquire" }

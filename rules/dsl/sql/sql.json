@@ -2,6 +2,10 @@
   "id": "sql",
   "framework": "any",
   "schema_version": 1,
+  "fragments": {
+    "sql-where-veto": "(?i)\\bWHERE\\b|\\$\\{|\\+\\s*[\"'`]|[\"'`]\\s*\\+",
+    "test-paths-migrations": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|(^|/)(migrations?|migrate|db/migrations?)/)"
+  },
   "rules": [
     {
       "id": "query-logic-density",
@@ -11,7 +15,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "line_pattern": "(?i)\\bcase\\s+when\\b|(?i)\\bcase\\b\\s*$",
         "snippet_max": 160,
@@ -29,7 +33,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "^(?:domains/[^/]+/routes/.+|api/.+)\\.ts$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "require_file": "\\bawait\\b",
         "skip_comment_lines": true,
         "patterns": [
@@ -51,7 +55,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.tsx?$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "require_file": "\\.count\\s*\\(",
         "skip_comment_lines": true,
         "patterns": [
@@ -73,7 +77,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.tsx?$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "require_file": "\\.reduce\\s*\\(",
         "skip_comment_lines": true,
         "patterns": [
@@ -98,7 +102,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.tsx?$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "require_file": "\\.filter\\s*\\(",
         "skip_comment_lines": true,
         "patterns": [
@@ -127,7 +131,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)(?:(?:^|/)api/.*\\.tsx?$|.*/routes/.*\\.tsx?$|.*/controllers/.*\\.tsx?$|.*handler\\.tsx?$|.*controller\\.tsx?$)",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "require_file": "\\.(?:findOne|findById|findUnique)\\s*\\(",
         "skip_comment_lines": true,
         "patterns": [
@@ -166,11 +170,11 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|(^|/)(migrations?|migrate|db/migrations?)/)",
+        "file_exclude_pattern": "${test-paths-migrations}",
         "require_file": "(?i)DELETE\\s+FROM",
         "skip_comment_lines": true,
         "line_pattern": "(?i)[\"'`]\\s*DELETE\\s+FROM\\s+[A-Za-z_\"`.][\\w\"`.]*\\s*;?\\s*[\"'`]",
-        "exclude_pattern": "(?i)WHERE|\\$\\{|\\+\\s*[\"'`]|[\"'`]\\s*\\+",
+        "exclude_pattern": "${sql-where-veto}",
         "snippet_max": 160
       }
     },
@@ -182,11 +186,11 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|(^|/)(migrations?|migrate|db/migrations?)/)",
+        "file_exclude_pattern": "${test-paths-migrations}",
         "require_file": "(?i)UPDATE\\s+[\\w\"`.]+\\s+SET",
         "skip_comment_lines": true,
         "line_pattern": "(?i)[\"'`]\\s*UPDATE\\s+[\\w\"`.]+\\s+SET\\s+[^\"'`]*[\"'`]",
-        "exclude_pattern": "(?i)WHERE|\\$\\{|\\+\\s*[\"'`]|[\"'`]\\s*\\+",
+        "exclude_pattern": "${sql-where-veto}",
         "snippet_max": 160
       }
     },
@@ -198,7 +202,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|(^|/)(migrations?|migrate|db/migrations?)/)",
+        "file_exclude_pattern": "${test-paths-migrations}",
         "require_file": "(?i)TRUNCATE",
         "skip_comment_lines": true,
         "line_pattern": "(?i)[\"'`]\\s*TRUNCATE\\s+(TABLE\\s+)?[\\w\"`.]+\\s*;?\\s*[\"'`]",
@@ -229,7 +233,7 @@
             "label": "update-no-where"
           }
         ],
-        "exclude_pattern": "(?i)WHERE|\\$\\{|\\+\\s*[\"'`]|[\"'`]\\s*\\+",
+        "exclude_pattern": "${sql-where-veto}",
         "snippet_max": 160
       }
     },
@@ -241,7 +245,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "(?i)SELECT\\s+\\*\\s+FROM",
         "skip_comment_lines": true,
         "line_pattern": "(?i)[\"'`][^\"'`]*SELECT\\s+\\*\\s+FROM\\b",
@@ -256,7 +260,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "(?i)LIKE\\s+['\"`]%",
         "skip_comment_lines": true,
         "line_pattern": "(?i)LIKE\\s+['\"`]%",

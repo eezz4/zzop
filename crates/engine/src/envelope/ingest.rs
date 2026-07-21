@@ -169,6 +169,12 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
             .filter(|f| f.is_entry)
             .map(|f| f.path.clone())
             .collect();
+        // Deliberate divergence from the native `assemble::rules` path: it post-filters out generated
+        // (`@generated`/auto-generated-bannered) files via `generated_banner::file_has_generated_banner`,
+        // which re-reads each candidate's head off disk. Mode A has no filesystem `root` and a
+        // `FileProjection` (normalized.rs) carries no raw text, so that head-comment detector structurally
+        // cannot run here — an adapter that wants a generated file exempt marks it `is_entry` (above) or
+        // omits it from the envelope. Documented, not a bug: the exemption is a native-path-only refinement.
         global_findings.extend(dead_candidate_findings(&nodes, &dep, &extra_entries));
     }
 

@@ -26,6 +26,28 @@ fn extra_entry_with_fan_in_is_not_flagged_and_keeps_its_island_live() {
 }
 
 #[test]
+fn asset_target_with_fan_in_but_no_dep_edge_needs_extra_entry() {
+    // A `public/*.js` worklet gets fan_in from an asset-ref bump (`merge_asset_ref_fan_in`) but NO
+    // incoming `dep` edge (the engine adds none — it mirrors the SFC fan-in bump), so it reads as a
+    // false `unreachable` island unless seeded as an entry. This is the regression sentinel for the
+    // mandatory `unreachable_entries.extend(asset_targets)` seed (assemble/rules.rs): without it, the
+    // fix would trade a dead-candidates FP for an unreachable FP.
+    let asset = "ai-hub-fe/public/noise-suppressor/rnnoiseWorklet.js";
+    let d = DepGraph::new(); // no edge points at the asset
+    let nodes = vec![node(asset, 1, 20)];
+    assert_eq!(
+        find_unreachable(&nodes, &d, 30, &no_extra()).len(),
+        1,
+        "without the seed, a fan_in>0 asset target with no dep edge is a false unreachable island"
+    );
+    let extra: HashSet<String> = std::iter::once(asset.to_string()).collect();
+    assert!(
+        find_unreachable(&nodes, &d, 30, &extra).is_empty(),
+        "seeding the asset target as an extra entry must clear the false unreachable island"
+    );
+}
+
+#[test]
 fn e2e_infra_directories_are_test_paths() {
     assert!(is_test_file(
         "packages/testing/playwright/scripts/import-data.mjs"
@@ -141,6 +163,18 @@ fn tool_entry_file_positives() {
         "vite-env.d.ts",
         "foo.d.ts",
         "packages/app/src/vite-env.d.ts",
+        // Test-runner setup entries (config-loaded via setupFiles/globalSetup, never imported).
+        "src/setup-tests.ts",
+        "vitest.setup.ts",
+        "jest.setup.js",
+        "setupTests.ts",
+        "src/test-setup.ts",
+        "e2e/global.setup.ts",
+        "playwright/global.teardown.ts",
+        // Tool-config entries loaded by their tool's own resolver, not imported.
+        "jest.preset.js",
+        "prisma/seed.ts",
+        "server/prisma/seed.ts",
     ] {
         assert!(
             is_tool_entry_file(path),
@@ -263,6 +297,10 @@ fn tool_entry_file_negatives() {
         "card.ts",
         "features/x/Component.tsx",
         "index.ts",
+        // Scoping guards: bare `seed.ts` (app code) is NOT the Prisma CLI entry; a `test-setup-*` stem
+        // is not the exact `test-setup` setup file.
+        "src/db/seed.ts",
+        "src/test-setup-helpers.ts",
     ] {
         assert!(
             !is_tool_entry_file(path),

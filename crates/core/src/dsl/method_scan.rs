@@ -155,8 +155,15 @@ pub(super) fn eval_method_scan(
                         continue;
                     }
                 }
+                // Pattern/absent regexes test `scan` (string interiors masked when opted in); the ORIGINAL
+                // `line` still supplies the finding's snippet and `marker_suppresses` context below.
+                let scan: std::borrow::Cow<'_, str> = if m.strip_string_literals {
+                    std::borrow::Cow::Owned(crate::dsl::string_mask::mask_string_literals(line))
+                } else {
+                    std::borrow::Cow::Borrowed(line)
+                };
                 for (pi, (re, _)) in patterns.iter().enumerate() {
-                    if !satisfied[pi] && re.is_match(line) {
+                    if !satisfied[pi] && re.is_match(&scan) {
                         if pi == trigger_idx && m.trigger_in_loop {
                             // Structural containment gate: this trigger match only counts if the
                             // line is textually inside a loop statement or array-iteration
@@ -179,7 +186,7 @@ pub(super) fn eval_method_scan(
                         }
                     }
                 }
-                if !vetoed && absent.iter().any(|re| re.is_match(line)) {
+                if !vetoed && absent.iter().any(|re| re.is_match(&scan)) {
                     vetoed = true;
                 }
             }

@@ -1,5 +1,5 @@
-//! Numstat rename-path spellings — `parse_path` (and its slash-collapse helper), split out of
-//! `parse.rs` unchanged; the parent module's pinned rename semantics (see its module doc) live here.
+//! Numstat rename-path spellings — `parse_path` (and its slash-collapse helper); the parent module's
+//! pinned rename semantics (see its module doc) live here.
 
 /// Handles the `git --numstat -M` rename path spellings: a top-level `"old => new"` rename, and the
 /// common-prefix-optimized `"{old => new}"` fragment inside an otherwise-shared path (e.g.

@@ -1,8 +1,7 @@
-# Prebuild matrix for the N-API addon (napi-rs optionalDependencies pattern — DESIGN.md decision #6).
-# On a `v*` tag push, also publishes the 5 platform sub-packages, the main @zzop/native package, and
-# the `zzop` CLI to npm via OIDC "trusted publishing" (no NPM_TOKEN secret) — requires each of the 7
-# packages to have a trusted publisher configured on npmjs.com for this repo + this workflow file. See
-# packages/native/README.md's "Publishing" section for the one-time npmjs.com setup.
+# Prebuild + release for the Node-free `zzop-mcp` binary. On a `v*` tag push, builds the binary for 5
+# platforms and attaches them PLUS per-platform MCPB (`.mcpb`) one-click Desktop bundles to the GitHub
+# release. No npm: the npm distribution (JS CLI `@zzop/cli` + napi `@zzop/native`) was removed 2026-07-20
+# — Node-free native binary is the single runtime form (see the mcp-distribution decision).
 name: prebuild
 
 on:
@@ -15,16 +14,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # `platform` is the npm/<platform> sub-package name for the target (napi-rs/swc/Prisma
-        # convention, same mapping as packages/native/scripts/place-artifacts.mjs) — used to name
-        # the zzop-mcp release assets.
+        # `platform` names the zzop-mcp release asset (and the per-platform `.mcpb`) for each target.
         include:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             platform: win32-x64-msvc
           # Intel macOS: cross-compiled from the Apple Silicon runner (Intel `macos-13` runners are
           # scarce/deprecated). Same lane as linux-arm64 below — a secondary arch built on the primary
-          # runner; smoke test is skipped for cross targets.
+          # runner. The binary depends only on pure-workspace crates, so every cross lane builds with no
+          # extra toolchain setup (only linux-arm64 needs a cross-linker, installed below).
           - target: x86_64-apple-darwin
             os: macos-latest
             cross: "true"
@@ -47,57 +45,19 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Install cross-compile linker (linux-arm64)
-        # linux-arm64 alone needs a cross-linker; the darwin-x64 cross target builds with the universal
-        # Apple SDK on the arm64 runner and needs no extra linker.
+        # linux-arm64 alone needs a cross-linker; darwin-x64 cross-builds with the universal Apple SDK
+        # on the arm64 runner and needs none.
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
           echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc' >> "$GITHUB_ENV"
-      - name: Build addon
-        # On a `v*` tag, stamp the addon's reported version (`version()`'s `zzop-napi/<version>`
-        # segment, compile-time `ZZOP_RELEASE_VERSION`) from the tag — the same source the publish
-        # job's sync-versions.mjs stamps into the npm packages, so the addon's reported version ==
-        # @zzop/native version by construction (same gate/export as the zzop-mcp step below).
-        # Gated on ref TYPE (refs/tags/v*), matching the publish job's startsWith gate — a
-        # workflow_dispatch run on a branch merely NAMED v-something must not stamp a bogus
-        # version; non-tag runs leave it unset so the 0.0.0 dev fallback applies.
-        shell: bash
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            export ZZOP_RELEASE_VERSION="${GITHUB_REF_NAME#v}"
-          fi
-          cargo build -p zzop-napi --release --features addon --target ${{ matrix.target }}
-      - name: Collect artifact
-        shell: bash
-        run: |
-          mkdir -p dist
-          case "${{ matrix.target }}" in
-            *windows*) cp "target/${{ matrix.target }}/release/zzop_napi.dll" "dist/zzop-napi.${{ matrix.target }}.node" ;;
-            *apple*)   cp "target/${{ matrix.target }}/release/libzzop_napi.dylib" "dist/zzop-napi.${{ matrix.target }}.node" ;;
-            *)         cp "target/${{ matrix.target }}/release/libzzop_napi.so" "dist/zzop-napi.${{ matrix.target }}.node" ;;
-          esac
-          ls -la dist
-      - name: Smoke test (native targets only)
-        if: matrix.cross != 'true'
-        shell: bash
-        run: |
-          cp "dist/zzop-napi.${{ matrix.target }}.node" packages/native/zzop-napi.node
-          node packages/native/smoke.mjs
-      - uses: actions/upload-artifact@v4
-        with:
-          name: zzop-napi-${{ matrix.target }}
-          path: dist/*.node
-      # The Node-free standalone binary (packages/mcp) — same target as the addon build above; it
-      # depends only on the same pure-workspace crates the addon already cross-compiles, so every
-      # lane (including the two cross ones) works with no extra toolchain setup.
       - name: Build zzop-mcp binary
         # On a `v*` tag, stamp the binary's reported version (MCP serverInfo.version, compile-time
-        # `ZZOP_RELEASE_VERSION`) from the tag — the same source the publish job's sync-versions.mjs
-        # stamps into the npm packages, so binary version == @zzop/cli version by construction.
-        # Gated on ref TYPE (refs/tags/v*), matching the publish job's startsWith gate — a
-        # workflow_dispatch run on a branch merely NAMED v-something must not stamp a bogus
-        # version; non-tag runs leave it unset so the 0.0.0 dev fallback applies.
+        # `ZZOP_RELEASE_VERSION`) from the tag — the same tag verify-plugin-version checks plugin.json
+        # against, so the binary version == plugin version by construction. Gated on ref TYPE
+        # (refs/tags/v*) so a workflow_dispatch run on a branch merely NAMED v-something leaves it unset
+        # (the 0.0.0 dev fallback applies).
         shell: bash
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
@@ -118,14 +78,12 @@ jobs:
           name: zzop-mcp-${{ matrix.target }}
           path: dist-mcp/*
 
-  # Only runs on a `v*` tag push (job-level `if`, same gate as `publish` below). Unlike every npm
-  # package version (overwritten from the tag at publish time by the step below), the Claude Code
-  # plugin marketplace reads `.claude-plugin/plugin.json`'s "version" straight from the repo at
-  # whatever commit the tag points at — there is no sync-versions.mjs-style stamping step for it, so
-  # a forgotten bump would silently ship a stale plugin version forever. This job makes that mistake
-  # impossible: it fails the whole run before `publish` does anything if the committed version and
-  # the tag disagree. `.claude-plugin/marketplace.json` carries no "version" field today (checked
-  # here so this job starts failing loudly the day one is added without being wired into this check).
+  # Only runs on a `v*` tag push. The Claude Code plugin marketplace reads
+  # `.claude-plugin/plugin.json`'s "version" straight from the repo at the tagged commit (no
+  # tag-stamping step), so a forgotten bump would silently ship a stale plugin version forever. This
+  # job fails the whole run before `release` does anything if the committed version and the tag
+  # disagree. `.claude-plugin/marketplace.json` carries no "version" field today (checked here so this
+  # job starts failing loudly the day one is added without being wired into this check).
   verify-plugin-version:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -149,73 +107,48 @@ jobs:
             echo ".claude-plugin/marketplace.json version ($MARKETPLACE_VERSION) matches tag $GITHUB_REF_NAME."
           fi
 
-  # Only runs on a `v*` tag push (job-level `if`, since the build matrix above must also run for
-  # workflow_dispatch without publishing). The git tag is the single source of truth for the
-  # published version: this job overwrites every package.json's committed version with the tag's,
-  # so there is no separate "bump packages/native/package.json before tagging" step to forget.
-  #
-  # Publishes via npm OIDC "trusted publishing" — no NPM_TOKEN secret. Each of the 7 package names
-  # (@zzop/native + the 5 platform sub-packages + the `zzop` CLI) must have a trusted publisher
-  # configured on npmjs.com pointing at this repo and this workflow file (packages/native/README.md
-  # "Publishing").
-  publish:
+  # Only runs on a `v*` tag push (the build matrix above also runs for workflow_dispatch, without
+  # releasing). Attaches the 5 bare `zzop-mcp-<platform>[.exe]` binaries (PATH install / Claude Code
+  # plugin) AND 5 per-platform `zzop-<platform>.mcpb` one-click Desktop bundles to the GitHub release.
+  release:
     needs: [build, verify-plugin-version]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
-      - name: Update npm (OIDC trusted publishing needs a recent npm CLI)
-        # Pinned to the 11.x line: npm@12.0.0 (published 2026-07-08) ships a broken
-        # `--provenance` path — `Cannot find module 'sigstore'` inside its own bundled
-        # libnpmpublish — which failed the v0.7.0 publish twice (run 29057344845, retry
-        # included). `@latest` floated onto that major the day after v0.6.0 shipped.
-        # Re-evaluate the pin once a fixed 12.x is out.
-        run: npm install -g npm@11
-      - name: Download all platform artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: zzop-napi-*
-          path: artifacts
-          merge-multiple: true
-      - name: Set version from tag (overwrites committed version everywhere)
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          (cd packages/native && npm version --no-git-tag-version "$VERSION")
-          node packages/native/scripts/sync-versions.mjs
-          # CLI package (`zzop`): bump its version and pin its @zzop/native dependency to this same
-          # release, so `npm i zzop` always pulls the matching engine build.
-          (cd packages/cli && npm version --no-git-tag-version "$VERSION" && npm pkg set "dependencies.@zzop/native=$VERSION")
-      - name: Place prebuilt binaries into platform packages
-        run: node packages/native/scripts/place-artifacts.mjs artifacts
-      - name: Publish platform packages
-        run: |
-          for dir in packages/native/npm/*/; do
-            (cd "$dir" && npm publish --provenance)
-          done
-      - name: Publish main package
-        run: (cd packages/native && npm publish --provenance)
-      - name: Publish CLI (`zzop`)
-        run: (cd packages/cli && npm publish --provenance)
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
-      # Standalone zzop-mcp binaries (built per-target by the matrix above) attach to the release as
-      # `zzop-mcp-<platform>[.exe]` assets — the Node-free install path (packages/mcp/README.md).
       - name: Download zzop-mcp binaries
         uses: actions/download-artifact@v4
         with:
           pattern: zzop-mcp-*
           path: mcp-artifacts
           merge-multiple: true
-      - name: Upload zzop-mcp binaries to the release
+      - name: Build per-platform MCPB bundles
+        # One `.mcpb` per platform (all on ubuntu, where jq/zip/npx are available — avoids the
+        # cross-platform zip problem): stage that platform's binary at bin/zzop-mcp[.exe], stamp the
+        # manifest version from the tag, validate against the MCPB schema, and zip. See packaging/README.md.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          jq --arg v "$VERSION" '.version=$v' packaging/mcpb/manifest.json > manifest.stamped.json
+          npx -y @anthropic-ai/mcpb@latest validate manifest.stamped.json
+          for f in mcp-artifacts/zzop-mcp-*; do
+            base=$(basename "$f")                       # zzop-mcp-<platform>[.exe]
+            plat=${base#zzop-mcp-}; plat=${plat%.exe}   # <platform>
+            rm -rf out && mkdir -p out/bin
+            case "$base" in
+              *.exe) cp "$f" out/bin/zzop-mcp.exe ;;
+              *)     cp "$f" out/bin/zzop-mcp && chmod +x out/bin/zzop-mcp ;;
+            esac
+            cp manifest.stamped.json out/manifest.json
+            (cd out && zip -r "../zzop-$plat.mcpb" manifest.json bin)
+          done
+          ls -la ./*.mcpb
+      - name: Upload zzop-mcp binaries + MCPB bundles to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" mcp-artifacts/* --clobber
+        run: gh release upload "$GITHUB_REF_NAME" mcp-artifacts/* ./*.mcpb --clobber

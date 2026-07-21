@@ -16,6 +16,7 @@
 ALLOWLIST=(
   "parser/parser-go"
   "parser/parser-java-21"
+  "parser/parser-csharp"
 )
 
 # Two checks, run once per allowlisted crate:
@@ -26,22 +27,41 @@ ALLOWLIST=(
 #     note).
 #  2. `use tree_sitter` or `tree_sitter::` in any .rs file outside an allowlisted crate's own src/.
 #
-# No deps beyond grep -P (PCRE). Exit 1 on any violation, listing file:line.
+# Scope: git-TRACKED files only (git ls-files), for the same reason as check-swc-isolation.sh /
+# check-ruff-isolation.sh / check-syn-isolation.sh — the working tree also holds gitignored/
+# untracked local corpora (cloned third-party repos, benchmark checkouts) whose own tree-sitter
+# usage is not ours to police, and `tree_sitter::` is ubiquitous in real Rust crates (a
+# `grep -r .` over the tree false-positives on every one of them). Anything that could ship must
+# be tracked, so tracked-only is exactly the isolation surface (and matches what CI checks out).
+#
+# Enumeration mechanism (TRACKED-file discovery + grep + the standard target/node_modules/.claude
+# exclusions) lives in scripts/lib/tracked-grep.sh, shared with check-syn-isolation.sh /
+# check-swc-isolation.sh / check-ruff-isolation.sh — this script keeps only ITS OWN pattern,
+# allowlist, and messages.
+#
+# No deps beyond git + grep -P (PCRE). Exit 1 on any violation, listing file:line.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. ./scripts/lib/tracked-grep.sh
 
 violations=0
+
+for dir in "${ALLOWLIST[@]}"; do
+  [ -d "$dir" ] || { echo "tree-sitter isolation guard: stale ALLOWLIST entry '$dir' -- directory does not exist (crate renamed/moved?)." >&2; exit 1; }
+done
 
 echo "tree-sitter isolation guard: checking Cargo.toml dependency declarations..."
 # `(-[a-z0-9]+)*` (not `?`): grammar crate names can be multi-segment (`tree-sitter-c-sharp`) — a
 # single-suffix pattern would let such a dependency slip past the guard (opus review F3).
 DEP_PATTERN='^\s*(tree-sitter(-[a-z0-9]+)*)\s*='
-cargo_files=$(grep -rlP "$DEP_PATTERN" . --include='Cargo.toml' 2>/dev/null \
-  | grep -v '/target/' \
-  | grep -v -x './Cargo.toml' || true)
+# The enumeration call is kept OUTSIDE the `|| true` below on purpose: tracked_files_matching's own
+# failure must still trip `set -e` and abort loud (see its header comment); only the root-Cargo.toml
+# exclusion and the per-crate allowlist loop below are safe to swallow via `|| true`.
+cargo_matches=$(tracked_files_matching "$DEP_PATTERN" 'Cargo.toml' '*/Cargo.toml')
+cargo_files=$(grep -v -x 'Cargo.toml' <<< "$cargo_matches" || true)
 
 for dir in "${ALLOWLIST[@]}"; do
-  cargo_files=$(echo "$cargo_files" | grep -v -x "./$dir/Cargo.toml" || true)
+  cargo_files=$(echo "$cargo_files" | grep -v -x "$dir/Cargo.toml" || true)
 done
 
 if [ -n "$cargo_files" ]; then
@@ -55,11 +75,10 @@ fi
 
 echo "tree-sitter isolation guard: checking .rs source usage..."
 USE_PATTERN='\btree_sitter::[A-Za-z_]|use\s+tree_sitter(::|;|\s)'
-rs_files=$(grep -rlP "$USE_PATTERN" . --include='*.rs' 2>/dev/null \
-  | grep -v '/target/' || true)
+rs_files=$(tracked_files_matching "$USE_PATTERN" '*.rs')
 
 for dir in "${ALLOWLIST[@]}"; do
-  rs_files=$(echo "$rs_files" | grep -v "^\./$dir/src/" || true)
+  rs_files=$(echo "$rs_files" | grep -v "^$dir/src/" || true)
 done
 
 if [ -n "$rs_files" ]; then

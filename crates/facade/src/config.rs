@@ -62,7 +62,7 @@ fn pack_shadow_warning(
 ///    a `RulePackDef::id` with a pack already in the list, the LATER one REPLACES the earlier one whole —
 ///    not a rule-level merge inside that pack id. Since directories are always folded in AFTER `pack_defs`,
 ///    a directory pack always wins a same-id collision against an inline def — this is the intentional
-///    override path (see `docs/modules/napi.md`'s "Defaults" section) — the JS wrapper (`index.js`) puts
+///    override path (see `docs/modules/napi.md`'s "Defaults" section) — `zzop-config` puts
 ///    the bundled default pack dir first and any caller-supplied `packsDir` after it, so a caller's pack
 ///    always wins a collision against a shipped one with the same id, while packs with distinct ids from
 ///    every source all stay loaded together. Per-directory load errors (a malformed `rules/dsl/*.json`, an
@@ -106,6 +106,19 @@ pub(crate) fn base_engine_config(
             warnings.push(format!("packDefs: pack \"{}\" skipped: {msg}", def.id));
             continue;
         }
+        // Same reasoning as the schema-version gate just above: `RulePackDef::expand_fragments` is the
+        // other per-pack judgment `parse_dsl_pack` folds in for the `packs_dir`/disk path, and an inline
+        // `packDefs` entry needs the identical resolution — a `${NAME}` ref an inline pack author wrote
+        // must resolve against the exact same shared bundle a disk pack sees, and an unknown/malformed
+        // ref must fail exactly as loudly here as it would on disk. Cloned first (this loop only ever
+        // borrowed `def` before this point) so expansion mutates a local copy, never the caller's
+        // `pack_defs` slice. Calling this on an ALREADY-expanded def (e.g. a bundled pack seeded via
+        // `parse_dsl_pack` upstream) is a documented no-op — see `expand_fragments`'s idempotency note.
+        let mut def = def.clone();
+        if let Err(err) = def.expand_fragments() {
+            warnings.push(format!("packDefs: pack \"{}\" skipped: {err}", def.id));
+            continue;
+        }
         pack_sources.insert(def.id.clone(), PackSource::Inline);
         match packs.iter_mut().find(|existing| existing.id == def.id) {
             Some(slot) => {
@@ -117,9 +130,9 @@ pub(crate) fn base_engine_config(
                     slot.rules.len(),
                     def.rules.len(),
                 ));
-                *slot = def.clone();
+                *slot = def;
             }
-            None => packs.push(def.clone()),
+            None => packs.push(def),
         }
     }
     for dir in packs_dirs {
@@ -215,8 +228,14 @@ pub(crate) fn build_engine_config(
         }),
     });
     // Overlays flow to `analyze_tree`'s unconditional `apply_adapter_overlays` merge; no cache-key
-    // impact (applied post-cache, re-applied every run regardless of hit/miss).
+    // impact (applied post-cache, re-applied every run regardless of hit/miss). The lightweight `routes`
+    // injection is expanded into ONE more synthetic overlay appended here, so it rides the identical path.
     config.adapter_overlays = req.adapter_overlays.clone();
+    if let Some(overlay) =
+        crate::route_injection::routes_overlay(&req.source_id, &req.routes, warnings)
+    {
+        config.adapter_overlays.push(overlay);
+    }
 
     config.mounts = fold_mounts(&req.mounts, req.mounted_at.as_deref());
     config.hosts = req.hosts.clone();

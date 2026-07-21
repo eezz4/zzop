@@ -34,6 +34,79 @@ fn delete_many_with_where_in_same_function_is_not_flagged() {
 }
 
 #[test]
+fn delete_many_with_an_empty_where_object_is_flagged() {
+    // `where: {}` is an EMPTY filter — Prisma treats it as no filter and deletes/updates every row,
+    // exactly the whole-table write this rule exists to catch. It must NOT be vetoed by the presence of
+    // the `where:` token alone.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function wipe() {\n  await prisma.order.deleteMany({ where: {} });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "update-delete-no-where");
+    assert_eq!(
+        h.len(),
+        1,
+        "empty `where: {{}}` must still flag: {:?}",
+        out.findings
+    );
+    assert_eq!(h[0].line, 3);
+}
+
+#[test]
+fn delete_many_with_a_multiline_populated_where_is_not_flagged() {
+    // A real `where` object opened at end of line (multi-line) must still veto — the empty-object carve-out
+    // treats `where: {` at EOL as populated (the empty multi-line `where: {\n}` shape is not a real idiom).
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function archiveOld() {\n  await prisma.order.deleteMany({\n    where: {\n      archived: false,\n    },\n  });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "update-delete-no-where").is_empty(),
+        "a populated multi-line where must not be flagged: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn delete_many_with_a_where_key_split_from_its_value_across_lines_is_not_flagged() {
+    // A bare `where:` at end of line with the filter object opening on the NEXT line (a real, if
+    // non-Prettier, formatting) must still veto: the per-line matcher can't see the next line, so the
+    // `where:`-at-EOL alternative treats it as populated. Guards against the widened empty-object regex
+    // re-introducing a false positive on genuinely-filtered multi-line deletes.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function archiveOld() {\n  await prisma.order.deleteMany({\n    where:\n      { archived: false },\n  });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "update-delete-no-where").is_empty(),
+        "a where-key split across lines must not be flagged: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn delete_many_with_a_dynamic_where_variable_is_not_flagged() {
+    // `where: filter` (a computed filter object) is a real filter — veto, don't flag.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function archive(filter: any) {\n  await prisma.order.deleteMany({ where: filter });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "update-delete-no-where").is_empty(),
+        "a dynamic `where: var` must not be flagged: {:?}",
+        out.findings
+    );
+}
+
+#[test]
 fn delete_many_with_arrow_predicate_first_arg_is_not_flagged() {
     // A custom Store wrapper's `deleteMany(predicate)` takes a filter function scoped internally, not a Prisma-style `{ where: ... }` object — not a whole-table write.
     let dir = TempDir::new("zzop-be-db");
@@ -206,6 +279,22 @@ fn fire_and_forget_prisma_user_create_is_flagged() {
     dir.write(
         "src/service.ts",
         "declare const prisma: any;\nexport async function trackSignup(email: string) {\n  prisma.user.create({ data: { email } });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "unawaited-write");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 3);
+}
+
+#[test]
+fn unawaited_write_with_a_comparison_in_the_payload_is_still_flagged() {
+    // Regression pin: the assignment-veto must not be tripped by a comparison operator (`>=`, `===`)
+    // inside the write's payload. A bare unawaited `update` whose data contains `score >= threshold` is
+    // still fire-and-forget and must flag — the former `=\s*\w` veto wrongly matched the `= t` in `>= t`.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function grade(id: string, score: number, threshold: number) {\n  prisma.user.update({ where: { id }, data: { verified: score >= threshold } });\n}\n",
     );
     let out = scan(&dir);
     let h = hits(&out, "unawaited-write");

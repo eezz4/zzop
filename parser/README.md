@@ -19,6 +19,7 @@ should never leak into the public IR).
 | `parser-prisma` | parses the Prisma schema DSL — lexical: model `db-table` provides (accessor-cased key, feeds the db-table join channel) |
 | `parser-java-21` | **native tree-sitter-java** (tree-sitter-java 0.23.5, Java 21 grammar coverage) — full CST: symbols, imports/dep graph, Spring MVC HTTP route provides |
 | `parser-sql` | parses SQL DDL — lexical/regex: `CREATE TABLE` → `db-table` provides (quote-stripped, schema-qualifier dropped, lower-first canonical key — twin of the Prisma provide, for ORM-less migration stacks) |
+| `parser-csharp` | **native tree-sitter-c-sharp** (tree-sitter-c-sharp 0.23.5) — full CST: symbols, imports/dep graph (`using` directives, namespace→files resolution), ASP.NET Core attribute-controller + Minimal-API HTTP route provides, `HttpClient` literal egress consumes |
 
 > A language dispatcher (in `core`) routes files to parsers by extension map + path-glob overrides — supporting a
 > single polyglot repo. Because the cross-layer linker is a multi-source join, even a crude JSP parser joins as a
@@ -37,7 +38,8 @@ middleware recognizers (see `docs/ARCHITECTURE.md`'s "Language support" section)
 enough in real polyglot backends earns full-AST/CST treatment in-workspace rather than being left to an
 adapter. Python set the precedent (promoted from the envelope path to `parser-python-3`, ruff-based);
 Rust (`parser-rust`, syn 2) and Go (`parser-go`, tree-sitter-go) have since cleared the same bar; SQL
-DDL (`parser-sql`, lexical) most recently joined as a `db-table` provider for ORM-less migration stacks.
+DDL (`parser-sql`, lexical) joined as a `db-table` provider for ORM-less migration stacks; and C#
+(`parser-csharp`, tree-sitter-c-sharp) most recently joined for ASP.NET Core backends.
 The table above is the current native list. A native crate's v1 scope can still be deliberately narrower
 than what an adapter covers: Python's is (Flask/Django routes, `Depends` auth attributes, ORM table
 facts, ... — see `crates/engine/examples/fastapi_overlay_adapter/main.rs` for the Mode-B overlay that

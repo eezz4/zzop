@@ -17,6 +17,7 @@ judgments — structure only, never rule quality — before you ship it.
   "id": "sql",
   "framework": "any",
   "schema_version": 1,
+  "fragments": { "sql-where-veto": "(?i)\\bWHERE\\b|\\$\\{|\\+\\s*[\"'`]|[\"'`]\\s*\\+" },
   "rules": [ /* RuleDef[] */ ]
 }
 ```
@@ -26,7 +27,59 @@ judgments — structure only, never rule quality — before you ship it.
 | `id` | string | — | Pack id; a finding's `rule_id` is `"{id}/{rule.id}"`. |
 | `framework` | string | `"any"` | Declared target environment (`"any"` \| `"react"` \| `"prisma"` \| ...). Currently informational: it is carried on `RuleMeta.framework`, but no engine code path filters on it today — `RuleMeta::applies_to` (crates/core/src/registry.rs) ignores its target argument and gates only on `enabled`. The per-file pre-filter that does run is path-based (`pack_loader::applies_to`, over each rule's `file_pattern`), not framework-based. |
 | `schema_version` | u32 | `1` | DSL schema this pack was authored against — see [Schema version policy](#schema-version-policy). |
+| `fragments` | `{ name: regex }` | `{}` | Named regex fragments this pack can reference by `${NAME}` — see [Fragments (`${NAME}` references)](#fragments-name-references). |
 | `rules` | `RuleDef[]` | — | The pack's rules. |
+
+## Fragments (`${NAME}` references)
+
+Every DSL regex idiom that recurs across many rules — most visibly the test-path `file_exclude_pattern`
+duplicated in ~90 rules across 11 packs before this mechanism existed — can be factored into a named
+fragment and referenced instead of copy-pasted, so a single fix (or a deliberate per-pack override) lands
+in one place.
+
+**Reference syntax.** A pattern-bearing field (`file_pattern`, `file_exclude_pattern`, `require_file`,
+each `require_file_all`/`require_file_absent` entry, `line_pattern`, each `any[].pattern`,
+`exclude_pattern`, each `patterns[].pattern`/`absent[].pattern`, `name_pattern`, `key_pattern`) may be
+spelled as a whole string EXACTLY `${NAME}` — no other characters before or after — instead of a literal
+regex. This is deliberately **whole-value only**: `"foo ${bar} baz"` is an ordinary literal string, not a
+reference; there is no inline substring composition in this pass. `${NAME}` is collision-safe as a
+sentinel because under the `regex` crate's syntax a bare `{` is only valid as a numeric repetition
+quantifier (`{n}`/`{n,}`/`{n,m}`, digits only) — a fragment name is a kebab-case identifier, never
+all-digits, so `${NAME}` can never simultaneously be a value a pack author would hand-write as a real
+pattern AND compile as one. A committed test
+(`crates/core/src/dsl/tests_fragments/byte_identity.rs::no_shipped_pattern_contains_the_sentinel_except_as_an_intended_whole_value_ref`)
+asserts no shipped `rules/dsl/**` pattern contains `${` except as a complete, resolvable reference.
+
+**Where names resolve from.** A `${NAME}` reference resolves against this pack's own `fragments` map
+merged UNDER a SHARED bundled set the engine ships (`zzop_core::dsl::fragments::shared_fragments` — an
+`include_str!`-embedded `{name: regex}` JSON, resolved identically whether the pack arrives from a
+`packsDir` file or an inline `packDefs` entry, with zero filesystem dependency at runtime). A name declared
+in a pack's own `fragments` WINS a collision against a shared fragment of the same name, so a pack can
+locally override a shared idiom without renaming it. Today's shared set: `test-paths` and
+`test-paths-stories` (the two DISTINCT test-path `file_exclude_pattern` strings shipped packs actually use
+— see the note below on why they were never unified).
+
+**Expand-then-clear.** `RulePackDef::expand_fragments` resolves every reference, then clears the pack's own
+`fragments` map to empty — so the loaded, in-memory `RulePackDef` for a pack authored with fragments is
+byte-identical (same `Debug` output, same hash, same cache fingerprint, same findings) to the equivalent
+pack authored with every pattern spelled out inline. This runs at every `RulePackDef` deserialize boundary
+— `pack_loader::parse_dsl_pack` (disk load, the `validate_rule_pack` validator, and bundled-pack parsing
+all funnel through it) and the inline `packDefs` wire path — BEFORE the pack is hashed or evaluated, so
+fragments never reach the DSL interpreter or the cache fingerprint.
+
+**Errors, not silent passthrough.** Resolution is single-pass, not recursive: a fragment whose own value is
+itself a whole-value `${...}` reference is a hard load error (`FragmentError::Nested`), never a silent
+no-op or a chained expansion. An unknown fragment name (`${typo}` naming nothing in either the pack's own
+`fragments` or the shared set) is likewise a hard load error (`FragmentError::Unknown`) — exactly like a
+malformed JSON body or an unsupported `schema_version`, never a rule that silently never fires. `zzop pack
+validate`/the `validate_rule_pack` MCP tool surface either as an ordinary issue.
+
+**Why two near-identical test-path fragments, not one.** `test-paths` and `test-paths-stories` differ only
+in whether they also exclude `.stories.`/`.storybook/` files — a real, pre-existing behavioral split across
+shipped rules (some rules intentionally still scan Storybook files, some don't). Unifying them would be a
+silent behavior change (a rule that used to scan a `.stories.tsx` file would stop, or vice versa), so each
+rule references whichever of the two fragments matches its OWN pre-existing string — migration only
+factored out the duplication, it never changed which files any rule scans.
 
 ## Rule shape (`RuleDef`)
 

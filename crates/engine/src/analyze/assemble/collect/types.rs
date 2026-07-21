@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use zzop_core::{Finding, ImportMap, IoConsume, IoProvide, ReExport};
 
-use crate::pipeline::{GoModuleMap, JavaIndex, RustWorkspaceMap};
+use crate::pipeline::{CSharpIndex, GoModuleMap, JavaIndex, RustWorkspaceMap};
 
 /// Every per-file substrate the fused pass collected, bucketed for the phases below. Field docs are
 /// preserved from the pre-split monolithic `assemble` — see each field for why it exists and who
@@ -25,6 +25,7 @@ pub(in crate::analyze::assemble) struct Collected {
     /// paired with its `rel` — merged into the dep graph as real (circular-excluded) edges alongside
     /// `ts_re_export_pairs`. Same collection gate as `ts_re_export_pairs`.
     pub(in crate::analyze::assemble) ts_dynamic_import_pairs: Vec<(String, Vec<String>)>,
+    pub(in crate::analyze::assemble) ts_asset_ref_pairs: Vec<(String, Vec<String>)>,
     pub(in crate::analyze::assemble) ts_paths: HashSet<String>,
     pub(in crate::analyze::assemble) degraded: Vec<String>,
     /// `pipeline::eval_packs`' minified/generated skip — a separate list from `degraded` (see
@@ -45,6 +46,11 @@ pub(in crate::analyze::assemble) struct Collected {
     /// per-file pass emitted a provide, since a file with no routes of its own (e.g. a prefix-constants
     /// file) still needs to be present for its constants to resolve.
     pub(in crate::analyze::assemble) java_rels: Vec<String>,
+    /// `run_csharp_provides_project_pass`'s whole-corpus input: every non-degraded csharp-dispatched file's
+    /// rel path, collected unconditionally (like `java_rels`) — the project pass needs EVERY `.cs` file,
+    /// including a route-constants-only `static class Routes` with no routes of its own, since its constants
+    /// must be present for a controller's non-literal route reference to resolve.
+    pub(in crate::analyze::assemble) csharp_rels: Vec<String>,
     /// `EngineConfig::profile_rules` reduce step: each `FileArtifact` carries its own file-local
     /// `rule_timings`, summed per `rule_id` in the loop below. Stays empty when profiling is off.
     pub(in crate::analyze::assemble) rule_time: HashMap<String, (u128, usize)>,
@@ -121,4 +127,16 @@ pub(in crate::analyze::assemble) struct Collected {
     /// drain here AND `super::dep_graph::merge_java_dep_edges`, so every Java-side resolution consults the
     /// SAME index — mirrors `go_modules`'s own dual-consumer doc.
     pub(in crate::analyze::assemble) java_index: JavaIndex,
+    /// C# namespace -> files scan (`crate::pipeline::scan_csharp_index`), built once up front in `collect`
+    /// (before the artifact-consuming loop) and reused by both the C# package-census drain here AND
+    /// `super::dep_graph::merge_csharp_dep_edges`, so every C#-side resolution consults the SAME index —
+    /// mirrors `java_index`'s own dual-consumer doc.
+    pub(in crate::analyze::assemble) csharp_index: CSharpIndex,
+    /// `.vue`/`.svelte` SFC rels — every walked file whose dispatch is `None` (no structural parser
+    /// frontend) AND whose extension is `.vue`/`.svelte`. `super::sfc::collect_sfc_import_pairs` reads
+    /// each one off disk (uncached, assemble-time — same pattern `dead_exports.rs`'s re-read does) to
+    /// extract `<script>`-block imports, so a `.ts` symbol imported ONLY inside an SFC's script block
+    /// still gets real fan-in for `dead-exports`/`dead-candidates` instead of false-firing. See
+    /// `zzop_parser_typescript::extract_sfc_script_imports`'s doc for why this needs no cache bump.
+    pub(in crate::analyze::assemble) sfc_rels: Vec<String>,
 }

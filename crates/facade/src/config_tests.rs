@@ -57,6 +57,105 @@ fn analyze_request_adapter_overlays_flow_into_engine_config() {
 }
 
 #[test]
+fn injected_routes_expand_into_a_synthetic_overlay_with_normalized_keys() {
+    // The lightweight `routes` field: a provide (default role) and a consume, both keyed through the same
+    // `http_interface_key` normalization the extractors use — so lowercase/trailing-slash input keys
+    // canonically. Expanded into ONE synthetic overlay appended to `EngineConfig::adapter_overlays`, whose
+    // `source` matches the tree so it makes no intra-source-mismatch claim. The join itself is covered
+    // end-to-end by `crates/engine/tests/analyze_multi_tree.rs`.
+    let config_json = r#"{
+        "root": "unused",
+        "sourceId": "be",
+        "routes": [
+            {"key": "get /api/users/"},
+            {"key": "GET /articles?limit=10", "role": "consume"}
+        ]
+    }"#;
+    let req: AnalyzeRequest = serde_json::from_str(config_json).expect("valid AnalyzeRequest JSON");
+    assert_eq!(
+        req.routes.len(),
+        2,
+        "expected the routes field to deserialize"
+    );
+
+    let mut warnings = Vec::new();
+    let config = build_engine_config(&req, &mut warnings);
+    assert_eq!(
+        config.adapter_overlays.len(),
+        1,
+        "expected routes to expand into exactly one synthetic overlay"
+    );
+    let overlay = &config.adapter_overlays[0];
+    assert_eq!(overlay.parser, "zzop-route-injection/1");
+    assert_eq!(overlay.source, "be", "overlay source must match the tree");
+    let io = &overlay.files[0].io;
+    assert_eq!(
+        io.provides
+            .iter()
+            .map(|p| p.key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["GET /api/users"],
+        "provide key must be normalized (uppercased, trailing slash stripped)"
+    );
+    assert_eq!(
+        io.consumes
+            .iter()
+            .filter_map(|c| c.key.as_deref())
+            .collect::<Vec<_>>(),
+        vec!["GET /articles"],
+        "consume role must key through http_consume_interface_key — the ?query is dropped so it joins a \
+         native GET /articles provide"
+    );
+    assert!(
+        warnings.is_empty(),
+        "valid routes must not warn: {warnings:?}"
+    );
+}
+
+#[test]
+fn a_malformed_injected_route_key_is_skipped_with_a_warning() {
+    // An injected fact that can never join (no METHOD/PATH split) is surfaced, never silently dropped.
+    let config_json = r#"{
+        "root": "unused",
+        "sourceId": "be",
+        "routes": [
+            {"key": "not-a-route-key"},
+            {"key": "GET /api/ok"}
+        ]
+    }"#;
+    let req: AnalyzeRequest = serde_json::from_str(config_json).expect("valid AnalyzeRequest JSON");
+    let mut warnings = Vec::new();
+    let config = build_engine_config(&req, &mut warnings);
+
+    // The valid one still expands; only the malformed one is dropped.
+    assert_eq!(config.adapter_overlays.len(), 1);
+    assert_eq!(
+        config.adapter_overlays[0].files[0].io.provides.len(),
+        1,
+        "only the valid route should survive"
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("not-a-route-key") && w.contains("METHOD PATH")),
+        "the malformed key must be surfaced: {warnings:?}"
+    );
+}
+
+#[test]
+fn no_routes_adds_no_overlay() {
+    let config_json = r#"{ "root": "unused", "sourceId": "be" }"#;
+    let req: AnalyzeRequest = serde_json::from_str(config_json).expect("valid AnalyzeRequest JSON");
+    assert!(req.routes.is_empty(), "routes must default to empty");
+    let mut warnings = Vec::new();
+    let config = build_engine_config(&req, &mut warnings);
+    assert!(
+        config.adapter_overlays.is_empty(),
+        "no routes must append no synthetic overlay"
+    );
+}
+
+#[test]
 fn analyze_request_git_commit_type_patterns_flow_into_engine_config() {
     // Plumbing-only, same spirit as `analyze_request_adapter_overlays_flow_into_engine_config`: proves
     // the wire-facing `git.commitTypePatterns` JSON field deserializes into

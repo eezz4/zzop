@@ -1,16 +1,15 @@
-//! JS<->Rust config-front-end parity harness (Rust side) — replays every case of the committed
+//! Config-front-end golden harness — replays every case of the committed
 //! `docs/contracts/config-parity.fixture.json` through `zzop_config::mapper::config_to_request` and
-//! deep-equals the emitted request against the fixture's expected JSON. The JS side
-//! (`packages/cli/test/config-parity.test.js`) asserts `mapper.js`'s `configToRequest` against the
-//! SAME file, so the two front-ends can only drift by failing one of the two tests. This is the
-//! harness behind `crates/config/Cargo.toml`'s "parity is pinned by comparing emitted request JSON"
-//! claim.
+//! deep-equals the emitted request against the fixture's expected JSON, pinning the mapper's output
+//! against regression. (The fixture originated as a JS<->Rust parity anchor; the JS front-end was
+//! removed 2026-07-20, so it is now the Rust front-end's sole golden.) This is the harness behind
+//! `crates/config/Cargo.toml`'s "the emitted request JSON is pinned" claim.
 //!
 //! Two documented deltas are reversed before comparing (see the fixture's `_docs.normalization` and
-//! the crate doc): (1) the Rust port resolves `root`/`cacheDir`/`packsDir` against the config
-//! directory — path values are mapped back to their raw form against the known base; (2) the Rust
-//! port folds the JS wrapper's `withDefaults` layer in — the bundled `packDefs` and default
-//! `git: {}` injections are asserted, then stripped. Everything else must match exactly.
+//! the crate doc): (1) the mapper resolves `root`/`cacheDir`/`packsDir` against the config
+//! directory — path values are mapped back to their raw form against the known base; (2) the
+//! `withDefaults` layer is folded in — the bundled `packDefs` and default `git: {}` injections are
+//! asserted, then stripped. Everything else must match exactly.
 
 use serde_json::Value;
 use std::path::Path;
@@ -121,8 +120,7 @@ fn rust_mapper_emits_the_committed_request_json_for_every_fixture_case() {
             &request, expected_request,
             "case {name:?}: the Rust mapper's request JSON drifted from the committed parity \
              fixture (docs/contracts/config-parity.fixture.json) — if the change is intentional, \
-             update the fixture AND confirm packages/cli/test/config-parity.test.js still passes \
-             (the JS mapper must emit the same shape)"
+             update the fixture to match the mapper's new output"
         );
     }
 }

@@ -8,6 +8,13 @@
 //!
 //! Provider sites in test-path files (`zzop_core::is_test_file`) are skipped — an isolated test
 //! fixture's route never coexists with the "duplicate" at runtime.
+//!
+//! A later site is skipped when it resolves to the SAME handler `symbol` as the canonical site: the same
+//! handler deliberately registered on two paths that normalize to one key is the trailing-slash-tolerance
+//! idiom (e.g. gin's `router.POST("", h)` + `router.POST("/", h)`, so both `/x` and `/x/` hit `h`), not a
+//! shadow — the same handler runs either way, so there is no "which handler wins?" ambiguity for the rule
+//! to warn about. A later site with a DIFFERENT symbol (or an unknown symbol on either side, where sameness
+//! can't be proven) is still flagged: that is the genuine shadowing case the rule exists for.
 
 pub fn duplicate_route_findings(io_provides: &[zzop_core::IoProvide]) -> Vec<zzop_core::Finding> {
     let mut by_key: std::collections::BTreeMap<&str, Vec<&zzop_core::IoProvide>> =
@@ -26,6 +33,14 @@ pub fn duplicate_route_findings(io_provides: &[zzop_core::IoProvide]) -> Vec<zzo
         sites.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
         let first = sites[0];
         for dup in &sites[1..] {
+            // Same-handler multi-registration (trailing-slash tolerance / framework convention) is not a
+            // shadow — skip it. Only proven-same non-empty symbols count; an absent symbol on either side
+            // leaves the conservative warning in place. See this module's doc.
+            if let (Some(a), Some(b)) = (first.symbol.as_deref(), dup.symbol.as_deref()) {
+                if !a.is_empty() && a == b {
+                    continue;
+                }
+            }
             findings.push(zzop_core::Finding {
                 rule_id: "duplicate-route".to_string(),
                 severity: zzop_core::Severity::Warning,
@@ -59,6 +74,13 @@ mod tests {
             file: file.to_string(),
             line,
             symbol: None,
+        }
+    }
+
+    fn provide_sym(key: &str, file: &str, line: u32, symbol: &str) -> zzop_core::IoProvide {
+        zzop_core::IoProvide {
+            symbol: Some(symbol.to_string()),
+            ..provide(key, file, line)
         }
     }
 
@@ -141,6 +163,63 @@ mod tests {
         assert_eq!(found[0].file, "src/routes/users.ts");
         assert_eq!(found[0].line, 3);
         assert!(found[0].message.contains("src/routes/legacy.ts:20"));
+    }
+
+    #[test]
+    fn same_handler_on_a_trailing_slash_pair_is_not_flagged() {
+        // gin's `router.POST("", h)` + `router.POST("/", h)` both normalize to one key with the SAME
+        // handler symbol — the tolerance idiom, not a shadow. No finding.
+        let provides = vec![
+            provide_sym(
+                "POST /api/articles",
+                "articles/routers.go",
+                15,
+                "ArticleCreate",
+            ),
+            provide_sym(
+                "POST /api/articles",
+                "articles/routers.go",
+                16,
+                "ArticleCreate",
+            ),
+        ];
+        assert!(duplicate_route_findings(&provides).is_empty());
+    }
+
+    #[test]
+    fn same_key_with_different_handlers_still_flags_the_shadow() {
+        // Two DIFFERENT handlers on one normalized key is the genuine "which handler wins?" ambiguity.
+        let provides = vec![
+            provide_sym("GET /api/users", "a.ts", 3, "listUsers"),
+            provide_sym("GET /api/users", "b.ts", 9, "legacyListUsers"),
+        ];
+        let found = duplicate_route_findings(&provides);
+        assert_eq!(found.len(), 1);
+        assert_eq!((found[0].file.as_str(), found[0].line), ("b.ts", 9));
+    }
+
+    #[test]
+    fn same_key_with_unknown_symbol_on_one_side_stays_conservative() {
+        // Can't prove same handler when a symbol is missing -> keep the warning.
+        let provides = vec![
+            provide_sym("GET /api/users", "a.ts", 3, "listUsers"),
+            provide("GET /api/users", "b.ts", 9),
+        ];
+        assert_eq!(duplicate_route_findings(&provides).len(), 1);
+    }
+
+    #[test]
+    fn a_third_divergent_handler_is_flagged_while_the_same_handler_pair_is_not() {
+        // Sorted by (file, line): a_routers.go:27 is canonical (A); a_routers.go:28 (A) matches it and is
+        // skipped as the tolerance pair; z_legacy.go:5 (B) diverges from the canonical handler and flags.
+        let provides = vec![
+            provide_sym("GET /api/articles", "a_routers.go", 27, "ArticleList"),
+            provide_sym("GET /api/articles", "a_routers.go", 28, "ArticleList"),
+            provide_sym("GET /api/articles", "z_legacy.go", 5, "OldArticleList"),
+        ];
+        let found = duplicate_route_findings(&provides);
+        assert_eq!(found.len(), 1);
+        assert_eq!((found[0].file.as_str(), found[0].line), ("z_legacy.go", 5));
     }
 
     #[test]

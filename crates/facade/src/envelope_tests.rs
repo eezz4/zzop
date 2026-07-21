@@ -226,18 +226,19 @@ fn version_string_includes_parser_fingerprints() {
     assert!(v.contains("zzop-parser-rust="));
     assert!(v.contains("zzop-parser-go="));
     assert!(v.contains("zzop-parser-sql="));
+    assert!(v.contains("zzop-parser-csharp="));
 }
 
 // `ZZOP_RELEASE_VERSION` is a compile-time env (`option_env!`), so only the fallback path is
 // testable here: test builds never set it, and this pins that the fallback is exactly
 // `CARGO_PKG_VERSION` (the workspace `0.0.0` placeholder) — the same pin `packages/mcp`'s
 // `server.rs` keeps for its own `version()`. The release path (the env exported from the tag in
-// .github/workflows/prebuild.yml's addon build step) is exercised live by release CI.
+// .github/workflows/prebuild.yml's zzop-mcp build step) is exercised live by release CI.
 #[test]
 fn version_string_falls_back_to_cargo_pkg_version_when_release_env_is_unset() {
     let v = version_string();
     assert!(
-        v.starts_with(concat!("zzop-napi/", env!("CARGO_PKG_VERSION"), " ")),
+        v.starts_with(concat!("zzop/", env!("CARGO_PKG_VERSION"), " ")),
         "expected the CARGO_PKG_VERSION fallback in the version segment, got: {v}"
     );
 }

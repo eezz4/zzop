@@ -70,12 +70,17 @@ impl Drop for TempDir {
     }
 }
 
-/// Loads the real `sql.json` pack, co-located with this test file.
+/// Loads the real `sql.json` pack, co-located with this test file. Goes through
+/// `zzop_core::parse_dsl_pack` (not a raw `serde_json::from_str`) so `${NAME}` fragment refs (the shared
+/// test-path exclusions plus this pack's own `sql-where-veto`/`test-paths-migrations` fragments) resolve
+/// exactly like they do at real load time — a raw struct deserialize would leave the literal
+/// `"${sql-where-veto}"` string in place, which is not a valid regex and would silently no-op every
+/// affected rule.
 fn sql_pack() -> RulePackDef {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("dsl/sql/sql.json");
     let text = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-    serde_json::from_str(&text).expect("parse sql.json")
+    zzop_core::parse_dsl_pack(&text).expect("parse sql.json")
 }
 
 fn config() -> EngineConfig {

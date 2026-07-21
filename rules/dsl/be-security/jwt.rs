@@ -26,6 +26,20 @@ fn jwt_sign_with_expires_in_option_is_not_flagged() {
     assert!(hits(&out, "jwt-no-expiry").is_empty(), "{:?}", out.findings);
 }
 
+#[test]
+fn jwt_sign_with_an_exp_payload_claim_is_not_flagged() {
+    // A token that expires via the `exp` payload claim (not the `expiresIn` option) still expires — the
+    // rule's own message endorses "or set `exp` in the payload". Regression pin (dogfood: corpus be-nest,
+    // user.service.ts generateJWT sets `exp: today.getTime() / 1000`).
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "declare const jwt: any;\nexport function issueToken(id: number) {\n  const exp = new Date();\n  exp.setDate(exp.getDate() + 60);\n  return jwt.sign({ id, exp: exp.getTime() / 1000 }, \"secret\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(hits(&out, "jwt-no-expiry").is_empty(), "{:?}", out.findings);
+}
+
 // --- jwt-none-algorithm ---
 
 #[test]

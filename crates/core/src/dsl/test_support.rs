@@ -9,9 +9,12 @@ use super::{eval_pack, RuleContext, RulePackDef, SourceFile};
 /// The three Java security-concern rules (`sql-taint`/`weak-crypto`/`cmd-injection`) that moved into
 /// `be-security` when the language-named `java-security` pack was dissolved (v0.15). We load the real
 /// `be-security.json` and filter to just those three so the fixture stays a small, fully-`.java`-applicable
-/// set.
+/// set. Goes through `crate::parse_dsl_pack` (not a raw `serde_json::from_str`) so this pack's `${NAME}`
+/// fragment refs (its shared test-path `file_exclude_pattern`) resolve exactly like they do at real load
+/// time — a raw struct deserialize would leave the literal `"${test-paths-stories}"`/`"${test-paths}"`
+/// strings in place, which are not valid regexes and would silently no-op every affected rule.
 pub(super) fn pack() -> RulePackDef {
-    let mut p: RulePackDef = serde_json::from_str(include_str!(
+    let mut p: RulePackDef = crate::parse_dsl_pack(include_str!(
         "../../../../rules/dsl/be-security/be-security.json"
     ))
     .expect("parse be-security.json");

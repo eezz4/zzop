@@ -44,28 +44,21 @@
 //!   callee>, attr_keys: vec![]}` to THAT argument's OWN fragment (the group/engine being passed in —
 //!   NOT a fragment named after `Fn`), mirroring how `zzop_parser_rust::adapters::axum`'s `nest`/`merge`
 //!   mount entries live on the MOUNTING receiver while naming the mounted side. Every OTHER argument (a
-//!   `*sql.DB` handle, a config struct, a literal, ...) is ignored outright — it carries no mount
-//!   information and never blocks recognition of the one receiver argument that does
-//!   (`pkg.Register(db, api.Group("/admin"))` mounts on `api` exactly as `pkg.Register(api.Group("/admin"))`
-//!   would — the dominant real-world multi-parameter registration idiom, e.g. `func Register(db *DB, r
-//!   *gin.RouterGroup)`). TWO OR MORE mountable-receiver arguments in the same call (`pkg.Wire(a.Group("/a"),
-//!   b.Group("/b"))`) is genuinely ambiguous — which one does `Wire` actually mount onto? — so the WHOLE
-//!   call is rejected, never guessed; this crate has no parser-layer disclosure/self-report channel to
-//!   flag the ambiguity (disclosure for router-mount gaps lives downstream in
-//!   `crates/engine`/`rules-cross-layer`, e.g. route-near-miss/prefix-drift), so
-//!   [`Collector::try_call_site`]'s own code comment is the only record. This is the OPPOSITE case from
-//!   a fresh local `Group` binding's specifier (always `None` — see the F1 comment in `try_binding`'s
+//!   `*sql.DB` handle, a config struct, a literal, ...) is ignored outright and never blocks recognition
+//!   of the one receiver argument that does (`pkg.Register(db, api.Group("/admin"))` mounts on `api`),
+//!   the dominant real-world multi-parameter registration idiom. TWO OR MORE mountable-receiver arguments
+//!   in the same call (`pkg.Wire(a.Group("/a"), b.Group("/b"))`) is genuinely ambiguous — which one does
+//!   `Wire` mount onto? — so the WHOLE call is rejected, never guessed. This is the OPPOSITE case from a
+//!   fresh local `Group` binding's specifier (always `None` — see the F1 comment in `try_binding`'s
 //!   `Group` arm below): a package qualifier genuinely IS an imported symbol, so the `ImportMap` lookup
 //!   is the correct resolution here, not the F1 hazard. The callee's operand (for a selector callee) is
 //!   checked against the `ImportMap` to tell a package qualifier (`users.UsersRegister(v1)`, a candidate)
-//!   apart from a method call on a local variable (`mux.HandleFunc(...)`, already handled by
-//!   [`Collector::try_verb_call`], never a candidate here) — an operand that does not resolve as an
-//!   import is skipped outright. A non-literal `Group` prefix in a candidate argument skips the whole
-//!   call, the same never-guess rule as every other prefix in this file. This is a deliberately loose
-//!   over-approximation on the CALLEE side: any call taking exactly one tracked receiver (bare or via
-//!   `.Group(...)`), of any arity, is a candidate, not just a fixed allowlist of registration-function
-//!   names — unlike gin's own `GET`/`POST`/... vocabulary, a user's own registration functions have no
-//!   fixed name to allowlist. Documented rather than narrowed further.
+//!   apart from a method call on a local variable (`mux.HandleFunc(...)`, handled by
+//!   [`Collector::try_verb_call`], never a candidate here). A non-literal `Group` prefix in a candidate
+//!   argument skips the whole call, the same never-guess rule as every other prefix in this file. The
+//!   candidate match is name-agnostic BY DESIGN: user registration functions have no fixed name to
+//!   allowlist (unlike gin's own `GET`/`POST` verb vocabulary), so recognition keys on the single-
+//!   mountable-receiver shape, not the callee name — deliberately loose, never narrowed to an allowlist.
 //! - Only a direct single-name `:=`/`=` binding is tracked for a LOCAL engine/group receiver (module doc
 //!   parity with `adapters::net_http`'s identical narrowing); a function-PARAMETER receiver is tracked
 //!   too (two bullets up), closing the dominant real-world gap this file's v1 used to document outright.
@@ -252,9 +245,18 @@ impl<'a> Collector<'a> {
         let Some(fragment) = self.known.get(recv).cloned() else {
             return;
         };
-        if !GIN_VERB_METHODS.contains(&method) {
+        // `.Any(path, h)` registers ONE handler for EVERY HTTP method (gin's catch-all — health/proxy/
+        // fallthrough routes). Emit one Verb entry per `HTTP_KEY_VERBS` so the route is not invisible and
+        // `mutating-route-no-auth` still sees its PUT/DELETE/PATCH surface. Shares the `.GET`/`.POST`/...
+        // shape exactly (path arg 0, handler arg 1); `.Handle(method, ...)`/`.Match([]string{...}, ...)`
+        // (verb-from-argument shapes) stay out of v1 scope.
+        let methods: Vec<String> = if method == "Any" {
+            HTTP_KEY_VERBS.iter().map(|v| v.to_string()).collect()
+        } else if GIN_VERB_METHODS.contains(&method) {
+            vec![method.to_string()]
+        } else {
             return;
-        }
+        };
         let Some(path_node) = nth_arg(call, 0) else {
             return;
         };
@@ -262,14 +264,18 @@ impl<'a> Collector<'a> {
             return;
         };
         let handler = nth_arg(call, 1).and_then(|n| bare_identifier(n, src));
-        let entry = RouterMountEntry::Verb {
-            method: method.to_string(),
-            path,
-            handler,
-            line: crate::util::line_of(call),
-            attr_keys: Vec::new(),
-        };
-        append_entries(&mut self.order, &mut self.entries, fragment, vec![entry]);
+        let line = crate::util::line_of(call);
+        let entries: Vec<RouterMountEntry> = methods
+            .into_iter()
+            .map(|method| RouterMountEntry::Verb {
+                method,
+                path: path.clone(),
+                handler: handler.clone(),
+                line,
+                attr_keys: Vec::new(),
+            })
+            .collect();
+        append_entries(&mut self.order, &mut self.entries, fragment, entries);
     }
 }
 

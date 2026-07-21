@@ -6,7 +6,7 @@
 use tree_sitter::Node;
 use zzop_core::{http_interface_key, IoProvide};
 
-use super::annotations::{class_annotation_facts, first_quoted_string, method_route};
+use super::annotations::{class_annotation_facts, method_route, route_path_state, RoutePathState};
 use crate::lang::symbols::is_type_decl_kind;
 use crate::util::{line_of, modifiers_of, node_text, valid_named_children};
 
@@ -27,20 +27,28 @@ pub fn extract_http_provides(rel: &str, text: &str) -> Vec<IoProvide> {
 }
 
 /// One class/interface/enum/record/annotation-type declaration: reads its OWN gating facts (never an
-/// ancestor's — module doc), then walks its direct members. A non-literal `@RequestMapping` prefix
-/// defaults to `""`, same as an absent one — this per-file pass has no cross-file visibility to resolve
-/// a constant reference (see `crate::project` for the whole-corpus pass that does).
+/// ancestor's — module doc), then walks its direct members. A NON-LITERAL `@RequestMapping` prefix
+/// (a constant reference) does NOT default to `""` — it BLOCKS this class's own direct routes (`blocked`),
+/// mirroring the whole-corpus pass's `PrefixState::Unresolved` drop (`crate::project`): this per-file pass
+/// has no cross-file visibility to resolve the constant, and keying the routes at the empty base would
+/// fabricate phantoms under the wrong prefix. An ABSENT or empty `@RequestMapping` is still the legitimate
+/// base `""`. (In the fused engine these per-file java http provides are replaced wholesale by the
+/// whole-corpus pass — `run_java_provides_project_pass` — so this blocking is defense-in-depth plus honesty
+/// for direct `extract_http_provides` callers; the whole-corpus pass is the one that reaches the join.)
 fn walk_type(rel: &str, node: Node, src: &str, out: &mut Vec<IoProvide>) {
     let facts = class_annotation_facts(modifiers_of(node), src);
-    let prefix = facts
-        .request_mapping_arg
-        .as_deref()
-        .and_then(first_quoted_string)
-        .unwrap_or_default();
+    let (prefix, blocked) = match facts.request_mapping_arg.as_deref() {
+        None => (String::new(), false),
+        Some(args) => match route_path_state(args) {
+            RoutePathState::Literal(p) => (p, false),
+            RoutePathState::Base => (String::new(), false),
+            RoutePathState::NonLiteral(_) => (String::new(), true),
+        },
+    };
     let Some(body) = node.child_by_field_name("body") else {
         return;
     };
-    walk_body(rel, body, src, facts.is_controller, &prefix, out);
+    walk_body(rel, body, src, facts.is_controller, &prefix, blocked, out);
 }
 
 fn walk_body(
@@ -49,15 +57,16 @@ fn walk_body(
     src: &str,
     is_controller: bool,
     prefix: &str,
+    blocked: bool,
     out: &mut Vec<IoProvide>,
 ) {
     for child in valid_named_children(body) {
         if child.kind() == "enum_body_declarations" {
             for member in valid_named_children(child) {
-                walk_member(rel, member, src, is_controller, prefix, out);
+                walk_member(rel, member, src, is_controller, prefix, blocked, out);
             }
         } else {
-            walk_member(rel, child, src, is_controller, prefix, out);
+            walk_member(rel, child, src, is_controller, prefix, blocked, out);
         }
     }
 }
@@ -68,6 +77,7 @@ fn walk_member(
     src: &str,
     is_controller: bool,
     prefix: &str,
+    blocked: bool,
     out: &mut Vec<IoProvide>,
 ) {
     if is_type_decl_kind(node.kind()) {
@@ -82,19 +92,29 @@ fn walk_member(
     {
         return;
     }
-    let Some((verb, path)) = method_route(modifiers_of(node), src) else {
+    if blocked {
+        // Class prefix is a non-literal this pass cannot resolve -> its own routes' paths are unknown. Skip
+        // rather than key them under the empty base (a phantom). Nested types were already recursed above.
         return;
-    };
+    }
+    let routes = method_route(modifiers_of(node), src);
+    if routes.is_empty() {
+        return;
+    }
     let Some(name_node) = node.child_by_field_name("name") else {
         return;
     };
-    let full_path = format!("{prefix}/{path}");
-    out.push(IoProvide {
-        body: None,
-        kind: "http".to_string(),
-        key: http_interface_key(&verb, &full_path),
-        file: rel.to_string(),
-        line: line_of(node),
-        symbol: Some(node_text(name_node, src).to_string()),
-    });
+    let symbol = node_text(name_node, src).to_string();
+    let line = line_of(node);
+    for (verb, path) in routes {
+        let full_path = format!("{prefix}/{path}");
+        out.push(IoProvide {
+            body: None,
+            kind: "http".to_string(),
+            key: http_interface_key(&verb, &full_path),
+            file: rel.to_string(),
+            line,
+            symbol: Some(symbol.clone()),
+        });
+    }
 }

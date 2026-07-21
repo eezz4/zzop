@@ -1,6 +1,4 @@
-//! `cross_repo`'s `bucketKeys`/`bucketKeySites` shaping — split out of `mod.rs` (300-line source cap)
-//! since the `bucketKeySites` addition (first-site-per-key lookup) grew this past a single-function
-//! sliver worth keeping inline.
+//! `cross_repo`'s `bucketKeys`/`bucketKeySites` shaping.
 
 /// Default cap for `cross_repo`'s `bucketKeys` distinct-key lists (see `bucket_keys`).
 pub const DEFAULT_BUCKET_KEYS_LIMIT: usize = 20;

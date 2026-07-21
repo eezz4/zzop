@@ -618,7 +618,7 @@ fn analyze_envelope_json_zero_config_injects_the_bundled_packs_as_inline() {
 
 #[test]
 fn analyze_envelope_json_packs_dir_null_opts_out_of_the_bundled_packs() {
-    // The JS wrapper's documented `packsDir: null` opt-out ("no DSL packs at all") must survive the
+    // The documented `packsDir: null` opt-out ("no DSL packs at all") must survive the
     // facade-level bundled default — absent key and explicit null are different contracts.
     let envelope = envelope_with_symbols(&["Anything"]);
     let out = analyze_envelope_json(&envelope, r#"{"sourceId": "legacy", "packsDir": null}"#)
@@ -637,7 +637,7 @@ fn analyze_envelope_json_packs_dir_null_opts_out_of_the_bundled_packs() {
 
 #[test]
 fn analyze_envelope_json_js_wrapper_shaped_packs_dir_shadows_the_inline_bundled_seed() {
-    // The JS wrapper sends `packsDir: [<bundled rules/dsl>, ...]` for envelope calls; the facade's
+    // An embedder / the config front-end sends `packsDir: [<bundled rules/dsl>, ...]` for envelope calls; the facade's
     // inline bundled seed must lose every id collision to that on-disk copy (dir wins whole), so a
     // JS-wrapper caller keeps the exact rule set AND the "dir" provenance it had before this
     // default existed — no double-loading, no behavior change.

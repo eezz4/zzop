@@ -40,6 +40,9 @@ pub(super) fn run(
     io_provides: &[zzop_core::IoProvide],
     io_consumes: &[zzop_core::IoConsume],
     rule_time: &mut std::collections::HashMap<String, (u128, usize)>,
+    sfc_import_pairs: &[(String, ImportMap)],
+    sfc_targets: &std::collections::HashSet<String>,
+    asset_targets: &std::collections::HashSet<String>,
 ) -> Vec<Finding> {
     // `profile` mirrors `dsl::eval_pack_impl`'s no-op-sink convention: `Instant::now()` is only ever called
     // when profiling is on, so a non-profiled `analyze_tree` call pays zero cost for the wrapping below.
@@ -62,7 +65,7 @@ pub(super) fn run(
         // below) for a fan_in > 0 overlay case remains a separate follow-up, as does
         // `dead_export_findings`' missing parameter.
         let t0 = profile.then(Instant::now);
-        let cargo_target_entries: std::collections::HashSet<String> =
+        let mut unreachable_entries: std::collections::HashSet<String> =
             crate::pipeline::declared_rust_target_paths(
                 root,
                 ts_paths
@@ -72,7 +75,17 @@ pub(super) fn run(
             )
             .into_iter()
             .collect();
-        let found = unreachable_findings(nodes, dep, &cargo_target_entries);
+        // A `.ts` imported ONLY by a `.vue`/`.svelte` SFC has real fan-in (via `merge_sfc_fan_in`) but no
+        // `dep` edge points at it (the SFC is not a graph node), so it would read as a false `unreachable`
+        // island. A framework-mounted component is effectively an entrypoint, so seed what it imports as
+        // reachable — the same "loaded by a mechanism this graph can't see" contract as the cargo targets.
+        unreachable_entries.extend(sfc_targets.iter().cloned());
+        // Same contract for runtime asset-URL targets (worklet/worker/importScripts/`new URL`): a
+        // `public/*.js` worklet has real fan-in (via `merge_asset_ref_fan_in`) but no incoming `dep`
+        // edge, so it too would read as a false `unreachable` island without being seeded as an entry —
+        // it IS an entrypoint, loaded by the browser's asset loader this graph can't see.
+        unreachable_entries.extend(asset_targets.iter().cloned());
+        let found = unreachable_findings(nodes, dep, &unreachable_entries);
         record_native_timing(rule_time, t0, "unreachable", found.len());
         global_findings.extend(found);
     }
@@ -96,7 +109,13 @@ pub(super) fn run(
                 .filter(|file| file.is_entry)
                 .map(|file| file.path.clone()),
         );
-        let found = dead_candidate_findings(nodes, dep, &extra_entries);
+        // Drop candidates on author-declared generated files, mirroring `dead-exports`' exemption: a
+        // generated file is regenerated, not hand-edited, so "delete this unused file" is non-actionable
+        // there. Reads only the (few) candidate files' heads. Same `has_generated_banner` detector.
+        let found: Vec<_> = dead_candidate_findings(nodes, dep, &extra_entries)
+            .into_iter()
+            .filter(|f| !crate::generated_banner::file_has_generated_banner(root, &f.file))
+            .collect();
         record_native_timing(rule_time, t0, "dead-candidates", found.len());
         global_findings.extend(found);
     }
@@ -110,6 +129,7 @@ pub(super) fn run(
             used_names_by_file,
             &pkg_scan.workspace_pkgs,
             tsconfigs,
+            sfc_import_pairs,
         );
         record_native_timing(rule_time, t0, "dead-exports", found.len());
         global_findings.extend(found);

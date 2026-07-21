@@ -6,9 +6,9 @@
 use std::collections::HashMap;
 use tree_sitter::Node;
 
-use super::{ClassRow, MethodRoute};
+use super::{ClassRow, MethodPath, MethodRoute};
 use crate::lang::symbols::is_type_decl_kind;
-use crate::provides::{class_annotation_facts, method_route};
+use crate::provides::{class_annotation_facts, method_route_states, RoutePathState};
 use crate::util::{line_of, modifiers_of, node_text, simple_type_name, valid_named_children};
 
 /// Walks `root`'s top-level children, recording one `ClassRow` PER type declaration found (top-level and
@@ -128,14 +128,26 @@ fn walk_member(
         "field_declaration" => collect_constant(node, src, false, constants),
         "constant_declaration" => collect_constant(node, src, always_const, constants),
         "method_declaration" | "constructor_declaration" => {
-            if let Some((verb, path)) = method_route(modifiers_of(node), src) {
+            let routes = method_route_states(modifiers_of(node), src);
+            if !routes.is_empty() {
                 if let Some(name_node) = node.child_by_field_name("name") {
-                    methods.push(MethodRoute {
-                        line: line_of(node),
-                        name: node_text(name_node, src).to_string(),
-                        verb,
-                        path,
-                    });
+                    let name = node_text(name_node, src).to_string();
+                    let line = line_of(node);
+                    for (verb, state) in routes {
+                        // A NON-LITERAL method path carries its raw args forward for whole-corpus constant
+                        // resolution (`walk::emit_class_routes`); a literal or absent-base path is final.
+                        let path = match state {
+                            RoutePathState::Literal(p) => MethodPath::Literal(p),
+                            RoutePathState::Base => MethodPath::Literal(String::new()),
+                            RoutePathState::NonLiteral(args) => MethodPath::Unresolved(args),
+                        };
+                        methods.push(MethodRoute {
+                            line,
+                            name: name.clone(),
+                            verb,
+                            path,
+                        });
+                    }
                 }
             }
         }

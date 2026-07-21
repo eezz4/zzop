@@ -5,6 +5,7 @@
 //! lives in the submodules.
 
 mod callgraph;
+mod csharp_provides;
 mod delegates;
 mod java_provides;
 mod schema_join;
@@ -13,6 +14,7 @@ mod schema_join;
 mod prisma_client_getter_consistency_tests;
 
 pub(super) use callgraph::run_callgraph_rules;
+pub(super) use csharp_provides::run_csharp_provides_project_pass;
 pub(crate) use delegates::{
     circular_findings, dead_candidate_findings, dep_stats_from_dep, unreachable_findings,
 };

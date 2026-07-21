@@ -1,6 +1,6 @@
 //! Lexical scan for Next.js `pages/api` default-export handlers: `export default <expr>` is
 //! invisible to `parse_symbols` (which only surfaces `ExportDefaultDecl`), and one handler serves
-//! every HTTP method via `req.method` checks or a `defaultHandler({ GET: …, POST: … })` verb map.
+//! every HTTP method via `req.method` `if`/`switch` checks or a `defaultHandler({ GET: …, POST: … })` map.
 //! `zzop-engine`'s file-convention route composition calls this scan to learn whether a candidate
 //! file default-exports a handler and which methods its body names.
 //!
@@ -18,9 +18,10 @@ pub struct PagesApiHandlerScan {
     /// `None` means the file has no default export (e.g. a config-only file).
     pub default_export_line: Option<u32>,
     /// Sorted, deduped UPPERCASE verbs named in the handler body: from `req.method`/`request.method`
-    /// comparisons against a GET|POST|PUT|PATCH|DELETE literal (either operand order), plus
-    /// `GET:`-style verb-map keys when the file uses the `defaultHandler(` idiom (bare verb keys
-    /// elsewhere are too FP-prone to count). Comment lines are skipped.
+    /// comparisons against a GET|POST|PUT|PATCH|DELETE literal (either operand order), `case 'VERB':`
+    /// labels when the body `switch`es on `req.method`/`request.method`, plus `GET:`-style verb-map keys
+    /// when the file uses the `defaultHandler(` idiom (bare verb keys elsewhere are too FP-prone to
+    /// count). Comment lines are skipped.
     pub verbs: Vec<String>,
 }
 
@@ -62,6 +63,8 @@ fn collect_verbs(text: &str) -> Vec<String> {
     static METHOD_CMP_FORWARD: OnceLock<Regex> = OnceLock::new();
     static METHOD_CMP_REVERSE: OnceLock<Regex> = OnceLock::new();
     static VERB_KEY: OnceLock<Regex> = OnceLock::new();
+    static METHOD_SWITCH: OnceLock<Regex> = OnceLock::new();
+    static CASE_LABEL: OnceLock<Regex> = OnceLock::new();
 
     // `req.method`/`request.method` compared to a quoted verb literal, either operand order.
     let forward = METHOD_CMP_FORWARD.get_or_init(|| {
@@ -79,8 +82,19 @@ fn collect_verbs(text: &str) -> Vec<String> {
     // Verb-map object key (`GET:`, `"GET":`, `'GET':`), only consulted when `defaultHandler(` appears.
     let verb_key =
         VERB_KEY.get_or_init(|| Regex::new(r#"\b(GET|POST|PUT|PATCH|DELETE)\b['"]?\s*:"#).unwrap());
+    // `switch (req.method)`/`switch (request.method)` — the switch-dispatch twin of the `req.method
+    // === 'VERB'` comparison forms; when present, `case 'VERB':` labels name the served methods.
+    let method_switch =
+        METHOD_SWITCH.get_or_init(|| Regex::new(r"switch\s*\(\s*(?:req|request)\.method").unwrap());
+    let case_label = CASE_LABEL
+        .get_or_init(|| Regex::new(r#"case\s+['"](GET|POST|PUT|PATCH|DELETE)['"]"#).unwrap());
 
     let has_verb_map_idiom = text.contains("defaultHandler(");
+    // Gated like the verb-map idiom (file-level presence, not block scope): `case 'VERB':` labels count
+    // only when the file switches on the request method. A method switch coexisting with an unrelated
+    // uppercase-verb `switch` can over-collect (the same accepted limitation the verb-map gate carries;
+    // the line-based scan does not brace-scope) — still strictly less fabrication than the fallback.
+    let has_method_switch = method_switch.is_match(text);
 
     let mut verbs: Vec<String> = Vec::new();
     for raw in text.lines() {
@@ -98,6 +112,11 @@ fn collect_verbs(text: &str) -> Vec<String> {
                 push_unique_verb(&mut verbs, &cap[1]);
             }
         }
+        if has_method_switch {
+            for cap in case_label.captures_iter(raw) {
+                push_unique_verb(&mut verbs, &cap[1]);
+            }
+        }
     }
     verbs.sort();
     verbs
@@ -112,7 +131,8 @@ fn push_unique_verb(verbs: &mut Vec<String>, verb: &str) {
 #[cfg(test)]
 mod tests {
     //! Coverage for `scan_pages_api_handler`: default-export detection, verb extraction (both
-    //! comparison orders, the `defaultHandler(` verb-map idiom, and the bare-verb-key FP guard).
+    //! comparison orders, `switch`/`case` labels, the `defaultHandler(` verb-map idiom, and the
+    //! bare-verb-key / unrelated-switch FP guards).
     use super::*;
 
     #[test]
@@ -199,6 +219,28 @@ mod tests {
     fn lowercase_or_non_verb_object_keys_ignored() {
         let text =
             "export default defaultHandler({\n  get: handleGet,\n  TARGET: something,\n});\n";
+        let scan = scan_pages_api_handler(text);
+        assert!(scan.verbs.is_empty());
+    }
+
+    #[test]
+    fn switch_on_req_method_collects_case_label_verbs() {
+        let text = "export default function handler(req, res) {\n  switch (req.method) {\n    case 'POST':\n      return create(req, res);\n    case 'DELETE':\n      return remove(req, res);\n  }\n}\n";
+        let scan = scan_pages_api_handler(text);
+        assert_eq!(scan.verbs, vec!["DELETE".to_string(), "POST".to_string()]);
+    }
+
+    #[test]
+    fn switch_on_request_method_double_quoted_case() {
+        let text = "switch (request.method) {\n  case \"PUT\": break;\n}\n";
+        let scan = scan_pages_api_handler(text);
+        assert_eq!(scan.verbs, vec!["PUT".to_string()]);
+    }
+
+    #[test]
+    fn case_labels_without_a_method_switch_contribute_nothing() {
+        // A switch on something other than the request method must not mint verbs from its case labels.
+        let text = "switch (action) {\n  case 'POST':\n    return x;\n}\n";
         let scan = scan_pages_api_handler(text);
         assert!(scan.verbs.is_empty());
     }

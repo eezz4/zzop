@@ -79,7 +79,7 @@ fn get_request_with_body_in_the_same_function_is_flagged() {
 
 #[test]
 fn generic_request_wrapper_with_type_union_method_is_not_flagged() {
-    // Corpus-derived FP pin (mono-hub, 3 identical hits): a generic wrapper's signature
+    // A generic wrapper's signature
     // `method: "GET" | "POST"` is a TYPE-position union — the method is a parameter, not a
     // committed GET — and its `body:` is the conditional passthrough. The value-position anchor
     // (`[,})]` or end-of-line after the literal, never a union `|`) is what keeps this silent.

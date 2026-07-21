@@ -57,7 +57,7 @@ use options::build_shared_options;
 use paths::{path_to_string, resolve_path};
 use validation::{
     resolve_overlays_for_root, validate_hosts_array, validate_mount_at, validate_mounts_array,
-    validate_overlays_array,
+    validate_overlays_array, validate_routes_array,
 };
 use warnings::{collect_config_warnings, parse_pack_defs};
 
@@ -187,6 +187,13 @@ pub fn config_to_request(
                 let arr = validate_hosts_array(v, &format!("trees[{i}].hosts"))?;
                 if !arr.is_empty() {
                     tree_request.insert("hosts".to_string(), Value::Array(arr));
+                }
+            }
+            // Lightweight route-fact injection — expanded into a synthetic adapter overlay by the facade.
+            if let Some(v) = tree_obj.get("routes") {
+                let arr = validate_routes_array(v, &format!("trees[{i}].routes"))?;
+                if !arr.is_empty() {
+                    tree_request.insert("routes".to_string(), Value::Array(arr));
                 }
             }
 

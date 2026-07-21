@@ -1,5 +1,4 @@
-//! Tests for the crate-root loading entry points — pure move of the former inline `mod tests` in
-//! `lib.rs` (test files are exempt from the 300-line source cap).
+//! Tests for the crate-root loading entry points.
 
 use super::*;
 use crate::test_support::TempDir;

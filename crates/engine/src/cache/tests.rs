@@ -49,6 +49,7 @@ fn parser_fingerprint_differs_by_language() {
     let rust = parser_fingerprint(Some(Language::Rust), &config);
     let go = parser_fingerprint(Some(Language::Go), &config);
     let sql = parser_fingerprint(Some(Language::Sql), &config);
+    let csharp = parser_fingerprint(Some(Language::CSharp), &config);
     let none = parser_fingerprint(None, &config);
     assert_ne!(ts, prisma);
     assert_ne!(ts, none);
@@ -78,6 +79,14 @@ fn parser_fingerprint_differs_by_language() {
     assert_ne!(sql, rust);
     assert_ne!(sql, go);
     assert_ne!(sql, none);
+    assert_ne!(csharp, ts);
+    assert_ne!(csharp, prisma);
+    assert_ne!(csharp, java);
+    assert_ne!(csharp, python);
+    assert_ne!(csharp, rust);
+    assert_ne!(csharp, go);
+    assert_ne!(csharp, sql);
+    assert_ne!(csharp, none);
 }
 
 #[test]
@@ -99,6 +108,7 @@ fn parser_fingerprint_changes_with_io_router_names_for_typescript_only() {
     let rust_before = parser_fingerprint(Some(Language::Rust), &config);
     let go_before = parser_fingerprint(Some(Language::Go), &config);
     let sql_before = parser_fingerprint(Some(Language::Sql), &config);
+    let csharp_before = parser_fingerprint(Some(Language::CSharp), &config);
     let none_before = parser_fingerprint(None, &config);
 
     config.io.router_names = vec!["customRouter".to_string()];
@@ -108,7 +118,7 @@ fn parser_fingerprint_changes_with_io_router_names_for_typescript_only() {
         ts_before, ts_after,
         "an io.router_names change must invalidate cached TypeScript entries"
     );
-    // Scoped to the TypeScript branch only — Prisma/Java/Python/Rust/Go/Sql/lexical-fallback
+    // Scoped to the TypeScript branch only — Prisma/Java/Python/Rust/Go/Sql/CSharp/lexical-fallback
     // fingerprints never consult `config.io`, so they must be unaffected by an `io` change (no needless
     // invalidation).
     assert_eq!(
@@ -129,6 +139,10 @@ fn parser_fingerprint_changes_with_io_router_names_for_typescript_only() {
     );
     assert_eq!(go_before, parser_fingerprint(Some(Language::Go), &config));
     assert_eq!(sql_before, parser_fingerprint(Some(Language::Sql), &config));
+    assert_eq!(
+        csharp_before,
+        parser_fingerprint(Some(Language::CSharp), &config)
+    );
     assert_eq!(none_before, parser_fingerprint(None, &config));
 }
 

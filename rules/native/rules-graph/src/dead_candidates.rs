@@ -31,39 +31,33 @@
 //! way `entry_patterns`/`is_tool_entry_file` model TS/JS/Java conventions (a real per-file exemption list
 //! instead of a blanket language exclusion) — until then, a blanket exclusion is the honest floor.
 //!
-//! **`.rs` is excluded from eligibility entirely too**, for a DIFFERENT reason than Python's: it is not a
-//! filename-loading-convention gap, it is a real-uses-without-an-import-edge gap. A `pub` Rust item can be
-//! genuinely, heavily used with NO import binding ever pointing at its own file: a trait implementation
-//! (`impl Display for Foo`) is reached by the compiler through trait resolution, never a `use`; `#[derive(
-//! ...)]` expansion generates calls into a type with no `use` of its own; and a fully-qualified call
-//! (`crate::a::f()`) never binds a local name the way `use crate::a::f;` would, so it never surfaces in
-//! the caller's own `ImportMap` at all — `lang::imports`' v1 scope is top-level `use`/`mod` items only.
-//! So "exported + fan_in == 0" is not dead-code evidence for Rust the way it is for TypeScript: the import
-//! graph structurally cannot see these use shapes, not merely doesn't happen to.
-//!
-//! **`.go` is excluded from eligibility entirely too**, same exclusion CLASS as `.rs` (a real-uses-
-//! without-an-import-edge gap, not a filename-loading-convention gap like Python's): files in the SAME Go
-//! package share every top-level symbol with NO import statement between them at all — Go's own
-//! compilation-unit model (a package is compiled as one unit; a sibling file's `func`/`type`/`var` is
-//! reachable with zero `import`s). So a `pub`-equivalent (exported, capitalized) Go symbol can be
-//! genuinely, heavily used by a sibling file in its own package while the FILE that declares it shows
-//! `fan_in == 0` — the import graph structurally cannot see intra-package usage, only cross-package
-//! `import`-bound edges (`merge_go_dep_edges`'s own doc, engine side).
-//!
-//! **`.java` is excluded from eligibility entirely too**, same exclusion CLASS as `.rs`/`.go` (a
-//! real-uses-without-an-import-edge gap): Java's own package-visibility model lets a type/member with NO
-//! explicit access modifier (package-private) — and even a fully-qualified reference to a `public` type
-//! in the SAME package — be used by a sibling file with no `import` statement pointing at it at all
-//! (Java, like Go, never requires importing a type declared in your own package). So a `.java` file can
-//! show `fan_in == 0` while genuinely, heavily used by same-package siblings — the import graph
-//! structurally cannot see that usage, only cross-package `import`-bound edges
-//! (`merge_java_dep_edges`'s own doc, engine side). `.java` previously never participated in `DepGraph`
-//! at all (no import-graph-based dep resolution existed for it); now that it does
-//! (`merge_java_dep_edges`), this exclusion keeps eligibility unaffected by that change rather than
-//! silently gaining a whole language's worth of same-package false positives.
+//! **`.rs`/`.go`/`.java`/`.cs` are all excluded from eligibility entirely too**, for a DIFFERENT reason
+//! than Python's: not a filename-loading-convention gap but a real-uses-without-an-import-edge gap. A
+//! `pub`-equivalent symbol can be genuinely, heavily used with NO import binding ever pointing at its own
+//! file, so "exported + fan_in == 0" is not dead-code evidence the way it is for TypeScript — the import
+//! graph structurally cannot see these use shapes, not merely doesn't happen to. Each language's
+//! import-free-visibility mechanism:
+//! - `.rs`: trait impls (`impl Display for Foo`, reached through trait resolution), `#[derive(...)]`
+//!   expansion, and fully-qualified calls (`crate::a::f()`) never bind a local `use` — `lang::imports`' v1
+//!   scope is top-level `use`/`mod` items only.
+//! - `.go`: files in the SAME package share every top-level symbol with zero `import` between them (a
+//!   package is one compilation unit) — only cross-package `import`-bound edges are visible
+//!   (`merge_go_dep_edges`, engine side).
+//! - `.java`: package-private members, and even fully-qualified refs to a `public` type in the SAME package,
+//!   are used by sibling files with no `import` at all — only cross-package `import`-bound edges are visible
+//!   (`merge_java_dep_edges`, engine side).
+//! - `.cs`: same-namespace types are visible to sibling files with no `using` (like Java's same-package
+//!   case), and ASP.NET adds framework discovery with no import edge at all — controllers are found by
+//!   attribute routing, MediatR/DI handlers by assembly scanning, and `Program.cs` is the runtime entry
+//!   point. So a `.cs` file's `fan_in == 0` is never dead evidence (`merge_csharp_dep_edges`, engine side).
 //!
 //! `dead_candidate_findings` is the `"dead-candidates"` native-analysis Finding-shaping wrapper the engine
-//! calls.
+//! calls. One exemption lives engine-side rather than here, since it needs file text this crate stays free
+//! of: a file carrying an author-declared `@generated`/auto-generated banner is dropped from the results
+//! by the engine's `file_has_generated_banner` (in its `generated_banner` module), mirroring the same
+//! exemption in `dead_exports` — a generated file is regenerated, not hand-edited, so flagging it dead is
+//! non-actionable for both. Native (on-disk) analysis path only; the envelope/Mode-A path can't read file
+//! heads, see that call site.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -95,6 +89,12 @@ pub fn find_dead_candidates(
         .filter(|n| n.change_count <= max_changes)
         .filter(|n| !matches_any(&n.path, entry_patterns()))
         .filter(|n| !matches_any(&n.path, exclude_patterns()))
+        // `zzop_core::is_test_file` is the SSOT for test surface — it adds the test-runner DIRECTORY
+        // conventions (`e2e/`, `cypress/`, `playwright/`, `testing/`, `__tests__/`, `tests/`, `spec/`)
+        // that `exclude_patterns()` intentionally does not duplicate. A file under one of those dirs
+        // (e.g. `playwright/global.setup.ts`) is loaded by the runner, not imported, so `fan_in == 0` on
+        // it is expected. Delegating here keeps this analysis in sync with `dead_exports::is_entry_or_test`.
+        .filter(|n| !zzop_core::is_test_file(&n.path))
         .filter(|n| !is_tool_entry_file(&n.path))
         .filter(|n| !extra_entries.contains(&n.path))
         .cloned()
@@ -154,11 +154,14 @@ fn dep_graph_participants(dep: &DepGraph) -> HashSet<&str> {
 
 /// Union discriminator — see module doc. `.py`/`.pyi` are excluded up front regardless of graph
 /// participation (F1: filename-convention loading makes `fan_in == 0` on them meaningless as "no
-/// importers" evidence); `.rs`, `.go`, and `.java` are excluded up front too, for the DIFFERENT reason
-/// the module doc's "`.rs` is excluded from eligibility entirely too" / "`.go` is excluded from
+/// importers" evidence); `.rs`, `.go`, `.java`, and `.cs` are excluded up front too, for the DIFFERENT
+/// reason the module doc's "`.rs` is excluded from eligibility entirely too" / "`.go` is excluded from
 /// eligibility entirely too" / "`.java` is excluded from eligibility entirely too" paragraphs explain
 /// (trait impls/derive expansion/full-path calls for Rust, same-package symbol sharing with no import
-/// statement for Go and Java — all give a real use the import graph structurally cannot see). Otherwise:
+/// statement for Go/Java/C# — all give a real use the import graph structurally cannot see). C# adds a
+/// framework-discovery layer on top of Java's same-namespace visibility: ASP.NET controllers are found by
+/// attribute routing, MediatR/DI handlers by assembly scanning, and `Program.cs` is the runtime entry —
+/// none carry a `using`-import edge, so `fan_in == 0` is never dead evidence for a `.cs` file. Otherwise:
 /// true if the path participates in the dep graph (branch a) OR its extension is in the TS-dispatch set
 /// (branch b).
 fn is_dead_candidate_eligible(path: &str, participants: &HashSet<&str>) -> bool {
@@ -166,6 +169,7 @@ fn is_dead_candidate_eligible(path: &str, participants: &HashSet<&str>) -> bool 
         || is_rust_source_ext(path)
         || is_go_source_ext(path)
         || is_java_source_ext(path)
+        || is_csharp_source_ext(path)
     {
         return false;
     }
@@ -206,6 +210,15 @@ fn is_java_source_ext(path: &str) -> bool {
         .is_match(path)
 }
 
+/// True for `.cs` (case-insensitive) — see `is_dead_candidate_eligible`'s doc for why C# is excluded from
+/// candidacy entirely (same-namespace visibility with no `using`, plus ASP.NET attribute-routing /
+/// MediatR-DI / `Program.cs`-entry framework discovery that carries no import edge).
+fn is_csharp_source_ext(path: &str) -> bool {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"(?i)\.cs$").unwrap())
+        .is_match(path)
+}
+
 /// True for the extensions `dispatch_by_extension` routes to `Language::TypeScript` (case-insensitive).
 /// Duplicated here rather than imported: this crate is deliberately `zzop-core`-only.
 fn is_ts_dispatch_extension(path: &str) -> bool {
@@ -219,8 +232,8 @@ fn entry_patterns() -> &'static [Regex] {
     R.get_or_init(|| {
         let mut v: Vec<Regex> = [
             r"(^|/)index\.(ts|tsx|js|jsx)$",
-            r"(^|/)main\.(ts|tsx)$",
-            r"(^|/)App\.(ts|tsx)$",
+            r"(^|/)main\.(ts|tsx|js|jsx)$",
+            r"(^|/)App\.(ts|tsx|js|jsx)$",
             r"Page\.(ts|tsx)$",
             r"Route\.(ts|tsx)$",
             r"(^|/)routes?\.(ts|tsx)$",

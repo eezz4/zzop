@@ -27,6 +27,51 @@ fn no_requests_or_httpx_import_yields_nothing() {
 }
 
 #[test]
+fn httpx_asyncclient_instance_assignment_get_is_a_consume() {
+    // The idiomatic async FastAPI egress: a module-level (or fn-level) `httpx.AsyncClient()` bound to a
+    // name, then `.get()` on it. Before instance-tracking this produced zero consumes.
+    let out = consumes(
+        "import httpx\nasync def fetch():\n    client = httpx.AsyncClient()\n    r = await client.get(\"/users\")\n    return r\n",
+    );
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert_eq!(out[0].key.as_deref(), Some("GET /users"));
+}
+
+#[test]
+fn requests_session_instance_get_is_a_consume() {
+    let out = consumes("import requests\ns = requests.Session()\ns.get(\"/health\")\n");
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert_eq!(out[0].key.as_deref(), Some("GET /health"));
+}
+
+#[test]
+fn async_with_httpx_asyncclient_binding_is_a_consume() {
+    // `async with httpx.AsyncClient() as client:` — the canonical FastAPI pattern.
+    let out = consumes(
+        "import httpx\nasync def fetch():\n    async with httpx.AsyncClient() as client:\n        return await client.post(\"http://svc/api\")\n",
+    );
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert_eq!(out[0].key.as_deref(), Some("POST http://svc/api"));
+}
+
+#[test]
+fn directly_imported_asyncclient_ctor_instance_is_a_consume() {
+    let out = consumes(
+        "from httpx import AsyncClient\nasync def fetch():\n    c = AsyncClient()\n    return await c.get(\"/items\")\n",
+    );
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert_eq!(out[0].key.as_deref(), Some("GET /items"));
+}
+
+#[test]
+fn a_non_client_instance_verb_call_is_not_a_consume() {
+    // A same-named `.get` on an unrelated object (a dict-like cache) in a requests-importing file must
+    // NOT be keyed as egress — instance-tracking only qualifies names bound to a client constructor.
+    let out = consumes("import requests\ncache = {}\ncache.get(\"/users\")\n");
+    assert!(out.is_empty(), "{out:?}");
+}
+
+#[test]
 fn literal_get_call_resolves_to_a_keyed_consume() {
     let out = consumes("import requests\nrequests.get(\"/users\")\n");
     assert_eq!(out.len(), 1);

@@ -140,3 +140,21 @@ fn opaque_client_at_or_above_the_ratio_rule_floor_hands_off_instead_of_firing() 
     let totals = vec![("web".to_string(), MIN_TOTAL_CONSUMES)];
     assert!(sdk_import_no_visible_consume_findings(&imports, &totals).is_empty());
 }
+
+/// Cross-crate contract pin (T2 — `rules/**` cannot depend on `zzop_parser_typescript`, so no shared
+/// symbol): `OPAQUE_HTTP_CLIENT_PATTERN` must stay DISJOINT from the HTTP clients the parser's egress
+/// extractor (`adapters::egress::matchers::match_http_call`) recognizes natively — `axios`/`ky`/
+/// `fetch`/`$fetch`. If a recognized client ALSO matched the opaque pattern, its calls would be both
+/// join-visible AND counted as an opaque blind spot (double-count / false blindness report). This is a
+/// mirror of that recognized set — keep it in sync if the extractor learns a new client name.
+#[test]
+fn opaque_pattern_is_disjoint_from_natively_recognized_http_clients() {
+    let opaque = regex::Regex::new(OPAQUE_HTTP_CLIENT_PATTERN).unwrap();
+    for recognized in ["axios", "ky", "fetch", "$fetch"] {
+        assert!(
+            !opaque.is_match(recognized),
+            "`{recognized}` is recognized by the parser's egress extractor — it must not also match \
+             OPAQUE_HTTP_CLIENT_PATTERN (would double-count as an opaque blind spot)",
+        );
+    }
+}

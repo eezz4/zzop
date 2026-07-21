@@ -53,6 +53,7 @@ mod node_kinds;
 mod util;
 
 pub use adapters::extract_go_router_fragments;
+pub use adapters::gorm::{extract_gorm_db_table_consumes, extract_gorm_db_table_provides};
 pub use adapters::http_clients::extract_go_http_consumes;
 pub use lang::imports::parse_imports;
 pub use lang::resolve::go_package_dir_of;
@@ -80,7 +81,22 @@ pub use lang::used_names::parse_local_identifier_refs;
 ///   argument) is a candidate; two-or-more mountable-receiver arguments is rejected as ambiguous
 ///   (`adapters::gin`'s own module doc). Extraction output changes for this previously-missed call
 ///   shape, so cached entries from before this marker must not be served as fresh.
-pub const PARSER_FINGERPRINT: &str = "go/tree-sitter-go-0.25.0/v1+gin-group-param-v2";
+/// - `gin-any-v1`: `.Any(path, h)` (gin's every-method catch-all — proxy/health/fallthrough routes) now
+///   expands to one `Verb` entry per `HTTP_KEY_VERBS` instead of being dropped (verb name `Any` was not in
+///   `GIN_VERB_METHODS`), so the route is no longer invisible to unconsumed-endpoint/duplicate-route/
+///   cross-layer joins and its mutating (PUT/DELETE/PATCH) surface reaches `mutating-route-no-auth`. New
+///   provides appear -> cached entries from before this marker must not be served as fresh.
+/// - `http-client-instance-v1`: `adapters::http_clients` tracks names bound to an `http.Client` value
+///   (`c := &http.Client{}`/`http.Client{}`/`new(http.Client)`) so their URL-at-call-site methods
+///   `c.Get(url)`/`.Post`/`.Head`/`.PostForm` key as egress like the `http.Get(url)` free functions.
+///   `client.Do(req)` stays roadmap. New consumes appear -> cached entries must recompute.
+/// - `gorm-db-table-v1`: `adapters::gorm` adds two `db-table` shapes — a `gorm.Model`-embedding struct ->
+///   PROVIDE (default `NamingStrategy` naming or a `TableName()` literal, `symbol` = struct name), and a
+///   model composite literal in a GORM query method (`db.Model(&X{})`) -> CONSUME (`key: None`,
+///   `raw` = struct name, resolved engine-side against the provide index, same as the TypeORM side). New
+///   provides/consumes appear -> cached entries must recompute.
+pub const PARSER_FINGERPRINT: &str =
+    "go/tree-sitter-go-0.25.0/v1+gin-group-param-v2+gin-any-v1+http-client-instance-v1+http-client-instance-v2+gorm-db-table-v1+unknown-verb-sentinel-v1";
 
 /// Every top-level declaration kind `lang::symbols`/`lang::imports` recognize, PLUS `package_clause`
 /// (never itself extracted, but still a sign the file has SOME real Go in it) — `parse_tree`'s

@@ -118,9 +118,9 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
                  consume(s) (file paths matching `zzop_core::is_test_file`, e.g. Go `_test.go`, TS \
                  `.test.ts`/`.spec.tsx`, Python `test_*.py`) before the cross-tree join, since a route or \
                  call registered only in test/fixture code is not real deployed surface: {sample}. Raw \
-                 per-file facts still remain visible in this tree's own `ir.io` (the JS CLI's `--json`/ \
-                 `--format json` output; MCP tool replies and the `zzop-mcp` CLI subcommands omit `ir`) — \
-                 only the JOIN input (`analyze_trees`' cross-layer output) is narrowed.",
+                 per-file facts still remain visible in this tree's own `ir.io` (the raw `zzop-facade` \
+                 JSON output from embedding the engine directly; MCP tool replies and the `zzop-mcp` CLI \
+                 omit `ir`) — only the JOIN input (`analyze_trees`' cross-layer output) is narrowed.",
                 dropped.provides,
                 dropped.consumes,
             ));

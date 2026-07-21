@@ -1,7 +1,6 @@
 //! Extraction-blindness caveat: the shared sentence `cross_layer_findings`'s `unconsumed-endpoint`/
 //! `unconsumed-mutation-endpoint` findings get appended when a sibling tree in the join contributed NO
-//! joinable io at all — split out of `cross_layer_findings.rs` purely to keep that file under the
-//! line-count ratchet.
+//! joinable io at all.
 
 use zzop_core::{Finding, SourceIo};
 

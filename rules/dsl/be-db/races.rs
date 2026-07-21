@@ -21,9 +21,7 @@ fn find_first_then_create_with_no_unique_guard_is_flagged() {
 fn find_first_then_create_wrapped_only_in_transaction_is_still_flagged() {
     // A bare `$transaction(...)` wrap is no longer treated as a fix: at the database's default READ
     // COMMITTED isolation level, two concurrent transactions can both read empty and both insert, so this
-    // still races and must fire. (Previously this was the pack's negative/veto fixture for a `$transaction`
-    // wrap; the veto was removed because it no longer reflects a real fix — see `find-then-create-no-unique`'s
-    // message.)
+    // still races and must fire.
     let dir = TempDir::new("zzop-be-db");
     dir.write(
         "src/service.ts",

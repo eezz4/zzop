@@ -60,6 +60,14 @@ fn dispatches_sql_extension() {
 }
 
 #[test]
+fn dispatches_csharp_extension() {
+    assert_eq!(
+        dispatch("src/UsersController.cs", &cfg()),
+        Some(Language::CSharp)
+    );
+}
+
+#[test]
 fn extension_match_is_case_insensitive() {
     assert_eq!(dispatch("src/Foo.TS", &cfg()), Some(Language::TypeScript));
 }

@@ -44,9 +44,23 @@
 //! ## Path test
 //! `===`/`==` (either operand order) between a pathname-provenanced receiver and a string literal
 //! starting with `/` (a zero-interpolation template literal counts, cooked). Deliberately
-//! excluded (v1 under-approximation): `!==`/`!=` path guards, `startsWith`/`includes`/regex,
+//! excluded (v1 under-approximation): `!==`/`!=` path guards, `startsWith`/`includes`,
 //! interpolated templates, literals without a leading `/`, const indirection through an
 //! unresolved identifier.
+//!
+//! ## Regex path test (`pathname.match(/re/)`)
+//! Raw-Worker parameterized routes commonly dispatch by regex, either bound
+//! (`const m = pathname.match(/^\/api\/x\/([^/]+)$/); if (m && method === "POST") ...`) or inline
+//! (`if (pathname.match(/re/) && ...)`), optionally guarded `!== null`/`!= null`. The regex SOURCE
+//! is converted to a route path by `regex_path::regex_to_route_path` and keyed exactly like a
+//! literal path — `http_interface_key`'s `{x}`/`:x` -> `{}` normalization makes a converted `{}`
+//! param join the FE template-literal consume side. The converter is strictly never-guess: it
+//! requires full `^...$` anchoring, no flags, and every `\/`-split segment to be either a clean
+//! literal or one of a fixed allowlist of single-path-segment param matchers (`([^/]+)`, `(\d+)`,
+//! `(\w+)`, common char classes, capturing or non-capturing). Alternation, optional segments, a
+//! `.+` multi-segment catch-all, named groups, or any unrecognized shape make the WHOLE regex bail
+//! (no provide — the site stays in the honesty channel, never a wrong key). `new RegExp("...")` (a
+//! string, not a `/re/` literal) is not handled.
 //!
 //! ## Association algorithm
 //! Per function body (independently — bindings/tests never leak across a nested function
@@ -60,8 +74,9 @@
 //! switch-on-method) — stopping at nested function bodies and skipping the whole subtree of any
 //! nested `IfStmt` whose OWN condition contains a path test (that nested `if` is a separate
 //! route, evaluated independently; letting its verb scan leak into the parent would
-//! cross-contaminate two different routes) — else `PATHNAME_DISPATCH_FALLBACK_VERBS`. One provide
-//! is emitted per (path × verb); `line` is the path test's own line, `symbol` is the enclosing
+//! cross-contaminate two different routes) — else a single `zzop_core::UNKNOWN_VERB` sentinel (the
+//! path is served, method unknown — the engine lifts it to the `cross-layer/unknown-verb-route`
+//! disclosure). One provide is emitted per (path × verb); `line` is the path test's own line, `symbol` is the enclosing
 //! function's name when nameable (`FnDecl` ident, class-method/object-method key, or `const name
 //! = () => {}` binding name).
 //!
@@ -90,15 +105,10 @@ use collector::TopCollector;
 mod classify;
 mod collector;
 mod ctx;
+mod regex_path;
 mod routes;
 #[cfg(test)]
 mod tests;
-
-/// Verbs emitted for a pathname-guarded route whose block names no request-method comparison at
-/// all. Same value (and same rationale) as the engine's `PAGES_API_FALLBACK_VERBS` for a
-/// `pages/api` handler that names no method literal; the equality is sealed by a cross-crate pin
-/// test (policy tier T2), not repeated here.
-pub const PATHNAME_DISPATCH_FALLBACK_VERBS: [&str; 2] = ["GET", "POST"];
 
 /// Extract `kind:"http"` route provides from manual pathname-dispatch sites in one file. See
 /// module doc for the full recognizer spec. Returns an empty `Vec` (never panics) on an
@@ -137,11 +147,12 @@ fn dedup_provides(provides: Vec<IoProvide>) -> Vec<IoProvide> {
     out
 }
 
+/// A pathname-guarded route whose block names no request-method comparison at all: the path is served
+/// but the method is statically unknown. Emit ONE [`zzop_core::UNKNOWN_VERB`] sentinel provide (not a
+/// fabricated `[GET, POST]`) — the engine lifts a `"? <path>"` key out of the exact-key join into the
+/// verb-unknown disclosure channel (`cross-layer/unknown-verb-route`).
 fn fallback_verbs() -> Vec<String> {
-    PATHNAME_DISPATCH_FALLBACK_VERBS
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    vec![zzop_core::UNKNOWN_VERB.to_string()]
 }
 
 fn push_unique(list: &mut Vec<String>, v: String) {

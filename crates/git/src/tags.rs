@@ -15,6 +15,8 @@
 
 use regex::Regex;
 
+use crate::compile_commit_type_pattern;
+
 /// Compiled (regex, tag) classifiers, in match order, matched case-insensitively. Patterns that fail
 /// to compile are skipped (defensive — the built-in table above always compiles; a caller-injected
 /// pattern should not be able to panic the collector).
@@ -26,7 +28,7 @@ impl CommitClassifiers {
             patterns
                 .iter()
                 .filter_map(|(src, tag)| {
-                    Regex::new(&format!("(?i){src}"))
+                    compile_commit_type_pattern(src)
                         .ok()
                         .map(|re| (re, tag.clone()))
                 })

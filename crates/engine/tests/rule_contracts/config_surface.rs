@@ -5,11 +5,10 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// `packages/cli/lib/config-surface.json`'s path, resolved relative to this crate's own manifest dir (same
-/// "sibling package, read across the tree, never hand-copied" pattern as `catalog_path`/`dsl_dir`/
-/// `native_dir` above).
+/// `crates/config/config-surface.json`'s path, resolved relative to this crate's own manifest dir (same
+/// "sibling crate, read across the tree, never hand-copied" pattern as `catalog_path`/`dsl_dir` above).
 fn config_surface_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/cli/lib/config-surface.json")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../config/config-surface.json")
 }
 
 /// Mirrors `config-surface.json`'s `configKeys` object.

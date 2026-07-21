@@ -8,8 +8,8 @@ use std::collections::{HashMap, HashSet};
 use zzop_core::{http_interface_key, IoProvide};
 
 use super::collect::collect_from_root;
-use super::resolve::resolve_class_prefix;
-use super::{ClassRow, PrefixState, ProjectProvidesReport};
+use super::resolve::{resolve_class_prefix, resolve_method_path};
+use super::{ClassRow, MethodPath, PrefixState, ProjectProvidesReport};
 
 /// Extracts Spring MVC HTTP route `IoProvide`s across an entire Java corpus — see module doc for what
 /// this resolves beyond `provides::extract_http_provides`'s per-file pass. Never panics: a file that
@@ -40,6 +40,7 @@ pub fn extract_http_provides_project(files: &[(String, String)]) -> ProjectProvi
     let mut provides = Vec::new();
     let mut seen: HashSet<(String, String, u32, Option<String>)> = HashSet::new();
     let mut skipped_unresolved_prefix = 0u32;
+    let mut skipped_unresolved_method_path = 0u32;
     let mut memo: HashMap<(String, String), Option<String>> = HashMap::new();
 
     // Every row carrying its own @RestController/@Controller is a gating root — walk its `extends`
@@ -60,6 +61,7 @@ pub fn extract_http_provides_project(files: &[(String, String)]) -> ProjectProvi
             &mut provides,
             &mut seen,
             &mut skipped_unresolved_prefix,
+            &mut skipped_unresolved_method_path,
         );
     }
 
@@ -67,6 +69,7 @@ pub fn extract_http_provides_project(files: &[(String, String)]) -> ProjectProvi
         provides,
         skipped_unresolved_prefix,
         skipped_ambiguous_class_name,
+        skipped_unresolved_method_path,
     }
 }
 
@@ -74,6 +77,7 @@ pub fn extract_http_provides_project(files: &[(String, String)]) -> ProjectProvi
 /// emits every class's own routes along the way: the first class in root-to-leaf order that declares its
 /// own `@RequestMapping` (resolved or not) fixes the prefix — or the unresolved-skip — for every class
 /// from that point on.
+#[allow(clippy::too_many_arguments)]
 fn walk_chain(
     root_name: &str,
     classes: &HashMap<String, ClassRow>,
@@ -81,6 +85,7 @@ fn walk_chain(
     provides: &mut Vec<IoProvide>,
     seen: &mut HashSet<(String, String, u32, Option<String>)>,
     skipped_unresolved_prefix: &mut u32,
+    skipped_unresolved_method_path: &mut u32,
 ) {
     let mut chain_names: Vec<String> = Vec::new();
     let mut visited: HashSet<String> = HashSet::new();
@@ -114,21 +119,50 @@ fn walk_chain(
             continue;
         }
         let prefix = effective.clone().unwrap_or_default();
-        emit_class_routes(row, &prefix, provides, seen);
+        emit_class_routes(
+            name,
+            row,
+            &prefix,
+            classes,
+            memo,
+            provides,
+            seen,
+            skipped_unresolved_method_path,
+        );
     }
 }
 
 /// Emits every `IoProvide` for `row`'s own PRECOMPUTED `methods` under `prefix`, deduped against `seen`
 /// so two different gating roots reaching the same base class with the same resolved prefix (the
-/// `FooController extends FooControllerCE` shape) do not double-emit.
+/// `FooController extends FooControllerCE` shape) do not double-emit. A method whose own path is a
+/// `MethodPath::Unresolved` constant reference is resolved against the corpus here (scoped to `class_name`,
+/// the declaring class — `resolve::resolve_method_path`); an unresolvable one is skipped and counted, never
+/// keyed at the empty base.
+#[allow(clippy::too_many_arguments)]
 fn emit_class_routes(
+    class_name: &str,
     row: &ClassRow,
     prefix: &str,
+    classes: &HashMap<String, ClassRow>,
+    memo: &mut HashMap<(String, String), Option<String>>,
     provides: &mut Vec<IoProvide>,
     seen: &mut HashSet<(String, String, u32, Option<String>)>,
+    skipped_unresolved_method_path: &mut u32,
 ) {
     for method in &row.methods {
-        let full_path = format!("{prefix}/{}", method.path);
+        let method_path = match &method.path {
+            MethodPath::Literal(p) => p.clone(),
+            MethodPath::Unresolved(args) => {
+                match resolve_method_path(class_name, args, classes, memo) {
+                    Some(p) => p,
+                    None => {
+                        *skipped_unresolved_method_path += 1;
+                        continue;
+                    }
+                }
+            }
+        };
+        let full_path = format!("{prefix}/{method_path}");
         let key = http_interface_key(&method.verb, &full_path);
         let dedupe_key = (
             key.clone(),

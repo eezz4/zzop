@@ -11,7 +11,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "line_pattern": "['\"]http://[^'\"\\s]",
         "exclude_pattern": "(?i)(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|//192\\.168\\.|//10\\.[0-9]|//172\\.(1[6-9]|2[0-9]|3[01])\\.|xmlns|w3\\.org|schemas?\\.|\\.xsd)",
         "skip_comment_lines": true
@@ -25,7 +25,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "line_pattern": "['\"]https?://(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|192\\.168\\.[0-9]{1,3}\\.[0-9]{1,3}|10\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}|172\\.(1[6-9]|2[0-9]|3[01])\\.[0-9]{1,3}\\.[0-9]{1,3})",
         "exclude_pattern": "(?i)(process\\.env|getEnv\\(|IS_PRODUCTION).*(\\|\\||\\?\\?|\\?)|new\\s+URL\\s*\\(|[!=]==?\\s*[\"'`]https?://localhost",
         "skip_comment_lines": true
@@ -39,7 +39,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "(?i)method\\s*:\\s*['\"]get['\"]\\s*(?:[,})]|$)", "label": "get-method" },
@@ -56,7 +56,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "new\\s+WebSocket\\s*\\(|\\.upgrade\\s*\\(", "label": "ws" }

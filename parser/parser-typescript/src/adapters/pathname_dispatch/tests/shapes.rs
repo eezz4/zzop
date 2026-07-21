@@ -62,7 +62,7 @@ fn shape_c_compound_guard_plain_function() {
     assert_eq!(keys(&out), vec!["POST /apply"]);
 }
 
-// -- Shape D: object-literal Workers entry, untyped JS, fallback verbs --
+// -- Shape D: object-literal Workers entry, untyped JS, no method mention -> verb-unknown sentinel --
 
 #[test]
 fn shape_d_object_literal_workers_entry_fallback_verbs() {
@@ -79,7 +79,8 @@ fn shape_d_object_literal_workers_entry_fallback_verbs() {
     let out = extract_pathname_dispatch_provides("worker.js", src);
     let mut got = keys(&out);
     got.sort();
-    assert_eq!(got, vec!["GET /webhook", "POST /webhook"]);
+    // No method comparison -> one UNKNOWN_VERB sentinel provide, not fabricated GET+POST.
+    assert_eq!(got, vec!["? /webhook"]);
     assert!(out.iter().all(|p| p.symbol.as_deref() == Some("fetch")));
 }
 
@@ -106,10 +107,9 @@ fn switch_on_pathname_with_fallthrough_grouping() {
     let out = extract_pathname_dispatch_provides("worker.ts", src);
     let mut got = keys(&out);
     got.sort();
-    assert_eq!(
-        got,
-        vec!["DELETE /d", "DELETE /e", "GET /a", "GET /b", "POST /b"]
-    );
+    // `/a` explicit GET, `/d`/`/e` explicit DELETE; `/b` names no method -> UNKNOWN_VERB sentinel (`?`),
+    // not fabricated GET+POST. `?` (0x3F) sorts before the letters.
+    assert_eq!(got, vec!["? /b", "DELETE /d", "DELETE /e", "GET /a"]);
 }
 
 // -- Verb `!==` mention --

@@ -100,12 +100,12 @@ pub fn build_common_ir(source_id: &str, files: &[(String, String)]) -> zzop_core
 /// already this same lower-first casing — so the provide side re-cases to meet it there rather than
 /// the other way around. See that module's doc header ("CANONICAL KEY CASING") for the cross-reference
 /// from the other side, and this module's `build_common_ir` for the one call site.
+///
+/// Delegates to [`zzop_core::db_table_channel_casing`] — the same shared transform
+/// `zzop_parser_sql::extract::bare_table_name` calls for its own (independent) `db-table` PROVIDE side,
+/// so the two extractors' casing cannot drift apart.
 fn accessor_casing(model_name: &str) -> String {
-    let mut chars = model_name.chars();
-    match chars.next() {
-        Some(c) => c.to_lowercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
-    }
+    zzop_core::db_table_channel_casing(model_name)
 }
 
 /// 1-based line of `model <name> {` in the schema text (lexical; parse_schema does not record lines).

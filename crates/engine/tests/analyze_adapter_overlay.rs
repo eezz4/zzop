@@ -378,34 +378,37 @@ fn overlay_is_entry_marker_exempts_an_otherwise_dead_native_file() {
     // `FileProjection::is_entry` — the overlay counterpart of a package.json manifest entry: `assemble`
     // unions every `is_entry: true` overlay path into `dead_candidate_findings`'s `extra_entries`.
     let dir = TempDir::new("zzop-adapter-overlay");
-    // Not an entry-pattern name (no `index`/`main`/`App`/...), so it reads as dead with no overlay.
-    dir.write("src/hooks.server.ts", "export const noop = 1;\n");
+    // A genuinely-dead file: not an entry-pattern name (no `index`/`main`/`App`/...) and not a framework
+    // convention file, so it reads as dead with no overlay. (Deliberately NOT `hooks.server.ts` — that IS
+    // a recognized SvelteKit hook entry now, so it would never read as dead; the overlay `is_entry` path
+    // is what this test exercises, on a file that has no native entry recognition.)
+    dir.write("src/orphan.ts", "export const noop = 1;\n");
 
     let baseline = analyze_tree(dir.path(), &config());
     assert!(
         baseline
             .findings
             .iter()
-            .any(|f| f.rule_id == "dead-candidates" && f.file == "src/hooks.server.ts"),
-        "expected src/hooks.server.ts to read as dead with no overlay at all: {:?}",
+            .any(|f| f.rule_id == "dead-candidates" && f.file == "src/orphan.ts"),
+        "expected src/orphan.ts to read as dead with no overlay at all: {:?}",
         baseline.findings
     );
 
     // Merges onto the EXISTING native artifact at the same path (not the synthetic branch) — `is_entry`
     // is read straight from `config.adapter_overlays` in `assemble`, so it applies regardless of which
     // merge branch a projection's `path` takes.
-    let mut hooks = projection("src/hooks.server.ts", 1);
-    hooks.is_entry = true;
+    let mut orphan = projection("src/orphan.ts", 1);
+    orphan.is_entry = true;
 
     let mut cfg = config();
-    cfg.adapter_overlays = vec![overlay("sveltekit-entry-adapter/1", vec![hooks])];
+    cfg.adapter_overlays = vec![overlay("entry-adapter/1", vec![orphan])];
     let out = analyze_tree(dir.path(), &cfg);
 
     assert!(
         !out.findings
             .iter()
-            .any(|f| f.rule_id == "dead-candidates" && f.file == "src/hooks.server.ts"),
-        "expected is_entry to exempt src/hooks.server.ts from dead-candidates: {:?}",
+            .any(|f| f.rule_id == "dead-candidates" && f.file == "src/orphan.ts"),
+        "expected is_entry to exempt src/orphan.ts from dead-candidates: {:?}",
         out.findings
     );
 }
@@ -417,12 +420,20 @@ fn overlay_import_onto_a_degraded_on_disk_file_gives_a_target_fan_in() {
     // becomes a degraded artifact with `imports: None`. An overlay for that same path then FILLS its
     // dep-graph data (a parsed TS artifact's own imports would instead stay authoritative — only a
     // `None` is filled).
+    //
+    // The `.svelte`'s own on-disk `<script>` body deliberately uses a DYNAMIC `import()` rather than a
+    // static one: the native SFC `<script>`-block pre-scan (`zzop_parser_typescript::
+    // extract_sfc_script_imports`, wired at `analyze::assemble::sfc`) now gives a STATIC import real
+    // fan-in without any overlay at all, so a static-import baseline would no longer reproduce the gap
+    // this test exists to cover. A dynamic `import()` is outside that pre-scan's scope (it calls
+    // `parse_imports` only, which never collects dynamic imports — see that function's own doc), so the
+    // baseline below still needs the overlay to see this file's real dependency.
     let dir = TempDir::new("zzop-adapter-overlay");
     dir.write("src/used.ts", "export const helper = 1;\n");
     // Present on disk -> native pass makes a degraded artifact for it (dispatch table can't parse .svelte).
     dir.write(
         "src/View.svelte",
-        "<script>import { helper } from './used';</script>\n",
+        "<script>import('./used').then(m => m.helper);</script>\n",
     );
 
     let baseline = analyze_tree(dir.path(), &config());
@@ -431,7 +442,8 @@ fn overlay_import_onto_a_degraded_on_disk_file_gives_a_target_fan_in() {
             .findings
             .iter()
             .any(|f| f.rule_id == "dead-candidates" && f.file == "src/used.ts"),
-        "the native pass can't parse .svelte, so src/used.ts reads as dead without the overlay: {:?}",
+        "the native pass can't see a dynamic import() inside .svelte, so src/used.ts reads as dead \
+         without the overlay: {:?}",
         baseline.findings
     );
 

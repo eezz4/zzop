@@ -30,6 +30,29 @@ fn verb_chain_on_engine_receiver() {
 }
 
 #[test]
+fn any_registers_one_route_per_http_verb() {
+    // `.Any(path, h)` is gin's catch-all — one handler for every method. It must expand to one entry
+    // per HTTP_KEY_VERBS (not vanish), so a proxy/health/fallthrough route stays visible and its
+    // mutating surface (PUT/DELETE/PATCH) is not hidden.
+    let src = "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc main() {\n\tr := gin.Default()\n\tr.Any(\"/proxy\", proxyHandler)\n}\n";
+    let frags = extract_go_router_fragments("a.go", src);
+    let f = frag(&frags, "r");
+    let mut methods: Vec<&str> = f
+        .entries
+        .iter()
+        .map(|e| match e {
+            RouterMountEntry::Verb { method, path, .. } => {
+                assert_eq!(path, "/proxy");
+                method.as_str()
+            }
+            _ => panic!("expected Verb"),
+        })
+        .collect();
+    methods.sort_unstable();
+    assert_eq!(methods, vec!["DELETE", "GET", "PATCH", "POST", "PUT"]);
+}
+
+#[test]
 fn gin_new_binding_is_recognized_too() {
     let src = "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc main() {\n\tr := gin.New()\n\tr.DELETE(\"/users/:id\", deleteUser)\n}\n";
     let frags = extract_go_router_fragments("a.go", src);

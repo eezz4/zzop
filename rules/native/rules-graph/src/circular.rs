@@ -10,6 +10,12 @@ use zzop_core::{disable_hint, Finding, Severity};
 pub fn circular_findings(cycles: &[Vec<String>]) -> Vec<Finding> {
     cycles
         .iter()
+        // A cycle whose every member is a test file is test-infrastructure structure (e.g. a
+        // `playwright/` page-object <-> decorator <-> fixture loop), not deployed runtime coupling — the
+        // same "not deployed surface" reasoning `zzop_core::is_test_file` already applies to dead-code and
+        // route analyses. A cycle touching even ONE non-test file still fires: that file's real coupling
+        // is the thing worth reporting.
+        .filter(|cycle| !cycle.iter().all(|f| zzop_core::is_test_file(f)))
         .cloned()
         .map(|mut cycle| {
             cycle.sort();
@@ -38,6 +44,22 @@ pub fn circular_findings(cycles: &[Vec<String>]) -> Vec<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn all_test_file_cycle_is_not_flagged_but_a_mixed_cycle_is() {
+        // Every member under a test path -> test-infra structure, exempt (see the filter's doc).
+        let test_only = vec![
+            "playwright/page-objects/conduit.page-object.ts".to_string(),
+            "playwright/utils/test-decorators.ts".to_string(),
+        ];
+        assert!(circular_findings(&[test_only]).is_empty());
+        // A cycle with even one non-test file still fires — the real coupling is worth reporting.
+        let mixed = vec![
+            "src/article/article.entity.ts".to_string(),
+            "playwright/utils/test-decorators.ts".to_string(),
+        ];
+        assert_eq!(circular_findings(&[mixed]).len(), 1);
+    }
 
     /// Pins the exact rendered message — regression coverage for the `disable_hint` splice this message
     /// went through during the 2026-07-10 dialect-consolidation sweep.

@@ -109,7 +109,7 @@ fn non_pem_looking_dashes_are_not_flagged() {
 
 #[test]
 fn pem_header_mentioned_in_prose_without_a_key_body_is_not_flagged() {
-    // Class fix (mono-hub 0.10.0 FP): an i18n/doc string that merely NAMES the PEM header — no
+    // An i18n/doc string that merely NAMES the PEM header — no
     // base64 key material accompanies it — is a non-key reading, so the header substring alone
     // must not fire. The line_pattern requires either the header at end-of-line (a dedicated key
     // line) or a base64 body after it; a header wrapped in a prose sentence satisfies neither.

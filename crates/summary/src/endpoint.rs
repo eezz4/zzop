@@ -2,7 +2,8 @@
 //! consumed/joined?" — resolves trees the same way `analyze_summary`/`cross_summary` do (shared
 //! `zzop-config` front-end and `crate::trees::zero_config_trees`'s paths mode, never re-implemented),
 //! runs the SAME `analyzeTrees` engine path, then hands the output to the shared facade query core
-//! (`zzop_facade::query_io_json`) so this tool and the JS CLI's `zzop endpoint` give identical
+//! (`zzop_facade::query_io_json`) so both surfaces — the `check_endpoint` tool and the
+//! `zzop-mcp endpoint` CLI subcommand — go through this one function and give identical
 //! answers. Every mode routes through `analyzeTrees` — even a single `path` — because the query's
 //! sealed verdict vocabulary (linked/provided-only/...) is made of cross-layer JOIN facts, and the
 //! join runs fine over one tree (intra-tree edges included); a plain `analyze` output would be

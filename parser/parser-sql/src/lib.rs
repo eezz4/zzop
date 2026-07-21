@@ -18,7 +18,12 @@
 //! pin to track" reasoning this crate shares — a local regex/line scanner, not a wrapped third-party
 //! crate). Bump the trailing `/vN` counter whenever `extract_db_table_provides`'s projection logic changes
 //! in a way that changes its output for the same SQL text.
-pub const PARSER_FINGERPRINT: &str = "sql/v1";
+//! - `+sql-quoted-dot-and-temp-table-v1`: `bare_table_name`'s dot-split is now quote-aware (a `.` inside
+//!   a quote pair, e.g. `"my.table"`, no longer wrongly splits into a fake schema qualifier), and
+//!   `create_table_re` now recognizes a `GLOBAL`/`LOCAL`/`TEMP`/`TEMPORARY`/`UNLOGGED` modifier between
+//!   `CREATE` and `TABLE`.
+pub const PARSER_FINGERPRINT: &str =
+    "sql/v1+sql-quoted-dot-and-temp-table-v1+temp-table-not-provided-v1";
 
 mod extract;
 

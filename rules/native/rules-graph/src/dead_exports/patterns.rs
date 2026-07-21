@@ -17,7 +17,17 @@ pub(super) fn is_excluded_file(path: &str) -> bool {
 
 pub(super) fn is_entry_or_test(path: &str) -> bool {
     // `is_tool_entry_file` covers tool-config files loaded by their own tool rather than imported.
-    is_entry_file(path) || is_excluded_file(path) || is_tool_entry_file(path)
+    // `zzop_core::is_test_file` is the SSOT for "test surface" — it recognizes the test-runner
+    // DIRECTORY conventions (`e2e/`, `cypress/`, `playwright/`, `testing/`, `__tests__/`, `tests/`,
+    // `spec/`) that the local `exclude_patterns()` below deliberately does NOT duplicate; a file under
+    // one of those dirs (e.g. `playwright/global.setup.ts`) is loaded by the runner, never imported, so
+    // its exports having zero in-repo importers is expected, not dead. Delegating here keeps the two
+    // dead-code analyses from drifting out of sync with the shared predicate (they both had only the
+    // `.test.`/`.spec.` FILE forms before, missing the directory forms).
+    is_entry_file(path)
+        || is_excluded_file(path)
+        || is_tool_entry_file(path)
+        || zzop_core::is_test_file(path)
 }
 
 fn entry_patterns() -> &'static [Regex] {
@@ -25,8 +35,8 @@ fn entry_patterns() -> &'static [Regex] {
     R.get_or_init(|| {
         let mut v: Vec<Regex> = [
             r"(^|/)index\.(ts|tsx|js|jsx)$",
-            r"(^|/)main\.(ts|tsx)$",
-            r"(^|/)App\.(ts|tsx)$",
+            r"(^|/)main\.(ts|tsx|js|jsx)$",
+            r"(^|/)App\.(ts|tsx|js|jsx)$",
             r"Page\.(ts|tsx)$",
             r"(^|/)apiRoutes\.(ts|tsx)$",
         ]

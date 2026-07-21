@@ -61,7 +61,9 @@ fn be_security_java_pack() -> RulePackDef {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/dsl/be-security/be-security.json");
     let text = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-    let mut pack: RulePackDef = serde_json::from_str(&text).expect("parse be-security.json");
+    // Goes through `zzop_core::parse_dsl_pack` (not a raw `serde_json::from_str`) so this pack's
+    // `${NAME}` fragment refs resolve exactly like they do at real load time.
+    let mut pack: RulePackDef = zzop_core::parse_dsl_pack(&text).expect("parse be-security.json");
     pack.rules
         .retain(|r| matches!(r.id.as_str(), "sql-taint" | "weak-crypto" | "cmd-injection"));
     pack

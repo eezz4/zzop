@@ -129,3 +129,65 @@ fn alter_and_drop_are_ignored() {
 fn empty_file_is_empty() {
     assert!(extract_db_table_provides("empty.sql", "").is_empty());
 }
+
+#[test]
+fn quoted_identifier_with_internal_dot_is_one_name_not_split() {
+    // `"my.table"` is a single quoted identifier LITERALLY named `my.table` — the dot is inside the
+    // quote pair, so it is not a schema-qualifier separator. Bare name: `my.table` lower-firsted (a
+    // no-op here, first char is already lowercase), NOT `table` (which `rsplit('.')` before
+    // quote-stripping used to produce as a bug).
+    assert_eq!(
+        keys(r#"CREATE TABLE "my.table" (id INT);"#),
+        vec!["table:my.table"]
+    );
+}
+
+#[test]
+fn schema_qualified_still_correct_after_quote_aware_split() {
+    // Regression pin: the quote-aware dot-split must not break the ordinary schema-qualified cases.
+    assert_eq!(
+        keys(r#"CREATE TABLE "public"."users" (id INT);"#),
+        vec!["table:users"]
+    );
+    assert_eq!(
+        keys("CREATE TABLE public.users (id INT);"),
+        vec!["table:users"]
+    );
+}
+
+#[test]
+fn create_temporary_table_is_parsed_but_not_provided() {
+    // A `TEMPORARY`/`TEMP` table is session-local, not a shared persistent schema object — it must NOT
+    // mint a `db-table` provide (else a temp `t`/`results`/`staging` false-joins an ORM accessor).
+    assert!(keys("CREATE TEMPORARY TABLE t (id INT);").is_empty());
+}
+
+#[test]
+fn create_temp_table_is_not_provided() {
+    assert!(keys("CREATE TEMP TABLE t (id INT);").is_empty());
+}
+
+#[test]
+fn create_unlogged_table_is_still_recognized() {
+    // UNLOGGED is persistent (just not crash-safe) — a real shared table, so it still provides.
+    assert_eq!(keys("CREATE UNLOGGED TABLE t (id INT);"), vec!["table:t"]);
+}
+
+#[test]
+fn create_global_temporary_table_is_not_provided() {
+    assert!(keys("CREATE GLOBAL TEMPORARY TABLE t (id INT);").is_empty());
+}
+
+#[test]
+fn create_temporary_table_if_not_exists_is_not_provided() {
+    assert!(keys("CREATE TEMPORARY TABLE IF NOT EXISTS t (id INT);").is_empty());
+}
+
+#[test]
+fn a_persistent_table_named_with_a_temp_prefix_still_provides() {
+    // The skip keys off the MODIFIER slot, not the table name — `temp_config` is a normal table.
+    assert_eq!(
+        keys("CREATE TABLE temp_config (id INT);"),
+        vec!["table:temp_config"]
+    );
+}

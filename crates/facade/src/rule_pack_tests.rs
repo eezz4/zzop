@@ -95,6 +95,40 @@ fn a_non_compiling_regex_is_a_named_issue() {
 }
 
 #[test]
+fn an_unknown_fragment_reference_is_a_named_issue() {
+    // `${does-not-exist}` names neither this pack's own `fragments` map (empty here) nor the shared
+    // bundled set — `RulePackDef::expand_fragments` must fail the load exactly like a bad regex does,
+    // and `validate_rule_pack_json` (which shares `parse_dsl_pack` with the real loader) must surface it.
+    let v = report(
+        r#"{"id": "p", "rules": [
+            {"id": "r1", "severity": "info", "message": "m",
+             "matcher": {"type": "line-scan", "file_pattern": "\\.ts$",
+                         "file_exclude_pattern": "${does-not-exist}", "line_pattern": "TODO"}}
+        ]}"#,
+    );
+    assert_eq!(v["valid"], false, "got: {v}");
+    let issue = v["issues"][0].as_str().unwrap();
+    assert!(issue.contains("unknown fragment"), "got: {v}");
+    assert!(issue.contains("does-not-exist"), "got: {v}");
+}
+
+#[test]
+fn a_pack_local_fragment_referencing_a_shared_name_resolves_clean() {
+    // `${test-paths}` is a shared bundled fragment name (see `zzop_core::dsl::fragments`) — a pack that
+    // references it without declaring its own `fragments` entry must validate clean, proving the
+    // validator resolves against the shared set, not just a pack's own local map.
+    let v = report(
+        r#"{"id": "p", "rules": [
+            {"id": "r1", "severity": "info", "message": "m",
+             "matcher": {"type": "line-scan", "file_pattern": "\\.ts$",
+                         "file_exclude_pattern": "${test-paths}", "line_pattern": "TODO"}}
+        ]}"#,
+    );
+    assert_eq!(v["valid"], true, "got: {v}");
+    assert_eq!(v["issues"].as_array().unwrap().len(), 0);
+}
+
+#[test]
 fn the_rule_pack_schema_parses_and_names_all_four_matcher_kinds() {
     let schema: serde_json::Value =
         serde_json::from_str(RULE_PACK_SCHEMA).expect("rule-pack schema must be valid JSON");

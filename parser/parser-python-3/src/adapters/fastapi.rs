@@ -22,17 +22,24 @@
 //!   attr_keys: vec![]}`. A non-literal path argument, or a decorator naming a verb this crate doesn't
 //!   recognize, skips just that decorator (the function may still carry other qualifying decorators, and
 //!   is still itself a `SourceSymbol` via `lang::symbols` regardless).
-//! - **Mounts**: `<receiver>.include_router(<ident>, prefix="/api")` -> `RouterMountEntry::Mount{prefix:
-//!   <literal or "/">, ident, specifier: <this file's ImportMap specifier for `ident`, else None>,
-//!   attr_keys: vec![]}`. A non-`Name` first argument, or a non-literal `prefix` kwarg, skips the mount
-//!   entirely (subtree silence is honest — never a guessed prefix).
+//! - **Mounts**: `<receiver>.include_router(<child>, prefix="/api")` -> `RouterMountEntry::Mount{prefix:
+//!   <literal or "/">, ident, specifier, attr_keys: vec![]}`, for a `<child>` in either of two shapes:
+//!   (a) a bare `<name>` — `ident` is the name, `specifier` is this file's ImportMap specifier for it
+//!   (else None, so the engine resolves same-file); or (b) `<mod>.<attr>` (the canonical
+//!   `import <mod>; <mod>.router` form) — `specifier` is `<mod>`'s full dotted module path, reconstructed
+//!   from the base name's import binding (`binding.specifier + "." + binding.original`), and `ident` is
+//!   the BASE module name (not the `.router` attribute, which is conventionally `router` in EVERY module
+//!   and would poison the engine's root-exclusion-by-name). The engine resolves the module to its file and
+//!   mounts its sole router fragment. An attribute whose base is not an imported name, any other
+//!   first-argument shape, or a non-literal `prefix` kwarg skips the mount entirely (subtree silence is
+//!   honest — never a guessed prefix).
 //! - One `RouterMountFragment` per receiver with at least one surviving entry, in first-appearance order;
 //!   a receiver with zero surviving entries produces no fragment (mirrors
 //!   `zzop_parser_typescript::adapters::router_mounts`'s same rule).
 
 use std::collections::HashMap;
 
-use ruff_python_ast::{Expr, Stmt, StmtExpr, StmtFunctionDef};
+use ruff_python_ast::{Expr, Stmt, StmtFunctionDef};
 use zzop_core::{ImportMap, RouterMountEntry, RouterMountFragment};
 
 /// FastAPI's own HTTP-method decorator names — lowercase, UPPERCASE-normalized at emission. A dedicated
@@ -157,6 +164,38 @@ fn callee_name(func: &Expr) -> Option<&str> {
     }
 }
 
+/// The HTTP methods a fastapi route decorator registers: one uppercased verb for a shortcut
+/// (`@app.get` -> `["GET"]`), or every string literal in `@app.api_route(..., methods=["GET", "POST"])`'s
+/// `methods=` list. Empty for any other decorator attribute, and for an `api_route` whose `methods=` is
+/// absent or not a literal list (never guessed).
+fn decorator_methods(verb: &str, call: &ruff_python_ast::ExprCall) -> Vec<String> {
+    if VERB_DECORATORS.contains(&verb) {
+        return vec![verb.to_ascii_uppercase()];
+    }
+    if verb != "api_route" {
+        return Vec::new();
+    }
+    let Some(kw) = call.arguments.find_keyword("methods") else {
+        return Vec::new();
+    };
+    let Expr::List(list) = &kw.value else {
+        return Vec::new();
+    };
+    // Dedup while preserving first-seen order: a `methods=["GET", "GET"]` list (or a case-variant
+    // repeat like `["GET", "get"]`) must mint one GET provide, not two — otherwise the single decorator
+    // yields a phantom duplicate that `duplicate-route` would count as a real collision.
+    let mut methods = Vec::new();
+    for e in &list.elts {
+        if let Expr::StringLiteral(s) = e {
+            let verb = s.value.to_str().to_ascii_uppercase();
+            if !methods.contains(&verb) {
+                methods.push(verb);
+            }
+        }
+    }
+    methods
+}
+
 /// Every verb-decorated route on `f`, keyed by receiver — appended into `entries`.
 fn collect_verb_entries(
     f: &StmtFunctionDef,
@@ -182,74 +221,43 @@ fn collect_verb_entries(
             continue;
         }
         let verb = attr.attr.as_str();
-        if !VERB_DECORATORS.contains(&verb) {
+        // The HTTP methods this decorator registers: a verb shortcut (`@app.get`) -> that one verb;
+        // `@app.api_route(path, methods=["GET","POST"])` -> each literal in the `methods=` list (the
+        // generic form the shortcuts wrap). Any other attribute (or an api_route with no literal
+        // `methods` list) contributes nothing.
+        let methods = decorator_methods(verb, call);
+        if methods.is_empty() {
             continue;
         }
-        let Some(Expr::StringLiteral(path_lit)) = call.arguments.find_positional(0) else {
+        // Path is normally positional-0 (`@app.get("/x")`) but the keyword form `@app.get(path="/x")`
+        // is valid FastAPI too — fall back to it rather than dropping the route.
+        let path_arg = call
+            .arguments
+            .find_positional(0)
+            .or_else(|| call.arguments.find_keyword("path").map(|kw| &kw.value));
+        let Some(Expr::StringLiteral(path_lit)) = path_arg else {
             continue;
         };
         let path = match &info.prefix {
             Some(prefix) => format!("{prefix}{}", path_lit.value.to_str()),
             None => path_lit.value.to_str().to_string(),
         };
-        entries
-            .entry(receiver_name.to_string())
-            .or_default()
-            .push(RouterMountEntry::Verb {
-                method: verb.to_ascii_uppercase(),
-                path,
+        let line = idx.line_of(dec.range.start());
+        let bucket = entries.entry(receiver_name.to_string()).or_default();
+        for method in methods {
+            bucket.push(RouterMountEntry::Verb {
+                method,
+                path: path.clone(),
                 handler: Some(f.name.to_string()),
-                line: idx.line_of(dec.range.start()),
+                line,
                 attr_keys: Vec::new(),
             });
+        }
     }
 }
 
-/// `<receiver>.include_router(<ident>, prefix="...")` -> `Mount`, or `None` for any non-qualifying shape
-/// (see module doc's "Mounts" bullet for the exact skip rules).
-fn match_include_router(
-    stmt: &StmtExpr,
-    receivers: &HashMap<String, ReceiverInfo>,
-    imports: &ImportMap,
-) -> Option<(String, RouterMountEntry)> {
-    let Expr::Call(call) = &*stmt.value else {
-        return None;
-    };
-    let Expr::Attribute(attr) = &*call.func else {
-        return None;
-    };
-    if attr.attr.as_str() != "include_router" {
-        return None;
-    }
-    let Expr::Name(recv) = &*attr.value else {
-        return None;
-    };
-    let receiver_name = recv.id.as_str();
-    if !receivers.contains_key(receiver_name) {
-        return None;
-    }
-    let Some(Expr::Name(router_ident)) = call.arguments.find_positional(0) else {
-        return None; // non-identifier first argument — never guessed
-    };
-    let ident = router_ident.id.as_str().to_string();
-    let prefix = match call.arguments.find_keyword("prefix") {
-        Some(kw) => match &kw.value {
-            Expr::StringLiteral(s) => s.value.to_str().to_string(),
-            _ => return None, // non-literal prefix — skip the mount entirely
-        },
-        None => "/".to_string(),
-    };
-    let specifier = imports.get(&ident).map(|b| b.specifier.clone());
-    Some((
-        receiver_name.to_string(),
-        RouterMountEntry::Mount {
-            prefix,
-            ident,
-            specifier,
-            attr_keys: Vec::new(),
-        },
-    ))
-}
+mod mounts;
+use mounts::match_include_router;
 
 #[cfg(test)]
 mod tests;

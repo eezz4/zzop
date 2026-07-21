@@ -1,19 +1,17 @@
-# `zzop-napi`
+# The zzop engine JSON contract (`zzop-facade`)
 
-The Node.js binding surface over the zzop analysis engine. Seven functions, all JSON-string-in /
-JSON-string-out (except `version`), are actually DEFINED in the shared `zzop-facade` crate
-(`crates/facade/src/lib.rs`) — plain, napi-free Rust that compiles and has a normal `#[test]` surface
-under the workspace's default `gnu` toolchain with no feature flags at all. This crate, `zzop-napi`
-(published as the npm binding `@zzop/native` from `packages/native/`), is one of two consumers:
-`src/lib.rs` re-exports every `zzop-facade` function unchanged, and `src/addon.rs` — compiled only
-under the default-off `addon` feature (MSVC-only; see [Building the addon from source](#building-the-addon-from-source)
-below) — wraps each one in a thin `#[napi]` shim. The other consumer is the Node-free `zzop-mcp`
-binary (`packages/mcp/`, see [modules/mcp.md](mcp.md)), which calls the same `zzop-facade` functions
-directly with no napi and no Node process at all. `zzop-facade` lives in its own `rlib`-only crate,
-separate from `zzop-napi`, because cargo builds a dependency's `cdylib` target even on an `rlib`
-dependency edge — `zzop-napi`'s `cdylib` half (the Node addon artifact) fails to link under the local
-`gnu` toolchain once its `#[napi]` surface is compiled in, and that failure would poison any crate that
-merely depended on `zzop-napi` for its plain-Rust logic, `zzop-mcp` included.
+> **Filename note:** this page lives at `napi.md` for historical reasons — it once documented the
+> `@zzop/native` Node binding. That npm package (and the `@zzop/cli` JS CLI) was **removed 2026-07-20**:
+> the Node-free `zzop-mcp` binary is now the single runtime form. The *contract* the binding exposed is
+> unchanged and is what this page documents — every host drives the same shapes.
+
+The zzop analysis engine's request/response surface. The functions below are all JSON-string-in /
+JSON-string-out (except `version`), DEFINED in the shared `zzop-facade` crate
+(`crates/facade/src/lib.rs`) — plain Rust that compiles and has a normal `#[test]` surface under the
+workspace's default `gnu` toolchain with no feature flags. The Node-free `zzop-mcp` binary
+(`packages/mcp/`, see [modules/mcp.md](mcp.md)) calls these `zzop-facade` functions directly — no Node
+process at all — and any embedder can drive the same JSON contract. This page documents those
+request/response shapes.
 
 ## Functions
 
@@ -34,7 +32,7 @@ merely depended on `zzop-napi` for its plain-Rust logic, `zzop-mcp` included.
 | `root` | `String` (required — empty → `Err`) | Tree root to walk. |
 | `sourceId` | `String` (default `""`) | Free-form label carried through into cross-tree output. |
 | `packsDir` | `Option<String \| String[]>` | Directory (or directories) of `*.json` DSL rule packs to load — see [rules/authoring-guide.md](../rules/authoring-guide.md). Multiple directories are loaded and MERGED (see [Defaults](#defaults-zero-config--full-analysis) below for the collision rule). A bad/missing directory is a non-fatal `warnings` entry, not a failure — other directories in the list still load. |
-| `packDefs` | `RulePackDef[]` (default `[]`) | Inline rule-pack definitions handed to the engine as data instead of a filesystem directory — the self-contained-binary alternative to `packsDir` (e.g. `zzop-mcp`'s bundled packs, embedded at compile time). Loaded BEFORE `packsDir` directories, so a directory pack with the same id wins the collision (mirrors the JS wrapper's bundled-first `packsDir` ordering below). A same-id collision among `packDefs` entries themselves: the later array entry wins whole. The JS CLI/wrapper never sends this field — it stays on the `packsDir`-only path unchanged; this is purely additive for non-JS hosts like `zzop-mcp` (see [modules/mcp.md](mcp.md)). Also accepted on `analyzeEnvelope`'s config — `EnvelopeAnalyzeRequest` carries the same field with the identical contract. |
+| `packDefs` | `RulePackDef[]` (default `[]`) | Inline rule-pack definitions handed to the engine as data instead of a filesystem directory — the self-contained-binary alternative to `packsDir` (e.g. `zzop-mcp`'s bundled packs, embedded at compile time). Loaded BEFORE `packsDir` directories, so a directory pack with the same id wins the collision (this ordering carries over from the removed JS wrapper's own bundled-first `packsDir` ordering — see below). A same-id collision among `packDefs` entries themselves: the later array entry wins whole. `packDefs` postdates the removed JS CLI/napi wrapper (which never sent it, staying on the `packsDir`-only path); it is purely additive for hosts like `zzop-mcp` (see [modules/mcp.md](mcp.md)). Also accepted on `analyzeEnvelope`'s config — `EnvelopeAnalyzeRequest` carries the same field with the identical contract. |
 | `cacheDir` | `Option<String>` | See [Caching](../ARCHITECTURE.md#caching). Omit to run uncached. |
 | `git` | `Option<{ since: Option<String>, recentDays: Option<u32>, commitTypePatterns: Option<Array<{ pattern: String, tag: String }>> }>` | Enables git-derived scores/health/recommendations/criticality/seams. `recentDays` default is 30. `commitTypePatterns` is an ARRAY of `{ pattern, tag }` objects (NOT a map) — e.g. `[{ "pattern": "^hotfix:", "tag": "FIX" }]` — and, when present and non-empty, REPLACES the default FIX/FEAT/REVERT/... classifier table entirely (match order = array order, mirroring the default table's REVERT-first rationale); an entry whose `pattern` fails to compile as a regex is skipped (matches nothing) and reported as a `warnings` entry, never a failure. |
 | `sizeCap` | `Option<usize>` | Default 1,500,000 bytes (~1.5MB) — see [degraded files](../ARCHITECTURE.md#degraded-files). |
@@ -43,54 +41,47 @@ merely depended on `zzop-napi` for its plain-Rust logic, `zzop-mcp` included.
 | `suppressions` | `Vec<{ rule: String, path?, glob? }>` (default `[]`) | Finding-level accept-list. Each entry drops findings for `rule` either everywhere (no filter), only in files whose path CONTAINS `path` as a plain substring (case-sensitive), or only in files matching `glob` (full-path shell glob; `glob` takes precedence over `path`). Multiple entries for one rule are OR-ed. |
 | `globalExcludes` | `Vec<{ path?, glob? }>` (default `[]`) | Config-wide, rule-agnostic finding-level filter — the top-level `"exclude"` config key. Same `path`/`glob` matching as `suppressions`, but drops matching findings from EVERY rule at once (rather than one named `rule`); the file itself is still analyzed, only its findings are filtered. |
 | `adapterOverlays` | `Vec<NormalizedEnvelope>` (default `[]`) | Mode-B adapter overlays: partial Normalized-AST envelopes merged ON TOP of native analysis (each re-validated, soft-skipped with a warning if invalid). How a framework/SDK adapter adds IoFacts the engine does not parse natively without reimplementing the parser — contrast `analyzeEnvelope`, where a full envelope REPLACES native analysis. Post-cache, so it does not affect the cache key. See [../NORMALIZED_AST.md](../NORMALIZED_AST.md). |
-| `mountedAt` | `Option<String>` | Deployment-topology whole-tree gateway/ingress mount prefix — shorthand for a `mounts` entry with `dir: ""`, folded in LAST (after every `mounts` entry) so an explicit equal-length `mounts` entry wins a tie. `None` (default) adds no implicit mount. Applied to `kind=http` provides only, stacking on top of any code-extracted prefix. See [../ARCHITECTURE.md](../ARCHITECTURE.md#cross-layer-join) / [packages/cli/README.md](../../packages/cli/README.md#connection-topology). |
+| `mountedAt` | `Option<String>` | Deployment-topology whole-tree gateway/ingress mount prefix — shorthand for a `mounts` entry with `dir: ""`, folded in LAST (after every `mounts` entry) so an explicit equal-length `mounts` entry wins a tie. `None` (default) adds no implicit mount. Applied to `kind=http` provides only, stacking on top of any code-extracted prefix. See [../ARCHITECTURE.md](../ARCHITECTURE.md#cross-layer-join). |
 | `mounts` | `Vec<{ dir: String, at: String }>` (default `[]`) | Deployment-topology per-directory mounts: prepends `at` to a `kind=http` provide's key when its file path falls under `dir` (longest matching `dir` wins per provide). Shape is validated fail-fast by the CLI mapper (`ConfigError`); the engine itself defensively skips+warns on a malformed value as a backstop. |
 | `hosts` | `Vec<String>` (default `[]`) | Hosts this tree owns. An absolute-URL consume from any tree targeting one of these hosts (`http`/`https` only) is re-keyed to an internal joinable key at cross-layer link time instead of falling into `externalConsumes` — see `hostRekeyCounts` below. |
+| `routes` | `Vec<{ key: String, role?: "provide" \| "consume" }>` (default `[]`) | Lightweight route-fact injection — the ergonomic counterpart of `adapterOverlays` for the common "inject one route zzop could not resolve from source" case (a non-literal path, a dynamic verb, a computed URL). `key` is a `"METHOD PATH"` interface key (`"GET /api/users"`), normalized through the same transform the extractors use for that side (`http_interface_key` for a provide; the query/fragment-dropping `http_consume_interface_key` for a consume, so `"GET /articles?limit=10"` joins a native `GET /articles`); `role` picks whether the route is SERVED here (`provide`, default) or CALLED from here (`consume`). The whole array expands into ONE synthetic adapter overlay of `http` provides/consumes, so it composes through the identical cross-layer join path as a hand-authored overlay. A `key` that is not a `METHOD`+`PATH` pair is soft-skipped with a warning (never a hard error). See [../ARCHITECTURE.md](../ARCHITECTURE.md#cross-layer-join). |
 
 ### Defaults (zero-config = full analysis)
 
-The JS wrapper (`index.js`, before the config JSON crosses into Rust) injects two defaults into every
-`analyze` config and every `analyzeTrees` tree entry, so a bare `{ root }` request runs the full
-analysis instead of silently degrading to native-analyses-only:
+The `analyze`/`analyzeTrees` facade functions inject no defaults themselves — default-injection is
+each host's own config front end's job, applied before the request ever reaches `zzop-facade`.
+`zzop-mcp` does this through the shared `zzop-config` crate (`crates/config`); historically, the
+removed JS CLI/napi binding's `index.js` wrapper did the equivalent for JS callers before the npm
+distribution (`@zzop/cli` + `@zzop/native`) was removed 2026-07-20 — `zzop-config` is a Rust port of
+that same `withDefaults` layer, carrying over its two defaults so a bare `{ root }` request still runs
+the full analysis instead of silently degrading to native-analyses-only:
 
-- `packsDir` — when the key is absent, defaults to the bundled rule packs: `<repo root>/rules/dsl`
-  when running from a source checkout (the live truth, so a rule edit is never shadowed by a stale
-  copy), else the `rules/` directory inside the installed package (populated at publish time by the
-  `prepack` script). When the caller supplies their own `packsDir` (a single
-  directory string, or an array of directories), the JS wrapper (`index.js`) PREPENDS the bundled
-  default directory rather than replacing it — the effective load order sent to Rust is
-  `[bundled, ...yourDirs]`. All listed directories are loaded and merged: a pack id that appears in
-  more than one directory is taken WHOLE from the LATER directory in that order — not a rule-level
-  merge inside that pack id — so a caller's pack always wins a collision against a shipped pack with
-  the same id, while every distinctly-id'd pack from every directory stays loaded. A bad/unreadable
-  directory anywhere in the list is a non-fatal `warnings` entry; every other directory still loads.
-  An explicit `packsDir: null` disables pack loading entirely (bundled included) — this is the one
-  case the wrapper leaves untouched, since `null` means "no DSL packs at all", not "no defaults".
+- **Bundled DSL packs.** `zzop-config` embeds the bundled rule packs at compile time (`build.rs`,
+  `BUNDLED_PACK_SOURCES`) and injects them as inline `packDefs` — a single-binary host has no sidecar
+  `rules/` directory to point a `packsDir` string at, unlike the removed JS wrapper, which defaulted
+  `packsDir` to a directory on disk (`<repo root>/rules/dsl` in a source checkout, or the installed
+  npm package's own copied `rules/`) and PREPENDED it ahead of any caller-supplied `packsDir`. A
+  caller-supplied pack directory (config `packs.extraDirs`, or an embedder's own `packsDir`) is loaded
+  alongside the bundled inline `packDefs`: a pack id present in both is taken WHOLE from the directory
+  pack — a caller's pack always wins a collision against a shipped pack with the same id, while every
+  distinctly-id'd pack from either source stays loaded. A bad/unreadable directory is a non-fatal
+  `warnings` entry; every other directory still loads. An explicit `packsDir: null` disables
+  directory-based pack loading — `null` means "no DSL packs from a directory", not "no defaults".
 - `git` — when the key is absent, defaults to `git: {}` (the engine applies its own `recentDays: 30`
   default). An explicit value wins; `git: null` disables git collection. If `root` is not a git
   repository, the engine degrades gracefully with a "git collection skipped" warning.
 
-This bundled-packs default is JS-specific: `index.js` injects it as a `packsDir` pointing at a directory
-on disk (a source checkout's `rules/dsl`, or the installed package's copied `rules/`). A non-JS host with
-no such directory to point at — `zzop-mcp` is the only one today — gets the same "bundled packs always
-load" guarantee through `packDefs` instead: the shared `zzop-config` crate embeds the bundled pack JSON
-at compile time and injects it as inline `packDefs` before mapping a config to a request (see
-[modules/mcp.md](mcp.md)). `packDefs` is additive to this crate's own contract — the JS wrapper never
-sends it, so this default-injection description is unchanged for JS callers.
-
 `analyzeEnvelope`'s config gets only the pack default — envelope mode has no `root`/git — and gets it
-at TWO layers: the JS wrapper still applies the `packsDir` default/prepend above, and the engine facade
-itself (`zzop_facade::analyze_envelope_json`) additionally seeds the bundled packs as inline `packDefs`
-on EVERY envelope analysis, whatever the host — the envelope path has no per-host config front-end on
-the Rust side, so its "zero-config = full analysis" default lives at the shared chokepoint instead. The
-seed order keeps every existing collision rule: bundled inline defs load first, a caller `packDefs`
+at a single layer: the engine facade itself (`zzop_facade::analyze_envelope_json`) seeds the bundled
+packs as inline `packDefs` on EVERY envelope analysis, whatever the host — the envelope path has no
+per-host config front-end on the Rust side (an envelope carries no filesystem root for one to attach
+to), so its "zero-config = full analysis" default lives at this shared chokepoint instead. The seed
+order keeps the same collision rule as above: bundled inline defs load first, a caller `packDefs`
 entry with a bundled id wins whole (later inline def wins), and any `packsDir` directory pack wins
-whole over both (so through the JS wrapper the bundled packs still report `packsLoaded` `source: "dir"`
-— the wrapper's on-disk copy shadows the embedded twin — while a raw facade/binary caller sees
-`source: "inline"`). An explicit `packsDir: null` disables the bundled seed and all pack directories
-— caller-supplied `packDefs` (never sent by the JS wrapper) are still honored, per the standing
-"packDefs always load" contract — the facade distinguishes an absent key from an explicit `null` for
-exactly this opt-out. Note only
+whole over both — so a raw facade/binary caller with no explicit `packsDir` sees `packsLoaded`
+`source: "inline"`. An explicit `packsDir: null` disables the bundled seed and all pack directories —
+caller-supplied `packDefs` are still honored, per the standing "packDefs always load" contract — the
+facade distinguishes an absent key from an explicit `null` for exactly this opt-out. Note only
 `symbol-scan`/`io-scan` rules can fire in envelope mode (no source text); every current bundled rule is
 `line-scan`/`method-scan`, so today the bundled default changes `packsLoaded` (and removes the spurious
 zero-packs warning), not findings. To turn off individual rules rather than a whole channel, use
@@ -134,8 +125,9 @@ produces an ordinary `{"valid": false, "issues": [...]}` result rather than a re
 ### Validation-only: `validateRulePackOnly`
 
 `validateRulePackOnly(packJson)` is the same idea for a DSL rule pack: the pre-load, structure-only
-check behind `zzop pack validate <path>` and the `zzop-mcp` binary's `validate_rule_pack` tool (one
-shared facade core, `zzop_facade::validate_rule_pack_json` — identical answers from every host). Its
+check behind the `zzop-mcp` binary's `validate_rule_pack` tool and `zzop-mcp validate-rule-pack <file>`
+CLI subcommand (one shared facade core, `zzop_facade::validate_rule_pack_json` — identical answers
+from every host). Its
 `issues` surface exactly the judgments the engine's pack loader makes when it loads a
 `packsDir`/`packDefs` pack — bad JSON, a missing field, a wrong type (serde's own messages, verbatim),
 a too-new `schema_version` — plus every matcher regex that fails to compile, which the DSL interpreter
@@ -150,9 +142,9 @@ contract ships as [`docs/contracts/rule-pack.schema.json`](../contracts/rule-pac
 
 `queryIo(analysisJson, queryJson)` answers "is io key X provided/consumed/joined?" DEFINITIVELY —
 pure post-processing over an ALREADY-PRODUCED `analyzeTrees` output (no re-analysis, no cache
-interaction). It is the one shared query core: the JS CLI's `zzop endpoint` command and the
-Node-free `zzop-mcp` binary's `check_endpoint` tool (see [mcp.md](mcp.md)) both call this exact
-function, so they give identical answers for the same analysis.
+interaction). It is the one shared query core: the Node-free `zzop-mcp` binary's `check_endpoint`
+tool and `zzop-mcp endpoint` CLI subcommand (see [mcp.md](mcp.md)) both call this exact function, so
+every host driving it gives identical answers for the same analysis.
 
 - `analysisJson` — the string `analyzeTrees` returned. A single-tree `analyze` output is a guided
   error: it carries raw io facts (`ir.io`) but no cross-layer join, and every verdict below is a
@@ -202,7 +194,7 @@ disambiguate); zero yield `"not-found"`.
 | `folders` | `object \| null` | Folder-granularity rollup of `nodes`/the dep graph. Not git-gated — `nodes`/dep graph are built unconditionally, so this is always non-null (an empty tree still gets an object with empty arrays, never `null`). |
 | `layerCoChurn` | `object[] \| null` | Cross-layer commit co-churn pairs (files in different architectural layers that change together). `null` unless `git` is set and collection succeeded — same git-gating as `scores`/`health`; `[]` (not `null`) when git is active but no pair meets the co-change threshold. |
 | `gitWindow` | `{ recentDays: number, since: string \| null } \| null` | Echoes the resolved git-history collection window — ALWAYS serialized (unlike `ruleOverridesApplied`'s omit-when-untouched convention); `null` on the wire IS the "git didn't run" signal (`git` not set, or collection failed), same gating as `scores`/`health`. When non-null: `recentDays` is always a resolved number (the caller's value, or the engine's `30` default when omitted); `since` is the caller's raw filter string (e.g. `"1.year"`, an ISO date) verbatim, or `null` when omitted (full history). |
-| `packsLoaded` | `{ id, rules, source, filesInScope }[]` | Positive pack-load confirmation: one entry per loaded DSL pack (sorted by `id`), with its rule count as loaded and its provenance — `source` is `"dir"` (read from a `packsDir` directory, which is also how the JS wrapper's bundled defaults arrive) or `"inline"` (`packDefs`). `filesInScope` counts the files this tree has that a pack's rules WOULD scan by path-pattern candidacy alone (`file_pattern`/`file_exclude_pattern` — see [rules/dsl-reference.md](../rules/dsl-reference.md)), computed before any content/pattern check runs — it is never a "matched" or "found N usages" count. A large `filesInScope` (e.g. every `.java` file in an all-Java tree) means "eligible", nothing more; pair it with zero findings to read "this pack ran, found no evidence" (`filesInScope > 0`, zero findings) versus "this pack has nothing to say about this tree" (`filesInScope: 0`, e.g. a redis pack over a tree with no redis-shaped file paths at all). Always present; `[]` is the honest "zero DSL packs loaded" state (the same condition the `warnings` self-report names). Reflects loading, not gating: a pack disabled via `disabledRules` still appears — it did load. |
+| `packsLoaded` | `{ id, rules, source, filesInScope }[]` | Positive pack-load confirmation: one entry per loaded DSL pack (sorted by `id`), with its rule count as loaded and its provenance — `source` is `"dir"` (read from a `packsDir` directory — how the removed JS wrapper's bundled defaults used to arrive) or `"inline"` (`packDefs` — how `zzop-config`'s bundled defaults arrive today). `filesInScope` counts the files this tree has that a pack's rules WOULD scan by path-pattern candidacy alone (`file_pattern`/`file_exclude_pattern` — see [rules/dsl-reference.md](../rules/dsl-reference.md)), computed before any content/pattern check runs — it is never a "matched" or "found N usages" count. A large `filesInScope` (e.g. every `.java` file in an all-Java tree) means "eligible", nothing more; pair it with zero findings to read "this pack ran, found no evidence" (`filesInScope > 0`, zero findings) versus "this pack has nothing to say about this tree" (`filesInScope: 0`, e.g. a redis pack over a tree with no redis-shaped file paths at all). Always present; `[]` is the honest "zero DSL packs loaded" state (the same condition the `warnings` self-report names). Reflects loading, not gating: a pack disabled via `disabledRules` still appears — it did load. |
 | `ruleOverridesApplied` | `{ disabled: string[], severityRemapped: string[] }` | Positive confirmation that `disabledRules`/`severityOverrides` were applied: `disabled` lists the affected rule ids, `severityRemapped` likewise for the severity remap. Omitted (or empty) when neither override was requested — a consumer must treat an absent key the same as "no overrides," never as `null`. |
 | `warnings` | `string[]` | Non-fatal issues (e.g. a bad `packsDir`) plus the capability self-report notes — see [Defaults](#defaults-zero-config--full-analysis). |
 | `configWarnings` | `string[]` | Config-authoring problems computed at analysis time, kept OUT of `warnings`: a `disabledRules`/`severityOverrides` entry matching no known rule id (a typo, or a stale id from a different zzop version) did nothing, and is reported here instead — only analysis time has the known-rule-id set (native analysis ids + loaded DSL pack ids) a config parser never sees. Always present; `[]` means neither knob had a matching-nothing entry. A `suppressions` entry with the same problem is unaffected by this split and still reports on `warnings`. A host that also runs its own config front-end (e.g. `zzop-mcp`'s `zzop-config` crate — see [mcp.md](mcp.md#config-semantics)) attaches ITS OWN parse-time config problems (unknown config keys, a malformed overlay) to the same `configWarnings` name on its own reply; this facade-level field is the analysis-time half of that one channel, never a rename of `warnings`. |
@@ -286,13 +278,13 @@ every tree's `disabledRules` (any one tree disabling a cross-layer rule id drops
 entirely, since it is a joint-analysis output no single tree fully owns).
 
 `version()` returns
-`"zzop-napi/{version} zzop-parser-typescript={FP} zzop-parser-prisma={FP} zzop-parser-python-3={FP} zzop-parser-java-21={FP} zzop-parser-rust={FP} zzop-parser-go={FP}"`
+`"zzop-napi/{version} zzop-parser-typescript={FP} zzop-parser-prisma={FP} zzop-parser-python-3={FP} zzop-parser-java-21={FP} zzop-parser-rust={FP} zzop-parser-go={FP} zzop-parser-sql={FP} zzop-parser-csharp={FP}"`
 — every native parser's `PARSER_FINGERPRINT`, in that order. `{version}` follows the same tag→binary
 stamping chain as `zzop-mcp`'s `serverInfo.version` (see [mcp.md](mcp.md#mcp-surface)): release
-prebuilds are stamped from the release tag at compile time (`ZZOP_RELEASE_VERSION`, exported by
-`prebuild.yml`'s addon build step from the same tag the npm package versions come from), so a
-released addon reports its own package version; local/dev builds fall back to `CARGO_PKG_VERSION`,
-the workspace-wide `0.0.0` placeholder.
+builds are stamped from the release tag at compile time (`ZZOP_RELEASE_VERSION`, exported by
+`prebuild.yml` from the tagged `v*` ref — the same tag `verify-plugin-version` checks the Claude Code
+plugin's `plugin.json` against), so a released build reports the release version; local/dev builds
+fall back to `CARGO_PKG_VERSION`, the workspace-wide `0.0.0` placeholder.
 
 ## Output data shapes
 
@@ -325,71 +317,29 @@ is dropped before sorting — it never appears in the output at all, with no sup
 
 ## Error/panic discipline
 
-Two layers. `zzop-facade` (`crates/facade/src/lib.rs`) never panics by contract — every fallible path
-(bad JSON, missing `root`, invalid envelope, a malformed query) returns `Result<String, String>`. `addon.rs` wraps each of
-the four fallible calls (analyze/analyzeTrees/analyzeEnvelope/queryIo — validateEnvelopeOnly and validateRulePackOnly are wrapped only for panic-safety and never themselves return Err) in:
+`zzop-facade` (`crates/facade/src/lib.rs`) never panics by contract — every fallible path (bad JSON,
+missing `root`, invalid envelope, a malformed query) returns `Result<String, String>`. The engine
+itself already isolates a single bad file's parse/rule failure internally (see [degraded
+files](../ARCHITECTURE.md#degraded-files)), so any caller — `zzop-mcp` or a direct `zzop-facade`
+embedder — gets either a value or a `Result::Err`, never a process crash, with no extra
+unwind-catching wrapper needed: an in-process Rust call has no FFI boundary to protect. `version` has
+no `Result` (cannot fail).
 
-```rust
-fn catch<F: FnOnce() -> Result<String, String> + UnwindSafe>(f: F) -> napi::Result<String> {
-    match std::panic::catch_unwind(f) {
-        Ok(Ok(json)) => Ok(json),
-        Ok(Err(message)) => Err(Error::from_reason(message)),
-        Err(_) => Err(Error::from_reason("zzop-napi: internal panic (this is a bug — please report it)")),
-    }
-}
-```
-
-This is a second, outer `catch_unwind` — the engine already isolates a single bad file's parse/rule
-failure internally (see [degraded files](../ARCHITECTURE.md#degraded-files)); this outer one exists
-because unwinding across a `#[napi]`-exported `extern "C"` boundary is undefined behavior and must
-never happen. In practice: a JS caller sees either a resolved value or a rejected/thrown `Error`, never
-a process crash. `version` has no `Result`/`catch` wrapper (cannot fail).
-
-## Building the addon from source
-
-The real `.node` addon requires the MSVC toolchain on Windows (Node-API's delay-load linking has no
-MinGW/`ld` equivalent):
-
-```
-cargo +stable-x86_64-pc-windows-msvc build -p zzop-napi --release --features addon
-```
+Historically, the removed `@zzop/native` napi binding (npm distribution, removed 2026-07-20) added its
+own outer `catch_unwind` in `addon.rs`, wrapping each fallible call before returning a `napi::Result`
+to the JS caller — specifically because unwinding across a `#[napi]`-exported `extern "C"` boundary is
+undefined behavior. That extra layer was a property of the removed FFI boundary itself, not of
+`zzop-facade`'s own contract, and has no equivalent (or need) in the Node-free `zzop-mcp` binary.
 
 ## Packaging layout
 
-Main package `@zzop/native` (publishes to npm on a `v*` git tag): `main: index.js`,
-`types: index.d.ts`, `optionalDependencies` on 5 platform packages under `npm/`:
-
-| Directory | Package | os/cpu/libc |
-|---|---|---|
-| `npm/win32-x64-msvc` | `@zzop/native-win32-x64-msvc` | win32/x64 |
-| `npm/darwin-x64` | `@zzop/native-darwin-x64` | darwin/x64 |
-| `npm/darwin-arm64` | `@zzop/native-darwin-arm64` | darwin/arm64 |
-| `npm/linux-x64-gnu` | `@zzop/native-linux-x64-gnu` | linux/x64/glibc |
-| `npm/linux-arm64-gnu` | `@zzop/native-linux-arm64-gnu` | linux/arm64/glibc |
-
-Each ships only a gitignored `zzop-napi.node` placed by CI (`scripts/place-artifacts.mjs`, mapping
-Rust target triples to these 5 platform dirs). `scripts/sync-versions.mjs` propagates the root
-version into every sub-package and the root's `optionalDependencies` pins.
-
-**Loader cascade** (`index.js`): build `${platform}-${arch}`, look up the matching platform package →
-`require()` it; on failure/absence, fall back to `require('./zzop-napi.node')` (local dev build); if
-both fail, throw with the attempted paths, supported-platform table, and the correct build command for
-the current platform. musl/Alpine and WASM have no table entry (fall to the local-build/throw path).
-`smoke.mjs` (package-root, not `cargo test`) exercises the loader end-to-end against a real built
-addon: `version()`, `analyze()` (2-file cycle fixture), `analyzeTrees()`.
-
-## Calling from ESM
-
-This is a CommonJS package. A bare specifier import (`import native from '@zzop/native'`) works from an
-ES module, but a dynamic `import()` of a raw Windows file path (e.g. `import('C:\\...\\index.js')`)
-fails with `ERR_UNSUPPORTED_ESM_URL_SCHEME` — Node requires a `file://` URL or `createRequire`:
-
-```js
-import { createRequire } from 'node:module';
-const native = createRequire(import.meta.url)('/abs/path/to/packages/native/index.js');
-// or: import { pathToFileURL } from 'node:url';
-//     const native = (await import(pathToFileURL('/abs/path/to/index.js').href)).default;
-```
+The engine ships as ONE Node-free native binary, `zzop-mcp` (`packages/mcp/`), built for 5 platforms
+(`win32-x64-msvc`, `darwin-x64`, `darwin-arm64`, `linux-x64-gnu`, `linux-arm64-gnu`) and attached to
+every GitHub release — both as bare `zzop-mcp-<platform>[.exe]` binaries (PATH install / Claude Code
+plugin) and as per-platform `zzop-<platform>.mcpb` one-click Claude Desktop bundles. There is no npm
+package: `build -p zzop-mcp --release` produces the binary, which drives the `zzop-facade` functions
+above directly. See [packaging/README.md](../../packaging/README.md) for the build + distribution
+details, and [modules/mcp.md](mcp.md) for the MCP tool + CLI surface the binary exposes.
 
 See also: [../ARCHITECTURE.md](../ARCHITECTURE.md) (how a tree is processed, degrade/cache behavior),
 [../rules/catalog.md](../rules/catalog.md) (every rule/analysis id `disabledRules` can reference),

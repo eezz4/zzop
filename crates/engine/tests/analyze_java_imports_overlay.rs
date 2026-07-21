@@ -70,7 +70,7 @@ fn write_fixture_tree() -> TempDir {
 
 /// The adapter's committed output for the fixture tree, validated through the REAL
 /// `zzop_core::validate_envelope` path — the same validator `apply_adapter_overlays` re-runs per
-/// overlay, and the same one `zzop adapter validate` / the MCP `validate_envelope` tool wrap.
+/// overlay, and the same one `zzop-mcp validate-envelope` / the MCP `validate_envelope` tool wrap.
 fn example_envelope() -> zzop_core::NormalizedEnvelope {
     let json = include_str!("../../../examples/java-imports-adapter/test/expected-envelope.json");
     zzop_core::validate_envelope(json)

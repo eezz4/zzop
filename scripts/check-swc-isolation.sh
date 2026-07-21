@@ -21,19 +21,26 @@
 # police — a `grep -r .` over the tree false-positives on them. Anything that could ship must be
 # tracked, so tracked-only is exactly the isolation surface (and matches what CI checks out).
 #
+# Enumeration mechanism (TRACKED-file discovery + grep + the standard target/node_modules/.claude
+# exclusions) lives in scripts/lib/tracked-grep.sh, shared with check-syn-isolation.sh /
+# check-tree-sitter-isolation.sh / check-ruff-isolation.sh — this script keeps only ITS OWN pattern,
+# allowlist, and messages.
+#
 # No deps beyond git + grep -P (PCRE). Exit 1 on any violation, listing file:line.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. ./scripts/lib/tracked-grep.sh
 
 violations=0
 
 echo "swc isolation guard: checking Cargo.toml dependency declarations..."
 DEP_PATTERN='^\s*swc[_-][A-Za-z0-9_-]*\s*='
-cargo_files=$(git ls-files -z -- 'Cargo.toml' '*/Cargo.toml' \
-  | xargs -0 -r grep -lP "$DEP_PATTERN" -- 2>/dev/null \
-  | grep -v '/target/' \
-  | grep -v '^\.claude/' \
-  | grep -v -x 'Cargo.toml' \
+# The enumeration call is kept OUTSIDE the `|| true` below on purpose: tracked_files_matching's own
+# failure must still trip `set -e` and abort loud (see its header comment); only its allowlisted
+# false-positives (this guard's own Cargo.toml, parser-typescript's own) are safe to swallow via
+# `|| true`.
+cargo_matches=$(tracked_files_matching "$DEP_PATTERN" 'Cargo.toml' '*/Cargo.toml')
+cargo_files=$(grep -v -x 'Cargo.toml' <<< "$cargo_matches" \
   | grep -v -x 'parser/parser-typescript/Cargo.toml' || true)
 
 if [ -n "$cargo_files" ]; then
@@ -46,11 +53,8 @@ fi
 
 echo "swc isolation guard: checking .rs source usage..."
 USE_PATTERN='swc_core::|use\s+swc_'
-rs_files=$(git ls-files -z -- '*.rs' \
-  | xargs -0 -r grep -lP "$USE_PATTERN" -- 2>/dev/null \
-  | grep -v '/target/' \
-  | grep -v '^\.claude/' \
-  | grep -v '^parser/parser-typescript/src/' || true)
+rs_matches=$(tracked_files_matching "$USE_PATTERN" '*.rs')
+rs_files=$(grep -v '^parser/parser-typescript/src/' <<< "$rs_matches" || true)
 
 if [ -n "$rs_files" ]; then
   echo "swc isolation guard: swc_core usage found outside parser-typescript/src:"

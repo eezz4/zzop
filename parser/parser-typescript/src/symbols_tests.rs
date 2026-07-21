@@ -157,6 +157,63 @@ fn anonymous_default_class_methods() {
     assert_eq!(names(&s), vec!["default", "default.foo", "default.bar"]);
 }
 
+// --- parseSymbols deferred exports (`export default foo;` / `export { foo }` as trailing statements) ---
+
+#[test]
+fn deferred_default_export_of_function() {
+    let s = parse_symbols("x.ts", "function useX() {}\nexport default useX;\n");
+    assert_eq!(s.len(), 1);
+    assert_eq!(s[0].name, "useX");
+    assert!(s[0].exported);
+    assert!(s[0].is_default);
+}
+
+#[test]
+fn deferred_named_export() {
+    let s = parse_symbols("x.ts", "const foo = 1;\nexport { foo };\n");
+    assert_eq!(s.len(), 1);
+    assert_eq!(s[0].name, "foo");
+    assert!(s[0].exported);
+    assert!(!s[0].is_default);
+}
+
+#[test]
+fn deferred_named_export_as_default() {
+    let s = parse_symbols("x.ts", "function bar() {}\nexport { bar as default };\n");
+    assert_eq!(s.len(), 1);
+    assert_eq!(s[0].name, "bar");
+    assert!(s[0].exported);
+    assert!(s[0].is_default);
+}
+
+#[test]
+fn inline_default_export_still_works() {
+    // regression: inline `export default function baz() {}` must not be affected by the deferred pass.
+    let s = parse_symbols("x.ts", "export default function baz() {}\n");
+    assert_eq!(s[0].name, "baz");
+    assert!(s[0].exported);
+    assert!(s[0].is_default);
+}
+
+#[test]
+fn no_export_statement_stays_private() {
+    // never-guess pin: a plain top-level decl with no export statement anywhere stays unexported.
+    let s = parse_symbols("x.ts", "function priv() {}\n");
+    assert_eq!(s[0].name, "priv");
+    assert!(!s[0].exported);
+}
+
+#[test]
+fn deferred_default_export_of_call_expr_fabricates_nothing() {
+    // `export default makeThing()` has no ident to attribute to -> no symbol fabricated, no crash.
+    let s = parse_symbols(
+        "x.ts",
+        "function makeThing() { return 1; }\nexport default makeThing();\n",
+    );
+    assert_eq!(names(&s), vec!["makeThing"]);
+    assert!(!s[0].exported);
+}
+
 // --- parseSymbols binding patterns ---
 
 #[test]

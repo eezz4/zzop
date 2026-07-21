@@ -19,16 +19,16 @@ node adapter.mjs --root <root> > auth.json   # emit the overlay envelope
 node --test test/adapter.test.mjs            # snapshot test
 ```
 
-Feed the envelope in via the `adapterOverlays` field on `analyze` / `analyzeTrees`:
+Feed the envelope in via the `overlays` key in `zzop.config.jsonc` (per-tree or top-level), then run
+the binary:
 
-```js
-const overlay = JSON.parse(execSync('node adapter.mjs --root .'));
-const out = JSON.parse(native.analyzeTrees(JSON.stringify({
-  trees: [{ root: '.', sourceId: 'backend', adapterOverlays: [overlay] }],
-})));
+```sh
+node adapter.mjs --root . > auth.json     # emit the overlay envelope
+zzop-mcp cross --config zzop.config.jsonc  # tree carries overlays: ["./auth.json"]
 ```
 
-or `overlays: ["./auth.json"]` in `zzop.config` if your embedding reads overlays from a config file.
+Embedders calling `zzop-facade` directly instead pass the parsed envelope on the request's
+`adapterOverlays` field (of `analyze_json` / `analyze_trees_json`).
 
 ## Contract points
 

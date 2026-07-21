@@ -30,7 +30,7 @@ impl PacksDir {
 }
 
 /// One tree's request shape (wire = camelCase via `rename_all`; full field list = this struct —
-/// `root` plus 14 optional knobs, see `docs/modules/napi.md`'s table for the authoritative
+/// `root` plus 15 optional knobs, see `docs/modules/napi.md`'s table for the authoritative
 /// per-field contract). `#[serde(deny_unknown_fields)]` is deliberately
 /// NOT set — an older/newer Node host sending an extra field (e.g. a future `scores_config` knob) should
 /// degrade to "ignored", not fail the whole call.
@@ -49,7 +49,7 @@ pub struct AnalyzeRequest {
     /// pre-existing `packs_dir`-only behavior, byte-for-byte. Loaded BEFORE `packs_dir` directories in
     /// `base_engine_config`'s seed order, so a directory pack with the same id WINS the collision whole
     /// (a caller's own `packsDir` directory overrides an embedded bundled pack with the same id, mirroring
-    /// the JS wrapper's bundled-first `index.js` ordering — see `base_engine_config`'s doc for the full
+    /// the bundled-first ordering — see `base_engine_config`'s doc for the full
     /// three-layer collision rule). `EnvelopeAnalyzeRequest` carries the same field with the identical
     /// contract, so every analyze entry point (`analyze`/`analyzeTrees`/`analyzeEnvelope`) accepts
     /// inline packs.
@@ -98,6 +98,12 @@ pub struct AnalyzeRequest {
     /// consumes to these hosts are re-keyed internal at cross-layer link time, see
     /// `zzop_core::LinkOptions::internal_hosts`). Empty (the default) declares no hosts.
     pub hosts: Vec<String>,
+    /// Lightweight route-fact injection — the ergonomic counterpart of `adapter_overlays` for the common
+    /// "inject one route zzop could not resolve from source" case (a non-literal path, a dynamic verb, a
+    /// computed URL). `build_engine_config` expands the whole array into ONE synthetic adapter overlay of
+    /// `http` provides/consumes (see `RouteInjectionRequest`), so it composes through the same join path as
+    /// a hand-authored overlay. Empty (the default) injects no routes.
+    pub routes: Vec<RouteInjectionRequest>,
 }
 
 /// Deserializes `T | null` into `Some(Some(T)) | Some(None)` so a struct-level `#[serde(default)]`
@@ -122,6 +128,42 @@ where
 pub struct MountEntryRequest {
     pub dir: String,
     pub at: String,
+}
+
+/// One `AnalyzeRequest::routes` entry — a single route fact a caller injects when zzop could not resolve it
+/// from source (a non-literal route path, a dynamic HTTP verb, a computed client URL). The LIGHTWEIGHT
+/// counterpart of hand-authoring an `adapterOverlays` envelope for the common "inject one route" case:
+/// `build_engine_config` expands the whole `routes` array into ONE synthetic adapter overlay carrying
+/// `http` io entries, so this reuses the exact same, already-proven overlay-`io` cross-layer join path
+/// (`zzop_engine::analyze`'s `apply_adapter_overlays` -> assemble -> `link_cross_layer_io`) with no new
+/// engine wiring — the ergonomic sibling of `mounts`/`hosts` on the route-FACT axis.
+///
+/// `key` is the `"METHOD PATH"` interface key (`"GET /api/users"`), normalized through the SAME transform
+/// the native extractors use for that side — `http_interface_key` for a provide, the query/fragment-dropping
+/// `http_consume_interface_key` for a consume — so `"get /api/users"` / `"GET /api/users/"` key canonically
+/// and join a native route exactly. A `key` that is not a `METHOD` + `PATH` pair is skipped
+/// with a `warnings` entry (an injected fact that can never join is surfaced, never silently dropped). The
+/// injected route is attributed to a synthetic file marker (it is a caller-declared fact, not extracted
+/// source), which the overlay's own synthetic-entry disclosure surfaces.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteInjectionRequest {
+    pub key: String,
+    /// Whether this route is SERVED here (a provide — the default, the "zzop dropped my route" case) or
+    /// CALLED from here (a consume — a dynamic client URL zzop could not key).
+    #[serde(default)]
+    pub role: RouteRole,
+}
+
+/// `RouteInjectionRequest::role` — which side of the cross-layer join an injected route participates on.
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RouteRole {
+    /// The route is SERVED here — injected as an `http` PROVIDE (the default).
+    #[default]
+    Provide,
+    /// The route is CALLED from here — injected as an `http` CONSUME.
+    Consume,
 }
 
 /// `AnalyzeRequest::git`'s payload — mirrors `zzop_engine::GitOptions` field-for-field, as JSON input.
@@ -169,7 +211,7 @@ pub struct EnvelopeAnalyzeRequest {
     /// Double-`Option`, unlike `AnalyzeRequest::packs_dir`: the envelope path is the one entry point
     /// where the FACADE injects the bundled-pack default (`analyze_envelope_json` — no host config
     /// front-end covers envelope requests, so the default lives at the shared chokepoint), and the
-    /// injection must honor the JS wrapper's documented `packsDir: null` opt-out. A plain `Option`
+    /// injection must honor the documented `packsDir: null` opt-out. A plain `Option`
     /// deserializes an explicit `null` and an ABSENT key identically, erasing
     /// the opt-out; here `None` = key absent (inject the bundled packs), `Some(None)` = explicit
     /// `null` (opt out of the bundled seed and all pack directories — caller `packDefs`, if any, are

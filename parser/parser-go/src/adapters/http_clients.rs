@@ -13,11 +13,13 @@
 //!   still emitted verbatim: `net/http`'s own function NAME is an explicit verb spelling (like a
 //!   Spring `method = RequestMethod.HEAD` attribute), not a name-shaped GUESS — `HTTP_KEY_VERBS`'s own
 //!   doc explicitly carves out this "explicit attribute passes through verbatim" case.
-//! - **`&http.Client{}`/`client.Do(req)` instances**: SKIPPED in v1 — a request built via
-//!   `http.NewRequest(...)` and dispatched through a separately-constructed `*http.Client` value is not
-//!   visible at the call site the way a free-function URL argument is (same "roadmap, not attempted"
-//!   note `zzop_parser_python_3::adapters::http_clients`'s module doc leaves for a `requests.Session`/
-//!   `httpx.Client` instance).
+//! - **`http.Client` instances**: a name bound to an `http.Client` value (`c := &http.Client{}`, `var c
+//!   = http.Client{}`, `c := new(http.Client)`) is tracked by a file-wide first pass (`instances`), so its
+//!   URL-at-call-site convenience methods `c.Get(url)`/`c.Post(url, ...)`/`c.Head(url)`/`c.PostForm(url,
+//!   ...)` key exactly like the package free functions above (the tree-sitter counterpart of
+//!   `zzop_parser_python_3::adapters::http_clients`'s instance pass). `client.Do(req)` stays a v1 roadmap
+//!   item: the URL rides a `*http.Request` value built elsewhere (`http.NewRequest("GET", url, ...)`), one
+//!   indirection removed from the call site, so it cannot be resolved without following the request value.
 //! - **URL resolution**: a string literal verbatim, OR `fmt.Sprintf("template", args...)` (gated on
 //!   the file's own `fmt` import) whose FIRST argument is a string literal with every `%`-verb
 //!   (`%s`/`%d`/%v`/`%q`/a flag+width+precision cluster like `%05.2f`/an explicit arg index `%[1]s`)
@@ -44,6 +46,8 @@ use crate::util::{node_text, string_literal_text, valid_named_children};
 
 use super::nth_arg;
 
+mod instances;
+
 /// `net/http` client helper name -> emitted key verb. Every verb is a `zzop_core::HTTP_KEY_VERBS`
 /// member EXCEPT `HEAD` — a deliberate T3 divergence (do not unify): `http.Head(...)` is a real
 /// client-side egress fact worth recording, but no provider-side extractor keys HEAD routes (the
@@ -69,12 +73,16 @@ pub fn extract_go_http_consumes(rel: &str, text: &str) -> Vec<IoConsume> {
         return Vec::new();
     }
     let fmt_names = local_names(&imports, "fmt");
+    // File-wide first pass: names bound to an `http.Client` value, so `c.Get(url)`/... reads as egress
+    // the same as `http.Get(url)` (see `instances`).
+    let instance_names = instances::client_instance_names(tree.root_node(), &net_http_names, text);
     let mut out = Vec::new();
     walk(
         tree.root_node(),
         rel,
         text,
         &net_http_names,
+        &instance_names,
         &fmt_names,
         &mut out,
     );
@@ -95,6 +103,7 @@ fn walk(
     rel: &str,
     src: &str,
     net_http_names: &HashSet<String>,
+    instance_names: &HashSet<String>,
     fmt_names: &HashSet<String>,
     out: &mut Vec<IoConsume>,
 ) {
@@ -102,19 +111,32 @@ fn walk(
         return;
     }
     if node.kind() == "call_expression" {
-        if let Some((method, url_arg)) = match_client_call(node, net_http_names, src) {
+        if let Some((method, url_arg)) =
+            match_client_call(node, net_http_names, instance_names, src)
+        {
             out.push(emit(rel, method, url_arg, fmt_names, src));
         }
     }
     for child in valid_named_children(node) {
-        walk(child, rel, src, net_http_names, fmt_names, out);
+        walk(
+            child,
+            rel,
+            src,
+            net_http_names,
+            instance_names,
+            fmt_names,
+            out,
+        );
     }
 }
 
-/// `<net/http-name>.<Verb>(url, ...)` -> `(UPPERCASE method, url argument node)`.
+/// `<net/http-name>.<Verb>(url, ...)` (package free function) OR `<client-instance>.<Verb>(url, ...)`
+/// (a bound `http.Client` value) -> `(UPPERCASE method, url argument node)`. Both share the same
+/// `VERB_METHODS` vocabulary and URL-at-arg-0 shape; `.Do(req)` is naturally excluded (not a verb name).
 fn match_client_call<'t>(
     call: Node<'t>,
     net_http_names: &HashSet<String>,
+    instance_names: &HashSet<String>,
     src: &str,
 ) -> Option<(&'static str, Node<'t>)> {
     let func = call.child_by_field_name("function")?;
@@ -123,7 +145,10 @@ fn match_client_call<'t>(
     }
     let operand = func.child_by_field_name("operand")?;
     let field = func.child_by_field_name("field")?;
-    if operand.kind() != "identifier" || !net_http_names.contains(node_text(operand, src)) {
+    let recv = node_text(operand, src);
+    if operand.kind() != "identifier"
+        || (!net_http_names.contains(recv) && !instance_names.contains(recv))
+    {
         return None;
     }
     let go_verb = node_text(field, src);

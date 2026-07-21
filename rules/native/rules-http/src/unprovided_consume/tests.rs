@@ -40,6 +40,46 @@ fn unmatched_consume_is_flagged_when_the_tree_has_a_provide() {
 }
 
 #[test]
+fn a_consume_in_a_test_file_is_never_flagged() {
+    // A `test_*.py`/`*.spec.ts` call to a missing route (a deliberate 404 probe, or an httpx/requests
+    // client fixture) is test scaffolding, not deployed egress — it must not be judged against the app's
+    // routes, mirroring the cross-tree join's own test-classified io drop (filter_join_io, D11).
+    let provides = vec![provide("GET /a", "api.ts", 1)];
+    let consumes = vec![
+        consume(
+            "http",
+            Some("GET /wrong_path/asd"),
+            "tests/test_errors.py",
+            15,
+        ),
+        consume("http", Some("GET /also-missing"), "src/client.spec.ts", 9),
+    ];
+    let found = unprovided_consume_findings(&provides, &consumes);
+    assert!(
+        found.is_empty(),
+        "test-file consumes must not be flagged: {found:?}"
+    );
+}
+
+#[test]
+fn a_non_test_consume_alongside_a_test_consume_is_still_flagged() {
+    // The test-file skip must not suppress a real app-code consume that happens to share the batch.
+    let provides = vec![provide("GET /a", "api.ts", 1)];
+    let consumes = vec![
+        consume(
+            "http",
+            Some("GET /wrong_path/asd"),
+            "tests/test_errors.py",
+            15,
+        ),
+        consume("http", Some("GET /missing"), "src/client.ts", 3),
+    ];
+    let found = unprovided_consume_findings(&provides, &consumes);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].file, "src/client.ts");
+}
+
+#[test]
 fn always_veto_static_asset_extension_consume_is_never_flagged() {
     let provides = vec![provide("GET /a", "api.ts", 1)];
     let consumes = vec![consume(
@@ -303,7 +343,7 @@ fn results_sorted_by_file_then_line() {
 
 #[test]
 fn field_case_nine_foreign_unmatched_consumes_fold_into_one_aggregate() {
-    // Mirrors the mono-hub field measurement: a tree that provides a handful of routes under one
+    // A tree that provides a handful of routes under one
     // family (/settle) but whose sibling apps' routes (served outside this analysis) leak in as
     // consumes spread across several foreign first segments.
     let provides = vec![
@@ -363,6 +403,11 @@ fn overlapping_unmatched_consume_keeps_the_individual_finding_shape() {
     assert_eq!(
         found[0].data.as_ref().unwrap()["key"].as_str(),
         Some("GET /api/missing")
+    );
+    // Paste-ready injection stub for the "route in a file this analysis didn't parse" case.
+    assert_eq!(
+        found[0].data.as_ref().unwrap()["injectionStub"].as_str(),
+        Some("routes: [{ \"key\": \"GET /api/missing\", \"role\": \"provide\" }]")
     );
 }
 
@@ -466,7 +511,7 @@ fn aggregate_message_appends_ellipsis_when_more_than_three_provide_segments() {
 
 #[test]
 fn aggregate_message_does_not_dangle_when_the_only_provides_are_root_path() {
-    // F4 (release-audit v0.14.0): a tree whose only http provides are `GET /` contributes zero
+    // A tree whose only http provides are `GET /` contributes zero
     // first-segments (`first_path_segment` returns `None` for `/`), so the normal "{m} provide(s)
     // under {segments}" clause would render as a dangling "under " with nothing after it. The
     // reworded clause must not contain that dangling construct.

@@ -40,6 +40,7 @@ pub(super) fn collect_config_warnings(config: &serde_json::Value) -> Vec<String>
     if let Some(trees) = config.get("trees").and_then(serde_json::Value::as_array) {
         let known_tree = known("tree");
         let known_mount = known("mount");
+        let known_route = known("route");
         for (i, tree) in trees.iter().enumerate() {
             warn_unknown_keys(
                 Some(tree),
@@ -54,6 +55,18 @@ pub(super) fn collect_config_warnings(config: &serde_json::Value) -> Vec<String>
                             Some(entry),
                             &known_mount,
                             &format!("trees[{i}].mounts[{j}]."),
+                            &mut warnings,
+                        );
+                    }
+                }
+            }
+            if let Some(routes) = tree.get("routes").and_then(serde_json::Value::as_array) {
+                for (j, entry) in routes.iter().enumerate() {
+                    if entry.is_object() {
+                        warn_unknown_keys(
+                            Some(entry),
+                            &known_route,
+                            &format!("trees[{i}].routes[{j}]."),
                             &mut warnings,
                         );
                     }

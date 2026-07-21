@@ -1,8 +1,7 @@
-//! `cross_repo`'s cross-layer join summary assembly (`cross_summary`) — split out of `tools.rs`
-//! unchanged when this crate's shaping logic moved out of `packages/mcp` (see the crate doc: hosts
-//! are thin protocol facades, all shaping logic lives here).
+//! `cross_repo`'s cross-layer join summary assembly (`cross_summary`) — see the crate doc: hosts
+//! are thin protocol facades, all shaping logic lives here.
 
-use crate::output::{self, FindingFilters};
+use crate::output::{self, FindingFilters, Verbosity};
 
 /// Cross-repo analysis — zzop's headline. Config-first mode (`config_path`) runs the config's `trees`;
 /// paths mode builds zero-config trees tagged by directory name (bundled packs + git defaults still
@@ -77,6 +76,14 @@ pub fn cross_summary(
             // index).
             if let Some(rule_overrides_applied) = t["output"].get("ruleOverridesApplied") {
                 source["ruleOverridesApplied"] = rule_overrides_applied.clone();
+            }
+            // MCP<->CLI parity (STAGED): the `Full` lane keeps each tree's raw output fields the
+            // per-source summary drops (`ir`/`nodes`/`scores`/...). Dead today — every caller passes
+            // `Verbosity::Summary` (see `output::Verbosity`), so per-source replies stay byte-identical.
+            if filters.verbosity == Verbosity::Full {
+                if let Some(map) = source.as_object_mut() {
+                    output::insert_full_output_fields(map, &t["output"]);
+                }
             }
             source
         })

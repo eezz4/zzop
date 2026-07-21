@@ -9,11 +9,15 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 use super::{ClassRow, PrefixState};
-use crate::provides::first_quoted_string;
+use crate::provides::route_path_arg;
 
-/// Resolves one class-level `@RequestMapping`'s raw argument text to a `PrefixState` — a literal quoted
-/// string resolves directly; a bare/empty argument list resolves to `""`; anything else is treated as a
-/// (possibly qualified) constant reference and resolved via `resolve_scoped`, starting at `class_name`.
+/// Resolves one class-level `@RequestMapping`'s raw argument text to a `PrefixState` — a literal
+/// `value=`/`path=`/positional string (`route_path_arg`, attribute-aware — see its doc) resolves
+/// directly; a bare/empty argument list resolves to `""`; anything else (including a NAMED
+/// `value = SOME_CONSTANT` with no quotes, which `route_path_arg` deliberately does not treat as a
+/// literal) is treated as a (possibly qualified) constant reference — extracted by `const_ref_qualified`,
+/// which is ITSELF attribute-aware (see its doc: `value=`/`path=`/positional, never an unrelated
+/// attribute like `produces=`/`headers=`) — and resolved via `resolve_scoped`, starting at `class_name`.
 pub(super) fn resolve_class_prefix(
     class_name: &str,
     raw: &Option<String>,
@@ -23,7 +27,7 @@ pub(super) fn resolve_class_prefix(
     let Some(args) = raw else {
         return PrefixState::NoMapping;
     };
-    if let Some(lit) = first_quoted_string(args) {
+    if let Some(lit) = route_path_arg(args) {
         return PrefixState::Resolved(lit);
     }
     if args.trim().is_empty() {
@@ -44,6 +48,31 @@ pub(super) fn resolve_class_prefix(
         Some(v) => PrefixState::Resolved(v),
         None => PrefixState::Unresolved,
     }
+}
+
+/// Resolves a NON-LITERAL method-level route path (a constant reference like `@GetMapping(ApiPaths.USERS)`
+/// or `@RequestMapping(value = SOME_CONST, method = GET)`) against the corpus, scoped to the DECLARING
+/// class's own `extends` chain — the method-path analog of [`resolve_class_prefix`]'s constant branch,
+/// reusing the exact same attribute-aware `const_ref_qualified` extractor and `resolve_scoped` walk. `raw`
+/// is the annotation's raw argument text (`MethodPath::Unresolved`). `None` when no constant reference is
+/// present (a genuinely computed expression) or the reference does not resolve to a literal in the corpus —
+/// the caller then SKIPS the route (counted in `skipped_unresolved_method_path`), never keying the empty base.
+pub(super) fn resolve_method_path(
+    class_name: &str,
+    raw: &str,
+    classes: &HashMap<String, ClassRow>,
+    memo: &mut HashMap<(String, String), Option<String>>,
+) -> Option<String> {
+    let (qualifier, name) = const_ref_qualified(raw)?;
+    let mut visiting = HashSet::new();
+    resolve_scoped(
+        class_name,
+        qualifier.as_deref(),
+        &name,
+        classes,
+        memo,
+        &mut visiting,
+    )
 }
 
 /// Resolves a possibly-qualified constant reference to its literal value, walking `scope_class`'s (or a
@@ -166,11 +195,32 @@ fn split_qualified(term: &str) -> Option<(Option<String>, String)> {
     Some((qualifier, c[2].to_string()))
 }
 
-/// The (optional, dotted-or-bare) constant reference found anywhere in an annotation's raw argument
-/// text, restricted to a `SCREAMING_SNAKE_CASE` final name so an attribute name like `value` is never
-/// mistaken for a constant reference.
+/// The (optional, dotted-or-bare) constant reference that is the actual PATH for this class-level
+/// `@RequestMapping` — attribute-aware exactly like `route_path_arg` (`provides/annotations.rs`, whose
+/// doc explains the same named-attribute-wins-over-positional-scan rationale for the literal case): a
+/// named `value=` attribute wins, then a named `path=` attribute, and only a genuinely positional first
+/// argument (`@RequestMapping(BASE_PATH)`) when neither names a constant. This is the
+/// constant-reference counterpart of `route_path_arg`'s quoted-literal extraction — implemented
+/// separately (not by literally sharing `route_path_arg`'s regexes) because the terminal token shape
+/// differs (a bare/qualified `SCREAMING_SNAKE_CASE` identifier here vs. a `"..."` literal there), but the
+/// SAME attribute-boundary discipline applies: an unrelated attribute (`produces=`, `headers=`, ...)
+/// that happens to carry a constant, or a quoted string literal, earlier in the raw text must never be
+/// mistaken for the path.
+///
+/// The three rules are tried in order and the FIRST that yields a constant wins (`value=`'s RHS, then
+/// `path=`'s RHS, then a positional bare constant) — a rule that finds no constant FALLS THROUGH to the
+/// next rather than committing (mirroring `route_path_arg`, which likewise falls through on a failed
+/// `value=`/`path=` match): so `@RequestMapping(params = "value=1", path = ApiPaths.USERS)`, where a
+/// `params` string literal literally contains the substring `value=`, still resolves `path=`'s constant
+/// instead of being swallowed. `None` only when no rule finds a constant at all.
 fn const_ref_qualified(args: &str) -> Option<(Option<String>, String)> {
-    let c = const_ref_re().captures(args)?;
+    capture_qualified(value_attr_const_re(), args)
+        .or_else(|| capture_qualified(path_attr_const_re(), args))
+        .or_else(|| capture_qualified(bare_leading_const_re(), args))
+}
+
+fn capture_qualified(re: &Regex, args: &str) -> Option<(Option<String>, String)> {
+    let c = re.captures(args)?;
     let qualifier = c.get(1).map(|m| m.as_str().to_string());
     Some((qualifier, c[2].to_string()))
 }
@@ -182,7 +232,42 @@ fn qualified_ident_re() -> &'static Regex {
     })
 }
 
-fn const_ref_re() -> &'static Regex {
+/// Captures the (optional qualifier, `SCREAMING_SNAKE_CASE` name) constant reference immediately on the
+/// right-hand side of a `value=` attribute. The `value` keyword must sit at a REAL attribute boundary —
+/// start of the (paren-stripped) argument text, or just after a `(`/`,` — so a `value=` substring buried
+/// inside another attribute's string literal (`params = "value=1"`) can never be mistaken for the named
+/// `value` attribute. Otherwise mirrors `provides::annotations::value_attr_re`'s shape
+/// (`value\s*=\s*\{?\s*`) but captures a constant identifier instead of a quoted literal.
+fn value_attr_const_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\b(?:([A-Za-z_][A-Za-z0-9_]*)\.)?([A-Z][A-Z0-9_]*)\b").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?:^|[(,])\s*value\s*=\s*\{?\s*(?:([A-Za-z_][A-Za-z0-9_]*)\.)?([A-Z][A-Z0-9_]*)\b",
+        )
+        .unwrap()
+    })
+}
+
+/// Same role and same real-attribute-boundary anchoring as `value_attr_const_re`, for `path=`.
+fn path_attr_const_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?:^|[(,])\s*path\s*=\s*\{?\s*(?:([A-Za-z_][A-Za-z0-9_]*)\.)?([A-Z][A-Z0-9_]*)\b",
+        )
+        .unwrap()
+    })
+}
+
+/// Captures a constant reference that is the genuinely POSITIONAL first argument (`@RequestMapping(
+/// BASE_PATH)`, `@RequestMapping(Api.BASE_PATH, method = RequestMethod.GET)`) — anchored at the start of
+/// `args` (Java requires positional arguments before any named ones, so the leading token is always the
+/// positional one when present) and required to be immediately followed by a comma or end-of-string
+/// (never `=`) so a named attribute whose NAME happens to be all-uppercase can never be mistaken for a
+/// bare positional constant.
+fn bare_leading_const_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^\s*(?:([A-Za-z_][A-Za-z0-9_]*)\.)?([A-Z][A-Z0-9_]*)\s*(?:,|$)").unwrap()
+    })
 }

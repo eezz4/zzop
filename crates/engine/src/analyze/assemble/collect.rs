@@ -9,10 +9,11 @@ use zzop_core::{Finding, ImportMap, IoConsume, IoProvide, ReExport};
 use crate::pipeline::FileArtifact;
 use crate::EngineConfig;
 
-use super::helpers::{is_go_source_ext, is_java_source_ext, is_rust_source_ext};
+use super::helpers::is_sfc_ext;
 
 mod candidates;
 mod census;
+mod scans;
 mod types;
 
 use candidates::{record_unparsed_extension, stage_package_import_candidate, LangGates};
@@ -20,12 +21,11 @@ pub(super) use types::Collected;
 
 /// Runs the fused pass's own accumulation loop over `artifacts`, bucketing every field into a
 /// [`Collected`]. See the pre-split monolithic `assemble`'s history for why each substrate exists —
-/// field docs above carry that context forward verbatim. `root` is only used for the Rust
-/// workspace-member manifest scan ([`crate::pipeline::scan_rust_workspace`]), the Go `go.mod` module
-/// manifest scan ([`crate::pipeline::scan_go_modules`]), and the Java `(package, type)` index
-/// ([`crate::pipeline::scan_java_index`]) — see task 6's doc on
-/// [`super::helpers::resolve_rust_import`] / [`super::helpers::resolve_go_import_package_dir`] /
-/// [`super::helpers::resolve_java_import`].
+/// field docs above carry that context forward verbatim. `root` is only used for the four up-front
+/// manifest/index scans below ([`crate::pipeline::scan_rust_workspace`] / `scan_go_modules` /
+/// `scan_java_index` / `scan_csharp_index`) — see each resolver's own doc (`super::helpers::
+/// resolve_rust_import` / `resolve_go_import_package_dir` / `resolve_java_import` /
+/// `resolve_csharp_import`).
 pub(super) fn collect(
     root: &std::path::Path,
     artifacts: Vec<FileArtifact>,
@@ -33,39 +33,20 @@ pub(super) fn collect(
 ) -> Collected {
     let file_count = artifacts.len();
     // Built up front (before the artifact-consuming loop below, which needs `rel` strings the loop's own
-    // `for artifact in artifacts` would otherwise have already moved) — see `scan_rust_workspace`'s doc.
-    // Cheap no-op when the tree has no `.rs` files at all (empty iterator -> empty map, no disk I/O).
-    let rust_workspace = crate::pipeline::scan_rust_workspace(
-        root,
-        artifacts
-            .iter()
-            .map(|a| a.rel.as_str())
-            .filter(|rel| is_rust_source_ext(rel)),
-    );
-    // Same up-front, cheap-when-empty pattern as `rust_workspace` above, for `go.mod` module manifests —
-    // see `crate::pipeline::scan_go_modules`'s doc.
-    let go_modules = crate::pipeline::scan_go_modules(
-        root,
-        artifacts
-            .iter()
-            .map(|a| a.rel.as_str())
-            .filter(|rel| is_go_source_ext(rel)),
-    );
-    // Same up-front, cheap-when-empty pattern as `rust_workspace`/`go_modules` above, for the Java
-    // `(package, type)` index — see `crate::pipeline::scan_java_index`'s doc.
-    let java_index = crate::pipeline::scan_java_index(
-        root,
-        artifacts
-            .iter()
-            .map(|a| a.rel.as_str())
-            .filter(|rel| is_java_source_ext(rel)),
-    );
+    // `for artifact in artifacts` would otherwise have already moved): the Rust workspace-member manifest
+    // scan, `go.mod` module scan, Java `(package, type)` index, and C# namespace index — each a cheap
+    // no-op when the tree has no matching-extension file at all (empty iterator -> empty map/index, no
+    // disk I/O). See each scan fn's own doc (`scan_rust_workspace`/`scan_go_modules`/`scan_java_index`/
+    // `scan_csharp_index`) for its own resolution semantics.
+    let (rust_workspace, go_modules, java_index, csharp_index) =
+        scans::scan_indices(root, &artifacts);
     let mut per_file_findings: Vec<Finding> = Vec::new();
     let mut all_symbols = Vec::new();
     let mut loc_by_path: HashMap<String, u32> = HashMap::new();
     let mut ts_import_pairs: Vec<(String, ImportMap)> = Vec::new();
     let mut ts_re_export_pairs: Vec<(String, Vec<ReExport>)> = Vec::new();
     let mut ts_dynamic_import_pairs: Vec<(String, Vec<String>)> = Vec::new();
+    let mut ts_asset_ref_pairs: Vec<(String, Vec<String>)> = Vec::new();
     let mut ts_paths: HashSet<String> = HashSet::new();
     let mut degraded: Vec<String> = Vec::new();
     let mut minified: Vec<String> = Vec::new();
@@ -74,6 +55,7 @@ pub(super) fn collect(
     let mut used_names_by_file: HashMap<String, Vec<String>> = HashMap::new();
     let mut prisma_rels: Vec<String> = Vec::new();
     let mut java_rels: Vec<String> = Vec::new();
+    let mut csharp_rels: Vec<String> = Vec::new();
     let mut rule_time: HashMap<String, (u128, usize)> = HashMap::new();
     let mut package_import_files: std::collections::BTreeMap<
         String,
@@ -92,15 +74,17 @@ pub(super) fn collect(
     let mut class_shape_pairs: Vec<(String, Vec<zzop_core::ClassShapeFragment>)> = Vec::new();
     let mut query_call_sites: Vec<zzop_core::QueryCallSite> = Vec::new();
     let mut field_usage_tokens: HashSet<String> = HashSet::new();
-    // Per-language F5 census staging (Python/Rust/Go): `candidates::stage_package_import_candidate`'s own
-    // doc explains why each is deferred rather than censused immediately, and `census`'s own doc explains
-    // the post-loop drain below that consumes each of these three.
+    // Per-language F5 census staging: `candidates::stage_package_import_candidate`'s own doc explains why
+    // each is deferred rather than censused immediately; `census`'s own doc explains the post-loop drain.
     let mut python_package_import_candidates: Vec<(String, Option<String>, String)> = Vec::new();
     let mut rust_package_import_candidates: Vec<(String, String)> = Vec::new();
     let mut go_package_import_candidates: Vec<(String, String)> = Vec::new();
     let mut java_package_import_candidates: Vec<(String, String)> = Vec::new();
+    let mut csharp_package_import_candidates: Vec<(String, String)> = Vec::new();
     let mut unparsed_extensions: std::collections::BTreeMap<String, (usize, Vec<String>)> =
         std::collections::BTreeMap::new();
+    // `.vue`/`.svelte` SFC pre-scan substrate — see `Collected::sfc_rels`'s doc.
+    let mut sfc_rels: Vec<String> = Vec::new();
     // The "bring an adapter" disclosure's overlay-exclusion set: every path any `config.adapter_overlays`
     // entry declares a `FileProjection` for THAT ITSELF CARRIES A REAL FACT (`envelope::
     // overlay_file_carries_facts` — non-empty io/symbols/imports/fragments/attributes, or `is_entry`) —
@@ -146,6 +130,12 @@ pub(super) fn collect(
             prisma_rels.push(artifact.rel.clone());
         } else if dispatch_lang == Some(crate::dispatch::Language::Java21) {
             java_rels.push(artifact.rel.clone());
+        } else if dispatch_lang == Some(crate::dispatch::Language::CSharp) {
+            // Whole-corpus C# provides input (`run_csharp_provides_project_pass`), collected exactly like
+            // `java_rels`: every non-degraded csharp-dispatched file, INCLUDING route-constants-only files
+            // with no routes of their own (their constants must be present for a controller's route ref to
+            // resolve). Degraded files are excluded — the project pass cannot re-parse them anyway.
+            csharp_rels.push(artifact.rel.clone());
         }
         // "Bring an adapter" per-extension disclosure — see `candidates::record_unparsed_extension`'s doc.
         record_unparsed_extension(
@@ -154,6 +144,12 @@ pub(super) fn collect(
             &overlay_covered_paths,
             &mut unparsed_extensions,
         );
+        // `.vue`/`.svelte` SFC pre-scan substrate: only dispatch-`None` files (a real structural-parser
+        // dispatch already produces a symbols/imports projection through the normal path below) whose
+        // extension is `.vue`/`.svelte` — see `Collected::sfc_rels`'s doc.
+        if dispatch_lang.is_none() && is_sfc_ext(&artifact.rel) {
+            sfc_rels.push(artifact.rel.clone());
+        }
         if let Some(imports) = artifact.imports {
             // F5 census staging — see `candidates::stage_package_import_candidate`'s doc.
             let gates = LangGates::for_rel(&artifact.rel);
@@ -166,10 +162,12 @@ pub(super) fn collect(
                     gates.is_rust,
                     gates.is_go,
                     gates.is_java,
+                    gates.is_csharp,
                     &mut python_package_import_candidates,
                     &mut rust_package_import_candidates,
                     &mut go_package_import_candidates,
                     &mut java_package_import_candidates,
+                    &mut csharp_package_import_candidates,
                     &mut package_import_files,
                 );
             }
@@ -179,6 +177,9 @@ pub(super) fn collect(
             }
             if !artifact.dynamic_imports.is_empty() {
                 ts_dynamic_import_pairs.push((artifact.rel.clone(), artifact.dynamic_imports));
+            }
+            if !artifact.asset_refs.is_empty() {
+                ts_asset_ref_pairs.push((artifact.rel.clone(), artifact.asset_refs));
             }
             ts_import_pairs.push((artifact.rel.clone(), imports));
             used_names_by_file.insert(artifact.rel.clone(), artifact.used_names.clone());
@@ -225,10 +226,9 @@ pub(super) fn collect(
     // stable sort by `(file, line)` alone reproduces the removed filesystem scan's ordering exactly.
     query_call_sites.sort_by(|a, b| (a.file.as_str(), a.line).cmp(&(b.file.as_str(), b.line)));
 
-    // F5 drain: `ts_paths`/`rust_workspace` are both final now (every artifact's own `insert` above has
-    // run) — see `census`'s own doc for what each drain resolves and why a resolved specifier must not
-    // pollute `package_import_files` (S2/S4's server-framework/http-client import tripwires, and
-    // `cross-layer/sdk-import-no-visible-consume`, would otherwise be polluted by an in-tree specifier).
+    // F5 drain: `ts_paths`/`rust_workspace`/etc. are all final now (every artifact's own `insert` above
+    // has run) — see `census`'s own doc for what each drain resolves and why a resolved specifier must
+    // not pollute `package_import_files` (S2/S4's tripwires, `cross-layer/sdk-import-no-visible-consume`).
     census::drain_python_candidates(
         python_package_import_candidates,
         &ts_paths,
@@ -250,6 +250,11 @@ pub(super) fn collect(
         &java_index,
         &mut package_import_files,
     );
+    census::drain_csharp_candidates(
+        csharp_package_import_candidates,
+        &csharp_index,
+        &mut package_import_files,
+    );
 
     Collected {
         file_count,
@@ -259,6 +264,7 @@ pub(super) fn collect(
         ts_import_pairs,
         ts_re_export_pairs,
         ts_dynamic_import_pairs,
+        ts_asset_ref_pairs,
         ts_paths,
         degraded,
         minified,
@@ -267,6 +273,7 @@ pub(super) fn collect(
         used_names_by_file,
         prisma_rels,
         java_rels,
+        csharp_rels,
         rule_time,
         package_import_files,
         fragment_pairs,
@@ -282,5 +289,7 @@ pub(super) fn collect(
         rust_workspace,
         go_modules,
         java_index,
+        csharp_index,
+        sfc_rels,
     }
 }

@@ -34,6 +34,12 @@ pub struct FileIrSlice {
     /// module's fan-in and re-introduce its `dead-candidates` false positive on every cache-warm run.
     #[serde(default)]
     pub dynamic_imports: Vec<String>,
+    /// This file's runtime asset-URL references (raw path strings) — mirrors `FileArtifact::asset_refs`.
+    /// Must round-trip through the cache: dropping it on a hit would silently undercount a `public/`-served
+    /// worklet/worker's fan-in and re-introduce its `dead-candidates` false positive on every cache-warm
+    /// run. Introduced with the `CACHE_SCHEMA_VERSION` v33->v34 bump, so no pre-v34 entry is served stale.
+    #[serde(default)]
+    pub asset_refs: Vec<String>,
     pub loc: u32,
     /// Whether this file's slice came from the lexical fallback path rather than a full structural
     /// parse — mirrors `FileArtifact::degraded`.

@@ -7,11 +7,11 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use crate::pipeline::{GoModuleMap, JavaIndex, RustWorkspaceMap};
+use crate::pipeline::{CSharpIndex, GoModuleMap, JavaIndex, RustWorkspaceMap};
 
 use super::super::helpers::{
-    java_census_key, resolve_go_import_package_dir, resolve_java_import, resolve_python_import,
-    resolve_rust_import,
+    java_census_key, resolve_csharp_import, resolve_go_import_package_dir, resolve_java_import,
+    resolve_python_import, resolve_rust_import,
 };
 
 /// Python F5 drain: a specifier that resolves in-tree (`app.services` -> `app/services.py`) is
@@ -99,6 +99,27 @@ pub(super) fn drain_java_candidates(
         if resolve_java_import(&specifier, java_index).is_empty() {
             package_import_files
                 .entry(java_census_key(&specifier))
+                .or_default()
+                .insert(from_file);
+        }
+    }
+}
+
+/// C# drain: a `using` specifier that resolves in-tree (`resolve_csharp_import`, non-empty — at least one
+/// file declares that namespace) is first-party — never enters `package_import_files`. A specifier that
+/// does NOT resolve is genuinely external and enters the census at the raw specifier verbatim (a C#
+/// namespace is already a meaningfully-scoped grain on its own — unlike Java's reverse-domain-heavy
+/// convention, `helpers::java_census_key`'s doc — so no separate truncation grain is needed here, same
+/// full-specifier convention `drain_go_candidates`'s own doc uses for Go's import paths).
+pub(super) fn drain_csharp_candidates(
+    candidates: Vec<(String, String)>,
+    csharp_index: &CSharpIndex,
+    package_import_files: &mut BTreeMap<String, BTreeSet<String>>,
+) {
+    for (specifier, from_file) in candidates {
+        if resolve_csharp_import(&specifier, csharp_index).is_empty() {
+            package_import_files
+                .entry(specifier)
                 .or_default()
                 .insert(from_file);
         }

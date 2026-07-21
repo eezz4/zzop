@@ -171,3 +171,68 @@ fn a_non_ddl_sql_file_contributes_no_provides_and_is_not_degraded() {
         "a non-DDL .sql file must contribute zero db-table provides"
     );
 }
+
+/// A TypeORM tree: an `@Entity('article')` class in one file provides `table:article` (carrying the class
+/// name), and a service `@InjectRepository(ArticleEntity)` in another file consumes it. The parser can't
+/// key the consume (it references the CLASS, not the table string), so the engine's
+/// `resolve_orm_entity_consumes` pass must fill it in from the entity index — end-to-end proof of the
+/// `typeorm-repo-consume` feature.
+fn typeorm_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-typeorm");
+    dir.write(
+        "src/article/article.entity.ts",
+        "@Entity('article')\nexport class ArticleEntity {}\n",
+    );
+    dir.write(
+        "src/article/article.service.ts",
+        concat!(
+            "import { Repository } from 'typeorm';\n",
+            "import { ArticleEntity } from './article.entity';\n",
+            "export class ArticleService {\n",
+            "  constructor(\n",
+            "    @InjectRepository(ArticleEntity)\n",
+            "    private readonly repo: Repository<ArticleEntity>,\n",
+            "  ) {}\n",
+            "}\n",
+        ),
+    );
+    dir
+}
+
+#[test]
+fn typeorm_repository_consume_resolves_to_its_entity_table_key() {
+    let dir = typeorm_tree();
+    let out = analyze_tree(dir.path(), &config());
+    let io = out
+        .ir
+        .ir
+        .io
+        .as_ref()
+        .expect("expected io facts from the TypeORM tree");
+
+    // The @Entity provide carries the class name so the resolver can key the consume.
+    let entity_provide = io
+        .provides
+        .iter()
+        .find(|p| p.kind == "db-table" && p.key == "table:article")
+        .expect("expected a table:article db-table provide from @Entity('article')");
+    assert_eq!(entity_provide.symbol.as_deref(), Some("ArticleEntity"));
+
+    // The repository consume, unkeyable at parse time, is resolved to the entity's table key.
+    let db_consumes: Vec<&zzop_core::IoConsume> = io
+        .consumes
+        .iter()
+        .filter(|c| c.kind == "db-table")
+        .collect();
+    assert_eq!(
+        db_consumes.len(),
+        1,
+        "expected one db-table consume, got: {db_consumes:?}"
+    );
+    assert_eq!(
+        db_consumes[0].key.as_deref(),
+        Some("table:article"),
+        "the @InjectRepository(ArticleEntity) consume must resolve to table:article"
+    );
+    assert_eq!(db_consumes[0].raw.as_deref(), Some("ArticleEntity"));
+}

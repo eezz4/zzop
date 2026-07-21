@@ -1,11 +1,9 @@
-//! `analyze_repo` (and CLI `zzop-mcp analyze <path>`) — split out of `tools.rs` unchanged (300-line
-//! source cap) once the `degraded`-list capping (D-blocking fix: forwarding it verbatim bypassed this
-//! module's own token-bomb guard) grew the function past a sliver worth keeping inline. Also hosts
+//! `analyze_repo` (and CLI `zzop-mcp analyze <path>`). Also hosts
 //! `analyze_envelope_summary` (`analyze_envelope` tool / CLI `zzop-mcp analyze-envelope <file>`, Mode
 //! A) — the two share one post-facade shaper (`shape_analyze_output`) so the same cap/disclosure/
 //! config-warning contract holds for both entry points.
 
-use crate::output::{self, FindingFilters};
+use crate::output::{self, FindingFilters, Verbosity};
 
 #[cfg(test)]
 mod tests;
@@ -53,10 +51,9 @@ pub fn analyze_summary(path: &str, filters: &FindingFilters) -> Result<String, S
             (v["trees"][0]["output"].clone(), v["disclosure"].clone())
         }
     };
-    // Config-loader warnings first, then the facade-level `configWarnings` entries riding the tree
-    // output (engine-side config diagnostics, e.g. unknown-rule-id overrides) — merged into the one
-    // config-honesty channel so the moved diagnostics are not silently dropped at this layer (see
-    // `crate::config_warnings::facade_config_warnings` for the absent-field degradation contract).
+    // Config-loader warnings, collected first; the facade-level `configWarnings` entries riding the
+    // tree output (engine-side config diagnostics, e.g. unknown-rule-id overrides) are merged onto
+    // these later, in `shape_analyze_output` (see `crate::config_warnings::facade_config_warnings`).
     let config_warnings: Vec<serde_json::Value> = loaded
         .warnings
         .into_iter()
@@ -210,6 +207,14 @@ fn shape_analyze_output(
     if let Some(git_window) = output_view.get("gitWindow") {
         summary.insert("gitWindow".to_string(), git_window.clone());
     }
+    // MCP<->CLI parity (STAGED): the `Full` lane additionally emits the raw output fields this summary
+    // drops or compacts (`ir`/`nodes`/`scores`/... and the un-compacted health/recommendations/critical
+    // behind the compact `architecture` above). Dead today — every caller passes `Verbosity::Summary`
+    // (see `output::Verbosity`), so this never runs and the reply is byte-identical; a later flip makes
+    // a host reply match the raw `zzop-facade` output.
+    if filters.verbosity == Verbosity::Full {
+        output::insert_full_output_fields(&mut summary, output_view);
+    }
     serde_json::Value::Object(summary)
 }
 
@@ -221,10 +226,10 @@ fn shape_analyze_output(
 /// (`{id, severity, topItem}`, null-safe when there are no recommendations or the top one has no
 /// items), and up to 3 paths off the engine's own blast-radius-ranked `critical` list — named
 /// `criticalTop`, NOT "hotspot": the engine's `hotspotScore` is a DIFFERENT metric (churn
-/// `changeCount x loc`, `nodes[].hotspotScore`, rendered by the CLI report's hotspot table), and
-/// reusing that word here would invite joining two non-matching rankings. The full arrays never
-/// ride this summary (see analyze_repo's own description: they are the `@zzop/cli` --json /
-/// `@zzop/native` embedder lane's job).
+/// `changeCount x loc`, `nodes[].hotspotScore`), and reusing that word here would invite joining two
+/// non-matching rankings. The full arrays never
+/// ride this summary (see analyze_repo's own description: they are the direct `zzop-facade`
+/// embedding lane's job).
 fn architecture_summary(output_view: &serde_json::Value) -> Option<serde_json::Value> {
     let pain = output_view.get("health")?.as_object()?.get("pain")?.clone();
     let top_recommendation = output_view["recommendations"]

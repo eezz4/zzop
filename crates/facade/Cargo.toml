@@ -24,5 +24,6 @@ zzop-parser-java-21 = { path = "../../parser/parser-java-21" }
 zzop-parser-rust = { path = "../../parser/parser-rust" }
 zzop-parser-go = { path = "../../parser/parser-go" }
 zzop-parser-sql = { path = "../../parser/parser-sql" }
+zzop-parser-csharp = { path = "../../parser/parser-csharp" }
 serde = { workspace = true }
 serde_json = { workspace = true }

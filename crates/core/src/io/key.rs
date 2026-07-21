@@ -25,6 +25,24 @@ pub fn http_interface_key(method: &str, raw_path: &str) -> String {
     )
 }
 
+/// Sentinel method for a route whose PATH is statically known but whose HTTP method(s) are NOT — a
+/// `pages/api` serve-all handler, a pathname-dispatch / Go `HandleFunc` block that names no method
+/// literal. Replaces the former per-adapter `[GET, POST]` fabrication (three lockstep constants +
+/// their pins) with one honest marker: at assemble time the engine PARTITIONS these out of the
+/// exact-key join into a path-level "served, verb-unknown" set (see `analyze::assemble`), which
+/// suppresses consume-side false unprovided/near-miss findings on that path and drives the
+/// `cross-layer/unknown-verb-route` disclosure. NEVER a real verb — a char no HTTP method spells, so
+/// a sentinel key `"? /x"` can never collide with a genuine [`http_interface_key`] key.
+pub const UNKNOWN_VERB: &str = "?";
+
+/// If `key` is an [`UNKNOWN_VERB`] sentinel `http` key (`"? <path>"`), returns its normalized PATH;
+/// otherwise `None`. Used by the assemble-time partition that lifts verb-unknown routes out of the
+/// exact-key join into the path-level served-set.
+pub fn unknown_verb_route_path(key: &str) -> Option<&str> {
+    key.split_once(' ')
+        .and_then(|(method, path)| (method == UNKNOWN_VERB).then_some(path))
+}
+
 /// The PATH-only half of [`http_interface_key`]'s normalization: path params (`{x}` or `:x`) -> `{}`,
 /// duplicate slashes collapsed, trailing slash dropped, leading slash ensured. Exposed so a caller
 /// composing a PATH PREFIX (not a full `"METHOD path"` key) — e.g. the engine's router-mount compose
@@ -49,6 +67,24 @@ pub fn normalize_http_path(raw_path: &str) -> String {
 pub fn http_consume_interface_key(method: &str, raw_url: &str) -> String {
     let path = raw_url.split(['?', '#']).next().unwrap_or(raw_url);
     http_interface_key(method, path)
+}
+
+/// The `db-table` PROVIDE channel's canonical casing: the FIRST character lowercased, everything else
+/// unchanged (e.g. `Article` -> `article`, `UserProfile` -> `userProfile`). PINNED shared transform for
+/// two independent extractors that must agree byte-for-byte so a `CREATE TABLE "Article"` DDL name and a
+/// Prisma `model Article` name key the SAME physical table: `zzop_parser_sql::extract::bare_table_name`
+/// (applied as the LAST step, after its quote-aware unquoted-dot schema-qualifier split and quote strip)
+/// and `zzop_parser_prisma::analysis::accessor_casing`. Those two parser crates cannot depend on each
+/// other (parser isolation), so this lives here in `zzop-core`, which both already depend on, instead of
+/// being a local twin in either — a real cross-parser dependency edge on ONE 3-line transform is not
+/// worth the isolation violation, but leaving it un-shared (prose-only agreement) is worse: this makes
+/// drift a compile-time impossibility instead of a convention.
+pub fn db_table_channel_casing(name: &str) -> String {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) => c.to_lowercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
 }
 
 fn re_multi_slash() -> &'static regex::Regex {
@@ -112,5 +148,18 @@ mod tests {
         // Query-only URL degrades to the root path (the egress extractor vetoes this shape
         // earlier — see `base_relative_path` — so it only arises from an explicit `/?x=1`).
         assert_eq!(http_consume_interface_key("get", "/?page=2"), "GET /");
+    }
+
+    #[test]
+    fn db_table_channel_casing_lower_firsts_only_the_first_character() {
+        // PascalCase model name -> Prisma client accessor casing (the shape this transform exists for).
+        assert_eq!(db_table_channel_casing("Article"), "article");
+        assert_eq!(db_table_channel_casing("UserProfile"), "userProfile");
+        // Already-lowercase / snake_case DDL names are a no-op (the common hand-written-SQL case).
+        assert_eq!(db_table_channel_casing("users"), "users");
+        assert_eq!(db_table_channel_casing("article_tags"), "article_tags");
+        // Single character and empty string are edge cases both call sites can hit after quote-stripping.
+        assert_eq!(db_table_channel_casing("A"), "a");
+        assert_eq!(db_table_channel_casing(""), "");
     }
 }

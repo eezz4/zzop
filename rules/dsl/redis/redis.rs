@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use zzop_core::{load_dsl_packs, RulePackDef};
 use zzop_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
 
-/// A self-cleaning temp directory (std-only mkdtemp equivalent — copied verbatim from `be-reliability/be-reliability.rs`).
+/// A self-cleaning temp directory (std-only mkdtemp equivalent).
 struct TempDir(PathBuf);
 
 impl TempDir {
@@ -53,9 +53,6 @@ impl Drop for TempDir {
 
 /// Loads the real `rules/dsl/redis/redis.json` from the repo, filtered to just the `redis` pack so this test
 /// is unaffected by sibling packs under concurrent development (same convention as `be-reliability/be-reliability.rs`).
-///
-/// `CARGO_MANIFEST_DIR` is the `rules` crate root (`rules/Cargo.toml`), so `dsl/` is `rules/dsl` — this pack's
-/// own `redis.json` lives one level down, at `rules/dsl/redis/redis.json`.
 fn redis_pack() -> RulePackDef {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("dsl");
     let result = load_dsl_packs(&dir);
@@ -95,16 +92,9 @@ fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {
 
 #[test]
 fn java_file_is_out_of_scope_for_flushall_and_keys_glob() {
-    // Regression for a blind field-test finding on corpus/oss/be-spring (pure Java, zero redis usage):
-    // `flushall-in-code`/`keys-glob-scan` used to include `java` in `file_pattern` alongside the pack's
-    // JS/TS extensions, while the pack's third rule (`client-no-error-listener`, whose vocabulary is
-    // unambiguously ioredis/node-redis-specific: `createClient`/`.on('error', ...)`) already did not —
-    // an inconsistent, apparently-accidental inclusion within one pack. Java client libraries (Jedis/
-    // Lettuce) do expose similarly-named `.flushAll()`/`.keys()` methods, but `keys-glob-scan`'s bare
-    // `.keys(` shape in particular collides broadly with ordinary Java Map/Collection APIs that have
-    // nothing to do with Redis, and the confirmed corpus behavior was `filesInScope` inflated to every
-    // `.java` file with none of them actually using Redis. Narrowed to match `client-no-error-listener`'s
-    // JS/TS-only scope for pack-internal consistency.
+    // `flushall-in-code`/`keys-glob-scan` used to include `java` in `file_pattern`, but `keys-glob-scan`'s
+    // bare `.keys(` shape collides with ordinary Java Map/Collection APIs that have nothing to do with Redis.
+    // Narrowed to JS/TS-only scope, matching `client-no-error-listener`.
     let dir = TempDir::new("zzop-redis");
     dir.write(
         "src/main/java/com/example/CacheService.java",

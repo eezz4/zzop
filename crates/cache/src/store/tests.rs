@@ -49,6 +49,7 @@ fn sample_ir(loc: u32) -> FileIrSlice {
         imports: Some(zzop_core::ImportMap::new()),
         re_exports: Vec::new(),
         dynamic_imports: Vec::new(),
+        asset_refs: Vec::new(),
         loc,
         degraded: false,
         io: None,

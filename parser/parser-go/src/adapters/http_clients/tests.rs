@@ -10,6 +10,50 @@ fn literal_relative_path_keys_via_http_consume_interface_key() {
 }
 
 #[test]
+fn http_client_instance_get_is_a_consume() {
+    // `c := &http.Client{}; c.Get(url)` — a bound client value's convenience method keys like `http.Get`.
+    let src = "package main\n\nimport \"net/http\"\n\nfunc f() {\n\tc := &http.Client{}\n\tc.Get(\"/users\")\n}\n";
+    let out = extract_go_http_consumes("a.go", src);
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert_eq!(out[0].key.as_deref(), Some("GET /users"));
+}
+
+#[test]
+fn http_client_value_and_new_instances_are_consumes() {
+    let src = "package main\n\nimport \"net/http\"\n\nfunc f() {\n\tvar a = http.Client{}\n\ta.Post(\"https://svc/x\")\n\tb := new(http.Client)\n\tb.Head(\"/ping\")\n}\n";
+    let out = extract_go_http_consumes("a.go", src);
+    assert_eq!(out.len(), 2, "{out:?}");
+    assert_eq!(out[0].key.as_deref(), Some("POST https://svc/x"));
+    assert_eq!(out[1].key.as_deref(), Some("HEAD /ping"));
+}
+
+#[test]
+fn zero_value_var_declaration_client_is_a_consume() {
+    // `var c http.Client` — no initializer; the zero value is a usable client, so `c.Get(url)` is egress.
+    let src = "package main\n\nimport \"net/http\"\n\nfunc f() {\n\tvar c http.Client\n\tc.Get(\"/users\")\n}\n";
+    let out = extract_go_http_consumes("a.go", src);
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert_eq!(out[0].key.as_deref(), Some("GET /users"));
+}
+
+#[test]
+fn plain_reassignment_to_a_client_is_a_consume() {
+    // `var c *http.Client` then `c = &http.Client{}` (assignment_statement, not `:=`) must still bind.
+    let src = "package main\n\nimport \"net/http\"\n\nfunc f() {\n\tvar c *http.Client\n\tc = &http.Client{}\n\tc.Get(\"/users\")\n}\n";
+    let out = extract_go_http_consumes("a.go", src);
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert_eq!(out[0].key.as_deref(), Some("GET /users"));
+}
+
+#[test]
+fn a_non_client_receiver_get_is_not_a_consume() {
+    // `.Get` on an unrelated value (a sync.Map) in a net/http-importing file must not be keyed.
+    let src = "package main\n\nimport \"net/http\"\n\nfunc f(m mymap) {\n\t_ = http.Get\n\tm.Get(\"/users\")\n}\n";
+    let out = extract_go_http_consumes("a.go", src);
+    assert!(out.is_empty(), "{out:?}");
+}
+
+#[test]
 fn absolute_url_keys_as_external() {
     let src = "package main\n\nimport \"net/http\"\n\nfunc f() {\n\thttp.Get(\"https://api.example.com/v1/ping\")\n}\n";
     let out = extract_go_http_consumes("a.go", src);

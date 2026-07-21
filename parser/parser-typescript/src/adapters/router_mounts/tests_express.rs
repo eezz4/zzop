@@ -5,6 +5,27 @@ use super::tests_hono::frag;
 use zzop_core::RouterMountEntry;
 
 #[test]
+fn express_all_registers_one_route_per_http_verb() {
+    // `router.all(path, h)` binds one handler to EVERY method — it must expand to one Verb per
+    // HTTP_KEY_VERBS (not vanish), keeping the route visible and its mutating surface reported.
+    let src = "const router = express.Router();\nrouter.all('/proxy', proxyHandler);\n";
+    let out = extract_router_mount_fragments("app.ts", src, &[]);
+    let mut methods: Vec<String> = frag(&out, "router")
+        .entries
+        .iter()
+        .map(|e| match e {
+            RouterMountEntry::Verb { method, path, .. } => {
+                assert_eq!(path, "/proxy");
+                method.clone()
+            }
+            _ => panic!("expected Verb, got {e:?}"),
+        })
+        .collect();
+    methods.sort();
+    assert_eq!(methods, vec!["DELETE", "GET", "PATCH", "POST", "PUT"]);
+}
+
+#[test]
 fn express_router_use_mounts_a_sub_router() {
     let src = concat!(
         "const app = express();\n",

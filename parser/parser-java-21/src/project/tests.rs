@@ -197,6 +197,111 @@ fn cross_file_base_class_and_constant_resolution_end_to_end() {
 }
 
 #[test]
+fn a_named_value_attribute_referencing_an_unquoted_constant_still_resolves_via_the_corpus() {
+    // `value = Path.ASSET_PATH` (named attribute, no quotes) must still fall through to constant
+    // resolution — `route_path_arg` only recognizes a QUOTED value=/path= literal, so an unquoted
+    // reference must not be swallowed as an empty-string "resolved" prefix.
+    let files = vec![
+        (
+            "Path.java".to_string(),
+            "class Path {\n  public static final String ASSET_PATH = \"/asset\";\n}\n".to_string(),
+        ),
+        (
+            "ResourceController.java".to_string(),
+            "@RestController\n@RequestMapping(value = Path.ASSET_PATH)\nclass ResourceController {\n  @GetMapping(\"/{id}\")\n  void get() {}\n}\n"
+                .to_string(),
+        ),
+    ];
+    let report = extract_http_provides_project(&files);
+    assert_eq!(keys(&report), vec!["GET /asset/{}"]);
+    assert_eq!(report.skipped_unresolved_prefix, 0);
+}
+
+#[test]
+fn a_non_path_named_attribute_constant_no_longer_hijacks_the_class_prefix() {
+    // The CONSTANT-branch counterpart of the LITERAL-branch fix (`route_path_arg`): a class-level
+    // `@RequestMapping` with an unquoted `path=` constant, preceded by an unrelated `produces=` attribute
+    // that ALSO carries a constant, must key on `path=`'s own constant — not on whichever constant
+    // appears first in the raw argument text. Before this fix, `MediaType.APPLICATION_JSON_VALUE` (not a
+    // corpus class) won the whole-string scan, resolved to `Unresolved`, and silently dropped every route
+    // of the controller.
+    let files = vec![
+        (
+            "ApiPaths.java".to_string(),
+            "class ApiPaths {\n  public static final String SOME_CONST = \"/users\";\n}\n".to_string(),
+        ),
+        (
+            "UserController.java".to_string(),
+            "@RestController\n@RequestMapping(produces = MediaType.APPLICATION_JSON_VALUE, path = ApiPaths.SOME_CONST)\nclass UserController {\n  @GetMapping(\"/{id}\")\n  void get() {}\n}\n"
+                .to_string(),
+        ),
+    ];
+    let report = extract_http_provides_project(&files);
+    assert_eq!(keys(&report), vec!["GET /users/{}"]);
+    assert_eq!(report.skipped_unresolved_prefix, 0);
+}
+
+#[test]
+fn a_quoted_sibling_attribute_no_longer_hijacks_an_unquoted_named_value_constant() {
+    // A quoted sibling attribute (`headers = "X-API-KEY"`) contains an all-uppercase substring ("API")
+    // that the OLD whole-string scan could latch onto ahead of the real `value=` constant. The
+    // attribute-aware scan must key on `value=`'s own RHS (`BASE_PATH`), never on text found inside an
+    // unrelated attribute's string literal.
+    let files = vec![
+        (
+            "Path.java".to_string(),
+            "class Path {\n  public static final String BASE_PATH = \"/base\";\n}\n".to_string(),
+        ),
+        (
+            "ResourceController.java".to_string(),
+            "@RestController\n@RequestMapping(headers = \"X-API-KEY\", value = Path.BASE_PATH)\nclass ResourceController {\n  @GetMapping(\"/{id}\")\n  void get() {}\n}\n"
+                .to_string(),
+        ),
+    ];
+    let report = extract_http_provides_project(&files);
+    assert_eq!(keys(&report), vec!["GET /base/{}"]);
+    assert_eq!(report.skipped_unresolved_prefix, 0);
+}
+
+#[test]
+fn a_value_equals_substring_inside_a_params_string_literal_does_not_swallow_the_path_constant() {
+    // A `params` param-condition string literal that literally contains `value=` (Spring's own syntax,
+    // `params = "value=1"`) must NOT be mistaken for a named `value=` attribute: the attribute scan is
+    // anchored to a real attribute boundary (start/`(`/`,`), and even a spurious `value=` gate would
+    // fall through to `path=` rather than committing and returning None. The controller's real `path=`
+    // constant must still resolve; routes must NOT be dropped.
+    let files = vec![
+        (
+            "ApiPaths.java".to_string(),
+            "class ApiPaths {\n  public static final String SOME_CONST = \"/users\";\n}\n".to_string(),
+        ),
+        (
+            "UserController.java".to_string(),
+            "@RestController\n@RequestMapping(params = \"value=1\", path = ApiPaths.SOME_CONST)\nclass UserController {\n  @GetMapping(\"/{id}\")\n  void get() {}\n}\n"
+                .to_string(),
+        ),
+    ];
+    let report = extract_http_provides_project(&files);
+    assert_eq!(keys(&report), vec!["GET /users/{}"]);
+    assert_eq!(report.skipped_unresolved_prefix, 0);
+}
+
+#[test]
+fn a_bare_positional_constant_with_no_named_value_or_path_attribute_still_resolves() {
+    // No regression: when neither `value=` nor `path=` is present at all, a genuinely positional bare
+    // constant (`@RequestMapping(BASE_PATH)`, unqualified — so resolution starts at the annotated class
+    // itself) must still resolve via the corpus.
+    let files = vec![(
+        "ResourceController.java".to_string(),
+        "@RestController\n@RequestMapping(BASE_PATH)\nclass ResourceController {\n  static final String BASE_PATH = \"/base\";\n  @GetMapping(\"/{id}\")\n  void get() {}\n}\n"
+            .to_string(),
+    )];
+    let report = extract_http_provides_project(&files);
+    assert_eq!(keys(&report), vec!["GET /base/{}"]);
+    assert_eq!(report.skipped_unresolved_prefix, 0);
+}
+
+#[test]
 fn a_nested_class_field_no_longer_leaks_into_the_enclosing_class_constant_scan() {
     // AST-native precision gain over the old lexical crate's documented limit (module doc): a nested
     // class's own `static final String` field must NOT resolve as if it belonged to the outer class.
@@ -214,4 +319,61 @@ fn a_nested_class_field_no_longer_leaks_into_the_enclosing_class_constant_scan()
     ];
     let report = extract_http_provides_project(&files);
     assert_eq!(keys(&report), vec!["GET /outer/y"]);
+}
+
+#[test]
+fn a_non_literal_method_path_constant_resolves_against_the_corpus() {
+    // The whole-corpus pass RESOLVES a non-literal METHOD path constant, the method-axis parallel of the
+    // class-prefix resolution: `@GetMapping(ApiPaths.USERS)` with `ApiPaths.USERS = "/users"` elsewhere in
+    // the corpus keys `GET /api/users` (class prefix `/api` + resolved method path `/users`), NOT a drop.
+    // The per-file pass, having no corpus, still drops it — resolution is a whole-corpus-only gain.
+    let files = vec![
+        (
+            "ApiPaths.java".to_string(),
+            "class ApiPaths {\n  public static final String USERS = \"/users\";\n}\n".to_string(),
+        ),
+        (
+            "UserController.java".to_string(),
+            "@RestController\n@RequestMapping(\"/api\")\nclass UserController {\n  @GetMapping(ApiPaths.USERS)\n  void list() {}\n  @PostMapping(\"/create\")\n  void create() {}\n}\n"
+                .to_string(),
+        ),
+    ];
+    let report = extract_http_provides_project(&files);
+    assert_eq!(keys(&report), vec!["GET /api/users", "POST /api/create"]);
+    assert_eq!(report.skipped_unresolved_method_path, 0);
+}
+
+#[test]
+fn a_named_value_method_path_constant_resolves_via_the_corpus() {
+    // The named-attribute shape — `@RequestMapping(value = ApiPaths.USERS, method = GET)` — resolves the
+    // same way, reusing `const_ref_qualified`'s attribute-awareness (value=/path=/positional).
+    let files = vec![
+        (
+            "ApiPaths.java".to_string(),
+            "class ApiPaths {\n  public static final String USERS = \"/users\";\n}\n".to_string(),
+        ),
+        (
+            "UserController.java".to_string(),
+            "@RestController\n@RequestMapping(\"/api\")\nclass UserController {\n  @RequestMapping(value = ApiPaths.USERS, method = RequestMethod.GET)\n  void list() {}\n}\n"
+                .to_string(),
+        ),
+    ];
+    let report = extract_http_provides_project(&files);
+    assert_eq!(keys(&report), vec!["GET /api/users"]);
+    assert_eq!(report.skipped_unresolved_method_path, 0);
+}
+
+#[test]
+fn an_out_of_corpus_method_path_constant_is_skipped_and_counted() {
+    // A method-path constant with no declaration anywhere in the corpus cannot be resolved — it is skipped
+    // (never keyed at the empty base) and counted in `skipped_unresolved_method_path`, the method-axis
+    // analog of `skipped_unresolved_prefix`. The controller's literal route still emits.
+    let files = vec![(
+        "UserController.java".to_string(),
+        "@RestController\n@RequestMapping(\"/api\")\nclass UserController {\n  @GetMapping(External.UNKNOWN)\n  void list() {}\n  @PostMapping(\"/create\")\n  void create() {}\n}\n"
+            .to_string(),
+    )];
+    let report = extract_http_provides_project(&files);
+    assert_eq!(keys(&report), vec!["POST /api/create"]);
+    assert_eq!(report.skipped_unresolved_method_path, 1);
 }

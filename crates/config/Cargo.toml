@@ -1,11 +1,9 @@
-# The Rust port of the JS config front-end (packages/cli/lib/{config,jsonc,mapper,workspaces}.js plus
-# the @zzop/native JS wrapper's default-injection layer): zzop.config.jsonc discovery -> JSONC stripping -> the
-# config->facade-request mapper -> `trees: "auto"` workspace expansion. A shared rlib so every native
-# host maps configs identically — the zzop-mcp binary today, and the binary's own CLI surface if it
-# subsumes the JS CLI later (mcp-distribution decision, "MCP-first, CLI later"). The JS CLI keeps its
-# own JS implementation for Node users; parity is pinned by comparing emitted request JSON against the
-# committed docs/contracts/config-parity.fixture.json — tests/config_parity.rs here and
-# packages/cli/test/config-parity.test.js on the JS side both replay every fixture case.
+# The config front-end shared by every native host: zzop.config.jsonc discovery -> JSONC stripping ->
+# the config->facade-request mapper -> `trees: "auto"` workspace expansion. A shared rlib so every
+# native host maps configs identically — the zzop-mcp binary today, and the binary's own CLI surface
+# as it grows (mcp-distribution decision, "MCP-first, CLI later"). Originally ported from the removed
+# JS front-end; the emitted request JSON is pinned against the committed
+# docs/contracts/config-parity.fixture.json golden by tests/config_parity.rs.
 [package]
 name = "zzop-config"
 version.workspace = true

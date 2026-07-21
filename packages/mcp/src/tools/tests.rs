@@ -452,6 +452,25 @@ fn validate_rule_pack_tool_reports_shape_verdicts_and_never_is_error_on_bad_inpu
 }
 
 #[test]
+fn cli_validate_wrappers_return_the_same_verdict_as_the_tool() {
+    // The `validate-rule-pack` / `validate-envelope` CLI subcommands call these wrappers, which call the
+    // same `zzop_summary` checks the tools do — so a terminal check and a tool call agree by construction.
+    let bundled = zzop_config::BUNDLED_PACK_SOURCES[0].1;
+    let ok: serde_json::Value = serde_json::from_str(&super::validate_rule_pack(bundled)).unwrap();
+    assert_eq!(ok["valid"], true, "got: {ok}");
+    let bad: serde_json::Value =
+        serde_json::from_str(&super::validate_rule_pack("{\"id\":\"p\"}")).unwrap();
+    assert_eq!(bad["valid"], false, "got: {bad}");
+
+    // The embedded minimal example envelope is valid; arbitrary non-envelope JSON (an array) is not.
+    let example = crate::embedded::find("example-envelope").unwrap().content;
+    let ok: serde_json::Value = serde_json::from_str(&super::validate_envelope(example)).unwrap();
+    assert_eq!(ok["valid"], true, "got: {ok}");
+    let bad: serde_json::Value = serde_json::from_str(&super::validate_envelope("[]")).unwrap();
+    assert_eq!(bad["valid"], false, "got: {bad}");
+}
+
+#[test]
 fn cross_repo_summary_includes_per_source_packs_loaded_and_coverage() {
     // fe extracts io (fetch consumes); be analyzes a file but contributes ZERO io to the join —
     // the engine asserts that (`joinContributionZero`), and the per-source summary entry must
@@ -884,7 +903,7 @@ fn analyze_repo_carries_a_compact_architecture_summary_when_git_signals_ran() {
         "got: {architecture}"
     );
     // Capped, never the full detail: this reply must not also carry the full `recommendations`/
-    // `critical` arrays (they stay in the @zzop/cli --json / napi lane, per this tool's description).
+    // `critical` arrays (they stay in the raw `zzop-facade` embedding lane, per this tool's description).
     assert!(v.get("recommendations").is_none(), "got: {v}");
     assert!(v.get("critical").is_none(), "got: {v}");
 

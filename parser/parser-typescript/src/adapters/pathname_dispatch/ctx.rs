@@ -1,14 +1,16 @@
-// ---------------------------------------------------------------------------------------------
 // Per-function context: request/URL/pathname/method provenance
-// ---------------------------------------------------------------------------------------------
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
+use swc_core::common::BytePos;
 use swc_core::ecma::ast::{
-    ArrowExpr, ClassMethod, Expr, FnDecl, FnExpr, GetterProp, MemberProp, MethodProp, ObjectPat,
-    ObjectPatProp, Pat, PropName, SetterProp, TsEntityName, TsType, TsTypeAnn, VarDeclarator,
+    ArrowExpr, Callee, ClassMethod, Expr, FnDecl, FnExpr, GetterProp, Lit, MemberProp, MethodProp,
+    ObjectPat, ObjectPatProp, Pat, PropName, SetterProp, TsEntityName, TsType, TsTypeAnn,
+    VarDeclarator,
 };
 use swc_core::ecma::visit::{Visit, VisitWith};
+
+use super::regex_path::regex_to_route_path;
 
 /// A bare `: Name` type annotation — a single-identifier `TsTypeRef` named exactly `name`.
 pub(super) fn type_ann_is(ann: Option<&TsTypeAnn>, name: &str) -> bool {
@@ -22,6 +24,10 @@ pub(super) struct FnCtx {
     pub(super) url_provenanced: HashSet<String>,
     pub(super) pathname_aliases: HashSet<String>,
     pub(super) method_aliases: HashSet<String>,
+    /// `const m = pathname.match(/re/)` bindings whose regex converted to a route path: the local
+    /// name -> (route path, the regex literal's span for `IoProvide::line`). A later `if (m && ...)`
+    /// conjunct referencing `m` is a path test (see `classify::match_path_test`).
+    pub(super) pathname_match_routes: HashMap<String, (String, BytePos)>,
 }
 
 /// Seeds gate 1 (`request_idents`) and part of gate 2 (`url_provenanced`) from a function's own
@@ -57,6 +63,10 @@ pub(super) struct BindingCollector {
     pub(super) url_provenanced: HashSet<String>,
     pub(super) pathname_aliases: HashSet<String>,
     pub(super) method_aliases: HashSet<String>,
+    pub(super) pathname_match_routes: HashMap<String, (String, BytePos)>,
+    /// Names bound to a `pathname.match` MORE THAN ONCE in this flat (block-scope-unaware) walk —
+    /// ambiguous, so removed from `pathname_match_routes` and never re-recorded (never-guess).
+    pub(super) pathname_match_poisoned: HashSet<String>,
 }
 
 impl Visit for BindingCollector {
@@ -79,6 +89,21 @@ impl Visit for BindingCollector {
                         self.pathname_aliases.insert(name);
                     } else if is_method_member(init, &self.request_idents) {
                         self.method_aliases.insert(name);
+                    } else if let Some(route) =
+                        pathname_match_route(init, &self.pathname_aliases, &self.url_provenanced)
+                    {
+                        // Name-keyed over a flat, block-scope-unaware walk: a name bound to a
+                        // pathname.match MORE THAN ONCE (sibling block scopes reusing `const m`)
+                        // is ambiguous. Never-guess — poison it so neither `if (m && ...)`
+                        // resolves, rather than mis-attribute the last regex's route to an earlier
+                        // block's guard.
+                        if self.pathname_match_poisoned.contains(&name)
+                            || self.pathname_match_routes.remove(&name).is_some()
+                        {
+                            self.pathname_match_poisoned.insert(name);
+                        } else {
+                            self.pathname_match_routes.insert(name, route);
+                        }
                     }
                 }
                 Pat::Object(op) => {
@@ -136,6 +161,42 @@ fn is_method_member(expr: &Expr, request_idents: &HashSet<String>) -> bool {
     matches!(&m.prop, MemberProp::Ident(p) if p.sym == "method")
 }
 
+/// `<pathname>.match(/re/)` where `<pathname>` is pathname-provenanced and the sole argument is a
+/// regex literal that `regex_to_route_path` converts -> `(route path, regex-literal span)`. `None`
+/// for a wrong receiver/method, a non-literal or multi/spread argument, or an unconvertible regex
+/// (never-guess — the binding is simply not recorded, so no route is emitted for it).
+pub(super) fn pathname_match_route(
+    expr: &Expr,
+    pathname_aliases: &HashSet<String>,
+    url_provenanced: &HashSet<String>,
+) -> Option<(String, BytePos)> {
+    let Expr::Call(call) = expr else { return None };
+    let Callee::Expr(callee) = &call.callee else {
+        return None;
+    };
+    let Expr::Member(m) = &**callee else {
+        return None;
+    };
+    if !is_pathname_receiver_sets(&m.obj, pathname_aliases, url_provenanced) {
+        return None;
+    }
+    let MemberProp::Ident(method) = &m.prop else {
+        return None;
+    };
+    if method.sym != "match" {
+        return None;
+    }
+    let [arg] = &call.args[..] else { return None };
+    if arg.spread.is_some() {
+        return None;
+    }
+    let Expr::Lit(Lit::Regex(re)) = &*arg.expr else {
+        return None;
+    };
+    let path = regex_to_route_path(re.exp.as_str(), re.flags.as_str())?;
+    Some((path, re.span.lo))
+}
+
 /// `(source key, local bound name)` pairs from an object pattern: shorthand `{ pathname }` binds
 /// under its own name, `{ pathname: p }` renames.
 fn object_pat_bindings(op: &ObjectPat) -> Vec<(String, String)> {
@@ -162,12 +223,20 @@ fn object_pat_bindings(op: &ObjectPat) -> Vec<(String, String)> {
     out
 }
 
-pub(super) fn is_pathname_receiver(expr: &Expr, ctx: &FnCtx) -> bool {
+pub(super) fn is_pathname_receiver_sets(
+    expr: &Expr,
+    pathname_aliases: &HashSet<String>,
+    url_provenanced: &HashSet<String>,
+) -> bool {
     match expr {
-        Expr::Ident(id) => ctx.pathname_aliases.contains(id.sym.as_str()),
-        Expr::Member(_) => is_pathname_member(expr, &ctx.url_provenanced),
+        Expr::Ident(id) => pathname_aliases.contains(id.sym.as_str()),
+        Expr::Member(_) => is_pathname_member(expr, url_provenanced),
         _ => false,
     }
+}
+
+pub(super) fn is_pathname_receiver(expr: &Expr, ctx: &FnCtx) -> bool {
+    is_pathname_receiver_sets(expr, &ctx.pathname_aliases, &ctx.url_provenanced)
 }
 
 pub(super) fn is_method_receiver(expr: &Expr, ctx: &FnCtx) -> bool {

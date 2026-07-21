@@ -1,8 +1,6 @@
-// ---------------------------------------------------------------------------------------------
 // Module-level walk: finds every function-like node and every DO-vetoed class.
-// ---------------------------------------------------------------------------------------------
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use swc_core::common::SourceMap;
 use swc_core::ecma::ast::{
@@ -61,6 +59,8 @@ impl TopCollector<'_> {
             url_provenanced,
             pathname_aliases: HashSet::new(),
             method_aliases: HashSet::new(),
+            pathname_match_routes: HashMap::new(),
+            pathname_match_poisoned: HashSet::new(),
         };
         body.visit_with(&mut bindings);
         let ctx = FnCtx {
@@ -69,6 +69,7 @@ impl TopCollector<'_> {
             url_provenanced: bindings.url_provenanced,
             pathname_aliases: bindings.pathname_aliases,
             method_aliases: bindings.method_aliases,
+            pathname_match_routes: bindings.pathname_match_routes,
         };
         let mut routes = RouteCollector {
             ctx: &ctx,
@@ -151,9 +152,7 @@ fn prop_name_string(key: &PropName) -> Option<String> {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
 // Durable Object veto
-// ---------------------------------------------------------------------------------------------
 
 fn class_has_do_evidence(class: &Class) -> bool {
     if let Some(super_class) = &class.super_class {

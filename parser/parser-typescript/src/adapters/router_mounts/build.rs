@@ -129,10 +129,14 @@ impl FragmentBuilder<'_> {
         let line = crate::line_of(self.cm, method.span.lo);
         match method.sym.as_str() {
             // Lowercase spelling of a `zzop_core::HTTP_KEY_VERBS` verb (T1: the verb set lives in
-            // core) — the `.get(path, handler)` registration vocabulary.
-            verb if zzop_core::HTTP_KEY_VERBS
-                .iter()
-                .any(|v| v.to_ascii_lowercase() == verb) =>
+            // core) — the `.get(path, handler)` registration vocabulary — OR Express's `.all(path,
+            // handler)`, which registers ONE handler for EVERY method (a catch-all), expanded below to
+            // one entry per verb so it is not invisible and its mutating surface reaches
+            // `mutating-route-no-auth`.
+            verb if verb == "all"
+                || zzop_core::HTTP_KEY_VERBS
+                    .iter()
+                    .any(|v| v.to_ascii_lowercase() == verb) =>
             {
                 // A route registration always carries a handler argument; a single-argument call
                 // (e.g. Express's `app.get('view engine')`) is a config getter, not a route.
@@ -158,13 +162,25 @@ impl FragmentBuilder<'_> {
                 } else {
                     Vec::new()
                 };
-                vec![RouterMountEntry::Verb {
-                    method: verb.to_uppercase(),
-                    path,
-                    handler,
-                    line,
-                    attr_keys,
-                }]
+                // `HTTP_KEY_VERBS` are already uppercase; a single verb uppercases its own spelling.
+                let methods: Vec<String> = if verb == "all" {
+                    zzop_core::HTTP_KEY_VERBS
+                        .iter()
+                        .map(|v| v.to_string())
+                        .collect()
+                } else {
+                    vec![verb.to_uppercase()]
+                };
+                methods
+                    .into_iter()
+                    .map(|method| RouterMountEntry::Verb {
+                        method,
+                        path: path.clone(),
+                        handler: handler.clone(),
+                        line,
+                        attr_keys: attr_keys.clone(),
+                    })
+                    .collect()
             }
             "route" => {
                 let Some(prefix) = string_lit_arg(call.args.first()) else {

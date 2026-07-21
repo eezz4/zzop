@@ -13,7 +13,9 @@ use crate::analyze::compose::{
     late_resolve_cross_file_consumes, merge_const_map_fragments, resolve_provide_body_refs,
     resolve_wrapper_consumes,
 };
-use crate::analyze::native_rules::run_java_provides_project_pass;
+use crate::analyze::native_rules::{
+    run_csharp_provides_project_pass, run_java_provides_project_pass,
+};
 use crate::pipeline::{GoModuleMap, PackageJsonScan, RustWorkspaceMap};
 use crate::EngineConfig;
 
@@ -21,6 +23,7 @@ use super::helpers::{
     find_go_mount_target, go_fragment_dirs, is_go_source_ext, is_python_source_ext,
     is_rust_source_ext, resolve_go_import_package_dir, resolve_python_import, resolve_rust_import,
 };
+use super::orm::resolve_orm_entity_consumes;
 
 /// Every output the provide/consume composition seam produces, consumed by the phases after it
 /// (`super::dep_graph` needs `pkg_scan`/`tsconfigs` too — the workspace-aware resolver both the dep
@@ -41,6 +44,7 @@ pub(super) fn compose(
     loc_by_path: &HashMap<String, u32>,
     ts_paths: &std::collections::HashSet<String>,
     java_rels: &[String],
+    csharp_rels: &[String],
     all_symbols: &[zzop_core::ir::SourceSymbol],
     mut io_provides: Vec<IoProvide>,
     mut io_consumes: Vec<IoConsume>,
@@ -54,11 +58,18 @@ pub(super) fn compose(
     rust_workspace: &RustWorkspaceMap,
     go_modules: &GoModuleMap,
 ) -> ProvidesResult {
-    // The merged project-wide const map is computed BEFORE `late_resolve_cross_file_consumes` below
-    // takes ownership of `fragment_pairs` (it only borrows here) — `compose_controller_prefix_provides`
-    // needs the SAME merge (`compose::merge_const_map_fragments`'s doc) a few lines further down.
+    // The merged project-wide const map is computed BEFORE `late_resolve_cross_file_consumes` below takes ownership of
+    // `fragment_pairs` (it only borrows here) — `compose_controller_prefix_provides` needs the SAME merge (`compose::merge_const_map_fragments`'s doc) a few lines further down.
     let merged_consts = merge_const_map_fragments(&fragment_pairs);
     late_resolve_cross_file_consumes(fragment_pairs, &mut io_consumes);
+
+    // ORM entity-reference consumes (`db-table`, `key: None`, `raw: <model type>`) — TypeORM
+    // `@InjectRepository(X)` and GORM `db.Model(&X{})` both reference a model by TYPE, whose physical table
+    // lives with the model's own definition elsewhere in the tree. Resolve each against the tree-wide
+    // type -> table-key index built from the model provides' `symbol` — runs here (after the per-file IO
+    // collection populated both sides, before the cross-layer join reads `io_consumes`) so a resolved
+    // consume joins its provide like any Prisma-keyed one.
+    resolve_orm_entity_consumes(&io_provides, &mut io_consumes);
 
     // `warnings` is declared here (rather than nearer its git-related first uses in `super::dep_graph`)
     // so both the controller-prefix composer and the NestJS global-prefix transform immediately below
@@ -94,15 +105,20 @@ pub(super) fn compose(
         run_java_provides_project_pass(root, java_rels, &mut io_provides);
     }
 
+    // Whole-corpus C# ASP.NET Core HTTP-provides resolution — the C# twin of the Java pass just above, resolving non-literal route
+    // CONSTANTS (`[HttpGet(Routes.List)]`) across files and REPLACING the per-file C# `http` provides wholesale (`run_csharp_provides_project_pass`'s doc). A no-op when empty.
+    if !csharp_rels.is_empty() {
+        run_csharp_provides_project_pass(root, csharp_rels, &mut io_provides);
+    }
+
     // Workspace-package manifest scan — hoisted above `build_dep` because `workspace_pkgs` also feeds
     // cross-package import resolution (`build_dep_with_workspace`): a monorepo import like
     // `import { x } from '@scope/pkg-b'` names a workspace package, not an npm dependency, and every
     // whole-graph analysis downstream of `dep` needs that edge to exist.
     let pkg_scan =
         crate::pipeline::package_json_entries(root, loc_by_path.keys().cloned(), ts_paths);
-    // tsconfig `paths`/`baseUrl` alias collection: a monorepo import like `import { x } from
-    // '@/features/y'` remapped by `compilerOptions.paths` needs this to become a real dep-graph edge
-    // instead of looking external/orphaned.
+    // tsconfig `paths`/`baseUrl` alias collection: a monorepo import like `import { x } from '@/features/y'` remapped by
+    // `compilerOptions.paths` needs this to become a real dep-graph edge instead of looking external/orphaned.
     let tsconfigs = crate::pipeline::tsconfig_scan(root, loc_by_path.keys().cloned());
 
     // tRPC PROVIDE composition — must run after `pkg_scan`/`tsconfigs` exist (a `Ref`'s import specifier
@@ -132,7 +148,6 @@ pub(super) fn compose(
     // mounts). Same placement constraints, and the same exact-rel-first resolver: the per-file pass
     // emits no code-registered router provides of its own, so this composition is the single source
     // of truth (no retain/dedup against per-file output needed).
-    //
     // Also composes producer-judged attributes riding the same fragments (e.g. a recognized Express
     // middleware guard — `zzop_parser_typescript::adapters::router_mounts`'s `express-middleware-v1`
     // vocabulary) into `native_attrs`, fed into `AttributeStore::from_parts` below alongside every

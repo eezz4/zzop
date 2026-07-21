@@ -1,6 +1,6 @@
 //! `route-shadowing` — within one file's HTTP `provides`, a param-segment route registered at an EARLIER
 //! line than a literal-segment route of the same shape shadows it in a first-match router (Express/Koa/
-//! Fastify-style, "the first registered pattern that matches wins"): the param route also matches every
+//! NestJS-style, "the first registered pattern that matches wins"): the param route also matches every
 //! request the literal route was meant to catch, making the literal handler unreachable in practice.
 //!
 //! Two `IoProvide`s (`kind == "http"`) shadow each other only when: same `file` (cross-file pairs carry no
@@ -10,15 +10,49 @@
 //! where both are literal is `duplicate-route`'s territory. When several earlier param routes qualify, the
 //! EARLIEST is reported, since it intercepts first in a first-match router.
 //!
-//! "First registered pattern wins" is an Express/Koa/Fastify convention, not universal — some routers pick
-//! the most-specific match regardless of order and are unaffected. This stays a Warning (never Critical)
-//! for that reason, stated explicitly in the message so a false positive is easy to recognize and disable.
+//! "First registered pattern wins" is an Express/Koa/NestJS convention, not universal — a router that
+//! picks the MOST-SPECIFIC match regardless of order never exhibits this shadow (a literal always beats a
+//! same-shape param there). Rather than emit a known false positive on those frameworks and rely on the
+//! reader to disable it, this check is FRAMEWORK-SCOPED by file extension: it runs only on the first-match
+//! ecosystems zzop extracts — see [`FIRST_MATCH_ROUTER_EXTENSIONS`]. It stays a Warning (never Critical)
+//! and the precision caveat remains in the message for the residual (a first-match language whose specific
+//! framework happens to be specificity-matched).
+
+/// File extensions of the frameworks zzop extracts that use FIRST-MATCH routing — registration order
+/// decides which pattern wins, the only semantics under which an earlier param route shadows a later
+/// literal one. The TypeScript/JavaScript ecosystem (Express/Koa/Hono/NestJS) and Python FastAPI
+/// (Starlette matches in registration order — its own docs warn to declare a fixed `/users/me` before
+/// `/users/{id}`). Frameworks that pick the MOST-SPECIFIC match regardless of order — Java Spring
+/// (`AntPathMatcher`), C# ASP.NET routing, Go gin/`net/http`, Rust axum — are exempt: a literal always
+/// beats a same-shape param there, so the shadow cannot occur. Positive allowlist, mirroring
+/// `mutating_route_no_auth::CALL_GRAPH_COVERED_EXTENSIONS`: a language not yet known to be first-match
+/// defaults to EXEMPT (no false shadow) until its routing semantics are pinned here. RESIDUAL: the gate is
+/// per-EXTENSION, so a `.ts`/`.js` app whose specific router is itself specificity-match (Fastify's radix
+/// `find-my-way`) can't be told apart from Express and still fires — the message's precision caveat covers
+/// that tail; a per-framework signal would be needed to close it.
+pub const FIRST_MATCH_ROUTER_EXTENSIONS: &[&str] = &[
+    "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "py", "pyi",
+];
+
+/// True when `file`'s extension is a first-match-router language — see [`FIRST_MATCH_ROUTER_EXTENSIONS`].
+fn is_first_match_router(file: &str) -> bool {
+    std::path::Path::new(file)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .is_some_and(|e| FIRST_MATCH_ROUTER_EXTENSIONS.contains(&e.as_str()))
+}
 
 pub fn route_shadowing_findings(io_provides: &[zzop_core::IoProvide]) -> Vec<zzop_core::Finding> {
     let mut by_file_method: std::collections::BTreeMap<(&str, &str), Vec<&zzop_core::IoProvide>> =
         std::collections::BTreeMap::new();
     for p in io_provides {
         if p.kind != "http" {
+            continue;
+        }
+        // Order-dependent shadowing is a first-match-router concept only — a specificity-match framework
+        // (Spring/ASP.NET/gin/axum) picks the literal regardless of order, so its routes never shadow.
+        if !is_first_match_router(&p.file) {
             continue;
         }
         let Some((method, _path)) = p.key.split_once(' ') else {
@@ -60,7 +94,7 @@ pub fn route_shadowing_findings(io_provides: &[zzop_core::IoProvide]) -> Vec<zzo
                     message: format!(
                         "Route `{}` (registered here at line {}) is shadowed by an earlier param route `{}` \
                          registered at line {} in the same file — in a first-match router (Express/Koa/\
-                         Fastify-style), the param route's pattern also matches every request this literal \
+                         NestJS-style), the param route's pattern also matches every request this literal \
                          route was meant to catch, so the earlier registration intercepts first and this \
                          handler is effectively unreachable. Fix: register the literal route BEFORE the param \
                          route (or merge them into one handler that branches on the concrete value). Precision \
@@ -118,152 +152,4 @@ fn shadows(param_segs: &[&str], literal_segs: &[&str]) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    //! Unit tests for `route_shadowing_findings`'s grouping + shape logic (e2e coverage: `crates/engine/tests/analyze_io_natives.rs`).
-    use super::*;
-
-    fn provide(key: &str, file: &str, line: u32) -> zzop_core::IoProvide {
-        zzop_core::IoProvide {
-            body: None,
-            kind: "http".to_string(),
-            key: key.to_string(),
-            file: file.to_string(),
-            line,
-            symbol: None,
-        }
-    }
-
-    #[test]
-    fn earlier_param_route_shadows_a_later_literal_route_same_position() {
-        let provides = vec![
-            provide("GET /items/{}", "r.ts", 2),
-            provide("GET /items/active", "r.ts", 5),
-        ];
-        let found = route_shadowing_findings(&provides);
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].file, "r.ts");
-        assert_eq!(found[0].line, 5);
-        assert_eq!(found[0].rule_id, "route-shadowing");
-        assert_eq!(found[0].severity, zzop_core::Severity::Warning);
-        assert!(found[0].message.contains("line 2"));
-    }
-
-    /// Pins the exact rendered message — regression coverage for the mid-sentence, lowercase-"disable"
-    /// `disable_hint` splice this message went through during the 2026-07-10 dialect-consolidation sweep
-    /// (unlike most native messages, this one reads "...disable {tail}", not "...Disable via config...").
-    #[test]
-    fn message_is_byte_identical_to_the_pre_sweep_text() {
-        let provides = vec![
-            provide("GET /items/{}", "r.ts", 2),
-            provide("GET /items/active", "r.ts", 5),
-        ];
-        let found = route_shadowing_findings(&provides);
-        assert_eq!(found.len(), 1);
-        assert_eq!(
-            found[0].message,
-            "Route `GET /items/active` (registered here at line 5) is shadowed by an earlier param route \
-             `GET /items/{}` registered at line 2 in the same file — in a first-match router (Express/Koa/\
-             Fastify-style), the param route's pattern also matches every request this literal route was \
-             meant to catch, so the earlier registration intercepts first and this handler is effectively \
-             unreachable. Fix: register the literal route BEFORE the param route (or merge them into one \
-             handler that branches on the concrete value). Precision limit: \"first registered pattern \
-             wins\" is framework-dependent — a router that picks the most-specific match regardless of \
-             registration order is unaffected by this shape; disable via config `rules: { \
-             \"route-shadowing\": \"off\" }` (embedders: `disabled_rules`) if that's your framework or the \
-             ordering is intentional (this rule has no inline suppression marker)."
-        );
-    }
-
-    #[test]
-    fn literal_route_registered_before_the_param_route_is_not_shadowed() {
-        let provides = vec![
-            provide("GET /items/active", "r.ts", 2),
-            provide("GET /items/{}", "r.ts", 5),
-        ];
-        assert!(route_shadowing_findings(&provides).is_empty());
-    }
-
-    #[test]
-    fn different_methods_are_never_compared() {
-        let provides = vec![
-            provide("GET /items/{}", "r.ts", 2),
-            provide("POST /items/active", "r.ts", 5),
-        ];
-        assert!(route_shadowing_findings(&provides).is_empty());
-    }
-
-    #[test]
-    fn different_files_are_never_compared() {
-        let provides = vec![
-            provide("GET /items/{}", "a.ts", 2),
-            provide("GET /items/active", "b.ts", 5),
-        ];
-        assert!(route_shadowing_findings(&provides).is_empty());
-    }
-
-    #[test]
-    fn two_literal_routes_at_the_same_position_are_not_flagged_shadowing() {
-        // Same-key duplicate registration is `duplicate-route`'s territory, not this rule's.
-        let provides = vec![
-            provide("GET /items/active", "r.ts", 2),
-            provide("GET /items/paused", "r.ts", 5),
-        ];
-        assert!(route_shadowing_findings(&provides).is_empty());
-    }
-
-    #[test]
-    fn differing_segment_count_is_not_shadowing() {
-        let provides = vec![
-            provide("GET /items/{}", "r.ts", 2),
-            provide("GET /items/active/extra", "r.ts", 5),
-        ];
-        assert!(route_shadowing_findings(&provides).is_empty());
-    }
-
-    #[test]
-    fn two_differing_positions_is_out_of_the_decidable_subset() {
-        let provides = vec![
-            provide("GET /items/{}/{}", "r.ts", 2),
-            provide("GET /items/active/paused", "r.ts", 5),
-        ];
-        assert!(route_shadowing_findings(&provides).is_empty());
-    }
-
-    #[test]
-    fn earliest_of_multiple_qualifying_param_routes_is_reported() {
-        let provides = vec![
-            provide("GET /items/{}", "r.ts", 8),
-            provide("GET /items/{}", "r.ts", 2),
-            provide("GET /items/active", "r.ts", 10),
-        ];
-        let found = route_shadowing_findings(&provides);
-        assert_eq!(found.len(), 1);
-        assert_eq!(
-            found[0].data.as_ref().unwrap()["paramLine"].as_u64(),
-            Some(2)
-        );
-    }
-
-    #[test]
-    fn non_http_provides_are_ignored() {
-        let provides = vec![
-            zzop_core::IoProvide {
-                body: None,
-                kind: "queue".to_string(),
-                key: "GET /items/{}".to_string(),
-                file: "r.ts".to_string(),
-                line: 2,
-                symbol: None,
-            },
-            zzop_core::IoProvide {
-                body: None,
-                kind: "queue".to_string(),
-                key: "GET /items/active".to_string(),
-                file: "r.ts".to_string(),
-                line: 5,
-                symbol: None,
-            },
-        ];
-        assert!(route_shadowing_findings(&provides).is_empty());
-    }
-}
+mod tests;

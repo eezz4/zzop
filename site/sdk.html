@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>zzop — SDK &amp; embedding</title>
-<meta name="description" content="Embed the zzop engine directly with @zzop/native — the JSON-in / JSON-out SDK layer: functions, request/output shapes, and multi-repo analysis.">
+<meta name="description" content="Embed the zzop engine directly via the zzop-facade / zzop-summary Rust crates, or shell out to the zzop-mcp binary — the JSON-in / JSON-out contract: functions, request/output shapes, and multi-repo analysis.">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="assets/site.css">
 </head>
@@ -50,26 +50,26 @@
   <main class="docs-content">
     <div class="docs-content-header">
       <h1>Embedding zzop</h1>
-      <p>If you're building a tool on top of zzop rather than running it as a CLI, depend on <code>@zzop/native</code> directly and call it JSON-in / JSON-out — the same engine the <a href="usage.html">CLI</a> drives. Install it the same way; <code>npm install @zzop/native</code> pulls the matching prebuilt binary — nothing to compile. This page documents that library layer; if you just want to run zzop, use the CLI instead.</p>
+      <p>If you're building a tool on top of zzop rather than running it as a CLI, there are two Node-free ways in. (1) Depend on the <code>zzop-facade</code> crate (JSON-string-in / JSON-string-out, no Node.js, nothing to compile) and, if you want the same config-auto-discovery and result-shaping the CLI gets, the <code>zzop-summary</code> crate on top of it. (2) Shell out to the <code>zzop-mcp</code> binary's JSON subcommands (<code>zzop-mcp analyze</code>, <code>cross</code>, <code>endpoint</code>, …) — JSON in, JSON out, no linkage at all. Both paths call the exact same engine the CLI drives, and the request/output shapes below are shared by all of them. This page documents that contract; if you just want to run zzop, use the <a href="usage.html">CLI</a> instead.</p>
     </div>
 
     <section id="functions">
-      <span class="eyebrow eyebrow--sm">@zzop/native</span>
+      <span class="eyebrow eyebrow--sm">zzop-facade</span>
       <h2>Seven functions, JSON in / JSON out</h2>
-      <p>All seven are JSON-string-in / JSON-string-out, except <code>version</code>. Core logic lives in <code>crates/facade/src/lib.rs</code> (crate <code>zzop-facade</code>) as plain Rust with no napi dependency at all (so it compiles and unit-tests under the workspace's default toolchain); <code>packages/native/src/addon.rs</code> is a thin <code>#[napi]</code>-annotated wrapper over those same functions, gated behind the <code>addon</code> Cargo feature.</p>
+      <p>All seven are JSON-string-in / JSON-string-out, except <code>version_string</code>. They live in <code>crates/facade/src/lib.rs</code> (crate <code>zzop-facade</code>) as plain Rust with no FFI/native-addon dependency at all, so the crate compiles and unit-tests under the workspace's default toolchain with no feature flags. The <code>zzop-mcp</code> binary calls these functions directly — no linkage, no wrapper layer required. (The removed npm distribution's <code>@zzop/cli</code> / <code>@zzop/native</code> packages, retired 2026-07-20, called this same logic through a napi addon; that addon build is gone, the Rust contract underneath it is not.)</p>
       <div class="table-scroll">
         <table>
           <thead>
             <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>analyze</code></td><td><code>(configJson: string) -&gt; string</code></td><td><code>AnalyzeRequest</code> &rarr; <code>AnalyzeOutputView</code>. Analyzes one tree.</td></tr>
-            <tr><td><code>analyzeTrees</code></td><td><code>(configJson: string) -&gt; string</code></td><td><code>AnalyzeTreesRequest</code> (<code>{ trees: AnalyzeRequest[] }</code>) &rarr; <code>MultiAnalyzeOutputView</code>. Analyzes several trees and joins them cross-layer.</td></tr>
-            <tr><td><code>analyzeEnvelope</code></td><td><code>(envelopeJson: string, configJson: string) -&gt; string</code></td><td><code>NormalizedEnvelope</code> + <code>EnvelopeAnalyzeRequest</code> &rarr; <code>AnalyzeOutputView</code>. Analyzes a Normalized AST envelope produced by an external parser adapter.</td></tr>
-            <tr><td><code>validateEnvelopeOnly</code></td><td><code>(envelopeJson: string) -&gt; string</code></td><td>Envelope JSON &rarr; <code>{ valid: boolean, issues: string[] }</code>. Runs the same structural/semantic checks <code>analyzeEnvelope</code> applies to its envelope and stops there — no config, no pack loading, no engine run — fast, offline "is my envelope well-formed" feedback for adapter authors. Never fails: an invalid envelope still returns an ordinary <code>{ valid: false, issues: [...] }</code> result.</td></tr>
-            <tr><td><code>validateRulePackOnly</code></td><td><code>(packJson: string) -&gt; string</code></td><td>Rule-pack JSON &rarr; <code>{ valid: boolean, issues: string[] }</code>. Runs the exact structural judgments the engine's pack loader applies at load time (bad JSON, missing field, wrong type, too-new <code>schema_version</code>) plus every matcher regex that fails to compile (such a rule would load but silently never fire) — shape only, never rule-quality semantics. Pre-ship feedback for pack authors. Never fails: an invalid pack still returns an ordinary <code>{ valid: false, issues: [...] }</code> result.</td></tr>
-            <tr><td><code>queryIo</code></td><td><code>(analysisJson: string, queryJson: string) -&gt; string</code></td><td><code>analyzeTrees</code> output + <code>{ pattern: string }</code> &rarr; definitive endpoint/io-key answer. Pure post-processing over an already-produced multi-tree analysis — no re-analysis: <code>pattern</code> is case-insensitively substring-matched against every cross-layer io key (HTTP routes, env keys, topics, plus <code>raw</code> for unresolved consumes), and the result carries a sealed <code>verdict</code> vocabulary (<code>linked</code> | <code>provided-only</code> | <code>consumed-unprovided</code> | <code>external</code> | <code>unresolved-only</code> | <code>ambiguous</code> | <code>mixed</code> | <code>not-found</code>) with the matches, counts, and related findings behind it. Throws on a malformed query and on single-tree <code>analyze</code> output — a guided error, since verdicts are join facts (run <code>analyzeTrees</code>, which joins even a single tree).</td></tr>
-            <tr><td><code>version</code></td><td><code>() -&gt; string</code></td><td>Engine + parser fingerprint version string. Has no <code>Result</code> — cannot fail.</td></tr>
+            <tr><td><code>analyze_json</code></td><td><code>(config_json: &amp;str) -&gt; Result&lt;String, String&gt;</code></td><td><code>AnalyzeRequest</code> &rarr; <code>AnalyzeOutputView</code>. Analyzes one tree. Backs the <code>zzop-mcp analyze &lt;path&gt;</code> CLI subcommand and the <code>analyze_repo</code> MCP tool (via <code>zzop-summary</code>).</td></tr>
+            <tr><td><code>analyze_trees_json</code></td><td><code>(config_json: &amp;str) -&gt; Result&lt;String, String&gt;</code></td><td><code>AnalyzeTreesRequest</code> (<code>{ trees: AnalyzeRequest[] }</code>) &rarr; <code>MultiAnalyzeOutputView</code>. Analyzes several trees and joins them cross-layer. Backs <code>zzop-mcp cross</code> / the <code>cross_repo</code> MCP tool.</td></tr>
+            <tr><td><code>analyze_envelope_json</code></td><td><code>(envelope_json: &amp;str, config_json: &amp;str) -&gt; Result&lt;String, String&gt;</code></td><td><code>NormalizedEnvelope</code> + <code>EnvelopeAnalyzeRequest</code> &rarr; <code>AnalyzeOutputView</code>. Analyzes a Normalized AST envelope produced by an external parser adapter. Backs <code>zzop-mcp analyze-envelope</code> / the <code>analyze_envelope</code> MCP tool.</td></tr>
+            <tr><td><code>validate_envelope_only_json</code></td><td><code>(envelope_json: &amp;str) -&gt; String</code></td><td>Envelope JSON &rarr; <code>{ valid: boolean, issues: string[] }</code>. Runs the same structural/semantic checks <code>analyze_envelope_json</code> applies to its envelope and stops there — no config, no pack loading, no engine run — fast, offline "is my envelope well-formed" feedback for adapter authors. Never fails: an invalid envelope still returns an ordinary <code>{ valid: false, issues: [...] }</code> result. Backs <code>zzop-mcp validate-envelope</code>.</td></tr>
+            <tr><td><code>validate_rule_pack_json</code></td><td><code>(pack_json: &amp;str) -&gt; String</code></td><td>Rule-pack JSON &rarr; <code>{ valid: boolean, issues: string[] }</code>. Runs the exact structural judgments the engine's pack loader applies at load time (bad JSON, missing field, wrong type, too-new <code>schema_version</code>) plus every matcher regex that fails to compile (such a rule would load but silently never fire) — shape only, never rule-quality semantics. Pre-ship feedback for pack authors. Never fails: an invalid pack still returns an ordinary <code>{ valid: false, issues: [...] }</code> result. Backs <code>zzop-mcp validate-rule-pack</code>.</td></tr>
+            <tr><td><code>query_io_json</code></td><td><code>(analysis_json: &amp;str, query_json: &amp;str) -&gt; Result&lt;String, String&gt;</code></td><td><code>analyze_trees_json</code> output + <code>{ pattern: string }</code> &rarr; definitive endpoint/io-key answer. Pure post-processing over an already-produced multi-tree analysis — no re-analysis: <code>pattern</code> is case-insensitively substring-matched against every cross-layer io key (HTTP routes, env keys, DB tables, topics, plus <code>raw</code> for unresolved consumes), and the result carries a sealed <code>verdict</code> vocabulary (<code>linked</code> | <code>provided-only</code> | <code>consumed-unprovided</code> | <code>external</code> | <code>unresolved-only</code> | <code>ambiguous</code> | <code>mixed</code> | <code>not-found</code>) with the matches, counts, and related findings behind it. Errs on a malformed query and on single-tree <code>analyze_json</code> output — a guided error, since verdicts are join facts (run <code>analyze_trees_json</code>, which joins even a single tree). Backs <code>zzop-mcp endpoint</code> / the <code>check_endpoint</code> MCP tool.</td></tr>
+            <tr><td><code>version_string</code></td><td><code>() -&gt; String</code></td><td>Engine + parser fingerprint version string. Has no <code>Result</code> — cannot fail. Backs <code>zzop-mcp version</code>.</td></tr>
           </tbody>
         </table>
       </div>
@@ -78,22 +78,24 @@
     <section id="zero-config">
       <span class="eyebrow eyebrow--sm">Defaults</span>
       <h2>Zero config runs the full analysis</h2>
-      <p>A bare <code>{ root: "." }</code> request is the entire required configuration:</p>
+      <p>A bare <code>{ "root": "." }</code> request is the entire required configuration <em>for the zzop-mcp binary and its MCP tools</em> — they route through the <code>zzop-config</code> crate, which auto-discovers a <code>zzop.config.jsonc</code> and, when <code>packsDir</code>/<code>packDefs</code> are absent, injects the bundled DSL rule packs (compiled into the binary) plus the engine's <code>recentDays: 30</code> git default:</p>
       <div class="code-panel">
-        <div class="code-panel__tab">analyze() call</div>
-        <pre class="code-block"><code>import zzop from '@zzop/native';
-
-const result = JSON.parse(
-  zzop.analyze(JSON.stringify({ root: '.' }))
-);</code></pre>
+        <div class="code-panel__tab">zzop-mcp CLI</div>
+        <pre class="code-block"><code>zzop-mcp analyze .   # zzop.config.jsonc auto-discovered if present;
+                     # otherwise bundled packs + git defaults apply</code></pre>
       </div>
-      <p>The package is CommonJS, so both module systems work: <code>import zzop from '@zzop/native'</code> in ESM, <code>const zzop = require('@zzop/native')</code> in CommonJS.</p>
-      <p>Before the config crosses into Rust, the JS wrapper (<code>index.js</code>) injects two defaults — so a bare <code>{ root }</code> request runs the full analysis instead of quietly degrading to native analyses only:</p>
+      <p>Calling <code>zzop_facade::analyze_json</code> directly has no such wrapper in front of it — the facade applies <strong>no implicit defaults</strong>. A bare <code>{"root": "."}</code> config JSON loads zero DSL packs (native analyses only) and runs with git collection off (<code>scores</code>/<code>health</code>/<code>recommendations</code> stay <code>null</code>) unless you set <code>packsDir</code>/<code>packDefs</code> and <code>git</code> yourself:</p>
+      <div class="code-panel">
+        <div class="code-panel__tab">Direct zzop-facade call (Rust)</div>
+        <pre class="code-block"><code>let config = serde_json::json!({ "root": ".", "git": {} }).to_string();
+let result: serde_json::Value =
+    serde_json::from_str(&amp;zzop_facade::analyze_json(&amp;config)?)?;</code></pre>
+      </div>
       <ul>
-        <li><strong>packsDir omitted</strong> — defaults to the bundled DSL rule packs: <code>&lt;repo root&gt;/rules/dsl</code> in a source checkout (always the live copy), or the <code>rules/</code> directory copied into the installed package at publish time by the <code>prepack</code> script.</li>
-        <li><strong>packsDir given</strong> — the wrapper prepends the bundled directory rather than replacing it: the effective load order becomes <code>[bundled, ...yourDirs]</code>. All listed directories are loaded and merged; if two directories ship a pack with the same id, the later directory replaces that pack whole (not a rule-by-rule merge) — so a caller's pack always wins a collision against a shipped one.</li>
-        <li><strong>packsDir: null</strong> — the one case the wrapper leaves untouched: disables all DSL pack loading, bundled packs included.</li>
-        <li><strong>git omitted</strong> — defaults to <code>git: {}</code>, so the engine applies its own <code>recentDays: 30</code> default. <code>git: null</code> disables git collection entirely. If <code>root</code> is not a git repository, the engine degrades gracefully and reports it in <code>warnings</code>.</li>
+        <li><strong>packsDir omitted</strong> (facade) — no DSL packs load at all; pass <code>packsDir</code> (a directory of <code>*.json</code> packs) or <code>packDefs</code> (inline definitions — see below) explicitly.</li>
+        <li><strong>packsDir given, multiple directories</strong> — all are loaded and merged; if two directories ship a pack with the same id, the later directory replaces that pack whole (not a rule-by-rule merge).</li>
+        <li><strong>packDefs given</strong> — loaded before any <code>packsDir</code> entries, so a directory pack with the same id wins the collision whole. This is how a host with no pack directory on disk (like <code>zzop-mcp</code>, whose <code>zzop-config</code> layer injects the bundled packs this way) supplies rules at all.</li>
+        <li><strong>git omitted</strong> (facade) — git collection is off; <code>scores</code>, <code>health</code>, <code>recommendations</code>, <code>critical</code>, <code>seams</code>, and <code>layerCoChurn</code> stay <code>null</code>. Pass <code>git: {}</code> to enable them with the engine's own <code>recentDays: 30</code> default, or <code>git: { "recentDays": N }</code> to override it. If <code>root</code> is not a git repository, the engine degrades gracefully and reports it in <code>warnings</code>.</li>
       </ul>
     </section>
 
@@ -110,7 +112,7 @@ const result = JSON.parse(
             <tr><td><code>root</code></td><td>string (required)</td><td>Tree root to analyze. An empty string is rejected with <code>Err</code>.</td></tr>
             <tr><td><code>sourceId</code></td><td>string (default <code>""</code>)</td><td>Free-form label carried through into cross-tree output.</td></tr>
             <tr><td><code>packsDir</code></td><td>string | string[] (optional)</td><td>Directory (or directories) of <code>*.json</code> DSL rule packs to load. Multiple directories are loaded and merged — a pack id repeated across directories is taken whole from the later directory. A missing/unreadable directory is a non-fatal <code>warnings</code> entry, not a failure.</td></tr>
-            <tr><td><code>packDefs</code></td><td>object[] (default <code>[]</code>)</td><td>Inline rule-pack definitions handed to the engine as data — the self-contained-binary alternative to <code>packsDir</code> for hosts with no pack directory on disk (e.g. <code>zzop-mcp</code>'s compile-time-embedded packs). Loaded <em>before</em> <code>packsDir</code> directories, so a directory pack with the same id wins the collision whole. Additive (v0.16.0); the JS wrapper never sends it. Also accepted on <code>analyzeEnvelope</code>'s config with the identical contract.</td></tr>
+            <tr><td><code>packDefs</code></td><td>object[] (default <code>[]</code>)</td><td>Inline rule-pack definitions handed to the engine as data — the self-contained-binary alternative to <code>packsDir</code> for hosts with no pack directory on disk (e.g. <code>zzop-mcp</code>'s compile-time-embedded packs). Loaded <em>before</em> <code>packsDir</code> directories, so a directory pack with the same id wins the collision whole. Additive (v0.16.0); the retired JS wrapper never sent it. Also accepted on <code>analyzeEnvelope</code>'s config with the identical contract.</td></tr>
             <tr><td><code>cacheDir</code></td><td>string (optional)</td><td>Per-file IR/rule-result cache directory (content hash + parser/ruleset fingerprint keyed). Omit to run uncached.</td></tr>
             <tr><td><code>git</code></td><td><code>{ since?: string, recentDays?: number, commitTypePatterns?: { pattern, tag }[] }</code> (optional)</td><td>Enables git-derived <code>scores</code>/<code>health</code>/<code>recommendations</code>/<code>critical</code>/<code>seams</code>. <code>recentDays</code> defaults to <code>30</code>; <code>commitTypePatterns</code>, when non-empty, replaces the default FIX/FEAT/REVERT/... classifier table entirely.</td></tr>
             <tr><td><code>sizeCap</code></td><td>number (optional)</td><td>Default <code>1,500,000</code> bytes (~1.5&nbsp;MB). Files larger than this skip structural parsing and are listed under <code>degraded</code>.</td></tr>
@@ -126,22 +128,26 @@ const result = JSON.parse(
         </table>
       </div>
       <p><code>analyzeEnvelope</code>'s config (<code>EnvelopeAnalyzeRequest</code>) is a smaller shape: <code>sourceId</code>, <code>packsDir</code>, <code>packDefs</code>, <code>disabledRules</code>, <code>severityOverrides</code>, <code>suppressions</code>, and <code>globalExcludes</code> only (<code>packDefs</code> and the last three behave identically to their <code>AnalyzeRequest</code> counterparts). An envelope carries no filesystem location the engine can re-read, so <code>root</code>, <code>cacheDir</code>, <code>git</code>, and <code>sizeCap</code> don't apply — only <code>symbol-scan</code>/<code>io-scan</code> DSL rules ever fire in envelope mode, since no source text is available.</p>
-      <p>Reference Mode-B adapters ship in the repo as worked examples — an <a href="https://github.com/eezz4/zzop/tree/main/examples/openapi-sdk-adapter">OpenAPI-SDK adapter</a> (resolves generated-SDK cross-layer consumption), a <a href="https://github.com/eezz4/zzop/tree/main/examples/svelte-adapter">Svelte/SvelteKit adapter</a> (fills <code>.svelte</code> import fan-in and exempts route entrypoints via each file's <code>is_entry</code> marker), a <a href="https://github.com/eezz4/zzop/tree/main/examples/wrapper-adapter">wrapper adapter</a> (makes a hand-rolled HTTP client wrapper's calls visible to the cross-layer join), and a <a href="https://github.com/eezz4/zzop/tree/main/examples/react-query-adapter">react-query adapter</a> (resolves react-query's positional-key idiom) — plus a scaffoldable starter kit via <code>zzop init adapter</code>.</p>
+      <p>Reference Mode-B adapters ship in the repo as worked examples — an <a href="https://github.com/eezz4/zzop/tree/main/examples/openapi-sdk-adapter">OpenAPI-SDK adapter</a> (resolves generated-SDK cross-layer consumption), a <a href="https://github.com/eezz4/zzop/tree/main/examples/svelte-adapter">Svelte/SvelteKit adapter</a> (fills <code>.svelte</code> import fan-in and exempts route entrypoints via each file's <code>is_entry</code> marker), a <a href="https://github.com/eezz4/zzop/tree/main/examples/wrapper-adapter">wrapper adapter</a> (makes a hand-rolled HTTP client wrapper's calls visible to the cross-layer join), and a <a href="https://github.com/eezz4/zzop/tree/main/examples/react-query-adapter">react-query adapter</a> (resolves react-query's positional-key idiom).</p>
       <p>Beyond IO and dependency facts, an overlay can carry <strong>generic entity attributes</strong>: open-vocabulary <code>{ target, key, value }</code> annotations attached to a route, symbol, file, or path scope that a rule consumes by key, without the engine ever knowing what the key means. This is how a cross-cutting fact the native pass can't see on its own — a rate limit, a validation layer, or (for anything outside the common Express shapes the native parser now recognizes directly) a router-level auth guard applied by middleware — is completed by injection instead of by ever-growing native modeling. The first consumer is <code>mutating-route-no-auth</code>: inject an <code>auth-guarded</code> attribute on a route's <code>ioKey</code> (or a <code>pathScope</code> prefix a middleware guards) and the rule clears it, composing with its native call-graph scan and with the same attribute the native parser itself emits for a recognized Express guard.</p>
     </section>
 
     <section id="multi-repo">
       <span class="eyebrow eyebrow--sm">Cross-repo</span>
       <h2>Analyzing multiple repositories together</h2>
-      <p><code>analyzeTrees({ trees: [...] })</code> runs <code>analyze</code> once per tree, then joins every tree's declared IoFacts (HTTP/DB/tRPC provides and consumes) across all of them. A frontend checkout and a backend checkout can be two entirely separate git repositories that share nothing on disk and still get joined.</p>
+      <p><code>analyze_trees_json</code> (CLI: <code>zzop-mcp cross</code>; MCP tool: <code>cross_repo</code>) runs <code>analyze</code> once per tree, then joins every tree's declared IoFacts (HTTP/DB/tRPC provides and consumes) across all of them. A frontend checkout and a backend checkout can be two entirely separate git repositories that share nothing on disk and still get joined.</p>
       <div class="code-panel">
-        <div class="code-panel__tab">Frontend + backend</div>
-        <pre class="code-block"><code>const result = JSON.parse(zzop.analyzeTrees(JSON.stringify({
-  trees: [
-    { root: '../frontend', sourceId: 'web' },
-    { root: '../backend', sourceId: 'api' },
-  ],
-})));</code></pre>
+        <div class="code-panel__tab">Cross-repo — direct zzop-facade (Rust)</div>
+        <pre class="code-block"><code>let config = serde_json::json!({
+  "trees": [
+    { "root": "../frontend", "sourceId": "web" },
+    { "root": "../backend",  "sourceId": "api" },
+  ]
+}).to_string();
+let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_trees_json(&amp;config)?)?;
+
+// Or from the CLI (trees tagged by directory name; use --config for custom sourceIds / topology):
+// zzop-mcp cross ../frontend ../backend</code></pre>
       </div>
       <p>The result shape is <code>{ trees: [{ root, sourceId, output }], crossLayer, crossLayerFindings, disclosure }</code>. Each tree's <code>output</code> carries its own <code>coverage</code> census; <code>disclosure</code> (the silent-failure-class registry) is run-global and appears once. <code>crossLayer</code> carries the raw join result — matched <code>edges</code>, <code>unconsumedProvides</code>, <code>unprovidedConsumes</code>, <code>unresolvedConsumes</code>, <code>ambiguousConsumes</code> multi-tree matches, and <code>externalConsumes</code> (absolute-URL) consumes. When any tree declares topology <code>hosts</code>, <code>crossLayer</code> also carries <code>hostRekeyCounts</code> — one <code>[host, rekeyedConsumeCount]</code> pair per declared host, omitted entirely when no tree declares any hosts. <code>crossLayerFindings</code> is the output of the <code>cross-layer/*</code> native rules that run over that join (see the rule catalog for the full id list). No single tree owns a cross-layer finding, so disabling one of these rule ids via <code>disabledRules</code> on <em>any one</em> tree drops it from the combined array for every tree — a union, not a per-tree gate. A tree whose <code>coverage.joinContributionZero</code> is <code>true</code> contributed no IO to this join — discount any cross-layer finding that references it.</p>
     </section>
@@ -169,8 +175,11 @@ const result = JSON.parse(
             <tr><td><code>seams</code></td><td>object[]</td><td>Folders that are good first-extraction candidates (low boundary-crossing coupling).</td></tr>
             <tr><td><code>folders</code></td><td>object</td><td>Folder-granularity rollup of <code>nodes</code> and the dependency graph. Not gated by git — always present, even for an empty tree.</td></tr>
             <tr><td><code>layerCoChurn</code></td><td>object[] | null</td><td>Cross-layer commit co-churn pairs. <code>null</code> unless <code>git</code> is set; <code>[]</code> (not <code>null</code>) when git is active but no pair meets the co-change threshold.</td></tr>
-            <tr><td><code>packsLoaded</code></td><td>{ id, rules, source }[]</td><td>Positive pack-load confirmation: one entry per loaded DSL pack, sorted by <code>id</code>, with its rule count and provenance (<code>source</code>: <code>"dir"</code> = read from a <code>packsDir</code> directory, <code>"inline"</code> = <code>packDefs</code>). Always present — <code>[]</code> is the honest "zero DSL packs loaded" state. Verifies a custom pack actually loaded without inferring it from findings deltas.</td></tr>
+            <tr><td><code>gitWindow</code></td><td>{ recentDays, since } | null</td><td>Echoes the resolved git-history window — always serialized; <code>null</code> is the "git didn't run" signal (same gating as <code>scores</code>). <code>recentDays</code> is the resolved number (the caller's value, or the <code>30</code> default); <code>since</code> is the caller's raw filter string, or <code>null</code> for full history.</td></tr>
+            <tr><td><code>packsLoaded</code></td><td>{ id, rules, source, filesInScope }[]</td><td>Positive pack-load confirmation: one entry per loaded DSL pack, sorted by <code>id</code>, with its rule count and provenance (<code>source</code>: <code>"dir"</code> = read from a <code>packsDir</code> directory, <code>"inline"</code> = <code>packDefs</code>). <code>filesInScope</code> counts the files a pack's rules are path-eligible to scan (<code>file_pattern</code> candidacy, before any content check) — pair <code>filesInScope &gt; 0</code> with zero findings to read "ran, found nothing" versus <code>filesInScope: 0</code> "nothing in scope." Always present — <code>[]</code> is the honest "zero DSL packs loaded" state. Verifies a custom pack actually loaded without inferring it from findings deltas.</td></tr>
+            <tr><td><code>ruleOverridesApplied</code></td><td>{ disabled, severityRemapped }</td><td>Positive confirmation that <code>disabledRules</code>/<code>severityOverrides</code> were applied, listing the affected rule ids. Omitted (or empty) when neither override was requested — treat an absent key as "no overrides," never <code>null</code>.</td></tr>
             <tr><td><code>warnings</code></td><td>string[]</td><td>Non-fatal issues plus capability self-report notes — see below.</td></tr>
+            <tr><td><code>configWarnings</code></td><td>string[]</td><td>Config-authoring problems computed at analysis time, kept OUT of <code>warnings</code>: a <code>disabledRules</code>/<code>severityOverrides</code> entry matching no known rule id is reported here (only analysis time has the full known-id set). Always present; <code>[]</code> means neither knob had a matching-nothing entry.</td></tr>
             <tr><td><code>cache</code></td><td>{ hits, misses } | null</td><td>Set only when <code>cacheDir</code> was given.</td></tr>
             <tr><td><code>ruleTimings</code></td><td>object[] | null</td><td>Per-rule id + elapsed time + finding count, when profiling is enabled. <code>AnalyzeRequest</code> does not currently expose a field to request profiling, so this is <code>null</code> in every <code>analyze</code>/<code>analyzeTrees</code>/<code>analyzeEnvelope</code> call today.</td></tr>
             <tr><td><code>disclosure</code></td><td>object[]</td><td>Run-global silent-failure-class registry — zzop's honest list of which classes of blindness it does and does not yet detect. Static and identical every run; on a multi-tree <code>analyzeTrees</code> call it sits once beside <code>trees</code>, never per tree. See below.</td></tr>
@@ -226,18 +235,7 @@ const result = JSON.parse(
     <section id="errors">
       <span class="eyebrow eyebrow--sm">Panic safety</span>
       <h2>The process never crashes</h2>
-      <p>Two layers. The pure layer, <code>crates/facade/src/lib.rs</code> (crate <code>zzop-facade</code>), never panics by contract — every fallible path (malformed JSON, a missing <code>root</code>, an invalid envelope) returns a <code>Result&lt;String, String&gt;</code>. <code>addon.rs</code> wraps each fallible call in a second, outer safety net:</p>
-      <div class="code-panel">
-        <div class="code-panel__tab">addon.rs — outer safety net</div>
-        <pre class="code-block"><code>fn catch&lt;F: FnOnce() -&gt; Result&lt;String, String&gt; + UnwindSafe&gt;(f: F) -&gt; napi::Result&lt;String&gt; {
-    match std::panic::catch_unwind(f) {
-        Ok(Ok(json)) =&gt; Ok(json),
-        Ok(Err(message)) =&gt; Err(Error::from_reason(message)),
-        Err(_) =&gt; Err(Error::from_reason("zzop-napi: internal panic (this is a bug — please report it)")),
-    }
-}</code></pre>
-      </div>
-      <p>This exists because unwinding across a <code>#[napi]</code>-exported boundary is undefined behavior and must never happen — the engine already isolates a single file's parse/rule failure internally, well before this outer net is ever needed. In practice a JS caller sees either a resolved value or a rejected/thrown <code>Error</code>, never a process crash. <code>version</code> has no <code>Result</code> and no <code>catch</code> wrapper — it cannot fail.</p>
+      <p><code>crates/facade/src/lib.rs</code> (crate <code>zzop-facade</code>) never panics by contract — every fallible path (malformed JSON, a missing <code>root</code>, an invalid envelope) returns a <code>Result&lt;String, String&gt;</code> instead. The engine already isolates a single file's parse/rule failure internally, well before it would ever reach that outer boundary. A direct Rust caller sees either <code>Ok(String)</code> or <code>Err(String)</code>, never a process abort; the <code>zzop-mcp</code> binary calls these functions with no FFI boundary in between, so there is no separate addon-side <code>catch_unwind</code> layer to reason about — the facade's own contract is the whole story. <code>version_string</code> has no <code>Result</code> at all — it cannot fail.</p>
     </section>
 
   </main>

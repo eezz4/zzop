@@ -140,6 +140,20 @@ pub(crate) fn framework_route_patterns() -> &'static [Regex] {
         [
             r"(^|/)(page|layout|loading|error|global-error|not-found|template|default|route)\.(ts|tsx)$",
             r"(^|/)(sitemap|robots|manifest|opengraph-image|twitter-image|icon|apple-icon)\.(ts|tsx)$",
+            // SvelteKit route/hook convention files — `load`/`actions` (in `+page(.server)`/
+            // `+layout(.server)`), `handle`/`handleError`/`handleFetch` (in `hooks.{server,client}`), and
+            // `GET`/`POST`/… (in `+server`) are invoked by SvelteKit by EXACT name via its file-based
+            // routing + hooks contract, never through an in-repo import — so the import graph shows zero
+            // importers and they read as dead/unreachable. Whole-file exemption, same as the Next.js App
+            // Router files above (dogfood fe-svelte: these were 20/26 dead-export + ~13 dead-candidate FPs).
+            // `.js` and `.ts` both, since SvelteKit projects use either.
+            r"(^|/)\+(page|layout)(\.server)?\.(js|ts)$",
+            r"(^|/)\+server\.(js|ts)$",
+            // `.server`/`.client` REQUIRED — a bare `hooks.ts`/`hooks.js` is an extremely common React
+            // hooks-barrel filename that is NOT a framework entry, so exempting it would hide real dead
+            // exports. SvelteKit's universal `src/hooks.ts` (rare vs `hooks.server`/`hooks.client`) is the
+            // accepted miss.
+            r"(^|/)hooks\.(server|client)\.(js|ts)$",
         ]
         .iter()
         .map(|p| Regex::new(p).unwrap())
@@ -158,6 +172,21 @@ fn tool_entry_patterns() -> &'static [Regex] {
             r"(^|/)\.(eslintrc|prettierrc|babelrc|stylelintrc)(\.[^/]+)?$",
             // Ambient TypeScript declarations — type-only, consumed by tsc without an import edge.
             r"\.d\.ts$",
+            // Test-runner setup entries loaded via a config field (`setupFiles`/`globalSetup` in
+            // vitest/jest/playwright config), not imported by app code — so `fan_in == 0` is expected.
+            // Matched by conventional filename since they can live anywhere (`src/setup-tests.ts`,
+            // `src/test-setup.ts`, `vitest.setup.ts`, `jest.setup.ts`, a Playwright `global.setup.ts`).
+            r"(^|/)(vitest|jest)\.setup\.(js|ts|mjs|cjs|mts|cts)$",
+            r"(^|/)setup-tests?\.(js|ts|mjs|cjs|mts|cts)$",
+            r"(^|/)setupTests\.(js|ts|mjs|cjs|mts|cts)$",
+            r"(^|/)test-setup\.(js|ts|mjs|cjs|mts|cts)$",
+            r"(^|/)global\.(setup|teardown)\.(js|ts|mjs|cjs|mts|cts)$",
+            // Jest preset config (`jest.preset.js`, an Nx/monorepo convention) — consumed by jest's own
+            // config resolver via the `preset` field, never imported.
+            r"(^|/)jest\.preset\.(js|ts|mjs|cjs)$",
+            // Prisma seed script at its conventional location — run by the Prisma CLI (`prisma db seed`,
+            // wired via the package.json `prisma.seed` field), never imported by app code.
+            r"(^|/)prisma/seed\.(js|ts|mjs|cjs|mts|cts)$",
         ]
         .iter()
         .map(|p| Regex::new(p).unwrap())

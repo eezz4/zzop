@@ -33,6 +33,43 @@ fn skip_take_pagination_with_orderby_in_same_function_is_not_flagged() {
 }
 
 #[test]
+fn skip_take_pagination_with_an_empty_orderby_object_is_flagged() {
+    // `orderBy: {}` is an EMPTY sort spec — Prisma applies no ordering, so pagination is just as
+    // unstable as with no `orderBy` at all. The empty-object carve-out (mirroring update-delete-no-where)
+    // means the bare `orderBy:` token must NOT veto when its value is `{}`.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function listUsers(page: number) {\n  return prisma.user.findMany({ skip: page * 20, take: 20, orderBy: {} });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "pagination-no-orderby");
+    assert_eq!(
+        h.len(),
+        1,
+        "empty `orderBy: {{}}` must still flag: {:?}",
+        out.findings
+    );
+    assert_eq!(h[0].line, 3);
+}
+
+#[test]
+fn skip_take_pagination_with_a_dynamic_orderby_variable_is_not_flagged() {
+    // `orderBy: sortSpec` (a computed sort object) is a real ordering — veto, don't flag.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function listUsers(page: number, sortSpec: any) {\n  return prisma.user.findMany({ skip: page * 20, take: 20, orderBy: sortSpec });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "pagination-no-orderby").is_empty(),
+        "a dynamic `orderBy: var` must not be flagged: {:?}",
+        out.findings
+    );
+}
+
+#[test]
 fn comment_mentioning_the_word_skip_with_a_colon_is_not_flagged() {
     // A comment documenting a `skip:` parameter can satisfy the `pagination` pattern's `\bskip\s*:` shape even with no real pagination call in the function.
     let dir = TempDir::new("zzop-be-db");

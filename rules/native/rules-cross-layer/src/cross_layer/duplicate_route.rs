@@ -27,7 +27,15 @@ pub fn cross_layer_duplicate_route_findings(cross_layer: &CrossLayerResult) -> V
     for p in cross_layer
         .unconsumed_provides
         .iter()
-        .filter(|p| p.provide.kind == "http" && !zzop_core::is_test_file(&p.provide.file))
+        // A verb-unknown route (`UNKNOWN_VERB` sentinel `"? <path>"`) is never a "duplicate route"
+        // candidate — its method is unknown, so comparing sentinel keys across trees is meaningless, and
+        // its `"? <path>"` key must never surface in a finding message. It is disclosed via
+        // `cross-layer/unknown-verb-route` instead.
+        .filter(|p| {
+            p.provide.kind == "http"
+                && zzop_core::unknown_verb_route_path(&p.provide.key).is_none()
+                && !zzop_core::is_test_file(&p.provide.file)
+        })
     {
         by_key.entry(p.provide.key.clone()).or_default().push((
             p.source.clone(),
@@ -130,6 +138,22 @@ mod tests {
         assert!(out[0].message.contains("svc-a"));
         assert!(out[0].message.contains("svc-b"));
         assert!(out[0].message.contains("disabled_rules"));
+    }
+
+    #[test]
+    fn two_verb_unknown_sentinels_at_the_same_path_are_not_a_duplicate_route() {
+        // A verb-unknown sentinel (`"? <path>"`) is never a duplicate-route candidate — its method is
+        // unknown, so its key must never be grouped or surfaced in a finding message (it is disclosed via
+        // `cross-layer/unknown-verb-route` instead). Two serve-all handlers at the same path across trees
+        // must NOT produce a `? /api/foo` duplicate-route warning (opus review F1 regression pin).
+        let cl = CrossLayerResult {
+            unconsumed_provides: vec![
+                dead("? /api/foo", "svc-a", "a/pages/api/foo.ts", 1),
+                dead("? /api/foo", "svc-b", "b/foo.go", 1),
+            ],
+            ..Default::default()
+        };
+        assert!(cross_layer_duplicate_route_findings(&cl).is_empty());
     }
 
     #[test]

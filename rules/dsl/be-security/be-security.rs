@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use zzop_core::{load_dsl_packs, RulePackDef};
 use zzop_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
 
-/// A self-cleaning temp directory (std-only mkdtemp equivalent — same pattern as `sql/sql.rs`).
+/// A self-cleaning temp directory (std-only mkdtemp equivalent).
 struct TempDir(PathBuf);
 
 impl TempDir {

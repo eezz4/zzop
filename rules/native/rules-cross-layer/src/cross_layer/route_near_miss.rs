@@ -206,7 +206,10 @@ pub fn route_near_miss_results(
             "consume `{method} {path}` (source `{}`) has no exact provider, but `{}` provides `{}` at \
              {}:{}{extra_note} — {dimension_detail}. This could be genuine route drift (align the call path \
              with the served route, or vice versa), or two unrelated routes that happen to be one dimension \
-             apart — verify manually before treating this as drift. The consume-side method and path reflect \
+             apart — verify manually before treating this as drift. A prefix difference in particular can be \
+             deployment topology the source does not carry — a gateway/ingress mount prefix or a config-file \
+             path rewrite zzop does not read; inject it via `mounts`/`mountedAt`/`hosts` if so. The \
+             consume-side method and path reflect \
              what static extraction read at the call site; a helper/wrapper around the call can make them \
              differ from the runtime request. {} if one-dimension-apart-but-unrelated routes are common in \
              your stack.",

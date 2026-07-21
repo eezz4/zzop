@@ -119,8 +119,7 @@ impl std::ops::Deref for AnalysisDiagnostics {
     }
 }
 
-/// Renders a count with the correctly-pluralized noun ("1 entry" / "2 entries") — replaces the old
-/// "N entry/entries" double-word form, which rendered literally (unresolved) in user-facing warning text.
+/// Pluralizes a count ('1 entry' / 'N entries').
 fn entry_count(n: usize) -> String {
     if n == 1 {
         "1 entry".to_string()

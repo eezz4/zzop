@@ -1,8 +1,9 @@
-//! The 23 `cross-layer/*` native rules run over one `analyze_trees` join — see
+//! The 24 `cross-layer/*` native rules run over one `analyze_trees` join — see
 //! `compute_cross_layer_findings`'s doc for the gating/derivation/sort contract.
 
 mod blindness_caveat;
 mod merge_config;
+mod partition;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -11,7 +12,7 @@ use zzop_core::{ConsumeBodyShape, Finding, ProvideBodyShape, SourceIo};
 
 use crate::EngineConfig;
 
-/// Runs the 23 `cross-layer/*` native rules (`zzop_rules_cross_layer::cross_layer`) over `cross_layer` and
+/// Runs the 24 `cross-layer/*` native rules (`zzop_rules_cross_layer::cross_layer`) over `cross_layer` and
 /// returns their merged, sorted findings.
 ///
 /// ## disabledRules gating and severity overrides
@@ -44,20 +45,16 @@ pub(crate) fn compute_cross_layer_findings(
 
     let extraction_blindness_caveat = blindness_caveat::build(source_ios);
 
-    let http_provides: Vec<zzop_rules_cross_layer::HttpProvideSite> = source_ios
-        .iter()
-        .flat_map(|s| {
-            s.io.provides
-                .iter()
-                .filter(|p| p.kind == "http")
-                .map(move |p| zzop_rules_cross_layer::HttpProvideSite {
-                    source: s.source.clone(),
-                    key: p.key.clone(),
-                    file: p.file.clone(),
-                    line: p.line,
-                })
-        })
-        .collect();
+    // Verb-unknown routes (`UNKNOWN_VERB` sentinel provides from a `pages/api` serve-all handler / pathname-dispatch / Go
+    // `HandleFunc` naming no method): lifted OUT of the exact-key join into a path-level served-set — `http_provides` drops them
+    // (never a dead route), `unprovided_filtered` drops consumes they serve (no FP), and they surface via `cross-layer/unknown-verb-route`.
+    let verb_unknown_sites = partition::verb_unknown_sites(source_ios);
+    let verb_unknown_paths = partition::served_path_set(&verb_unknown_sites);
+    let unprovided_filtered =
+        partition::without_verb_unknown(&cross_layer.unprovided_consumes, &verb_unknown_paths);
+    let unconsumed_provides =
+        partition::without_verb_unknown_provides(&cross_layer.unconsumed_provides);
+    let http_provides = partition::http_provide_sites(source_ios);
 
     let http_consume_totals: Vec<(String, usize)> = source_ios
         .iter()
@@ -67,13 +64,11 @@ pub(crate) fn compute_cross_layer_findings(
         })
         .collect();
 
-    // `cross-layer/body-field-drift`'s lookup maps — keyed exactly like `HttpProvideSite`/edge anchors
-    // are derived, `(source, file, line)`, so a rule can join an edge's `from`/`to` straight into these
-    // without re-deriving anything. Only entries whose `body` is `Some` are worth keeping (an edge whose
-    // consume/provide never witnessed a body shape can never drift-compare). On a duplicate key, the
-    // FIRST occurrence wins for consumes (same call site => same witnessed body, so any duplicate is
-    // spurious re-collection, never a real second body); a duplicate provide key is likewise first-wins
-    // (same handler declaration site).
+    // `cross-layer/body-field-drift`'s lookup maps — keyed exactly like `HttpProvideSite`/edge anchors are derived, `(source, file,
+    // line)`, so a rule can join an edge's `from`/`to` straight into these without re-deriving anything. Only entries whose `body`
+    // is `Some` are worth keeping (an edge whose consume/provide never witnessed a body shape can never drift-compare). On a
+    // duplicate key, the FIRST occurrence wins for consumes (same call site => same witnessed body, so any duplicate is spurious
+    // re-collection, never a real second body); a duplicate provide key is likewise first-wins (same handler declaration site).
     let mut consume_bodies: BTreeMap<(String, String, u32), ConsumeBodyShape> = BTreeMap::new();
     let mut provide_bodies: BTreeMap<(String, String, u32), ProvideBodyShape> = BTreeMap::new();
     for s in source_ios {
@@ -93,18 +88,23 @@ pub(crate) fn compute_cross_layer_findings(
         }
     }
 
-    let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(23);
+    let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(24);
 
-    // `route_near_miss_results` is called ONCE here (ahead of its own position in `sources` order below) so
-    // both `unconsumed-endpoint` and `unconsumed-mutation-endpoint` can annotate a provide that is also a
-    // near-miss target — see `zzop_rules_cross_layer::route_near_miss`'s module doc. Disabled ->
-    // `near_miss_targets` stays empty (there is no near-miss finding to point at, so no annotation), and the
-    // findings themselves are still only pushed into `sources` at their original position, under the same
-    // `is_enabled` gate as before.
+    if zzop_core::is_enabled(&gate, "cross-layer/unknown-verb-route") {
+        sources.push(zzop_rules_cross_layer::unknown_verb_route_findings(
+            &partition::disclosure_sites(&verb_unknown_sites, trpc_participating_sources),
+        ));
+    }
+
+    // `route_near_miss_results` is called ONCE here (ahead of its own position in `sources` order below) so both
+    // `unconsumed-endpoint` and `unconsumed-mutation-endpoint` can annotate a provide that is also a near-miss target — see
+    // `zzop_rules_cross_layer::route_near_miss`'s module doc. Disabled -> `near_miss_targets` stays empty (there is no near-miss
+    // finding to point at, so no annotation), and the findings themselves are still only pushed into `sources` at their original
+    // position, under the same `is_enabled` gate as before.
     let route_near_miss_result = if zzop_core::is_enabled(&gate, "cross-layer/route-near-miss") {
         Some(
             zzop_rules_cross_layer::cross_layer::route_near_miss::route_near_miss_results(
-                &cross_layer.unprovided_consumes,
+                &unprovided_filtered,
                 &http_provides,
             ),
         )
@@ -118,7 +118,7 @@ pub(crate) fn compute_cross_layer_findings(
 
     if zzop_core::is_enabled(&gate, "cross-layer/unconsumed-endpoint") {
         let mut findings = zzop_rules_cross_layer::unconsumed_endpoint_findings(
-            &cross_layer.unconsumed_provides,
+            &unconsumed_provides,
             &cross_layer.unresolved_consumes,
             &near_miss_targets,
             trpc_participating_sources,
@@ -128,19 +128,19 @@ pub(crate) fn compute_cross_layer_findings(
     }
     if zzop_core::is_enabled(&gate, "cross-layer/method-mismatch") {
         sources.push(zzop_rules_cross_layer::method_mismatch_findings(
-            &cross_layer.unprovided_consumes,
+            &unprovided_filtered,
             &http_provides,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/version-skew") {
         sources.push(zzop_rules_cross_layer::version_skew_findings(
-            &cross_layer.unprovided_consumes,
+            &unprovided_filtered,
             &http_provides,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/path-near-miss") {
         sources.push(zzop_rules_cross_layer::path_near_miss_findings(
-            &cross_layer.unprovided_consumes,
+            &unprovided_filtered,
             &http_provides,
         ));
     }
@@ -228,7 +228,7 @@ pub(crate) fn compute_cross_layer_findings(
             &http_consume_totals,
         );
         let mut findings = zzop_rules_cross_layer::unconsumed_mutation_endpoint_findings(
-            &cross_layer.unconsumed_provides,
+            &unconsumed_provides,
             &cross_layer.unresolved_consumes,
             &blind_sources,
             &near_miss_targets,
@@ -257,7 +257,7 @@ pub(crate) fn compute_cross_layer_findings(
         let provide_blind_sources =
             crate::framework_silence::provide_blind_sources(package_imports, &http_provide_counts);
         sources.push(zzop_rules_cross_layer::unprovided_mutation_call_findings(
-            &cross_layer.unprovided_consumes,
+            &unprovided_filtered,
             &provide_blind_sources,
         ));
     }
@@ -282,7 +282,7 @@ pub(crate) fn compute_cross_layer_findings(
     }
     if zzop_core::is_enabled(&gate, "cross-layer/unconsumed-procedure") {
         sources.push(zzop_rules_cross_layer::unconsumed_procedure_findings(
-            &cross_layer.unconsumed_provides,
+            &unconsumed_provides,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/body-field-drift") {

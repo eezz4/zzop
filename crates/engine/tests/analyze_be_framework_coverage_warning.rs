@@ -504,6 +504,39 @@ fn axios_import_with_zero_extracted_consumes_fires_the_s4_warning() {
     );
 }
 
+/// Test-surface-only http-client import: axios is imported and called, but the SOLE importing file is a
+/// `*.spec.ts` under `e2e/`. A test-only import is not deployed egress surface, so it must not feed the
+/// S4 census (`stage_package_import_candidate`'s `is_test_file` drain) — otherwise a tree whose only axios
+/// use is an e2e harness pinging the server root false-fires the tripwire (dogfood: corpus `be-express`).
+fn axios_import_only_in_a_test_file_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-coverage-axios-test-only");
+    dir.write(
+        "e2e/server.spec.ts",
+        concat!(
+            "import axios from 'axios';\n\n",
+            "it('pings the root', async () => {\n",
+            "  const res = await axios.get('/');\n",
+            "  expect(res.status).toBe(200);\n",
+            "});\n",
+        ),
+    );
+    dir
+}
+
+#[test]
+fn axios_import_only_in_a_test_file_does_not_fire_the_s4_warning() {
+    let dir = axios_import_only_in_a_test_file_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains(S4_WARNING_SUBSTRING)),
+        "a test-only axios import is not deployed egress surface and must not trip S4, got: {:?}",
+        out.warnings
+    );
+}
+
 #[test]
 fn angular_http_client_import_with_near_zero_extracted_consumes_fires_the_s4_warning() {
     let dir = angular_http_client_near_zero_consumes_tree();

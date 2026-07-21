@@ -1,5 +1,5 @@
-//! Small, self-contained JSON-view mirrors of engine output types — split out of `output.rs` once it
-//! crossed the 300-line source cap. Every type here mirrors ONE engine type field-for-field (a plain
+//! Small, self-contained JSON-view mirrors of engine output types. Every type here mirrors ONE engine
+//! type field-for-field (a plain
 //! `From` conversion, no cross-type composition); the composed views (`AnalyzeOutputView` and friends)
 //! stay in `output.rs` itself, which is where the composition logic — and the casing contract doc —
 //! belongs.

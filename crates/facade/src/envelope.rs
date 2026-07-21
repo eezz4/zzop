@@ -17,15 +17,14 @@ use crate::request::{EnvelopeAnalyzeRequest, PacksDir};
 /// `AnalyzeOutputView`-serialized shape as `analyze_json`/`analyze_trees_json`.
 ///
 /// ## Bundled-pack default (the one facade-level default in this crate)
-/// The tree entry points (`analyze`/`analyzeTrees`) get their bundled-pack default from a HOST layer —
-/// the JS wrapper's `withDefaults` (`packages/native/index.js`, a `packsDir` prepend) or `zzop-config`'s
+/// The tree entry points (`analyze`/`analyzeTrees`) get their bundled-pack default from `zzop-config`'s
 /// mapper (inline `packDefs`). The envelope path has no host config front-end on the Rust side at all,
 /// so the same "zero-config = full analysis" default is applied HERE, once, for every host: the bundled
 /// packs (`zzop_config::BUNDLED_PACK_SOURCES`) are seeded as inline `packDefs` BEFORE any
 /// caller-supplied `packDefs`/`packsDir`, so the existing collision rules are untouched — a caller pack
 /// with a bundled id wins the collision whole (later inline def wins; a directory pack always wins).
-/// An explicit `"packsDir": null` opts out of every DSL pack, bundled included (the JS wrapper's
-/// documented opt-out, preserved by `EnvelopeAnalyzeRequest::packs_dir`'s absent-vs-null distinction).
+/// An explicit `"packsDir": null` opts out of every DSL pack, bundled included (the documented
+/// opt-out, preserved by `EnvelopeAnalyzeRequest::packs_dir`'s absent-vs-null distinction).
 /// Only `symbol-scan`/`io-scan` rules can fire in envelope mode (no source text — see
 /// `zzop_engine::envelope`), so a bundled pack with neither contributes `packsLoaded` provenance
 /// (`source: "inline"`) but no findings.
@@ -108,7 +107,7 @@ pub(crate) struct ValidateReport {
 /// pack loading, no `zzop_engine::analyze_envelope` — and reports the result as a JSON `{"valid": bool,
 /// "issues": ["..."]}`. This is `analyze_envelope_json`'s validation half (see its use of
 /// `zzop_core::validate_envelope` above) split out on its own so an external adapter author gets fast,
-/// offline "is my envelope well-formed" feedback (`zzop adapter validate <path>`) without needing a full
+/// offline "is my envelope well-formed" feedback (`zzop-mcp validate-envelope <path>`) without needing a full
 /// engine run or even a `configJson` at all.
 ///
 /// Unlike every other `*_json` function in this crate, this one never fails: an unparseable or

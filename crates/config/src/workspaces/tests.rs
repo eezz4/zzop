@@ -1,5 +1,4 @@
-//! Tests for `trees: "auto"` workspace expansion — pure move of the former inline `mod tests` in
-//! `workspaces.rs` (test files are exempt from the 300-line source cap).
+//! Tests for `trees: "auto"` workspace expansion.
 
 use super::*;
 use crate::test_support::TempDir;

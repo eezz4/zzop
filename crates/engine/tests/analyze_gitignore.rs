@@ -207,10 +207,10 @@ fn default_skip_dirs_are_still_skipped_without_any_gitignore() {
 
 // --- 4b. self-scan pollution: zzop's OWN default report/cache output dirs must not be rescanned ---
 //
-// The JS CLI writes reports into `<repo>/zzop-reports/` and defaults `cacheDir` to `.zzop-cache` in its
-// `zzop init` template (both, by default, land INSIDE the analyzed tree) — without a default exclusion the
-// NEXT analysis walks a prior run's own output as source, growing the file count every run (observed live
-// in a blind field test). `DEFAULT_SKIP_DIRS` (`dispatch.rs`) must exclude both by name.
+// The removed JS CLI wrote reports into `<repo>/zzop-reports/` and defaulted `cacheDir` to `.zzop-cache`
+// (both, by default, INSIDE the analyzed tree) — without a default exclusion the NEXT analysis walks a
+// prior run's own output as source, growing the file count every run (observed live in a blind field
+// test). `DEFAULT_SKIP_DIRS` (`dispatch.rs`) must exclude both by name.
 
 #[test]
 fn zzops_own_report_and_cache_dirs_are_not_rescanned_as_source() {

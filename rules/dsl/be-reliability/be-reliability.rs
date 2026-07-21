@@ -21,7 +21,7 @@ mod server_hygiene;
 mod suppression;
 mod writes_and_parsing;
 
-/// A self-cleaning temp directory (std-only mkdtemp equivalent — copied verbatim from `sql/sql.rs`).
+/// A self-cleaning temp directory (std-only mkdtemp equivalent).
 struct TempDir(PathBuf);
 
 impl TempDir {

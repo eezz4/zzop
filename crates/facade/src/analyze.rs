@@ -43,8 +43,8 @@ fn apply_source_id_default(req: &mut AnalyzeRequest) {
     }
 }
 
-/// Shared root-shape gate — the ONE chokepoint every host (the `zzop-mcp` binary's CLI/MCP surface,
-/// the napi native addon) funnels through via `analyze_json`/`analyze_trees_json`, so both get the
+/// Shared root-shape gate — the ONE chokepoint the host (the `zzop-mcp` binary's CLI/MCP surface)
+/// funnels through via `analyze_json`/`analyze_trees_json`, so every entry gets the
 /// same error for the same mistake. A root that names an EXISTING file (not a directory) used to fall
 /// straight through to `zzop_engine::analyze_tree`'s walk, which treats a file path exactly like an
 /// empty directory: the walk yields that one file as its sole entry, so the output was
@@ -71,7 +71,8 @@ fn reject_non_directory_root(root: &Path) -> Result<(), String> {
 /// `analyze(configJson)`: deserializes `configJson` into an `AnalyzeRequest`, builds
 /// an `EngineConfig` (loading DSL packs from `packs_dir` via `zzop_core::load_dsl_packs` when given), runs
 /// `zzop_engine::analyze_tree`, and serializes the result. Every failure mode (bad JSON, a pack directory
-/// that doesn't exist) returns `Err(message)` — never a panic; `addon.rs` maps `Err` to a napi `Error`.
+/// that doesn't exist) returns `Err(message)` — never a panic; the host maps `Err` to its own error
+/// channel (the MCP `isError` reply / a nonzero CLI exit).
 pub fn analyze_json(config_json: &str) -> Result<String, String> {
     let mut req: AnalyzeRequest = serde_json::from_str(config_json)
         .map_err(|e| format!("zzop-facade: invalid analyze() config JSON: {e}"))?;

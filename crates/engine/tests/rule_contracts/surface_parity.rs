@@ -29,8 +29,7 @@
 //! requests an override, so its pinned key-set literal does not include `ruleOverridesApplied` either, and
 //! neither does this registry/test. `ruleOverridesApplied` is consequently NOT covered by this parity
 //! contract today — a real gap in the pragmatic route's completeness, not a claim that the field doesn't
-//! exist or doesn't matter (it is forwarded by both the MCP lane and the JS CLI render, per those sources'
-//! own doc comments).
+//! exist or doesn't matter (it is forwarded by the MCP lane, per that source's own doc comments).
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -192,7 +191,11 @@ fn row_status<'a>(row: &'a serde_json::Value, surface: &str) -> Option<&'a str> 
     row.get(surface).and_then(|v| v.as_str())
 }
 
-const SURFACES: [&str; 3] = ["mcpAnalyzeReply", "jsCliRender", "mdReport"];
+// Only one delivery surface remains: the MCP `analyze_repo`/`cross_repo` reply, which is the same
+// shaped summary the `zzop-mcp analyze`/`cross` CLI subcommands print. The JS CLI's two render
+// surfaces (`jsCliRender`/`mdReport`) were removed with the npm distribution 2026-07-20 — see the
+// registry's own `_doc` historical note.
+const SURFACES: [&str; 1] = ["mcpAnalyzeReply"];
 
 #[test]
 fn every_omit_or_conditional_row_carries_a_non_empty_note() {

@@ -25,25 +25,29 @@ fn internal_path_with_no_role_check_handler_is_flagged() {
 }
 
 #[test]
-fn dev_path_with_no_role_check_handler_is_flagged() {
+fn dev_path_is_not_an_auth_gates_concern() {
+    // `/dev/` is an ENV-exposure axis (does dev tooling leak to prod?), owned by `route-exposure` —
+    // authorization (who may call) is a different question, so auth-gates deliberately does not inspect it.
     let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
-        "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/dev/config\", api.devConfig);\n",
+        "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/dev/config\", api.plainConfig);\n",
     );
     let out = scan(&dir);
-    assert_eq!(hits(&out, "auth-gates").len(), 1, "{:?}", out.findings);
+    assert!(hits(&out, "auth-gates").is_empty(), "{:?}", out.findings);
 }
 
 #[test]
 fn multiple_protected_paths_all_missing_auth_are_all_flagged() {
+    // Only the authorization-axis segments (`/admin/`, `/internal/`) are auth-gates' concern — the
+    // `/dev/` route is `route-exposure`'s, so exactly two of the three fire here.
     let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/admin/items\", api.itemList);\napiRoutes.delete(\"/api/internal/cache\", api.clearCache);\napiRoutes.get(\"/api/dev/flags\", api.featureFlags);\n",
     );
     let out = scan(&dir);
-    assert_eq!(hits(&out, "auth-gates").len(), 3, "{:?}", out.findings);
+    assert_eq!(hits(&out, "auth-gates").len(), 2, "{:?}", out.findings);
 }
 
 #[test]
@@ -113,26 +117,27 @@ fn ordinary_path_with_no_protected_segment_is_not_inspected() {
 }
 
 #[test]
-fn handler_identifier_containing_is_local_env_gate_hint_passes() {
-    // An env-scoped gate like `if (!CONFIG.isLocal()) return 403;` must not be flagged as missing auth — an environment check does gate the route.
+fn env_gate_alone_does_not_clear_an_admin_route() {
+    // An env check (`isLocal`/`NODE_ENV`) gates WHERE code runs, not WHO may call it — it is not
+    // authorization, so an `/admin/` route carrying only an env gate is still a missing-auth finding.
     let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
-        "declare const apiRoutes: any;\ndeclare const isLocalGuardedHandlers: any;\napiRoutes.get(\"/api/admin/users\", isLocalGuardedHandlers.userList);\n",
+        "declare const apiRoutes: any;\ndeclare const isLocalScopedHandlers: any;\napiRoutes.get(\"/api/admin/users\", isLocalScopedHandlers.userList);\n",
     );
     let out = scan(&dir);
-    assert!(hits(&out, "auth-gates").is_empty(), "{:?}", out.findings);
+    assert_eq!(hits(&out, "auth-gates").len(), 1, "{:?}", out.findings);
 }
 
 #[test]
-fn handler_identifier_containing_node_env_hint_passes() {
+fn node_env_gate_alone_does_not_clear_an_internal_route() {
     let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
-        "declare const apiRoutes: any;\ndeclare function nodeEnvGuard(h: any): any;\napiRoutes.post(\"/api/internal/metrics\", nodeEnvGuard(handlers));\n",
+        "declare const apiRoutes: any;\ndeclare function nodeEnvOnly(h: any): any;\napiRoutes.post(\"/api/internal/metrics\", nodeEnvOnly(handlers));\n",
     );
     let out = scan(&dir);
-    assert!(hits(&out, "auth-gates").is_empty(), "{:?}", out.findings);
+    assert_eq!(hits(&out, "auth-gates").len(), 1, "{:?}", out.findings);
 }
 
 #[test]

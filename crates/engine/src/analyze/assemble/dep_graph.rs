@@ -9,13 +9,16 @@ use zzop_metrics::{build_folder_aggregates, FolderAggregates, DEFAULT_FOLDER_DEP
 
 use crate::analyze::diagnostics::{collect_git, git_not_requested_warning, zero_packs_warning};
 use crate::analyze::native_rules::dep_stats_from_dep;
-use crate::pipeline::{GoModuleMap, JavaIndex, PackageJsonScan, RustWorkspaceMap};
+use crate::pipeline::{CSharpIndex, GoModuleMap, JavaIndex, PackageJsonScan, RustWorkspaceMap};
 use crate::EngineConfig;
 
+mod fan_in;
 mod merge;
 
+use fan_in::{merge_asset_ref_fan_in, merge_sfc_fan_in};
 use merge::{
-    merge_go_dep_edges, merge_java_dep_edges, merge_python_dep_edges, merge_rust_dep_edges,
+    merge_csharp_dep_edges, merge_go_dep_edges, merge_java_dep_edges, merge_python_dep_edges,
+    merge_rust_dep_edges,
 };
 
 pub(super) struct DepGraphResult {
@@ -25,6 +28,12 @@ pub(super) struct DepGraphResult {
     pub(super) folders: Option<FolderAggregates>,
     pub(super) commits: Vec<zzop_core::CommitFileSet>,
     pub(super) git_active: bool,
+    /// `.ts` targets imported by a `.vue`/`.svelte` SFC — seeded into `unreachable`'s `extra_entries`.
+    /// See `merge_sfc_fan_in`'s doc.
+    pub(super) sfc_targets: HashSet<String>,
+    /// Files targeted by a runtime asset-URL reference (worklet/worker/importScripts/`new URL`) — seeded
+    /// into `unreachable`'s `extra_entries` alongside `sfc_targets`. See `merge_asset_ref_fan_in`'s doc.
+    pub(super) asset_targets: HashSet<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -42,6 +51,9 @@ pub(super) fn build(
     rust_workspace: &RustWorkspaceMap,
     go_modules: &GoModuleMap,
     java_index: &JavaIndex,
+    csharp_index: &CSharpIndex,
+    sfc_import_pairs: &[(String, ImportMap)],
+    asset_ref_pairs: &[(String, Vec<String>)],
 ) -> DepGraphResult {
     // `type_only_edges` is the ephemeral noncycle-exclusion set (never cached/serialized — see
     // `circular_from_dep_excluding`'s doc): a pair present here is contributed ONLY by edges excludable
@@ -84,6 +96,14 @@ pub(super) fn build(
     // call site documents). `.java` joined the shared dep graph only in this batch — see
     // `pipeline::FileArtifact::imports`'s doc for the "`Language::Java21` now" update.
     merge_java_dep_edges(&mut dep, ts_import_pairs, java_index);
+    // C# dep-graph edges — an additive, separate post-hoc pass mirroring the Python/Rust/Go/Java quartet
+    // above exactly (deliberately NOT generalized together with any of them: `resolve_csharp_import` needs
+    // `csharp_index` and fans out to every file declaring a namespace, a shape close to but distinct from
+    // Java's own glob-only fanout — same "one `for` loop each, no forced-generic reuse" reasoning
+    // `merge_go_dep_edges`'s own call site documents). `.cs` joined the shared dep graph already at Stage
+    // 1 (`Language::CSharp` dispatch, `ts_slot` participation); this is the first pass that resolves its
+    // `using` bindings into real edges.
+    merge_csharp_dep_edges(&mut dep, ts_import_pairs, csharp_index);
     // Rust module cycles are structural, not architectural: cargo forbids cross-CRATE cycles outright,
     // and intra-crate parent<->child module edges (`mod x;` down + the child's `use super::`/`use
     // crate::...` back up) are idiomatic — rustc compiles a crate as one unit, so an all-`.rs` cycle
@@ -111,7 +131,28 @@ pub(super) fn build(
         .filter(|cycle| !cycle.iter().all(|f| f.ends_with(".rs")))
         .collect();
 
-    let dep_stats = dep_stats_from_dep(&dep);
+    let mut dep_stats = dep_stats_from_dep(&dep);
+    // `.vue`/`.svelte` SFC fan-in bump — see `merge_sfc_fan_in`'s own doc for why this must mutate
+    // `dep_stats.fan_in` alone rather than adding the `.vue`/`.svelte` file to `ts_import_pairs`/`dep`
+    // itself (the F3 pin: a `.vue`/`.svelte` `dep`-graph node with zero in-edges would become a NEW
+    // `dead-candidates` false positive).
+    let sfc_targets = merge_sfc_fan_in(
+        &mut dep_stats,
+        sfc_import_pairs,
+        ts_paths,
+        &pkg_scan.workspace_pkgs,
+        tsconfigs,
+    );
+    // Runtime asset-URL references (worklet/worker/importScripts/`new URL`) — same fan-in-bump-without-a-
+    // node shape as the SFC pass, resolving each captured string against `public/`/`static/` (or a
+    // relative module path); its returned targets seed `unreachable`'s `extra_entries`.
+    let asset_targets = merge_asset_ref_fan_in(
+        &mut dep_stats,
+        asset_ref_pairs,
+        ts_paths,
+        &pkg_scan.workspace_pkgs,
+        tsconfigs,
+    );
 
     // Git-history-dependent analyses. `None`/failed-collection both fall through to a default
     // (all-zero) `GitStats` and no commits — `nodes` still builds (dep-graph + LOC signal only) and
@@ -147,5 +188,7 @@ pub(super) fn build(
         folders,
         commits,
         git_active,
+        sfc_targets,
+        asset_targets,
     }
 }

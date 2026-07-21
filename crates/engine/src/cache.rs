@@ -78,6 +78,11 @@ use crate::{CacheStats, EngineConfig};
 /// file's axios call sites from the assemble-time `axios.defaults.baseURL` path-prefix seam on
 /// every warm run (client-scoped seams skip untagged consumes rather than guess).
 ///
+/// `v20` -> `v21`: oazapfts-generated-SDK recognition was REMOVED from HTTP egress (`oazapfts-removed-v1`
+/// — generated SDKs are injection adapters, not engine vocab). Fewer consumes are recognized and a
+/// trailing `QS.` interpolation now keys as an ordinary `{}` placeholder, so a stale entry's `io` no
+/// longer matches the current projection and must recompute.
+///
 /// `v21` -> `v22`: `FileIrSlice`'s `router_mount_fragments` gain the `express-middleware-v1` shape —
 /// `RouterMountEntry::Verb`/`Mount` each gain an `attr_keys: Vec<String>` field and the enum gains a
 /// new `ScopedAttr` variant. A stale entry defaulting `attr_keys` to empty (via `#[serde(default)]`)
@@ -114,42 +119,34 @@ use crate::{CacheStats, EngineConfig};
 /// any file whose content changes even slightly) gets the new hint, splitting one tree's findings between
 /// two message shapes depending on cache luck. The bump forces every existing entry to recompute once.
 ///
-/// `v26` -> `v27`: batch-wide cached-content changes (2026-07-17) — (1) the unknown-`disabledRules`/
-/// `severityOverrides`-id diagnostics moved from the `warnings` channel to the new `configWarnings`
-/// channel, (2) DSL rule message texts in `rules/dsl` were revised, and (3) `packsLoaded` entries
-/// gained the per-pack `filesInScope` count. Same invisible-staleness class as `v25` -> `v26`: an old
-/// entry still deserializes, but a warm run would serve pre-change message text forever, splitting one
-/// tree's output between two shapes depending on cache luck.
+/// `v26` -> `v27`: config-id diagnostics moved to the new `configWarnings` channel, DSL rule message texts revised, and `packsLoaded` gained the per-pack `filesInScope` count (invisible-staleness bump, see `v25` -> `v26`).
 ///
-/// `v27` -> `v28`: second blind-round-3 fix batch (2026-07-17) — (1) the unresolved-rule-id diagnostics'
-/// "N entry/entries" double-word form was replaced with correctly-pluralized text, (2) several
-/// `ir.io`-pointing disclosure texts gained a "where it's actually reachable" parenthetical, (3) the
-/// `cross-layer/unconsumed-endpoint`/`unconsumed-mutation-endpoint` findings gained an appended
-/// extraction-blindness caveat sentence when a sibling tree contributed zero joinable io, and (4) a new
-/// framework-silence tripwire (S6, `orm_schema_silence_warning`) can now fire a brand-new warning class
-/// that never existed in any older cache entry. Same invisible-staleness class as `v25` -> `v26`/`v26` ->
-/// `v27`: a warm run would otherwise serve pre-change text (or simply never emit the new S6 warning at
-/// all) forever for any unchanged file.
+/// `v27` -> `v28`: pluralized unresolved-rule-id text, "where it's actually reachable" parentheticals on `ir.io` disclosures, an extraction-blindness caveat appended to `cross-layer/unconsumed-(mutation-)endpoint` findings, and the new S6 `orm_schema_silence_warning` tripwire class (invisible-staleness bump, see `v25` -> `v26`).
 ///
-/// `v28` -> `v29`: blind-field-test fix batch W2 (2026-07-17) — (1) several DSL pack `file_pattern`s
-/// were narrowed to stop over-broad cross-language false-fires (a pack scope change can change which
-/// files a rule even considers, so a cached finding computed under the OLD broader scope may no
-/// longer be correct), and (2) `zzop-facade`'s pack-merge chokepoint now emits a new shadow-warning
-/// class when a same-id pack replaces an already-loaded one whole. Same invisible-staleness class as
-/// the prior bumps: a warm run would otherwise keep serving findings scoped/warned under the old
-/// rules forever for any unchanged file.
+/// `v28` -> `v29`: several DSL pack `file_pattern`s narrowed against over-broad cross-language false-fires, and a new same-id pack-shadow warning class from the facade pack-merge chokepoint (invisible-staleness bump, see `v25` -> `v26`).
 ///
-/// `v29` -> `v30`: blind-field-test fix batch W3-A (2026-07-17) — the overlay synthetic-entry warning
-/// text changed and the unparsed-extension warning's Mode A/B wording was corrected; same
-/// invisible-staleness class as the prior bumps (a warm run would otherwise keep serving OLD text).
+/// `v29` -> `v30`: overlay synthetic-entry warning text changed and the unparsed-extension warning's Mode A/B wording corrected (invisible-staleness bump, see `v25` -> `v26`).
 /// `v30` -> `v31`: `Language` gains `Sql` (`.sql` -> `zzop_parser_sql` db-table provides) — same bump class as Rust/Go above.
 ///
-/// `v31` -> `v32`: the S5/S7 framework-silence tripwires gained a PER-APP census (`builtin_fetch_census`/
-/// `fetch_wrapper_census`) + internal-intent recount — a brand-new app-scoped warning CLASS and a changed
-/// set of counted `fetch(`/wrapper sites (absolute-URL/bare-const egress no longer counts; per-app gating
-/// now fires on a dark app a healthy sibling used to mask). Same invisible-staleness class as v27 -> v28's
-/// S6 bump: a warm run would otherwise serve pre-change (or entirely missing) warnings forever.
-pub const CACHE_SCHEMA_VERSION: &str = "zzop-cache-v32";
+/// `v31` -> `v32`: the S5/S7 framework-silence tripwires gained a PER-APP census (`builtin_fetch_census`/`fetch_wrapper_census`) + internal-intent recount — a new app-scoped warning class and a changed set of counted `fetch(`/wrapper sites (absolute-URL/bare-const egress no longer counts; per-app gating now fires on a dark app a healthy sibling used to mask). Unlike every bump above, this one is DEFENSIVE, not required: the census runs at ASSEMBLE time (`analyze/assemble/warnings.rs`), re-reading files fresh every run off already-cached `io_consumes`, and its output is tree-level warnings that never land in a per-file cache entry — so no stale entry could have served an old verdict even without a bump. Bumped anyway on the "changed a cached artifact" reflex; a real invisible-staleness bump (v25 -> v26 and friends) changes what a CACHED entry would silently keep serving, which this one structurally cannot.
+///
+/// `v32` -> `v33`: C# route PROVIDES now project even when the `.cs` CST parse is `degraded` (Java-parity — see `io::extract_csharp_file_io`); only the egress consumes stay gated. A REQUIRED invisible-staleness bump: a degraded `.cs` file cached under v32 holds `io: None`, so without this it would keep serving zero routes for a controller with one broken method even after the fix.
+///
+/// Convention note (added with `v33`): adding a `Language` ENUM VARIANT does NOT itself require a schema bump — contrary to what the `v30 -> v31` "same bump class as Rust/Go" line above implies. `Language` is never serialized into a cache key (`dispatch.rs`); a newly-dispatched extension (`.cs` -> `Language::CSharp`) is disambiguated from a prior lexical-fallback entry by its own per-language `PARSER_FINGERPRINT` (`csharp/...` != `LEXICAL_FALLBACK_FINGERPRINT`), which IS a key ingredient — so a pre-merge lexical `.cs` entry has a different key and is never served stale. The earlier per-language bumps (Rust v22->23, Go v23->24, Java v24->25, Sql v30->31) were over-conservative: they needlessly wiped every OTHER language's warm cache. `Language::CSharp` was therefore added (in the parser-csharp merge) with no bump of its own; the `v33` bump here is for the degraded-`io` projection change above, which is a genuine cached-artifact change, not for the variant.
+/// `v33` -> `v34`: `FileIrSlice` gained `asset_refs` (raw runtime asset-URL reference strings from
+/// `parse_asset_refs` — `AudioWorklet.addModule`/`new Worker`/`importScripts`/`new URL(_,import.meta.url)`).
+/// A REQUIRED invisible-staleness bump: a file cached under v33 holds no `asset_refs`, so without this a
+/// cache-warm run would keep serving `fan_in == 0` for a `public/*.js` worklet loaded only by URL string
+/// and re-introduce its `dead-candidates` false positive. Paired with `zzop_parser_typescript`'s
+/// `+asset-refs-v1` `PARSER_FINGERPRINT` bump (which also invalidates prior TS entries by key).
+/// `v34` -> `v35`: verb-unknown route provides. `pages/api` serve-all handlers, pathname-dispatch, and
+/// Go `HandleFunc` blocks that name no method literal no longer fabricate `[GET, POST]` provides — each
+/// emits ONE `zzop_core::UNKNOWN_VERB` sentinel (`"? <path>"`, partitioned at assemble into the
+/// `cross-layer/unknown-verb-route` disclosure). A REQUIRED invisible-staleness bump: a file cached under
+/// v34 holds the OLD fabricated `GET`/`POST` provide keys, so a cache-warm run would keep serving them
+/// (and never mint the sentinel the new partition needs). Paired with `zzop_parser_typescript`'s
+/// `+unknown-verb-sentinel-v1` `PARSER_FINGERPRINT` bump.
+pub const CACHE_SCHEMA_VERSION: &str = "zzop-cache-v35";
 
 /// Fingerprint for files that never reach a structural parser crate in the fused pass: no `Language` match
 /// (`dispatch::dispatch` returned `None` — unrecognized extension), or the size-cap lexical fallback
@@ -226,13 +223,13 @@ pub(crate) fn parser_fingerprint(language: Option<Language>, config: &EngineConf
             )
         }
         Some(Language::Prisma) => zzop_parser_prisma::PARSER_FINGERPRINT.to_string(),
-        // Own fingerprint, distinct from `LEXICAL_FALLBACK_FINGERPRINT`: `.java` goes through the real
-        // structural `zzop_parser_java_21` projector crate, not this engine's own text-only heuristics.
+        // Own fingerprint (not `LEXICAL_FALLBACK_FINGERPRINT`): `.java` uses the real structural projector.
         Some(Language::Java21) => zzop_parser_java_21::PARSER_FINGERPRINT.to_string(),
         Some(Language::Python) => zzop_parser_python_3::PARSER_FINGERPRINT.to_string(),
         Some(Language::Rust) => zzop_parser_rust::PARSER_FINGERPRINT.to_string(),
         Some(Language::Go) => zzop_parser_go::PARSER_FINGERPRINT.to_string(),
         Some(Language::Sql) => zzop_parser_sql::PARSER_FINGERPRINT.to_string(),
+        Some(Language::CSharp) => zzop_parser_csharp::PARSER_FINGERPRINT.to_string(),
         None => LEXICAL_FALLBACK_FINGERPRINT.to_string(),
     };
     format!("{base}+size_cap={}", config.size_cap)

@@ -1,6 +1,6 @@
-//! Language parser dispatch targets: TypeScript / Prisma / Java / Python / Rust / Go, plus the shared
-//! lexical loc fallback. The parser's AST never leaves these functions — only `zzop_core` types cross
-//! back.
+//! Language parser dispatch targets: TypeScript / Prisma / Java / Python / Rust / Go / C#, plus the
+//! shared lexical loc fallback. The parser's AST never leaves these functions — only `zzop_core` types
+//! cross back.
 
 use zzop_core::{ir::SourceSymbol, ImportMap};
 
@@ -176,6 +176,31 @@ pub(super) fn parse_go(
     text: &str,
 ) -> (Vec<SourceSymbol>, Option<ImportMap>, u32, bool, Vec<String>) {
     let result = std::panic::catch_unwind(|| zzop_parser_go::parse_go(rel, text));
+    match result {
+        Ok(Some((symbols, imports, loc, used_names))) => {
+            (symbols, Some(imports), loc, false, used_names)
+        }
+        Ok(None) | Err(_) => (
+            Vec::new(),
+            Some(ImportMap::new()),
+            lexical_loc(text),
+            true,
+            Vec::new(),
+        ),
+    }
+}
+
+/// C# parse: symbols + imports + loc, or a degraded lexical fallback — same shape/contract as
+/// `parse_go` above, backed by `zzop_parser_csharp::parse_csharp` (a tree-sitter-based frontend) instead
+/// of tree-sitter-go. Like `parse_go`, `zzop_parser_csharp::parse_csharp` already gates its own
+/// parse-failure case internally (`Option::None` = the source did not parse into a usable CST) and
+/// returns all four facts behind ONE all-or-nothing gate, so there is no separate `parse_ok` probe here —
+/// just the `catch_unwind` defense-in-depth every parser frontend in this fused pass carries.
+pub(super) fn parse_csharp(
+    rel: &str,
+    text: &str,
+) -> (Vec<SourceSymbol>, Option<ImportMap>, u32, bool, Vec<String>) {
+    let result = std::panic::catch_unwind(|| zzop_parser_csharp::parse_csharp(rel, text));
     match result {
         Ok(Some((symbols, imports, loc, used_names))) => {
             (symbols, Some(imports), loc, false, used_names)

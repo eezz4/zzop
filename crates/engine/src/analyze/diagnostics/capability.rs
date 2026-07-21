@@ -165,8 +165,8 @@ pub(in crate::analyze) fn unparsed_extension_warning(
                  for a complete sample). The contract ships inside the binary: `zzop-mcp contract \
                  envelope-guide` / MCP resource `zzop://contract/envelope-guide` (machine-checkable \
                  schema: `zzop-mcp contract envelope-schema`); repo users, see docs/NORMALIZED_AST.md. \
-                 (Mode A full-envelope analysis: napi `analyzeEnvelope`, or `zzop-mcp \
-                 analyze-envelope <file>` / MCP tool `analyze_envelope`.)"
+                 (Mode A full-envelope analysis: `zzop-mcp analyze-envelope <file>` / MCP tool \
+                 `analyze_envelope`.)"
             )
         })
         .collect()

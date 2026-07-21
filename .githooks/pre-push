@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# pre-push — runs the RANGE-based guard(s) that pre-commit structurally cannot.
+#
+# pre-commit scans the working tree per commit; check-parser-fingerprint-bump instead diffs a
+# base..head RANGE (it asks "did a parser's src change without a PARSER_FINGERPRINT bump anywhere in
+# this range?"). That question is only well-formed once you know the range being pushed — which is
+# exactly what pre-push receives. Running it here makes "push, then watch CI fail on fingerprint
+# drift" impossible: the same check CI runs (ci.yml's `guards` job, HEAD~1...HEAD on a push) is run
+# locally over the outgoing range first. Squash releases are the trap this closes — a per-commit
+# `[no-projection-change: <crate>]` marker vanishes in the squash, and this hook fails the push until
+# the marker is (re)added to the squash message.
+#
+# Enable once per clone (same switch as pre-commit): git config core.hooksPath .githooks
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+z40=0000000000000000000000000000000000000000
+fail=0
+# stdin: one line per ref being pushed: <local ref> <local sha> <remote ref> <remote sha>
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$z40" ] && continue                 # branch delete — nothing to check
+  case "$local_ref" in refs/tags/*) continue ;; esac    # tags carry no new history; their branch push was already checked
+  if [ "$remote_sha" = "$z40" ]; then
+    # New branch on the remote: check against origin/main (the base it will merge into), if present.
+    base="$(git rev-parse --verify --quiet origin/main || true)"
+    [ -n "$base" ] || continue
+    range="$base...$local_sha"
+  else
+    range="$remote_sha...$local_sha"                     # exactly the commits this push adds
+  fi
+  if ! out="$(FINGERPRINT_DIFF_RANGE="$range" bash scripts/check-parser-fingerprint-bump.sh 2>&1)"; then
+    echo "pre-push: scripts/check-parser-fingerprint-bump.sh FAILED (range $range)"
+    echo "$out"
+    fail=1
+  fi
+done
+
+if [ "$fail" -ne 0 ]; then
+  echo "pre-push: blocked — bump the parser's PARSER_FINGERPRINT, or add '[no-projection-change: <crate>]' to a commit in the push range (for a squash release, that means the squash message)."
+  exit 1
+fi
+echo "pre-push: range guards clean."

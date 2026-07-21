@@ -34,6 +34,20 @@ fn schema_parse_sanitizer_clears_the_finding() {
 }
 
 #[test]
+fn json_parse_of_a_tainted_value_does_not_veto_the_finding() {
+    // `JSON.parse(req.body)` is the commonest way to OBTAIN the tainted value, not a sanitizer —
+    // parsing JSON validates syntax, not safety for an eval/exec/SQL sink. Regression pin for the
+    // formerly-over-broad `\.parse\(` veto that also swallowed `JSON.parse(`/`Date.parse(`.
+    let dir = TempDir::new("zzop-security");
+    dir.write(
+        "json.ts",
+        "export function handler(req: any, res: any) {\n  const data = JSON.parse(req.body);\n  eval(data.code);\n  res.end();\n}\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(hits(&out, "taint-flow").len(), 1, "{:?}", out.findings);
+}
+
+#[test]
 fn dangerously_set_inner_html_with_tainted_value_is_flagged() {
     let dir = TempDir::new("zzop-security");
     dir.write(
@@ -42,6 +56,24 @@ fn dangerously_set_inner_html_with_tainted_value_is_flagged() {
     );
     let out = scan(&dir);
     assert_eq!(hits(&out, "taint-flow").len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn innerhtml_equality_comparison_is_not_a_write_sink() {
+    // `el.innerHTML === x` / `== x` is a READ (comparison), not an assignment. The sink pattern must not
+    // treat the `=` of `===`/`==` as an innerHTML write, or any handler that also touches request input
+    // false-fires taint-flow.
+    let dir = TempDir::new("zzop-security");
+    dir.write(
+        "handler.ts",
+        "export function check(req: any) {\n  const want = req.query.h;\n  const el: any = document.body;\n  if (el.innerHTML === want) return true;\n  return el.outerHTML == want;\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "taint-flow").is_empty(),
+        "an innerHTML/outerHTML equality read must not fire the write sink: {:?}",
+        out.findings
+    );
 }
 
 #[test]

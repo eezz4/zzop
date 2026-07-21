@@ -1,0 +1,55 @@
+{
+  "id": "http",
+  "framework": "any",
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "read-model-path",
+      "severity": "info",
+      "message": "GET route registered via `apiRoutes.get(...)` with no cache-strategy marker on the same line — make the caching decision explicit for read-heavy endpoints. Add `// cache: <strategy>`, `// no-cache: <reason>`, or `// read-model-ok: <reason>` to the route line.",
+      "suppress_marker": "read-model-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?:^|/)api/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|/routes/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|/controllers/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|[Hh]andler\\.ts$|[Cc]ontroller\\.ts$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "apiRoutes\\.get\\(",
+        "skip_comment_lines": true,
+        "line_pattern": "apiRoutes\\.get\\(",
+        "exclude_pattern": "//\\s*(?:cache:|no-cache:|read-model-ok:)",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "auth-gates",
+      "severity": "warning",
+      "message": "Route registered under a protected path segment (`/admin/`, `/internal/`) whose handler identifier carries none of the admin/role/guard/protect keywords — possible missing auth gate. An env check (isProduction/NODE_ENV) gates WHERE code runs, not WHO may call it, so it does not clear this — that axis is `route-exposure`'s. If no guard exists, add a role/admin check in the handler; if one already exists but isn't grep-visible, rename/restructure so it is. Suppress a vetted case with `// auth-gate-ok`.",
+      "suppress_marker": "auth-gate-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?:^|/)api/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|/routes/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|/controllers/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|[Hh]andler\\.ts$|[Cc]ontroller\\.ts$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "apiRoutes\\.(?:get|post|put|patch|delete)\\(",
+        "skip_comment_lines": true,
+        "line_pattern": "apiRoutes\\.(?:get|post|put|patch|delete)\\(\\s*[\"'`][^\"'`]*/(?:admin|internal)(?:/|[\"'`])",
+        "exclude_pattern": "(?i),[^,]*(?:admin|role|guard|protect)",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "route-exposure",
+      "severity": "warning",
+      "message": "Route registered under a dev/debug/internal/test/playground path segment whose handler carries none of the guard-hint keywords (dev/debug/internal/env/guard/isProduction/NODE_ENV) — risks leaking dev tooling to production. If no guard exists, gate it behind an env check; if one already exists but isn't grep-visible, rename/restructure so it is. Suppress a vetted case with `// route-exposure-ok`.",
+      "suppress_marker": "route-exposure-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?:^|/)api/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|/routes/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|/controllers/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|[Hh]andler\\.ts$|[Cc]ontroller\\.ts$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "apiRoutes\\.(?:get|post|put|patch|delete)\\(",
+        "skip_comment_lines": true,
+        "line_pattern": "apiRoutes\\.(?:get|post|put|patch|delete)\\(\\s*[\"'`][^\"'`]*/(?:dev|debug|internal|__test__|playground)(?:/|[\"'`])",
+        "exclude_pattern": "(?i),[^,]*(?:dev|debug|internal|env|guard|isProduction|isLocal|NODE_ENV)",
+        "snippet_max": 160
+      }
+    }
+  ]
+}

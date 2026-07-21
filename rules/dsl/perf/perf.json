@@ -11,7 +11,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "require_file": "(?i)\\b(?:fetch|axios|got|ky|superagent|undici|wretch|ofetch|httpclient|httpservice|apiclient|fetcher|xhr|http|https|client|api|conn|session|agent|http2|net)\\b",
         "skip_comment_lines": true,
         "patterns": [

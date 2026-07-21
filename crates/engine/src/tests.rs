@@ -46,13 +46,15 @@ impl Drop for TempDir {
 /// three Java security-concern rules (`sql-taint`/`weak-crypto`/`cmd-injection`) that moved into
 /// `be-security` when the language-named `java-security` pack was dissolved (v0.15). Filtering keeps
 /// this fixture a small, fully-`.java`-applicable pack (every rule fires only on the `.java` fixture
-/// file), which the profiling/degradation tests below rely on.
+/// file), which the profiling/degradation tests below rely on. Goes through `zzop_core::parse_dsl_pack`
+/// (not a raw `serde_json::from_str`) so this pack's `${NAME}` fragment refs (its shared test-path
+/// `file_exclude_pattern`) resolve exactly like they do at real load time.
 fn be_security_java_pack() -> RulePackDef {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/dsl/be-security/be-security.json");
     let text = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-    let mut pack: RulePackDef = serde_json::from_str(&text).expect("parse be-security.json");
+    let mut pack: RulePackDef = zzop_core::parse_dsl_pack(&text).expect("parse be-security.json");
     pack.rules
         .retain(|r| matches!(r.id.as_str(), "sql-taint" | "weak-crypto" | "cmd-injection"));
     pack

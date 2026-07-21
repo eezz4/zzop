@@ -1,20 +1,21 @@
 //! `zzop-parser-java-21` — a `tree-sitter-java`-based Java parser frontend -> Common IR projection,
 //! mirroring `zzop-parser-go`'s tree-sitter discipline exactly (grammar AST types stay inside this
 //! crate; only `zzop_core` types cross the crate boundary — enforced by
-//! `scripts/check-tree-sitter-isolation.sh`'s allowlist). Built to REPLACE the lexical `zzop-parser-java`
-//! crate (a later wiring batch does the swap) at full parity with that crate's public duties, plus AST
-//! precision gains where the task brief calls for them (M2 Spring provides, in particular).
+//! `scripts/check-tree-sitter-isolation.sh`'s allowlist). At full parity with the retired lexical Java
+//! extractor's public duties, plus AST precision gains where the task brief calls for them (M2 Spring
+//! provides, in particular).
 //!
 //! ## Layout
 //! - `lang` — CST -> Common-IR LANGUAGE projection: `SourceSymbol` extraction (`symbols`, including
-//!   method/constructor BODY SPANS — the `zzop-parser-java` method-scan parity surface), `ImportMap`
+//!   method/constructor BODY SPANS — the lexical extractor's method-scan parity surface), `ImportMap`
 //!   extraction (`imports`), identifier-reference collection (`used_names`), and same-file call-site
 //!   extraction (`calls`, `RawCall`s feeding the whole-repo call-graph `SymbolGraph`).
-//! - `provides` — Spring MVC HTTP route PROVIDES, AST-grade reimplementation of the old lexical
-//!   `zzop-parser-java::provides` extractor (parity-first: same annotation vocabulary, same keying,
-//!   same never-guess rules; ported as this module's own test fixtures).
-//! - `project` — the whole-corpus Spring provides pass (`zzop-parser-java::project`'s equivalent):
-//!   cross-file class-level `@RequestMapping` constant resolution and CE-split `extends`-chain gating.
+//! - `provides` — Spring MVC HTTP route PROVIDES, AST-grade reimplementation of the retired lexical
+//!   Java `provides` extractor (parity-first: same annotation vocabulary, same keying, same never-guess
+//!   rules; ported as this module's own test fixtures).
+//! - `project` — the whole-corpus Spring provides pass (the retired lexical extractor's project-pass
+//!   equivalent): cross-file class-level `@RequestMapping` constant resolution and CE-split
+//!   `extends`-chain gating.
 //!
 //! ## Tree-sitter discipline (mirrors `zzop_parser_go`'s crate-root doc verbatim — see that crate for
 //! the fuller rationale; summarized here)
@@ -31,6 +32,8 @@
 pub mod lang;
 pub mod project;
 pub mod provides;
+pub mod security;
+pub mod spring_security;
 mod util;
 
 #[cfg(test)]
@@ -42,6 +45,10 @@ pub use lang::symbols::parse_symbols;
 pub use lang::used_names::parse_local_identifier_refs;
 pub use project::{extract_http_provides_project, ProjectProvidesReport};
 pub use provides::extract_http_provides;
+pub use security::extract_spring_guarded_lines;
+pub use spring_security::{
+    extract_spring_security_posture, SpringAntMatcher, SpringSecurityPosture,
+};
 
 /// Cache key ingredient for `zzop-cache`, mirroring `zzop_parser_go::PARSER_FINGERPRINT`'s scheme:
 /// parser id + pinned frontend + a logic-version counter.
@@ -54,7 +61,39 @@ pub use provides::extract_http_provides;
 ///   containment, field/local/parameter receiver typing) feeding the whole-repo call-graph `SymbolGraph`
 ///   the `mutating-route-no-auth`/`unsafe-read-endpoint`/`non-idempotent-write` native rules BFS over —
 ///   see `crates/engine/src/analyze/native_rules/callgraph.rs`'s module doc.
-pub const PARSER_FINGERPRINT: &str = "java21/tree-sitter-java-0.23.5/v2";
+/// - `+java-route-attr-aware-v1`: fixed a route-path-keying correctness bug — a mapping annotation's path
+///   is now read from the NAMED `value=`/`path=` attribute (`provides::annotations::route_path_arg`),
+///   falling back to "first quoted string" only for the genuinely-positional single-arg form, instead of
+///   blindly taking the first `"..."` literal regardless of which attribute it followed (which mis-keyed
+///   `@GetMapping(produces = "application/json", value = "/users")` as `application/json`). Also:
+///   `@RequestMapping(method = {RequestMethod.GET, RequestMethod.POST})` now emits one route per verb
+///   instead of only the first.
+/// - `+java-const-prefix-attr-aware-v1`: fixed the SAME attribute-blind-first-token-keying bug in the
+///   CONSTANT branch (`project::resolve::const_ref_qualified`), missed by the `+java-route-attr-aware-v1`
+///   fix above (which only covered the literal-string branch): a class-level `@RequestMapping`'s unquoted
+///   `value=`/`path=` constant reference is now read from that NAMED attribute's own RHS, falling back to
+///   a genuinely positional bare constant only when neither is present — instead of taking the first
+///   `SCREAMING_SNAKE_CASE`/`Pkg.CONST` token found anywhere in the raw argument text. Previously, e.g.
+///   `@RequestMapping(produces = MediaType.APPLICATION_JSON_VALUE, path = ApiPaths.USERS)` keyed on
+///   `MediaType.APPLICATION_JSON_VALUE` (an attribute the annotation doesn't even name as a path), which
+///   is almost never a corpus class, resolved to `PrefixState::Unresolved`, and silently dropped EVERY
+///   route of that controller from `provides`.
+/// - `+java-method-path-tristate-v1`: a NON-LITERAL method-level mapping path (`@GetMapping(ApiPaths.USERS)`,
+///   `@RequestMapping(value = SOME_CONST, method = GET)`) is no longer collapsed to the empty base by
+///   `method_route`'s old `route_path_arg(..).unwrap_or_default()` — which fabricated a phantom route at the
+///   controller prefix AND lost the real path. `route_path_state` now distinguishes literal / absent-base /
+///   non-literal: a non-literal path drops the route (honest under-report), mirroring the class-prefix
+///   `PrefixState::Unresolved` branch. The per-file `extract`'s own class-prefix collapse was fixed the same
+///   way (blocks the class's direct routes rather than keying them at `""`).
+/// - `+java-method-path-const-resolve-v1`: the whole-corpus pass now RESOLVES a non-literal method-level
+///   path constant (`@GetMapping(ApiPaths.USERS)`, `@RequestMapping(value = SOME_CONST, method = GET)`)
+///   against the corpus — scoped to the declaring class's `extends` chain, reusing the exact
+///   `const_ref_qualified` + `resolve_scoped` ladder the class-level `@RequestMapping` prefix already uses
+///   (`project::resolve::resolve_method_path`). Previously these dropped (honest under-report); now the real
+///   route is keyed. An out-of-corpus / genuinely-computed method path still drops, counted in
+///   `ProjectProvidesReport::skipped_unresolved_method_path`. The per-file `extract` pass, having no corpus,
+///   keeps dropping — resolution is a whole-corpus-only gain.
+pub const PARSER_FINGERPRINT: &str = "java21/tree-sitter-java-0.23.5/v2+java-route-attr-aware-v1+java-const-prefix-attr-aware-v1+java-method-path-tristate-v1+java-method-path-const-resolve-v1";
 
 /// Every top-level declaration kind this crate recognizes, PLUS `module_declaration` (never itself
 /// extracted, but still a sign the file has SOME real Java in it) — the root-hopeless gate's "is there

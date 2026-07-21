@@ -11,17 +11,18 @@ silently. There is no error: the consume just lands in `unprovidedConsumes` / th
 An adapter can reach the engine two ways (see `docs/NORMALIZED_AST.md`'s "Adapter overlays" section for
 the full contract) — and the two are NOT available in the same places. **Mode B (adapter overlays)**
 works everywhere: the config-file `overlays`/`trees[].overlays` key and the `adapterOverlays` field
-it maps to are honored by every host, including both `zzop` CLI commands (`@zzop/cli`) and the Node-free
-`zzop-mcp` binary. **Mode A (full envelope, `analyze_envelope`/napi `analyzeEnvelope`)** is reachable
-from Rust, from a host application embedding `@zzop/native` directly, AND from the Node-free `zzop-mcp`
-binary — its `analyze_envelope` MCP tool and `zzop-mcp analyze-envelope <envelope.json>` CLI subcommand
-run the same facade call path (zero-config only; an envelope has no filesystem location for a config
-file to auto-discover). The `@zzop/cli` `zzop` command does NOT run Mode A: its only envelope-shaped
-subcommands are `zzop adapter validate <path>` (structural validation only) and `zzop init adapter --mode
-a|b` (scaffolds starter FILES, does not run an analysis) — `zzop-mcp`'s `validate_envelope` tool is the
-same structural-validation-only story, distinct from its own `analyze_envelope` tool. Write a Mode B
-overlay for a `zzop`-CLI-hosted workflow; use `zzop-mcp`'s `analyze_envelope` (tool or CLI subcommand) or
-a direct `@zzop/native` embedding to actually RUN a Mode A envelope.
+it maps to are honored by every host, including the Node-free `zzop-mcp` binary and any direct
+`zzop-facade` embedding. **Mode A (full envelope, `analyze_envelope`)** is reachable from Rust, from a
+direct `zzop-facade` embedding, AND from the Node-free `zzop-mcp` binary — its `analyze_envelope` MCP
+tool and `zzop-mcp analyze-envelope <envelope.json>` CLI subcommand run the same facade call path
+(zero-config only; an envelope has no filesystem location for a config file to auto-discover).
+`zzop-mcp`'s `validate_envelope` tool (and `zzop-mcp validate-envelope <file>` subcommand) is a
+separate, structural-validation-only story, distinct from actually running one. To RUN a Mode A
+envelope, use the `zzop-mcp` binary (`zzop-mcp analyze-envelope <file>`, or its `analyze_envelope` MCP
+tool) or embed `zzop-facade` directly — there is no other runner. (The npm distribution's JS CLI
+`@zzop/cli`, removed 2026-07-20 along with the `@zzop/native` napi binding, never ran Mode A either:
+its only envelope-shaped subcommands were `zzop adapter validate <path>`, structural validation only,
+and `zzop init adapter --mode a|b`, which scaffolded starter FILES rather than running an analysis.)
 
 ## The fixture
 

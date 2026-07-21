@@ -98,12 +98,16 @@ impl Drop for TempDir {
     }
 }
 
-/// Loads the real `browser.json` pack from the repo, one directory down from this test file.
+/// Loads the real `browser.json` pack from the repo, one directory down from this test file. Goes
+/// through `zzop_core::parse_dsl_pack` (not a raw `serde_json::from_str`) so `${NAME}` fragment refs
+/// (e.g. the shared test-path `file_exclude_pattern`) resolve exactly like they do at real load time —
+/// a raw struct deserialize would leave the literal `"${test-paths}"` string in place, which is not a
+/// valid regex and would silently no-op every affected rule.
 fn browser_pack() -> RulePackDef {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("dsl/browser/browser.json");
     let text = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-    serde_json::from_str(&text).expect("parse browser.json")
+    zzop_core::parse_dsl_pack(&text).expect("parse browser.json")
 }
 
 fn config() -> EngineConfig {

@@ -209,7 +209,9 @@ fn non_literal_path_skips_only_that_entry_fragment_survives() {
 }
 
 #[test]
-fn all_and_use_are_ignored() {
+fn use_is_ignored_and_all_expands_to_every_verb() {
+    // `.use(mw)` is middleware (no route), so it stays ignored — but `.all('/x', h)` binds one handler
+    // to EVERY method and now expands to one Verb per HTTP_KEY_VERBS (previously it was dropped too).
     let src = concat!(
         "const route = new Hono();\n",
         "route.all('/x', h);\n",
@@ -217,16 +219,20 @@ fn all_and_use_are_ignored() {
         "route.get('/ok', h2);\n"
     );
     let out = extract_router_mount_fragments("route.ts", src, &[]);
-    assert_eq!(
-        frag(&out, "route").entries,
-        vec![RouterMountEntry::Verb {
-            method: "GET".into(),
-            path: "/ok".into(),
-            handler: Some("h2".into()),
-            line: 4,
-            attr_keys: vec![],
-        }]
-    );
+    // Every entry is a Verb (`.use` contributed nothing): `/x` -> every HTTP verb, `/ok` -> GET only.
+    let pairs: Vec<(&str, &str)> = frag(&out, "route")
+        .entries
+        .iter()
+        .map(|e| match e {
+            RouterMountEntry::Verb { method, path, .. } => (method.as_str(), path.as_str()),
+            _ => panic!("expected Verb, got {e:?}"),
+        })
+        .collect();
+    assert_eq!(pairs.len(), 6);
+    assert!(pairs.contains(&("GET", "/ok")));
+    for m in ["GET", "POST", "PUT", "DELETE", "PATCH"] {
+        assert!(pairs.contains(&(m, "/x")), "missing {m} /x in {pairs:?}");
+    }
 }
 
 #[test]

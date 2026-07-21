@@ -21,8 +21,10 @@ mod collect;
 mod dep_graph;
 mod helpers;
 mod metrics;
+mod orm;
 mod provides;
 mod rules;
+mod sfc;
 mod warnings;
 
 /// Consumes the fused pass's per-file artifacts and produces the final `AnalyzeOutput`. `artifacts` must
@@ -43,6 +45,7 @@ pub(crate) fn assemble(
         ts_import_pairs,
         ts_re_export_pairs,
         ts_dynamic_import_pairs,
+        ts_asset_ref_pairs,
         ts_paths,
         mut degraded,
         mut minified,
@@ -51,6 +54,7 @@ pub(crate) fn assemble(
         used_names_by_file,
         prisma_rels,
         java_rels,
+        csharp_rels,
         mut rule_time,
         package_import_files,
         fragment_pairs,
@@ -66,8 +70,11 @@ pub(crate) fn assemble(
         rust_workspace,
         go_modules,
         java_index,
+        csharp_index,
+        sfc_rels,
     } = collected;
 
+    let sfc_import_pairs = sfc::collect_sfc_import_pairs(root, &sfc_rels);
     let provides::ProvidesResult {
         mut io_provides,
         mut io_consumes,
@@ -81,6 +88,7 @@ pub(crate) fn assemble(
         &loc_by_path,
         &ts_paths,
         &java_rels,
+        &csharp_rels,
         &all_symbols,
         io_provides,
         io_consumes,
@@ -102,6 +110,8 @@ pub(crate) fn assemble(
         folders,
         commits,
         git_active,
+        sfc_targets,
+        asset_targets,
     } = dep_graph::build(
         root,
         config,
@@ -116,6 +126,9 @@ pub(crate) fn assemble(
         &rust_workspace,
         &go_modules,
         &java_index,
+        &csharp_index,
+        &sfc_import_pairs,
+        &ts_asset_ref_pairs,
     );
 
     let global_findings = rules::run(
@@ -138,6 +151,9 @@ pub(crate) fn assemble(
         &io_provides,
         &io_consumes,
         &mut rule_time,
+        &sfc_import_pairs,
+        &sfc_targets,
+        &asset_targets,
     );
 
     let findings = merge_findings(
@@ -160,20 +176,8 @@ pub(crate) fn assemble(
     if let Some(w) = no_applicable_dsl_rule_warning(&config.packs, &dsl_scope) {
         warnings.push(w);
     }
-    io_provides.sort_by(|a, b| {
-        a.kind
-            .cmp(&b.kind)
-            .then_with(|| a.key.cmp(&b.key))
-            .then_with(|| a.file.cmp(&b.file))
-            .then_with(|| a.line.cmp(&b.line))
-    });
-    io_consumes.sort_by(|a, b| {
-        a.kind
-            .cmp(&b.kind)
-            .then_with(|| a.key.cmp(&b.key))
-            .then_with(|| a.file.cmp(&b.file))
-            .then_with(|| a.line.cmp(&b.line))
-    });
+    helpers::sort_io_provides(&mut io_provides);
+    helpers::sort_io_consumes(&mut io_consumes);
 
     warnings.extend(warnings::framework_silence_warnings(
         root,
@@ -218,20 +222,19 @@ pub(crate) fn assemble(
     let config_warnings = diagnostics_report.config_warnings;
 
     // `root.is_dir()` gates this so it doesn't duplicate `analyze_tree`'s more specific "root does not
-    // exist or is not a directory" self-report (`lib.rs`'s `scope_warnings`) — that one already states
-    // the cause when the root itself is invalid, and every failure mode from an invalid root funnels
-    // through `file_count == 0` too. For a root that DOES exist but simply matched no analyzable files,
-    // no such self-report ran (see `lib.rs`'s "0 source files found under root" check, which only covers
-    // that same case from a different angle), so this generic line still carries its own information and
-    // stays.
+    // exist / is not a directory" self-report (`lib.rs`'s `scope_warnings`), which already states the cause
+    // when the root itself is invalid; every invalid-root failure funnels through `file_count == 0` too. A
+    // root that DOES exist but matched no analyzable files gets no such self-report (`lib.rs`'s "0 source
+    // files found under root" covers that from a different angle), so this generic line still earns its keep.
     if file_count == 0 && root.is_dir() {
         warnings.push(
             "root produced 0 analyzable files — check the path exists and contains supported source files".to_string(),
         );
     }
 
-    let profile = config.profile_rules;
-    let rule_timings = profile.then(|| crate::analyze::sort_rule_timings(rule_time));
+    let rule_timings = config
+        .profile_rules
+        .then(|| crate::analyze::sort_rule_timings(rule_time));
 
     let ir = CommonIr {
         source: config.source_id.clone(),

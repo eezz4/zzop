@@ -6,6 +6,7 @@
 //! `http_clients` is the CONSUME-side counterpart, exposed directly as its own public fn.
 
 pub mod gin;
+pub mod gorm;
 pub mod http_clients;
 pub mod net_http;
 

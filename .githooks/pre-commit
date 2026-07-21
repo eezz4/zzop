@@ -18,15 +18,14 @@ GUARDS=(
   check-ruff-isolation
   check-syn-isolation
   check-tree-sitter-isolation
+  check-guards-wired
   check-rules-catalog-sync
-  check-cli-readme-sync
   check-docs-rule-ids
   check-docs-link-graph
-  check-site-sdk-tokens
   check-io-key-vocab
-  check-napi-request-fields
   check-policy-census
   check-shell-pipe-sigpipe
+  check-version-lists-parsers
 )
 
 for g in "${GUARDS[@]}"; do

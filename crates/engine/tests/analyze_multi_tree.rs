@@ -14,7 +14,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zzop_core::{FileProjection, IoConsume, IoFacts, NormalizedEnvelope, NORMALIZED_AST_FORMAT};
+use zzop_core::{
+    FileProjection, IoConsume, IoFacts, IoProvide, NormalizedEnvelope, NORMALIZED_AST_FORMAT,
+};
 use zzop_engine::{analyze_trees, EngineConfig, MIN_PARALLEL_IMPL_SIGNALS};
 
 struct TempDir(PathBuf);
@@ -321,6 +323,116 @@ fn overlay_injected_consume_joins_a_native_provide_across_trees() {
 
     assert!(out.cross_layer.unprovided_consumes.is_empty());
     assert!(out.cross_layer.unconsumed_provides.is_empty());
+}
+
+/// The PROVIDE-side twin of the SDK test above, and the exact loop this project's routing doctrine is
+/// built on: zzop CANNOT statically resolve a dynamic route, so it stays honest (drops it, never guesses),
+/// then a user AI injects the resolved fact and the cross-repo join closes.
+///
+/// The BE is a Java Spring controller whose method path is a NON-LITERAL constant reference whose
+/// declaration lives OUTSIDE this corpus (`@GetMapping(ExternalRoutes.USERS)`). zzop resolves the class
+/// prefix (`/api`, a literal) and resolves method-path constants that ARE in the corpus, but an
+/// out-of-corpus constant it genuinely cannot recover — so the route is DROPPED (honest under-report, not a
+/// phantom at the empty base). The FE natively calls `GET /api/users`, which therefore has no provider — an
+/// unprovided consume, exactly the kind of gap the `route-near-miss`/`unprovided` disclosures point at
+/// "inject this."
+///
+/// A user (or their AI), who knows the external route resolves to `/users`, injects the resolved
+/// `GET /api/users` provide through the adapter-overlay `io` channel on the BE tree. `analyze_trees` then
+/// joins it to the native FE consume. Asserts BOTH directions — dropped-and-unprovided without the
+/// injection, exact edge WITH it — so the disclosure→inject→resolve loop is locked end to end.
+#[test]
+fn user_injected_route_resolves_a_dropped_non_literal_be_route_across_trees() {
+    let be = TempDir::new("zzop-engine-multi-be-java");
+    // The path constant `ExternalRoutes.USERS` is declared OUTSIDE this tree (a shared dependency, not in
+    // the corpus), so the whole-corpus resolver cannot recover it and honestly drops the route — the
+    // residue the method-path constant resolver leaves for genuine out-of-corpus/computed cases.
+    be.write(
+        "UserController.java",
+        "@RestController\n@RequestMapping(\"/api\")\nclass UserController {\n  @GetMapping(ExternalRoutes.USERS)\n  public String list() { return \"\"; }\n}\n",
+    );
+    let fe = TempDir::new("zzop-engine-multi-fe-axios");
+    fe.write(
+        "app.ts",
+        "import axios from 'axios';\nexport function load() { return axios.get('/api/users'); }\n",
+    );
+
+    // Baseline: zzop honestly drops the non-literal-path route, so the FE call has no provider — no http
+    // edge, and the consume sits unprovided.
+    let baseline = analyze_trees(&[
+        (be.path().to_path_buf(), config("be")),
+        (fe.path().to_path_buf(), config("fe")),
+    ]);
+    assert!(
+        baseline
+            .cross_layer
+            .edges
+            .iter()
+            .all(|e| e.key != "GET /api/users"),
+        "zzop must not statically resolve the non-literal-path route: {:?}",
+        baseline.cross_layer.edges
+    );
+    assert!(
+        baseline
+            .cross_layer
+            .unprovided_consumes
+            .iter()
+            .any(|c| c.consume.key.as_deref() == Some("GET /api/users")),
+        "the FE call must read as unprovided without the injection: {:?}",
+        baseline.cross_layer.unprovided_consumes
+    );
+
+    // The user AI injects the resolved dynamic route as an http provide on the BE tree, on a synthetic
+    // (non-`.java`) path so the whole-corpus Java provides pass — which replaces java-FILE http provides
+    // wholesale — leaves it intact. `source: "be"` matches the tree so no intra-source mismatch is claimed.
+    let mut injected = projection("injected/routes.json", 1);
+    injected.io.provides.push(IoProvide {
+        body: None,
+        kind: "http".to_string(),
+        key: "GET /api/users".to_string(),
+        file: "injected/routes.json".to_string(),
+        line: 1,
+        symbol: Some("list".to_string()),
+    });
+    let mut be_cfg = config("be");
+    be_cfg.adapter_overlays = vec![NormalizedEnvelope {
+        format: NORMALIZED_AST_FORMAT.to_string(),
+        version: 1,
+        parser: "user-route-injection/1".to_string(),
+        source: "be".to_string(),
+        files: vec![injected],
+    }];
+
+    let out = analyze_trees(&[
+        (be.path().to_path_buf(), be_cfg),
+        (fe.path().to_path_buf(), config("fe")),
+    ]);
+
+    let http_edges: Vec<_> = out
+        .cross_layer
+        .edges
+        .iter()
+        .filter(|e| e.kind == "http" && e.key == "GET /api/users")
+        .collect();
+    assert_eq!(
+        http_edges.len(),
+        1,
+        "the injected route must join the native FE consume: {:?}",
+        out.cross_layer.edges
+    );
+    let edge = http_edges[0];
+    assert_eq!(edge.from.source, "fe");
+    assert_eq!(edge.to.source, "be");
+    assert!(edge.cross_source, "FE and BE are different sources");
+    // Resolution, not mere disclosure: the previously-unprovided consume is gone.
+    assert!(
+        out.cross_layer
+            .unprovided_consumes
+            .iter()
+            .all(|c| c.consume.key.as_deref() != Some("GET /api/users")),
+        "the injected provide must clear the unprovided consume: {:?}",
+        out.cross_layer.unprovided_consumes
+    );
 }
 
 // --- parallel-implementation tripwire (blind field test: trees:"auto" wiring 5 competing frontend

@@ -2,6 +2,8 @@
 //!
 //!   zzop-mcp analyze <path>            — analyze ONE repo/tree, print a JSON findings summary (Node-free).
 //!   zzop-mcp analyze-envelope <file>   — Mode A: analyze a Normalized-AST envelope file in place of native parsing.
+//!   zzop-mcp validate-envelope <file>  — offline "is this envelope well-formed?" report (exit 0 valid / 1 invalid).
+//!   zzop-mcp validate-rule-pack <file> — offline "does this DSL pack load + regexes compile?" report (exit 0 / 1).
 //!   zzop-mcp cross <path>...           — analyze 2+ trees and print the cross-layer join (zzop's headline).
 //!   zzop-mcp endpoint <pattern> <path>... — definitive "is io key X provided/consumed/joined?" query.
 //!   zzop-mcp endpoint <pattern> --config <path> — same query, trees defined by a zzop.config.jsonc.
@@ -14,7 +16,7 @@
 
 /// The one usage line — printed to stdout by `--help` (exit 0) and to stderr by every malformed
 /// invocation (exit 2), so the two surfaces can never drift apart.
-const USAGE: &str = "usage: zzop-mcp <analyze <path> | analyze-envelope <envelope.json> | cross <path>... | cross --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | contract [<name>] | version | mcp>";
+const USAGE: &str = "usage: zzop-mcp <analyze <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path>... | cross --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | contract [<name>] | version | mcp>";
 
 /// A one-line pointer at the bare-invocation/unknown-subcommand error path (exit 2) — two field agents
 /// stumbled on exactly this gap: a bare `zzop-mcp` gave no hint that `help` exists, or that `mcp` is the
@@ -22,19 +24,7 @@ const USAGE: &str = "usage: zzop-mcp <analyze <path> | analyze-envelope <envelop
 /// the `help` branch below's own doc comment on why the error path itself stays bare beyond this).
 const BARE_INVOCATION_HINT: &str = "(run 'zzop-mcp help' for details; 'mcp' serves MCP over stdio)";
 
-/// A dash-leading argument in a path/pattern position is NEVER swallowed as a path or pattern —
-/// `zzop-mcp analyze --help` must be a usage error, not "path does not exist: --help". The only
-/// flags this binary recognizes are parsed positionally before this check runs (`--config` for
-/// cross/endpoint, top-level `--help`/`--version`); anything else dash-shaped exits 2 with the
-/// subcommand's usage line.
-fn reject_flag_like_args<'a>(args: impl IntoIterator<Item = &'a str>, usage: &str) {
-    for arg in args {
-        if arg.starts_with('-') {
-            eprintln!("{usage}");
-            std::process::exit(2);
-        }
-    }
-}
+use zzop_mcp::cli::{reject_flag_like_args, run_file_validate};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -96,6 +86,19 @@ fn main() {
                 }
             }
         }
+        // Offline authoring checks — read a file, print a `{"valid":…,"issues":…}` report, exit by
+        // validity. Same `zzop_summary` check the `validate_envelope`/`validate_rule_pack` MCP tools
+        // call, so a CLI check and a tool call give the identical verdict.
+        Some("validate-envelope") => run_file_validate(
+            &args,
+            "validate-envelope <envelope.json>",
+            zzop_mcp::tools::validate_envelope,
+        ),
+        Some("validate-rule-pack") => run_file_validate(
+            &args,
+            "validate-rule-pack <pack.json>",
+            zzop_mcp::tools::validate_rule_pack,
+        ),
         Some("cross") => {
             // `cross --config <path>` = config-first mode (the config's trees define the join);
             // `cross <path>...` = config-free paths mode. Mirrors the cross_repo tool's two modes.
@@ -195,11 +198,9 @@ fn main() {
                 }
             }
         }
-        // The embedded authoring contracts, reachable from a terminal — the same ten documents MCP
-        // `resources/read` serves, resolved through the same `embedded::find` lookup, so the two
-        // surfaces cannot drift. No name lists them (name + one-line description + mime, one per
-        // line); a name prints that document's exact embedded bytes (raw, pipe-safe — no trailing
-        // newline added, so `zzop-mcp contract config-surface | jq` sees the byte-identical file).
+        // The embedded authoring contracts from a terminal — the same documents MCP `resources/read`
+        // serves via the same `embedded::find` lookup (no drift). No name lists them; a name prints that
+        // document's exact embedded bytes (raw, pipe-safe — `contract config-surface | jq` is byte-identical).
         Some("contract") => match args.get(2) {
             None => {
                 for doc in zzop_mcp::embedded::CONTRACT_DOCS {
@@ -240,17 +241,21 @@ fn main() {
             println!("zzop-mcp {}", zzop_mcp::server::version());
         }
         Some("mcp") => zzop_mcp::server::run_stdio(),
-        // The polite lane: an explicit help REQUEST prints the usage line plus one elaboration line
-        // per subcommand (D17: a bare usage line left `contract`/`mcp` a guessing game — what
-        // `contract` with no args does, and that `mcp` speaks newline-delimited JSON-RPC over stdio)
-        // to stdout and exits 0 — only an invocation the dispatch cannot honor is the exit-2 stderr
-        // lane below, which stays a bare usage line plus `BARE_INVOCATION_HINT` (a pointer AT `help`,
-        // never a repeat of it — an error is not a tutorial).
+        // The polite lane: an explicit help REQUEST prints the usage line + one elaboration per
+        // subcommand to stdout, exit 0 (D17: a bare usage line left `contract`/`mcp` a guessing game).
+        // The exit-2 stderr lane below stays a bare usage line + `BARE_INVOCATION_HINT` — an error is
+        // a pointer AT `help`, not a tutorial.
         Some("help") | Some("--help") | Some("-h") => {
             println!("{USAGE}");
             println!("  analyze <path> — analyze ONE repo/tree, print a JSON findings summary");
             println!(
                 "  analyze-envelope <envelope.json> — Mode A: a Normalized-AST envelope file REPLACES native parsing, print the same JSON findings summary"
+            );
+            println!(
+                "  validate-envelope <envelope.json> — offline: is this envelope well-formed? print {{valid,issues}}, exit 0 valid / 1 invalid"
+            );
+            println!(
+                "  validate-rule-pack <pack.json> — offline: does this DSL rule pack load + every matcher regex compile? print {{valid,issues}}, exit 0/1"
             );
             println!("  cross <path>... | cross --config <path> — analyze 2+ trees, print the cross-layer join");
             println!(

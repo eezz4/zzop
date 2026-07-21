@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zzop_engine::{analyze_trees, EngineConfig};
+use zzop_engine::{analyze_trees, EngineConfig, MountRule};
 
 struct TempDir(PathBuf);
 
@@ -433,7 +433,7 @@ fn unconsumed_endpoint_cross_references_its_route_near_miss_finding() {
 // mount route IS the transport those edges flow through, so reporting it as a dead endpoint is tone noise.
 // `web_tree_with_trpc_edge` composes a full router (`viewer.ts` -> `trpc.ts`) consumed by `page.tsx` (>= 1
 // `trpc` edge) AND registers the `pages/api/trpc/[trpc].ts` mount file (no verb checks in its body, so
-// `file_routes` emits both the GET and POST fallback verbs for it).
+// `file_routes` emits ONE `UNKNOWN_VERB` sentinel provide `? /api/trpc/{}` for it, not fabricated GET/POST).
 
 fn web_tree_with_trpc_edge() -> TempDir {
     let dir = TempDir::new("zzop-engine-xlf-trpc-web");
@@ -527,15 +527,29 @@ fn trpc_mount_route_unconsumed_findings_are_suppressed_when_the_run_has_a_trpc_e
                 web_output.warnings
             )
         });
-    assert!(note.contains("2 tRPC mount routes"), "{note}");
-    assert!(note.contains("GET /api/trpc/{}"), "{note}");
-    assert!(note.contains("POST /api/trpc/{}"), "{note}");
+    assert!(note.contains("1 tRPC mount route"), "{note}");
+    // The sentinel's `?` method is stripped for display — the note shows the path, never `? /api/...`.
+    assert!(note.contains("(/api/trpc/{})"), "{note}");
+    assert!(
+        !note.contains("? /api"),
+        "sentinel method must not leak into the note: {note}"
+    );
     assert!(note.contains("1 tRPC edge"), "{note}");
     assert!(note.contains("tRPC transport"), "{note}");
+    // The verb-unknown tRPC mount is transport (understood via the trpc edge), so it is NOT also disclosed
+    // as an unknown-verb-route "inject the method" candidate.
+    let unknown_verb = find(&out.cross_layer_findings, "cross-layer/unknown-verb-route");
+    assert!(
+        unknown_verb
+            .iter()
+            .all(|f| !f.message.contains("/api/trpc/")),
+        "expected the tRPC mount suppressed from unknown-verb-route (transport): {:?}",
+        unknown_verb
+    );
 }
 
 #[test]
-fn trpc_mount_route_stays_reported_when_the_run_has_zero_trpc_edges() {
+fn trpc_mount_route_with_zero_trpc_edges_is_disclosed_as_unknown_verb() {
     let web = web_tree_without_trpc_edge();
     let trees = vec![(web.path().to_path_buf(), config("web"))];
     let out = analyze_trees(&trees);
@@ -551,24 +565,22 @@ fn trpc_mount_route_stays_reported_when_the_run_has_zero_trpc_edges() {
         out.cross_layer.edges
     );
 
+    // Zero trpc edges: the serve-all mount is a verb-unknown route (its handler names no method), not a
+    // dead route. A sentinel is never an unconsumed dead-route candidate — it surfaces as
+    // `cross-layer/unknown-verb-route` (path served, method unknown, inject to confirm).
     let unconsumed = find(&out.cross_layer_findings, "cross-layer/unconsumed-endpoint");
     assert!(
-        unconsumed
-            .iter()
-            .any(|f| f.message.contains("GET /api/trpc/{}")),
-        "expected the tRPC mount route to stay reported with zero trpc edges: {:?}",
+        unconsumed.iter().all(|f| !f.message.contains("/api/trpc/")),
+        "a verb-unknown sentinel is never an unconsumed dead route: {:?}",
         unconsumed
     );
-    let unconsumed_mutation = find(
-        &out.cross_layer_findings,
-        "cross-layer/unconsumed-mutation-endpoint",
-    );
+    let unknown_verb = find(&out.cross_layer_findings, "cross-layer/unknown-verb-route");
     assert!(
-        unconsumed_mutation
+        unknown_verb
             .iter()
-            .any(|f| f.message.contains("POST /api/trpc/{}")),
-        "expected the tRPC mount route's POST verb to stay reported with zero trpc edges: {:?}",
-        unconsumed_mutation
+            .any(|f| f.message.contains("/api/trpc/{}")),
+        "expected the no-edge tRPC-segment mount disclosed as unknown-verb-route: {:?}",
+        unknown_verb
     );
 
     let (_, _, web_output) = out
@@ -588,10 +600,10 @@ fn trpc_mount_route_stays_reported_when_the_run_has_zero_trpc_edges() {
 
 /// A tree with NO tRPC router of its own — just an http route whose path coincidentally carries a literal
 /// `trpc` segment (e.g. a REST endpoint left over from a retired tRPC installation, unrelated to any OTHER
-/// tree's real tRPC setup). `file_routes`'s content-blind convention scan still emits GET/POST provides for
-/// it (any `pages/api/**` default-export file does), so [`super::is_trpc_mount_route_key`]-equivalent
-/// matching still fires on the path shape alone — the per-tree edge-participation gate is the only thing
-/// standing between this coincidence and a wrongful suppression.
+/// tree's real tRPC setup). `file_routes`'s content-blind convention scan still emits a verb-unknown
+/// sentinel provide for it (any serve-all `pages/api/**` default-export file does), so the
+/// `is_trpc_mount_route_path` shape match still fires — the per-tree edge-participation gate is the only
+/// thing standing between this coincidence and a wrongful suppression.
 fn other_tree_with_coincidental_trpc_route() -> TempDir {
     let dir = TempDir::new("zzop-engine-xlf-trpc-other");
     dir.write(
@@ -627,7 +639,6 @@ fn trpc_mount_route_in_a_tree_with_no_trpc_edges_of_its_own_stays_reported_even_
         out.cross_layer.edges
     );
 
-    let unconsumed = find(&out.cross_layer_findings, "cross-layer/unconsumed-endpoint");
     let source_of = |f: &&zzop_core::Finding| {
         f.data
             .as_ref()
@@ -635,28 +646,33 @@ fn trpc_mount_route_in_a_tree_with_no_trpc_edges_of_its_own_stays_reported_even_
             .and_then(|s| s.as_str())
             .map(str::to_string)
     };
-
-    // `web`'s own mount routes are still suppressed (unchanged from the single-tree test above).
+    let unknown_verb = find(&out.cross_layer_findings, "cross-layer/unknown-verb-route");
+    // No verb-unknown sentinel is ever an unconsumed dead route (either tree).
+    let unconsumed = find(&out.cross_layer_findings, "cross-layer/unconsumed-endpoint");
     assert!(
-        unconsumed
-            .iter()
-            .all(|f| source_of(f).as_deref() != Some("web") || !f.message.contains("/api/trpc/")),
-        "expected web's own tRPC mount routes to stay suppressed: {:?}",
+        unconsumed.iter().all(|f| !f.message.contains("/api/trpc/")),
+        "no verb-unknown sentinel is an unconsumed dead route: {:?}",
         unconsumed
     );
 
-    // `other`'s coincidental trpc-segment route is NOT suppressed — it has zero tRPC edges of its own.
-    let other_finding = unconsumed
-        .iter()
-        .find(|f| source_of(f).as_deref() == Some("other"))
-        .unwrap_or_else(|| {
-            panic!(
-                "expected tree `other`'s coincidental trpc-segment route to stay reported, not \
-                 suppressed by tree `web`'s edges: {:?}",
-                unconsumed
-            )
-        });
-    assert!(other_finding.message.contains("GET /api/trpc/{}"));
+    // `web`'s own mount (a real tRPC transport) is suppressed from the disclosure — its trpc edge covers it.
+    assert!(
+        unknown_verb
+            .iter()
+            .all(|f| source_of(f).as_deref() != Some("web")),
+        "expected web's tRPC mount suppressed from the unknown-verb disclosure (transport): {:?}",
+        unknown_verb
+    );
+
+    // `other`'s coincidental trpc-segment route is NOT suppressed — zero tRPC edges of its own — so it is
+    // disclosed as an honest verb-unknown route (the per-tree gate holds against tree `web`'s edges).
+    assert!(
+        unknown_verb.iter().any(|f| source_of(f).as_deref() == Some("other")
+            && f.message.contains("/api/trpc/{}")),
+        "expected tree `other`'s coincidental route disclosed as unknown-verb-route, not suppressed by \
+         tree `web`'s edges: {:?}",
+        unknown_verb
+    );
 
     // Disclosure must be per-tree too: `web` still gets its suppression note, `other` gets none (nothing
     // of its own was suppressed — a note there would be a phantom disclosure).
@@ -682,6 +698,157 @@ fn trpc_mount_route_in_a_tree_with_no_trpc_edges_of_its_own_stays_reported_even_
             .all(|w| !w.contains("tRPC mount")),
         "expected no suppression note on `other` — nothing of its own was suppressed: {:?}",
         other_output.warnings
+    );
+}
+
+// --- Deliberate error case: verb-unknown route end-to-end (1b) ---
+
+#[test]
+fn verb_unknown_route_is_disclosed_and_suppresses_a_would_be_false_finding() {
+    // A serve-all `pages/api` handler (names no method literal) is a verb-unknown route. A FE consuming a
+    // SPECIFIC method on that path must NOT be reported unprovided/near-miss (the path IS served, only the
+    // verb is unknown), the route must NOT be an unconsumed dead route, and NO fabricated GET/POST — nor the
+    // internal `?` sentinel — may appear anywhere. Only the honest `cross-layer/unknown-verb-route` fires.
+    let api = TempDir::new("zzop-engine-xlf-verbunknown-api");
+    api.write(
+        "pages/api/widgets.ts",
+        "export default function handler(req, res) {}\n",
+    );
+    let fe = TempDir::new("zzop-engine-xlf-verbunknown-fe");
+    fe.write(
+        "app.ts",
+        "import axios from 'axios';\naxios.delete('/api/widgets');\n",
+    );
+    let trees = vec![
+        (api.path().to_path_buf(), config("api")),
+        (fe.path().to_path_buf(), config("fe")),
+    ];
+    let out = analyze_trees(&trees);
+
+    let unknown_verb = find(&out.cross_layer_findings, "cross-layer/unknown-verb-route");
+    assert!(
+        unknown_verb
+            .iter()
+            .any(|f| f.message.contains("/api/widgets")),
+        "expected /api/widgets disclosed as unknown-verb-route: {:?}",
+        unknown_verb
+    );
+    for f in &out.cross_layer_findings {
+        assert!(
+            !(f.message.contains("GET /api/widgets") || f.message.contains("POST /api/widgets")),
+            "no fabricated verb may appear for a verb-unknown route: {}",
+            f.message
+        );
+        assert!(
+            !f.message.contains("? /api/widgets"),
+            "sentinel `?` must not leak into a finding: {}",
+            f.message
+        );
+    }
+    for rule in [
+        "cross-layer/unprovided-mutation-call",
+        "cross-layer/route-near-miss",
+        "cross-layer/path-near-miss",
+        "cross-layer/unconsumed-endpoint",
+    ] {
+        let hits = find(&out.cross_layer_findings, rule);
+        assert!(
+            hits.iter().all(|f| !f.message.contains("/api/widgets")),
+            "a verb-unknown served path must suppress {rule} on /api/widgets: {:?}",
+            hits
+        );
+    }
+}
+
+// --- Deliberate error case: unconfigured deployment-prefix blind spot ---
+
+#[test]
+fn unconfigured_deployment_prefix_surfaces_a_near_miss_naming_the_topology_remedy() {
+    // A gateway/ingress adds an `/api` prefix at deploy time that neither repo's source carries. Without a
+    // `mountedAt`/`mounts` injection zzop cannot see it, so the FE `/api/users` call and the BE `/users`
+    // route land one prefix apart — a route-near-miss. The finding must name deployment topology as a
+    // possible cause and point at the `mounts` remedy (the honest "verify against your topology" caveat).
+    let be = TempDir::new("zzop-engine-xlf-deploy-be");
+    be.write(
+        "routes.ts",
+        "const app = new Hono();\napp.get(\"/users\", handler);\n",
+    );
+    let fe = TempDir::new("zzop-engine-xlf-deploy-fe");
+    fe.write(
+        "app.ts",
+        "import axios from 'axios';\naxios.get('/api/users');\n",
+    );
+    let trees = vec![
+        (be.path().to_path_buf(), config("be")),
+        (fe.path().to_path_buf(), config("fe")),
+    ];
+    let out = analyze_trees(&trees);
+
+    let near_miss = find(&out.cross_layer_findings, "cross-layer/route-near-miss");
+    let hit = near_miss
+        .iter()
+        .find(|f| f.message.contains("/api/users"))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a route-near-miss for the unconfigured /api prefix: {:?}",
+                near_miss
+            )
+        });
+    assert!(
+        hit.message.contains("deployment topology") && hit.message.contains("mounts"),
+        "near-miss must name the deployment-topology remedy: {}",
+        hit.message
+    );
+}
+
+// --- Field test: a user AI injects the dynamic deployment prefix, and the join RESOLVES ---
+
+#[test]
+fn injecting_the_deployment_prefix_via_mounts_resolves_the_near_miss_into_an_exact_edge() {
+    // The remedy path of the blind-spot test above: a user (or their AI) knows the gateway mounts the BE
+    // tree at `/api` — a fact no source file carries — and injects it via `mounts`. zzop then prepends the
+    // topology prefix to the BE provide's key, so the FE `/api/users` call and the (now-rewritten) BE
+    // `/api/users` route join as an EXACT edge, and the route-near-miss disappears entirely. This proves
+    // the disclosure -> inject -> resolve loop closes, not just that the gap is named.
+    let be = TempDir::new("zzop-engine-xlf-deploy-be-fix");
+    be.write(
+        "routes.ts",
+        "const app = new Hono();\napp.get(\"/users\", handler);\n",
+    );
+    let fe = TempDir::new("zzop-engine-xlf-deploy-fe-fix");
+    fe.write(
+        "app.ts",
+        "import axios from 'axios';\naxios.get('/api/users');\n",
+    );
+    // The injected dynamic fact: the whole BE tree is mounted at `/api` by the deployment gateway.
+    let be_config = EngineConfig {
+        source_id: "be".to_string(),
+        mounts: vec![MountRule {
+            dir: String::new(),
+            at: "api".to_string(),
+        }],
+        ..EngineConfig::default()
+    };
+    let trees = vec![
+        (be.path().to_path_buf(), be_config),
+        (fe.path().to_path_buf(), config("fe")),
+    ];
+    let out = analyze_trees(&trees);
+
+    // The join now resolves as an exact edge at the mounted key...
+    assert!(
+        out.cross_layer
+            .edges
+            .iter()
+            .any(|e| e.key == "GET /api/users"),
+        "injecting the /api mount must make the call and route join as an exact edge: {:?}",
+        out.cross_layer.edges
+    );
+    // ...and the near-miss the un-injected run disclosed is gone.
+    let near_miss = find(&out.cross_layer_findings, "cross-layer/route-near-miss");
+    assert!(
+        !near_miss.iter().any(|f| f.message.contains("/api/users")),
+        "the injected mount must eliminate the deployment-prefix near-miss: {near_miss:?}"
     );
 }
 

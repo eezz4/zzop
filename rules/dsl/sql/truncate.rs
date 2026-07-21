@@ -82,7 +82,7 @@ fn sql_truncate_app_ok_marker_suppresses_the_finding() {
 
 #[test]
 fn jsx_truncate_boolean_prop_is_not_flagged() {
-    // Class fix (mono-hub 0.10.0 FP): a JSX boolean prop `truncate` sits after the CLOSING quote of
+    // A JSX boolean prop `truncate` sits after the CLOSING quote of
     // a sibling attribute (`size="sm" truncate style=...`). The rule now requires a CLOSED string
     // literal (a quote after the table name, like its `sql-delete-no-where` siblings), so `truncate`
     // as prose outside any quoted SQL string no longer fires.

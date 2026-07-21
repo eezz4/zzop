@@ -61,9 +61,7 @@ catalog="$repo_root/docs/rules/catalog.md"
 if [ -n "${ZZOP_CHECK_DOCS_RULE_IDS_FILES:-}" ]; then
   files="$ZZOP_CHECK_DOCS_RULE_IDS_FILES"
 else
-  files="$repo_root/packages/cli/README.md
-$repo_root/packages/cli/lib/init.js
-$repo_root/docs/getting-started.md
+  files="$repo_root/docs/getting-started.md
 $repo_root/site/usage.html"
 fi
 

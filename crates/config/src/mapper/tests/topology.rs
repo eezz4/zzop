@@ -133,6 +133,73 @@ fn empty_mounts_and_hosts_arrays_are_omitted_from_the_request() {
     assert!(tree.get("hosts").is_none());
 }
 
+// --- routes injection gate + flow -----------------------------------------------------------
+
+#[test]
+fn routes_gate_error_texts() {
+    let run = |v: serde_json::Value| {
+        config_to_request(
+            &json!({"trees": [{"root": ".", "routes": v}]}),
+            Path::new("/base"),
+        )
+        .unwrap_err()
+        .0
+    };
+    assert_eq!(
+        run(json!("x")),
+        "trees[0].routes must be an array of { key, role? } objects."
+    );
+    assert_eq!(
+        run(json!([5])),
+        "trees[0].routes[0] must be an object with a \"key\" string."
+    );
+    assert_eq!(
+        run(json!([{"role": "provide"}])),
+        "trees[0].routes[0].key must be a non-empty \"METHOD PATH\" string (e.g. \"GET /api/users\")."
+    );
+    assert_eq!(
+        run(json!([{"key": "GET /x", "role": "middleware"}])),
+        "trees[0].routes[0].role must be \"provide\" or \"consume\"."
+    );
+}
+
+#[test]
+fn well_formed_routes_flow_into_the_tree_request() {
+    let mapped = config_to_request(
+        &json!({"trees": [{
+            "root": ".",
+            "routes": [
+                {"key": "GET /api/users"},
+                {"key": "POST /api/orders", "role": "consume"}
+            ]
+        }]}),
+        Path::new("/base"),
+    )
+    .unwrap();
+    let tree = &mapped.request["trees"][0];
+    assert_eq!(tree["routes"][0]["key"], "GET /api/users");
+    assert_eq!(tree["routes"][1]["role"], "consume");
+}
+
+#[test]
+fn an_unknown_key_inside_a_routes_entry_warns_but_does_not_reject() {
+    let mapped = config_to_request(
+        &json!({"trees": [{"root": ".", "routes": [{"key": "GET /x", "note": "typo-field"}]}]}),
+        Path::new("/base"),
+    )
+    .unwrap();
+    assert!(
+        mapped
+            .warnings
+            .iter()
+            .any(|w| w.contains("trees[0].routes[0].note")),
+        "an unknown per-route key must drift-warn: {:?}",
+        mapped.warnings
+    );
+    // ...but the valid route still flows through (drift never rejects).
+    assert_eq!(mapped.request["trees"][0]["routes"][0]["key"], "GET /x");
+}
+
 #[test]
 fn roots_shorthand_never_reads_mounted_at_mounts_hosts() {
     // These keys have no meaning off the `trees[]` shape; a `roots` config simply has nowhere to

@@ -29,6 +29,61 @@ fn no_axum_import_yields_nothing() {
 }
 
 #[test]
+fn any_route_expands_to_every_http_verb() {
+    // `any(handler)` is axum's every-method catch-all — it must expand to one Verb per HTTP_KEY_VERBS
+    // (not vanish), keeping the route visible and its mutating surface reported.
+    let src = concat!(
+        "use axum::Router;\n",
+        "use axum::routing::any;\n",
+        "fn main() {\n",
+        "    let app = Router::new().route(\"/proxy\", any(proxy));\n",
+        "}\n",
+    );
+    let out = extract_axum_router_fragments("a.rs", src);
+    let mut methods: Vec<&str> = frag(&out, "app")
+        .entries
+        .iter()
+        .map(|e| match e {
+            RouterMountEntry::Verb { method, path, .. } => {
+                assert_eq!(path, "/proxy");
+                method.as_str()
+            }
+            _ => panic!("expected Verb"),
+        })
+        .collect();
+    methods.sort_unstable();
+    assert_eq!(methods, vec!["DELETE", "GET", "PATCH", "POST", "PUT"]);
+}
+
+#[test]
+fn concrete_verb_plus_any_on_one_route_does_not_duplicate_that_verb() {
+    // `get(h).any(h2)` on one path: the concrete GET and the `any` expansion both yield GET /x. The
+    // (method, path) dedup keeps exactly one GET so `duplicate-route` never sees a phantom second GET
+    // from a single `.route()` registration — total is 5 verbs, not 6.
+    let src = concat!(
+        "use axum::Router;\n",
+        "use axum::routing::get;\n",
+        "fn main() {\n",
+        "    let app = Router::new().route(\"/x\", get(h).any(h2));\n",
+        "}\n",
+    );
+    let out = extract_axum_router_fragments("a.rs", src);
+    let mut methods: Vec<&str> = frag(&out, "app")
+        .entries
+        .iter()
+        .map(|e| match e {
+            RouterMountEntry::Verb { method, path, .. } => {
+                assert_eq!(path, "/x");
+                method.as_str()
+            }
+            _ => panic!("expected Verb"),
+        })
+        .collect();
+    methods.sort_unstable();
+    assert_eq!(methods, vec!["DELETE", "GET", "PATCH", "POST", "PUT"]);
+}
+
+#[test]
 fn single_let_chain_with_multiple_verbs() {
     let src = concat!(
         "use axum::Router;\n",

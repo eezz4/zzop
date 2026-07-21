@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>zzop — Usage</title>
-<meta name="description" content="zzop usage — install and run the CLI, write a zzop.config.jsonc, and read the report. Embedding the engine? See the SDK reference.">
+<meta name="description" content="zzop usage — download the Node-free zzop-mcp binary, write a zzop.config.jsonc, and read the report. Embedding the engine? See the SDK reference.">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="assets/site.css">
 </head>
@@ -50,27 +50,31 @@
   <main class="docs-content">
     <div class="docs-content-header">
       <h1>Using zzop</h1>
-      <p>Run zzop as a CLI: write a <code>zzop.config.jsonc</code>, run <code>npx zzop</code> — no code, ESLint-style. The <code>@zzop/cli</code> package is the config-driven front end; the engine ships as <code>@zzop/native</code>, the SDK layer for embedders. This page is the CLI — if you're building a tool on top of zzop instead, see the <a href="sdk.html">SDK reference</a>.</p>
+      <p>zzop ships as <code>zzop-mcp</code>, a single Node-free native binary: no Node.js, no npm, nothing to compile. Run it as a CLI over subcommands (<code>zzop-mcp analyze .</code> — no code, ESLint-style) or point an MCP client at <code>zzop-mcp mcp</code>. This page is the CLI — if you're building a tool on top of zzop instead, see the <a href="sdk.html">SDK reference</a>.</p>
     </div>
 
     <section id="install">
       <span class="eyebrow eyebrow--sm">Command line</span>
-      <h2>Install &amp; run the CLI</h2>
-      <p>Add <code>@zzop/cli</code> as a dev dependency and let it scaffold a config. <code>@zzop/cli</code> depends on <code>@zzop/native</code>, which auto-installs the right prebuilt platform binary — nothing to compile. Requires Node.js &ge; 18.</p>
+      <h2>Install &amp; run the binary</h2>
+      <p>Three ways to get it — no source checkout or toolchain required for any of them:</p>
+      <ul>
+        <li><strong>Claude Code</strong> — <code>/plugin marketplace add eezz4/zzop</code>, then <code>/plugin install zzop@zzop</code>. The plugin's <code>.mcp.json</code> runs <code>zzop-mcp mcp</code> for you.</li>
+        <li><strong>Claude Desktop</strong> — the one-click <code>.mcpb</code> bundle (drag-and-drop install); it carries the platform binary. See <a href="https://github.com/eezz4/zzop/blob/main/packaging/README.md">packaging/README.md</a>.</li>
+        <li><strong>CLI / CI</strong> — download the <code>zzop-mcp-&lt;platform&gt;[.exe]</code> binary from <a href="https://github.com/eezz4/zzop/releases" target="_blank" rel="noreferrer">GitHub Releases</a> (5 platforms) and put it on <code>PATH</code> as <code>zzop-mcp</code>.</li>
+      </ul>
       <div class="code-panel">
-        <div class="code-panel__tab">Install, scaffold, analyze</div>
-        <pre class="code-block"><code>npm i -D @zzop/cli     # add to your project (or one-off: npx @zzop/cli)
-npx zzop init     # writes an annotated zzop.config.jsonc
-npx zzop          # analyzes using that config and prints a report</code></pre>
+        <div class="code-panel__tab">Analyze a tree</div>
+        <pre class="code-block"><code>zzop-mcp analyze .        # analyze this tree, print JSON findings
+zzop-mcp cross ../api ../web   # cross-layer join across 2+ trees
+zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop</code></pre>
       </div>
-      <p><code>zzop init</code> refuses to overwrite an existing config; pass <code>--force</code> to replace it. Both <code>@zzop/cli</code> and <code>@zzop/native</code> are published to npm.</p>
-      <p>Using Claude Code instead? <code>zzop-mcp</code> is a Node-free binary with an MCP server built in: prebuilt binaries for 5 platforms attach to <a href="https://github.com/eezz4/zzop/releases" target="_blank" rel="noreferrer">GitHub Releases</a> — put one on <code>PATH</code> as <code>zzop-mcp</code>, then <code>/plugin marketplace add eezz4/zzop</code> and <code>/plugin install zzop@zzop</code>. See <a href="https://github.com/eezz4/zzop/blob/main/packages/mcp/README.md">packages/mcp/README.md</a> for the full reference.</p>
+      <p>See <a href="https://github.com/eezz4/zzop/blob/main/packages/mcp/README.md">packages/mcp/README.md</a> for the full CLI reference. (The npm distribution — the JS CLI <code>@zzop/cli</code> and the napi addon <code>@zzop/native</code>, installed via <code>npm i -D @zzop/cli</code> / <code>npx zzop</code> — was removed 2026-07-20; <code>zzop-mcp</code> is its full Node-free replacement.)</p>
     </section>
 
     <section id="cli-config">
       <span class="eyebrow eyebrow--sm">CLI config</span>
       <h2>zzop.config.jsonc</h2>
-      <p><code>zzop.config.jsonc</code> is JSON with comments and trailing commas allowed. <code>zzop init</code> generates a fully annotated copy; the reference below summarizes each option.</p>
+      <p><code>zzop.config.jsonc</code> is JSON with comments and trailing commas allowed. <code>zzop-mcp analyze &lt;path&gt;</code> auto-discovers one at the tree root; <code>cross</code>/<code>endpoint</code> load one explicitly via <code>--config &lt;path&gt;</code>. There is no scaffolding command to generate a starter file (the JS CLI's <code>zzop init</code> was dropped, not ported) — hand-write it from the reference below, or run <code>zzop-mcp contract config-surface</code> to print the machine-checked vocabulary of every known key.</p>
       <div class="code-panel">
         <div class="code-panel__tab">zzop.config.jsonc</div>
         <pre class="code-block"><code>{
@@ -111,41 +115,36 @@ npx zzop          # analyzes using that config and prints a report</code></pre>
   // Files larger than this many bytes skip structural parsing.
   "sizeCap": 500000,
 
-  // "pretty" or "json"; overridden by --format / --json.
+  // "format" / "report.*" / "failOn" are recognized (no unknown-key warning)
+  // for forward-compat with the removed JS CLI's config files, but zzop-mcp
+  // does not act on them today: output is always the JSON summary on stdout,
+  // and the exit code reflects only whether the run itself succeeded (see
+  // "Exit codes" below) — gate on a specific severity by parsing the JSON.
   "format": "pretty",
-
-  // Reports are written to disk BY DEFAULT, in addition to stdout — markdown,
-  // one file per tree, to ./zzop-reports/zzop.<epoch>/ (a fresh subdir per
-  // run, so runs accumulate). Set "enabled": false to opt out, or override
-  // the directory/formats here. Same directory override as the --out flag.
-  // "report": { "dir": "zzop-reports", "formats": ["md", "json", "sarif"], "enabled": true },
-
-  // Exit non-zero when any finding is at or above this severity, or "off".
   "failOn": "warn"
 }</code></pre>
       </div>
-      <p>Config severities normalize to the engine's three levels — <code>off</code>/<code>none</code>/<code>disabled</code> disable a rule; <code>info</code>/<code>note</code>/<code>low</code> &rarr; <code>info</code>; <code>warn</code>/<code>warning</code>/<code>medium</code> &rarr; <code>warning</code>; <code>error</code>/<code>critical</code>/<code>high</code> &rarr; <code>critical</code>. <code>failOn</code> uses the same names (plus <code>off</code> to never fail); ordering is <code>info</code> &lt; <code>warning</code> &lt; <code>critical</code>.</p>
+      <p>Config severities normalize to the engine's three levels — <code>off</code>/<code>none</code>/<code>disabled</code> disable a rule; <code>info</code>/<code>note</code>/<code>low</code> &rarr; <code>info</code>; <code>warn</code>/<code>warning</code>/<code>medium</code> &rarr; <code>warning</code>; <code>error</code>/<code>critical</code>/<code>high</code> &rarr; <code>critical</code>.</p>
       <div class="table-scroll">
         <table>
           <thead>
-            <tr><th>Command / option</th><th>Description</th></tr>
+            <tr><th>Command</th><th>Description</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>zzop init [--force]</code></td><td>Write an annotated <code>zzop.config.jsonc</code> to the current directory.</td></tr>
-            <tr><td><code>zzop init adapter --mode &lt;a|b&gt; --kind &lt;consume|provide&gt; [--force]</code></td><td>Scaffold a self-contained starter adapter into <code>./zzop-adapter/</code>. <code>--mode a</code> = full envelope (replaces native analysis for the tree); <code>--mode b</code> = io-only overlay (merged via the <code>overlays</code> config key). <code>--kind</code> selects which side's extraction TODOs are stubbed in.</td></tr>
-            <tr><td><code>zzop [run]</code></td><td>Load the config, analyze, and print. The default command.</td></tr>
-            <tr><td><code>zzop adapter validate &lt;path&gt;</code></td><td>Offline check of an external-parser envelope against the v1 contract, plus semantic lint hints (unnormalized keys, host-carrying provide keys, duplicate provides, absolute paths). Exits non-zero only if the envelope is structurally invalid; hints never affect the exit code. No config/root needed.</td></tr>
-            <tr><td><code>--config &lt;path&gt;</code></td><td>Config file to load (default <code>./zzop.config.jsonc</code>).</td></tr>
-            <tr><td><code>--format &lt;pretty|json&gt;</code>, <code>--json</code></td><td>Output format, overriding the config's <code>format</code>.</td></tr>
-            <tr><td><code>--out &lt;dir&gt;</code></td><td>Override the report base directory (default <code>./zzop-reports</code>; reports are written by default regardless of this flag). Each run writes to <code>&lt;dir&gt;/zzop.&lt;epoch&gt;/</code> — a fresh subdir per run, markdown by default. Same as config <code>report.dir</code>.</td></tr>
-            <tr><td><code>-a, --all</code></td><td>Expand info-level findings (folded to per-rule counts by default so warnings stay visible).</td></tr>
-            <tr><td><code>--severity &lt;critical|warning|info|off&gt;</code></td><td>Only display findings at or above this severity (default <code>off</code>, show all). Display-only — the exit code still uses the unfiltered findings, so <code>failOn</code> is unaffected.</td></tr>
-            <tr><td><code>--debug-io</code></td><td>After the normal output, dump every cross-layer join bucket (<code>edges</code>, <code>unconsumedProvides</code>, <code>unprovidedConsumes</code>, <code>unresolvedConsumes</code>, <code>externalConsumes</code>, <code>ambiguousConsumes</code>) as deterministic plain text — the join-debug surface for troubleshooting an adapter/overlay.</td></tr>
-            <tr><td><code>-h, --help</code> / <code>--version</code></td><td>Show help / the CLI and engine versions.</td></tr>
+            <tr><td><code>zzop-mcp analyze &lt;path&gt;</code></td><td>Analyze one repo/tree, print a JSON findings summary. Auto-discovers <code>&lt;path&gt;/zzop.config.jsonc</code>; a config declaring 2+ trees is a guided error pointing at <code>cross</code> instead.</td></tr>
+            <tr><td><code>zzop-mcp cross &lt;path&gt;... </code> / <code>cross --config &lt;zzop.config.jsonc&gt;</code></td><td>Analyze 2+ trees and print the cross-layer join — zzop's headline. Paths mode needs 2+ roots and ignores any per-tree config; config mode's <code>trees</code> array defines the join.</td></tr>
+            <tr><td><code>zzop-mcp endpoint &lt;pattern&gt; &lt;path&gt;...</code> / <code>endpoint &lt;pattern&gt; --config &lt;path&gt;</code></td><td>Definitive "is io key X provided/consumed/joined?" query: <code>pattern</code> is substring-matched against every cross-layer io key, answered with a sealed verdict (<code>linked</code> / <code>provided-only</code> / <code>consumed-unprovided</code> / <code>external</code> / <code>unresolved-only</code> / <code>ambiguous</code> / <code>mixed</code> / <code>not-found</code>).</td></tr>
+            <tr><td><code>zzop-mcp analyze-envelope &lt;envelope.json&gt;</code></td><td>Mode A: the envelope file replaces native parsing entirely for this run; prints the same JSON findings summary shape as <code>analyze</code>.</td></tr>
+            <tr><td><code>zzop-mcp validate-envelope &lt;envelope.json&gt;</code></td><td>Offline "is this envelope well-formed?" check. Prints <code>{"valid":…,"issues":[…]}</code>; exits <code>0</code> valid / <code>1</code> invalid.</td></tr>
+            <tr><td><code>zzop-mcp validate-rule-pack &lt;pack.json&gt;</code></td><td>Offline "does this DSL pack load and every matcher regex compile?" check. Same <code>{valid,issues}</code>/exit-code contract as <code>validate-envelope</code>.</td></tr>
+            <tr><td><code>zzop-mcp contract [&lt;name&gt;]</code></td><td>No name lists the embedded authoring-contract resources (schemas, guides, the rule catalog, <code>config-surface</code>); a name prints that document's exact bytes to stdout.</td></tr>
+            <tr><td><code>zzop-mcp mcp</code></td><td>Serve MCP over stdio (newline-delimited JSON-RPC 2.0) — what a Claude Code/Desktop config points at.</td></tr>
+            <tr><td><code>zzop-mcp version</code> / <code>--version</code></td><td>Print the binary's version (the same value MCP's <code>initialize</code> reports as <code>serverInfo.version</code>).</td></tr>
+            <tr><td><code>zzop-mcp help</code> / <code>--help</code> / <code>-h</code></td><td>Print the usage line plus one elaboration per subcommand, exit 0.</td></tr>
           </tbody>
         </table>
       </div>
-      <p>Exit codes: <code>0</code> = ran, no finding at or above <code>failOn</code>; <code>1</code> = at least one finding at or above <code>failOn</code> (CI gate); <code>2</code> = config or usage error.</p>
+      <p>Exit codes are uniform across every subcommand: <code>0</code> = ran successfully; <code>1</code> = a runtime failure (unreadable path, invalid envelope/config) — for <code>validate-envelope</code>/<code>validate-rule-pack</code> specifically, <code>1</code> instead means "ran fine, found the input invalid"; <code>2</code> = an argument-shape mistake (missing/extra/flag-shaped argument). There is no severity-gated CI exit code today — <code>failOn</code> is a recognized-but-inert config key (see above); gate a build by parsing the JSON output's <code>findings</code>/<code>crossLayerFindings</code> severities yourself.</p>
     </section>
 
     <section id="suppressing">
@@ -167,7 +166,7 @@ npx zzop          # analyzes using that config and prints a report</code></pre>
     <section id="embedding">
       <span class="eyebrow eyebrow--sm">Programmatic / embedding</span>
       <h2>Embedding the engine</h2>
-      <p>Building a tool on top of zzop rather than running it as a CLI? Depend on <code>@zzop/native</code> directly and call it JSON-in / JSON-out — the same engine the CLI drives. The <a href="sdk.html">SDK reference</a> documents the seven functions, the request/output shapes, and multi-repo (<code>analyzeTrees</code>) analysis.</p>
+      <p>Building a tool on top of zzop rather than running it as a CLI? Depend on the <code>zzop-facade</code> / <code>zzop-summary</code> Rust crates directly, or shell out to this same binary's JSON subcommands — either way it's the same engine the CLI drives, JSON in / JSON out. The <a href="sdk.html">SDK reference</a> documents the seven functions, the request/output shapes, and multi-repo (<code>cross</code>) analysis.</p>
     </section>
 
   </main>

@@ -290,6 +290,7 @@ fn applies_to_is_false_for_a_pack_with_no_rules() {
         id: "empty".into(),
         framework: "any".into(),
         schema_version: 1,
+        fragments: Default::default(),
         rules: vec![],
     };
     assert!(!applies_to(&pack, "anything.java"));

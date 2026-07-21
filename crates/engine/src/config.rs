@@ -11,7 +11,7 @@ use crate::{DispatchConfig, IoOptions, DEFAULT_SIZE_CAP};
 
 /// Provenance of one loaded DSL pack, as reported by `AnalyzeOutput::packs_loaded`. Only two classes
 /// exist at this boundary: `Dir` = read off disk from a packs directory (`packsDir` — which is also how
-/// the JS wrapper's bundled default packs arrive, since `packages/native/index.js` prepends the bundled
+/// the bundled default packs arrive, since the `zzop-config` mapper prepends the bundled
 /// directory to `packsDir`); `Inline` = handed to the engine as an already-parsed, in-memory
 /// `RulePackDef` (`packDefs` — which is also how the Rust hosts' build.rs-embedded bundled packs arrive,
 /// via `zzop-config`'s `withDefaults` injection). There is deliberately NO `Bundled` variant: "bundled"

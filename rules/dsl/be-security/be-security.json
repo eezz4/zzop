@@ -33,7 +33,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\.(create|update|upsert|updateMany)\\s*\\(", "label": "db-write" },
@@ -51,7 +51,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "line_pattern": "\\$(queryRawUnsafe|executeRawUnsafe)\\s*\\(",
         "skip_comment_lines": true,
         "snippet_max": 160
@@ -65,14 +65,14 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\b(res\\.cookie|setCookie|cookies?\\.set)\\s*\\(", "label": "cookie-set" }
         ],
         "trigger": "cookie-set",
         "absent": [
-          { "pattern": "(?i)httpOnly", "label": "httponly" }
+          { "pattern": "(?i)httpOnly\\s*:\\s*true", "label": "httponly" }
         ],
         "snippet_max": 160
       }
@@ -85,7 +85,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "any": [
           {
@@ -108,7 +108,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|java)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "any": [
           {
@@ -135,7 +135,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|java)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "line_pattern": "(?i)https?://[^\"'\\s]*[?&](api[_-]?key|apikey|access[_-]?token|token|secret)=",
         "snippet_max": 160
@@ -149,7 +149,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.java$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "line_pattern": "@Query\\s*\\(\\s*\"[^\"]*\"\\s*\\+",
         "snippet_max": 160
@@ -163,7 +163,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\bredirect\\s*\\(", "label": "redirect" },
@@ -181,7 +181,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\b(fetch|axios|got)\\s*[.(]", "label": "egress" },
@@ -199,7 +199,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\b(fs|fsp)\\.\\w+\\s*\\(|\\b(readFile|writeFile|createReadStream)\\s*\\(", "label": "fs-call" },
@@ -218,7 +218,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "line_pattern": "credentials\\s*:\\s*true",
         "require_file_all": ["origin\\s*:\\s*['\"]\\*['\"]"],
@@ -233,14 +233,14 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\bjwt\\.sign\\s*\\(", "label": "jwt-sign" }
         ],
         "trigger": "jwt-sign",
         "absent": [
-          { "pattern": "expiresIn", "label": "expiry" }
+          { "pattern": "expiresIn|\\bexp\\s*:", "label": "expiry" }
         ],
         "snippet_max": 160
       }
@@ -253,11 +253,11 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "any": [
           { "pattern": "(?i)\\b(token|otp|nonce|session_?id|secret)\\b.*Math\\.random\\s*\\(", "label": "ctx-before" },
-          { "pattern": "(?i)Math\\.random\\s*\\(\\).*\\b(token|otp|nonce|secret)\\b", "label": "ctx-after" }
+          { "pattern": "(?i)Math\\.random\\s*\\(\\).*\\b(token|otp|nonce|session_?id|secret)\\b", "label": "ctx-after" }
         ],
         "snippet_max": 160
       }
@@ -270,10 +270,10 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "line_pattern": "(?i)\\b(secret|token|signature|hmac|api_?key)\\w*\\s*[!=]==\\s*",
-        "exclude_pattern": "(?i)[!=]==\\s*(undefined|null)\\b|(?i)\\btypeof\\s+[\\w$.\\[\\]'\"]*(secret|token|signature|hmac|api_?key)\\w*\\s*[!=]==\\s*['\"](string|number|boolean|object|function|bigint|symbol|undefined)['\"]",
+        "exclude_pattern": "(?i)[!=]==\\s*(undefined|null)\\b|[!=]==\\s*['\"]|(?i)\\btypeof\\s+[\\w$.\\[\\]'\"]*(secret|token|signature|hmac|api_?key)\\w*\\s*[!=]==\\s*['\"](string|number|boolean|object|function|bigint|symbol|undefined)['\"]",
         "snippet_max": 160
       }
     },
@@ -285,7 +285,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "any": [
           { "pattern": "res\\.status\\s*\\(\\s*5\\d\\d\\s*\\)\\s*\\.\\s*(send|json)\\s*\\(\\s*(err|error|e)\\b", "label": "status5xx" },
@@ -302,7 +302,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)(\\.(tsx|jsx)$|(^|/)(fe|frontend|client|web)/.*\\.(ts|js)$)",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "line_pattern": "(?i)(process\\.env|import\\.meta\\.env)\\.[A-Z0-9_]*(SECRET|PRIVATE|SERVICE_ROLE|SERVICE_KEY)[A-Z0-9_]*",
         "snippet_max": 160
@@ -316,7 +316,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "line_pattern": "(?i)localStorage\\.setItem\\s*\\([^)]*\\b(token|jwt|access_?token)\\b",
         "snippet_max": 160
@@ -346,7 +346,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.java$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "(DocumentBuilderFactory|SAXParserFactory)\\.newInstance\\s*\\(", "label": "factory" }
@@ -368,7 +368,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.java$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "new\\s+ObjectInputStream", "label": "ois" },
@@ -387,7 +387,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.java$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "new\\s+File\\s*\\(", "label": "new-file" },
@@ -405,7 +405,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.java$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "any": [
           { "pattern": "(?i)\\b(token|session|otp|nonce)\\b.*new\\s+Random\\s*\\(", "label": "ctx-before" },
@@ -422,7 +422,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.java$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "printStackTrace\\s*\\(|\\.getMessage\\s*\\(\\)", "label": "leak" },
@@ -440,7 +440,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.java$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "any": [
           { "pattern": "TrustAllCerts", "label": "trust-all-class" },
@@ -507,7 +507,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "(?i)jwt|jose|jsonwebtoken",
         "skip_comment_lines": true,
         "line_pattern": "(?i)algorithms?\\s*:\\s*\\[?\\s*['\"]none['\"]",
@@ -522,7 +522,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "child_process",
         "skip_comment_lines": true,
         "any": [
@@ -554,7 +554,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "(?i)jsonwebtoken|jose|jwt",
         "skip_comment_lines": true,
         "any": [
@@ -572,7 +572,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "skip_comment_lines": true,
         "line_pattern": "\\b(?:sendFile|download)\\s*\\(\\s*[^)]*\\breq\\.(?:params|query|body)",
         "exclude_pattern": "path\\.basename\\s*\\(",
@@ -587,7 +587,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "skip_comment_lines": true,
         "any": [
           { "pattern": "credentials\\s*:\\s*true.*origin\\s*:\\s*(?:true\\b|req\\.headers)", "label": "credentials-then-origin" },
@@ -616,12 +616,12 @@
     {
       "id": "html-response-from-request",
       "severity": "warning",
-      "message": "A `res.send`/`res.write`/`res.end` call co-occurs with request input (`req.query`/`req.params`/`req.body`/`req.headers`) AND an HTML-shaped marker (a literal opening tag like `<div>`/`<html>`, or a `Content-Type: text/html` header) in the same function, with no sanitizer call anywhere in it — this is a co-occurrence heuristic, not a proof that the request value actually reaches the HTML output (same honesty as `be-reliability/multi-write-no-tx`'s documented approximation): it flags the shape, not a traced data flow. Escape/sanitize request-derived values before splicing them into HTML, set an explicit `application/json` content type for pure API responses, or use a template engine with auto-escaping instead of building markup by hand. Sibling boundary: `security/taint-flow` also does source+sink co-occurrence for `.ts`/`.tsx`, but its sink list does not include `res.send`/`res.write`/`res.end` — this rule covers exactly the class taint-flow misses, and also runs on plain `.js`/`.cjs`/`.mjs` files taint-flow doesn't scan. Suppress a vetted case with `// html-response-ok`.",
+      "message": "A `res.send`/`res.write`/`res.end` call co-occurs with request input (`req.query`/`req.params`/`req.body`/`req.headers`) AND an HTML-shaped marker (a literal opening tag like `<div>`/`<html>`, or a `Content-Type: text/html` header) in the same function, with no sanitizer call anywhere in it — this is a co-occurrence heuristic, not a proof that the request value actually reaches the HTML output (same honesty as `be-db/multi-write-no-tx`'s documented approximation): it flags the shape, not a traced data flow. Escape/sanitize request-derived values before splicing them into HTML, set an explicit `application/json` content type for pure API responses, or use a template engine with auto-escaping instead of building markup by hand. Sibling boundary: `security/taint-flow` also does source+sink co-occurrence for `.ts`/`.tsx`, but its sink list does not include `res.send`/`res.write`/`res.end` — this rule covers exactly the class taint-flow misses, and also runs on plain `.js`/`.cjs`/`.mjs` files taint-flow doesn't scan. Suppress a vetted case with `// html-response-ok`.",
       "suppress_marker": "html-response-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "skip_comment_lines": true,
         "patterns": [
           { "pattern": "\\bres\\.(?:send|write|end)\\s*\\(", "label": "html-send" },
@@ -643,7 +643,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "(?i)(res\\.|response\\.|content-type|text/html)",
         "skip_comment_lines": true,
         "any": [
@@ -661,7 +661,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths}",
         "require_file": "(?i)helmet|content-security-policy|contentSecurityPolicy",
         "skip_comment_lines": true,
         "any": [
@@ -680,7 +680,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(java|jsp|jspx|tag)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "require_file": "(?i)\\b(?:SELECT|INSERT|UPDATE|DELETE|MERGE)\\b",
         "skip_comment_lines": true,
         "line_pattern": "(?i)(?:\"[^\"]*(?:SELECT[^\"]*\\bFROM\\b|DELETE\\s+FROM\\b|INSERT\\s+INTO\\b|MERGE\\s+INTO\\b)[^\"]*\"|\"\\s*UPDATE\\b[^\"]*\")\\s*\\+\\s*[A-Za-z_$]",
@@ -695,7 +695,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(java|jsp|jspx|tag)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "require_file": "\\b(?:MessageDigest|DigestUtils|Cipher)\\b",
         "skip_comment_lines": true,
         "any": [
@@ -715,7 +715,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.java$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "file_exclude_pattern": "${test-paths-stories}",
         "require_file": "\\b(?:exec|ProcessBuilder)\\b",
         "skip_comment_lines": true,
         "patterns": [

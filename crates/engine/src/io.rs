@@ -1,31 +1,21 @@
-//! Per-file IO projection fused into the parse pass: HTTP egress (`consumes`, frontend side) and
-//! Hono-style route provides (`provides`, backend side), via `zzop-parser-typescript`'s `egress`/`routes`
-//! adapters, run against a single-file slice (`pipeline::process_file` calls [`extract_file_io`] once
-//! per file, before that file's parse scratch state is dropped).
-//!
+//! Per-file IO projection fused into the parse pass: HTTP egress (`consumes`, frontend side) and Hono-style route provides
+//! (`provides`, backend side), via `zzop-parser-typescript`'s `egress`/`routes` adapters, run against a single-file slice
+//! (`pipeline::process_file` calls [`extract_file_io`] once per file, before that file's parse scratch state is dropped).
 //! ## tRPC
-//! `extract_file_io` also folds in tRPC client-call consumes (kind `"trpc"`), already fully keyed at
-//! extraction time. The provide side is NOT projected here: a tRPC router's full route path is only
-//! knowable once every file's router fragment is assembled (e.g. a `viewerRouter` mounting a
-//! `bookingsRouter` imported from another file). Instead `pipeline::FileArtifact::
-//! procedure_router_fragments` collects each file's own router shape, and `analyze::compose_trpc_provides`
-//! composes every fragment at assembly time.
-//!
+//! `extract_file_io` also folds in tRPC client-call consumes (kind `"trpc"`), already fully keyed at extraction time. The provide
+//! side is NOT projected here: a tRPC router's full route path is only knowable once every file's router fragment is assembled
+//! (e.g. a `viewerRouter` mounting a `bookingsRouter` imported from another file). Instead `pipeline::FileArtifact::
+//! procedure_router_fragments` collects each file's own router shape, and `analyze::compose_trpc_provides` composes every fragment at assembly time.
 //! ## Cross-file resolution (fragment now, compose later)
-//! Both TS-side adapters were designed for a project-wide call, so cross-file indirection does not
-//! resolve at this one-file call site:
-//! - `extract_http_egress`: a file-local constant still resolves (`build_const_map` runs over the same
-//!   slice). A cross-file constant falls through to `IoConsume { key: None, raw: Some(<expr>), method:
-//!   Some(<METHOD>) }`. [`extract_file_io`] also collects this file's own constant-map fragment
-//!   (`const_map_fragment`) into `FileArtifact::const_map_fragment`; `analyze::assemble` merges every
-//!   file's fragment into one project-wide map and `analyze::late_resolve_cross_file_consumes`
-//!   re-resolves the unresolved consumes against it before `MinimalIr::io` is frozen. A genuinely
-//!   dynamic call, or a constant assigned via `Object.assign`/spread rather than a plain literal, stays
-//!   honestly unresolved.
+//! Both TS-side adapters were designed for a project-wide call, so cross-file indirection does not resolve at this one-file call site:
+//! - `extract_http_egress`: a file-local constant still resolves (`build_const_map` runs over the same slice). A cross-file constant
+//!   falls through to `IoConsume { key: None, raw: Some(<expr>), method: Some(<METHOD>) }`. [`extract_file_io`] also collects this file's
+//!   own constant-map fragment (`const_map_fragment`) into `FileArtifact::const_map_fragment`; `analyze::assemble` merges every file's
+//!   fragment into one project-wide map and `analyze::late_resolve_cross_file_consumes` re-resolves the unresolved consumes against it
+//!   before `MinimalIr::io` is frozen. A genuinely dynamic call, or a constant assigned via `Object.assign`/spread rather than a plain literal, stays honestly unresolved.
 //! - Code-registered routers (Hono-style): this per-file pass derives no router provides at all;
-//!   `pipeline::compute_fresh_artifact` projects each file's own router-mount shape
-//!   (`FileArtifact::router_mount_fragments`) and `analyze::compose_router_mount_provides` joins them —
-//!   chained builders, cross-file mounts, mount prefixes — into whole-tree `http` provides.
+//!   `pipeline::compute_fresh_artifact` projects each file's own router-mount shape (`FileArtifact::router_mount_fragments`) and
+//!   `analyze::compose_router_mount_provides` joins them — chained builders, cross-file mounts, mount prefixes — into whole-tree `http` provides.
 
 use zzop_core::{IoConsume, IoFacts, IoProvide};
 
@@ -46,11 +36,9 @@ impl Default for IoOptions {
     }
 }
 
-/// Projects one Java file's `IoFacts` — Spring MVC HTTP route provides only (`consumes` is always empty;
-/// this engine has no Java-side HTTP-egress extractor yet). Delegates to
-/// `zzop_parser_java_21::extract_http_provides` — see that function's module doc for the annotation
-/// shapes recognized and the `@RestController`/`@Controller` class-gating rule. `None` when the file
-/// yields no provides at all. Called only for `.java` files (`Language::Java21`).
+/// Projects one Java file's `IoFacts` — Spring MVC HTTP route provides only (`consumes` is always empty; this engine has no
+/// Java-side HTTP-egress extractor yet). Delegates to `zzop_parser_java_21::extract_http_provides` — see that function's module doc
+/// for the annotation shapes recognized and the `@RestController`/`@Controller` class-gating rule. `None` when the file yields no provides at all. Called only for `.java` files (`Language::Java21`).
 pub(crate) fn extract_java_file_io(rel: &str, text: &str) -> Option<IoFacts> {
     let provides = zzop_parser_java_21::extract_http_provides(rel, text);
     if provides.is_empty() {
@@ -61,6 +49,25 @@ pub(crate) fn extract_java_file_io(rel: &str, text: &str) -> Option<IoFacts> {
             consumes: Vec::new(),
         })
     }
+}
+
+/// Projects one C# file's `IoFacts` — ASP.NET Core attribute-controller + minimal-API HTTP route provides AND `HttpClient` literal
+/// HTTP egress consumes. C# is the one native language whose io projection carries BOTH directions here directly (unlike
+/// Go/Rust/Python, whose route provides travel as `router_mount_fragments` and compose whole-tree). `None` when the file yields neither.
+///
+/// Called for EVERY `.cs` file. Route PROVIDES project regardless of `degraded` (Java-parity — like `extract_java_file_io`,
+/// `extract_csharp_http_provides` returns nothing rather than guessing on a malformed file, so a controller with one
+/// syntactically-broken sibling method still contributes its well-formed routes). Egress CONSUMES stay gated behind `!degraded`,
+/// matching every other language's consume arm (`Rust`/`Go`/`Python` in `pipeline::fresh`) — a degraded parse can't be trusted to
+/// have seen the whole call site. Before this split, both directions were dropped for any degraded `.cs` file, silently vanishing real endpoints from the cross-layer join.
+pub(crate) fn extract_csharp_file_io(rel: &str, text: &str, degraded: bool) -> Option<IoFacts> {
+    let provides = zzop_parser_csharp::extract_csharp_http_provides(rel, text);
+    let consumes = if degraded {
+        Vec::new()
+    } else {
+        zzop_parser_csharp::extract_csharp_http_consumes(rel, text)
+    };
+    (!provides.is_empty() || !consumes.is_empty()).then_some(IoFacts { provides, consumes })
 }
 
 /// Projects one file's `IoFacts` (HTTP/tRPC egress it consumes + NestJS controller routes it
@@ -89,6 +96,11 @@ pub(crate) fn extract_file_io(rel: &str, text: &str, opts: &IoOptions) -> Option
     // extraction time. Feeds the generic cross-layer linker so `cross-layer/shared-db-table` can fire when
     // 2+ trees touch one table. See decisions/2026-07-rule-side-lexical-reparse-leak.md.
     consumes.extend(zzop_parser_typescript::extract_db_table_consumes(rel, text));
+    // TypeORM repository-access consumes (kind "db-table", key None, raw = entity class): unkeyable at
+    // parse time; `analyze::assemble::resolve_orm_entity_consumes` keys them from the entity index.
+    consumes.extend(zzop_parser_typescript::extract_typeorm_repository_consumes(
+        rel, text,
+    ));
     // `axios.defaults.baseURL = "literal"` sentinel (kind "client-base-prefix"): a tree-level
     // axios base-path marker consumed and stripped by `analyze::assemble` after late cross-file
     // resolution (see `client_base.rs`'s module doc) — this per-file pass only surfaces it.
@@ -101,6 +113,12 @@ pub(crate) fn extract_file_io(rel: &str, text: &str, opts: &IoOptions) -> Option
     let _ = opts;
     let mut provides: Vec<IoProvide> =
         zzop_parser_typescript::extract_controller_provides(rel, text);
+    // TypeORM `@Entity('table_name')` class decorator (kind "db-table"): joins the same cross-layer
+    // channel a Prisma PSL model / SQL DDL `CREATE TABLE` provide already feed — see
+    // `zzop_parser_typescript::adapters::entity_decorators` module doc.
+    provides.extend(zzop_parser_typescript::extract_entity_db_table_provides(
+        rel, text,
+    ));
     // NestJS `app.setGlobalPrefix('api')` sentinel (kind "nest-global-prefix"): a project-level marker
     // consumed and stripped by `analyze::assemble` once every file's `IoFacts` are aggregated tree-wide
     // (see `global_prefix.rs`'s module doc) — this per-file pass only needs to surface it.
@@ -132,6 +150,44 @@ mod tests {
     #[test]
     fn no_io_in_a_plain_file_is_none() {
         assert!(extract_file_io("a.ts", "export const a = 1;\n", &opts()).is_none());
+    }
+
+    #[test]
+    fn csharp_route_provides_project_when_degraded_but_consumes_are_gated_off() {
+        // A `.cs` file carrying both a controller route AND an `HttpClient` egress call. When the CST
+        // parse degrades (one broken sibling method elsewhere), the route PROVIDE must still project
+        // (Java-parity) while the egress CONSUME is gated off (egress-parity) — the split this test pins.
+        let src = concat!(
+            "using System.Net.Http;\n",
+            "using Microsoft.AspNetCore.Mvc;\n",
+            "[ApiController]\n",
+            "[Route(\"api/users\")]\n",
+            "public class UsersController {\n",
+            "    [HttpGet]\n",
+            "    public string Get() {\n",
+            "        var client = new HttpClient();\n",
+            "        var r = client.GetAsync(\"http://svc/data\");\n",
+            "        return \"\";\n",
+            "    }\n",
+            "}\n",
+        );
+        let degraded =
+            extract_csharp_file_io("Users.cs", src, true).expect("routes even when degraded");
+        assert!(
+            !degraded.provides.is_empty(),
+            "routes must project when degraded"
+        );
+        assert!(
+            degraded.consumes.is_empty(),
+            "consumes must be gated off when degraded"
+        );
+
+        let fresh = extract_csharp_file_io("Users.cs", src, false).expect("both when not degraded");
+        assert!(!fresh.provides.is_empty());
+        assert!(
+            !fresh.consumes.is_empty(),
+            "consumes project when not degraded"
+        );
     }
 
     #[test]

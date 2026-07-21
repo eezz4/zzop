@@ -196,6 +196,51 @@ pub(super) fn validate_hosts_array(
     Ok(arr.clone())
 }
 
+/// Validates a `routes` array's shape (`[{ key, role? }, ...]`): each entry is an object with a
+/// non-empty `key` string and an optional `role` of exactly `"provide"` or `"consume"`. The deeper
+/// `"METHOD PATH"` shape of `key` is NOT gated here — the facade's `routes_overlay` normalizes it and
+/// soft-skips a malformed pair with a warning (an injected route that can never join is surfaced, not a
+/// hard load error), the same "validate shape here, the join layer backstops semantics" split the mount
+/// gates use. Returns the array unchanged (original `Value`s, extra keys surfaced separately via
+/// `collect_config_warnings`'s `route` scope).
+pub(super) fn validate_routes_array(
+    value: &serde_json::Value,
+    label: &str,
+) -> Result<Vec<serde_json::Value>, ConfigError> {
+    let arr = value.as_array().ok_or_else(|| {
+        ConfigError(format!(
+            "{label} must be an array of {{ key, role? }} objects."
+        ))
+    })?;
+    for (i, entry) in arr.iter().enumerate() {
+        if !entry.is_object() {
+            return Err(ConfigError(format!(
+                "{label}[{i}] must be an object with a \"key\" string."
+            )));
+        }
+        entry
+            .get("key")
+            .and_then(serde_json::Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            .ok_or_else(|| {
+                ConfigError(format!(
+                    "{label}[{i}].key must be a non-empty \"METHOD PATH\" string (e.g. \"GET /api/users\")."
+                ))
+            })?;
+        if let Some(role) = entry.get("role") {
+            let ok = role
+                .as_str()
+                .is_some_and(|r| r == "provide" || r == "consume");
+            if !ok {
+                return Err(ConfigError(format!(
+                    "{label}[{i}].role must be \"provide\" or \"consume\"."
+                )));
+            }
+        }
+    }
+    Ok(arr.clone())
+}
+
 /// A JSON value is "falsy" exactly like JS's `||` operator would treat it: `null`, `false`, `0`
 /// (any numeric zero), or `""`. Used ONLY where the JS source itself relies on `x || defaultValue`
 /// (today: `config.rules`) — every other field in this module is presence-gated with `!== undefined`,

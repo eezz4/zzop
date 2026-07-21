@@ -23,7 +23,8 @@
 //!
 //! Module layout (every public item stays importable at `crate::io::X` — the paths below are internal):
 //! - [`facts`](self) — the serde wire types ([`IoFacts`], provides/consumes, cross-layer result buckets).
-//! - [`key`](self) — pinned HTTP interface-key normalization ([`http_interface_key`] and friends).
+//! - [`key`](self) — pinned HTTP interface-key normalization ([`http_interface_key`] and friends) and the
+//!   `db-table` channel's shared casing transform ([`key::db_table_channel_casing`]).
 //! - [`link`](self) — [`link_cross_layer_io`] and its [`LinkOptions`].
 
 mod facts;
@@ -36,6 +37,7 @@ pub use facts::{
     TaggedConsume, TaggedProvide,
 };
 pub use key::{
-    http_consume_interface_key, http_interface_key, normalize_http_path, HTTP_KEY_VERBS,
+    db_table_channel_casing, http_consume_interface_key, http_interface_key, normalize_http_path,
+    unknown_verb_route_path, HTTP_KEY_VERBS, UNKNOWN_VERB,
 };
 pub use link::{link_cross_layer_io, LinkOptions};

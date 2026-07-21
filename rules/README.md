@@ -36,11 +36,12 @@ whether the rule is common or environment-specific).
   `zzop-core` (loading/schema) and `zzop-engine` (evaluation), both of which it depends on as
   dev-dependencies. `crates/engine/tests/rule_contracts/` machine-checks that this crate's `[[test]]`
   list stays in sync with the pack folders on disk.
-- **Distribution**: published/versioned **independently** via npm/registry, loaded on demand by language
-  detection / config. **Platform-independent** (data, so prebuilds are unaffected). Build-free replacement.
-  The npm package's `prepack` step (`packages/native/scripts/copy-rules.mjs`) copies `rules/dsl/` (both
-  layouts) into `packages/native/rules/`, preserving whichever shape each pack uses; `<pack>.rs` files are
-  never copied.
+- **Distribution**: the DSL packs (`rules/dsl/`) are **compile-time-embedded** into the `zzop-mcp` binary
+  (the single runtime form since the npm distribution was removed, 2026-07-20), so they ride the binary
+  rather than a separately-versioned package. **Platform-independent** (data, so prebuilds are unaffected).
+  Build-free replacement. Hosts with no pack directory on disk receive them as data via the `packDefs`
+  request field; a `packsDir` still loads packs off disk when present. `<pack>.rs` native rule files are
+  compiled in, not shipped as data.
 - **Extensibility**: same DSL schema for first-party and third-party — a user can drop in a JSON rule.
 - **Why DSL over WASM?** Redistribution is needed regardless, so the DSL gives the same build-free / platform-independent benefits while wasmtime, the ABI, the boundary cost, and the ~3x slowdown all disappear. (Biome GritQL / ast-grep / Semgrep model.)
 - **Status**: 14 packs shipped (`rules/dsl/<pack>/<pack>.json`), most with rules implemented, a handful

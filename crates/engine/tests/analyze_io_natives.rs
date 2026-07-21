@@ -289,7 +289,8 @@ fn nestjs_class_level_use_guards_exempts_every_route_in_the_controller() {
     // A class-level `@UseGuards` chain genuinely guards every route in the controller, but the
     // handler's own body never calls anything guard-named, so the call-graph BFS alone would
     // false-positive on it. This is the end-to-end test proving the fix works through the real
-    // engine: real swc parse, real BFS, real `extract_nest_guarded_lines` wiring in `analyze.rs`.
+    // engine: real swc parse, real BFS, real `extract_controller_guarded_lines` wiring in
+    // `native_rules/callgraph.rs`.
     let dir = TempDir::new("zzop-mutating-no-auth-nest-guarded");
     dir.write(
         "items.controller.ts",
@@ -335,6 +336,86 @@ fn nestjs_route_with_no_use_guards_anywhere_still_fires() {
     let found = hits(&out, "mutating-route-no-auth");
     assert_eq!(found.len(), 1, "{:?}", out.findings);
     assert_eq!(found[0].file, "items.controller.ts");
+}
+
+#[test]
+fn nestjs_forroutes_auth_middleware_exempts_the_covered_route() {
+    // Same single-route controller as `nestjs_route_with_no_use_guards_anywhere_still_fires` (which proves
+    // it FIRES without any guard) — here a sibling module binds `AuthMiddleware` to that exact route via
+    // `consumer.apply(AuthMiddleware).forRoutes({path, method})`. The BFS can't see the middleware, so only
+    // the forRoutes exemption can clear it: the finding must now be gone. This is the NestJS route-scoped-
+    // middleware analog of the `@UseGuards` and Spring `@PreAuthorize` end-to-end tests.
+    let dir = TempDir::new("zzop-mutating-no-auth-nest-forroutes");
+    dir.write(
+        "items.controller.ts",
+        concat!(
+            "import { Controller, Post } from '@nestjs/common';\n\n",
+            "@Controller('items')\n",
+            "export class ItemsController {\n",
+            "  @Post('x')\n",
+            "  async create() {\n",
+            "    return true;\n",
+            "  }\n",
+            "}\n"
+        ),
+    );
+    dir.write(
+        "items.module.ts",
+        concat!(
+            "import { MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';\n\n",
+            "export class ItemsModule implements NestModule {\n",
+            "  public configure(consumer: MiddlewareConsumer) {\n",
+            "    consumer\n",
+            "      .apply(AuthMiddleware)\n",
+            "      .forRoutes({path: 'items/x', method: RequestMethod.POST});\n",
+            "  }\n",
+            "}\n"
+        ),
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "mutating-route-no-auth").is_empty(),
+        "forRoutes(AuthMiddleware) should exempt POST /items/x: {:?}",
+        hits(&out, "mutating-route-no-auth")
+    );
+}
+
+#[test]
+fn nestjs_forroutes_with_a_non_auth_middleware_does_not_exempt() {
+    // Companion negative: a LoggerMiddleware bound via forRoutes must NOT clear the route (false-clear
+    // guard) — the same POST /items/x still fires, proving the exemption is auth-name-gated.
+    let dir = TempDir::new("zzop-mutating-no-auth-nest-forroutes-nonauth");
+    dir.write(
+        "items.controller.ts",
+        concat!(
+            "import { Controller, Post } from '@nestjs/common';\n\n",
+            "@Controller('items')\n",
+            "export class ItemsController {\n",
+            "  @Post('x')\n",
+            "  async create() {\n",
+            "    return true;\n",
+            "  }\n",
+            "}\n"
+        ),
+    );
+    dir.write(
+        "items.module.ts",
+        concat!(
+            "import { MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';\n\n",
+            "export class ItemsModule implements NestModule {\n",
+            "  public configure(consumer: MiddlewareConsumer) {\n",
+            "    consumer.apply(LoggerMiddleware).forRoutes({path: 'items/x', method: RequestMethod.POST});\n",
+            "  }\n",
+            "}\n"
+        ),
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "mutating-route-no-auth").len(),
+        1,
+        "a non-auth middleware must not exempt: {:?}",
+        out.findings
+    );
 }
 
 // --- Java call-graph coverage (CALL_GRAPH_COVERED_EXTENSIONS lift) ---------------------------
@@ -436,6 +517,51 @@ fn java_handler_with_no_reachable_guard_is_flagged() {
     assert_eq!(found[0].data.as_ref().unwrap()["method"], "PUT");
 }
 
+/// `CurrentUserApi.updateProfile` guarded by method-level Spring `@PreAuthorize` — identical to
+/// `java_current_user_api_fixture` except for the annotation. The handler body still reaches no
+/// call-graph guard, so ONLY the annotation exemption can clear it.
+fn java_current_user_api_preauthorize_fixture(dir: &TempDir) {
+    dir.write(
+        "src/main/java/io/spring/api/CurrentUserApi.java",
+        concat!(
+            "package io.spring.api;\n\n",
+            "import org.springframework.http.ResponseEntity;\n",
+            "import org.springframework.security.access.prepost.PreAuthorize;\n",
+            "import org.springframework.web.bind.annotation.PutMapping;\n",
+            "import org.springframework.web.bind.annotation.RequestMapping;\n",
+            "import org.springframework.web.bind.annotation.RestController;\n\n",
+            "@RestController\n",
+            "@RequestMapping(path = \"/user\")\n",
+            "public class CurrentUserApi {\n",
+            "  private UserService userService;\n\n",
+            "  @PutMapping\n",
+            "  @PreAuthorize(\"isAuthenticated()\")\n",
+            "  public ResponseEntity updateProfile() {\n",
+            "    userService.updateUser(null);\n",
+            "    return ResponseEntity.ok().build();\n",
+            "  }\n",
+            "}\n"
+        ),
+    );
+}
+
+#[test]
+fn java_spring_method_level_preauthorize_exempts_a_mutating_route() {
+    // End-to-end proof through the real engine (parser `extract_spring_guarded_lines` + `run_callgraph_
+    // rules` wiring + the rule's `decorator_guarded` exemption): the SAME PUT /user handler that fires in
+    // `java_handler_with_no_reachable_guard_is_flagged` is now silenced purely by its `@PreAuthorize`,
+    // which the call-graph BFS structurally cannot see. This is the Java parallel of the NestJS
+    // `@UseGuards` end-to-end test.
+    let dir = TempDir::new("zzop-mutating-no-auth-java-preauthorize");
+    java_current_user_api_preauthorize_fixture(&dir);
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "mutating-route-no-auth").is_empty(),
+        "@PreAuthorize should exempt PUT /user: {:?}",
+        out.findings
+    );
+}
+
 #[test]
 fn java_call_graph_coverage_does_not_disturb_the_ambiguous_handler_bailout() {
     // Both fixtures together: `deleteComment`/`updateProfile` are each unique in this small tree, so
@@ -452,6 +578,139 @@ fn java_call_graph_coverage_does_not_disturb_the_ambiguous_handler_bailout() {
     assert_eq!(
         found[0].file,
         "src/main/java/io/spring/api/CurrentUserApi.java"
+    );
+}
+
+/// The be-spring `WebSecurityConfig` shape: secure-by-default (`.anyRequest().authenticated()`) with a
+/// `POST /widgets` permitAll exception.
+fn java_security_config_fixture(dir: &TempDir) {
+    dir.write(
+        "src/main/java/io/spring/api/security/WebSecurityConfig.java",
+        concat!(
+            "package io.spring.api.security;\n\n",
+            "import org.springframework.http.HttpMethod;\n",
+            "import org.springframework.security.config.annotation.web.builders.HttpSecurity;\n\n",
+            "public class WebSecurityConfig {\n",
+            "  protected void configure(HttpSecurity http) throws Exception {\n",
+            "    http.csrf().disable().authorizeRequests()\n",
+            "        .antMatchers(HttpMethod.POST, \"/widgets\").permitAll()\n",
+            "        .anyRequest().authenticated();\n",
+            "  }\n",
+            "}\n"
+        ),
+    );
+}
+
+/// A `POST /widgets` controller — the route the config marks `permitAll` (genuinely open).
+fn java_widget_api_fixture(dir: &TempDir) {
+    dir.write(
+        "src/main/java/io/spring/api/WidgetApi.java",
+        concat!(
+            "package io.spring.api;\n\n",
+            "import org.springframework.http.ResponseEntity;\n",
+            "import org.springframework.web.bind.annotation.PostMapping;\n",
+            "import org.springframework.web.bind.annotation.RequestMapping;\n",
+            "import org.springframework.web.bind.annotation.RestController;\n\n",
+            "@RestController\n",
+            "@RequestMapping(path = \"/widgets\")\n",
+            "public class WidgetApi {\n",
+            "  @PostMapping\n",
+            "  public ResponseEntity createWidget() {\n",
+            "    return ResponseEntity.ok().build();\n",
+            "  }\n",
+            "}\n"
+        ),
+    );
+}
+
+#[test]
+fn spring_security_global_posture_exempts_authenticated_but_not_permitall_routes() {
+    // The B12 ① end-to-end proof: a secure-by-default `WebSecurityConfig` governs the tree. `PUT /user`
+    // (CurrentUserApi) escapes every permitAll -> authenticated -> exempt (the measured be-spring FP,
+    // which fires WITHOUT the config in `java_handler_with_no_reachable_guard_is_flagged`). `POST /widgets`
+    // IS permitAll -> genuinely open -> must STILL fire. This pins that the global-posture exemption never
+    // false-clears an open route.
+    let dir = TempDir::new("zzop-mutating-no-auth-spring-posture");
+    java_current_user_api_fixture(&dir);
+    java_widget_api_fixture(&dir);
+    java_security_config_fixture(&dir);
+    let out = scan(&dir);
+    let found = hits(&out, "mutating-route-no-auth");
+    let paths: Vec<&str> = found
+        .iter()
+        .map(|f| f.data.as_ref().unwrap()["path"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(
+        paths,
+        vec!["/widgets"],
+        "only the permitAll POST /widgets fires; authenticated PUT /user is exempt: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn spring_security_posture_absent_keeps_the_finding() {
+    // Without a security config, `PUT /user` fires as before — the exemption is purely additive.
+    let dir = TempDir::new("zzop-mutating-no-auth-spring-noposture");
+    java_current_user_api_fixture(&dir);
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "mutating-route-no-auth").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn spring_security_posture_does_not_exempt_a_sibling_modules_routes() {
+    // A monorepo: module `service-a` has a secure-by-default config; `service-b` has NONE. `service-a`'s
+    // posture must NOT reach `service-b`'s genuinely-unguarded route — it is scoped to its own
+    // `.../src/main/java/` source root. `service-b`'s `POST /b` must still fire.
+    let dir = TempDir::new("zzop-mutating-no-auth-spring-crossapp");
+    dir.write(
+        "service-a/src/main/java/a/WebSecurityConfig.java",
+        concat!(
+            "package a;\n",
+            "import org.springframework.security.config.annotation.web.builders.HttpSecurity;\n",
+            "public class WebSecurityConfig {\n",
+            "  protected void configure(HttpSecurity http) throws Exception {\n",
+            "    http.authorizeRequests().anyRequest().authenticated();\n",
+            "  }\n}\n"
+        ),
+    );
+    dir.write(
+        "service-a/src/main/java/a/AApi.java",
+        concat!(
+            "package a;\n",
+            "import org.springframework.web.bind.annotation.PutMapping;\n",
+            "import org.springframework.web.bind.annotation.RequestMapping;\n",
+            "import org.springframework.web.bind.annotation.RestController;\n",
+            "@RestController @RequestMapping(path = \"/a\")\n",
+            "public class AApi {\n  @PutMapping public String updateA() { return \"a\"; }\n}\n"
+        ),
+    );
+    dir.write(
+        "service-b/src/main/java/b/BApi.java",
+        concat!(
+            "package b;\n",
+            "import org.springframework.web.bind.annotation.PostMapping;\n",
+            "import org.springframework.web.bind.annotation.RequestMapping;\n",
+            "import org.springframework.web.bind.annotation.RestController;\n",
+            "@RestController @RequestMapping(path = \"/b\")\n",
+            "public class BApi {\n  @PostMapping public String createB() { return \"b\"; }\n}\n"
+        ),
+    );
+    let out = scan(&dir);
+    let paths: Vec<&str> = hits(&out, "mutating-route-no-auth")
+        .iter()
+        .map(|f| f.data.as_ref().unwrap()["path"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(
+        paths,
+        vec!["/b"],
+        "service-a's posture exempts /a but must NOT reach service-b's /b: {:?}",
+        out.findings
     );
 }
 

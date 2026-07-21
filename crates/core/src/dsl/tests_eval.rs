@@ -149,6 +149,7 @@ fn eval_pack_profiled_on_empty_pack_yields_no_timings() {
         id: "empty".into(),
         framework: "any".into(),
         schema_version: 1,
+        fragments: Default::default(),
         rules: vec![],
     };
     let files = vec![];

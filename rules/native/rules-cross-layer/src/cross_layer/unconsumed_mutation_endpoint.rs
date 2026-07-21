@@ -9,10 +9,7 @@
 //! Provider sites in test-path files (`zzop_core::is_test_file`) are skipped — not deployed surface.
 //!
 //! ## Confidence downgrade when the run is blind
-//! Field defect (mono-hub review, first external v0.14.0 reviews): this rule fired Warning unconditionally,
-//! even on a run whose own consume side was mostly unresolved (83% of one tree's `http` consumes, in the
-//! field case) — the highest-severity cross-layer finding turned out to be the least trustworthy, because a
-//! zero ("unconsumed") is only a confident zero when the consume key space was actually resolved
+//! A zero ("unconsumed") is only a confident zero when the consume key space was actually resolved
 //! (`output-philosophy.md` §1). When `blind_sources` (`super::majority_unresolved_http_sources`, the same
 //! predicate `unresolved_consume_ratio` uses to self-report) is non-empty for this run, "unconsumed" cannot
 //! be trusted as a confident zero — this rule de-escalates to `Severity::Info` and names the blind source(s)
@@ -27,13 +24,13 @@
 //! finding — see `unconsumed_endpoint`'s module doc for the dogfood motivation.
 //!
 //! ## tRPC mount-route suppression
-//! Same exclusion as the sibling `unconsumed_endpoint` (see its module doc): a provide
-//! [`super::is_trpc_mount_route_key`] identifies as a tRPC mount route is excluded here too when ITS OWN
-//! source tree is in `trpc_participating_sources` — a POST-verb tRPC mount (`file_routes`'s
-//! `pages/api/**` fallback-verb convention emits both GET and POST for a default-export handler) would
-//! otherwise ALSO fire this write-verb rule for the exact same tone-noise site. Per-tree, not run-global:
-//! see `unconsumed_endpoint`'s module doc for why a run-global edge count would misattribute suppression
-//! across trees.
+//! Same exclusion as the sibling `unconsumed_endpoint` (see its module doc): an EXPLICIT-verb tRPC mount
+//! provide [`super::is_trpc_mount_route_key`] identifies (e.g. an app-router `route.ts` `export const POST`)
+//! is excluded here when ITS OWN source tree is in `trpc_participating_sources` — it would otherwise fire
+//! this write-verb rule for a tone-noise transport site. A serve-all `pages/api` mount is instead a
+//! verb-unknown `UNKNOWN_VERB` sentinel (1b) that carries no write method and is partitioned out of the
+//! provide universe upstream, so it never reaches this rule. Per-tree, not run-global: see
+//! `unconsumed_endpoint`'s module doc for why a run-global edge count would misattribute suppression.
 
 use std::collections::{BTreeMap, BTreeSet};
 

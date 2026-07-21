@@ -7,6 +7,16 @@
 //! - **Verb methods**: `get`/`post`/`put`/`patch`/`delete` — the same five `adapters::fastapi::
 //!   VERB_DECORATORS` recognizes, kept as a separate vocabulary (this one names CALLED methods, that one
 //!   DECORATOR names) since the two crates' conventions happen to agree one-for-one for these five.
+//! - **Instance receivers** (`requests.Session()`, `httpx.Client()`/`AsyncClient()`): a file-wide first
+//!   pass (`InstanceCollector`, the `ruff` counterpart of `zzop_parser_rust::adapters::http_clients`'s
+//!   `BindingCollector`) binds a local name to a client CONSTRUCTOR — `<module>.Session/Client/
+//!   AsyncClient(...)` (module in `client_names`) or a directly-imported `Session/Client/AsyncClient(...)`
+//!   (`ctor_direct_names`) — through either an assignment (`s = requests.Session()`, `client =
+//!   httpx.AsyncClient()`, incl. the annotated `client: httpx.AsyncClient = ...`) or a `with`/`async with`
+//!   binding (`async with httpx.AsyncClient() as client:` — the idiomatic FastAPI async-egress shape). A
+//!   `.verb(...)` on any such bound name then keys exactly like a top-level `httpx.get(...)`. Shadowing
+//!   approximation, same as the Rust pass: a name counts as a client if ANY constructor binding in the
+//!   file binds it. `.request(method, url)` (verb-as-first-arg) stays out of v1 scope.
 //! - **Call-site discovery**: a generic `ruff_python_ast::visitor::Visitor` walk (mirroring
 //!   `lang::used_names::parse_local_identifier_refs`'s use of the same crate visitor) rather than a
 //!   hand-rolled statement/expression descent — every expression position (nested call args, dict/list
@@ -51,6 +61,8 @@ use ruff_python_ast::{Expr, InterpolatedStringElement};
 use ruff_text_size::Ranged;
 use zzop_core::{http_consume_interface_key, ImportMap, IoConsume};
 
+mod instances;
+
 pub(crate) const VERB_METHODS: &[&str] = &["get", "post", "put", "patch", "delete"];
 
 /// Extract this file's `requests`/`httpx` HTTP egress consumes — see module doc. Empty on parse failure,
@@ -64,12 +76,16 @@ pub fn extract_python_http_consumes(rel: &str, text: &str) -> Vec<IoConsume> {
     if client_names.is_empty() {
         return Vec::new();
     }
+    // File-wide first pass: bind every local name assigned/with-bound to a client constructor, so a
+    // `.verb()` on it below reads as egress (module doc's "Instance receivers").
+    let instances = instances::instance_names(&module.body, &client_names, &imports);
     let idx = crate::LineIndex::new(text);
     let mut collector = CallCollector {
         rel,
         text,
         idx: &idx,
         client_names: &client_names,
+        instances: &instances,
         out: Vec::new(),
     };
     for stmt in &module.body {
@@ -102,6 +118,7 @@ struct CallCollector<'a> {
     text: &'a str,
     idx: &'a crate::LineIndex,
     client_names: &'a HashSet<String>,
+    instances: &'a HashSet<String>,
     out: Vec<IoConsume>,
 }
 
@@ -129,7 +146,11 @@ impl<'a> CallCollector<'a> {
         let Expr::Name(recv) = &*attr.value else {
             return None;
         };
-        if !self.client_names.contains(recv.id.as_str()) {
+        // A top-level module call (`requests.get(...)`) OR a bound client instance (`client.get(...)`,
+        // `s.get(...)` — see `InstanceCollector`). Both key identically.
+        if !self.client_names.contains(recv.id.as_str())
+            && !self.instances.contains(recv.id.as_str())
+        {
             return None;
         }
         let verb = attr.attr.as_str();

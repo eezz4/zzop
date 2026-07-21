@@ -8,6 +8,16 @@
 //! shaping logic used to live inside the host package itself. A host that reimplements any of this
 //! instead of calling it is exactly the drift this split exists to close.
 //!
+//! Host<->facade parity (STAGED): the `output::Verbosity` knob stages a `Full` reply lane that
+//! additionally emits the raw output fields (`ir`/`nodes`/`scores`/...) the default `Summary` reply
+//! drops — the data a direct `zzop-facade` embedding returns but every host (MCP replies and the
+//! `zzop-mcp` CLI alike) deliberately omits today. It is NOT yet reachable: every host builds
+//! `FindingFilters` with `Summary`, so the `Full` branches in `analyze`/`cross` are dead and replies
+//! stay byte-identical. Flipping it on (a `verbosity`/`raw` tool argument + CLI flag) is the one-step
+//! "punch through the facade" that makes a host reply data-identical to the raw `zzop-facade` output —
+//! and MUST then update the tool self-descriptions (`packages/mcp/src/tools/definitions.rs`) that today
+//! promise the raw `ir` block is the direct-facade-embedding lane only.
+//!
 //! Module map:
 //! - `args`   — shared, MCP-protocol-agnostic `tools/call`-shaped argument extraction (`required_string`/
 //!   `optional_string`/`optional_string_array`); every declared-type violation is a named error, never a

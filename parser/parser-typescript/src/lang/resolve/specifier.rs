@@ -36,6 +36,17 @@ pub fn resolve_file(
         // tsconfig `paths` isn't read here (yet); this covers the two conventional mappings, root first.
         return try_ext(rest, all_paths).or_else(|| try_ext(&format!("src/{rest}"), all_paths));
     }
+    // SvelteKit reserves `$lib` for `src/lib` — a built-in, non-configurable alias every SvelteKit app
+    // relies on. It is normally wired through the generated `.svelte-kit/tsconfig.json`, which is absent
+    // from a fresh checkout (created by `svelte-kit sync` at build time), so resolve it directly here.
+    // Without this, `$lib/*` imports from `.svelte` components and `+page.server.js` routes all fail to
+    // resolve and dead-exports/dead-candidates misreport the whole `src/lib` tree as orphaned.
+    if specifier == "$lib" {
+        return try_ext("src/lib", all_paths);
+    }
+    if let Some(rest) = specifier.strip_prefix("$lib/") {
+        return try_ext(&format!("src/lib/{rest}"), all_paths);
+    }
     None
 }
 
@@ -173,6 +184,34 @@ mod tests {
         assert_eq!(
             resolve_file("@/features/x", "a/b.ts", &all).as_deref(),
             Some("features/x.ts")
+        );
+    }
+
+    #[test]
+    fn resolves_sveltekit_lib_alias() {
+        let all = paths(&["src/lib/api.ts", "src/lib/constants.js"]);
+        // `$lib/api` -> src/lib/api.ts; `$lib/constants.js` -> src/lib/constants.js (literal ext kept).
+        assert_eq!(
+            resolve_file("$lib/api", "src/routes/+page.svelte", &all).as_deref(),
+            Some("src/lib/api.ts")
+        );
+        assert_eq!(
+            resolve_file(
+                "$lib/constants.js",
+                "src/routes/x/CommentInput.svelte",
+                &all
+            )
+            .as_deref(),
+            Some("src/lib/constants.js")
+        );
+    }
+
+    #[test]
+    fn resolves_bare_sveltekit_lib_to_index() {
+        let all = paths(&["src/lib/index.ts"]);
+        assert_eq!(
+            resolve_file("$lib", "src/routes/+layout.svelte", &all).as_deref(),
+            Some("src/lib/index.ts")
         );
     }
 

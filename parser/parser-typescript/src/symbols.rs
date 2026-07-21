@@ -2,11 +2,11 @@
 //! type/const + `export default` fn/class, factory sub-symbols (via `factory`), binding-pattern
 //! consts, and CommonJS exports (via `cjs_exports`). Symbol constructors live in `symbol_shapes`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use swc_core::common::SourceMap;
 use swc_core::ecma::ast::{
-    Decl, DefaultDecl, Expr, ModuleDecl, ModuleItem, Pat, Stmt, VarDeclarator,
+    Decl, DefaultDecl, ExportSpecifier, Expr, ModuleDecl, ModuleItem, Pat, Stmt, VarDeclarator,
 };
 use zzop_core::{SourceSymbol, SourceSymbolKind};
 
@@ -14,6 +14,7 @@ use crate::cjs_exports::collect_common_js_exports;
 use crate::factory::{
     collect_top_level_object_lits, extract_factory_methods, extract_object_methods, ObjectLitMap,
 };
+use crate::imports::export_name;
 use crate::symbol_shapes::{
     collect_binding_names, emit_class, fn_symbol, is_require_init, simple_symbol,
 };
@@ -80,6 +81,50 @@ pub fn parse_symbols(file: &str, source: &str) -> Vec<SourceSymbol> {
     for cjs in collect_common_js_exports(&cm, file, &module) {
         if !declared.contains(&cjs.name) {
             out.push(cjs);
+        }
+    }
+    // DEFERRED exports: a top-level decl declared normally, then exported by a SEPARATE trailing
+    // statement (`export default foo;` / `export { foo }` / `export { foo as default }`) instead of
+    // inline (`export function foo` / `export default function foo`). These never get an inline
+    // `exported`/`is_default` flag from the match above, so they're collected here by exact name and
+    // back-applied to the already-built `out` list. `export { x } from "./y"` (a re-export, `src.is_some()`)
+    // is deliberately excluded — that's `re_exports.rs`'s domain, not a local declaration.
+    let mut deferred_exports: HashMap<String, bool> = HashMap::new(); // name -> is_default
+    for item in &module.body {
+        match item {
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(e)) => {
+                // Only a bare identifier has a name to attribute; `export default makeThing()` etc.
+                // fabricates nothing (never-guess).
+                if let Expr::Ident(i) = &*e.expr {
+                    deferred_exports.insert(i.sym.to_string(), true);
+                }
+            }
+            ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(named)) if named.src.is_none() => {
+                for spec in &named.specifiers {
+                    // `Default`/`Namespace` specifiers have no local declaration to attribute; only
+                    // `Named` (`export { foo }` / `export { foo as bar }` / `export { foo as default }`).
+                    if let ExportSpecifier::Named(n) = spec {
+                        let orig = export_name(&n.orig);
+                        let is_default = n
+                            .exported
+                            .as_ref()
+                            .is_some_and(|alias| export_name(alias) == "default");
+                        let entry = deferred_exports.entry(orig).or_insert(false);
+                        *entry = *entry || is_default;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if !deferred_exports.is_empty() {
+        for sym in &mut out {
+            if let Some(&is_default) = deferred_exports.get(&sym.name) {
+                sym.exported = true;
+                if is_default {
+                    sym.is_default = true;
+                }
+            }
         }
     }
     // Write-site detection is a pure function of (this symbol's own body span, constant vocab), so it

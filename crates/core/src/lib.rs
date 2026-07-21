@@ -34,8 +34,8 @@ pub use fragments::{
 pub use schema::{FieldAttr, SchemaEnum, SchemaField, SchemaModel, SchemaUsage};
 
 pub use dsl::{
-    eval_pack, IoDirection, IoScan, LabeledPattern, LineScan, Matcher, MethodScan, RuleContext,
-    RuleDef, RulePackDef, SourceFile, SymbolScan,
+    eval_pack, FragmentError, IoDirection, IoScan, LabeledPattern, LineScan, Matcher, MethodScan,
+    RuleContext, RuleDef, RulePackDef, SourceFile, SymbolScan,
 };
 
 pub use finding::{disable_hint, Finding, RuleExplain, Severity};
@@ -44,9 +44,10 @@ pub use graph::{
     ComponentEdge, ConnectedComponentsResult,
 };
 pub use io::{
-    http_consume_interface_key, http_interface_key, link_cross_layer_io, normalize_http_path,
-    AmbiguousConsume, ConsumeBodyShape, CrossLayerEdge, CrossLayerResult, IoConsume, IoFacts,
-    IoKind, IoProvide, LinkOptions, ProvideBodyField, ProvideBodyShape, SourceIo, HTTP_KEY_VERBS,
+    db_table_channel_casing, http_consume_interface_key, http_interface_key, link_cross_layer_io,
+    normalize_http_path, unknown_verb_route_path, AmbiguousConsume, ConsumeBodyShape,
+    CrossLayerEdge, CrossLayerResult, IoConsume, IoFacts, IoKind, IoProvide, LinkOptions,
+    ProvideBodyField, ProvideBodyShape, SourceIo, HTTP_KEY_VERBS, UNKNOWN_VERB,
 };
 pub use ir::{
     ApiEndpoint, CommonIr, DepGraph, ImportBinding, ImportMap, MinimalIr, NonIdempotentKind,

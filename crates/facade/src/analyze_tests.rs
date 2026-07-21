@@ -457,6 +457,58 @@ fn analyze_trees_json_joins_two_trees_and_rejects_empty_input() {
     assert!(empty_err.contains("at least one entry"));
 }
 
+#[test]
+fn analyze_trees_json_routes_injection_resolves_a_dropped_be_route() {
+    // End-to-end through the PUBLIC wire surface, the whole point of the lightweight `routes` field: a user
+    // AI injects a route zzop honestly could not resolve from source. The BE is a Java Spring controller
+    // whose method path is a non-literal constant declared OUTSIDE this corpus
+    // (`@GetMapping(ExternalRoutes.USERS)`) — the whole-corpus resolver recovers in-corpus method-path
+    // constants but honestly drops this out-of-corpus one (no phantom), so the FE's `GET /api/users` call
+    // has no provider. One `routes` entry on the BE tree resolves the join, with no hand-authored overlay.
+    let be = TempDir::new("zzop-facade-routes-be");
+    // The path constant is declared OUTSIDE this tree (a shared dependency), so the whole-corpus resolver
+    // cannot recover it and honestly drops the route — the genuine out-of-corpus residue.
+    be.write(
+        "UserController.java",
+        "@RestController\n@RequestMapping(\"/api\")\nclass UserController {\n  @GetMapping(ExternalRoutes.USERS)\n  public String list() { return \"\"; }\n}\n",
+    );
+    let fe = TempDir::new("zzop-facade-routes-fe");
+    fe.write(
+        "client.ts",
+        "import axios from 'axios';\nexport const load = () => axios.get('/api/users');\n",
+    );
+
+    // Baseline: no injection -> the dropped route leaves the FE call unprovided, no http edge for it.
+    let baseline_config = format!(
+        r#"{{"trees": [{{"root": {:?}, "sourceId": "fe"}}, {{"root": {:?}, "sourceId": "be"}}]}}"#,
+        fe.path().display(),
+        be.path().display()
+    );
+    let baseline = analyze_trees_json(&baseline_config).expect("baseline analyze");
+    let baseline_v: serde_json::Value = serde_json::from_str(&baseline).unwrap();
+    let baseline_edges = baseline_v["crossLayer"]["edges"].as_array().unwrap();
+    assert!(
+        !baseline_edges.iter().any(|e| e["key"] == "GET /api/users"),
+        "zzop must not resolve the non-literal route without injection: {baseline_edges:?}"
+    );
+
+    // Inject the resolved route on the BE tree with a single lightweight `routes` entry.
+    let injected_config = format!(
+        r#"{{"trees": [{{"root": {:?}, "sourceId": "fe"}}, {{"root": {:?}, "sourceId": "be", "routes": [{{"key": "GET /api/users"}}]}}]}}"#,
+        fe.path().display(),
+        be.path().display()
+    );
+    let out = analyze_trees_json(&injected_config).expect("injected analyze");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let edges = v["crossLayer"]["edges"].as_array().unwrap();
+    let edge = edges
+        .iter()
+        .find(|e| e["key"] == "GET /api/users")
+        .unwrap_or_else(|| panic!("the injected route must resolve the join: {edges:?}"));
+    assert_eq!(edge["from"]["source"], "fe");
+    assert_eq!(edge["to"]["source"], "be");
+}
+
 /// A blind field test passed an envelope JSON FILE's own path as an analysis root: the walk treated
 /// the file as a bogus empty directory, so the output claimed "0 files" in `warnings` while
 /// `coverage.files`/`fileCount` read 1 (the file itself, picked up as the walk's sole entry) — a

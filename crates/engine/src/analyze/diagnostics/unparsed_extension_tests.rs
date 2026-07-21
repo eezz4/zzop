@@ -57,13 +57,13 @@ fn message_chains_the_gap_to_creation_with_the_minimal_on_ramp_and_embedded_cont
     assert!(w.contains("zzop-mcp contract envelope-guide"), "{w}");
     assert!(w.contains("zzop://contract/envelope-guide"), "{w}");
     assert!(w.contains("zzop-mcp contract envelope-schema"), "{w}");
-    // Reachability honesty, both directions: a 2026-07-17 blind agent burned time hunting for a
-    // Mode A entry point the binary then lacked (wording was corrected to "embedder API only");
-    // the binary now HAS one (`zzop-mcp analyze-envelope` / MCP tool `analyze_envelope`), so the
-    // wording names every reachable surface — a reword that drops one of them regresses to a
-    // partial claim and fails here.
+    // Reachability honesty: a 2026-07-17 blind agent burned time hunting for a Mode A entry point
+    // the binary then lacked (wording was corrected to "embedder API only"); the binary now HAS
+    // one (`zzop-mcp analyze-envelope` / MCP tool `analyze_envelope`), so the wording names every
+    // reachable surface — a reword that drops one of them regresses to a partial claim and fails
+    // here. (The removed napi `analyzeEnvelope` binding is deliberately NOT named — naming an
+    // unreachable surface is the same honesty regression in the other direction.)
     assert!(w.contains("Mode A full-envelope analysis:"), "{w}");
-    assert!(w.contains("napi `analyzeEnvelope`"), "{w}");
     assert!(w.contains("analyze-envelope"), "{w}");
     assert!(w.contains("`analyze_envelope`"), "{w}");
     assert!(

@@ -46,7 +46,7 @@ fn mutating_handler_never_reaching_a_guard_is_flagged() {
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert_eq!(out.len(), 1);
@@ -73,7 +73,7 @@ fn auth_acquisition_route_is_exempt_even_when_never_guarded() {
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert!(out.is_empty());
@@ -88,7 +88,7 @@ fn standalone_exempt_segment_is_exempt_alone_with_no_auth_family_segment_present
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert!(out.is_empty());
@@ -110,7 +110,7 @@ fn conditional_segment_paired_with_an_auth_family_segment_is_exempt() {
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert!(out.is_empty());
@@ -133,7 +133,7 @@ fn conditional_segment_alone_with_no_auth_family_segment_is_not_exempt() {
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
@@ -159,7 +159,7 @@ fn conditional_segment_token_refresh_with_no_auth_family_segment_is_not_exempt()
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
@@ -182,7 +182,7 @@ fn a_path_segment_that_only_contains_auth_as_a_substring_is_not_exempt() {
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
@@ -204,7 +204,7 @@ fn handler_reaching_a_guard_call_across_an_edge_is_not_flagged() {
         symbols: &symbols,
         symbol_graph: &graph,
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert!(out.is_empty());
@@ -224,7 +224,7 @@ fn handler_named_like_a_guard_itself_clears_at_depth_zero() {
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert!(out.is_empty());
@@ -239,7 +239,7 @@ fn safe_methods_are_never_checked() {
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert!(out.is_empty());
@@ -254,7 +254,7 @@ fn ambiguous_handler_name_defined_in_two_files_is_skipped() {
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert!(out.is_empty());
@@ -275,7 +275,7 @@ fn provide_with_no_symbol_captured_is_skipped() {
         symbols: &[],
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert!(out.is_empty());
@@ -295,7 +295,7 @@ fn route_registered_in_a_test_fixture_file_is_skipped() {
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert!(out.is_empty(), "{:?}", out);
@@ -322,7 +322,7 @@ fn handler_reaching_a_require_prefixed_ownership_guard_is_not_flagged() {
         symbols: &symbols,
         symbol_graph: &graph,
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert!(out.is_empty(), "{:?}", out);
@@ -354,7 +354,7 @@ fn handler_reaching_only_input_validation_require_helpers_is_still_flagged() {
         symbols: &symbols,
         symbol_graph: &graph,
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
@@ -362,7 +362,10 @@ fn handler_reaching_only_input_validation_require_helpers_is_still_flagged() {
 }
 
 #[test]
-fn handler_reaching_an_is_local_env_gate_is_not_flagged() {
+fn handler_reaching_only_an_env_gate_is_flagged() {
+    // An env gate (`isLocal`/`isProduction`/`isDev`) decides WHERE code runs, not WHO may call it — it is
+    // NOT authorization. A mutating route whose only guard-reachable name is an env gate must still fire
+    // (clearing on it was a silent missing-auth suppression — the env-gate=auth category error).
     let provides = vec![provide(
         "POST /debug/reset",
         "routes/api.ts",
@@ -382,10 +385,16 @@ fn handler_reaching_an_is_local_env_gate_is_not_flagged() {
         symbols: &symbols,
         symbol_graph: &graph,
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
-    assert!(out.is_empty(), "{:?}", out);
+    assert_eq!(
+        out.len(),
+        1,
+        "env gate is not authorization — must fire: {:?}",
+        out
+    );
+    assert_eq!(out[0].file, "routes/api.ts");
 }
 
 #[test]
@@ -407,16 +416,16 @@ fn require_lowercase_substring_in_an_unrelated_word_does_not_false_clear() {
         symbols: &symbols,
         symbol_graph: &graph,
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
 }
 
 #[test]
-fn nest_guarded_line_is_exempt_before_entering_the_bfs() {
+fn decorator_guarded_line_is_exempt_before_entering_the_bfs() {
     // Empty symbol_graph and a handler name with no guard-vocabulary substring — the BFS alone would
-    // find nothing. The provide's own (file, line) is in `nest_guarded`, so it must never be flagged,
+    // find nothing. The provide's own (file, line) is in `decorator_guarded`, so it must never be flagged,
     // proving the exemption applies BEFORE/INSTEAD of the BFS.
     let provides = vec![provide(
         "POST /items",
@@ -425,22 +434,22 @@ fn nest_guarded_line_is_exempt_before_entering_the_bfs() {
         "handleApiPost",
     )];
     let symbols = vec![sym("items.controller.ts", "handleApiPost", 5)];
-    let mut nest_guarded = std::collections::HashSet::new();
-    nest_guarded.insert(("items.controller.ts".to_string(), 5));
+    let mut decorator_guarded = std::collections::HashSet::new();
+    decorator_guarded.insert(("items.controller.ts".to_string(), 5));
     let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &nest_guarded,
+        decorator_guarded: &decorator_guarded,
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert!(out.is_empty(), "{:?}", out);
 }
 
 #[test]
-fn a_provide_whose_line_is_not_in_nest_guarded_is_still_flagged_normally() {
-    // Regression guard: `nest_guarded` containing some OTHER line does not blanket-suppress the rule —
+fn a_provide_whose_line_is_not_in_decorator_guarded_is_still_flagged_normally() {
+    // Regression guard: `decorator_guarded` containing some OTHER line does not blanket-suppress the rule —
     // only the exact (file, line) pairs it names are exempt.
     let provides = vec![provide(
         "POST /items",
@@ -449,23 +458,23 @@ fn a_provide_whose_line_is_not_in_nest_guarded_is_still_flagged_normally() {
         "handleApiPost",
     )];
     let symbols = vec![sym("items.controller.ts", "handleApiPost", 5)];
-    let mut nest_guarded = std::collections::HashSet::new();
-    nest_guarded.insert(("items.controller.ts".to_string(), 99));
+    let mut decorator_guarded = std::collections::HashSet::new();
+    decorator_guarded.insert(("items.controller.ts".to_string(), 99));
     let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &nest_guarded,
+        decorator_guarded: &decorator_guarded,
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
 }
 
 #[test]
-fn nest_guarded_exemption_is_precise_per_route_in_a_shared_controller() {
+fn decorator_guarded_exemption_is_precise_per_route_in_a_shared_controller() {
     // End-to-end-flavored: two routes in one controller file, only one line present in
-    // `nest_guarded` (simulating method-level-only guarding) — the guarded one is exempt, the other
+    // `decorator_guarded` (simulating method-level-only guarding) — the guarded one is exempt, the other
     // still fires. Neither handler name nor the empty symbol_graph offers the BFS anything to find.
     let provides = vec![
         provide("POST /items/a", "items.controller.ts", 4, "createA"),
@@ -475,14 +484,14 @@ fn nest_guarded_exemption_is_precise_per_route_in_a_shared_controller() {
         sym("items.controller.ts", "createA", 4),
         sym("items.controller.ts", "createB", 7),
     ];
-    let mut nest_guarded = std::collections::HashSet::new();
-    nest_guarded.insert(("items.controller.ts".to_string(), 4));
+    let mut decorator_guarded = std::collections::HashSet::new();
+    decorator_guarded.insert(("items.controller.ts".to_string(), 4));
     let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &nest_guarded,
+        decorator_guarded: &decorator_guarded,
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
@@ -504,7 +513,7 @@ fn non_http_provides_are_ignored() {
         symbols: &[sym("routes/handlers.ts", "publish", 1)],
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert!(out.is_empty());
@@ -530,7 +539,7 @@ fn injected_auth_guarded_attribute_on_the_route_iokey_exempts_it() {
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &store,
     });
     assert!(out.is_empty(), "{:?}", out);
@@ -566,7 +575,7 @@ fn java_route_reaching_an_authorization_service_static_guard_is_not_flagged() {
         symbols: &symbols,
         symbol_graph: &graph,
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert!(out.is_empty(), "{:?}", out);
@@ -598,7 +607,7 @@ fn java_route_reaching_only_a_domain_noun_class_stays_flagged() {
         symbols: &symbols,
         symbol_graph: &graph,
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
@@ -626,7 +635,7 @@ fn java_route_with_no_reachable_guard_is_flagged_now_that_java_is_covered() {
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
@@ -664,7 +673,7 @@ fn java_ambiguous_handler_name_is_still_skipped_not_guessed() {
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert!(out.is_empty(), "{:?}", out);
@@ -694,7 +703,7 @@ fn injected_pathscope_auth_guarded_exempts_every_route_under_the_prefix() {
         symbols: &symbols,
         symbol_graph: &Vec::new(),
         auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
-        nest_guarded: &std::collections::HashSet::new(),
+        decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &store,
     });
     assert_eq!(out.len(), 1, "{:?}", out);

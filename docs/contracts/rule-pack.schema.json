@@ -23,6 +23,12 @@
       "default": 1,
       "description": "DSL schema version this pack was authored against. Defaults to 1 when absent; the loader rejects a pack whose version exceeds the engine's SUPPORTED_DSL_SCHEMA_VERSION (currently 1) rather than silently misinterpreting newer fields."
     },
+    "fragments": {
+      "type": "object",
+      "default": {},
+      "additionalProperties": { "type": "string" },
+      "description": "Named regex fragments. A pattern-bearing field below (any field whose description ends '${NAME} fragment reference supported') can be spelled as a whole string EXACTLY `${NAME}` instead of a literal regex — the loader replaces it with the fragment's text before the pack is hashed or evaluated. Merged UNDER a shared bundled fragment set the engine ships (`zzop_core::dsl::fragments`, no filesystem dependency — resolved identically whether the pack arrives from a `packsDir` file or an inline `packDefs` entry): a name declared here WINS a collision against a shared fragment of the same name, letting a pack locally override a shared idiom. `${NAME}` is collision-safe as a sentinel: under the `regex` crate's syntax a bare `{` is only valid as a numeric repetition quantifier, so `${<kebab-case-name>}` can never simultaneously be a value a pack author would hand-write as a real pattern and compile as one. Resolution is single-pass, not recursive — a fragment whose own value is itself a `${...}` reference is a load error, not a silent no-op or a chained expansion. After resolution this map is CLEARED, so a pack authored with fragments and the equivalent pack authored with patterns spelled out inline are load-time indistinguishable (identical cache fingerprint, identical findings). An unresolved/unknown/malformed `${NAME}` reference fails the pack load outright — `zzop pack validate`/`validate_rule_pack` report it as an issue, same severity as a bad JSON body. Default `{}` for a pack that references only shared fragments, or none at all."
+    },
     "rules": {
       "type": "array",
       "items": { "$ref": "#/definitions/rule" },
@@ -62,7 +68,7 @@
       "required": ["pattern", "label"],
       "additionalProperties": true,
       "properties": {
-        "pattern": { "type": "string", "description": "Regex (Rust `regex` crate syntax — no lookaround/backreferences). A non-compiling pattern silently no-ops its rule; `zzop pack validate` names it." },
+        "pattern": { "type": "string", "description": "Regex (Rust `regex` crate syntax — no lookaround/backreferences). A non-compiling pattern silently no-ops its rule; `zzop pack validate` names it. ${NAME} fragment reference supported (used for `any[].pattern`, `patterns[].pattern`, `absent[].pattern`)." },
         "label": { "type": "string", "description": "Classification label — lands in the finding's `data.label` (line-scan `any`) or names the pattern for `trigger`/veto roles (method-scan)." }
       }
     },
@@ -72,19 +78,20 @@
       "additionalProperties": true,
       "properties": {
         "type": { "const": "line-scan", "description": "Per-line regex scan over source text. Use either `line_pattern` (single) or `any` (labeled alternatives, first match per line wins)." },
-        "file_pattern": { "type": "string", "description": "Target file-path regex (e.g. `(?i)\\.(java|jsp)$`) — the rule only scans matching files." },
-        "require_file": { "type": ["string", "null"], "description": "Cheap pre-skip: only scan a file whose whole text matches this regex. Absent = always scan." },
-        "require_file_all": { "type": "array", "default": [], "items": { "type": "string" }, "description": "Additional pre-skip regexes, ALL of which must match the file text (short-circuits on first miss)." },
-        "require_file_absent": { "type": "array", "default": [], "items": { "type": "string" }, "description": "Negated pre-skip: if ANY of these matches the whole file text, the rule skips the file entirely (\"flag X only when there is no Y anywhere in the file\")." },
+        "file_pattern": { "type": "string", "description": "Target file-path regex (e.g. `(?i)\\.(java|jsp)$`) — the rule only scans matching files. ${NAME} fragment reference supported." },
+        "require_file": { "type": ["string", "null"], "description": "Cheap pre-skip: only scan a file whose whole text matches this regex. Absent = always scan. ${NAME} fragment reference supported." },
+        "require_file_all": { "type": "array", "default": [], "items": { "type": "string" }, "description": "Additional pre-skip regexes, ALL of which must match the file text (short-circuits on first miss). Each entry: ${NAME} fragment reference supported." },
+        "require_file_absent": { "type": "array", "default": [], "items": { "type": "string" }, "description": "Negated pre-skip: if ANY of these matches the whole file text, the rule skips the file entirely (\"flag X only when there is no Y anywhere in the file\"). Each entry: ${NAME} fragment reference supported." },
         "skip_comment_lines": { "type": "boolean", "default": false, "description": "Skip lines whose trimmed start begins with `//`, `*`, or `/*`." },
-        "line_pattern": { "type": ["string", "null"], "description": "Regex that flags a line (single pattern, no label). Mutually alternative with `any`." },
+        "strip_string_literals": { "type": "boolean", "default": false, "description": "Mask the interior of every closed string literal (single/double-quote and backtick pairs) on a line to spaces before testing `line_pattern`/`any`/`exclude_pattern`, so a token that only appears inside a string literal does not false-fire. The original line still supplies the snippet. Leave false for rules whose intent is to match INSIDE strings (hardcoded-secret, sql-in-string)." },
+        "line_pattern": { "type": ["string", "null"], "description": "Regex that flags a line (single pattern, no label). Mutually alternative with `any`. ${NAME} fragment reference supported." },
         "any": {
           "type": ["array", "null"],
           "items": { "$ref": "#/definitions/labeledPattern" },
           "description": "Labeled alternatives — first match per line wins, its label lands in the finding's `data.label`."
         },
-        "exclude_pattern": { "type": ["string", "null"], "description": "A line matching the main pattern is skipped when it ALSO matches this regex (per-line veto)." },
-        "file_exclude_pattern": { "type": ["string", "null"], "description": "Path regex — a file whose relative path matches is skipped entirely (the escape hatch for \"this extension but NOT under scripts/\")." },
+        "exclude_pattern": { "type": ["string", "null"], "description": "A line matching the main pattern is skipped when it ALSO matches this regex (per-line veto). ${NAME} fragment reference supported." },
+        "file_exclude_pattern": { "type": ["string", "null"], "description": "Path regex — a file whose relative path matches is skipped entirely (the escape hatch for \"this extension but NOT under scripts/\"). ${NAME} fragment reference supported — this is the field the shared bundled fragments (e.g. `test-paths`/`test-paths-stories`) are typically used for." },
         "snippet_max": { "type": "integer", "default": 160, "description": "Max snippet length in the finding (long lines truncate)." }
       }
     },
@@ -95,10 +102,11 @@
       "properties": {
         "type": { "const": "method-scan", "description": "Multi-pattern co-occurrence within one symbol's body span (e.g. exec + string concatenation in the SAME method). Needs parser-projected symbol spans; files without them are silently skipped." },
         "file_pattern": { "type": "string", "description": "Target file-path regex — the rule only scans matching files." },
-        "require_file": { "type": ["string", "null"], "description": "Cheap pre-skip: only scan a file whose whole text matches this regex. Absent = always scan." },
+        "require_file": { "type": ["string", "null"], "description": "Cheap pre-skip: only scan a file whose whole text matches this regex. Absent = always scan. ${NAME} fragment reference supported." },
         "require_file_all": { "type": "array", "default": [], "items": { "type": "string" }, "description": "Additional pre-skip regexes, ALL of which must match the file text." },
         "require_file_absent": { "type": "array", "default": [], "items": { "type": "string" }, "description": "Negated pre-skip: if ANY of these matches the whole file text, the rule skips the file entirely." },
         "skip_comment_lines": { "type": "boolean", "default": false, "description": "Skip comment lines (`//`, `*`, `/*` starts) when testing any pattern." },
+        "strip_string_literals": { "type": "boolean", "default": false, "description": "Mask closed string-literal interiors on each line to spaces before testing any `patterns`/`absent` regex, so a token inside a string literal does not false-fire. The original line still supplies the snippet + marker context. Leave false for rules whose intent is to match INSIDE strings." },
         "patterns": {
           "type": "array",
           "items": { "$ref": "#/definitions/labeledPattern" },
@@ -112,7 +120,7 @@
           "items": { "$ref": "#/definitions/labeledPattern" },
           "description": "Vetoes: after every `patterns` entry is satisfied, the finding is dropped if ANY of these also matches a line in the SAME span (e.g. a guarding try/catch or `$transaction(...)` wrapper)."
         },
-        "file_exclude_pattern": { "type": ["string", "null"], "description": "Path regex — a file whose relative path matches is skipped entirely." },
+        "file_exclude_pattern": { "type": ["string", "null"], "description": "Path regex — a file whose relative path matches is skipped entirely. ${NAME} fragment reference supported." },
         "snippet_max": { "type": "integer", "default": 160, "description": "Max snippet length in the finding (long lines truncate)." }
       }
     },
@@ -127,7 +135,7 @@
           "enum": ["function", "class", "const", "type", "interface", null],
           "description": "Restrict to one symbol kind (zzop_core::SourceSymbolKind, lowercase serde form). Absent = any kind."
         },
-        "name_pattern": { "type": ["string", "null"], "description": "Regex on the symbol name — fires on a match, or on a NON-match under `negate: true`." },
+        "name_pattern": { "type": ["string", "null"], "description": "Regex on the symbol name — fires on a match, or on a NON-match under `negate: true`. ${NAME} fragment reference supported." },
         "exported": { "type": ["boolean", "null"], "description": "Restrict to exported (`true`) or non-exported (`false`) symbols. Absent = both." },
         "negate": { "type": "boolean", "default": false, "description": "Flips `name_pattern` from \"must match\" to \"must not match\" (e.g. \"every exported component must be PascalCase\"). With no `name_pattern`, every symbol passes." }
       }
@@ -147,7 +155,7 @@
           "type": ["string", "null"],
           "description": "Exact match against the io entry's kind string (open vocabulary — e.g. \"http\", \"db-table\", \"env\", \"topic\"). Absent = any kind."
         },
-        "key_pattern": { "type": ["string", "null"], "description": "Regex on the entry's normalized key — fires on a match, or on a NON-match under `negate: true`. An entry with an unresolved (null) key never matches; under `negate: true` that makes it a hit." },
+        "key_pattern": { "type": ["string", "null"], "description": "Regex on the entry's normalized key — fires on a match, or on a NON-match under `negate: true`. An entry with an unresolved (null) key never matches; under `negate: true` that makes it a hit. ${NAME} fragment reference supported." },
         "negate": { "type": "boolean", "default": false, "description": "Flips `key_pattern` from \"must match\" to \"must not match\"." }
       }
     }

@@ -15,18 +15,33 @@
 #     declaration site today, but a legitimate place for a future pin/isolation note).
 #  2. `use syn` or `syn::` in any .rs file outside parser/parser-rust/src/.
 #
-# No deps beyond grep -P (PCRE). Exit 1 on any violation, listing file:line.
+# Scope: git-TRACKED files only (git ls-files), for the same reason as check-swc-isolation.sh /
+# check-ruff-isolation.sh — the working tree also holds gitignored/untracked local corpora (cloned
+# third-party repos, benchmark checkouts) whose own syn usage is not ours to police, and `syn::` is
+# ubiquitous in real Rust crates (a `grep -r .` over the tree false-positives on every one of them).
+# Anything that could ship must be tracked, so tracked-only is exactly the isolation surface (and
+# matches what CI checks out).
+#
+# Enumeration mechanism (TRACKED-file discovery + grep + the standard target/node_modules/.claude
+# exclusions) lives in scripts/lib/tracked-grep.sh, shared with check-tree-sitter-isolation.sh /
+# check-swc-isolation.sh / check-ruff-isolation.sh — this script keeps only ITS OWN pattern,
+# allowlist, and messages.
+#
+# No deps beyond git + grep -P (PCRE). Exit 1 on any violation, listing file:line.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. ./scripts/lib/tracked-grep.sh
 
 violations=0
 
 echo "syn isolation guard: checking Cargo.toml dependency declarations..."
 DEP_PATTERN='^\s*(syn|proc-macro2)\s*='
-cargo_files=$(grep -rlP "$DEP_PATTERN" . --include='Cargo.toml' 2>/dev/null \
-  | grep -v '/target/' \
-  | grep -v -x './Cargo.toml' \
-  | grep -v -x './parser/parser-rust/Cargo.toml' || true)
+# The enumeration call is kept OUTSIDE the `|| true` below on purpose: tracked_files_matching's own
+# failure must still trip `set -e` and abort loud (see its header comment); only its allowlisted
+# false-positives (this guard's own Cargo.toml, parser-rust's own) are safe to swallow via `|| true`.
+cargo_matches=$(tracked_files_matching "$DEP_PATTERN" 'Cargo.toml' '*/Cargo.toml')
+cargo_files=$(grep -v -x 'Cargo.toml' <<< "$cargo_matches" \
+  | grep -v -x 'parser/parser-rust/Cargo.toml' || true)
 
 if [ -n "$cargo_files" ]; then
   echo "syn isolation guard: syn/proc-macro2 dependency declared outside parser-rust:"
@@ -38,9 +53,8 @@ fi
 
 echo "syn isolation guard: checking .rs source usage..."
 USE_PATTERN='\bsyn::[A-Za-z_]|use\s+syn(::|;|\s)'
-rs_files=$(grep -rlP "$USE_PATTERN" . --include='*.rs' 2>/dev/null \
-  | grep -v '/target/' \
-  | grep -v '^\./parser/parser-rust/src/' || true)
+rs_matches=$(tracked_files_matching "$USE_PATTERN" '*.rs')
+rs_files=$(grep -v '^parser/parser-rust/src/' <<< "$rs_matches" || true)
 
 if [ -n "$rs_files" ]; then
   echo "syn isolation guard: syn usage found outside parser-rust/src:"

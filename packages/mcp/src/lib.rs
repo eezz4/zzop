@@ -21,6 +21,7 @@
 //! "auto"`) is NOT a module here — it lives in the shared `zzop-config` crate so a future full-CLI
 //! binary maps configs identically.
 
+pub mod cli;
 pub mod embedded;
 pub mod resources;
 pub mod server;

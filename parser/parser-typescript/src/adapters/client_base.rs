@@ -21,6 +21,9 @@
 //! - a value carrying `"://"` (an absolute URL) keys off the first `/` AFTER the scheme+host portion
 //!   (`"https://api.example.io/api/"` -> `"/api"`); a value with no such `/` is host-only and yields
 //!   `None` (prepending nothing is a no-op).
+//! - a protocol-relative `"//host/path"` (leading `//`) strips the host like the `://` branch — the
+//!   `//` head is a host carrier, never a path — so it keys off the first `/` after the host, checked
+//!   BEFORE the `/`-leading rule below (which would otherwise treat `//cdn/api` as a verbatim path).
 //! - a value already starting with `/` is itself a path (`"/api"` -> `"/api"`).
 //! - any other (relative, non-slash) string (`"api/"`) is refused (`None`) — axios resolves that
 //!   shape against the current page URL, not deterministically against this tree's routes.

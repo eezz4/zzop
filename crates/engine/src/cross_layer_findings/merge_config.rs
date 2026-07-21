@@ -1,6 +1,5 @@
-//! The two union `RuleConfig`s the cross-layer run derives from its trees' per-tree configs —
-//! extracted from the parent module purely for the 300-line cap; the contract prose lives on
-//! `compute_cross_layer_findings`'s own doc.
+//! The two union `RuleConfig`s the cross-layer run derives from its trees' per-tree configs; the
+//! contract prose lives on `compute_cross_layer_findings`'s own doc.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

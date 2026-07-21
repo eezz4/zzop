@@ -139,6 +139,40 @@ fn process_exit_inside_a_function_is_flagged() {
 }
 
 #[test]
+fn process_exit_inside_a_string_literal_is_not_flagged() {
+    // A code-generation template or example emits the TEXT `process.exit(2)` as a string literal — it is
+    // not a real call in THIS file. With `strip_string_literals`, the masked line no longer matches the
+    // `process.exit(` pattern, so the code-gen helper is not falsely flagged. (Regression: the raw
+    // per-line regex used to fire on the string's contents.)
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/codegen.ts",
+        "export function emitExit(): string {\n  return 'if (err) { process.exit(2); }';\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "process-exit-in-lib").is_empty(),
+        "a process.exit inside a string literal must not fire: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn a_real_call_on_the_same_line_as_a_string_literal_still_fires() {
+    // The mask only blanks string INTERIORS — a genuine call outside the string on the same line is still
+    // seen. Proves the masking doesn't over-suppress.
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/shutdown.ts",
+        "export function shutdown() {\n  logger.info('shutting down'); process.exit(1);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "process-exit-in-lib");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 2);
+}
+
+#[test]
 fn process_exit_inside_a_scripts_dir_cli_file_is_not_flagged() {
     // process.exit is the expected/idiomatic way for a CLI entrypoint to exit, so scripts/**.cjs files are excluded outright rather than flagged.
     let dir = TempDir::new("zzop-be-rel");

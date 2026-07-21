@@ -96,6 +96,44 @@ fn delete_from_prefix_concatenation_is_not_flagged() {
 }
 
 #[test]
+fn delete_from_sessions_on_a_line_also_calling_log_somewhere_now_fires() {
+    // Regression fixture for the `sql-where-veto` fragment's fix (bare `(?i)WHERE` -> `(?i)\bWHERE\b`):
+    // `exclude_pattern` used to veto on ANY substring match of "where", including inside an unrelated
+    // identifier elsewhere on the same line — `logSomewhere` contains "where" as a substring
+    // (case-insensitively), so a closed, complete-literal `DELETE FROM sessions` with no WHERE clause at
+    // all was wrongly suppressed just because `logSomewhere(id)` happened to share the line. With the
+    // word-boundary fix, `logSomewhere` no longer matches `\bWHERE\b` (no word boundary before "where" —
+    // it's preceded by the letter "e"), so this now correctly fires as the CRITICAL whole-table delete it
+    // is.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "db.ts",
+        "export async function purge(db: any, id: string) {\n  db.query(\"DELETE FROM sessions\"); logSomewhere(id);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "sql-delete-no-where");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 2);
+}
+
+#[test]
+fn delete_from_sessions_with_a_real_where_id_1_clause_is_still_not_flagged() {
+    // Paired with the fixture above: a GENUINE `WHERE` clause must still veto — the word-boundary fix
+    // narrows the match to real `WHERE` occurrences, it does not stop matching real ones.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "db.ts",
+        "export async function purge(db: any) {\n  return db.query(\"DELETE FROM sessions WHERE id=1\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "sql-delete-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
 fn sql_delete_no_where_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-sql");
     dir.write(

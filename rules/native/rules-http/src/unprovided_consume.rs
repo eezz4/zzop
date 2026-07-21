@@ -96,6 +96,8 @@ fn first_path_segment(key: &str) -> Option<&str> {
 /// Builds today's individual `unprovided-consume` finding for one unmatched consume — shared by both the
 /// "overlapping" leg (always individual) and the "foreign, below fold threshold" leg (module doc).
 fn individual_finding(key: &str, file: &str, line: u32) -> zzop_core::Finding {
+    // Paste-ready `routes` stub (single-tree, so the serving tree is this one — no cross-tree ambiguity).
+    let injection_stub = format!("routes: [{{ \"key\": \"{key}\", \"role\": \"provide\" }}]");
     zzop_core::Finding {
         rule_id: "unprovided-consume".to_string(),
         severity: zzop_core::Severity::Info,
@@ -104,9 +106,8 @@ fn individual_finding(key: &str, file: &str, line: u32) -> zzop_core::Finding {
         message: format!(
             "This call consumes `{key}` but no HTTP route anywhere in this analysis provides that \
              key — likely a typo'd path, a renamed/removed backend route, or a route defined in a \
-             file this analysis didn't parse. Verify the route still exists at that path and method. \
-             Veto: consumes whose key path ends in a static-asset extension (.js, .css, .svg, .png, \
-             .jpg/.jpeg, .gif, .ico, .txt, .webp, .woff/.woff2, .map) are never flagged. \
+             file this analysis didn't parse. Verify the route still exists at that path and method; if it does, inject it with `{injection_stub}`. \
+             Veto: consumes whose key path ends in a static-asset extension (.js, .css, .svg, .png, .jpg/.jpeg, .gif, .ico, .txt, .webp, .woff/.woff2, .map) are never flagged. \
              Consumes ending in .json or .xml are vetoed by default UNLESS the path contains an \
              API-ish segment (/api/, /graphql/, /rpc/, or a version segment like /v1/) — e.g. \
              `GET /i18n/ko.json` and `GET /public/recipes.json` are vetoed, but \
@@ -115,8 +116,8 @@ fn individual_finding(key: &str, file: &str, line: u32) -> zzop_core::Finding {
              /api-ish path segment will also be missed by this veto. An absolute-URL consume whose \
              host is localhost or 127.0.0.1 (with or without a port) is treated as a same-app \
              dev self-reference and is never flagged — a deliberate skip rather than a fabricated \
-             host-stripped path join. Note: this only \
-             fires because this same source ALSO provides at least one HTTP route itself — a source with \
+             host-stripped path join. Note: this only fires because this same source ALSO provides at \
+             least one HTTP route itself — a source with \
              zero HTTP provides is assumed to be consuming a remote backend outside this analysis's \
              scope and is never flagged by this rule (that veto avoids a systematic false-positive \
              class for pure front-end sources). If you're analyzing a split FE/BE repo pair, prefer \
@@ -129,7 +130,7 @@ fn individual_finding(key: &str, file: &str, line: u32) -> zzop_core::Finding {
              structural false-positive source. {} if intentional (this rule has no inline suppression marker).",
             zzop_core::disable_hint("unprovided-consume")
         ),
-        data: Some(serde_json::json!({ "key": key })),
+        data: Some(serde_json::json!({ "key": key, "injectionStub": injection_stub })),
     }
 }
 
@@ -174,7 +175,17 @@ pub fn unprovided_consume_findings(
     let mut overlapping: Vec<UnmatchedConsume> = Vec::new();
     let mut foreign: Vec<UnmatchedConsume> = Vec::new();
 
-    for c in io_consumes.iter().filter(|c| c.kind == "http") {
+    // Test-file consumes are not deployed surface — a `test_*.py`/`*.spec.ts` call to a route (often a
+    // deliberately-wrong path exercising a 404, or an httpx/requests client fixture) is test scaffolding,
+    // not app egress that should be matched against the app's routes. Skipping them mirrors the cross-tree
+    // join's own `filter_join_io` test-drop (D11): the multi-tree path already excludes test-classified io
+    // before matching, and this intra-app rule now agrees. Filtering only CONSUMES (not provides) is the
+    // safe direction — it removes noise without ever creating a finding (a test-only provide still counts
+    // as a provider, which can only suppress).
+    for c in io_consumes
+        .iter()
+        .filter(|c| c.kind == "http" && !zzop_core::is_test_file(&c.file))
+    {
         let Some(key) = c.key.as_deref() else {
             continue;
         };
@@ -236,7 +247,7 @@ pub fn unprovided_consume_findings(
         } else {
             example_segments.join(", ")
         };
-        // Edge case (release-audit v0.14.0, F4): a tree whose only http provides are root-path (e.g.
+        // Edge case: a tree whose only http provides are root-path (e.g.
         // `GET /`) contributes zero first-segments (`first_path_segment` returns `None` for `/` — see
         // this fn's own doc), so `example_segments_str` is empty and `m` is 0. Rendering the normal
         // "{m} provide(s) under {segments}" clause in that case would dangle a trailing "under" with

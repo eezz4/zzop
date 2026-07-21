@@ -1,7 +1,5 @@
-//! Unit tests for the tool-output shaping helpers (`shape_findings`/`shape_list`/`FindingFilters`) —
-//! split out of `mod.rs` unchanged to keep that file under the 300-line source cap (test files are
-//! exempt from the cap; see `scripts/check-max-file-lines.sh`). `bucket_keys`'s own tests live beside
-//! it in `bucket_keys.rs`.
+//! Unit tests for the tool-output shaping helpers (`shape_findings`/`shape_list`/`FindingFilters`).
+//! `bucket_keys`'s own tests live beside it in `bucket_keys.rs`.
 
 use super::*;
 
@@ -20,6 +18,7 @@ fn counts_stay_full_while_filter_narrows_shown() {
         min_severity: Some("warning".into()),
         rule: None,
         limit: None,
+        verbosity: Default::default(),
     };
     let shaped = shape_findings(&findings, &filters);
     assert_eq!(shaped["total"], 3);
@@ -38,6 +37,7 @@ fn truncation_is_disclosed_never_silent() {
         min_severity: None,
         rule: None,
         limit: Some(2),
+        verbosity: Default::default(),
     };
     let shaped = shape_findings(&findings, &filters);
     assert_eq!(shaped["shown"].as_array().unwrap().len(), 2);
@@ -60,6 +60,7 @@ fn deterministic_order_same_input_same_output() {
         min_severity: None,
         rule: None,
         limit: None,
+        verbosity: Default::default(),
     };
     let one = serde_json::to_string(&shape_findings(&findings, &filters)).unwrap();
     let two = serde_json::to_string(&shape_findings(&findings, &filters)).unwrap();
@@ -147,6 +148,7 @@ fn rule_filter_is_exact() {
         min_severity: None,
         rule: Some("a".into()),
         limit: None,
+        verbosity: Default::default(),
     };
     let shaped = shape_findings(&findings, &filters);
     assert_eq!(shaped["shown"].as_array().unwrap().len(), 1);
@@ -160,6 +162,7 @@ fn zero_match_rule_filter_for_a_nonexistent_rule_id_gets_a_disclosure_note() {
         min_severity: None,
         rule: Some("typo-d-rule-id".into()),
         limit: None,
+        verbosity: Default::default(),
     };
     let shaped = shape_findings(&findings, &filters);
     assert_eq!(shaped["shown"].as_array().unwrap().len(), 0);
@@ -181,6 +184,7 @@ fn zero_match_rule_filter_for_a_real_rule_with_no_findings_gets_no_note() {
         min_severity: Some("critical".into()),
         rule: Some("a".into()),
         limit: None,
+        verbosity: Default::default(),
     };
     let shaped = shape_findings(&findings, &filters);
     assert_eq!(shaped["shown"].as_array().unwrap().len(), 0);
@@ -194,6 +198,7 @@ fn a_rule_filter_that_actually_matches_gets_no_note() {
         min_severity: None,
         rule: Some("a".into()),
         limit: None,
+        verbosity: Default::default(),
     };
     let shaped = shape_findings(&findings, &filters);
     assert_eq!(shaped["shown"].as_array().unwrap().len(), 1);

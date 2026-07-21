@@ -221,8 +221,9 @@ exactly which per-file DSL rules and analyses run in envelope mode, and why line
 and git-history-dependent analyses do not). Envelope analysis also gets the same bundled-rule-pack
 default as every other analyze path: the facade entry point (`zzop_facade::analyze_envelope_json`, the
 one code path every host drives) seeds the bundled packs as inline `packDefs` unless the config passes
-an explicit `packsDir: null` — they appear in the output's `packsLoaded` (`source: "inline"`; `"dir"`
-through the JS wrapper, whose on-disk bundled copy wins the id collision), and since only
+an explicit `packsDir: null` — they appear in the output's `packsLoaded` (`source: "inline"`; the
+removed JS wrapper's bundled packs used to report `"dir"` instead, since its on-disk bundled copy won
+the id collision), and since only
 `symbol-scan`/`io-scan` rules can fire without source text and every current bundled rule is
 `line-scan`/`method-scan`, the default currently adds pack-load confirmation, not findings. A
 caller-supplied pack reusing a bundled id keeps the existing collision semantics (a later inline def,
@@ -312,8 +313,8 @@ If your framework has an equivalent concept (a global route prefix, a per-client
 the normalized `key` you emit yourself rather than trying to reproduce either native rewrite.
 
 Deployment-topology `mounts`/`mountedAt` (config-declared, not a sentinel kind — see
-[packages/cli/README.md](../packages/cli/README.md#connection-topology)) are NOT part of the reserved-kind
-drop above: they apply uniformly to Mode A envelopes and natively-parsed trees alike, at the structurally
+[modules/napi.md](modules/napi.md#functions)'s `mounts`/`mountedAt`/`hosts` `AnalyzeRequest` fields) are
+NOT part of the reserved-kind drop above: they apply uniformly to Mode A envelopes and natively-parsed trees alike, at the structurally
 equivalent seam after fragment composition and before the IO freeze — a config mount rewrites a Mode A
 tree's `http` provide keys exactly like it would a native tree's.
 
@@ -335,22 +336,21 @@ callers can refer to either unambiguously.
   (empty by default: zero behavior change for every existing caller).
 
   **Availability — where each mode actually runs.** Mode B overlays work everywhere: the config-file
-  `overlays`/`trees[].overlays` key (`zzop.config.jsonc`, both the JS and Rust-hosted mapper), and the
-  `adapterOverlays` request field it compiles down to, are honored by every host — the `@zzop/cli`
-  `zzop` command AND the Node-free `zzop-mcp` binary both run a config's overlays through the exact same
-  `analyze`/`analyzeTrees` path. Mode A (full-envelope `analyze_envelope`/napi `analyzeEnvelope`) is
-  reachable from Rust (`zzop_engine::analyze_envelope`), from napi (`analyzeEnvelope` — a host app
-  calling `@zzop/native` directly), AND from the Node-free `zzop-mcp` binary — its `analyze_envelope`
-  MCP tool and `zzop-mcp analyze-envelope <envelope.json>` CLI subcommand both run the same
+  `overlays`/`trees[].overlays` key (`zzop.config.jsonc`, mapped by the Rust-hosted `zzop-config`
+  crate), and the `adapterOverlays` request field it compiles down to, are honored by every host — the
+  Node-free `zzop-mcp` binary runs a config's overlays through the exact same `analyze`/`analyzeTrees`
+  path any direct `zzop-facade` embedder does. Mode A (full-envelope `analyze_envelope`) is reachable
+  from Rust (`zzop_engine::analyze_envelope`), from a direct `zzop-facade` embedding
+  (`analyze_envelope_json`), AND from the Node-free `zzop-mcp` binary — its `analyze_envelope` MCP tool
+  and `zzop-mcp analyze-envelope <envelope.json>` CLI subcommand both run the same
   `zzop_summary::analyze_envelope_summary` call path (`crates/summary`, over
   `zzop_facade::analyze_envelope_json`), zero-config only (an
-  envelope carries no filesystem location, so there is no config file to auto-discover). The `@zzop/cli`
-  `zzop` command (`packages/cli/bin/zzop.js`) does NOT run a Mode A envelope today — verified by reading
-  it, not assumed: its only envelope-shaped commands are `zzop adapter validate <path>` (structural
-  validation only, via `validateEnvelopeOnly`) and `zzop init adapter --mode a|b` (scaffolds a starter
-  adapter's FILES — `--mode a` scaffolds a Mode A shape, it does not run one). In short: to run a Mode A
-  envelope without embedding `@zzop/native` yourself, use the `zzop-mcp` binary (its tool or CLI
-  subcommand); the `@zzop/cli` `zzop` command still only authors Mode B overlays.
+  envelope carries no filesystem location, so there is no config file to auto-discover). (The npm
+  distribution's JS CLI `@zzop/cli` — removed 2026-07-20 along with the `@zzop/native` napi binding —
+  never ran a Mode A envelope either: its only envelope-shaped commands were `zzop adapter validate
+  <path>`, structural validation only, and `zzop init adapter --mode a|b`, which scaffolded starter
+  FILES rather than running an analysis.) In short: to run a Mode A envelope, use the `zzop-mcp` binary
+  (its tool or CLI subcommand) or embed `zzop-facade` directly.
 
   Each overlay is validated with `validate_envelope` independently; an invalid overlay is skipped with
   one `AnalyzeOutput::warnings` entry naming its `parser` id — never a crash, never a failed analysis
@@ -385,11 +385,11 @@ callers can refer to either unambiguously.
     invocation you're using. Two different defaults apply depending on how the tree is invoked, and they
     are NOT the same string: a `zzop.config.jsonc` `trees[]` entry with no explicit `sourceId` defaults
     to that entry's own raw `root` string exactly as written (e.g. `root: "./api"` → `sourceId: "./api"`
-    — see `packages/cli/lib/config-surface.json`'s `treeFields` docs); a config-less/bare-path run (no
-    config file, no `trees[]` — e.g. a host app calling `@zzop/native`'s `analyze()` directly with `root`
+    — see `crates/config/config-surface.json`'s `treeFields` docs); a config-less/bare-path run (no
+    config file, no `trees[]` — e.g. a direct `zzop-facade` embedding calling `analyze()` with `root`
     only) instead defaults to the analyzed ROOT DIRECTORY's own basename (`apply_source_id_default`,
-    `crates/facade/src/analyze.rs` — the shared chokepoint every host funnels through: napi
-    `analyze`/`analyzeTrees`, and any embedder driving the facade with no config-file front end). Set an
+    `crates/facade/src/analyze.rs` — the shared chokepoint every host funnels through: the `zzop-mcp`
+    binary's zero-config path, and any embedder driving the facade with no config-file front end). Set an
     explicit `sourceId` in your request/config when you want one fixed value regardless of which path
     invokes the tree, rather than relying on either default.
   - A declared `files[].path` matching no file in the tree is still merged in, as a synthetic
@@ -416,8 +416,8 @@ tens-of-lines script, not an hours-long native parser. Exhibit A:
 no imports at all — the native Java parser has since closed that specific gap, but the recipe is
 unchanged for any extension still missing a channel. Iterate against the embedded contract
 (`zzop-mcp contract envelope-guide` / `zzop-mcp contract envelope-schema` print this document and
-its JSON Schema straight from the binary), validate offline with `zzop adapter validate
-<envelope.json>` (zzop-mcp hosts: the `validate_envelope` MCP tool performs the same check;
+its JSON Schema straight from the binary), validate offline with `zzop-mcp validate-envelope
+<envelope.json>` (or the `validate_envelope` MCP tool, which performs the same check;
 `zzop-mcp contract example-envelope` prints a complete valid sample), and add further channels only
 when an analysis you care about needs them. The
 per-extension "no native parser" warning and the consume-silence tripwires point here for exactly
@@ -516,8 +516,7 @@ regardless of how many lines the invocation wraps across.
 
 **Wire exposure.** Overlays are reachable from Rust (`EngineConfig::adapter_overlays`) AND from every wire
 host: `analyze`/`analyzeTrees`'s config accepts an `adapterOverlays` array of envelopes with this
-same shape (`AnalyzeRequest::adapter_overlays` in `crates/facade/src/lib.rs`, `Array<Record<string,
-unknown>>` in `packages/native/index.d.ts`'s `AnalyzeConfig`), e.g.:
+same shape (`AnalyzeRequest::adapter_overlays` in `crates/facade/src/lib.rs`), e.g.:
 
 ```json
 {

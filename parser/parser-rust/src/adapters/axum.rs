@@ -33,8 +33,15 @@
 //! - One `RouterMountFragment` per name with >=1 surviving entry, in first-appearance order.
 
 use std::collections::HashMap;
-use syn::{Expr, ExprAssign, ExprMethodCall, ItemFn, Lit, Local, Pat, Stmt};
+use syn::{Expr, ExprAssign, ExprMethodCall, ItemFn, Local, Stmt};
 use zzop_core::{ImportMap, RouterMountEntry, RouterMountFragment};
+
+mod entries;
+mod util;
+use entries::push_verb;
+use util::{
+    is_router_new_call, is_same_ident, simple_expr_ident, simple_pat_ident, string_literal,
+};
 
 pub(crate) const VERB_METHODS: &[&str] = &["get", "post", "put", "delete", "patch"];
 
@@ -193,17 +200,19 @@ fn route_entries(mc: &ExprMethodCall) -> Vec<RouterMountEntry> {
     let Some((verb, handler, line)) = verb_call(root) else {
         return Vec::new(); // root isn't a recognized verb call — never guess the whole `.route()`
     };
-    let mut out = vec![verb_entry(verb, &path, handler, line)];
+    let mut out = Vec::new();
+    push_verb(&mut out, verb, &path, handler, line);
     for link in chain {
         let name = link.method.to_string();
-        if VERB_METHODS.contains(&name.as_str()) {
+        if VERB_METHODS.contains(&name.as_str()) || name == "any" {
             let handler = link.args.first().and_then(simple_expr_ident);
-            out.push(verb_entry(
+            push_verb(
+                &mut out,
                 name.to_ascii_uppercase(),
                 &path,
                 handler,
                 crate::line_of(&link.method),
-            ));
+            );
         }
     }
     out
@@ -216,7 +225,10 @@ fn verb_call(root: &Expr) -> Option<(String, Option<String>, u32)> {
     };
     let seg = p.path.segments.last()?;
     let verb = seg.ident.to_string();
-    if !VERB_METHODS.contains(&verb.as_str()) {
+    // `any(handler)` is axum's every-method catch-all — recognized here as the sentinel "ANY", expanded
+    // to one entry per HTTP verb by `push_verb` below. `on(MethodFilter, handler)` (verb-from-argument)
+    // stays out of v1 scope.
+    if !VERB_METHODS.contains(&verb.as_str()) && verb != "any" {
         return None;
     }
     let handler = call.args.first().and_then(simple_expr_ident);
@@ -225,16 +237,6 @@ fn verb_call(root: &Expr) -> Option<(String, Option<String>, u32)> {
         handler,
         crate::line_of(&seg.ident),
     ))
-}
-
-fn verb_entry(method: String, path: &str, handler: Option<String>, line: u32) -> RouterMountEntry {
-    RouterMountEntry::Verb {
-        method,
-        path: path.to_string(),
-        handler,
-        line,
-        attr_keys: Vec::new(),
-    }
 }
 
 fn nest_entry(mc: &ExprMethodCall, imports: &ImportMap) -> Option<RouterMountEntry> {
@@ -258,41 +260,6 @@ fn merge_entry(mc: &ExprMethodCall, imports: &ImportMap) -> Option<RouterMountEn
         specifier,
         attr_keys: Vec::new(),
     })
-}
-
-fn is_router_new_call(expr: &Expr) -> bool {
-    let Expr::Call(call) = expr else { return false };
-    let Expr::Path(p) = &*call.func else {
-        return false;
-    };
-    let segs = &p.path.segments;
-    let n = segs.len();
-    n >= 2 && segs[n - 1].ident == "new" && segs[n - 2].ident == "Router"
-}
-
-fn is_same_ident(expr: &Expr, name: &str) -> bool {
-    simple_expr_ident(expr).as_deref() == Some(name)
-}
-
-fn simple_expr_ident(expr: &Expr) -> Option<String> {
-    let Expr::Path(p) = expr else { return None };
-    if p.path.segments.len() != 1 {
-        return None;
-    }
-    Some(p.path.segments[0].ident.to_string())
-}
-
-fn simple_pat_ident(pat: &Pat) -> Option<String> {
-    match pat {
-        Pat::Ident(pi) => Some(pi.ident.to_string()),
-        _ => None,
-    }
-}
-
-fn string_literal(expr: &Expr) -> Option<String> {
-    let Expr::Lit(el) = expr else { return None };
-    let Lit::Str(s) = &el.lit else { return None };
-    Some(s.value())
 }
 
 #[cfg(test)]
