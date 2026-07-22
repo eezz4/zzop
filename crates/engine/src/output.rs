@@ -30,6 +30,12 @@ pub struct AnalyzeOutput {
     /// for `cross-layer/sdk-import-no-visible-consume` (the tree IR drops package imports during dep
     /// resolution) — not part of the serialized output surface.
     pub package_imports: Vec<PackageImportSummary>,
+    /// This tree's assembled entity-attribute store (native producer judgments + Mode B overlay
+    /// injections — see `zzop_core::AttributeStore`). Plumbing for the cross-layer stage
+    /// (`cross-layer/retrying-write-no-idempotency`'s provider-side `idempotency-guarded` veto reads
+    /// the PROVIDER tree's store by source id) — like `package_imports`, not part of the serialized
+    /// output surface.
+    pub attributes: zzop_core::AttributeStore,
     pub nodes: Vec<FileNode>,
     pub scores: Option<Scores>,
     pub health: Option<HealthIndex>,

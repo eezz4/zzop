@@ -64,6 +64,7 @@ pub(crate) fn routes_overlay(
                 line,
                 raw: None,
                 method: Some(method.to_uppercase()),
+                retry_configured: None,
             }),
         }
     }

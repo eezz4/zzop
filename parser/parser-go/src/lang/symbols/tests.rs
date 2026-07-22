@@ -124,6 +124,21 @@ fn grouped_var_declaration_via_var_spec_list() {
     assert!(!sym(&syms, "port").exported);
 }
 
+/// Regression pin: a function whose LAST top-level statement is itself multi-line (here, a `for` loop
+/// that is the function's ONLY statement) must have `body_end` at the statement's own closing line, not
+/// its opening line — module doc's "`body_start`/`body_end`" section. Before this fix, `body_end` used
+/// `line_of` (the child's START line) for the last child too, so a function shaped `func f() { for
+/// ... { ... } }` reported a `body_end` equal to `body_start`, silently excluding the loop's own body
+/// lines from `Matcher::MethodScan`'s scan window — exactly the shape `trigger_in_loop` most needs to see.
+#[test]
+fn multiline_last_statement_body_end_is_its_own_closing_line() {
+    let src = "package main\n\nfunc f(items []int) {\n\tfor _, it := range items {\n\t\tgo process(it)\n\t}\n}\n";
+    let syms = parse_symbols("a.go", src);
+    let s = sym(&syms, "f");
+    assert_eq!(s.body_start, Some(4));
+    assert_eq!(s.body_end, Some(6));
+}
+
 #[test]
 fn empty_body_function_has_no_body_range() {
     let src = "package main\n\nfunc noop() {}\n";

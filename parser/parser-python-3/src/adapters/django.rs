@@ -226,6 +226,7 @@ impl<'a> Visitor<'a> for ConsumeCollector<'a> {
                             line: self.idx.line_of(attr.range.start()),
                             raw: Some(name),
                             method: None,
+                            retry_configured: None,
                         });
                     }
                 }

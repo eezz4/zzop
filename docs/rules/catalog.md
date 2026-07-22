@@ -6,11 +6,11 @@ Everything the engine ships today, read directly from `rules/dsl/**/*.json` and
 semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 [authoring-guide.md](authoring-guide.md).
 
-**Totals** (machine-checked by `crates/engine/tests/rule_contracts/`'s `catalog_totals_match_loaded_rule_and_analysis_counts`): 14 DSL packs, 112 DSL rules, 44 native analysis ids. 11 packs ship rules; 3 are stub packs (see "Stub packs" below).
+**Totals** (machine-checked by `crates/engine/tests/rule_contracts/`'s `catalog_totals_match_loaded_rule_and_analysis_counts`): 15 DSL packs, 132 DSL rules, 45 native analysis ids. 13 packs ship rules; 2 are stub packs (see "Stub packs" below).
 
 ## DSL packs (`rules/dsl/<pack>/<pack>.json`)
 
-### `be-db` (12 rules)
+### `be-db` (20 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
@@ -26,8 +26,16 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `multi-write-no-tx` | warning | method-scan | `multi-write-tx-ok` | A create-family write (`create`/`createMany`/`insert`) and a mutate-family write (`update`/`delete`/`upsert`/...) in the same function with no `$transaction(`/SQL `BEGIN` — a failure between the two leaves partial state (co-occurrence heuristic; independent writes suppress with the marker). |
 | `non-atomic-counter-update` | warning | method-scan | `atomic-counter-ok` | A `findUnique`/`findFirst`/`findOne`/`findById` read plus a `field: value +/- 1` arithmetic update in the same function with no atomic `increment:`/`decrement:`/`$inc`/`FOR UPDATE` — a read-modify-write counter that loses updates under concurrency. |
 | `connection-no-release` | warning | method-scan | `connection-release-ok` | `pool.connect(`/`getConnection(`/`acquireConnection(` with no `.release(`/`.destroy(`/`.end(`, no `return conn`, and no `using`/`await using` declaration in the same function — a connection leak under load (release in a callee still fires; verify before refactoring). |
+| `db-client-new-in-loop` | warning | method-scan | `client-in-loop-ok` | A DB/connection client or pool constructor (`new PrismaClient()`/`new Pool()`/`new Sequelize()`/`new MongoClient()`/`new IORedis()`/`new Redis()`, `createPool`/`createClient`/`createConnection`) proven via loop spans to sit structurally inside a loop body — a fresh connection/pool per iteration exhausts the pool. The loop-proven sibling of `client-per-request`, which fires on request-handler co-occurrence instead. |
+| `write-in-loop-no-tx` | warning | method-scan | `write-in-loop-ok` | A DB write on a DB-client-shaped receiver proven via loop spans to sit structurally inside a loop body, with no `$transaction(`/bare `transaction(`/SQL `BEGIN` anywhere in the function — each iteration autocommits independently, so a mid-loop failure leaves a partial, non-rollback-able prefix. The loop-proven sibling of `multi-write-no-tx`, which needs two different write-verb families to co-occur and misses a single-verb write repeated in a loop. |
+| `check-then-act-in-loop` | warning | method-scan | `check-act-loop-ok` | A `findFirst`/`findUnique`/`findOne`/`exists` read and a `.create(`/`.insert(` call both in a loop body, with the create/insert proven via loop spans, and no `connectOrCreate`/`upsert`/`ON CONFLICT`/`ON DUPLICATE KEY` guard — a batch get-or-create race across concurrent workers/retries. The loop-proven sibling of `find-then-create-no-unique`, a whole-function co-occurrence heuristic with no proof both calls share an iterated body. |
+| `idempotency-key-regenerated-per-retry` | warning | method-scan | `idempotency-regen-ok` | An idempotency key assigned a fresh random value (`randomUUID()`/`uuidv4()`/`nanoid()`/`cuid()`/...) on a line proven via loop spans to sit structurally inside a loop/retry body — every attempt carries a different key, so the server treats each retry as a brand-new request, defeating the idempotency the key exists to provide. |
+| `unawaited-transaction` | warning | line-scan | `unawaited-tx-ok` | A `$transaction(`/`.transaction(` call on a DB-client-shaped receiver (`prisma`/`db`/`client`) whose promise is neither awaited, returned, nor chained — runs detached, so the handler can send its response before the transaction commits or fails. |
+| `manual-tx-no-rollback` | warning | method-scan | `manual-tx-ok` | A `BEGIN`/`beginTransaction()`/`startTransaction()` call and a `COMMIT`/`.commit()` call co-occur in the same function with no `ROLLBACK`/`.rollback()` anywhere in it (co-occurrence heuristic) — an error raised between BEGIN and COMMIT has nothing to release it, poisoning the pooled connection for whichever request borrows it next. |
+| `tx-swallows-error-commits` | warning | method-scan | `tx-catch-ok` | An empty `catch {}` co-occurs with a `$transaction(`/`@Transactional`/`beginTransaction()` call in the same function (co-occurrence heuristic, doesn't prove the catch wraps the transaction) — swallowing the error prevents the throw that would trigger a rollback, so a partially-failed transaction can commit as if it succeeded. |
+| `critical-write-default-isolation` | info | method-scan | `tx-isolation-ok` | A `$transaction(`/`@Transactional` span also matches a money/inventory-named identifier (`balance`/`amount`/`payment`/`wallet`/`ledger`/`charge`/`refund`/`invoice`/`inventory`/`stock`) and a write call (`update`/`create`/`upsert`/`increment`/`decrement`), with no explicit isolation level (`isolationLevel`/`Serializable`/`RepeatableRead`) or `FOR UPDATE` row lock anywhere in it — co-occurrence heuristic, a review nudge rather than a confirmed defect (doesn't prove the write touches the money field, or that the default isolation on the target engine is actually unsafe here); the database's default isolation (e.g. Postgres READ COMMITTED) can permit lost updates/write skew on a money-critical read-modify-write. |
 
-### `be-reliability` (13 rules)
+### `be-reliability` (19 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
@@ -44,12 +52,19 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `console-in-be` | info | line-scan | `console-ok` | `console.*` call in backend-path source (`api/`/`server/`/`backend/`/`be/`/`routes/`/`controllers/`/`services/`) — unstructured, synchronous, not queryable. |
 | `interval-no-clear` | warning | line-scan | `interval-ok` | `setInterval(...)` with no matching `clearInterval(...)` anywhere in the file — a leaked timer keeps the process/page alive and re-fires forever. |
 | `env-outside-config` | info | line-scan | `env-access-ok` | `process.env.X` accessed outside a config module (files/dirs named `config`/`env`/`settings` exempt) — scatters env parsing/validation instead of centralizing it. |
+| `stream-open-no-close-in-loop` | warning | method-scan | `stream-in-loop-ok` | A file/stream handle (`createReadStream`/`createWriteStream`/`fs.open`/`fs.openSync`) proven via loop spans to open structurally inside a loop body, with no `.close(`/`.destroy(`/`pipeline(`/`finished(` anywhere in the enclosing function — file descriptors accumulate under a fan-out until the process hits `EMFILE`. |
+| `listener-subscribe-in-loop` | warning | method-scan | `listener-in-loop-ok` | An EventEmitter listener (`.on(`/`.once(`/`.addListener(`/`.prependListener(` with a string event name) proven via loop spans to subscribe structurally inside a loop body, with no `.off(`/`.removeListener(`/`.removeAllListeners(` anywhere in the enclosing function — listeners pile up and each event fires the handler N times. The event-listener sibling of `interval-no-clear`. |
+| `await-inside-promise-all-array` | warning | line-scan | `promise-all-await-ok` | `await` used directly inside a `Promise.all(...)`/`Promise.allSettled(...)`/`Promise.race(...)` array literal — each awaited element resolves before the next array element is even evaluated, serializing calls that were meant to run concurrently. Syntax-proven, not a heuristic: an `await` textually between the array's `[` and `]` always serializes that element. |
+| `emitter-async-listener` | warning | method-scan | `emitter-async-ok` | An `async` callback registered as an EventEmitter listener (`.on`/`.once`/`.addListener`/`.prependListener`) — the emitter fires it and discards the returned promise, so a rejection inside the handler becomes an unhandled promise rejection, which crashes the process on Node 15+. |
+| `promise-race-resource-leak` | info | method-scan | `promise-race-ok` | `Promise.race([...])` with no `AbortController`/`AbortSignal`/`clearTimeout`/`.abort()` visible in the same function — the operation(s) that lose the race are never cancelled, so their socket/timer/handle stays alive after the race settles. Heuristic, not proof — some raced operations hold no cancellable resource and can over-flag. |
+| `fs-check-then-use` | warning | method-scan | `fs-check-use-ok` | A filesystem existence/permission check (`fs.existsSync`/`fs.access`/`fs.stat`/...) and a create/write call (`fs.writeFile`/`fs.open`/`fs.rename`/...) in the same function with no exclusive-create flag (`wx`/`O_EXCL`) visible anywhere in it — CWE-367 TOCTOU: between the check and the use, the path can be swapped out from under it or another writer can win the race. Co-occurrence check, not proof the check and the write target the same path. |
 
-### `be-security` (41 rules)
+### `be-security` (42 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
 | `hardcoded-secret` | warning | line-scan | `secret-ok` | Hardcoded secret-shaped literal (API key/password/token assignment, or a known cloud-key prefix). |
+| `config-file-secret` | warning | line-scan | `config-secret-ok` | A high-entropy secret value committed in a config file (`.properties`/`.yml`/`.toml`/`.ini`/`.conf`/`.cfg`/`.env`) — a `jwt.secret`/`*.password`/`api-key` assignment whose value is 16+ chars. Empty values, short placeholders, and `${VAR}` env references are not flagged. Scans test paths too (a committed credential is leaked regardless). |
 | `mass-assignment` | warning | method-scan | `mass-assignment-ok` | `req.body` (or a spread of it) passed directly into a database write in the same function — lets a caller set fields the handler never intended to expose. |
 | `raw-query-interpolation` | critical | line-scan | `raw-sql-ok` | `$queryRawUnsafe`/`$executeRawUnsafe` called — no parameterization, so any interpolated request-derived string is a SQL injection. |
 | `insecure-cookie` | warning | method-scan | `cookie-ok` | A cookie is set (`res.cookie`/`setCookie`/`cookies.set`) with no `httpOnly: true` anywhere in the same function body — an explicit `httpOnly: false` still fires. |
@@ -114,13 +129,19 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `get-with-body` | warning | method-scan | `get-body-ok` | A GET request carrying a body (`method: 'get'` alongside a `body:` property in the same function) — servers/proxies may silently drop the body on a GET. |
 | `ws-no-auth` | info | method-scan | `ws-auth-ok` | WebSocket opened/upgraded (`new WebSocket(...)`/`.upgrade(...)`) with no auth material (`token`/`auth`/`session`/`cookie`/`jwt`) visible in the same function — unauthenticated realtime channel. |
 
+### `go` (1 rule)
+
+| Rule id | Severity | Matcher | Suppress marker | Detects |
+|---|---|---|---|---|
+| `go-goroutine-in-loop` | warning | method-scan | `goroutine-in-loop-ok` | A `go func(){...}()`/`go someCall(...)` statement proven via loop spans to start structurally inside a `for` loop body — fans out one goroutine per iteration with no bound, exhausting memory/file descriptors on a large `range`/count. Pre-Go 1.22 toolchains also capture the SAME loop variable across every iteration. Bound concurrency with a worker pool/semaphore, or (pre-1.22) copy the loop variable into a new local before passing it into the goroutine. |
+
 ### `http` (3 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
-| `read-model-path` | info | line-scan | `read-model-ok` | `apiRoutes.get(...)` with no cache-strategy marker (`// cache:`, `// no-cache:`, `// read-model-ok:`) on the same line. |
-| `auth-gates` | warning | line-scan | `auth-gate-ok` | Route under a protected path segment (`/admin/`, `/internal/`, `/dev/`) whose handler identifier carries no admin/role/guard/protect keyword. |
-| `route-exposure` | warning | line-scan | `route-exposure-ok` | Route under a dev/debug/internal/test/playground path segment whose handler identifier carries no guard-hint keyword. |
+| `read-model-path` | info | line-scan | `read-model-ok` | HOUSE-CONVENTION rule for `apiRoutes.get(...)`-registered codebases only (its `// cache:`/`// no-cache:` annotation channel is inherently lexical): GET route with no cache-strategy marker (`// cache:`, `// no-cache:`, `// read-model-ok:`) on the same line. Silent (never fires) outside that convention. |
+| `auth-gates` | warning | io-scan | `auth-gate-ok` | Framework-neutral: any assembled `http` provide under a protected path segment (`/admin/`, `/internal/`) with no witnessed auth evidence — the `auth-guarded` attribute is absent (no native middleware/decorator/annotation guard recognized, no Mode B adapter injection). Deliberately NO same-line keyword carve-out: on a security rule a lexical token over-clearing a real unguarded route (e.g. Java's `value="/admin/..."` argument, Django's `views.AdminView`) is worse than relying on the attribute/marker escape hatches. Marker works in `//` and `#` comment languages. |
+| `route-exposure` | warning | io-scan | `route-exposure-ok` | Framework-neutral: any assembled `http` provide under a dev/debug/internal/test/playground path segment whose registration line carries no guard-hint keyword (dev/debug/internal/env/guard/isProduction/isLocal/NODE_ENV) as a later, unquoted call argument — preserves the env-gate=WHERE-axis carve-out while a quoted path string (`value="/debug"`) can no longer self-clear. Known residual: an unquoted later argument whose identifier contains a keyword (Django's `views.DebugView`) still clears — exposure hygiene tolerates that direction; `auth-gates` deliberately does not. Marker works in `//` and `#` comment languages. |
 
 ### `perf` (1 rule)
 
@@ -128,13 +149,22 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 |---|---|---|---|---|
 | `api-in-loop` | warning | method-scan | `api-in-loop-ok` | Network call made inside a loop or array-iteration callback — the HTTP analogue of N+1. |
 
-### `redis` (3 rules)
+### `react` (1 rule)
+
+| Rule id | Severity | Matcher | Suppress marker | Detects |
+|---|---|---|---|---|
+| `setstate-after-await-unmounted` | warning | method-scan | `setstate-await-ok` | A `setX(...)` state setter call and an `await` both appear in the same function, with no unmount/abort guard (`AbortController`/`AbortSignal`/`isMounted`/`mountedRef`/`signal:`/`cancelled`/`didCancel`) anywhere in it — co-occurrence heuristic, scoped to React files (`useEffect`/`useState`/`from 'react'`); a plain event handler (mounted by construction whenever it fires) is an accepted false positive. When the setter genuinely follows an in-flight await in code that can unmount mid-request (an effect's async loader), the resolve races teardown — the classic "state update on an unmounted component" warning, a stale-data flash, or a wasted render after remount. |
+
+### `redis` (6 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
 | `flushall-in-code` | critical | line-scan | `redis-flush-ok` | `flushall`/`flushdb` call or quoted command literal reachable from application code — wipes every key in the database/instance; one bug or exposed admin endpoint away from total data loss. |
 | `keys-glob-scan` | warning | line-scan | `redis-keys-ok` | `KEYS` scan (`.keys('pattern')` with a string argument, or a quoted `'KEYS'` command) — O(N) walk that blocks the single-threaded server; use the SCAN cursor family or an index set. |
 | `client-no-error-listener` | warning | line-scan | `redis-error-ok` | redis/ioredis client created in a file with no `.on('error', ...)` anywhere in it — node-redis emits `error` on an EventEmitter, so an unhandled listener crashes the process on the first connection blip. |
+| `redis-lock-get-then-set` | warning | method-scan | `redis-lock-atomic-ok` | A `.get(`/`.exists(` read and a `.set(` call co-occur in the same function alongside a lock-ish identifier (co-occurrence heuristic, not proof of order) — a non-atomic check-then-set lock, a classic TOCTOU race where two concurrent callers can both pass the check before either writes. Use atomic `SET key value NX` (with a TTL), a `WATCH`/`MULTI` transaction, an `.eval(` Lua script, or a redlock library instead. |
+| `redis-lock-no-ttl` | warning | line-scan | `lock-ttl-ok` | A lock acquired with `SET key value NX`/`setnx` and no `EX`/`PX`/`EXAT`/`PXAT` expiry on that same call — if the holder crashes before releasing it, the key lives forever and wedges every future caller waiting on that lock. Always pair `NX` with a TTL. |
+| `redis-counter-get-set` | warning | method-scan | `redis-counter-ok` | A `.get(` read followed by a `.set(` call whose value looks like arithmetic (`n++`/`n +- 1`/`Number(...)`/`parseInt(...)`) in the same function (co-occurrence heuristic) — a non-atomic read-modify-write counter that silently loses one of two concurrent increments under load. Use Redis's atomic `INCR`/`INCRBY`/`DECR`/`DECRBY`/`HINCRBY` instead. |
 
 ### `security` (2 rules)
 
@@ -179,7 +209,7 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 
 ### Stub packs (0 rules — roadmap)
 
-`conventions`, `react`, `routes` load successfully (valid, empty `rules: []`)
+`conventions`, `routes` load successfully (valid, empty `rules: []`)
 but currently ship no detections — each needs either declaration→use tracking, cross-repo/cross-file
 joins, or JSX/AST structure the DSL can't express (see
 [authoring-guide.md#when-a-rule-does-not-fit-the-dsl](authoring-guide.md#when-a-rule-does-not-fit-the-dsl)).
@@ -248,6 +278,7 @@ toggle/gating surface). `zzop_engine::register_all_native` composes all five. Th
 | `cross-layer/sdk-import-no-visible-consume` | info | A tree importing an SDK-shaped package (`@scope/sdk`, `*-sdk`, `openapi*`, `*api-client*`) from 3+ files, OR an opaque HTTP client library (`superagent`, `got`, `node-fetch`, `oazapfts`, ...) the egress extractor cannot trace at all, from 1+ files, while having fewer visible `http` consumes than `unresolved-consume-ratio`'s floor — consumption flows through a client the egress extractor cannot see; the not-even-visible half of the blind-spot partition. `oazapfts` joined the opaque-client list once its native recognition retired in favor of `examples/oazapfts-adapter` (Mode B). Rule id kept for compatibility even though scope now covers both classes (`rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs`). |
 | `cross-layer/unconsumed-procedure` | info | A tRPC procedure (kind `trpc`, key `"VERB dotted.path"`, composed at assembly from cross-file router fragments) that no analyzed tree calls — TypeScript's compiler catches calls to nonexistent procedures but not unused definitions. Caveats server-side `createCaller`/SSR consumers this analysis cannot see (`rules/native/rules-cross-layer/src/cross_layer/unconsumed_procedure.rs`). |
 | `cross-layer/body-field-drift` | warning | A matched `http` edge whose FE-witnessed request-body literal (`body-shape-v1`) disagrees with the BE handler's resolved `@Body()` DTO: a required field the DTO declares but the FE literal never sets (only when the FE literal is otherwise exhaustive at that level), an undeclared key the FE sends (only when the DTO's own field list is complete), or a missing `@Body('subKey')` wrapper key entirely. Anchored at the consume, citing the DTO's `file:line`; caveats that this is a witnessed-literals-only comparison — interceptors/transforms can add or strip fields (`rules/native/rules-cross-layer/src/cross_layer/body_field_drift.rs`). |
+| `cross-layer/retrying-write-no-idempotency` | critical | A frontend WRITE call that runs under an automatic retry (`IoConsume::retry_configured` — the parser-typescript `egress-retry-v1` recognizer: an `axios-retry`-wired file, or a `pRetry(...)`/`backOff(...)` wrapper enclosing the call) resolves to a real provider route via the cross-layer join, AND that provider route carries no witnessed idempotency guard — the two-sided check that justifies `critical`. If the retry fires (timeout, dropped response, 5xx) the non-idempotent request is replayed, so a provider that is not idempotent applies the write twice (double charge, duplicate order). Anchored at the consume (where the retry is configured), citing the provider `file:line`. The veto is a truthy `idempotency-guarded` attribute on the provider route (an exact `IoKey` or covering `PathScope`), the same open-vocab entity-attribute channel as `mutating-route-no-auth`'s `auth-guarded`: set NATIVELY by parser-typescript's inline-handler recognizer when a handler reads the `Idempotency-Key` header (Express/Hono, TS only), or INJECTED via a Mode B overlay's `attributes` for every other provider language/framework — a paste-ready stub for that injection ships in the finding's `data.injectionStub`. Attribute absence means "no guard witnessed", not "proven unguarded"; the per-site disable marker remains the escape hatch for a handler known-idempotent by inspection (`rules/native/rules-cross-layer/src/cross_layer/retrying_write_no_idempotency.rs`). |
 | `cross-layer/unknown-verb-route` | info | A route whose path is statically served but whose HTTP method(s) could not be determined — an all-verb `pages/api` handler, a `pathname`-dispatch block, or a Go `HandleFunc` registration that pins no method literal. The honest-disclosure replacement for the retired `[GET, POST]` verb fabrication (1b): the path is confirmed served, only the verb is a static unknown, so no exact verb-level cross-layer check (unconsumed/near-miss/method-mismatch) can run against the route without inventing a method. Not an error — inject the method(s) through a Normalized AST adapter (Mode B overlay) to enable exact verb-level checks (`rules/native/rules-cross-layer/src/cross_layer/unknown_verb_route.rs`). |
 
 ### Roadmap

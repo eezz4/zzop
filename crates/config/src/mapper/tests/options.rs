@@ -91,8 +91,8 @@ fn pack_defs_carries_every_bundled_pack_with_no_parse_warnings() {
     let pack_defs = req["packDefs"].as_array().unwrap();
     assert_eq!(
         pack_defs.len(),
-        14,
-        "expected exactly the 14 bundled DSL packs"
+        15,
+        "expected exactly the 15 bundled DSL packs"
     );
     assert!(mapped.warnings.iter().all(|w| !w.contains("bundled pack")));
 }
@@ -102,7 +102,7 @@ fn every_tree_in_an_analyze_trees_request_gets_its_own_pack_defs() {
     let mapped = config_to_request(&json!({"roots": ["./a", "./b"]}), Path::new("/base")).unwrap();
     let trees = mapped.request["trees"].as_array().unwrap();
     for tree in trees {
-        assert_eq!(tree["packDefs"].as_array().unwrap().len(), 14);
+        assert_eq!(tree["packDefs"].as_array().unwrap().len(), 15);
     }
 }
 
@@ -164,7 +164,7 @@ fn representative_config_maps_to_the_expected_request_shape() {
     });
 
     assert_eq!(actual, expected);
-    assert_eq!(pack_defs_len, 14);
+    assert_eq!(pack_defs_len, 15);
     assert!(mapped
         .warnings
         .iter()

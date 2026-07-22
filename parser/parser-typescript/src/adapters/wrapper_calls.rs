@@ -15,10 +15,15 @@
 //! ALL of:
 //! - a parameter's name, case-insensitively, is or ENDS IN `endpoint`/`path`/`url` (e.g.
 //!   `apiEndpoint`) -> its index becomes `path_param`. No type annotation required — same
-//!   "name is the signal" tradeoff `router_mounts.rs`/`controller_decorators.rs` document;
+//!   "name is the signal" tradeoff `router_mounts.rs`/`controller_decorators.rs` document. FALLBACK
+//!   for a builtin-`fetch` sink: absent a path-like NAME, the param passed VERBATIM as a bare
+//!   identifier first arg to `fetch(...)` (`fetch(p)`/`fetch(p, {...})`) is the path param — a
+//!   composite first arg (`fetch(base + p)`) is left to the name signal, never guessed;
 //! - a `method` (or `: Method`-typed) parameter -> `method_param`, OR — absent that — the reachable
-//!   sink body contains exactly ONE distinct `method: 'VERB'` literal -> `fixed_method` (zero or
-//!   ambiguous verbs disqualify the function);
+//!   sink body contains exactly ONE distinct `method: 'VERB'` literal -> `fixed_method`. For a
+//!   builtin-`fetch` sink with NO `method` key at all, bare `fetch(url)` defaults to a fixed GET;
+//!   a present-but-dynamic `method` (`fetch(url, { method: verb })`) or ambiguous/zero-for-non-fetch
+//!   verbs disqualify the function (never guess a computed verb);
 //! - its body reaches a sink call `fetch(`/`axios.`/`axios(`/`ky.`, directly or one hop through a
 //!   LOCAL top-level helper (declared or const arrow/fn, exported or not) whose body contains the
 //!   sink. Exactly one hop — a helper forwarding to ANOTHER helper is not walked further.

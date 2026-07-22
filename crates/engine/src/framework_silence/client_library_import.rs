@@ -102,7 +102,7 @@ pub fn client_library_import_warning(
 extracted tree-wide: {spec_list} — the call idiom may be a wrapper or DI pattern this extraction pass does \
 not recognize; cross-layer joins will be near-silent from this tree's consume side — project this tree's \
 consumes with a Mode B overlay adapter (see the adapter examples) to restore cross-layer visibility: a \
-partial envelope covering just the consume channel is enough; contract: `zzop-mcp contract envelope-guide` \
+partial envelope covering just the consume channel is enough; contract: `zzop contract envelope-guide` \
 on MCP hosts, docs/NORMALIZED_AST.md in the repo."
     ))
 }

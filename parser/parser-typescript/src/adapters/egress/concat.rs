@@ -7,7 +7,7 @@ use swc_core::common::SourceMap;
 use swc_core::ecma::ast::{BinaryOp, Expr, Lit};
 
 use super::unwrap_expr;
-use super::url_resolve::{dedup_preserve_order, expr_text, TplPiece};
+use super::url_resolve::{dedup_preserve_order, expr_text, resolve_cond_arm, TplPiece};
 
 /// `+` string-concatenation -> URL variants (`str-concat-url-v1`), the isomorphic counterpart to
 /// [`resolve_template_variants`](super::url_resolve) for binary `+` instead of a template literal. Flattens the
@@ -68,16 +68,10 @@ fn concat_operand_piece(
             Some(v) => TplPiece::Fixed(v.clone()),
             None => TplPiece::Fixed("{}".to_string()),
         },
-        Expr::Cond(c) => {
-            if let (Expr::Lit(Lit::Str(cons)), Expr::Lit(Lit::Str(alt))) = (&*c.cons, &*c.alt) {
-                TplPiece::Slot(
-                    cons.value.as_str().unwrap_or_default().to_string(),
-                    alt.value.as_str().unwrap_or_default().to_string(),
-                )
-            } else {
-                TplPiece::Fixed("{}".to_string())
-            }
-        }
+        Expr::Cond(c) => match (resolve_cond_arm(&c.cons), resolve_cond_arm(&c.alt)) {
+            (Some(cons), Some(alt)) => TplPiece::Slot(cons, alt),
+            _ => TplPiece::Fixed("{}".to_string()),
+        },
         _ => TplPiece::Fixed("{}".to_string()),
     }
 }

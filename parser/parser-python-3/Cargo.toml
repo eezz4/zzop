@@ -1,6 +1,6 @@
 [package]
 name = "zzop-parser-python-3"
-version = "0.0.0"
+version.workspace = true
 edition = "2021"
 publish = false
 
@@ -15,4 +15,4 @@ ruff_python_ast = "=0.0.4"
 # ruff_python_parser 0.0.4 were built against (see their own Cargo.toml), so there is no version drift
 # risk — this is the same artifact already in the dependency graph, just named directly.
 ruff_text_size = "=0.0.4"
-zzop-core = { version = "0.0.0", path = "../../crates/core" }
+zzop-core = { path = "../../crates/core" }

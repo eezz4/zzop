@@ -168,3 +168,121 @@ fn json_parse_of_own_previously_stringified_cache_is_not_flagged() {
         out.findings
     );
 }
+
+// --- await-inside-promise-all-array ---
+
+#[test]
+fn await_inside_a_promise_all_array_literal_is_flagged() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/load.ts",
+        "declare function getA(): Promise<number>;\ndeclare function getB(): Promise<number>;\nexport async function loadBoth() {\n  return await Promise.all([await getA(), await getB()]);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "await-inside-promise-all-array");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4);
+}
+
+#[test]
+fn await_producing_the_promise_all_array_itself_is_not_flagged() {
+    // FP-adversarial pin: `await` resolves `buildTasks()` to the ARRAY passed to `Promise.all`, which is
+    // the correct, fully-parallel shape — there is no `await` between the array literal's `[` and `]`
+    // (there is no `[` at all here), so the line-scan's `\[[^\]]*\bawait\b` never matches.
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/load.ts",
+        "declare function buildTasks(): Promise<Promise<number>[]>;\nexport async function loadAll() {\n  return await Promise.all(await buildTasks());\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "await-inside-promise-all-array").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn promise_all_await_ok_marker_above_the_call_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/load.ts",
+        "declare function getA(): Promise<number>;\ndeclare function getB(): Promise<number>;\nexport async function loadBoth() {\n  // promise-all-await-ok: two independent one-off calls, serial cost is negligible here\n  return await Promise.all([await getA(), await getB()]);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "await-inside-promise-all-array").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- fs-check-then-use ---
+//
+// Co-occurrence check only: a `check` label (existsSync/access/stat) and a `use` label (writeFile/open/rename/...)
+// in the same function body. It does not confirm the two calls touch the same path, or that the check runs
+// before the write — stated plainly in the rule's message.
+
+#[test]
+fn exists_check_followed_by_write_with_no_exclusive_flag_is_flagged() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/save.ts",
+        "import fs from \"fs\";\n\nexport function saveIfAbsent(p: string, data: string) {\n  if (!fs.existsSync(p)) {\n    fs.writeFileSync(p, data);\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "fs-check-then-use");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 5);
+}
+
+#[test]
+fn exists_check_followed_by_exclusive_create_write_is_not_flagged() {
+    // Adversarial negative: the exclusive-create flag (`wx`) is exactly the fix the rule's message
+    // recommends — it fails atomically if the path already exists, closing the TOCTOU window, so the
+    // `absent: exclusive` veto must suppress this even though check+use still co-occur.
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/save.ts",
+        "import fs from \"fs\";\n\nexport function saveIfAbsent(p: string, data: string) {\n  if (!fs.existsSync(p)) {\n    fs.writeFileSync(p, data, { flag: 'wx' });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "fs-check-then-use").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn exists_check_guarding_only_a_read_is_not_flagged() {
+    // Adversarial negative: `existsSync` guards a `readFileSync` — a read, not a member of the `use`
+    // pattern's create/write call set — so the `use` label never appears and the rule has nothing to
+    // trigger on at all.
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/load.ts",
+        "import fs from \"fs\";\n\nexport function loadIfPresent(p: string) {\n  if (fs.existsSync(p)) {\n    return fs.readFileSync(p, 'utf8');\n  }\n  return null;\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "fs-check-then-use").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn fs_check_use_ok_marker_above_the_write_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/save.ts",
+        "import fs from \"fs\";\n\nexport function saveIfAbsent(p: string, data: string) {\n  if (!fs.existsSync(p)) {\n    // fs-check-use-ok: single-writer batch job, no concurrent access to this path\n    fs.writeFileSync(p, data);\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "fs-check-then-use").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}

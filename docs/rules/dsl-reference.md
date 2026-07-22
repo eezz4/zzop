@@ -196,16 +196,24 @@ Finding `data.snippet` is the symbol's name; `line` is the symbol's declaration 
 
 ### `io-scan` (`IoScan`)
 
-Query over a file's `IoFacts` (the cross-layer IO the parser projected alongside `symbols`) — for
-boundary-convention rules (e.g. "every HTTP endpoint must be versioned under `/api/v[0-9]+/`").
+Query over the WHOLE TREE's IO facts — evaluated once, post-assemble, over every `IoProvide`/`IoConsume`
+the assembled tree carries plus the tree's `AttributeStore`, NOT per file: this is what lets a rule see
+facts a single file's raw extraction never has on its own — router-mount/controller-prefix/file-convention
+composition, and Java/C#'s whole-corpus passes — for boundary-convention rules (e.g. "every HTTP endpoint
+must be versioned under `/api/v[0-9]+/`").
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `file_pattern` | regex | required | Path regex — required here too, even though `IoFacts` isn't itself file-shaped, so a matcher still opts into which files it considers. |
+| `file_exclude_pattern` | regex \| null | `null` | Path regex — an entry whose `file` matches this is skipped entirely, checked right after `file_pattern` (cheapest gate first, before any attribute lookup or anchor-text fetch). Same escape-hatch rationale as `line-scan`'s field of the same name. |
 | `direction` | `"provides"` \| `"consumes"` \| `"any"` | required | Which side(s) of `IoFacts` to scan. |
 | `kind` | `IoKind` \| null | `null` | Exact match against an entry's `kind` (e.g. `"http"`, `"db-table"`). |
 | `key_pattern` | regex \| null | `null` | Regex on the entry's normalized key — meaning flips under `negate`, same convention as `symbol-scan`. |
 | `negate` | bool | `false` | See below. |
+| `symbol_pattern` | regex \| null | `null` | Regex on `IoProvide::symbol` — provides-only: a consume never carries a symbol, so it never matches when this is set, and a provide whose `symbol` is unresolved (`None`) never matches either (never-guess). Unlike `key_pattern`, `negate` never flips this field's role. |
+| `attr_present` | string \| null | `null` | Plain string, not a regex. Fires only when the tree's `AttributeStore` has a truthy value for `route_attr(entry.kind, entry.key, attr_present)` — an exact `IoKey` match wins over the longest covering `PathScope`. An entry with no resolved key never satisfies this gate. |
+| `attr_absent` | string \| null | `null` | Same `route_attr` lookup as `attr_present`, inverted: fires only when there is NO truthy value for the attribute. An entry with no resolved key has nothing to look up, so it always satisfies this gate. |
+| `anchor_exclude_pattern` | regex \| null | `null` | Regex against the entry's own source line, fetched via the tree context's anchor-line lookup. Inapplicable when no source text is reachable (e.g. envelope mode has no native source) — the exclusion then simply never applies, never a guessed match. |
 
 - `negate: false`: fires on entries whose key matches `key_pattern`.
 - `negate: true`: fires on entries whose key does **not** match `key_pattern` — the "endpoints not under
@@ -215,9 +223,14 @@ boundary-convention rules (e.g. "every HTTP endpoint must be versioned under `/a
   consume is not proven to follow the convention); under `negate: false` it never fires.
 - When `key_pattern` is absent entirely, every entry matches (so `negate: true` with no `key_pattern`
   yields no findings — nothing to fail — same "nothing to negate against" convention as `symbol-scan`).
+- `symbol_pattern`/`attr_present`/`attr_absent`/`anchor_exclude_pattern` are plain additive AND gates,
+  evaluated after `negate` has already resolved `key_pattern`'s role — `negate` itself only ever flips
+  `key_pattern`, never these four.
 
-Files with no IO projection (`SourceFile.io == None`) are silently skipped, same convention as
-method-scan's `symbols`. Finding `data` is `{ "snippet": <key or "<unresolved>">, "kind": <kind> }`;
+A file that contributes no `IoProvide`/`IoConsume` to the assembled tree simply supplies no entries here
+— there is no separate per-file skip step to speak of (unlike method-scan's per-file `symbols` walk):
+io-scan iterates the tree's already-assembled `provides` then `consumes` lists directly, each in input
+order (the determinism contract). Finding `data` is `{ "snippet": <key or "<unresolved>">, "kind": <kind> }`;
 `line` is the entry's own line.
 
 ## Path-exclusion semantics
@@ -234,21 +247,31 @@ the exclusion.
 
 ## Suppress-marker semantics
 
-`RuleDef.suppress_marker` (e.g. `"n+1-ok"`) applies uniformly to `line-scan` and `method-scan` findings
-(not `symbol-scan`/`io-scan`, which have no source-line concept to anchor a comment against):
+`RuleDef.suppress_marker` (e.g. `"n+1-ok"`) applies to `line-scan`, `method-scan`, AND `io-scan` findings
+(not `symbol-scan`, which still has no source-line concept to anchor a comment against):
 
-- A finding is suppressed when a `//`-comment naming the marker appears on the finding's **own line, or the
-  single line directly above it** — a fixed 1-line lookback window used uniformly across every pack.
-  A wider lookback window over-suppresses: a marker aimed at one call can silently suppress unrelated,
-  unvetted findings on the lines below it. Place the marker on the finding's own line, or directly above
-  it — nowhere further back.
+- A `line-scan`/`method-scan` finding is suppressed when a `//`-comment naming the marker appears on the
+  finding's **own line, or the single line directly above it** — a fixed 1-line lookback window used
+  uniformly across every pack. A wider lookback window over-suppresses: a marker aimed at one call can
+  silently suppress unrelated, unvetted findings on the lines below it. Place the marker on the finding's
+  own line, or directly above it — nowhere further back.
 - Matches `// <marker>` or `// <marker>: <reason>` — the marker text is regex-escaped before compiling
   (`//\s*{escaped-marker}\b`), so a marker containing regex metacharacters (`n+1-ok`'s `+`) matches
   literally, not as regex syntax.
 - For a file whose extension is `.sql` (case-insensitive), a `--`-comment naming the marker suppresses
   identically (`-- <marker>` or `-- <marker>: <reason>`), same lookback window and escaping rules. This is
-  gated to `.sql` files only: `--` is a line comment in SQL but not in JS/TS (`--x` is a decrement there),
-  so no other extension's suppression behavior changes.
+  gated to `.sql` files only, and to `line-scan`/`method-scan` only: `--` is a line comment in SQL but not
+  in JS/TS (`--x` is a decrement there), so no other extension's or matcher's suppression behavior changes.
+- An `io-scan` finding anchors at the matched provide/consume's own `file:line` — not a line the matcher
+  scanned itself, but the entry's own source location. The marker is honored on that anchor line, or the
+  single line directly above it, same 1-line lookback window as `line-scan`/`method-scan`. Recognition
+  there is line-comment-**NEUTRAL**: both `// <marker>` and `# <marker>` suppress identically, since an
+  io-scan anchor line can come from any provide-producing language (Python's `#` included, not just
+  JS/TS/Java/Go/C#'s `//`). `--` is deliberately NOT recognized for `io-scan` — no `.sql` file produces a
+  route provide, so the SQL comment dialect stays a `line-scan`/`method-scan`-only concern.
+- In envelope mode (no native source text to fetch a line from), `io-scan` suppress markers are honestly
+  **inactive**: the anchor-line lookup returns `None`, and a `None` result is never treated as a match —
+  the finding fires unsuppressed rather than silently guessing.
 
 ## Schema version policy
 

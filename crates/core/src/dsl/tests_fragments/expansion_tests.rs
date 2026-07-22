@@ -169,7 +169,8 @@ fn expand_fragments_is_idempotent_on_an_already_expanded_pack() {
 /// Every pattern-bearing field the task names — `file_pattern`, `require_file`, `require_file_all`,
 /// `require_file_absent`, `line_pattern`, `any[].pattern`, `exclude_pattern`, `file_exclude_pattern`
 /// (line-scan); `patterns[].pattern`/`absent[].pattern`/`file_exclude_pattern` (method-scan);
-/// `name_pattern` (symbol-scan); `key_pattern` (io-scan) — resolves a `${NAME}` ref. One pack exercising
+/// `name_pattern` (symbol-scan); `key_pattern`/`file_exclude_pattern` (io-scan) — resolves a `${NAME}`
+/// ref. One pack exercising
 /// every field at once, each pointed at its own fragment name, so a future field added to a matcher
 /// without wiring it into `expand_fragments` shows up here as an unresolved `${...}` left in place
 /// (caught by the sentinel-collision guard below on ANY pack, not just shipped ones, if this test's own
@@ -261,10 +262,15 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         message: "m".to_string(),
         matcher: Matcher::IoScan(IoScan {
             file_pattern: "${file-pattern}".to_string(),
+            file_exclude_pattern: Some("${file-exclude-pattern}".to_string()),
             direction: IoDirection::Any,
             kind: None,
             key_pattern: Some("${key-pattern}".to_string()),
             negate: false,
+            symbol_pattern: None,
+            attr_absent: None,
+            attr_present: None,
+            anchor_exclude_pattern: None,
         }),
         suppress_marker: None,
     };
@@ -331,4 +337,8 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         unreachable!()
     };
     assert_eq!(io.key_pattern.as_deref(), Some("(?i)key-pattern-resolved"));
+    assert_eq!(
+        io.file_exclude_pattern.as_deref(),
+        Some("(?i)file-exclude-pattern-resolved")
+    );
 }

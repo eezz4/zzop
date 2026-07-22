@@ -1,7 +1,10 @@
 //! Phase 4: every whole-graph / call-graph-BFS native analysis, gated by `EngineConfig::rule_config`
-//! and timed under `EngineConfig::profile_rules` — accumulates into one `Vec<Finding>` merged with the
-//! per-file DSL findings back in `super::assemble`.
+//! and timed under `EngineConfig::profile_rules`, PLUS (last, once `run_callgraph_rules`' own
+//! `decorator_guarded` evidence exists) the [`io_scan`] sub-phase's whole-tree `Matcher::IoScan` DSL
+//! pass — accumulates into one `Vec<Finding>` merged with the per-file DSL findings back in
+//! `super::assemble`.
 
+use std::collections::BTreeSet;
 use std::time::Instant;
 
 use zzop_core::{is_enabled, Finding, ImportMap};
@@ -15,10 +18,12 @@ use crate::EngineConfig;
 
 use crate::analyze::record_native_timing;
 
+mod io_scan;
+
 /// Runs every whole-graph/call-graph-BFS native analysis in the same order (and under the same
-/// `is_enabled` gates) the pre-split monolithic `assemble` did, returning the accumulated
-/// `global_findings` — merged with `per_file_findings` (the fused per-file DSL pass's own output) back
-/// in `super::assemble`.
+/// `is_enabled` gates) the pre-split monolithic `assemble` did, then the whole-tree `io_scan` sub-phase,
+/// returning the combined `global_findings` — merged with `per_file_findings` (the fused per-file DSL
+/// pass's own output) back in `super::assemble`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run(
     root: &std::path::Path,
@@ -186,6 +191,7 @@ pub(super) fn run(
         global_findings.extend(found);
     }
 
+    let mut decorator_guarded = BTreeSet::new();
     run_callgraph_rules(
         root,
         config,
@@ -198,7 +204,19 @@ pub(super) fn run(
         profile,
         rule_time,
         &mut global_findings,
+        &mut decorator_guarded,
     );
+
+    // Whole-tree `Matcher::IoScan` DSL pass — runs last, now that `decorator_guarded` (just above) is
+    // fully accumulated, so `io_scan::run` can mint from it. See that fn's doc.
+    global_findings.extend(io_scan::run(
+        root,
+        config,
+        io_provides,
+        io_consumes,
+        attribute_store,
+        &decorator_guarded,
+    ));
 
     global_findings
 }

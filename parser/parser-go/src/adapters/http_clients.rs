@@ -180,6 +180,7 @@ fn emit(
         line: crate::util::line_of(url_arg),
         raw,
         method: method_field,
+        retry_configured: None,
         body: None,
         client: None,
     }

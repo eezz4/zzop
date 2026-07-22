@@ -6,26 +6,28 @@ quiet a false positive. For the full config schema and CLI flag reference, see
 
 ## Install & first run
 
-zzop ships as a single Node-free binary, `zzop-mcp` — no Node.js, no npm, no Rust toolchain needed.
-Get it one of three ways:
+zzop ships as two Node-free binaries — `zzop` (the CLI, for the terminal workflow below) and `zzop-mcp`
+(the MCP server, for AI-agent clients) — no Node.js, no npm, no Rust toolchain needed. Get them one of
+three ways:
 
-- **Download the binary.** Grab the `zzop-mcp-<platform>[.exe]` asset for your platform from [GitHub
-  Releases](https://github.com/eezz4/zzop/releases) and put it on `PATH`.
+- **Download the binaries.** Grab the `zzop-<platform>[.exe]` (CLI) and/or `zzop-mcp-<platform>[.exe]`
+  (MCP server) assets for your platform from [GitHub Releases](https://github.com/eezz4/zzop/releases)
+  and put them on `PATH`.
 - **Claude Code plugin.** `/plugin marketplace add eezz4/zzop`, then `/plugin install zzop@zzop` (the
   plugin's bundled `.mcp.json` runs `zzop-mcp mcp` from `PATH`).
 - **Claude Desktop.** One-click `.mcpb` bundle (drag-and-drop install) — see
   [`packaging/README.md`](../packaging/README.md).
 
 ```sh
-zzop-mcp analyze .          # analyzes the current directory and prints a report
-zzop-mcp cross ./frontend ./backend   # cross-layer join across 2+ trees
+zzop analyze .          # analyzes the current directory and prints a report
+zzop cross ./frontend ./backend   # cross-layer join across 2+ trees
 ```
 
 There is no scaffolding subcommand — write `zzop.config.jsonc` by hand (or copy one from
 [`packages/mcp/README.md`](../packages/mcp/README.md)) and pass it explicitly:
 
 ```sh
-zzop-mcp cross --config zzop.config.jsonc
+zzop cross --config zzop.config.jsonc
 ```
 
 See [`packages/mcp/README.md`](../packages/mcp/README.md) for the full `zzop.config.jsonc` schema
@@ -34,7 +36,7 @@ See [`packages/mcp/README.md`](../packages/mcp/README.md) for the full `zzop.con
 
 ## Reading the output
 
-`zzop-mcp analyze` prints a single JSON object to stdout — a shaped summary, not a raw dump. It carries
+`zzop analyze` prints a single JSON object to stdout — a shaped summary, not a raw dump. It carries
 full finding counts by severity and by rule, engine warnings, and a capped findings list (default 50;
 truncation is always disclosed). When git signals ran, it also carries a compact `architecture` object
 (pain score, top recommendation, top critical files). This is the exact same summary the `analyze_repo`
@@ -96,7 +98,7 @@ is used as-is (e.g. `dead-candidates` — and note some native ids contain a sla
 "Reading the output" above.) Full schema in [`packages/mcp/README.md`](../packages/mcp/README.md).
 
 **(c) SDK/embedding-level (per call, when embedding the engine directly).** Callers embedding
-`zzop-facade` directly — or driving the engine JSON contract via `zzop-mcp`'s subcommands — pass
+`zzop-facade` directly — or driving the engine JSON contract via `zzop`'s subcommands — pass
 `suppressions` (finding-level accept-list by rule + path/glob), `disabledRules`, or
 `severityOverrides` on the request:
 
@@ -107,7 +109,7 @@ is used as-is (e.g. `dead-candidates` — and note some native ids contain a sla
 Full field shapes in [modules/napi.md](modules/napi.md) (see `AnalyzeRequest`).
 
 **(d) Caveat: native cross-layer analyses are disable-only.** The `cross-layer/*` native rules (run
-over the cross-layer join, `zzop-mcp cross`) have no source line to anchor an inline marker against — silence
+over the cross-layer join, `zzop cross`) have no source line to anchor an inline marker against — silence
 one only via `disabledRules`/config `rules` `"off"`, never a comment. See
 [modules/napi.md](modules/napi.md) for why (no single tree owns a cross-layer finding).
 

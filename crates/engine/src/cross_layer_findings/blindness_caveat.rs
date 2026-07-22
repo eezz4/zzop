@@ -103,6 +103,7 @@ mod tests {
             line: 4,
             raw: None,
             method: None,
+            retry_configured: None,
             body: None,
             client: None,
         }

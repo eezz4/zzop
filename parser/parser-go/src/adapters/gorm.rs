@@ -254,6 +254,7 @@ fn collect_consumes(
                         line: line_of(n),
                         raw: Some(model),
                         method: None,
+                        retry_configured: None,
                     });
                 }
             }

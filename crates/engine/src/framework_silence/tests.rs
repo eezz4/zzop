@@ -97,10 +97,9 @@ fn three_or_more_matching_files_with_zero_http_provides_warns() {
     // Funnel pin (D9): the disclosure must chain to CREATION — a reword that drops the
     // partial-envelope on-ramp or the embedded-contract pointer fails here.
     assert!(
-        warning
-            .as_deref()
-            .is_some_and(|w| w.contains("zzop-mcp contract envelope-guide")
-                && w.contains("partial envelope")),
+        warning.as_deref().is_some_and(
+            |w| w.contains("zzop contract envelope-guide") && w.contains("partial envelope")
+        ),
         "got: {warning:?}"
     );
 }
@@ -160,6 +159,56 @@ fn below_threshold_file_count_does_not_warn() {
     let rels = vec!["a.ts".to_string(), "b.ts".to_string()];
     let warning = controller_silence_warning(dir.path(), &rels, 0);
     assert!(warning.is_none(), "got: {warning:?}");
+}
+
+#[test]
+fn decorator_mentions_in_comments_or_string_literals_do_not_trip_the_silence_report() {
+    // Dogfooding zzop on its own source surfaced this: a SAST tool DOCUMENTS (`/// … @GetMapping`,
+    // ` * @Controller`) and FIXTURES (`dir.write("a.ts", "@FastController('/a')")`) the very decorators
+    // it detects. Neither is a real route — a real decorator LEADS its line — so a tree whose only
+    // decorator-shaped tokens are in comments or string literals must stay silent.
+    let dir = TempDir::new("zzop-coverage-mentions");
+    dir.write(
+        "a.rs",
+        "/// A Spring `@GetMapping` annotation draws from this set.\npub const X: u8 = 1;\n",
+    );
+    dir.write(
+        "b.rs",
+        "/**\n * The bare `@PostMapping` decorator, joined onto the class prefix.\n */\nfn b() {}\n",
+    );
+    // The zzop-fixture shape: the decorator is embedded in a Rust string literal, mid-line.
+    dir.write(
+        "c.rs",
+        "fn c() {\n    dir.write(\"x.ts\", \"@FastController('/a')\\n@Get('/y')\");\n}\n",
+    );
+    let rels = vec!["a.rs".to_string(), "b.rs".to_string(), "c.rs".to_string()];
+    let warning = controller_silence_warning(dir.path(), &rels, 0);
+    assert!(
+        warning.is_none(),
+        "comment/string-literal mentions must not fire: {warning:?}"
+    );
+}
+
+#[test]
+fn a_real_code_line_decorator_still_fires_even_amid_comment_mentions() {
+    // The refinement must not over-correct: a decorator on a real CODE line still counts, even in a
+    // file that also has commented mentions.
+    let dir = TempDir::new("zzop-coverage-code-line");
+    for (f, body) in [
+        ("a.ts", "// mentions @GetMapping in a comment\n@Controller('/a')\nclass A {\n  @Get('/x')\n  x() {}\n}\n"),
+        ("b.ts", "@Controller('/b')\nclass B {\n  @Post('/y')\n  y() {}\n}\n"),
+        ("c.ts", "@Controller('/c')\nclass C {\n  @Put('/z')\n  z() {}\n}\n"),
+    ] {
+        dir.write(f, body);
+    }
+    let rels = vec!["a.ts".to_string(), "b.ts".to_string(), "c.ts".to_string()];
+    let warning = controller_silence_warning(dir.path(), &rels, 0);
+    assert!(
+        warning
+            .as_deref()
+            .is_some_and(|w| w.contains("route decorators/annotations")),
+        "got: {warning:?}"
+    );
 }
 
 #[test]
@@ -473,9 +522,9 @@ fn committed_openapi_spec_with_zero_io_both_directions_warns() {
     );
     // Funnel pin (D9): same chain-to-creation tail as every sibling silence warning.
     assert!(
-        warning.as_deref().is_some_and(
-            |w| w.contains("zzop-mcp contract envelope-guide") && w.contains("partial")
-        ),
+        warning
+            .as_deref()
+            .is_some_and(|w| w.contains("zzop contract envelope-guide") && w.contains("partial")),
         "got: {warning:?}"
     );
 }
@@ -555,7 +604,7 @@ fn axios_import_with_near_zero_consumes_warns() {
                 && w.contains("src/api.ts")
                 // Same D9 funnel tail as S5's: chain the disclosure to the minimal on-ramp.
                 && w.contains("a partial envelope covering just the consume channel is enough")
-                && w.contains("zzop-mcp contract envelope-guide")
+                && w.contains("zzop contract envelope-guide")
                 && w.contains("docs/NORMALIZED_AST.md")),
         "got: {warning:?}"
     );
@@ -627,7 +676,7 @@ fn wrapper_style_fetch_call_sites_with_near_zero_keyed_consumes_warn() {
             // D9 funnel: the disclosure chains to CREATION — minimal partial-envelope on-ramp plus
             // the embedded-contract print command (MCP hosts) / docs path (repo users).
             && w.contains("a partial envelope covering just the consume channel is enough")
-            && w.contains("zzop-mcp contract envelope-guide")
+            && w.contains("zzop contract envelope-guide")
             && w.contains("docs/NORMALIZED_AST.md")),
         "got: {warning:?}"
     );
@@ -737,7 +786,7 @@ fn typeorm_marker_with_zero_db_table_facts_warns_naming_typeorm() {
             && w.contains("src/user.entity.ts")
             && w.contains("zero db-table io facts")
             && w.contains("a partial envelope covering just the db-table channel is enough")
-            && w.contains("zzop-mcp contract envelope-guide")
+            && w.contains("zzop contract envelope-guide")
             && w.contains("docs/NORMALIZED_AST.md")),
         "got: {warning:?}"
     );
@@ -875,7 +924,7 @@ fn wrapper_module_with_enough_cross_file_call_sites_fires() {
             && w.contains("Mode B overlay adapter")
             // D9 funnel tail — same chain-to-creation convention as every sibling tripwire.
             && w.contains("a partial envelope covering just the consume channel is enough")
-            && w.contains("zzop-mcp contract envelope-guide")
+            && w.contains("zzop contract envelope-guide")
             && w.contains("docs/NORMALIZED_AST.md")),
         "got: {warning:?}"
     );

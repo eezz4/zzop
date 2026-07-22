@@ -19,6 +19,11 @@ pub(super) enum BodyStyle {
     /// `fetch`/`$fetch` idiom (mirrors how `method_from_options` reads `method:` from the same
     /// object).
     OptionsBodyProp,
+    /// `args[0]` IS the request-descriptor object (path/method/body live together on it); the body lives
+    /// at its own `body:` property — the generated-client `request({ path, method, body })` idiom
+    /// (`generated-request-object-v1`). Same `body:`-prop reader as [`BodyStyle::OptionsBodyProp`], only
+    /// the arg index differs.
+    SelfObjectBodyProp,
 }
 
 /// The body-position HTTP verb set (`body-shape-v1`) — a `BodyStyle::DirectArg` call's `args[1]` is only
@@ -63,20 +68,32 @@ pub(super) fn witnessed_body_shape(call: &CallExpr, hc: &HttpCall<'_>) -> Option
             };
             Some(shape_from_object_lit(obj))
         }
-        BodyStyle::OptionsBodyProp => {
-            let body_expr = unwrap_expr(body_prop_from_options(call.args.get(1))?);
-            match body_expr {
-                Expr::Object(obj) => Some(shape_from_object_lit(obj)),
-                Expr::Call(c) if is_json_stringify_call(c) => {
-                    let inner = unwrap_expr(&c.args.first()?.expr);
-                    let Expr::Object(obj) = inner else {
-                        return None;
-                    };
-                    Some(shape_from_object_lit(obj))
-                }
-                _ => None,
-            }
+        // `args[1].body` (fetch options) vs the request descriptor's own `body` (generated clients). The
+        // descriptor's position varies by generator (`request({...})` = arg 0, `__request(cfg, {...})` =
+        // arg 1), so scan every argument for the first that carries a readable `body:` — same reader.
+        BodyStyle::OptionsBodyProp => body_from_object_prop(call.args.get(1)),
+        BodyStyle::SelfObjectBodyProp => call
+            .args
+            .iter()
+            .find_map(|a| body_from_object_prop(Some(a))),
+    }
+}
+
+/// Reads a `body:` property off the object at `arg` and extracts its witnessed shape (direct object
+/// literal or `JSON.stringify(<object literal>)`), or `None` — the shared reader for both the fetch
+/// options object (`args[1]`) and the generated-client request descriptor (`args[0]`).
+fn body_from_object_prop(arg: Option<&ExprOrSpread>) -> Option<ConsumeBodyShape> {
+    let body_expr = unwrap_expr(body_prop_from_options(arg)?);
+    match body_expr {
+        Expr::Object(obj) => Some(shape_from_object_lit(obj)),
+        Expr::Call(c) if is_json_stringify_call(c) => {
+            let inner = unwrap_expr(&c.args.first()?.expr);
+            let Expr::Object(obj) = inner else {
+                return None;
+            };
+            Some(shape_from_object_lit(obj))
         }
+        _ => None,
     }
 }
 

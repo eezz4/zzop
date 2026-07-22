@@ -218,6 +218,12 @@ impl RulePackDef {
                 }
                 Matcher::IoScan(m) => {
                     resolve_field(&mut m.file_pattern, &merged, &rid, "file_pattern")?;
+                    resolve_opt(
+                        &mut m.file_exclude_pattern,
+                        &merged,
+                        &rid,
+                        "file_exclude_pattern",
+                    )?;
                     resolve_opt(&mut m.key_pattern, &merged, &rid, "key_pattern")?;
                 }
             }

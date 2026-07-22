@@ -1,9 +1,11 @@
 //! Shared fixtures/helpers for the DSL interpreter test modules (`tests_*`).
 
+use crate::attributes::AttributeStore;
 use crate::finding::Finding;
-use crate::io::{IoConsume, IoFacts, IoProvide};
+use crate::io::{IoConsume, IoProvide};
 use crate::ir::{SourceSymbol, SourceSymbolKind};
 
+use super::ir_scan::{eval_pack_io_scan, IoScanTreeContext};
 use super::{eval_pack, RuleContext, RulePackDef, SourceFile};
 
 /// The three Java security-concern rules (`sql-taint`/`weak-crypto`/`cmd-injection`) that moved into
@@ -137,19 +139,26 @@ pub(super) fn io_scan_pack(matcher_json: &str) -> RulePackDef {
     serde_json::from_str(&src).expect("parse inline io-scan pack")
 }
 
-pub(super) fn scan_io(rel: &str, io: IoFacts, matcher_json: &str) -> Vec<Finding> {
-    let files = vec![SourceFile {
-        loop_spans: Vec::new(),
-        rel: rel.into(),
-        text: String::new(),
-        symbols: vec![],
-        io: Some(io),
-    }];
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
+/// Whole-tree io-scan evaluation (`eval_pack_io_scan`) against plain `provides`/`consumes` vecs, an empty
+/// `AttributeStore` (every `attr_present`/`attr_absent` lookup misses), and a `None`-returning
+/// `anchor_line` (no source text reachable — the envelope-mode shape). Covers the common case; a test
+/// exercising `attr_present`/`attr_absent`/`anchor_exclude_pattern`/suppress-marker builds its own
+/// `IoScanTreeContext` directly (see the `tests_ir_scan/` directory module).
+pub(super) fn scan_io_tree(
+    pack: &RulePackDef,
+    provides: Vec<IoProvide>,
+    consumes: Vec<IoConsume>,
+) -> Vec<Finding> {
+    let attrs = AttributeStore::from_attrs(Vec::new());
+    let ctx = IoScanTreeContext {
+        provides: &provides,
+        consumes: &consumes,
+        attrs: &attrs,
+        anchor_line: &|_file: &str, _line: u32| None,
     };
-    eval_pack(&io_scan_pack(matcher_json), &ctx)
+    let mut out = Vec::new();
+    eval_pack_io_scan(pack, &ctx, &mut out);
+    out
 }
 
 pub(super) fn io_provide(kind: &str, key: &str, line: u32) -> IoProvide {
@@ -163,6 +172,14 @@ pub(super) fn io_provide(kind: &str, key: &str, line: u32) -> IoProvide {
     }
 }
 
+/// Like `io_provide`, but with a `symbol` set — for `IoScan::symbol_pattern` tests.
+pub(super) fn io_provide_symbol(kind: &str, key: &str, line: u32, symbol: &str) -> IoProvide {
+    IoProvide {
+        symbol: Some(symbol.into()),
+        ..io_provide(kind, key, line)
+    }
+}
+
 pub(super) fn io_consume(kind: &str, key: Option<&str>, line: u32) -> IoConsume {
     IoConsume {
         client: None,
@@ -173,6 +190,7 @@ pub(super) fn io_consume(kind: &str, key: Option<&str>, line: u32) -> IoConsume 
         line,
         raw: None,
         method: None,
+        retry_configured: None,
     }
 }
 

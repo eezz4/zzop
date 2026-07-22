@@ -170,15 +170,28 @@ pub enum IoDirection {
     Any,
 }
 
-/// Query over a file's `IoFacts` (the cross-layer IO the parser projected alongside `symbols`), for
-/// boundary-convention rules line-scan/method-scan can't express (e.g. "every HTTP endpoint must be
-/// versioned under `/api/v[0-9]+/`"). Filters combine with AND: `direction` selects `provides`/`consumes`/
-/// `any`, `kind` is an exact match. `key_pattern` + `negate` work like `SymbolScan`'s. An entry with
-/// `key: None` (unresolved) never matches `key_pattern` — under `negate: true` that makes it a hit.
+/// Query over a tree's cross-layer IO (every `IoProvide`/`IoConsume`, projected whole-tree since the 2026
+/// projection redesign — see `crate::dsl::eval_pack_io_scan`), for boundary-convention rules
+/// line-scan/method-scan can't express (e.g. "every HTTP endpoint must be versioned under
+/// `/api/v[0-9]+/`", or "every mutating route must carry an `auth-guarded` attribute"). Filters combine
+/// with AND, evaluated cheap-first: `file_exclude_pattern` right after `file_pattern`, then `direction`
+/// selects `provides`/`consumes`/`any`, `kind` is an exact match, then `key_pattern`/`negate` (below), then
+/// the four additive gates below (`symbol_pattern`, `attr_present`, `attr_absent`,
+/// `anchor_exclude_pattern`) — each a plain conjunctive filter evaluated AFTER `negate` has already
+/// resolved `key_pattern`'s role; `negate` itself only ever flips `key_pattern`, never these newer fields.
+/// `key_pattern` + `negate` work like `SymbolScan`'s. An entry with `key: None` (unresolved) never matches
+/// `key_pattern` — under `negate: true` that makes it a hit.
 #[derive(Debug, Clone, Deserialize)]
 pub struct IoScan {
     /// Target file-path regex — see struct doc for why this field is required.
     pub file_pattern: String,
+    /// Optional path regex — an entry whose `file` matches this is skipped entirely, evaluated right
+    /// after `file_pattern` (cheapest gate first). Same rationale and shape as `LineScan`'s field of the
+    /// same name (e.g. excluding `${test-paths-stories}` so a composed whole-tree provide/consume from a
+    /// test/story file never reaches the rule) — fragment-expanded by `RulePackDef::expand_fragments`
+    /// exactly like `LineScan::file_exclude_pattern` is.
+    #[serde(default)]
+    pub file_exclude_pattern: Option<String>,
     pub direction: IoDirection,
     /// Exact match against `IoProvide`/`IoConsume`'s `kind` string (e.g. `"http"`, `"db-table"`).
     #[serde(default)]
@@ -189,4 +202,29 @@ pub struct IoScan {
     /// See struct doc — flips `key_pattern`'s role from "must match" to "must not match".
     #[serde(default)]
     pub negate: bool,
+    /// Regex on `IoProvide::symbol` — PROVIDES-ONLY evidence: a consume never carries a symbol, so when
+    /// this is set a consume entry never matches, and a provide whose `symbol` is `None` never matches
+    /// either (never-guess). Unlike `key_pattern`, `negate` does NOT flip this field's role — it is a
+    /// plain "must match" gate evaluated after `negate` has already resolved `key_pattern` (see struct
+    /// doc).
+    #[serde(default)]
+    pub symbol_pattern: Option<String>,
+    /// Entry matches only when the tree's `AttributeStore` has NO truthy value for
+    /// `route_attr(entry.kind, entry.key, attr_absent)` (see `crate::attributes::AttributeStore::route_attr`
+    /// — exact `IoKey` wins, else the longest covering `PathScope`; truthiness via `attr_is_truthy`). An
+    /// entry with no resolved key (an unresolved consume) has nothing to look up, so it always satisfies
+    /// this gate. A plain string, not a regex — never regex-checked by `pack_regex_issues`.
+    #[serde(default)]
+    pub attr_absent: Option<String>,
+    /// Entry matches only when that same `route_attr` lookup IS truthy. An entry with no resolved key
+    /// never satisfies this gate (nothing to look up). A plain string, not a regex — never regex-checked
+    /// by `pack_regex_issues`.
+    #[serde(default)]
+    pub attr_present: Option<String>,
+    /// Regex applied to the ANCHOR LINE's own text (the provide/consume's own source line, fetched via
+    /// `IoScanTreeContext::anchor_line`). When the callback returns `None` (no source text reachable —
+    /// e.g. envelope mode with no native source), the exclusion simply does not apply: lexical carve-outs
+    /// are a native-tree convenience, honestly absent without source text, never a guessed match.
+    #[serde(default)]
+    pub anchor_exclude_pattern: Option<String>,
 }

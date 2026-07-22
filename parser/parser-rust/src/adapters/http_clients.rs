@@ -1,5 +1,4 @@
-//! `reqwest` literal HTTP egress CONSUMES — Rust-side counterpart of `adapters::axum`'s route PROVIDES.
-//! Import-gated on `reqwest`; a file that never imports it yields nothing.
+//! `reqwest` literal HTTP egress CONSUMES — Rust-side counterpart of `adapters::axum`'s route PROVIDES. Import-gated on `reqwest`; a file that never imports it yields nothing.
 //!
 //! - **Call shapes**: `reqwest::get(...)`/`reqwest::blocking::get(...)`; and `<recv>.get/.post/.put/
 //!   .delete/.patch(...)` gated on a BOUND receiver, mirroring `zzop_parser_python_3`'s import-bound
@@ -9,7 +8,7 @@
 //!   identifier/named field bound to `reqwest` by a file-wide first pass: `let <name> = <expr>;` with a
 //!   chain-2 RHS; fn/method params and named struct fields typed `reqwest::Client`/`&reqwest::Client`/
 //!   `reqwest::blocking::Client`, or a bare `Client` import alias. Shadowing approximation: a name is
-//!   bound if ANY visible binding in the file binds it to `reqwest`.
+//!   bound if ANY visible binding binds it to `reqwest` — deliberately FLAT vs Python's last-write-wins (B14①, 2026-07-22): the collision surface here is narrower (import-gated on `reqwest` + a bound name); upgrade only if a live FP pulls it.
 //!
 //!   Anything else (`.get`/`.post`/... on an untracked identifier/field, e.g. `cache.get(...)` on a
 //!   `HashMap`, `headers.get(...)` on a header map) is NOT a consume: skipped, no unresolved entry
@@ -200,6 +199,7 @@ impl<'a> CallCollector<'a> {
             line: crate::line_of(url_arg),
             raw,
             method,
+            retry_configured: None,
             body: None,
             client: None,
         });

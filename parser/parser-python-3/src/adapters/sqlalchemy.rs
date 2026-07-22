@@ -171,6 +171,7 @@ impl<'a> Visitor<'a> for ConsumeCollector<'a> {
                         line: self.idx.line_of(call.range.start()),
                         raw: Some(model),
                         method: None,
+                        retry_configured: None,
                     });
                 }
             }

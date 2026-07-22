@@ -159,3 +159,129 @@ fn atomic_counter_ok_marker_directly_above_the_arithmetic_line_suppresses_the_fi
         out.findings
     );
 }
+
+// --- check-then-act-in-loop ---
+
+#[test]
+fn find_first_then_create_both_inside_for_of_loop_is_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\ndeclare const rows: { key: string }[];\nexport async function ensureAll() {\n  for (const r of rows) {\n    const e = await prisma.item.findFirst({ where: { key: r.key } });\n    if (!e) {\n      await prisma.item.create({ data: r });\n    }\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "check-then-act-in-loop");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn find_first_in_loop_but_create_after_the_loop_closes_is_not_flagged() {
+    // The `.create(` call sits AFTER the loop's closing brace, outside every projected loop span, so
+    // `trigger_in_loop` never satisfies even though `findFirst` is genuinely in-loop.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\ndeclare const rows: { key: string }[];\ndeclare const acc: any[];\nexport async function collectThenCreateOnce() {\n  for (const r of rows) {\n    const e = await prisma.item.findFirst({ where: { key: r.key } });\n    acc.push(e);\n  }\n  await prisma.item.create({ data: acc[0] });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "check-then-act-in-loop").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn loop_using_upsert_instead_of_find_then_create_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\ndeclare const rows: { key: string }[];\nexport async function ensureAllUpsert() {\n  for (const r of rows) {\n    await prisma.item.upsert({ where: { key: r.key }, create: r, update: {} });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "check-then-act-in-loop").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn check_act_loop_ok_marker_directly_above_the_create_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\ndeclare const rows: { key: string }[];\nexport async function ensureAllMarked() {\n  for (const r of rows) {\n    const e = await prisma.item.findFirst({ where: { key: r.key } });\n    if (!e) {\n      // check-act-loop-ok: single-threaded seed script, no concurrent workers\n      await prisma.item.create({ data: r });\n    }\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "check-then-act-in-loop").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- idempotency-key-regenerated-per-retry ---
+
+#[test]
+fn idempotency_key_regenerated_via_random_uuid_inside_retry_loop_is_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/payments.ts",
+        "declare const attempts: number[];\ndeclare const body: any;\ndeclare const api: any;\ndeclare function randomUUID(): string;\nexport async function chargeWithRetries() {\n  for (const attempt of attempts) {\n    const idempotencyKey = randomUUID();\n    await api.post(\"/charge\", body, { headers: { \"Idempotency-Key\": idempotencyKey } });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "idempotency-key-regenerated-per-retry");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 7);
+}
+
+/// FP-adversarial (nearest harmless lookalike): the key is still generated with `randomUUID()`, but the
+/// assignment sits BEFORE the loop and is reused across every attempt — the assignment's own line never
+/// falls inside the loop span, so `trigger_in_loop` never satisfies.
+#[test]
+fn idempotency_key_generated_once_before_loop_and_reused_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/payments.ts",
+        "declare const attempts: number[];\ndeclare const body: any;\ndeclare const api: any;\ndeclare function randomUUID(): string;\nexport async function chargeOnceKey() {\n  const idempotencyKey = randomUUID();\n  for (const attempt of attempts) {\n    await api.post(\"/charge\", body, { headers: { \"Idempotency-Key\": idempotencyKey } });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "idempotency-key-regenerated-per-retry").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn idempotency_key_derived_deterministically_inside_loop_is_not_flagged() {
+    // `hash(o.id)` is not one of the recognized random-generator calls, so the trigger pattern never
+    // matches this line at all.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/payments.ts",
+        "declare const orders: { id: string }[];\ndeclare const api: any;\ndeclare function hash(id: string): string;\nexport async function chargeOrders() {\n  for (const o of orders) {\n    const idempotencyKey = hash(o.id);\n    await api.post(\"/charge\", o, { headers: { \"Idempotency-Key\": idempotencyKey } });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "idempotency-key-regenerated-per-retry").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn idempotency_regen_ok_marker_directly_above_the_regenerated_key_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/payments.ts",
+        "declare const attempts: number[];\ndeclare const body: any;\ndeclare const api: any;\ndeclare function randomUUID(): string;\nexport async function chargeWithRetriesMarked() {\n  for (const attempt of attempts) {\n    // idempotency-regen-ok: sandbox test harness, retries treated as new charges intentionally\n    const idempotencyKey = randomUUID();\n    await api.post(\"/charge\", body, { headers: { \"Idempotency-Key\": idempotencyKey } });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "idempotency-key-regenerated-per-retry").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}

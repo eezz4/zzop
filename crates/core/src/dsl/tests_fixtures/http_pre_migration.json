@@ -6,7 +6,7 @@
     {
       "id": "read-model-path",
       "severity": "info",
-      "message": "GET route registered via `apiRoutes.get(...)` with no cache-strategy marker on the same line — make the caching decision explicit for read-heavy endpoints. Add `// cache: <strategy>`, `// no-cache: <reason>`, or `// read-model-ok: <reason>` to the route line.",
+      "message": "HOUSE-CONVENTION rule, `apiRoutes.get(...)`-registered codebases only: GET route with no cache-strategy marker on the same line. A codebase that never calls `apiRoutes.get(...)` never satisfies this rule's `require_file` gate and is silently unaffected by it — this is not a general HTTP rule (see `auth-gates`/`route-exposure` below for this pack's framework-neutral rules). Add `// cache: <strategy>`, `// no-cache: <reason>`, or `// read-model-ok: <reason>` to the route line.",
       "suppress_marker": "read-model-ok",
       "matcher": {
         "type": "line-scan",
@@ -22,33 +22,31 @@
     {
       "id": "auth-gates",
       "severity": "warning",
-      "message": "Route registered under a protected path segment (`/admin/`, `/internal/`) whose handler identifier carries none of the admin/role/guard/protect keywords — possible missing auth gate. An env check (isProduction/NODE_ENV) gates WHERE code runs, not WHO may call it, so it does not clear this — that axis is `route-exposure`'s. If no guard exists, add a role/admin check in the handler; if one already exists but isn't grep-visible, rename/restructure so it is. Suppress a vetted case with `// auth-gate-ok`.",
+      "message": "HTTP route registered under a protected path segment (`/admin/`, `/internal/`) with no witnessed auth evidence — no native middleware/decorator/annotation guard was recognized on this route (Express middleware, NestJS `@UseGuards`/`forRoutes`, Spring method-security annotation, ...), and no adapter injected the `auth-guarded` attribute (Mode B envelope injection). An env check (isProduction/NODE_ENV) gates WHERE code runs, not WHO may call it, so it does not clear this — that axis is `route-exposure`'s. If a guard exists but isn't recognized, inject the `auth-guarded` attribute via a Mode B adapter overlay; otherwise add one. Suppress a vetted case with `// auth-gate-ok` (or `# auth-gate-ok` in Python) on the route's registration line.",
       "suppress_marker": "auth-gate-ok",
       "matcher": {
-        "type": "line-scan",
-        "file_pattern": "(?:^|/)api/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|/routes/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|/controllers/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|[Hh]andler\\.ts$|[Cc]ontroller\\.ts$",
+        "type": "io-scan",
+        "file_pattern": "(?i)\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|java|py|go|cs)$",
         "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
-        "require_file": "apiRoutes\\.(?:get|post|put|patch|delete)\\(",
-        "skip_comment_lines": true,
-        "line_pattern": "apiRoutes\\.(?:get|post|put|patch|delete)\\(\\s*[\"'`][^\"'`]*/(?:admin|internal)(?:/|[\"'`])",
-        "exclude_pattern": "(?i),[^,]*(?:admin|role|guard|protect)",
-        "snippet_max": 160
+        "direction": "provides",
+        "kind": "http",
+        "key_pattern": "(?i)/(admin|internal)(/|$)",
+        "attr_absent": "auth-guarded"
       }
     },
     {
       "id": "route-exposure",
       "severity": "warning",
-      "message": "Route registered under a dev/debug/internal/test/playground path segment whose handler carries none of the guard-hint keywords (dev/debug/internal/env/guard/isProduction/NODE_ENV) — risks leaking dev tooling to production. If no guard exists, gate it behind an env check; if one already exists but isn't grep-visible, rename/restructure so it is. Suppress a vetted case with `// route-exposure-ok`.",
+      "message": "HTTP route registered under a dev/debug/internal/test/playground path segment with no guard-hint keyword (dev/debug/internal/env/guard/isProduction/isLocal/NODE_ENV) on its registration line — risks leaking dev tooling to production. If no guard exists, gate it behind an env check; if one already exists but isn't grep-visible, rename/restructure so it is. Suppress a vetted case with `// route-exposure-ok` (or `# route-exposure-ok` in Python).",
       "suppress_marker": "route-exposure-ok",
       "matcher": {
-        "type": "line-scan",
-        "file_pattern": "(?:^|/)api/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|/routes/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|/controllers/.*\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$|[Hh]andler\\.ts$|[Cc]ontroller\\.ts$",
+        "type": "io-scan",
+        "file_pattern": "(?i)\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|java|py|go|cs)$",
         "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
-        "require_file": "apiRoutes\\.(?:get|post|put|patch|delete)\\(",
-        "skip_comment_lines": true,
-        "line_pattern": "apiRoutes\\.(?:get|post|put|patch|delete)\\(\\s*[\"'`][^\"'`]*/(?:dev|debug|internal|__test__|playground)(?:/|[\"'`])",
-        "exclude_pattern": "(?i),[^,]*(?:dev|debug|internal|env|guard|isProduction|isLocal|NODE_ENV)",
-        "snippet_max": 160
+        "direction": "provides",
+        "kind": "http",
+        "key_pattern": "(?i)/(dev|debug|internal|__test__|playground)(/|$)",
+        "anchor_exclude_pattern": "(?i),[^,\"']*(?:dev|debug|internal|env|guard|isProduction|isLocal|NODE_ENV)"
       }
     }
   ]

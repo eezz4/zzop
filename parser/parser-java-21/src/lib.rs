@@ -50,50 +50,11 @@ pub use spring_security::{
     extract_spring_security_posture, SpringAntMatcher, SpringSecurityPosture,
 };
 
-/// Cache key ingredient for `zzop-cache`, mirroring `zzop_parser_go::PARSER_FINGERPRINT`'s scheme:
-/// parser id + pinned frontend + a logic-version counter.
-/// - `v1`: initial release — symbols (top-level + nested class/interface/enum/record/annotation-type,
-///   methods/constructors as `Type.method` with body spans, `static final` fields as `Const`), imports
-///   (plain/glob/static, `ImportMap`), `used_names`, per-file Spring HTTP provides, and the whole-corpus
-///   Spring provides pass.
-/// - `v2`: added `lang::calls::parse_calls` — same-file `RawCall` extraction (method-invocation call
-///   sites attributed to their enclosing method/constructor body, lambda bodies included via body-span
-///   containment, field/local/parameter receiver typing) feeding the whole-repo call-graph `SymbolGraph`
-///   the `mutating-route-no-auth`/`unsafe-read-endpoint`/`non-idempotent-write` native rules BFS over —
-///   see `crates/engine/src/analyze/native_rules/callgraph.rs`'s module doc.
-/// - `+java-route-attr-aware-v1`: fixed a route-path-keying correctness bug — a mapping annotation's path
-///   is now read from the NAMED `value=`/`path=` attribute (`provides::annotations::route_path_arg`),
-///   falling back to "first quoted string" only for the genuinely-positional single-arg form, instead of
-///   blindly taking the first `"..."` literal regardless of which attribute it followed (which mis-keyed
-///   `@GetMapping(produces = "application/json", value = "/users")` as `application/json`). Also:
-///   `@RequestMapping(method = {RequestMethod.GET, RequestMethod.POST})` now emits one route per verb
-///   instead of only the first.
-/// - `+java-const-prefix-attr-aware-v1`: fixed the SAME attribute-blind-first-token-keying bug in the
-///   CONSTANT branch (`project::resolve::const_ref_qualified`), missed by the `+java-route-attr-aware-v1`
-///   fix above (which only covered the literal-string branch): a class-level `@RequestMapping`'s unquoted
-///   `value=`/`path=` constant reference is now read from that NAMED attribute's own RHS, falling back to
-///   a genuinely positional bare constant only when neither is present — instead of taking the first
-///   `SCREAMING_SNAKE_CASE`/`Pkg.CONST` token found anywhere in the raw argument text. Previously, e.g.
-///   `@RequestMapping(produces = MediaType.APPLICATION_JSON_VALUE, path = ApiPaths.USERS)` keyed on
-///   `MediaType.APPLICATION_JSON_VALUE` (an attribute the annotation doesn't even name as a path), which
-///   is almost never a corpus class, resolved to `PrefixState::Unresolved`, and silently dropped EVERY
-///   route of that controller from `provides`.
-/// - `+java-method-path-tristate-v1`: a NON-LITERAL method-level mapping path (`@GetMapping(ApiPaths.USERS)`,
-///   `@RequestMapping(value = SOME_CONST, method = GET)`) is no longer collapsed to the empty base by
-///   `method_route`'s old `route_path_arg(..).unwrap_or_default()` — which fabricated a phantom route at the
-///   controller prefix AND lost the real path. `route_path_state` now distinguishes literal / absent-base /
-///   non-literal: a non-literal path drops the route (honest under-report), mirroring the class-prefix
-///   `PrefixState::Unresolved` branch. The per-file `extract`'s own class-prefix collapse was fixed the same
-///   way (blocks the class's direct routes rather than keying them at `""`).
-/// - `+java-method-path-const-resolve-v1`: the whole-corpus pass now RESOLVES a non-literal method-level
-///   path constant (`@GetMapping(ApiPaths.USERS)`, `@RequestMapping(value = SOME_CONST, method = GET)`)
-///   against the corpus — scoped to the declaring class's `extends` chain, reusing the exact
-///   `const_ref_qualified` + `resolve_scoped` ladder the class-level `@RequestMapping` prefix already uses
-///   (`project::resolve::resolve_method_path`). Previously these dropped (honest under-report); now the real
-///   route is keyed. An out-of-corpus / genuinely-computed method path still drops, counted in
-///   `ProjectProvidesReport::skipped_unresolved_method_path`. The per-file `extract` pass, having no corpus,
-///   keeps dropping — resolution is a whole-corpus-only gain.
-pub const PARSER_FINGERPRINT: &str = "java21/tree-sitter-java-0.23.5/v2+java-route-attr-aware-v1+java-const-prefix-attr-aware-v1+java-method-path-tristate-v1+java-method-path-const-resolve-v1";
+/// Cache-bust token for `zzop-cache`: `parser-id/pinned-toolchain/last-change-version`. The
+/// `tree-sitter-java` segment must match this crate's `Cargo.toml` pin (a grammar upgrade changes
+/// extraction → restamp); the trailing `CARGO_PKG_VERSION` is restamped when this crate's projected IR
+/// shape changes, else kept so warm Java caches survive the upgrade (2026-07-22 version reform).
+pub const PARSER_FINGERPRINT: &str = "java21/tree-sitter-java-0.23.5/0.21.0";
 
 /// Every top-level declaration kind this crate recognizes, PLUS `module_declaration` (never itself
 /// extracted, but still a sign the file has SOME real Java in it) — the root-hopeless gate's "is there

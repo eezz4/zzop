@@ -35,6 +35,10 @@
 //! - `Verb::line` uses the `.get`/`.post`/... identifier's own span, not the call's: swc gives a
 //!   chained call the same start position as the chain's root, which would misreport the line on
 //!   a multi-line chain otherwise.
+//! - Verb entries carry two independent producer-judged `attr_keys`: a middleware guard-name
+//!   judgment (`guard.rs`, `AUTH_GUARDED_ATTR_KEY`) and an inline-handler idempotency-key-read
+//!   judgment (`idempotency.rs`, `IDEMPOTENCY_GUARDED_ATTR_KEY`) — both can be present on the
+//!   same entry.
 
 use std::collections::{HashMap, HashSet};
 
@@ -46,6 +50,9 @@ mod chain;
 mod guard;
 #[cfg(test)]
 mod guard_tests;
+mod idempotency;
+#[cfg(test)]
+mod idempotency_tests;
 #[cfg(test)]
 mod tests_express;
 #[cfg(test)]

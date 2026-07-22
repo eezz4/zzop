@@ -44,6 +44,9 @@ pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     "assignment_statement",
     "expression_list",
     "call_expression",
+    // Loop-body line spans (`lang::loop_spans`) — the single node kind covering every Go loop form
+    // (classic/condition-only/infinite/range), per that module's own doc.
+    "for_statement",
 ];
 
 #[cfg(test)]

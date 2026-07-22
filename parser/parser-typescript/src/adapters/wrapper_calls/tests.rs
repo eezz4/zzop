@@ -109,6 +109,96 @@ fn file_private_request_wrapper_below_exported_callers_is_collected_and_keys() {
 }
 
 #[test]
+fn bare_fetch_wrapper_non_pathlike_param_is_fixed_get() {
+    // The S7 cop-out shape: `export function get(p) { return fetch(p) }`. `p` is not name-signalled,
+    // so the path param comes from being fetch's first arg; a bare `fetch(url)` (no method key) → GET.
+    let src = "export function get(p) {\n  return fetch(p);\n}\n";
+    let (defs, _) = extract_wrapper_fragments("api.ts", src);
+    let d = def(&defs, "get");
+    assert_eq!(d.method_param, None);
+    assert_eq!(d.path_param, 0);
+    assert_eq!(d.fixed_method.as_deref(), Some("GET"));
+}
+
+#[test]
+fn fetch_wrapper_non_pathlike_param_with_literal_method_is_fixed_post() {
+    // `export function post(p, body) { return fetch(p, { method: 'POST', body }) }` — path via
+    // fetch's first arg, verb from the string-literal method option.
+    let src = concat!(
+        "export function post(p, body) {\n",
+        "  return fetch(p, { method: 'POST', body: JSON.stringify(body) });\n",
+        "}\n"
+    );
+    let (defs, _) = extract_wrapper_fragments("api.ts", src);
+    let d = def(&defs, "post");
+    assert_eq!(d.method_param, None);
+    assert_eq!(d.path_param, 0);
+    assert_eq!(d.fixed_method.as_deref(), Some("POST"));
+}
+
+#[test]
+fn fetch_wrapper_with_dynamic_method_emits_no_fixed_fragment() {
+    // A present-but-dynamic `method` (a local, not a `method` param) must never be guessed to a verb.
+    let src = concat!(
+        "export function send(p, verb) {\n",
+        "  return fetch(p, { method: verb });\n",
+        "}\n"
+    );
+    let (defs, _) = extract_wrapper_fragments("api.ts", src);
+    assert!(defs.is_empty(), "{defs:?}");
+}
+
+#[test]
+fn refetch_and_prefetch_are_not_fetch_sinks() {
+    // BLOCKING (opus): `fetch(` must match at a word boundary, else `refetch(`/`prefetch(` (React Query)
+    // are read as fetch sinks and, via the positional-path + GET-default paths, fabricate a `GET`
+    // consume for a fire-and-forget query refresh.
+    let src = concat!(
+        "export function reload(key) {\n  return refetch(key);\n}\n",
+        "export function warm(key) {\n  return prefetch(key);\n}\n",
+    );
+    let (defs, _) = extract_wrapper_fragments("q.ts", src);
+    assert!(defs.is_empty(), "{defs:?}");
+}
+
+#[test]
+fn opaque_fetch_options_do_not_default_to_get() {
+    // BLOCKING (opus): `fetch(url, opts)` with an opaque options identifier (which may carry
+    // `{ method: 'POST' }`) must NOT be stamped GET — the verb is caller-controlled, so it is guessed.
+    let src = "export function send(url, opts) {\n  return fetch(url, opts);\n}\n";
+    let (defs, _) = extract_wrapper_fragments("api.ts", src);
+    assert!(defs.is_empty(), "{defs:?}");
+}
+
+#[test]
+fn inline_fetch_options_object_still_defaults_to_get() {
+    // The opaque-options guard must NOT over-correct: a transparent inline `{ ... }` with no method key
+    // is a legitimate GET.
+    let src = "export function get(p) {\n  return fetch(p, { headers: h });\n}\n";
+    let (defs, _) = extract_wrapper_fragments("api.ts", src);
+    let d = def(&defs, "get");
+    assert_eq!(d.fixed_method.as_deref(), Some("GET"));
+}
+
+#[test]
+fn non_wrapper_fn_calling_fetch_with_literal_url_is_not_a_wrapper() {
+    // No path param to identify (fetch's first arg is a literal, not a param) — a direct call site,
+    // `egress.rs`'s channel, not a wrapper def.
+    let src = "export function refresh() {\n  return fetch('/api/refresh');\n}\n";
+    let (defs, _) = extract_wrapper_fragments("api.ts", src);
+    assert!(defs.is_empty(), "{defs:?}");
+}
+
+#[test]
+fn fetch_wrapper_composite_first_arg_falls_to_name_signal_not_guessed() {
+    // A composite fetch first arg (`base + id`) is NOT a verbatim param, and `id` is not name-signalled,
+    // so no path param resolves — honest miss over a guessed positional.
+    let src = "export function load(id) {\n  return fetch(baseUrl + id);\n}\n";
+    let (defs, _) = extract_wrapper_fragments("api.ts", src);
+    assert!(defs.is_empty(), "{defs:?}");
+}
+
+#[test]
 fn file_private_non_wrapper_helper_with_path_param_but_no_sink_stays_uncollected() {
     // Broadening def collection to private decls must NOT sweep in a private path-shaped helper that
     // never reaches a fetch/axios/ky sink — the sink gate is the guard against false wrapper defs.

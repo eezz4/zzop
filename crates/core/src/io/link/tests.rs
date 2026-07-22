@@ -30,6 +30,7 @@ fn consume(kind: &str, key: Option<&str>, file: &str, line: u32, raw: Option<&st
         line,
         raw: raw.map(Into::into),
         method: None,
+        retry_configured: None,
     }
 }
 

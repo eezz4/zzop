@@ -24,11 +24,12 @@ rechecks.
 
 ## Quick start
 
-zzop ships as a single Node-free binary, `zzop-mcp` — no Node.js, no npm, nothing to compile. Get it
-one of three ways:
+zzop ships as two Node-free binaries — `zzop` (CLI) and `zzop-mcp` (MCP server) — no Node.js, no npm,
+nothing to compile. Get them one of three ways:
 
-- **Download the binary.** Grab the `zzop-mcp-<platform>[.exe]` asset for your platform from [GitHub
-  Releases](https://github.com/eezz4/zzop/releases) and run its subcommands directly.
+- **Download the binaries.** Grab the `zzop-<platform>[.exe]` (CLI) and/or `zzop-mcp-<platform>[.exe]`
+  (MCP server) assets for your platform from [GitHub Releases](https://github.com/eezz4/zzop/releases)
+  and run them directly.
 - **Claude Code plugin.** `/plugin marketplace add eezz4/zzop`, then `/plugin install zzop@zzop` —
   see [Use in Claude Code](#use-in-claude-code-mcp-plugin) below.
 - **Claude Desktop.** One-click `.mcpb` bundle (drag-and-drop install) — see
@@ -37,8 +38,8 @@ one of three ways:
 Write a `zzop.config.jsonc` and run it, ESLint-style:
 
 ```sh
-zzop-mcp analyze .                          # analyze one repo/tree -> JSON findings summary
-zzop-mcp cross --config zzop.config.jsonc   # cross-layer join, driven by that config
+zzop analyze .                          # analyze one repo/tree -> JSON findings summary
+zzop cross --config zzop.config.jsonc   # cross-layer join, driven by that config
 ```
 
 See [packages/mcp/README.md](packages/mcp/README.md) for the full CLI and config reference.
@@ -103,7 +104,7 @@ route joins — which has no single-tree equivalent.
 | Anything else (Ruby, JSP, ...) | Lexical fallback in-tree (line count + `line-scan` rules only), or first-class support via an external parser adapter conforming to the [Normalized AST protocol](docs/NORMALIZED_AST.md) |
 
 Full precision-tier breakdown — exactly what each native parser extracts, Python's v1 scope note, and
-each parser's `zzop-mcp version` fingerprint — in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#language-support).
+each parser's `zzop version` fingerprint — in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#language-support).
 
 A normal-sized file whose extension has no native parser also self-reports in the output's `warnings`
 — naming the extension, a file count, and a path sample — instead of vanishing silently; point it at an
@@ -133,8 +134,8 @@ Semantic Versioning and a maintained changelog begin at `1.0.0`. Full policy:
   that `packages/mcp` calls directly — no Node, no native addon in between
 - `crates/config` — shared Rust config front end (`zzop.config.jsonc` discovery → JSONC strip →
   config→facade-request mapper → `trees: "auto"` workspace expansion), used by `packages/mcp`
-- `packages/mcp` — `zzop-mcp`, a Node-free host binary: an MCP stdio server plus direct CLI
-  subcommands, built on `zzop-config` + `zzop-facade`
+- `packages/mcp` — two Node-free host binaries over one shared lib: `zzop` (CLI subcommands) and
+  `zzop-mcp` (MCP stdio server), built on `zzop-config` + `zzop-facade`
 - `parser/` — parser frontends: source → Common IR, including HTTP route/consume extraction across
   languages and frameworks ([parser/README.md](parser/README.md))
 - `rules/native/` — whole-graph native rules (`rules-graph`, `rules-http`, `rules-cross-layer`, `rules-schema`) plus `rules/dsl/`

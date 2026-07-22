@@ -1,27 +1,28 @@
 # `zzop-mcp`
 
-The Node-free host: one self-contained binary that runs the zzop analysis engine with no Node.js
-runtime at all. [`napi.md`](napi.md) documents the same `zzop-facade` JSON contract this binary drives —
-historically exposed to Node via the `@zzop/native` binding, part of the npm distribution removed
-2026-07-20. `zzop-mcp` is the Node-free side of that same contract — it calls
+The Node-free host: **two** self-contained binaries over one shared library, running the zzop analysis
+engine with no Node.js runtime at all. [`napi.md`](napi.md) documents the same `zzop-facade` JSON contract
+they drive — historically exposed to Node via the `@zzop/native` binding, part of the npm distribution
+removed 2026-07-20. These binaries are the Node-free side of that same contract — they call
 `analyze_json`/`analyze_envelope_json`/`analyze_trees_json`/`validate_envelope_only_json`/`validate_rule_pack_json`/`query_io_json`
-(`crates/facade/src/lib.rs`) directly,
-with no napi and no JS in between. It serves two front ends over that one engine call path:
+(`crates/facade/src/lib.rs`) directly, with no napi and no JS in between:
 
-- an **MCP server** over stdio (`zzop-mcp mcp`) — for MCP clients (`.mcp.json` pointing at this
-  executable);
-- a **CLI** (`zzop-mcp analyze <path>` / `zzop-mcp analyze-envelope <envelope.json>` / `zzop-mcp cross
-  <path>...` / `zzop-mcp endpoint <pattern> <path>...`) — for direct terminal/CI use, no MCP client
-  required.
+- **`zzop-mcp`** — the **MCP server** over stdio (bare `zzop-mcp`, or the `zzop-mcp mcp` form `.mcp.json`
+  and the MCPB manifest register). For MCP clients.
+- **`zzop`** — the **CLI** (`zzop analyze <path>` / `zzop analyze-envelope <envelope.json>` / `zzop cross
+  <path>...` / `zzop endpoint <pattern> <path>...` / `zzop contract` / `zzop validate-…`). For direct
+  terminal/CI use, no MCP client required.
 
-Both share the exact same handlers (`packages/mcp/src/tools.rs`), so a CLI run and an MCP `tools/call`
-against the same path produce the same analysis through the same code.
+Both are thin `src/bin/` arg-dispatch shims over the same `zzop_mcp` lib and share the exact same handlers
+(`packages/mcp/src/tools.rs`), so a CLI run and an MCP `tools/call` against the same path produce the same
+analysis through the same code.
 
 ## Module map
 
 | Module | Responsibility |
 |---|---|
-| `main.rs` | Thin argument dispatch: `analyze` / `cross` / `endpoint` / `contract` / `version` / `mcp` subcommands over the library below. |
+| `bin/zzop.rs` | The `zzop` CLI entry — thin argument dispatch: `analyze` / `cross` / `endpoint` / `contract` / `validate-*` / `version` subcommands over the library below. |
+| `bin/zzop-mcp.rs` | The `zzop-mcp` server entry — thin: bare / `mcp` serve stdio; `version` / `help` / unknown-arg lanes. |
 | `server.rs` | The stdio JSON-RPC 2.0 loop (`initialize`, `tools/*`, `resources/*`). |
 | `tools.rs` | Pure dispatch: match tool name → extract arguments → call the shared `zzop-summary` function → wrap the MCP result. No shaping logic lives here. |
 | `tools/definitions.rs` | MCP tool descriptions + input schemas (`tools/list`). |
@@ -44,15 +45,15 @@ workspace expansion) likewise lives in the shared `zzop-config` crate (`crates/c
 ## CLI surface
 
 ```
-zzop-mcp analyze <path>                  # analyze ONE repo/tree, print a JSON findings summary
-zzop-mcp analyze-envelope <envelope.json>  # Mode A: a Normalized-AST envelope file replaces native parsing, same summary shape
-zzop-mcp cross <path>...                 # analyze 2+ trees, print the cross-layer join (paths mode)
-zzop-mcp cross --config <zzop.config.jsonc>  # same, but the config's `trees` define the join
-zzop-mcp endpoint <pattern> <path>...    # definitive "is io key X provided/consumed/joined?" query
-zzop-mcp endpoint <pattern> --config <zzop.config.jsonc>  # same query, the config's `trees` define the join
-zzop-mcp contract                        # list the embedded authoring contracts (name, mime, description)
-zzop-mcp contract <name>                 # print that contract document to stdout (raw bytes, pipe-safe)
-zzop-mcp version                         # print this binary's version (also: --version)
+zzop analyze <path>                  # analyze ONE repo/tree, print a JSON findings summary
+zzop analyze-envelope <envelope.json>  # Mode A: a Normalized-AST envelope file replaces native parsing, same summary shape
+zzop cross <path>...                 # analyze 2+ trees, print the cross-layer join (paths mode)
+zzop cross --config <zzop.config.jsonc>  # same, but the config's `trees` define the join
+zzop endpoint <pattern> <path>...    # definitive "is io key X provided/consumed/joined?" query
+zzop endpoint <pattern> --config <zzop.config.jsonc>  # same query, the config's `trees` define the join
+zzop contract                        # list the embedded authoring contracts (name, mime, description)
+zzop contract <name>                 # print that contract document to stdout (raw bytes, pipe-safe)
+zzop version                         # print this binary's version (also: --version)
 zzop-mcp mcp                             # the MCP server over stdio (newline-delimited JSON-RPC 2.0)
 zzop-mcp help                            # print the usage line, exit 0 (also: --help, -h)
 ```
@@ -67,7 +68,7 @@ filesystem-only `path`/`config` fields an envelope has neither of. A missing/mal
 in a path/pattern position — the only recognized flag there is `--config`, so `analyze --help` is a
 usage error, never the path `--help`) exits `2` with a usage line. `zzop-mcp help`/`--help`/`-h`
 prints the same usage line to stdout and exits `0`. Path arguments (tree roots and `--config` files
-alike) are absolutized against the invocation cwd before any config handling, so `zzop-mcp analyze .`
+alike) are absolutized against the invocation cwd before any config handling, so `zzop analyze .`
 and relative `--config` paths work from anywhere. The analysis subcommands run the unfiltered default view (no `severity`/`rule`/`limit`
 narrowing — that's an MCP-tool-only argument surface today). `endpoint` with ONE path is the
 `check_endpoint` tool's `path` mode, with 2+ paths its config-free `paths` mode, and with `--config`
@@ -81,12 +82,12 @@ unknown name exits `1` with an error naming every valid contract. `version`/`--v
 (see below), so the two surfaces can never disagree.
 
 **Windows Git Bash / MSYS caveat**: a leading-slash `endpoint <pattern>` (e.g. `/articles`) run from Git
-Bash/MSYS gets silently path-converted by the shell BEFORE it reaches this binary — `zzop-mcp endpoint
+Bash/MSYS gets silently path-converted by the shell BEFORE it reaches this binary — `zzop endpoint
 "/articles" <path>` can become a query for `C:/Program Files/Git/articles`, producing a confusing
 false not-found with no indication the pattern itself was rewritten. This is a shell behavior, not a
 `zzop-mcp` bug, but it bites `endpoint` specifically because its first argument is a bare pattern rather
 than a path. Work around it either by quoting AND setting `MSYS_NO_PATHCONV=1` for the invocation
-(`MSYS_NO_PATHCONV=1 zzop-mcp endpoint "/articles" <path>`), or by running the command from PowerShell/
+(`MSYS_NO_PATHCONV=1 zzop endpoint "/articles" <path>`), or by running the command from PowerShell/
 cmd instead, neither of which path-converts arguments.
 
 ## MCP surface
@@ -212,7 +213,7 @@ into the binary (`embedded.rs`, `include_str!` over the repo's own committed pub
 `mimeType`; `resources/read` returns the full text verbatim. Deterministic: same binary, same list, same
 bytes every time. An unknown `uri` is a named error listing every valid resource — an agent should never
 have to guess the name. The same ten documents are reachable without an MCP client via
-`zzop-mcp contract [<name>]` (see [CLI surface](#cli-surface)) — both surfaces resolve names through the
+`zzop contract [<name>]` (see [CLI surface](#cli-surface)) — both surfaces resolve names through the
 one embedded lookup, so they can never disagree on what exists.
 
 ## Config semantics
@@ -222,7 +223,7 @@ config front end (discovery, mapping, and zero-config defaulting, ported from th
 `config.js`/`mapper.js`) that a future full-CLI Rust binary would reuse. Three things to know about how
 it behaves here specifically:
 
-- **Auto-discovery.** `analyze_repo`/`zzop-mcp analyze <path>` look for `<path>/zzop.config.jsonc`
+- **Auto-discovery.** `analyze_repo`/`zzop analyze <path>` look for `<path>/zzop.config.jsonc`
   (literal filename, no ancestor walk — the same rule the removed JS CLI used). If present, it is parsed
   (JSONC: comments and trailing commas allowed) and mapped by the same rules the JS CLI's `mapper.js`
   used to, now ported to `zzop-config`'s Rust mapper.
@@ -274,7 +275,7 @@ built to never lie by omission.
   `rule` filter that matches ZERO findings AND names a rule id absent from `byRule` (i.e. it never
   fired at ALL this run, not merely filtered down to nothing) gets an additive `note` field pointing
   the caller at the `rule-catalog` contract resource (`zzop://contract/rule-catalog` /
-  `zzop-mcp contract rule-catalog`) to check the id — this fires through the real `analyze_repo`/
+  `zzop contract rule-catalog`) to check the id — this fires through the real `analyze_repo`/
   `cross_repo`/`check_endpoint` tool-call path end to end, not just the underlying shaping helper.
 - **Cross-layer edges** (`cross_repo`) get the same treatment via a plain list cap (`edgesTruncated`,
   default cap 200 — edges are small rows, so most joins fit uncapped).
@@ -370,7 +371,7 @@ Prebuilt, per-platform `zzop-mcp` binaries are attached to every tagged [GitHub
 Release](https://github.com/eezz4/zzop/releases) (`prebuild.yml`'s tag-triggered build — see
 [napi.md](napi.md#packaging-layout)): named `zzop-mcp-<platform>[.exe]`
 for the 5 platforms `win32-x64-msvc`, `darwin-x64`, `darwin-arm64`, `linux-x64-gnu`, `linux-arm64-gnu` —
-a single static binary per platform, no Node required. Download the asset for your platform, rename/link
+a self-contained static binary per platform, no Node required. Download the asset for your platform, rename/link
 it to `zzop-mcp` (`zzop-mcp.exe` on Windows), and point `.mcp.json` at it (see
 [packages/mcp/README.md](../../packages/mcp/README.md) for the worked example, including the Claude Code
 plugin install path). Building from a source checkout with the command above remains fully supported as

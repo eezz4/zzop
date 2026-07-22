@@ -3,7 +3,7 @@
 use crate::finding::Finding;
 
 use super::def::{Matcher, RulePackDef};
-use super::ir_scan::{eval_io_scan, eval_symbol_scan};
+use super::ir_scan::eval_symbol_scan;
 use super::line_scan::eval_line_scan;
 use super::method_scan::eval_method_scan;
 use super::prefilter::LineScanPrefilter;
@@ -53,7 +53,9 @@ fn eval_pack_impl(
             }
             Matcher::MethodScan(m) => eval_method_scan(&pack.id, rule, m, ctx, &mut out),
             Matcher::SymbolScan(m) => eval_symbol_scan(&pack.id, rule, m, ctx, &mut out),
-            Matcher::IoScan(m) => eval_io_scan(&pack.id, rule, m, ctx, &mut out),
+            // io-scan evaluates whole-tree via eval_pack_io_scan since the 2026 projection redesign — see
+            // ir_scan.rs's module doc.
+            Matcher::IoScan(_) => {}
         }
         if let Some(t0) = t0 {
             timings.push(RuleTiming {

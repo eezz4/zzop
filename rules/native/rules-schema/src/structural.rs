@@ -8,8 +8,9 @@ use serde::{Deserialize, Serialize};
 use zzop_core::{SchemaModel, Severity};
 
 /// Version token for `apply_schema_rules`'s output shape, folded into the ruleset cache fingerprint so
-/// a stale cache doesn't keep serving old `schema/*` findings. Bump when the output shape changes.
-pub const STRUCTURAL_RULES_VERSION: &str = "v1";
+/// a stale cache doesn't keep serving old `schema/*` findings. Restamp with the current `CARGO_PKG_VERSION`
+/// when the output shape changes (2026-07-22 version reform: cache-bust tokens are package-version stamps).
+pub const STRUCTURAL_RULES_VERSION: &str = "0.21.0";
 
 /// A structural schema issue (source-agnostic; from a single model/field). `camelCase` here matches
 /// every other output-facing type, since this struct serializes verbatim into `Finding.data`.

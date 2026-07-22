@@ -1,5 +1,5 @@
-//! `analyze_repo` (and CLI `zzop-mcp analyze <path>`). Also hosts
-//! `analyze_envelope_summary` (`analyze_envelope` tool / CLI `zzop-mcp analyze-envelope <file>`, Mode
+//! `analyze_repo` (and CLI `zzop analyze <path>`). Also hosts
+//! `analyze_envelope_summary` (`analyze_envelope` tool / CLI `zzop analyze-envelope <file>`, Mode
 //! A) — the two share one post-facade shaper (`shape_analyze_output`) so the same cap/disclosure/
 //! config-warning contract holds for both entry points.
 
@@ -79,7 +79,7 @@ pub fn analyze_summary(path: &str, filters: &FindingFilters) -> Result<String, S
     serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())
 }
 
-/// `analyze_envelope` (and CLI `zzop-mcp analyze-envelope <envelope.json>`) — Mode A: a full
+/// `analyze_envelope` (and CLI `zzop analyze-envelope <envelope.json>`) — Mode A: a full
 /// Normalized-AST envelope REPLACES native parsing entirely (contrast `validate_envelope`, which only
 /// checks the envelope's shape and never runs analysis; and Mode B mount/overlay requests, which merge
 /// external symbols ON TOP of a natively-parsed tree). Runs via `zzop_facade::analyze_envelope_json` —

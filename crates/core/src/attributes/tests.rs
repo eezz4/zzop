@@ -306,6 +306,52 @@ fn from_overlays_still_delegates_with_no_native_attributes() {
     );
 }
 
+// --- extended ---
+
+#[test]
+fn extended_appends_after_existing_so_existing_keeps_first_match_priority() {
+    let s = store(vec![Attribute {
+        target: EntityRef::IoKey {
+            kind: "http".into(),
+            key: "POST /admin/webhook".into(),
+        },
+        key: "auth-guarded".into(),
+        value: json!(false),
+    }]);
+    let extended = s.extended(vec![Attribute {
+        target: EntityRef::IoKey {
+            kind: "http".into(),
+            key: "POST /admin/webhook".into(),
+        },
+        key: "auth-guarded".into(),
+        value: json!(true),
+    }]);
+    // The pre-existing explicit `false` still wins — the minted `true` only fills gaps.
+    assert_eq!(
+        extended.route_attr("http", "POST /admin/webhook", "auth-guarded"),
+        Some(&json!(false))
+    );
+}
+
+#[test]
+fn extended_fills_gaps_for_targets_the_existing_store_has_no_entry_for() {
+    let s = store(Vec::new());
+    let extended = s.extended(vec![Attribute {
+        target: EntityRef::IoKey {
+            kind: "http".into(),
+            key: "POST /admin/tasks".into(),
+        },
+        key: "auth-guarded".into(),
+        value: json!(true),
+    }]);
+    assert_eq!(
+        extended.route_attr("http", "POST /admin/tasks", "auth-guarded"),
+        Some(&json!(true))
+    );
+    // The original store is untouched — `extended` returns a copy.
+    assert!(s.is_empty());
+}
+
 // --- attr_is_truthy ---
 
 #[test]

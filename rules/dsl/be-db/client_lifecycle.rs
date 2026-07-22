@@ -193,3 +193,71 @@ fn connection_release_ok_marker_directly_above_the_acquire_line_suppresses_the_f
         out.findings
     );
 }
+
+// --- db-client-new-in-loop ---
+
+#[test]
+fn prisma_client_constructed_inside_for_of_loop_is_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare class PrismaClient { user: any; }\ndeclare const ids: string[];\nexport async function f() {\n  for (const id of ids) {\n    const c = new PrismaClient();\n    await c.user.findUnique({ where: { id } });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "db-client-new-in-loop");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 5);
+}
+
+#[test]
+fn prisma_client_hoisted_outside_loop_and_reused_is_not_flagged() {
+    // The client is constructed ONCE, before the loop — the ctor token itself never sits inside the
+    // loop span, so `trigger_in_loop` never satisfies, regardless of how many times the hoisted client
+    // is reused per iteration.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare class PrismaClient { user: any; }\ndeclare const ids: string[];\nexport async function f() {\n  const c = new PrismaClient();\n  for (const id of ids) {\n    await c.user.findUnique({ where: { id } });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "db-client-new-in-loop").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn client_in_loop_ok_marker_directly_above_the_ctor_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare class PrismaClient { user: any; }\ndeclare const ids: string[];\nexport async function f() {\n  for (const id of ids) {\n    // client-in-loop-ok: intentional per-shard client, bounded fixture list\n    const c = new PrismaClient();\n    await c.user.findUnique({ where: { id } });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "db-client-new-in-loop").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+/// FP-adversarial (nearest harmless lookalike): a same-named `new Pool()` that is a WORKER pool, not a
+/// DB pool, constructed inside a loop in a file that imports no database driver/ORM. The rule's
+/// `require_file` DB-library gate is not satisfied, so the file is never scanned — the "pool exhausts the
+/// database connection pool" message must not fire on a non-database `Pool`. Pins the over-match class the
+/// constructor alternation would otherwise hit (worker pools, API `createClient`, raw-socket `createConnection`).
+#[test]
+fn worker_pool_ctor_in_loop_in_a_file_with_no_db_driver_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/worker.ts",
+        "declare class Pool { run(t: any): void; }\ndeclare const tasks: any[];\nexport function f() {\n  for (const t of tasks) {\n    const p = new Pool();\n    p.run(t);\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "db-client-new-in-loop").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}

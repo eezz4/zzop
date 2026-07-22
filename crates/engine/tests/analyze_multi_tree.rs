@@ -289,6 +289,7 @@ fn overlay_injected_consume_joins_a_native_provide_across_trees() {
         line: 2,
         raw: None,
         method: None,
+        retry_configured: None,
     });
     let mut fe_cfg = config("fe");
     fe_cfg.adapter_overlays = vec![overlay("openapi-sdk-adapter/1", vec![sdk_call])];

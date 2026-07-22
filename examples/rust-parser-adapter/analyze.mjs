@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 // Runs a NormalizedEnvelope (adapter.mjs's stdout) through zzop's Mode A entry point by spawning the
-// Node-free `zzop-mcp` binary's `analyze-envelope` subcommand, and prints a compact summary — the
+// Node-free `zzop` binary's `analyze-envelope` subcommand, and prints a compact summary — the
 // smallest possible "external language, full analysis" round trip.
 //
 // Node-free rewrite (2026-07-20): this script used to `require('@zzop/native')` (falling back to the
 // in-checkout `packages/native` addon) and call `analyzeEnvelope` in-process. The npm distribution
 // (the `@zzop/cli` JS CLI + the `@zzop/native` napi binding) was removed that day — zzop now ships as
-// a single Node-free binary, `zzop-mcp`, with no in-process JS embedding path at all. This script
+// a single Node-free binary, `zzop`, with no in-process JS embedding path at all. This script
 // spawns that binary as a child process and parses its JSON stdout instead of `require()`-ing a
 // native addon.
 //
 // USAGE
 //   node adapter.mjs --root <workspaceRoot> --source <id> > envelope.json
-//   node analyze.mjs envelope.json [--bin <path-to-zzop-mcp>]
+//   node analyze.mjs envelope.json [--bin <path-to-zzop>]
 //
-// `--bin` defaults to `zzop-mcp` on PATH, falling back to an in-checkout `target/release/zzop-mcp` or
-// `target/debug/zzop-mcp` build (`cargo build -p zzop-mcp [--release]`) so the example runs inside the
+// `--bin` defaults to `zzop` on PATH, falling back to an in-checkout `target/release/zzop` or
+// `target/debug/zzop` build (`cargo build -p zzop-mcp [--release]`) so the example runs inside the
 // zzop repo without a separate install.
 import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -23,11 +23,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const exeName = process.platform === 'win32' ? 'zzop-mcp.exe' : 'zzop-mcp';
+const exeName = process.platform === 'win32' ? 'zzop.exe' : 'zzop';
 
 const envelopePath = process.argv[2];
 if (!envelopePath || envelopePath.startsWith('--')) {
-  console.error('usage: node analyze.mjs <envelope.json> [--bin <path-to-zzop-mcp>]');
+  console.error('usage: node analyze.mjs <envelope.json> [--bin <path-to-zzop>]');
   process.exit(2);
 }
 const binArgIdx = process.argv.indexOf('--bin');
@@ -53,7 +53,7 @@ const result = spawnSync(bin, ['analyze-envelope', path.resolve(envelopePath)], 
 if (result.error) {
   console.error(`failed to run '${bin}': ${result.error.message}`);
   console.error(
-    'build it with `cargo build -p zzop-mcp --release`, put zzop-mcp on your PATH, or pass --bin <path>'
+    'build it with `cargo build -p zzop-mcp --release`, put zzop on your PATH, or pass --bin <path>'
   );
   process.exit(1);
 }
@@ -62,7 +62,7 @@ if (result.status !== 0) {
   process.exit(result.status ?? 1);
 }
 
-// `zzop-mcp analyze-envelope` prints the same compact summary shape the `analyze_envelope` MCP tool
+// `zzop analyze-envelope` prints the same compact summary shape the `analyze_envelope` MCP tool
 // returns (see docs/modules/mcp.md#output-contract): `findings` is `{total, bySeverity, byRule, shown,
 // truncated?}`, not a flat array — `byRule` already carries the per-rule counts the old script had to
 // tally itself from a raw `Finding[]`.

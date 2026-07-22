@@ -73,6 +73,7 @@ fn client_base_prefix_consume_is_dropped_and_warned_in_envelope_mode() {
         line: 1,
         raw: None,
         method: None,
+        retry_configured: None,
         body: None,
         client: Some("axios".to_string()),
     });
@@ -117,6 +118,7 @@ fn ordinary_io_kinds_are_not_dropped_or_warned_in_envelope_mode() {
         line: 3,
         raw: None,
         method: Some("GET".to_string()),
+        retry_configured: None,
         body: None,
         client: None,
     });

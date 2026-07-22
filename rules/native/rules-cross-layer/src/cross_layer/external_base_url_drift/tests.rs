@@ -12,6 +12,7 @@ fn consume(key: Option<&str>, source: &str, file: &str, line: u32) -> TaggedCons
             line,
             raw: None,
             method: None,
+            retry_configured: None,
         },
     }
 }

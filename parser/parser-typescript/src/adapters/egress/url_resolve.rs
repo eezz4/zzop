@@ -12,8 +12,8 @@ use super::concat::resolve_concat_variants;
 /// dynamic/unresolvable, same meaning as the old `None`. A plain literal or const indirection yields
 /// exactly one variant, unchanged from before. A top-level ternary whose BOTH arms are string literals
 /// fans out to one variant per arm (cons first, then alt), deduped preserving first-seen order — visible
-/// literal enumeration, not a guess (`cond-literal-fanout-v1`); any other ternary shape is unresolved
-/// (empty vec), same as today's non-literal shapes. See [`resolve_template_variants`] for the template
+/// literal enumeration, not a guess (`cond-literal-fanout-v1`); any other ternary shape is unresolved.
+/// See [`resolve_template_variants`] for the template
 /// literal case, which fans out per-interpolation with its own cap, and [`resolve_concat_variants`] for
 /// the binary `+` string-concatenation case (`str-concat-url-v1`).
 pub(super) fn resolve_url_variants(
@@ -23,18 +23,10 @@ pub(super) fn resolve_url_variants(
 ) -> Vec<String> {
     match arg {
         Expr::Lit(Lit::Str(s)) => vec![s.value.as_str().unwrap_or_default().to_string()],
-        Expr::Cond(c) => {
-            let Expr::Lit(Lit::Str(cons)) = &*c.cons else {
-                return Vec::new();
-            };
-            let Expr::Lit(Lit::Str(alt)) = &*c.alt else {
-                return Vec::new();
-            };
-            dedup_preserve_order(vec![
-                cons.value.as_str().unwrap_or_default().to_string(),
-                alt.value.as_str().unwrap_or_default().to_string(),
-            ])
-        }
+        Expr::Cond(c) => match (resolve_cond_arm(&c.cons), resolve_cond_arm(&c.alt)) {
+            (Some(cons), Some(alt)) => dedup_preserve_order(vec![cons, alt]),
+            _ => Vec::new(),
+        },
         Expr::Tpl(t) => resolve_template_variants(t),
         Expr::Ident(_) | Expr::Member(_) => consts
             .get(&expr_text(arg, cm))
@@ -53,23 +45,39 @@ pub(super) enum TplPiece {
     Slot(String, String),
 }
 
+/// Resolve one ternary arm to a single fan-out string, or `None` if it is not a bounded single-variant
+/// value. A plain string literal is its own value; a template literal is accepted only when it resolves to
+/// EXACTLY ONE variant (`` `/${slug}` `` -> `"/{}"`, `` `/x` `` -> `"/x"`) — a template that itself fans
+/// out (a nested ternary) would multiply the outer 2-arm slot beyond its bound, so it falls through to the
+/// fixed `{}` placeholder. This lets a slash INSIDE a branch (`` slug ? `/${slug}` : '' ``) survive.
+pub(super) fn resolve_cond_arm(e: &Expr) -> Option<String> {
+    match e {
+        Expr::Lit(Lit::Str(s)) => Some(s.value.as_str().unwrap_or_default().to_string()),
+        Expr::Tpl(t) => match resolve_template_variants(t).as_slice() {
+            [one] => Some(one.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Template literal -> URL variants. `/api/users/${id}` -> `["/api/users/{}"]`, same as before.
-/// (`cond-literal-fanout-v1`): an interpolation whose expression is a ternary with BOTH arms string
-/// literals is a fan-out slot instead of a fixed `{}` — e.g. `` `/users${isRegister ? '' : '/login'}` ``
-/// -> `["/users", "/users/login"]`. Multiple slots cartesian-product together, capped at 2 slots (<=4
-/// variants); a 3rd+ slot forces EVERY slot in this template back to the old fixed `{}` behavior, keeping
-/// output bounded and deterministic. Variants are deduped preserving first-seen order.
+/// (`cond-literal-fanout-v1`): an interpolation whose expression is a ternary with BOTH arms resolving to
+/// a single value (via [`resolve_cond_arm`] — a string literal, or a template like `` `/${slug}` `` that
+/// resolves to one variant `"/{}"`) is a fan-out slot instead of a fixed `{}` — e.g.
+/// `` `/users${isRegister ? '' : '/login'}` `` -> `["/users", "/users/login"]`, and
+/// `` `/articles${slug ? `/${slug}` : ''}` `` -> `["/articles/{}", "/articles"]` (the in-branch slash is
+/// kept). Multiple slots cartesian-product together, capped at 2 slots (<=4 variants); a 3rd+ slot forces
+/// EVERY slot in this template back to the old fixed `{}` behavior, keeping output bounded and
+/// deterministic. Variants are deduped preserving first-seen order.
 fn resolve_template_variants(t: &Tpl) -> Vec<String> {
     let mut pieces: Vec<TplPiece> = Vec::with_capacity(t.exprs.len());
     let mut slot_count = 0usize;
     for e in t.exprs.iter() {
         if let Expr::Cond(c) = &**e {
-            if let (Expr::Lit(Lit::Str(cons)), Expr::Lit(Lit::Str(alt))) = (&*c.cons, &*c.alt) {
+            if let (Some(cons), Some(alt)) = (resolve_cond_arm(&c.cons), resolve_cond_arm(&c.alt)) {
                 slot_count += 1;
-                pieces.push(TplPiece::Slot(
-                    cons.value.as_str().unwrap_or_default().to_string(),
-                    alt.value.as_str().unwrap_or_default().to_string(),
-                ));
+                pieces.push(TplPiece::Slot(cons, alt));
                 continue;
             }
         }
@@ -172,6 +180,63 @@ mod tests {
         assert_eq!(
             keys(&out),
             vec![Some("GET /a".to_string()), Some("GET /b".to_string())]
+        );
+    }
+
+    #[test]
+    fn template_ternary_with_a_template_arm_keeps_the_in_branch_slash() {
+        // fe-vite Editor.jsx shape: the slash lives INSIDE the cons branch (`` `/${slug}` ``). It used to
+        // collapse to a malformed `/articles{}`; now the template arm resolves to `/{}` and fans out,
+        // keeping the slash — `/articles/{}` (has-slug) and `/articles` (no-slug).
+        let out = extract_http_egress(&files(&[(
+            "a.jsx",
+            "axios.put(`/articles${slug ? `/${slug}` : ''}`);",
+        )]));
+        assert_eq!(
+            keys(&out),
+            vec![
+                Some("PUT /articles/{}".to_string()),
+                Some("PUT /articles".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn correlated_verb_and_url_ternaries_pair_instead_of_cross_producting() {
+        // fe-vite Editor.jsx: the verb ternary and the url ternary share the SAME guard `slug`, so only
+        // the two reachable branches exist — PUT /articles/{} (slug truthy) and POST /articles (falsy).
+        // The two cross combos (POST /articles/{}, PUT /articles) are unreachable and must NOT be emitted
+        // (they used to cascade into spurious method-mismatch findings).
+        let out = extract_http_egress(&files(&[(
+            "Editor.jsx",
+            "axios[slug ? 'put' : 'post'](`/articles${slug ? `/${slug}` : ''}`, { article });",
+        )]));
+        assert_eq!(
+            keys(&out),
+            vec![
+                Some("PUT /articles/{}".to_string()),
+                Some("POST /articles".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn independent_verb_and_url_ternaries_still_cross_product() {
+        // DIFFERENT guards (`a` vs `b`) are genuinely independent — the full Cartesian product is the
+        // correct over-approximation, unchanged by the correlation special-case.
+        let out = extract_http_egress(&files(&[(
+            "a.ts",
+            "axios[a ? 'put' : 'post'](`/x${b ? '/1' : '/2'}`);",
+        )]));
+        assert_eq!(out.len(), 4);
+    }
+
+    #[test]
+    fn top_level_ternary_with_a_template_arm_fans_out() {
+        let out = extract_http_egress(&files(&[("a.ts", "axios.get(cond ? `/a/${x}` : '/b');")]));
+        assert_eq!(
+            keys(&out),
+            vec![Some("GET /a/{}".to_string()), Some("GET /b".to_string())]
         );
     }
 

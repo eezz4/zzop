@@ -1,26 +1,27 @@
-//! Binary-level tests for `main.rs`'s argument dispatch — the thin layer the crate's unit tests
-//! (`tools/tests.rs`, handler-level) never exercise. Spawns the real `zzop-mcp` executable
-//! (`CARGO_BIN_EXE_zzop-mcp`, built by cargo for integration tests), so exit codes and the
-//! stdout/stderr split are pinned exactly as a shell sees them.
+//! Binary-level tests for the `zzop` CLI binary's argument dispatch (`src/bin/zzop.rs`) — the thin layer
+//! the crate's unit tests (`tools/tests.rs`, handler-level) never exercise. Spawns the real `zzop`
+//! executable (`CARGO_BIN_EXE_zzop`, built by cargo for integration tests), so exit codes and the
+//! stdout/stderr split are pinned exactly as a shell sees them. The sibling `zzop-mcp` server binary is
+//! smoke-tested at the bottom (its non-serving surfaces — `version`, unknown-arg).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_zzop-mcp"))
+    Command::new(env!("CARGO_BIN_EXE_zzop"))
         .args(args)
         .output()
-        .expect("zzop-mcp binary should spawn")
+        .expect("zzop binary should spawn")
 }
 
 /// Like `run`, but from a chosen working directory — the lane that pins relative-path arguments
 /// (`analyze .`, `endpoint <pattern> <relative dir>`) resolving against the invocation cwd.
 fn run_in(dir: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_zzop-mcp"))
+    Command::new(env!("CARGO_BIN_EXE_zzop"))
         .current_dir(dir)
         .args(args)
         .output()
-        .expect("zzop-mcp binary should spawn")
+        .expect("zzop binary should spawn")
 }
 
 fn stdout(out: &Output) -> String {
@@ -33,17 +34,16 @@ fn stderr(out: &Output) -> String {
 
 #[test]
 fn version_subcommand_and_flag_print_the_server_version_and_exit_zero() {
-    // Both spellings print the exact `server::version()` value — the same string MCP `initialize`
-    // reports as serverInfo.version, so the CLI and the protocol can never disagree. Test builds
-    // never set the compile-time `ZZOP_RELEASE_VERSION`, so this pins the 0.0.0 dev fallback lane;
-    // the release lane is exercised live by release CI (prebuild.yml).
+    // Both spellings print the exact `server::version()` value (= `CARGO_PKG_VERSION`, the workspace
+    // release SSOT) — the same string MCP `initialize` reports as serverInfo.version, so the CLI and the
+    // protocol can never disagree. CI verifies the release tag matches it.
     for arg in ["version", "--version"] {
         let out = run(&[arg]);
-        assert!(out.status.success(), "`zzop-mcp {arg}` must exit 0");
+        assert!(out.status.success(), "`zzop {arg}` must exit 0");
         assert_eq!(
             stdout(&out).trim(),
-            format!("zzop-mcp {}", zzop_mcp::server::version()),
-            "`zzop-mcp {arg}` must print the server::version() value"
+            format!("zzop {}", zzop_mcp::server::version()),
+            "`zzop {arg}` must print the server::version() value"
         );
         assert!(stderr(&out).is_empty(), "no stderr on success");
     }
@@ -55,7 +55,7 @@ fn top_level_help_prints_the_usage_line_to_stdout_and_exits_zero() {
     // exit-2 stderr lane every malformed invocation takes.
     for arg in ["--help", "-h", "help"] {
         let out = run(&[arg]);
-        assert!(out.status.success(), "`zzop-mcp {arg}` must exit 0");
+        assert!(out.status.success(), "`zzop {arg}` must exit 0");
         let text = stdout(&out);
         assert!(text.contains("usage:"), "`{arg}` got: {text}");
         assert!(text.contains("analyze"), "`{arg}` got: {text}");
@@ -71,7 +71,7 @@ fn analyze_help_flag_is_a_usage_error_never_a_path() {
     let out = run(&["analyze", "--help"]);
     assert_eq!(out.status.code(), Some(2), "usage errors exit 2");
     let err = stderr(&out);
-    assert!(err.contains("usage: zzop-mcp analyze"), "got: {err}");
+    assert!(err.contains("usage: zzop analyze"), "got: {err}");
     assert!(
         !err.contains("does not exist"),
         "must never be treated as a path: {err}"
@@ -83,7 +83,7 @@ fn endpoint_flag_like_pattern_is_a_usage_error_never_a_pattern() {
     let out = run(&["endpoint", "-x", "a", "b"]);
     assert_eq!(out.status.code(), Some(2), "usage errors exit 2");
     assert!(
-        stderr(&out).contains("usage: zzop-mcp endpoint"),
+        stderr(&out).contains("usage: zzop endpoint"),
         "got: {}",
         stderr(&out)
     );
@@ -107,7 +107,7 @@ fn endpoint_config_flag_without_a_path_is_a_usage_error() {
     let out = run(&["endpoint", "users", "--config"]);
     assert_eq!(out.status.code(), Some(2), "usage errors exit 2");
     assert!(
-        stderr(&out).contains("usage: zzop-mcp endpoint <pattern> --config"),
+        stderr(&out).contains("usage: zzop endpoint <pattern> --config"),
         "got: {}",
         stderr(&out)
     );
@@ -132,7 +132,7 @@ fn contract_with_no_name_lists_every_embedded_resource() {
     // (name + description + mime, human-readable lines) — a terminal user must never have to
     // reverse-engineer the config surface from error messages while the docs sit inside the binary.
     let out = run(&["contract"]);
-    assert!(out.status.success(), "`zzop-mcp contract` must exit 0");
+    assert!(out.status.success(), "`zzop contract` must exit 0");
     let text = stdout(&out);
     for doc in zzop_mcp::embedded::CONTRACT_DOCS {
         assert!(
@@ -157,7 +157,7 @@ fn contract_with_a_name_prints_the_exact_embedded_bytes() {
     let out = run(&["contract", "config-surface"]);
     assert!(
         out.status.success(),
-        "`zzop-mcp contract config-surface` must exit 0"
+        "`zzop contract config-surface` must exit 0"
     );
     assert_eq!(
         out.stdout,
@@ -226,7 +226,7 @@ fn endpoint_config_mode_runs_the_query_against_the_configs_trees() {
     // `endpoint <pattern> --config <path>` — the config-first mode the check_endpoint MCP tool has
     // always had (`configPath`), now reachable from the CLI like `cross --config`. The reply is the
     // shared query core's JSON with the honored config path stamped on top.
-    let dir = TempDir::new("zzop-mcp-endpoint-config");
+    let dir = TempDir::new("zzop-endpoint-config");
     dir.write(
         "src/api.ts",
         "export function load() { return fetch(\"/api/users\"); }\n",
@@ -273,13 +273,13 @@ fn analyze_dot_resolves_the_invocation_cwd_not_an_empty_root() {
     // normalization, which collapses all-CurDir paths to the EMPTY path — the engine then rejected
     // `root: ""` as a missing required field. Absolutized at the host boundary, `analyze .` from
     // inside a tree analyzes that tree.
-    let dir = TempDir::new("zzop-mcp-analyze-dot");
+    let dir = TempDir::new("zzop-analyze-dot");
     dir.write("src/api.ts", "export const a = 1;\n");
 
     let out = run_in(dir.path(), &["analyze", "."]);
     assert!(
         out.status.success(),
-        "`zzop-mcp analyze .` must succeed, stderr: {}",
+        "`zzop analyze .` must succeed, stderr: {}",
         stderr(&out)
     );
     let v: serde_json::Value =
@@ -295,7 +295,7 @@ fn endpoint_relative_path_resolves_against_the_cwd_and_dir_names_its_source() {
     // Same boundary, endpoint's `path` mode: a relative tree argument resolves against the
     // invocation cwd, and the dir-name sourceId derives from the ABSOLUTIZED path (a relative
     // name used to be handed to zzop-config verbatim).
-    let parent = TempDir::new("zzop-mcp-endpoint-relative");
+    let parent = TempDir::new("zzop-endpoint-relative");
     parent.write(
         "fe/src/api.ts",
         "export function load() { return fetch(\"/api/users\"); }\n",
@@ -322,7 +322,7 @@ const EXAMPLE_ENVELOPE: &str = include_str!("../../../examples/jsp-envelope.exam
 
 #[test]
 fn analyze_envelope_subcommand_runs_mode_a_over_a_file_and_prints_the_summary() {
-    let dir = TempDir::new("zzop-mcp-analyze-envelope");
+    let dir = TempDir::new("zzop-analyze-envelope");
     dir.write("envelope.json", EXAMPLE_ENVELOPE);
     let path = dir.path().join("envelope.json");
 
@@ -362,7 +362,7 @@ fn analyze_envelope_subcommand_requires_a_file_argument() {
     let out = run(&["analyze-envelope"]);
     assert_eq!(out.status.code(), Some(2), "usage errors exit 2");
     assert!(
-        stderr(&out).contains("usage: zzop-mcp analyze-envelope"),
+        stderr(&out).contains("usage: zzop analyze-envelope"),
         "got: {}",
         stderr(&out)
     );
@@ -372,21 +372,21 @@ fn analyze_envelope_subcommand_requires_a_file_argument() {
 fn fixed_arity_subcommands_reject_trailing_extra_args_instead_of_dropping_them() {
     // A silently-dropped trailing arg means the user believes it was analyzed — both fixed-arity
     // shapes must answer with a usage error (exit 2), like endpoint/contract already do.
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_zzop-mcp"))
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_zzop"))
         .args(["analyze", "a", "b"])
         .output()
         .expect("spawn");
     assert_eq!(out.status.code(), Some(2), "analyze with 2 paths");
     assert!(String::from_utf8_lossy(&out.stderr).contains("one path"));
 
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_zzop-mcp"))
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_zzop"))
         .args(["analyze-envelope", "a.json", "b.json"])
         .output()
         .expect("spawn");
     assert_eq!(out.status.code(), Some(2), "analyze-envelope with 2 files");
     assert!(String::from_utf8_lossy(&out.stderr).contains("one file"));
 
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_zzop-mcp"))
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_zzop"))
         .args(["cross", "--config", "x.jsonc", "./extra"])
         .output()
         .expect("spawn");

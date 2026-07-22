@@ -1,5 +1,5 @@
 //! `validateRulePackOnly` — the pre-load, structure-only DSL rule-pack check behind the
-//! `validate_rule_pack` MCP tool and `zzop-mcp validate-rule-pack <path>`.
+//! `validate_rule_pack` MCP tool and `zzop validate-rule-pack <path>`.
 //!
 //! Scope: this surfaces only judgments the engine itself already makes — the loader's load-time
 //! verdicts plus one eval-time check (the regex compile below; such a pack LOADS clean but the

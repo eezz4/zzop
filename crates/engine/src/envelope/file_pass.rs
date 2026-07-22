@@ -45,9 +45,11 @@ pub(super) struct FilePassState {
     pub(super) reserved_dropped: usize,
 }
 
-/// The per-file pass of `analyze_envelope`: per-file fact collection, hand-built dep-graph edges, and
-/// the SymbolScan/IoScan-only DSL rule evaluation. `files` must already be `path`-sorted (the
-/// orchestrator sorts) so every accumulated `Vec` is deterministic.
+/// The per-file pass of `analyze_envelope`: per-file fact collection, hand-built dep-graph edges, and the
+/// per-file `SymbolScan` DSL rule evaluation (`IoScan` no-ops here — it evaluates whole-tree, run once by
+/// `ingest::analyze_envelope` after this pass returns; see `zzop_core::dsl::eval_pack_io_scan`'s doc).
+/// `files` must already be `path`-sorted (the orchestrator sorts) so every accumulated `Vec` is
+/// deterministic.
 pub(super) fn run_file_pass(
     files: &[&zzop_core::FileProjection],
     all_paths: &HashSet<&str>,

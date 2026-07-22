@@ -44,7 +44,7 @@ pub use lang::used_names::parse_local_identifier_refs;
 ///   `impl` block methods/assoc consts emitted dotted as `Type.member`), imports (`use` trees including
 ///   groups/globs/renames/`pub use`, plus `mod x;` declarations), `used_names`, axum router-mount
 ///   fragments, and `reqwest` literal HTTP egress consumes.
-pub const PARSER_FINGERPRINT: &str = "rust/syn-2/v1+axum-any-v1+axum-verb-dedup-v1";
+pub const PARSER_FINGERPRINT: &str = "rust/syn-2/0.21.0";
 
 /// Parses `text` with `syn`, returning `None` on any syntax error (never panics — unexpected/malformed
 /// input degrades to `None`, letting the caller fall back to a lexical scan, same contract every parser

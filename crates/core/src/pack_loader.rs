@@ -58,7 +58,7 @@ pub struct LoadResult {
 /// then `RulePackDef::expand_fragments` — an unknown or malformed `${NAME}` fragment reference fails the
 /// load exactly like a bad JSON body does, never a silent passthrough. This is the exact per-file step
 /// [`load_dsl_packs`] applies to every `rules/dsl/*.json`, extracted so a pre-load validator
-/// (`zzop_facade::validate_rule_pack_json`, the `validate_rule_pack` MCP tool / `zzop-mcp validate-rule-pack` CLI)
+/// (`zzop_facade::validate_rule_pack_json`, the `validate_rule_pack` MCP tool / `zzop validate-rule-pack` CLI)
 /// surfaces the SAME verdicts the loader would produce at load time — one path, no forked logic. The
 /// returned pack's `fragments` map is always empty (see `expand_fragments`'s doc) — every pattern-bearing
 /// field already carries its resolved regex text, so nothing downstream (hashing, `RegexSet` prefilter,
@@ -171,9 +171,20 @@ pub fn pack_regex_issues(pack: &RulePackDef) -> Vec<String> {
             }
             Matcher::IoScan(m) => {
                 check("file_pattern", &m.file_pattern);
+                if let Some(p) = &m.file_exclude_pattern {
+                    check("file_exclude_pattern", p);
+                }
                 if let Some(p) = &m.key_pattern {
                     check("key_pattern", p);
                 }
+                if let Some(p) = &m.symbol_pattern {
+                    check("symbol_pattern", p);
+                }
+                if let Some(p) = &m.anchor_exclude_pattern {
+                    check("anchor_exclude_pattern", p);
+                }
+                // `attr_present`/`attr_absent` are plain attribute-key strings, not regexes — never
+                // checked here (see `IoScan`'s doc).
             }
         }
     }

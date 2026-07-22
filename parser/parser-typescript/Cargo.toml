@@ -1,10 +1,10 @@
 [package]
 name = "zzop-parser-typescript"
-version = "0.0.0"
+version.workspace = true
 edition = "2021"
 publish = false
 
 [dependencies]
 swc_core = { version = "71.0.5", features = ["ecma_parser", "ecma_ast", "ecma_visit", "common"] }
-zzop-core = { version = "0.0.0", path = "../../crates/core" }
+zzop-core = { path = "../../crates/core" }
 regex = { workspace = true }

@@ -26,6 +26,25 @@
       }
     },
     {
+      "id": "config-file-secret",
+      "severity": "warning",
+      "message": "A high-entropy secret value is committed in a configuration file (`jwt.secret`, `*.password`, `api-key`, ... in a config file — `.properties`, `.ya?ml`, `.toml`, `.ini`, `.conf`, `.cfg`, or `.env`) — this is a live credential exposed to every reader/fork/clone AND preserved in git history, and unlike a code literal it is often the app's real signing key or datastore password. Move it to an environment variable or secrets manager referenced from config (`jwt.secret=${JWT_SECRET}`) AND rotate/revoke the committed value. An empty value, a short placeholder (<16 chars), and a `${VAR}` env reference are not flagged. Suppress a vetted case with `# config-secret-ok`.",
+      "suppress_marker": "config-secret-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)(\\.(properties|ya?ml|toml|ini|conf|cfg)$|(^|/)\\.env(\\.[\\w.-]+)?$)",
+        "skip_comment_lines": true,
+        "any": [
+          {
+            "pattern": "(?i)(?:^|[^A-Za-z0-9])(secret|passwd|password|api[_-]?key|apikey|access[_-]?key|private[_-]?key|token)\\s*[=:]\\s*[\"']?[A-Za-z0-9+/_\\-]{16,}[\"']?\\s*$",
+            "label": "config-assignment"
+          }
+        ],
+        "exclude_pattern": "(?i)\\$\\{|\\$[A-Za-z]|<[^>]*>|(changeme|change[_-]?me|your[_-]|placeholder|example|redacted|xxxx)",
+        "snippet_max": 160
+      }
+    },
+    {
       "id": "mass-assignment",
       "severity": "warning",
       "message": "`req.body` (or a spread of it) passed directly into a database write (`create`/`update`/`upsert`/`updateMany`) — an attacker can set any field the model accepts (role, isAdmin, price, ownerId, ...) that the handler never intended to expose. Whitelist the fields you accept, or use a validated DTO. Suppress a vetted case with `// mass-assignment-ok`.",
@@ -417,7 +436,7 @@
     {
       "id": "stacktrace-to-response",
       "severity": "warning",
-      "message": "An exception's stack trace/message (`printStackTrace()`/`.getMessage()`) touches the HTTP response (`getWriter()`, `ResponseEntity`, `@ResponseBody`) in the same method — if it reaches the client, it exposes internal class names and file paths. Log server-side and return a generic error body instead. Suppress a vetted case with `// stacktrace-ok`.",
+      "message": "An exception's stack trace (`printStackTrace()`, `getStackTrace()`) touches the HTTP response (`getWriter()`, `ResponseEntity`, `@ResponseBody`) in the same method — if it reaches the client, it exposes internal class names and file paths. Log server-side and return a generic error body instead. (A custom exception's `.getMessage()` — a curated message string, not a stack trace — is deliberately NOT flagged, to match this rule's stack-trace-exposure scope.) Suppress a vetted case with `// stacktrace-ok`.",
       "suppress_marker": "stacktrace-ok",
       "matcher": {
         "type": "method-scan",
@@ -425,7 +444,7 @@
         "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
-          { "pattern": "printStackTrace\\s*\\(|\\.getMessage\\s*\\(\\)", "label": "leak" },
+          { "pattern": "printStackTrace\\s*\\(|getStackTrace(?:AsString)?\\s*\\(", "label": "leak" },
           { "pattern": "getWriter\\s*\\(|ResponseEntity|@ResponseBody|HttpServletResponse", "label": "resp" }
         ],
         "trigger": "leak",

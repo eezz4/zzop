@@ -1,5 +1,4 @@
-//! The 24 `cross-layer/*` native rules run over one `analyze_trees` join — see
-//! `compute_cross_layer_findings`'s doc for the gating/derivation/sort contract.
+//! The 25 `cross-layer/*` native rules run over one `analyze_trees` join — see `compute_cross_layer_findings` for the gating/derivation/sort contract.
 
 mod blindness_caveat;
 mod merge_config;
@@ -12,42 +11,40 @@ use zzop_core::{ConsumeBodyShape, Finding, ProvideBodyShape, SourceIo};
 
 use crate::EngineConfig;
 
-/// Runs the 24 `cross-layer/*` native rules (`zzop_rules_cross_layer::cross_layer`) over `cross_layer` and
-/// returns their merged, sorted findings.
+/// Runs the 25 `cross-layer/*` native rules (`zzop_rules_cross_layer::cross_layer`) over `cross_layer`, returning their merged, sorted findings.
 ///
 /// ## disabledRules gating and severity overrides
-/// Both union across trees — see `merge_config::union_configs`'s doc for the exclude-only gating
-/// rationale and the first-declarer conflict rule.
+/// Both union across trees — see `merge_config::union_configs` for the exclude-only gating rationale and
+/// the first-declarer conflict rule.
 ///
 /// ## The provide-key universe
-/// `method_mismatch`/`version_skew`/`path_near_miss` need every `http` provide across every tree, not
-/// just what `CrossLayerResult` exposes — derived here (`http_provides`) from the same `source_ios` the
-/// join itself was built from.
+/// `method_mismatch`/`version_skew`/`path_near_miss` need every `http` provide across every tree, not just
+/// what `CrossLayerResult` exposes — derived here (`http_provides`) from the same `source_ios` as the join.
 ///
 /// ## Sort and severity overrides
 /// `zzop_core::merge_findings`, the same (severity, file, line, ruleId) order `AnalyzeOutput::findings`
-/// uses. The config passed to it carries the severity-overrides union so the override runs INSIDE
-/// the merge, before its sort — see `merge_config::union_configs`'s doc for why applying it after
-/// would break the order.
+/// uses. Its config carries the severity-overrides union so the override runs INSIDE the merge, before its
+/// sort (see `merge_config::union_configs` for why applying it after would break the order).
 ///
 /// ## Extraction-blindness caveat
-/// `blindness_caveat::build`/`append` (split out to keep this file under the line-count ratchet) append
-/// a shared caveat sentence to `unconsumed-endpoint`/`unconsumed-mutation-endpoint` findings when at
-/// least one OTHER source in this join contributed zero joinable io — see that module's doc.
+/// `blindness_caveat::build`/`append` (split out to keep this file under the line-count ratchet) append a
+/// shared caveat to `unconsumed-endpoint`/`unconsumed-mutation-endpoint` findings when at least one OTHER
+/// source in this join contributed zero joinable io — see that module's doc.
 pub(crate) fn compute_cross_layer_findings(
     source_ios: &[SourceIo],
     cross_layer: &zzop_core::CrossLayerResult,
     trees: &[(PathBuf, EngineConfig)],
     package_imports: &[zzop_rules_cross_layer::PackageImportSite],
     trpc_participating_sources: &BTreeSet<String>,
+    attribute_stores: &BTreeMap<String, &zzop_core::AttributeStore>,
 ) -> Vec<Finding> {
     let (gate, merge_config) = merge_config::union_configs(trees);
 
     let extraction_blindness_caveat = blindness_caveat::build(source_ios);
 
-    // Verb-unknown routes (`UNKNOWN_VERB` sentinel provides from a `pages/api` serve-all handler / pathname-dispatch / Go
-    // `HandleFunc` naming no method): lifted OUT of the exact-key join into a path-level served-set — `http_provides` drops them
-    // (never a dead route), `unprovided_filtered` drops consumes they serve (no FP), and they surface via `cross-layer/unknown-verb-route`.
+    // Verb-unknown routes (`UNKNOWN_VERB` sentinel: `pages/api` serve-all / pathname-dispatch / Go
+    // `HandleFunc` pinning no method) lift OUT of the exact-key join to a served-set — `http_provides` drops
+    // them (never dead), `unprovided_filtered` drops consumes they serve (no FP); surface via `unknown-verb-route`.
     let verb_unknown_sites = partition::verb_unknown_sites(source_ios);
     let verb_unknown_paths = partition::served_path_set(&verb_unknown_sites);
     let unprovided_filtered =
@@ -64,19 +61,21 @@ pub(crate) fn compute_cross_layer_findings(
         })
         .collect();
 
-    // `cross-layer/body-field-drift`'s lookup maps — keyed exactly like `HttpProvideSite`/edge anchors are derived, `(source, file,
-    // line)`, so a rule can join an edge's `from`/`to` straight into these without re-deriving anything. Only entries whose `body`
-    // is `Some` are worth keeping (an edge whose consume/provide never witnessed a body shape can never drift-compare). On a
-    // duplicate key, the FIRST occurrence wins for consumes (same call site => same witnessed body, so any duplicate is spurious
-    // re-collection, never a real second body); a duplicate provide key is likewise first-wins (same handler declaration site).
+    // `cross-layer/body-field-drift`'s lookup maps, keyed `(source, file, line)` like edge `from`/`to` anchors
+    // so a rule joins straight in; only `Some`-body entries kept, first occurrence wins per key.
     let mut consume_bodies: BTreeMap<(String, String, u32), ConsumeBodyShape> = BTreeMap::new();
     let mut provide_bodies: BTreeMap<(String, String, u32), ProvideBodyShape> = BTreeMap::new();
+    // Retry-configured write consume sites (write-only tag), same `from`-anchor key — join set for `cross-layer/retrying-write-no-idempotency`.
+    let mut retry_sites: BTreeSet<zzop_rules_cross_layer::RetrySite> = BTreeSet::new();
     for s in source_ios {
         for c in s.io.consumes.iter().filter(|c| c.kind == "http") {
             if let Some(body) = &c.body {
                 consume_bodies
                     .entry((s.source.clone(), c.file.clone(), c.line))
                     .or_insert_with(|| body.clone());
+            }
+            if c.retry_configured == Some(true) {
+                retry_sites.insert((s.source.clone(), c.file.clone(), c.line));
             }
         }
         for p in s.io.provides.iter().filter(|p| p.kind == "http") {
@@ -88,7 +87,7 @@ pub(crate) fn compute_cross_layer_findings(
         }
     }
 
-    let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(24);
+    let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(25);
 
     if zzop_core::is_enabled(&gate, "cross-layer/unknown-verb-route") {
         sources.push(zzop_rules_cross_layer::unknown_verb_route_findings(
@@ -96,11 +95,10 @@ pub(crate) fn compute_cross_layer_findings(
         ));
     }
 
-    // `route_near_miss_results` is called ONCE here (ahead of its own position in `sources` order below) so both
-    // `unconsumed-endpoint` and `unconsumed-mutation-endpoint` can annotate a provide that is also a near-miss target — see
-    // `zzop_rules_cross_layer::route_near_miss`'s module doc. Disabled -> `near_miss_targets` stays empty (there is no near-miss
-    // finding to point at, so no annotation), and the findings themselves are still only pushed into `sources` at their original
-    // position, under the same `is_enabled` gate as before.
+    // `route_near_miss_results` is called ONCE here (ahead of its `sources` position below) so both
+    // `unconsumed-endpoint`/`unconsumed-mutation-endpoint` can annotate a provide that is also a near-miss
+    // target — see `route_near_miss`'s doc. Disabled -> `near_miss_targets` empty (no annotation); the
+    // findings themselves still push at their original position under the same `is_enabled` gate.
     let route_near_miss_result = if zzop_core::is_enabled(&gate, "cross-layer/route-near-miss") {
         Some(
             zzop_rules_cross_layer::cross_layer::route_near_miss::route_near_miss_results(
@@ -145,12 +143,11 @@ pub(crate) fn compute_cross_layer_findings(
         ));
     }
     if let Some(result) = route_near_miss_result {
-        // `cross-layer/prefix-drift` aggregates route-near-miss's `prefix_records`: when 3+ consumes share
-        // one missing/extra base prefix (`/api`, ...) against the same target tree, one aggregate finding
-        // replaces those per-route near-misses — subsumed via `retain_non_subsumed`. This is a replacement,
-        // not silent suppression: the aggregate enumerates every folded route (`output-philosophy.md` §0/§1).
-        // Structurally derived from route-near-miss's records, so it can only run inside this branch (route-
-        // near-miss enabled); disabling prefix-drift alone leaves the per-route near-misses intact.
+        // `cross-layer/prefix-drift` aggregates route-near-miss's `prefix_records`: 3+ consumes sharing one
+        // missing/extra base prefix (`/api`, ...) against the same target collapse into one finding that
+        // subsumes (`retain_non_subsumed`) the per-route near-misses — a replacement, not suppression (the
+        // aggregate enumerates every folded route, `output-philosophy.md` §0/§1). Derived from route-near-
+        // miss's records, so it only runs inside this branch; disabling it alone leaves the near-misses.
         if zzop_core::is_enabled(&gate, "cross-layer/prefix-drift") {
             let prefix_drift =
                 zzop_rules_cross_layer::prefix_drift_findings(&result.prefix_records);
@@ -219,10 +216,9 @@ pub(crate) fn compute_cross_layer_findings(
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/unconsumed-mutation-endpoint") {
-        // Same blindness predicate `cross-layer/unresolved-consume-ratio` self-reports with (below) —
-        // computed via the shared helper so the two rules can never silently drift apart on what counts as
-        // a BLIND source (mono-hub field review: a confident "unconsumed" verdict requires a resolved
-        // consume side).
+        // Same blindness predicate `cross-layer/unresolved-consume-ratio` self-reports with, via the shared
+        // helper so the two rules never drift on what counts BLIND (a confident "unconsumed" verdict needs
+        // a resolved consume side).
         let blind_sources = zzop_rules_cross_layer::majority_unresolved_http_sources(
             &cross_layer.unresolved_consumes,
             &http_consume_totals,
@@ -238,13 +234,11 @@ pub(crate) fn compute_cross_layer_findings(
         sources.push(findings);
     }
     if zzop_core::is_enabled(&gate, "cross-layer/unprovided-mutation-call") {
-        // Provide-side blindness gate — the symmetric mirror of `unconsumed-mutation-endpoint`'s
-        // consume-blind gate above: a confident "no provider anywhere" verdict cannot be trusted when a
-        // framework-bearing tree in this run extracted almost no routes (the S2 framework-silence
-        // tripwire condition, `framework_silence::provide_blind_sources`) — the provider may live in that
-        // blind tree, unseen. `http_provide_counts` seeds every source in this run at 0 (not just sources
-        // that appear in `http_provides`) so a framework-importer with zero extracted routes — the most
-        // blind case — is never silently dropped from the count map.
+        // Provide-side blindness gate — mirror of `unconsumed-mutation-endpoint`'s consume-blind gate: a
+        // "no provider anywhere" verdict is untrusted when a framework-bearing tree extracted almost no
+        // routes (S2 tripwire, `framework_silence::provide_blind_sources`) — the provider may live there
+        // unseen. `http_provide_counts` seeds every source at 0 (not just those in `http_provides`) so a
+        // framework-importer with zero routes — the most blind case — is never dropped from the count map.
         let mut http_provide_counts_map: BTreeMap<String, usize> = source_ios
             .iter()
             .map(|s| (s.source.clone(), 0usize))
@@ -291,6 +285,15 @@ pub(crate) fn compute_cross_layer_findings(
             &consume_bodies,
             &provide_bodies,
         ));
+    }
+    if zzop_core::is_enabled(&gate, "cross-layer/retrying-write-no-idempotency") {
+        sources.push(
+            zzop_rules_cross_layer::retrying_write_no_idempotency_findings(
+                &cross_layer.edges,
+                &retry_sites,
+                attribute_stores,
+            ),
+        );
     }
 
     zzop_core::merge_findings(sources, &merge_config)

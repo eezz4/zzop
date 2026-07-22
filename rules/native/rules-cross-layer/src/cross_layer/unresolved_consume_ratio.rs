@@ -114,6 +114,7 @@ mod tests {
                 line,
                 raw: raw.map(str::to_string),
                 method: None,
+                retry_configured: None,
             },
         }
     }

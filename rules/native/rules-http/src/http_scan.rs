@@ -59,11 +59,37 @@ pub(crate) fn build_name_index(symbols: &[SourceSymbol]) -> HashMap<String, Vec<
 /// Resolves a handler reference string to a unique symbol id, stripping wrapper calls (`rateLimit(fn)`) and
 /// member access (`ctrl.list`). `None` when unknown or ambiguous (defined in multiple files) — never guessed.
 pub(crate) fn resolve_handler(handler: &str, idx: &HashMap<String, Vec<String>>) -> Option<String> {
+    resolve_handler_scoped(handler, idx, None)
+}
+
+/// [`resolve_handler`] with an optional route-FILE tie-break. When a handler name is ambiguous repo-wide
+/// (defined in multiple files), a `Some(route_file)` disambiguates to the candidate declared in that file:
+/// a decorator-routed handler (NestJS `@Delete() delete()`) is a METHOD of the controller class in the
+/// file its route `IoProvide` points at, so a bare method name colliding across controllers (`delete` in
+/// four controllers) still resolves uniquely once scoped to the route's own file. Only a UNIQUE in-file
+/// candidate resolves; two `delete`s in one file, or none, still yields `None` (do-not-guess). With
+/// `None` the behavior is identical to the original repo-wide-unique-or-nothing rule.
+pub(crate) fn resolve_handler_scoped(
+    handler: &str,
+    idx: &HashMap<String, Vec<String>>,
+    route_file: Option<&str>,
+) -> Option<String> {
     let ids: Vec<&str> = ident_re().find_iter(handler).map(|m| m.as_str()).collect();
     for ident in ids.iter().rev() {
         match idx.get(*ident) {
             Some(candidates) if candidates.len() == 1 => return Some(candidates[0].clone()),
-            Some(_) => return None, // ambiguous — do not guess
+            Some(candidates) => {
+                // Ambiguous repo-wide. Tie-break to the route's own file, if one was given.
+                if let Some(file) = route_file {
+                    let mut in_file = candidates
+                        .iter()
+                        .filter(|id| id.split('#').next() == Some(file));
+                    if let (Some(one), None) = (in_file.next(), in_file.next()) {
+                        return Some(one.clone());
+                    }
+                }
+                return None; // still ambiguous — do not guess
+            }
             None => continue,
         }
     }

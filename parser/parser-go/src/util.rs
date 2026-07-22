@@ -10,6 +10,17 @@ pub(crate) fn line_of(node: Node) -> u32 {
     node.start_position().row as u32 + 1
 }
 
+/// 1-based END line of any tree-sitter node — `lang::loop_spans`'s inclusive `(start, end)` span pairs
+/// need this alongside [`line_of`]'s start-line convention. `node.end_position().row` is the 0-based
+/// row of the position immediately AFTER the node's last byte; tree-sitter only advances the row once
+/// a `\n` byte has actually been consumed, so for any node whose last byte isn't itself a newline (true
+/// of every node this crate spans — a `}`, an identifier, ...) `end_position().row` is exactly the row
+/// of that last byte, i.e. this returns the same 1-based line `line_of` would if called on the node's
+/// own last character.
+pub(crate) fn end_line_of(node: Node) -> u32 {
+    node.end_position().row as u32 + 1
+}
+
 /// The verbatim source text spanning `node`, empty on any UTF-8 boundary failure (never panics —
 /// tree-sitter guarantees valid byte ranges for a well-formed tree, but a defensive empty string
 /// keeps this infallible for callers).
@@ -69,4 +80,8 @@ mod tests {
         // Non-ASCII exported identifier (Go allows Unicode identifiers).
         assert!(is_exported("Ünïcode"));
     }
+
+    // `end_line_of` has no standalone unit test here (it needs a real parsed node to exercise, and
+    // this module has no parser access of its own) — it's exercised indirectly by every
+    // `lang::loop_spans` test, which asserts exact `(start, end)` line pairs derived from it.
 }

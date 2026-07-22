@@ -134,6 +134,7 @@ mod tests {
                 line,
                 raw: None,
                 method: None,
+                retry_configured: None,
             },
         }
     }
@@ -205,6 +206,7 @@ mod tests {
                     line: 4,
                     raw: None,
                     method: None,
+                    retry_configured: None,
                 },
                 candidates: vec![TaggedProvide {
                     source: "db1".to_string(),

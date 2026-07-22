@@ -61,48 +61,61 @@ fn extra_path_segments_after_protected_segment_is_still_flagged() {
     assert_eq!(hits(&out, "auth-gates").len(), 1, "{:?}", out.findings);
 }
 
+// --- the removed keyword carve-out (opus F2, 2026-07-23): a keyword inside a handler IDENTIFIER must
+// NOT clear a security finding. The old same-line token belt over-cleared exactly these shapes (and,
+// systematically, Django's `views.AdminView` / Java's `value="/admin/..."` argument) — a lexical name
+// is not auth evidence. Real evidence = the `auth-guarded` attribute (native recognizer or Mode B
+// injection); vetted cases use the `// auth-gate-ok` marker. These pins keep the carve-out removed.
+
 #[test]
-fn handler_identifier_containing_admin_keyword_passes() {
+fn handler_identifier_containing_admin_keyword_no_longer_clears() {
     let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const adminHandlers: any;\napiRoutes.get(\"/api/admin/users\", adminHandlers.userList);\n",
     );
     let out = scan(&dir);
-    assert!(hits(&out, "auth-gates").is_empty(), "{:?}", out.findings);
+    assert_eq!(hits(&out, "auth-gates").len(), 1, "{:?}", out.findings);
 }
 
 #[test]
-fn handler_identifier_containing_role_keyword_passes() {
+fn handler_identifier_containing_role_keyword_no_longer_clears() {
     let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const handlers: any;\napiRoutes.get(\"/api/internal/report\", handlers.roleBasedReport);\n",
     );
     let out = scan(&dir);
-    assert!(hits(&out, "auth-gates").is_empty(), "{:?}", out.findings);
+    assert_eq!(hits(&out, "auth-gates").len(), 1, "{:?}", out.findings);
 }
 
 #[test]
-fn handler_identifier_containing_require_admin_call_passes() {
+fn require_admin_hof_wrapper_fires_as_a_known_fp_until_natively_recognized() {
+    // `apiRoutes.get(path, requireAdmin(handler))` IS a genuine route-level guard idiom, but a
+    // wrapped-handler LAST argument is not judged by the native guard recognizer today (it only judges
+    // middleware args BETWEEN path and handler), so no `auth-guarded` attribute exists and the rule
+    // fires. Deliberate trade (documented, backlog follow-up: judge a call-expression last-arg's
+    // guard-vocab callee natively): a noisy-but-escapable FP (marker/attr/disable) beats the removed
+    // belt's silent over-clear on names like `adminHandlers`. If the native recognizer learns this
+    // idiom, flip this pin to assert the attribute veto instead.
     let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const handlers: any;\ndeclare function requireAdmin(h: any): any;\napiRoutes.get(\"/api/admin/settings\", requireAdmin(handlers.settings));\n",
     );
     let out = scan(&dir);
-    assert!(hits(&out, "auth-gates").is_empty(), "{:?}", out.findings);
+    assert_eq!(hits(&out, "auth-gates").len(), 1, "{:?}", out.findings);
 }
 
 #[test]
-fn handler_identifier_containing_guard_keyword_passes() {
+fn handler_identifier_containing_guard_keyword_no_longer_clears() {
     let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const guardedHandlers: any;\napiRoutes.delete(\"/api/internal/flush\", guardedHandlers.flush);\n",
     );
     let out = scan(&dir);
-    assert!(hits(&out, "auth-gates").is_empty(), "{:?}", out.findings);
+    assert_eq!(hits(&out, "auth-gates").len(), 1, "{:?}", out.findings);
 }
 
 #[test]

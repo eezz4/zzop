@@ -47,7 +47,10 @@ const MAX_SAMPLES: usize = 3;
 /// documented over-disclosure tolerance includes `.d.ts` ambient declarations (`declare function
 /// fetch(` — `.d.ts` has extension `ts`) and comment/string occurrences — a types-only tree with 5+
 /// such lines and zero keyed consumes fires a warning it does not strictly merit; over-disclosure
-/// is safe, silence is fatal (same stance as S1's decorator line-scan). `pub(super)` so S7
+/// is safe, silence is fatal (the coverage self-report principle). Unlike S1's decorator scan — which
+/// anchors on a line-LEADING match to discount comment/string mentions — a `fetch(` call is commonly
+/// mid-line (`await fetch(`), so there is no comparable anchor here; the raw-text tolerance stays,
+/// mitigated instead by the `region_is_internal_intent` first-arg filter. `pub(super)` so S7
 /// (`fetch_wrapper`) walks the identical file-family filter over the identical candidate list — one
 /// extension policy for "can this file carry a js-runtime `fetch` idiom", not two.
 pub(super) fn is_js_ts_family(rel: &str) -> bool {
@@ -102,7 +105,7 @@ pub fn builtin_fetch_lexical_warning(
 /// envelope over just the consume channel, plus the embedded-contract pointer. Split into a `const` so
 /// the tree-wide wording stays BYTE-IDENTICAL to its pre-census form while the new app-scoped wording
 /// reuses the exact same tail.
-const FUNNEL_TAIL: &str = "builtin fetch has no package import for the http-client tripwire to anchor on, and the call idiom is likely a hand-rolled wrapper whose computed URLs this extraction pass cannot key; cross-layer joins will be near-silent from this tree's consume side — project this tree's consumes with a Mode B overlay adapter (see the adapter examples) to restore cross-layer visibility: a partial envelope covering just the consume channel is enough; contract: `zzop-mcp contract envelope-guide` on MCP hosts, docs/NORMALIZED_AST.md in the repo.";
+const FUNNEL_TAIL: &str = "builtin fetch has no package import for the http-client tripwire to anchor on, and the call idiom is likely a hand-rolled wrapper whose computed URLs this extraction pass cannot key; cross-layer joins will be near-silent from this tree's consume side — project this tree's consumes with a Mode B overlay adapter (see the adapter examples) to restore cross-layer visibility: a partial envelope covering just the consume channel is enough; contract: `zzop contract envelope-guide` on MCP hosts, docs/NORMALIZED_AST.md in the repo.";
 
 /// Counts INTERNAL-INTENT builtin `fetch(` call sites (per [`region_is_internal_intent`], classifying
 /// each match's first-argument region via [`ArgSpan::First`] so a later options-object literal cannot

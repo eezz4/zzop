@@ -6,7 +6,7 @@
 //! `extract_file_io` adapter — the route is a function of the file's *path*, over data `assemble`
 //! already holds (`all_symbols`, the rel list), so nothing new is cached. One exception: Next.js
 //! `pages/api` handlers are `export default <expr>`, invisible to `parse_symbols`, so those
-//! candidate files are re-read from disk and lexically scanned
+//! candidate files are re-read from disk and AST-scanned, handler-body-scoped
 //! (`zzop_parser_typescript::scan_pages_api_handler`).
 //!
 //! v1 scope decisions (deliberate; revisit with field data):
@@ -14,7 +14,7 @@
 //!   existing `http` cross-layer rules with zero rule-layer changes.
 //! - Verb-export conventions (app-router/Medusa `export const GET/POST/...`, Remix `loader`→GET /
 //!   `action`→POST) are exact. A `pages/api` default-export handler serves any method, so its verb set
-//!   comes from the lexical scan's method-literal hints; a handler that names NO method literal emits
+//!   comes from the AST scan's method-literal hints; a handler that names NO method literal emits
 //!   ONE `zzop_core::UNKNOWN_VERB` sentinel provide (`"? <path>"`) rather than a fabricated {GET, POST}
 //!   — the `super::assemble` partition lifts it out of the exact-key join into the path-level
 //!   verb-unknown disclosure (`cross-layer/unknown-verb-route`). This reverses the former engine-wide
@@ -186,7 +186,7 @@ pub(crate) fn compose_file_convention_provides<'a>(
             continue;
         };
         let Some(text) = read_text(rel) else { continue };
-        let scan = zzop_parser_typescript::scan_pages_api_handler(&text);
+        let scan = zzop_parser_typescript::scan_pages_api_handler(rel, &text);
         let Some(line) = scan.default_export_line else {
             continue;
         };

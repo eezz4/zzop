@@ -32,6 +32,7 @@ mod test_util;
 
 pub use adapters::class_shapes::extract_class_shape_fragments;
 pub use adapters::client_base::{extract_client_base_prefix_marker, CLIENT_BASE_PREFIX_KIND};
+pub use adapters::client_base_generated::extract_generated_client_base_prefix_marker;
 pub use adapters::controller_decorators::{
     extract_controller_guarded_lines, extract_controller_prefix_route_fragments,
     extract_controller_provides,
@@ -73,163 +74,12 @@ pub use re_exports::{parse_dynamic_imports, parse_re_exports};
 pub use sfc_imports::extract_sfc_script_imports;
 pub use symbols::parse_symbols;
 
-/// Cache key ingredient for `zzop-cache`: parser id + pinned swc version + a logic-version counter, so an
-/// swc upgrade or a change in this crate's projected IR shape invalidates stale cached entries. The
-/// `swc_core-71.0.5` segment must match this crate's `Cargo.toml` pin exactly (TODO Phase 2: derive it
-/// from the pin automatically instead of hand-syncing). Each `+name-vN` suffix marks a projection-shape
-/// change — new IO kind, new fragment type, or a changed field on an existing one — that a cache entry
-/// from before that marker would not reflect and must not be served as fresh:
-/// - `v3` -> `v4`: NestJS-style `@Controller`/`@Get`/... route PROVIDES extraction.
-/// - `late-resolve-v1`: `IoConsume::method` now set on unresolved consumes; added the late cross-file
-///   constant re-resolution substrate (`const_map_fragment`/`resolve_raw_path`).
-/// - `oazapfts-v1`: recognizes the oazapfts-generated-SDK call family in HTTP egress. RETIRED by
-///   `oazapfts-removed-v1` below (decision: generated SDKs are injection adapters, not engine vocab) —
-///   left here so the marker's history stays readable; the recognition itself no longer exists.
-/// - `trpc-v1`: tRPC consume extraction plus per-file tRPC router fragments.
-/// - `router-mounts-v1`: code-registered router-mount fragments (Hono-style), replacing the old
-///   line-based route extractor — sees chained builders and cross-file mounts it couldn't before.
-/// - `wrapper-calls-v1`: FE HTTP-call wrapper fragments, re-anchoring consumes from a wrapper's
-///   internals to its real cross-file call sites.
-/// - `hono-client-v1`: Hono's typed `hc<AppType>()` proxy-client call shape as HTTP consumes.
-/// - `router-mounts-v2`: router-mount fragments gain an Express vocabulary alongside Hono; the
-///   fragment shape and engine-side compose pass are unchanged, only the recognizer's vocabulary grew.
-/// - `db-table-consume-v1`: `db_table_consume` — per-file `db-table` CONSUME facts from ORM/query-builder
-///   call sites (a Prisma model accessor `prisma.user.findMany()`, a `.from("table")` builder), the
-///   consumer side of the `db-table` cross-layer channel (a SQL/Prisma provide joins this consume).
-/// - `query-call-sites-v1`: `extract_query_call_sites` — per-file `zzop_core::QueryCallSite` facts for
-///   the schema x usage JOIN rules, replacing `zzop_rules_schema::join`'s own filesystem re-walk.
-/// - `store-binding-removed-v1`: the per-file store-binding recognizer (`extract_store_bound_models`) was
-///   removed — it recognized one project's `createStore`/`STORES`/`/domains/` convention, an app-specific
-///   environment that belongs in a Mode-B overlay, not native. `dead-model` now keys on the generic
-///   `identifier_counts` presence signal (see `zzop_rules_schema::usage`); a store binding is now injected
-///   as a generic `bound-model` attribute on the model `Symbol` (the entity-attribute channel), not a slot.
-/// - `write-sites-v1`: `SourceSymbol::write_sites` — per-symbol store-write site detection, computed once
-///   here instead of `zzop_rules_http::http_scan` re-scanning each BFS-reached symbol's raw text on every
-///   analysis run.
-/// - `reexport-edges-v1`: `FileArtifact`/`FileIrSlice` now carry each file's `parse_re_exports` output
-///   (specifier + `type_only`) so `lang::resolve::build_dep`/`build_dep_with_workspace` can merge
-///   non-type-only re-export specifiers into the dep graph as real edges — a barrel file's re-exports
-///   used to be invisible to `dep`, undercounting fan-in and false-positiving `dead-candidates`.
-/// - `dynamic-import-edges-v1`: `FileArtifact`/`FileIrSlice` now carry each file's `parse_dynamic_imports`
-///   output (dynamic `import()` specifiers), merged into the dep graph as real edges (excluded from
-///   circular) so a code-split-only module keeps its fan-in and isn't false-positived by
-///   `dead-candidates`. Also, a type-only re-export now gains the same edge-but-excluded-from-cycles
-///   treatment a type-only import binding already had, instead of being dropped entirely.
-/// - `nest-global-prefix-v1`: `extract_global_prefix_marker` — a NestJS `app.setGlobalPrefix('api')`
-///   sentinel `IoProvide { kind: "nest-global-prefix", ... }`, ridden on the existing `provides` channel
-///   (no cache-schema bump) so `zzop-engine`'s tree assembly can prepend the global prefix onto every
-///   `http` provide key and then strip the sentinel before output.
-/// - `jsx-in-js-v1`: the parser now enables JSX syntax in `.js`/`.jsx` sources (not only `.tsx`), so
-///   egress/route call sites inside JSX-bearing `.js` files are extracted instead of failing to parse.
-/// - `base-relative-egress-v1`: a base-relative path literal on a recognized HTTP call
-///   (`axios.get('users/login')` — the `baseURL` idiom) now keys as its root-normalized path
-///   (`GET /users/login`) instead of falling unresolved; see `adapters::egress::base_relative_path`'s
-///   veto list for what still never keys.
-/// - `query-drop-v1`: HTTP CONSUME keys drop any `?...`/`#...` query/fragment suffix
-///   (`core::http_consume_interface_key`) — `axios.get('articles?limit=10')` and
-///   `` axios.get(`articles?${qs}`) `` now key as `GET /articles`, so they can exact-join (or
-///   route-near-miss against) the provide, instead of being structurally unmatchable. Provide keys
-///   are untouched (`?` in a route PATTERN is not a query separator).
-/// - `controller-prefix-ref-v1`: `const_map_fragment` now also folds every top-level (incl. `export`)
-///   `enum`'s string-valued members (`RouteKey.Asset -> "assets"`); AND a `@Controller(RouteKey.Asset)`
-///   dotted member-expression prefix no longer skips the whole controller — its methods are now
-///   projected as `zzop_core::ControllerPrefixRouteFragment`s
-///   (`extract_controller_prefix_route_fragments`), resolved against the merged const map at assemble
-///   time instead of being dropped outright.
-/// - `cond-literal-fanout-v1`: HTTP egress URL/verb resolution fans a two-literal ternary
-///   (`cond ? "/a" : "/b"`, or a computed member with a two-literal bracket) out into BOTH literal
-///   variants instead of failing to key — see `adapters::egress::matchers`.
-/// - `express-router-vocab-v2`: a further expansion of the Express router-mount registration vocabulary
-///   (beyond `router-mounts-v2`'s initial Express set) recognized by `adapters::router_mounts`.
-/// - `angular-httpclient-v1`: HTTP egress now recognizes Angular's dependency-injected `HttpClient`
-///   call shape (`this.<name>.get/post/put/delete/patch(url)` / `<name>.get/...(url)`), gated per-file
-///   on an `@angular/common/http` import plus a proven HttpClient receiver (constructor param property,
-///   class property, or `inject(HttpClient)`) — see `adapters::egress` module doc.
-/// - `str-concat-url-v1`: `+` string-concatenation URL resolution in HTTP egress (`base + "/x"`), the
-///   isomorphic counterpart to template-literal URL resolution — see `adapters::egress::concat`.
-/// - `loop-spans-v1`: `extract_loop_spans` — per-file loop-body line spans (`zzop_core::dsl::
-///   SourceFile::loop_spans`), feeding `MethodScan::trigger_in_loop`: every `for`/`for-in`/`for-of`
-///   (incl. `for await`)/`while`/`do-while` statement's whole span, plus the callback-argument-only span
-///   of a recognized array-iteration call (see [`ARRAY_ITERATION_METHODS`]).
-/// - `pathname-dispatch-v1`: `extract_pathname_dispatch_provides` — manual pathname-dispatch route
-///   PROVIDES (`if (url.pathname === "/x")` chains / `switch (url.pathname)`) from framework-less
-///   servers (raw Cloudflare Workers, Node `http.createServer`, ...), evidence-gated on URL
-///   provenance plus a Request-typed/named parameter in the same function, with Durable-Object
-///   class bodies vetoed — see `adapters::pathname_dispatch` module doc.
-/// - `base-carrier-drop-v1`: a consume URL variant with exactly one leading dynamic piece followed
-///   by a `/`-headed literal (`` `${BASE_URL}/me/x` ``, `BASE + '/x'`) now keys as its visible
-///   path (`GET /me/x`) instead of falling unresolved — the opaque base is dropped, never valued.
-///   `{}{}`-heads, non-`/` suffixes (invisible segment boundary), and post-drop `//` (host
-///   carrier) still refuse to key — see `adapters::egress`'s `consume_key_for`.
-/// - `body-shape-v1`: HTTP consume sites additionally carry the statically witnessed request-body
-///   object-literal key shape (`IoConsume::body`), controller `@Body()` params carry their DTO
-///   type ref (`IoProvide::body`), and every class declaration's field shape is emitted as a
-///   `ClassShapeFragment` for assemble-time DTO resolution — `cross-layer/body-field-drift`'s
-///   substrate. See `adapters::class_shapes` / `adapters::egress` / `adapters::controller_decorators`.
-/// - `axios-defaults-base-v1`: egress consumes carry a `client` provenance tag, and a literal
-///   `axios.defaults.baseURL = "..."` assignment emits a sentinel consume whose PATH PART the
-///   engine prepends to that tree's axios-tagged consume keys at assemble time (host deliberately
-///   ignored — deploy config, not contract; same effective-URL stance as the openapi adapter's
-///   `servers[].url` handling). Non-literal base values stay uninterpreted (adapter overlays cover
-///   them) — see `adapters::client_base`.
-/// - `oazapfts-removed-v1`: oazapfts recognition removed from HTTP egress (the `oazapfts-v1` call
-///   family, its `method`/`body` wrapper-unwrap reads, and the trailing `QS.`-suffix template drop) —
-///   generated SDKs are injection adapters, not engine vocab; the vocabulary moves to
-///   `examples/oazapfts-adapter`. Extraction output changes (fewer consumes recognized, a trailing
-///   `QS.` interpolation now keys as an ordinary `{}` placeholder instead of being dropped), so cached
-///   entries from before this marker must not be served as fresh.
-/// - `express-middleware-v1`: `router_mounts` now judges common Express middleware guard
-///   registrations (`app.use(prefix, requireAuth())`, a route-level middle argument, a
-///   `.use(prefix, mw1, mw2)` list) against a narrow guard-name/callee vocabulary (the
-///   `is_guard_name` predicate / `MIDDLEWARE_GUARD_CALLEES`, vetoed first by
-///   `ROUTER_NAME_VETO_SUFFIXES`), emitting the judgment as `RouterMountEntry::Verb::attr_keys` /
-///   `RouterMountEntry::Mount::attr_keys` / the new `RouterMountEntry::ScopedAttr` variant — composed
-///   at assemble time into the generic entity-attribute channel (`zzop_core::AttributeStore`) that
-///   `zzop_rules_http::mutating_route_no_auth` already consumed for Mode-B overlay evidence. Fragment
-///   shape change (new fields + variant), so cached entries from before this marker must not be
-///   served as fresh.
-/// - `db-table-bare-receiver-v1`: `db_table_consume`'s recognizer now ALSO anchors on a bare
-///   `<receiver>.<model>.<method>(...)` call (both `extract_db_table_consumes` and
-///   `extract_query_call_sites`), where `<receiver>` is a plain identifier this file has import
-///   evidence binds to a Prisma client (`prisma_bound_receivers`) — the be-express
-///   `import prisma from '../prisma/prisma-client'` idiom, previously invisible (`getPrisma()`-only).
-///   Strictly additive (more call shapes recognized, no existing shape's output changes), but cached
-///   entries from before this marker must not be served as fresh since they lack the new facts.
-/// - `intra-file-wrapper-v1`: the wrapper-def recognizer now ALSO collects file-PRIVATE top-level
-///   wrapper functions/const-arrows (a `Stmt::Decl`, not just `export`ed decls) — the common idiom of
-///   a private `function request(method, path) { fetch(base + path) }` below a `// --- private ---`
-///   line, called only by same-file callers (`getGroupInfo() → request("GET", ` + a path template)).
-///   Their same-file consume join already worked; only def-collection was export-gated. Strictly
-///   additive (new keyed http consumes appear for these shapes, no existing shape changes), but cached
-///   entries from before this marker must not be served as fresh since they lack the new facts.
-/// - `pathname-dispatch-regex-v1`: the pathname-dispatch adapter now ALSO extracts raw-Worker
-///   `pathname.match(/re/)` parameterized routes (a bound `const m = pathname.match(...)` referenced
-///   by a later `if (m && ...)`, or the match inline in the test), converting an anchored regex
-///   literal to a `{}`-param route path — closes the gap that previously forced a hand-written Mode B
-///   overlay for regex-dispatch Workers. Strictly additive (new provides for these shapes; no
-///   existing literal/switch shape's output changes), but cached entries from before this marker lack
-///   the new route facts and must not be served as fresh.
-/// - `typeorm-entity-provide-v1`: `adapters::entity_decorators::extract_entity_db_table_provides` —
-///   a TypeORM `@Entity('table_name')` (or `@Entity({ name: 'table_name' })`) class decorator now
-///   emits a `db-table` PROVIDE keyed `table:<db_table_channel_casing(name)>`, joining the same
-///   cross-layer channel `parser-prisma`'s PSL-model provide and `parser-sql`'s DDL provide already
-///   feed. Bare `@Entity()` (no literal table name) is never-guessed and stays unrecognized. New
-///   PROVIDES for previously-invisible entities, so cached entries from before this marker must not
-///   be served as fresh.
-/// - `deferred-default-export-v1`: `parse_symbols` now back-attributes `exported`/`is_default` onto a
-///   top-level decl exported by a SEPARATE trailing statement — `export default foo;` (bare-ident form)
-///   and local `export { foo }` / `export { foo as default }` (no `from` clause) — instead of only the
-///   INLINE forms (`export function foo`, `export default function foo`). A non-ident default
-///   (`export default makeThing()`) still fabricates nothing. Fixes a real under-detection bug (e.g.
-///   fe-vite's `export default useX;` idiom was previously invisible), so `exported`/`is_default` now
-///   flip `true` for symbols that were wrongly `false` before — cached entries from before this marker
-///   must not be served as fresh.
-/// - `typeorm-repo-consume-v1`: two linked shape changes. `entity_decorators` provides now carry the
-///   decorated class name in `symbol` (was `None`); and `typeorm_repository` adds per-file `db-table`
-///   CONSUME facts (`key: None`, `raw: <entity class>`) from `@InjectRepository(X)`/`getRepository(X)`,
-///   the TypeORM consumer side of the `db-table` channel — resolved engine-side against the entity-class
-///   index so intra-app `shared-db-table` can fire (previously only Prisma-accessor consumes existed).
-pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/v4+late-resolve-v1+oazapfts-v1+trpc-v1+router-mounts-v1+wrapper-calls-v1+hono-client-v1+router-mounts-v2+db-table-consume-v1+query-call-sites-v1+store-binding-removed-v1+write-sites-v1+reexport-edges-v1+dynamic-import-edges-v1+nest-global-prefix-v1+jsx-in-js-v1+base-relative-egress-v1+query-drop-v1+controller-prefix-ref-v1+cond-literal-fanout-v1+express-router-vocab-v2+angular-httpclient-v1+str-concat-url-v1+loop-spans-v1+pathname-dispatch-v1+base-carrier-drop-v1+body-shape-v1+axios-defaults-base-v1+oazapfts-removed-v1+express-middleware-v1+db-table-bare-receiver-v1+intra-file-wrapper-v1+pathname-dispatch-regex-v1+typeorm-entity-provide-v1+deferred-default-export-v1+express-all-verb-v1+typeorm-repo-consume-v1+asset-refs-v1+unknown-verb-sentinel-v1";
+/// Cache-bust token for `zzop-cache`: `parser-id/pinned-toolchain/last-change-version`. The
+/// `swc_core-71.0.5` segment must match this crate's `Cargo.toml` pin exactly (an swc upgrade changes
+/// extraction → must restamp). The trailing `CARGO_PKG_VERSION` is restamped whenever this crate's
+/// projected IR shape changes; an unchanged release keeps the old value so warm TS caches survive the
+/// upgrade (2026-07-22 version reform — the "what changed" narrative lives in git, not this string).
+pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/0.21.0";
 
 /// POLICY VOCABULARY — array-iteration callback methods whose first function-shaped argument runs once
 /// per element (`Array.prototype` iteration methods only; `Map`/`Set`/`for...in` etc. are out of scope).

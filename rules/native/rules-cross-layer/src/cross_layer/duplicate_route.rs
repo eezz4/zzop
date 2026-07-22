@@ -170,6 +170,7 @@ mod tests {
                     line: 1,
                     raw: None,
                     method: None,
+                    retry_configured: None,
                 },
                 candidates: vec![
                     dead("GET /health", "svc-a", "svc-a/health.ts", 3),

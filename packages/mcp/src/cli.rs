@@ -1,9 +1,9 @@
-//! CLI argv-dispatch helpers shared by `main.rs`'s subcommand match — kept out of the binary entry so
+//! CLI argv-dispatch helpers shared by the `zzop` binary's subcommand match (`src/bin/zzop.rs`) — kept out of the binary entry so
 //! it stays a thin dispatch table. Both exit the process directly (a CLI arg mistake is terminal) and
 //! carry the exit-code contract: 2 = argument-shape error, 1 = runtime (unreadable file / invalid).
 
 /// A dash-leading argument in a path/pattern position is NEVER swallowed as a path or pattern —
-/// `zzop-mcp analyze --help` must be a usage error, not "path does not exist: --help". Anything
+/// `zzop analyze --help` must be a usage error, not "path does not exist: --help". Anything
 /// dash-shaped here exits 2 with the subcommand's usage line.
 pub fn reject_flag_like_args<'a>(args: impl IntoIterator<Item = &'a str>, usage: &str) {
     for arg in args {
@@ -19,7 +19,7 @@ pub fn reject_flag_like_args<'a>(args: impl IntoIterator<Item = &'a str>, usage:
 /// on it — the `validate-envelope`/`validate-rule-pack` subcommands' own exit contract. Missing/extra/
 /// flag-shaped args exit 2, an unreadable file exits 1, exactly like every sibling subcommand.
 pub fn run_file_validate(args: &[String], usage_tail: &str, validate: fn(&str) -> String) -> ! {
-    let usage = format!("usage: zzop-mcp {usage_tail}");
+    let usage = format!("usage: zzop {usage_tail}");
     let Some(path) = args.get(2) else {
         eprintln!("{usage}");
         std::process::exit(2);
@@ -32,7 +32,7 @@ pub fn run_file_validate(args: &[String], usage_tail: &str, validate: fn(&str) -
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("zzop-mcp: failed to read {path}: {e}");
+            eprintln!("zzop: failed to read {path}: {e}");
             std::process::exit(1);
         }
     };

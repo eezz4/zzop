@@ -122,6 +122,7 @@ fn emit(rel: &str, verb: &str, url_arg: Node, src: &str) -> IoConsume {
         line: line_of(url_arg),
         raw,
         method,
+        retry_configured: None,
         body: None,
         client: Some("httpclient".to_string()),
     }

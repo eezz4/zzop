@@ -235,6 +235,165 @@
         ],
         "snippet_max": 160
       }
+    },
+    {
+      "id": "db-client-new-in-loop",
+      "severity": "warning",
+      "message": "A DB/connection client or pool (`new PrismaClient()`/`new Pool()`/`new Sequelize()`/`new MongoClient()`/`new IORedis()`/`new Redis()`, or a `createPool`/`createClient`/`createConnection` call) is constructed structurally inside a loop body — verified against the parser's projected loop spans (the constructor call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function. To avoid firing on same-named non-database constructs (a worker-pool `new Pool()`, an API `createClient()`, a raw-socket `createConnection()`), the rule only scans files that import a database driver/ORM. Allocating a fresh connection/pool per iteration exhausts the database connection pool under any real iteration count. Hoist the client to a module-level singleton, or construct it once outside the loop and reuse it across iterations. This sharpens `client-per-request` (which fires on request-handler co-occurrence — a `new PrismaClient()` alongside `req.`/`res.` evidence anywhere in the function — rather than on loop containment); a handler that constructs a client inside a loop can trip both rules on the same line, which is expected since they assert different things. Suppress a vetted case with `// client-in-loop-ok`.",
+      "suppress_marker": "client-in-loop-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "require_file": "(?i)\\bPrismaClient\\b|\\bMongoClient\\b|\\bSequelize\\b|\\bIORedis\\b|\\b(?:mongoose|typeorm|knex)\\b|\\bfrom\\s+['\"](?:pg|mysql2?|redis|ioredis|mongodb|@prisma/client)['\"]|\\brequire\\s*\\(\\s*['\"](?:pg|mysql2?|redis|ioredis|mongodb)['\"]",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\bnew\\s+(?:PrismaClient|Pool|Sequelize|MongoClient|IORedis|Redis)\\s*\\(|\\b(?:createPool|createClient|createConnection)\\s*\\(", "label": "client-ctor" }
+        ],
+        "trigger": "client-ctor",
+        "trigger_in_loop": true,
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "write-in-loop-no-tx",
+      "severity": "warning",
+      "message": "A database write (`create`/`createMany`/`update`/`updateMany`/`delete`/`deleteMany`/`upsert`/`insert`/`save`) on a DB-client-shaped receiver (`prisma`/`db`/`tx`/`client`/`repo`/...) executes structurally inside a loop body — verified against the parser's projected loop spans, not mere co-occurrence — while the enclosing function opens no transaction (no `$transaction(`, bare `transaction(` call, or SQL `BEGIN`). Each iteration autocommits independently: a mid-loop failure leaves the already-committed prefix behind with nothing to roll it back, and a caller retry double-applies the rows that already committed. This is the loop-containment-proven sibling of `multi-write-no-tx`, which requires two different write-verb families (a create-family call and a mutate-family call) to co-occur in the same function — it structurally misses a single-verb write repeated once per loop iteration, exactly the shape this rule catches. Wrap the loop body in `$transaction(...)`, or replace the per-row writes with a batch `createMany`/`updateMany` call. Suppress a vetted case with `// write-in-loop-ok`.",
+      "suppress_marker": "write-in-loop-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\b(?:prisma|db|tx|client|repo(?:sitory|sitories)?s?)\\.(?:\\w+\\.)?(?:create|createMany|update|updateMany|delete|deleteMany|upsert|insert|save)\\s*\\(", "label": "write" }
+        ],
+        "trigger": "write",
+        "trigger_in_loop": true,
+        "absent": [
+          { "pattern": "\\$transaction\\s*\\(", "label": "prisma-tx" },
+          { "pattern": "\\btransaction\\s*\\(", "label": "bare-tx-call" },
+          { "pattern": "(?i)(['\"`]BEGIN['\"`]|\\bBEGIN\\s+TRANSACTION\\b)", "label": "sql-begin" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "check-then-act-in-loop",
+      "severity": "warning",
+      "message": "A `.create(`/`.insert(` call whose own line is verified to sit inside a loop body (via the parser's projected loop spans) co-occurs in the same function with a `findFirst`/`findUnique`/`findOne`/`exists` read, and no `connectOrCreate`/`upsert`/`ON CONFLICT`/`ON DUPLICATE KEY` guard appears anywhere in the function. The create is loop-proven; the read is a whole-function co-occurrence (not itself proven to sit in the loop). This is the batch get-or-create shape: two concurrent workers (or an overlapping retry) can both observe \"absent\" for the same key on an iteration and both insert a duplicate row. It sharpens `find-then-create-no-unique` (a whole-function co-occurrence heuristic) by additionally loop-proving the create, and can fire alongside it on the overlapping shape. Add a unique constraint and replace the check-then-act with `upsert`/`connectOrCreate`; a `$transaction` wrap alone does not close this race at the database's default READ COMMITTED isolation level. Suppress a vetted case with `// check-act-loop-ok`.",
+      "suppress_marker": "check-act-loop-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\.(?:findFirst|findUnique|findOne|exists)\\s*\\(", "label": "read" },
+          { "pattern": "\\.(?:create|insert)\\s*\\(", "label": "create" }
+        ],
+        "trigger": "create",
+        "trigger_in_loop": true,
+        "absent": [
+          { "pattern": "connectOrCreate|\\.upsert\\s*\\(|(?i)ON\\s+CONFLICT|(?i)ON\\s+DUPLICATE\\s+KEY", "label": "safe" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "idempotency-key-regenerated-per-retry",
+      "severity": "warning",
+      "message": "An idempotency key is assigned a FRESH random value (`randomUUID()`/`uuidv4()`/`nanoid()`/`cuid()`/...) on a line that sits structurally inside a loop/retry body — verified against the parser's projected loop spans (the assignment's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — so every attempt carries a DIFFERENT key and the server treats each retry as a brand-new request, defeating the idempotency the key exists to provide. The key is present and correctly named, so this survives ordinary code review. Generate the key ONCE before the loop and reuse it across every attempt, or derive it deterministically from the request payload (e.g. a hash of a stable business id) instead of a random generator. Suppress a vetted case with `// idempotency-regen-ok`.",
+      "suppress_marker": "idempotency-regen-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "require_file": "(?i)idempotenc",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "(?i)['\"]?idempotenc[\\w-]*['\"]?\\s*[:=]\\s*(?:await\\s+)?(?:crypto\\.)?(?:randomUUID|uuidv4|uuid|nanoid|cuid)\\s*\\(", "label": "regen-key" }
+        ],
+        "trigger": "regen-key",
+        "trigger_in_loop": true,
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "unawaited-transaction",
+      "severity": "warning",
+      "message": "A `$transaction(`/`.transaction(` call on a DB-client-shaped receiver (`prisma`/`db`/`client`) whose promise is neither awaited, returned, nor chained — it runs detached, and the handler can send its response before the transaction commits or fails. Await the call (or return it, or attach `.then()`/`.catch()`). Suppress a vetted case with `// unawaited-tx-ok`.",
+      "suppress_marker": "unawaited-tx-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "skip_comment_lines": true,
+        "line_pattern": "\\b(?:prisma|db|client)\\.\\$?transaction\\s*\\(",
+        "exclude_pattern": "\\b(await|return)\\b|\\.then\\b|\\.catch\\b|[^=!<>]=[^=>]",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "manual-tx-no-rollback",
+      "severity": "warning",
+      "message": "A `BEGIN`/`beginTransaction()`/`startTransaction()` call and a `COMMIT`/`.commit()` call both appear somewhere in the same function — this is a co-occurrence heuristic, not proof COMMIT actually follows BEGIN or that nothing is nested between them, but when it's a genuine manual transaction: no `ROLLBACK`/`.rollback()` appears anywhere in the function either, so an error raised between BEGIN and COMMIT has nothing to release it, and the half-open transaction poisons the pooled connection for whichever request borrows it next. Wrap the work in a try/catch that issues `ROLLBACK` (or `.rollback()`) on error, or use the ORM's managed `$transaction(...)` wrapper instead of manual BEGIN/COMMIT. Suppress a vetted case with `// manual-tx-ok`.",
+      "suppress_marker": "manual-tx-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "(?i)['\"]BEGIN['\"]|\\bbeginTransaction\\s*\\(|\\bstartTransaction\\s*\\(", "label": "begin" },
+          { "pattern": "(?i)['\"]COMMIT['\"]|\\.commit\\s*\\(", "label": "commit" }
+        ],
+        "trigger": "begin",
+        "absent": [
+          { "pattern": "(?i)['\"]ROLLBACK['\"]|\\.rollback\\s*\\(", "label": "rollback" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "tx-swallows-error-commits",
+      "severity": "warning",
+      "message": "An empty `catch {}` appears in the same function as a `$transaction(`/`@Transactional`/`beginTransaction()` call — swallowing the error prevents the throw that would trigger a rollback, so a partially-failed transaction can commit as if it succeeded. This is a co-occurrence heuristic: it doesn't prove the empty catch wraps the transaction's body, only that both patterns appear in the same function span. Log the error and rethrow it (or handle rollback explicitly) instead of swallowing it. Suppress a vetted case with `// tx-catch-ok`.",
+      "suppress_marker": "tx-catch-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\$transaction\\s*\\(|@Transactional|\\bbeginTransaction\\s*\\(", "label": "tx" },
+          { "pattern": "catch\\s*(?:\\([^)]*\\))?\\s*\\{\\s*\\}", "label": "empty-catch" }
+        ],
+        "trigger": "empty-catch",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "critical-write-default-isolation",
+      "severity": "info",
+      "message": "A `$transaction(`/`@Transactional` span also matches a money/inventory-named identifier (`balance`/`amount`/`payment`/`wallet`/`ledger`/`charge`/`refund`/`invoice`/`inventory`/`stock`) and a write call (`update`/`create`/`upsert`/`increment`/`decrement`), but sets no explicit isolation level (`isolationLevel`/`Serializable`/`RepeatableRead`) and takes no `FOR UPDATE` row lock — this is a co-occurrence heuristic, not proof the write actually touches the money field or that it runs inside the transaction body, and whether the database's default isolation is actually unsafe here depends on the target engine (e.g. READ COMMITTED on Postgres permits lost updates and write skew for a read-modify-write; other engines and defaults differ). Treat this as a review nudge, not a confirmed defect. Set an explicit isolation level — e.g. `{ isolationLevel: Prisma.TransactionIsolationLevel.Serializable }` — or take a `SELECT ... FOR UPDATE` row lock for the money-critical read-modify-write. Suppress a vetted case with `// tx-isolation-ok`.",
+      "suppress_marker": "tx-isolation-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\$transaction\\s*\\(|@Transactional", "label": "tx" },
+          { "pattern": "(?i)\\b(?:balance|amount|payment|wallet|ledger|charge|refund|invoice|inventory|stock)\\w*\\b", "label": "money" },
+          { "pattern": "\\.(?:update|create|upsert|increment|decrement)\\s*\\(|\\b(?:increment|decrement)\\s*:", "label": "write" }
+        ],
+        "trigger": "tx",
+        "absent": [
+          { "pattern": "(?i)isolationLevel|Serializable|RepeatableRead|REPEATABLE\\s+READ|\\bFOR\\s+UPDATE\\b", "label": "isolation" }
+        ],
+        "snippet_max": 160
+      }
     }
   ]
 }

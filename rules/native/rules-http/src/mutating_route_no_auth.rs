@@ -11,15 +11,16 @@
 //! finding (recall loss outweighs FP savings for a security rule): a blanket `require[A-Z]\w*` (clears
 //! `requireBody`-style validation; `requireAuth`/`requireOwner` still match via the stem), and env gates
 //! (`isProduction`/`isLocal`/`isDev` — WHERE code runs, not WHO calls it: route-EXPOSURE, not auth). A
-//! real guard named outside this vocabulary still false-positives here —
-//! the finding message points at config `rules: { "mutating-route-no-auth": "off" }` (embedders:
-//! `disabled_rules`) as the escape hatch, since this rule has no inline suppression marker.
+//! real guard named outside this vocabulary still false-positives — the message points at config
+//! `rules: { "mutating-route-no-auth": "off" }` (embedders: `disabled_rules`), this rule having no marker.
 //!
 //! ## Decidable subset
-//! Only mutating-method provides whose `symbol` resolves to a UNIQUE known symbol are checked
-//! (`http_scan::resolve_handler`'s "do not guess" contract) — an unresolved or ambiguous handler is
-//! skipped. `bfs_reachable` can match the handler's own symbol id at depth 0, so a self-describing handler
-//! name alone is enough to clear this check.
+//! Only mutating provides whose handler resolves to a known symbol are checked
+//! (`http_scan::resolve_handler_scoped`, "do not guess"): a repo-wide-unique name resolves directly; a name
+//! ambiguous repo-wide resolves ONLY to a UNIQUE candidate in the route's OWN file — sound for a decorator-
+//! routed method (it lives in its controller file), with a narrow imported-member-handler residual noted at
+//! that fn. Any other ambiguity, or an unknown handler, is skipped; a `bfs_reachable` depth-0 self-match
+//! clears a self-describing handler name on its own.
 //!
 //! ## Call-graph language coverage (the OTHER half of the decidable subset)
 //! `symbol_graph` is built from re-parsed TypeScript/JavaScript source AND (as of
@@ -30,16 +31,13 @@
 //! BFS can never find a guard there. [`is_call_graph_covered`] makes this explicit and load-bearing: a
 //! mutating provide outside the covered set is exempt from the BFS entirely, same "do not guess" spirit
 //! as the unresolved/ambiguous-handler skip above — recall for an uncovered ecosystem is zero until real
-//! coverage exists, honest given the mechanism has no evidence for it, vs. a naming-accident-gated mix of
-//! false positives/negatives (skipped only when `resolve_handler` happens to fail on an unrelated name
-//! collision) that looks like a bug and is one.
+//! coverage exists, honest given the mechanism has no evidence for it.
 //! Lifting the exemption for a language needs two additions outside this crate: (1) a `RawCall`-producing
 //! extractor (`RawCall`'s own doc, `crates/core/src/callgraph.rs`); (2) engine wiring in
 //! `run_callgraph_rules` to gather that language's calls. Java is the first to have done both: its
-//! extractor is `zzop_parser_java_21::lang::calls::parse_calls`; its `resolve_file` is an
-//! opaque-specifier stand-in, not real package resolution (see `run_callgraph_rules`'s doc for why
-//! that's sound here). Neither addition is this crate's call to make (`rules/**` cannot depend on
-//! `zzop_parser_typescript`/`zzop_parser_java_21`/engine internals) — see its dependency boundary.
+//! extractor is `zzop_parser_java_21::lang::calls::parse_calls`; its `resolve_file` is an opaque-specifier
+//! stand-in, not real package resolution (see `run_callgraph_rules`'s doc). Neither addition is this crate's
+//! call to make (`rules/**` cannot depend on parser/engine internals) — see its dependency boundary.
 //!
 //! ## Precision limit (and its injection completion)
 //! This is a vocabulary-based reachability check over the CALL graph only. Route-level middleware —
@@ -49,16 +47,13 @@
 //!
 //! Middleware is a per-project environment fact the native call-graph can't see — so, per zzop's design
 //! line (native sees the common case; everything else is injected), it is COMPLETED BY INJECTION rather
-//! than by ever-growing native middleware modeling. The common Express shapes (`app`/`router.use(guard)`,
-//! a route-level guard argument) are the exception that proves the rule: the native TypeScript parser's
-//! router-mounts producer (`zzop_parser_typescript::adapters::router_mounts`) now judges and emits the
-//! same attribute directly, PREPAID injection for that one common environment, not a second code path —
-//! everything outside that vocabulary (a non-Express framework, a project's own custom guard naming)
-//! still needs an adapter to inject it. A producer/adapter that understands a project's
-//! middleware injects an [`AUTH_GUARDED_ATTR`] attribute on the guarded route (an `IoKey`) or router
-//! prefix (a `PathScope`) through the generic entity-attribute channel (`zzop_core::AttributeStore`,
-//! [`ScanMutatingRouteNoAuthInput::route_attr_store`]); the native vocab BFS and the injected evidence
-//! COMPOSE (either clears the route). This is one consumer of a general channel, not a bespoke auth path.
+//! than ever-growing native middleware modeling. The common Express shapes (`app`/`router.use(guard)`, a
+//! route-level guard argument) are prepaid: the native `router_mounts` producer
+//! (`zzop_parser_typescript::adapters::router_mounts`) emits the attribute directly. Everything else (a
+//! non-Express framework, custom guard naming) needs an adapter to inject an [`AUTH_GUARDED_ATTR`] on the
+//! guarded route (`IoKey`) or router prefix (`PathScope`) via the generic entity-attribute channel
+//! (`zzop_core::AttributeStore`, [`ScanMutatingRouteNoAuthInput::route_attr_store`]); native vocab BFS and
+//! injected evidence COMPOSE (either clears the route), one consumer of a general channel.
 //!
 //! ## Match granularity: tail name PLUS the immediate qualifier
 //! [`is_guard_id`] checks TWO trailing segments of a visited id (`<file>#<Receiver>.<method>`), with
@@ -110,7 +105,7 @@ use regex::Regex;
 use zzop_core::callgraph::{bfs_reachable, SymbolGraph};
 use zzop_core::{disable_hint, Finding, Severity, SourceSymbol};
 
-use crate::http_scan::{build_name_index, resolve_handler};
+use crate::http_scan::{build_name_index, resolve_handler_scoped};
 use zzop_core::is_test_file;
 
 /// Default guard-name vocabulary — see module doc "Guard vocabulary".
@@ -247,7 +242,12 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
         let Some((method, path)) = p.key.split_once(' ') else {
             continue;
         };
-        let Some(handler_symbol) = resolve_handler(handler_ref, &name_index) else {
+        // Scope ambiguity tie-break to the route's own file: a NestJS `@Delete() delete()` handler is a
+        // controller-class method in `p.file`, so a bare method name colliding across controllers
+        // (`delete` in four controllers) still resolves — otherwise the whole rule is inert on idiomatic
+        // decorator-routed controllers.
+        let Some(handler_symbol) = resolve_handler_scoped(handler_ref, &name_index, Some(&p.file))
+        else {
             continue; // unresolved/ambiguous handler — do not guess
         };
         if reaches_guard(&handler_symbol) {

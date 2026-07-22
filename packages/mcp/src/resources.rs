@@ -29,7 +29,7 @@ pub fn read(params: Option<&serde_json::Value>) -> Result<serde_json::Value, Str
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing `uri` argument".to_string())?;
     let name = uri.strip_prefix(URI_PREFIX).unwrap_or("");
-    // `embedded::find` is the shared name-lookup the `zzop-mcp contract <name>` CLI path also uses —
+    // `embedded::find` is the shared name-lookup the `zzop contract <name>` CLI path also uses —
     // one table, one resolver, so the MCP and terminal surfaces cannot drift.
     match crate::embedded::find(name) {
         Some(doc) => Ok(serde_json::json!({

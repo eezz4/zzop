@@ -40,6 +40,7 @@ fn unresolved(kind: &str, source: &str) -> TaggedConsume {
             line: 1,
             raw: Some("dyn".to_string()),
             method: None,
+            retry_configured: None,
         },
     }
 }

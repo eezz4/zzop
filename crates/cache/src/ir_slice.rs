@@ -8,6 +8,38 @@
 //! `wrapper_call_fragments` round-trip the matching `zzop_core` types verbatim; those types live in
 //! `zzop-core` (not the TypeScript parser crate that produces them) so this crate never needs
 //! `zzop-parser-typescript` as a dependency.
+//!
+//! # Structural-fact projection contract
+//!
+//! Every field below is a *structural fact* the per-file projection emits. They are NOT
+//! interchangeable: each belongs to one of five categories that fixes its consumer, lifetime, and
+//! obligations. A new field MUST declare which category it joins — that decision, not ad-hoc taste,
+//! determines where it is threaded and who reads it. The categories:
+//!
+//! 1. **Cross-tree IR** — `symbols`, `io`, `loc` (the `zzop_core::MinimalIr` channels; `dep` is
+//!    assembled from `imports`). Serialized and joined *across* trees by the cross-layer linker.
+//! 2. **DSL-facing per-file facts** — `symbols` (body spans = method-scan spans), `io` (`IoScan`),
+//!    `loop_spans` (`MethodScan::trigger_in_loop`). Reach `zzop_core::dsl::RuleContext` and are read
+//!    directly by DSL matchers. This set is a *deliberate contract*, not "whatever got threaded":
+//!    adding to it requires a real consuming rule (no speculative generality — an unused fact waits).
+//! 3. **Assemble-time composition fragments** — `procedure_router_fragments`,
+//!    `router_mount_fragments`, `wrapper_def_fragments`, `wrapper_call_fragments`,
+//!    `controller_prefix_route_fragments`, `class_shape_fragments`, `const_map_fragment`,
+//!    `query_call_sites`. Composed whole-tree at assemble into cross-layer / schema facts; never read
+//!    by a DSL matcher.
+//! 4. **Dep-graph augmentation** — `imports`, `re_exports`, `dynamic_imports`, `asset_refs`,
+//!    `used_names`. Feed the dependency graph and dead-code fan-in.
+//! 5. **Native-scanner facts + file flags** — `SourceSymbol::write_sites` (embedded, native-only),
+//!    `loc`, `degraded`, `minified_or_generated`.
+//!
+//! Contract shared by every category: OPTIONAL / graceful-degrade (an absent fact silently skips the
+//! rules that would read it — never a hard error; a parser that does not produce it is a matrix blank,
+//! not a failure), deterministic serialization, and — because this is the *cached* slice — a
+//! `CACHE_SCHEMA_VERSION` bump (or `#[serde(default)]` back-compat) on every add, so a warm run never
+//! serves a slice that silently lost the field. Language coverage is per-fact and uneven (e.g.
+//! `loop_spans` is TypeScript + Go, `write_sites` and `io`'s `IoConsume::retry_configured` tag are
+//! TypeScript-only, while `symbols` / `io` (structure) span every parser); that unevenness is a
+//! deliberate, documented state, not an oversight.
 
 use serde::{Deserialize, Serialize};
 use zzop_core::{
@@ -106,7 +138,8 @@ pub struct FileIrSlice {
     /// usage evidence, same reasoning as `query_call_sites` above.
     #[serde(default)]
     pub field_usage_tokens: Vec<String>,
-    /// This file's loop-body line spans (`zzop_parser_typescript::extract_loop_spans`) — mirrors
+    /// This file's loop-body line spans (`zzop_parser_typescript::extract_loop_spans` /
+    /// `zzop_parser_go::extract_loop_spans`) — mirrors
     /// `FileArtifact::loop_spans` / `zzop_core::dsl::SourceFile::loop_spans`. Must round-trip through the
     /// cache: dropping it on a hit would silently starve `Matcher::MethodScan::trigger_in_loop` of loop
     /// evidence for this file on every subsequent cache-warm run, same reasoning as `query_call_sites`

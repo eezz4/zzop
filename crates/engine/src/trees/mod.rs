@@ -119,7 +119,7 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
                  `.test.ts`/`.spec.tsx`, Python `test_*.py`) before the cross-tree join, since a route or \
                  call registered only in test/fixture code is not real deployed surface: {sample}. Raw \
                  per-file facts still remain visible in this tree's own `ir.io` (the raw `zzop-facade` \
-                 JSON output from embedding the engine directly; MCP tool replies and the `zzop-mcp` CLI \
+                 JSON output from embedding the engine directly; MCP tool replies and the `zzop` CLI \
                  omit `ir`) — only the JOIN input (`analyze_trees`' cross-layer output) is narrowed.",
                 dropped.provides,
                 dropped.consumes,
@@ -208,13 +208,24 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
     }
     let trpc_participating_sources: BTreeSet<String> =
         trpc_edge_counts_by_source.keys().cloned().collect();
+    // Per-tree attribute stores, keyed by source id — the provider-side lookup channel for
+    // `cross-layer/retrying-write-no-idempotency`'s `idempotency-guarded` veto (an edge's `to.source`
+    // picks the PROVIDER tree's store; native producer judgments and Mode B overlay injections both
+    // already live in `AnalyzeOutput::attributes`, so the veto covers every provider language via
+    // injection even where no native recognizer exists).
+    let attribute_stores: BTreeMap<String, &zzop_core::AttributeStore> = outputs
+        .iter()
+        .map(|(_, source, output)| (source.clone(), &output.attributes))
+        .collect();
     let cross_layer_findings = compute_cross_layer_findings(
         &source_ios,
         &cross_layer,
         trees,
         &package_imports,
         &trpc_participating_sources,
+        &attribute_stores,
     );
+    drop(attribute_stores); // end the immutable borrow of `outputs` before the mutable pushes below
 
     // Severity overrides for cross-layer findings are applied INSIDE `compute_cross_layer_findings`'s
     // final merge (union of every tree's overrides, first-declaring tree wins — see its doc): applying

@@ -302,6 +302,56 @@ fn route_registered_in_a_test_fixture_file_is_skipped() {
 }
 
 #[test]
+fn ambiguous_handler_name_resolves_to_the_route_file_and_is_flagged() {
+    // NestJS idiom: `@Delete() delete()` decorates a controller method in the route's OWN file, but the
+    // bare name `delete` is also defined in three other controllers/services repo-wide. Repo-wide
+    // resolution bails as ambiguous (the whole rule was inert on idiomatic NestJS); file-scoped tie-break
+    // resolves to user.controller's `delete`, reaches no guard, and correctly flags the unauth route.
+    let provides = vec![provide(
+        "DELETE /api/users/{}",
+        "src/user/user.controller.ts",
+        37,
+        "delete",
+    )];
+    let symbols = vec![
+        sym("src/user/user.controller.ts", "delete", 37),
+        sym("src/article/article.controller.ts", "delete", 24),
+        sym("src/user/user.service.ts", "delete", 10),
+        sym("src/article/article.service.ts", "delete", 12),
+    ];
+    let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+        io_provides: &provides,
+        symbols: &symbols,
+        symbol_graph: &Vec::new(),
+        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        decorator_guarded: &std::collections::HashSet::new(),
+        route_attr_store: &zzop_core::AttributeStore::default(),
+    });
+    assert_eq!(out.len(), 1, "{:?}", out);
+    assert_eq!(out[0].file, "src/user/user.controller.ts");
+}
+
+#[test]
+fn handler_ambiguous_even_within_the_route_file_stays_unresolved() {
+    // Two `delete` symbols in the SAME route file — file-scoping cannot disambiguate, so the rule still
+    // does not guess (preserves the do-not-guess contract).
+    let provides = vec![provide("DELETE /api/x/{}", "a/ctrl.ts", 5, "delete")];
+    let symbols = vec![
+        sym("a/ctrl.ts", "delete", 5),
+        sym("a/ctrl.ts", "delete", 20),
+    ];
+    let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+        io_provides: &provides,
+        symbols: &symbols,
+        symbol_graph: &Vec::new(),
+        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        decorator_guarded: &std::collections::HashSet::new(),
+        route_attr_store: &zzop_core::AttributeStore::default(),
+    });
+    assert!(out.is_empty(), "{:?}", out);
+}
+
+#[test]
 fn handler_reaching_a_require_prefixed_ownership_guard_is_not_flagged() {
     let provides = vec![provide(
         "DELETE /guilds/{}",
@@ -646,10 +696,11 @@ fn java_route_with_no_reachable_guard_is_flagged_now_that_java_is_covered() {
 }
 
 #[test]
-fn java_ambiguous_handler_name_is_still_skipped_not_guessed() {
-    // Same "do not guess" ambiguity bailout as `ambiguous_handler_name_defined_in_two_files_is_skipped`,
-    // exercised on a Java-flavored shape: `.java` becoming call-graph-covered doesn't touch the
-    // `resolve_handler` ambiguity gate, which runs BEFORE the BFS ever sees the (here, empty) graph.
+fn java_handler_unique_in_the_route_file_resolves_past_an_unrelated_collision() {
+    // A `@RestController`'s `@DeleteMapping deleteArticle()` is a method of the class in the route's own
+    // file; an unrelated `Other.deleteArticle` elsewhere makes the bare tail-name ambiguous repo-wide.
+    // File-scoped tie-break resolves to ArticleApi's handler (evidence: the route provide points at that
+    // file), reaches no guard here, and fires — the same NestJS-style improvement, on a Java shape.
     let provides = vec![provide(
         "DELETE /articles/{}",
         "src/main/java/io/spring/api/ArticleApi.java",
@@ -676,7 +727,8 @@ fn java_ambiguous_handler_name_is_still_skipped_not_guessed() {
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
-    assert!(out.is_empty(), "{:?}", out);
+    assert_eq!(out.len(), 1, "{:?}", out);
+    assert_eq!(out[0].file, "src/main/java/io/spring/api/ArticleApi.java");
 }
 
 #[test]

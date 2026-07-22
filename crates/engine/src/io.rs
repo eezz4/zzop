@@ -92,9 +92,9 @@ pub(crate) fn extract_file_io(rel: &str, text: &str, opts: &IoOptions) -> Option
     consumes.extend(zzop_parser_typescript::extract_hono_client_consumes(
         rel, text,
     ));
-    // db-table consumes (kind "db-table"): a Prisma `getPrisma().<model>.<method>(...)` access, keyed at
-    // extraction time. Feeds the generic cross-layer linker so `cross-layer/shared-db-table` can fire when
-    // 2+ trees touch one table. See decisions/2026-07-rule-side-lexical-reparse-leak.md.
+    // db-table consumes (kind "db-table"): a Prisma `getPrisma().<model>` or bare `prisma.<model>`
+    // access, keyed at extraction time in the PARSER (not re-lexed in a rule) — io facts project during
+    // parsing, before AST drop. Feeds the linker so `cross-layer/shared-db-table` fires across trees.
     consumes.extend(zzop_parser_typescript::extract_db_table_consumes(rel, text));
     // TypeORM repository-access consumes (kind "db-table", key None, raw = entity class): unkeyable at
     // parse time; `analyze::assemble::resolve_orm_entity_consumes` keys them from the entity index.
@@ -107,6 +107,9 @@ pub(crate) fn extract_file_io(rel: &str, text: &str, opts: &IoOptions) -> Option
     consumes.extend(zzop_parser_typescript::extract_client_base_prefix_marker(
         rel, text,
     ));
+    // Same sentinel tagged `client: "generated"`: the swagger `HttpClient` base field; the
+    // client-generic `apply_client_base_prefixes` prefixes `client == "generated"` consumes too.
+    consumes.extend(zzop_parser_typescript::extract_generated_client_base_prefix_marker(rel, text));
 
     // Code-registered router provides (Hono-style) come from `FileArtifact::router_mount_fragments`
     // instead (module doc). `opts.router_names` is consumed by that fragment projection, not here.

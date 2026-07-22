@@ -43,12 +43,18 @@
 //! `zzop_parser_rust::lang::symbols`'s convention (no Go declaration shape has a Rust-`class`-like
 //! statement-list body, so every non-`Function` symbol here always carries
 //! `body_start: None, body_end: None`). A body-less func (a `//go:linkname`/cgo-style forward
-//! declaration, syntactically legal but rare) also carries `None`/`None`.
+//! declaration, syntactically legal but rare) also carries `None`/`None`. `body_start` is the FIRST
+//! child's own START line (`util::line_of`); `body_end` is the LAST child's own END line
+//! (`util::end_line_of`), not its start line — a function whose last top-level statement is itself
+//! multi-line (an `if`/`for`/`switch`/`select` block, the common case for a worker function shaped
+//! `func f() { for ... { ... } }`) would otherwise report a `body_end` that excludes most of that
+//! statement's own lines, silently narrowing `Matcher::MethodScan`'s scan window under the very shape
+//! `MethodScan::trigger_in_loop` most needs to see (a `for` as the whole/last statement in the body).
 
 use tree_sitter::Node;
 use zzop_core::{SourceSymbol, SourceSymbolKind};
 
-use crate::util::{is_exported, line_of, node_text, valid_named_children};
+use crate::util::{end_line_of, is_exported, line_of, node_text, valid_named_children};
 
 /// Extract this file's top-level symbols — see module doc. Empty on parse failure (never panics, and
 /// never on a partial in-file error — module doc's "skip this item, not the file").
@@ -147,8 +153,9 @@ fn receiver_type_name(ty: Node, src: &str) -> Option<String> {
     }
 }
 
-/// A `block`'s line range, taken from its `statement_list`'s first/last NAMED child (a body-less
-/// `{}` or an entirely-erased body yields `(None, None)`).
+/// A `block`'s line range, taken from its `statement_list`'s first NAMED child's START line and last
+/// NAMED child's END line (a body-less `{}` or an entirely-erased body yields `(None, None)`) — module
+/// doc's "`body_start`/`body_end`" section explains why the last child needs its END, not its start.
 fn body_line_range(block: Node) -> (Option<u32>, Option<u32>) {
     let Some(stmts) = valid_named_children(block).into_iter().next() else {
         return (None, None);
@@ -158,7 +165,7 @@ fn body_line_range(block: Node) -> (Option<u32>, Option<u32>) {
     }
     let children = valid_named_children(stmts);
     let start = children.first().map(|n| line_of(*n));
-    let end = children.last().map(|n| line_of(*n));
+    let end = children.last().map(|n| end_line_of(*n));
     (start, end)
 }
 

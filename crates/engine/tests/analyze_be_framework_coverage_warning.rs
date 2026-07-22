@@ -347,7 +347,7 @@ fn koa_import_with_zero_http_provides_fires_the_s2_warning() {
     // warning — a reword dropping the partial-envelope on-ramp or the contract pointer fails here.
     assert!(
         out.warnings.iter().any(|w| w.contains(S2_WARNING_SUBSTRING)
-            && w.contains("zzop-mcp contract envelope-guide")
+            && w.contains("zzop contract envelope-guide")
             && w.contains("partial envelope")),
         "expected the S2 warning to carry the adapter-creation funnel tail, got: {:?}",
         out.warnings
@@ -694,7 +694,7 @@ fn fetch_wrapper_module_with_enough_cross_file_call_sites_fires_the_s7_warning()
     assert!(
         out.warnings.iter().any(|w| w.contains(S7_WARNING_SUBSTRING)
             && w.contains("src/lib/api.js")
-            && w.contains("zzop-mcp contract envelope-guide")
+            && w.contains("zzop contract envelope-guide")
             && w.contains("partial envelope")),
         "expected the S7 fetch-wrapper warning naming src/lib/api.js, got: {:?}",
         out.warnings

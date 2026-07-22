@@ -34,8 +34,9 @@ pub use fragments::{
 pub use schema::{FieldAttr, SchemaEnum, SchemaField, SchemaModel, SchemaUsage};
 
 pub use dsl::{
-    eval_pack, FragmentError, IoDirection, IoScan, LabeledPattern, LineScan, Matcher, MethodScan,
-    RuleContext, RuleDef, RulePackDef, SourceFile, SymbolScan,
+    eval_pack, eval_pack_io_scan, FragmentError, IoDirection, IoScan, IoScanTreeContext,
+    LabeledPattern, LineScan, Matcher, MethodScan, RuleContext, RuleDef, RulePackDef, SourceFile,
+    SymbolScan,
 };
 
 pub use finding::{disable_hint, Finding, RuleExplain, Severity};

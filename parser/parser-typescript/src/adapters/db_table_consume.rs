@@ -107,6 +107,7 @@ impl Visit for DbTableCollector<'_> {
                 line: crate::line_of(self.cm, call.span.lo),
                 raw: None,
                 method: None,
+                retry_configured: None,
             });
         }
         call.visit_children_with(self); // the inner `getPrisma()` call (or receiver ident) and any nested chains

@@ -45,6 +45,67 @@
         "skip_comment_lines": true,
         "line_pattern": "\\bcreateClient\\s*\\(|\\bnew\\s+Redis(\\.Cluster)?\\s*\\("
       }
+    },
+    {
+      "id": "redis-lock-get-then-set",
+      "severity": "warning",
+      "message": "A `.get(`/`.exists(` read and a `.set(` call both appear in the same function alongside a lock-ish identifier — a co-occurrence heuristic for a non-atomic check-then-set lock: this doesn't prove the set follows the read (both patterns just match somewhere in the same function span), but that shape (check whether a lock key is free, then set it) is a classic TOCTOU race — two concurrent callers can both pass the check before either writes, and both end up believing they hold the lock. Acquire the lock atomically instead with `SET key value NX` (add `EX`/`PX` for a TTL), a `WATCH`/`MULTI` transaction, an `.eval(` Lua script, or a redlock library. Suppress a vetted case (e.g. an atomic acquire the regex can't see) with `// redis-lock-atomic-ok`.",
+      "suppress_marker": "redis-lock-atomic-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "(?i)redis|ioredis",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\.(?:get|exists)\\s*\\(", "label": "read" },
+          { "pattern": "\\.set\\s*\\(", "label": "set" },
+          { "pattern": "(?i)\\block", "label": "lockish" }
+        ],
+        "trigger": "set",
+        "absent": [
+          { "pattern": "(?i)\\bNX\\b|\\bsetnx\\b|\\.eval\\s*\\(|redlock|\\bWATCH\\b|\\bMULTI\\b", "label": "atomic" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "redis-lock-no-ttl",
+      "severity": "warning",
+      "message": "A lock is acquired with `SET key value NX` (or `setnx`) with no `EX`/`PX`/`EXAT`/`PXAT` expiry on that same call — if the holder crashes or is killed before releasing it, the key lives forever and wedges every future caller waiting on that lock. Always pair `NX` with a TTL (e.g. `SET key value NX EX 30`) so an abandoned lock self-clears instead of requiring manual intervention. Suppress a vetted case (e.g. a separate `PEXPIRE` set right after) with `// lock-ttl-ok`.",
+      "suppress_marker": "lock-ttl-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "(?i)redis|ioredis",
+        "skip_comment_lines": true,
+        "line_pattern": "(?i)\\bsetnx\\s*\\(|\\.set\\s*\\([^)]*\\bNX\\b",
+        "exclude_pattern": "(?i)\\b(?:EX|PX|EXAT|PXAT)\\b"
+      }
+    },
+    {
+      "id": "redis-counter-get-set",
+      "severity": "warning",
+      "message": "A `.get(` read followed by a `.set(` call whose value looks like arithmetic (`n++`, `n + 1`, `n - 1`, `Number(...)`, `parseInt(...)`) both appear in the same function — a co-occurrence heuristic for a read-modify-write counter, not proof the set actually follows the read from the same key (both patterns just match somewhere in the same function span). When it genuinely is read-then-recompute-then-write, it isn't atomic: two concurrent requests can both read the same starting value and both write the same incremented result, silently losing one of the two increments under load. Use Redis's atomic `INCR`/`INCRBY`/`DECR`/`DECRBY`/`HINCRBY` instead. Suppress a vetted case with `// redis-counter-ok`.",
+      "suppress_marker": "redis-counter-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "require_file": "(?i)redis|ioredis",
+        "skip_comment_lines": true,
+        "strip_string_literals": true,
+        "patterns": [
+          { "pattern": "\\.get\\s*\\(", "label": "read" },
+          { "pattern": "\\.set\\s*\\([^)]*(?:\\+\\+|[+\\-]\\s*1|\\bNumber\\b|\\bparseInt\\b)", "label": "arith-set" }
+        ],
+        "trigger": "arith-set",
+        "absent": [
+          { "pattern": "(?i)\\b(?:incr|incrby|decr|decrby|hincrby)\\b|\\.eval\\s*\\(|\\bMULTI\\b", "label": "atomic" }
+        ],
+        "snippet_max": 160
+      }
     }
   ]
 }

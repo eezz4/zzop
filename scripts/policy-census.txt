@@ -82,8 +82,11 @@ parser/parser-typescript/src/adapters/controller_decorators/context.rs:CONTROLLE
 parser/parser-typescript/src/adapters/controller_decorators/method_facts.rs:METHOD_DECORATORS
 parser/parser-typescript/src/adapters/db_table_consume.rs:QUERY_METHODS
 parser/parser-typescript/src/adapters/egress/body_shape.rs:BODY_POSITION_VERBS
+parser/parser-typescript/src/adapters/egress/react_query.rs:QUERY_HOOKS
+parser/parser-typescript/src/adapters/egress/retry.rs:RETRY_WRAPPERS
 parser/parser-typescript/src/adapters/router_mounts/guard.rs:MIDDLEWARE_GUARD_CALLEES
 parser/parser-typescript/src/adapters/router_mounts/guard.rs:ROUTER_NAME_VETO_SUFFIXES
+parser/parser-typescript/src/adapters/router_mounts/idempotency.rs:IDEMPOTENCY_HEADER_NAMES
 parser/parser-typescript/src/lang/resolve/specifier.rs:RESOLVE_EXTS
 parser/parser-typescript/src/lang/write_site.rs:ATOMIC_OP_KEYS
 parser/parser-typescript/src/lang/write_site.rs:COUNTER_METHODS

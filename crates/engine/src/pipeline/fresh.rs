@@ -162,10 +162,13 @@ pub(super) fn compute_fresh_artifact(
                 config.io.router_names.iter().map(String::as_str).collect();
             zzop_parser_typescript::extract_router_mount_fragments(rel, text, &router_names)
         }
-        // FastAPI's `FastAPI()`/`APIRouter()` receivers project into the SAME framework-neutral router-mount-fragment shape TS's Hono
-        // adapter emits (see `zzop_parser_python_3::adapters::fastapi`'s module doc) — composed by the identical `analyze::compose_router_mount_provides` pass below, no separate Python-only composition path needed.
+        // FastAPI receivers AND Django `urlpatterns` project the SAME router-mount-fragment shape (`adapters::fastapi`/`::django_routes`), both composed by the identical `compose_router_mount_provides` pass below — merged here (the two never coexist in one Python file).
         Some(Language::Python) if !degraded => {
-            zzop_parser_python_3::extract_fastapi_router_fragments(rel, text)
+            let mut f = zzop_parser_python_3::extract_fastapi_router_fragments(rel, text);
+            f.extend(zzop_parser_python_3::extract_django_route_fragments(
+                rel, text,
+            ));
+            f
         }
         // axum router builders project into the SAME framework-neutral router-mount-fragment shape — see `zzop_parser_rust::adapters::axum`'s module doc. Composed by the identical `analyze::compose_router_mount_provides` pass below, no separate Rust-only composition path.
         Some(Language::Rust) if !degraded => {
@@ -222,15 +225,15 @@ pub(super) fn compute_fresh_artifact(
         }
         _ => Vec::new(),
     };
-    // Loop-body line spans (`loop-spans-v1`): AST-derived, so it follows the `symbols`-style TypeScript-only/non-degraded gate above (never the `store_bound_models`/`field_usage_tokens` regex-scan gate below) — `MethodScan::trigger_in_loop`'s substrate.
+    // Loop-body line spans (`loop-spans-v1`): AST-derived, so it follows the `symbols`-style per-language/non-degraded gate above (TypeScript + Go today, never the `store_bound_models`/`field_usage_tokens` regex-scan gate below) — `MethodScan::trigger_in_loop`'s substrate.
     let loop_spans = match language {
         Some(Language::TypeScript) if !degraded => {
             zzop_parser_typescript::extract_loop_spans(rel, text)
         }
+        Some(Language::Go) if !degraded => zzop_parser_go::extract_loop_spans(rel, text),
         _ => Vec::new(),
     };
-    // Store-binding and field-usage-token facts are both raw-text regex scans, never an AST parse, so — like the removed
-    // `scan_store_map`/`scan_field_usage` filesystem walks they replace — they run unconditionally on `rel`/`text` here regardless of `language`/`degraded`; each gates its own applicability internally (the store-file convention, the `.ts`/`.tsx` extension, respectively).
+    // Store-binding and field-usage-token facts are both raw-text regex scans, never an AST parse, so — like the removed `scan_store_map`/`scan_field_usage` filesystem walks they replace — they run unconditionally on `rel`/`text` here regardless of `language`/`degraded`; each gates its own applicability internally (the store-file convention, the `.ts`/`.tsx` extension, respectively).
     let field_usage_tokens = sorted_field_usage_tokens(rel, text);
     let (mut findings, rule_timings, minified_or_generated) = eval_packs(
         packs,

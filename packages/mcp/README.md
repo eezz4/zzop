@@ -1,32 +1,34 @@
 # zzop-mcp
 
-The Node-free way to run zzop: one self-contained binary with no Node.js runtime, no npm install. It
-serves an MCP server over stdio for MCP clients, and doubles as a plain CLI for direct/CI use — both
-share the same analysis path. Full reference: [docs/modules/mcp.md](../../docs/modules/mcp.md).
+The Node-free way to run zzop: two self-contained binaries with no Node.js runtime, no npm install —
+`zzop` (a plain CLI for direct/CI use) and `zzop-mcp` (an MCP server over stdio for MCP clients). Both are
+thin entries over one shared lib and the same analysis path. Full reference:
+[docs/modules/mcp.md](../../docs/modules/mcp.md).
 
-Prebuilt per-platform binaries (`zzop-mcp-<platform>[.exe]`, 5 platforms) are attached to
-[GitHub Releases](https://github.com/eezz4/zzop/releases); building from a source checkout (below) remains an option.
+Prebuilt per-platform binaries (`zzop-<platform>[.exe]` + `zzop-mcp-<platform>[.exe]`, 5 platforms each)
+are attached to [GitHub Releases](https://github.com/eezz4/zzop/releases); building from a source checkout
+(below) remains an option.
 
 ## Build
 
 ```sh
-cargo build -p zzop-mcp --release
+cargo build -p zzop-mcp --release   # builds BOTH bins: `zzop` and `zzop-mcp`
 ```
 
-The binary lands at `target/release/zzop-mcp` (`target/release/zzop-mcp.exe` on Windows).
+The binaries land at `target/release/zzop` and `target/release/zzop-mcp` (`.exe` on Windows).
 
 ## Use as a CLI
 
 ```sh
-zzop-mcp analyze ./my-repo
-zzop-mcp analyze-envelope ./envelope.json  # Mode A: envelope REPLACES native parsing
-zzop-mcp validate-envelope ./envelope.json # offline: well-formed? {valid,issues}, exit 0/1
-zzop-mcp validate-rule-pack ./pack.json    # offline: pack loads + regexes compile? exit 0/1
-zzop-mcp cross ./frontend ./backend
-zzop-mcp cross --config ./zzop.config.jsonc
-zzop-mcp endpoint users ./frontend ./backend
-zzop-mcp contract                 # list the embedded authoring contracts
-zzop-mcp contract config-surface  # print one to stdout (raw bytes, pipe-safe)
+zzop analyze ./my-repo
+zzop analyze-envelope ./envelope.json  # Mode A: envelope REPLACES native parsing
+zzop validate-envelope ./envelope.json # offline: well-formed? {valid,issues}, exit 0/1
+zzop validate-rule-pack ./pack.json    # offline: pack loads + regexes compile? exit 0/1
+zzop cross ./frontend ./backend
+zzop cross --config ./zzop.config.jsonc
+zzop endpoint users ./frontend ./backend
+zzop contract                 # list the embedded authoring contracts
+zzop contract config-surface  # print one to stdout (raw bytes, pipe-safe)
 ```
 
 Prints pretty-printed JSON to stdout; a failure prints to stderr and exits non-zero.
@@ -57,7 +59,7 @@ The repo doubles as a self-hosted plugin marketplace (`.claude-plugin/marketplac
 
 1. Put the binary on `PATH` **under the name `zzop-mcp`** — the bundled `.mcp.json` invokes exactly
    that command. Prebuilt assets on [GitHub Releases](https://github.com/eezz4/zzop/releases) are
-   named `zzop-mcp-<platform>[.exe]` (5 platforms, single static binary, no Node needed): download
+   named `zzop-mcp-<platform>[.exe]` (5 platforms, self-contained static binary, no Node needed): download
    yours and rename/link it to `zzop-mcp` (`zzop-mcp.exe` on Windows). Building from source (see
    Build above) needs the same rename of the `target/release` artifact.
 2. In Claude Code: `/plugin marketplace add eezz4/zzop`, then `/plugin install zzop@zzop`.
@@ -79,7 +81,7 @@ fetched-on-first-run, so the plugin stays runtime-free and you always know exact
 Plus a `resources/*` surface exposing ten embedded authoring-contract documents
 (`zzop://contract/<name>`) for writing a custom parser adapter, a DSL rule pack, or a
 `zzop.config.jsonc` with nothing but this binary. The same documents print to a terminal via
-`zzop-mcp contract [<name>]` — no MCP client required.
+`zzop contract [<name>]` — no MCP client required.
 
 See [docs/modules/mcp.md](../../docs/modules/mcp.md) for the full tool/resource/config reference,
 including exact argument shapes, the output-truncation contract, and the config path-resolution rules

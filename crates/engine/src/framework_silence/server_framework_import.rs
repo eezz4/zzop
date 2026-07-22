@@ -156,7 +156,7 @@ tree-wide: {spec_list} — the registration idiom may be a runtime method call (
 `app.post(...)`) rather than a decorator, which this extraction pass does not yet recognize; cross-layer \
 joins will be near-silent for this tree — project this tree's routes with a Mode B overlay adapter (see \
 the adapter examples) to restore cross-layer visibility: a partial envelope covering just the provide \
-channel is enough; contract: `zzop-mcp contract envelope-guide` on MCP hosts, docs/NORMALIZED_AST.md in \
+channel is enough; contract: `zzop contract envelope-guide` on MCP hosts, docs/NORMALIZED_AST.md in \
 the repo."
     ))
 }

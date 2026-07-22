@@ -7,16 +7,18 @@
 //! - **Verb methods**: `get`/`post`/`put`/`patch`/`delete` — the same five `adapters::fastapi::
 //!   VERB_DECORATORS` recognizes, kept as a separate vocabulary (this one names CALLED methods, that one
 //!   DECORATOR names) since the two crates' conventions happen to agree one-for-one for these five.
-//! - **Instance receivers** (`requests.Session()`, `httpx.Client()`/`AsyncClient()`): a file-wide first
-//!   pass (`InstanceCollector`, the `ruff` counterpart of `zzop_parser_rust::adapters::http_clients`'s
-//!   `BindingCollector`) binds a local name to a client CONSTRUCTOR — `<module>.Session/Client/
-//!   AsyncClient(...)` (module in `client_names`) or a directly-imported `Session/Client/AsyncClient(...)`
-//!   (`ctor_direct_names`) — through either an assignment (`s = requests.Session()`, `client =
-//!   httpx.AsyncClient()`, incl. the annotated `client: httpx.AsyncClient = ...`) or a `with`/`async with`
-//!   binding (`async with httpx.AsyncClient() as client:` — the idiomatic FastAPI async-egress shape). A
-//!   `.verb(...)` on any such bound name then keys exactly like a top-level `httpx.get(...)`. Shadowing
-//!   approximation, same as the Rust pass: a name counts as a client if ANY constructor binding in the
-//!   file binds it. `.request(method, url)` (verb-as-first-arg) stays out of v1 scope.
+//! - **Instance receivers** (`requests.Session()`, `httpx.Client()`/`AsyncClient()`): a `LAST-WRITE-WINS`
+//!   pass (`instances::instance_bindings`, backlog B14①'s fix for the flat approximation the
+//!   `zzop_parser_rust::adapters::http_clients::BindingCollector` still carries) binds a local name to a
+//!   client CONSTRUCTOR — `<module>.Session/Client/AsyncClient(...)` (module in `client_names`) or a
+//!   directly-imported `Session/Client/AsyncClient(...)` (`ctor_direct_names`) — through an assignment
+//!   (`s = requests.Session()`, `client = httpx.AsyncClient()`, incl. the annotated `client:
+//!   httpx.AsyncClient = ...`) or a `with`/`async with` binding (`async with httpx.AsyncClient() as
+//!   client:` — the idiomatic FastAPI async-egress shape), and resolves a `.verb(...)` call against that
+//!   name's MOST RECENT binding at or before the call's own line — see `instances`' module doc for the
+//!   full resolution contract, kill classes (a non-client reassignment or `del`), and the remaining
+//!   file-level (not per-function-scope) grain this still carries. `.request(method, url)`
+//!   (verb-as-first-arg) stays out of v1 scope.
 //! - **Call-site discovery**: a generic `ruff_python_ast::visitor::Visitor` walk (mirroring
 //!   `lang::used_names::parse_local_identifier_refs`'s use of the same crate visitor) rather than a
 //!   hand-rolled statement/expression descent — every expression position (nested call args, dict/list
@@ -76,10 +78,11 @@ pub fn extract_python_http_consumes(rel: &str, text: &str) -> Vec<IoConsume> {
     if client_names.is_empty() {
         return Vec::new();
     }
-    // File-wide first pass: bind every local name assigned/with-bound to a client constructor, so a
-    // `.verb()` on it below reads as egress (module doc's "Instance receivers").
-    let instances = instances::instance_names(&module.body, &client_names, &imports);
     let idx = crate::LineIndex::new(text);
+    // File-wide last-write-wins pass: for every name ever bound to a client constructor, a binding
+    // history keyed by line — a `.verb()` call resolves against the MOST RECENT binding at or before its
+    // own line (module doc's "Instance receivers"; full resolution contract in `instances`' module doc).
+    let instances = instances::instance_bindings(&module.body, &client_names, &imports, &idx);
     let mut collector = CallCollector {
         rel,
         text,
@@ -118,7 +121,7 @@ struct CallCollector<'a> {
     text: &'a str,
     idx: &'a crate::LineIndex,
     client_names: &'a HashSet<String>,
-    instances: &'a HashSet<String>,
+    instances: &'a instances::Bindings,
     out: Vec<IoConsume>,
 }
 
@@ -147,9 +150,11 @@ impl<'a> CallCollector<'a> {
             return None;
         };
         // A top-level module call (`requests.get(...)`) OR a bound client instance (`client.get(...)`,
-        // `s.get(...)` — see `InstanceCollector`). Both key identically.
+        // `s.get(...)` — resolved against `recv`'s own line via `instances::Bindings::is_client_at`'s
+        // last-write-wins contract). Both key identically.
+        let recv_line = self.idx.line_of(attr.value.start());
         if !self.client_names.contains(recv.id.as_str())
-            && !self.instances.contains(recv.id.as_str())
+            && !self.instances.is_client_at(recv.id.as_str(), recv_line)
         {
             return None;
         }
@@ -172,6 +177,7 @@ impl<'a> CallCollector<'a> {
                     line,
                     raw: None,
                     method: None,
+                    retry_configured: None,
                     body: None,
                     client: None,
                 });
@@ -187,6 +193,7 @@ impl<'a> CallCollector<'a> {
             line,
             raw: Some(raw),
             method: Some(method),
+            retry_configured: None,
             body: None,
             client: None,
         });

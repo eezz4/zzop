@@ -24,7 +24,7 @@ the binary:
 
 ```sh
 node adapter.mjs --root . > auth.json     # emit the overlay envelope
-zzop-mcp cross --config zzop.config.jsonc  # tree carries overlays: ["./auth.json"]
+zzop cross --config zzop.config.jsonc  # tree carries overlays: ["./auth.json"]
 ```
 
 Embedders calling `zzop-facade` directly instead pass the parsed envelope on the request's

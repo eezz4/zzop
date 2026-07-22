@@ -1,7 +1,8 @@
-# Prebuild + release for the Node-free `zzop-mcp` binary. On a `v*` tag push, builds the binary for 5
-# platforms and attaches them PLUS per-platform MCPB (`.mcpb`) one-click Desktop bundles to the GitHub
-# release. No npm: the npm distribution (JS CLI `@zzop/cli` + napi `@zzop/native`) was removed 2026-07-20
-# — Node-free native binary is the single runtime form (see the mcp-distribution decision).
+# Prebuild + release for the two Node-free binaries — `zzop` (CLI) and `zzop-mcp` (MCP server), both from
+# the `zzop-mcp` crate over one shared lib. On a `v*` tag push, builds both for 5 platforms and attaches
+# them PLUS per-platform MCPB (`.mcpb`) one-click Desktop bundles to the GitHub release. Version SSOT =
+# Cargo.toml `[workspace.package] version` (2026-07-22 reform): the tag, `plugin.json`, and the MCPB
+# manifest are all verified against it. No npm (removed 2026-07-20). See the mcp-distribution decision.
 name: prebuild
 
 on:
@@ -52,25 +53,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
           echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc' >> "$GITHUB_ENV"
-      - name: Build zzop-mcp binary
-        # On a `v*` tag, stamp the binary's reported version (MCP serverInfo.version, compile-time
-        # `ZZOP_RELEASE_VERSION`) from the tag — the same tag verify-plugin-version checks plugin.json
-        # against, so the binary version == plugin version by construction. Gated on ref TYPE
-        # (refs/tags/v*) so a workflow_dispatch run on a branch merely NAMED v-something leaves it unset
-        # (the 0.0.0 dev fallback applies).
+      - name: Build the zzop + zzop-mcp binaries
+        # The binaries report `CARGO_PKG_VERSION` (the workspace version) directly — no tag-stamping env
+        # (2026-07-22 version reform). `-p zzop-mcp` builds BOTH the crate's bins (`zzop` CLI + `zzop-mcp`
+        # server) in one invocation.
         shell: bash
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            export ZZOP_RELEASE_VERSION="${GITHUB_REF_NAME#v}"
-          fi
-          cargo build -p zzop-mcp --release --target ${{ matrix.target }}
-      - name: Collect zzop-mcp binary
+        run: cargo build -p zzop-mcp --release --target ${{ matrix.target }}
+      - name: Collect the zzop + zzop-mcp binaries
         shell: bash
         run: |
           mkdir -p dist-mcp
           case "${{ matrix.target }}" in
-            *windows*) cp "target/${{ matrix.target }}/release/zzop-mcp.exe" "dist-mcp/zzop-mcp-${{ matrix.platform }}.exe" ;;
-            *)         cp "target/${{ matrix.target }}/release/zzop-mcp" "dist-mcp/zzop-mcp-${{ matrix.platform }}" ;;
+            *windows*)
+              cp "target/${{ matrix.target }}/release/zzop.exe" "dist-mcp/zzop-${{ matrix.platform }}.exe"
+              cp "target/${{ matrix.target }}/release/zzop-mcp.exe" "dist-mcp/zzop-mcp-${{ matrix.platform }}.exe" ;;
+            *)
+              cp "target/${{ matrix.target }}/release/zzop" "dist-mcp/zzop-${{ matrix.platform }}"
+              cp "target/${{ matrix.target }}/release/zzop-mcp" "dist-mcp/zzop-mcp-${{ matrix.platform }}" ;;
           esac
           ls -la dist-mcp
       - uses: actions/upload-artifact@v4
@@ -89,6 +88,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Verify Cargo.toml (version SSOT) matches the tag
+        # The workspace `[workspace.package] version` is the version SSOT (2026-07-22 reform): the tag, the
+        # plugin, and the MCPB manifest all derive from it. This fails the run before `release` if the tag
+        # was pushed without bumping Cargo.toml to the same version (or vice versa).
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION=$(grep -m1 '^version = "' Cargo.toml | sed -E 's/^version = "(.*)"/\1/')
+          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Cargo.toml [workspace.package] version ($CARGO_VERSION) does not match tag $GITHUB_REF_NAME (expected $TAG_VERSION) — bump the workspace version in the release commit, or tag the version Cargo.toml already declares."
+            exit 1
+          fi
+          echo "Cargo.toml version ($CARGO_VERSION) matches tag $GITHUB_REF_NAME."
       - name: Verify .claude-plugin/plugin.json version matches the tag
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"

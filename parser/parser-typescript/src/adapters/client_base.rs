@@ -2,8 +2,7 @@
 //! the axios runtime joins onto every relative/root-relative axios call, which the per-file egress
 //! extractor cannot see (the assignment usually lives in a bootstrap file, the call sites elsewhere).
 //!
-//! Mirrors `global_prefix.rs`'s sentinel pattern on the CONSUME side: rather than a new fragment
-//! channel, this rides the existing `IoFacts.consumes` channel with a sentinel
+//! Mirrors `global_prefix.rs`'s sentinel pattern on the CONSUME side: rather than a new fragment channel, this rides the existing `IoFacts.consumes` channel with a sentinel
 //! `IoConsume { kind: "client-base-prefix", key: Some(<path part>), client: Some("axios"), .. }`.
 //! `zzop-engine`'s assemble pass collects every such sentinel, prepends the path to that tree's
 //! axios-tagged (`IoConsume::client == Some("axios")`) http consume keys AFTER late cross-file
@@ -88,6 +87,7 @@ impl Visit for ClientBaseCollector<'_> {
                     line: crate::line_of(self.cm, n.span.lo),
                     raw: None,
                     method: None,
+                    retry_configured: None,
                     body: None,
                     client: Some("axios".to_string()),
                 });
@@ -142,8 +142,9 @@ fn literal_or_zero_interp_template(e: &Expr) -> Option<String> {
 
 /// The assignment's right-hand side, resolved to the sentinel's `key` (the base's path part), or
 /// `None` when the value isn't a recognized literal shape or its path part doesn't survive
-/// [`base_path_from_string`]'s rules.
-fn base_url_value_to_path(e: &Expr) -> Option<String> {
+/// [`base_path_from_string`]'s rules. `pub(crate)` so [`super::client_base_generated`] normalizes a
+/// generated-client base by the identical value→path rule (host-strip, path-only, never-guess).
+pub(crate) fn base_url_value_to_path(e: &Expr) -> Option<String> {
     let base = literal_or_zero_interp_template(e)?;
     base_path_from_string(&base)
 }

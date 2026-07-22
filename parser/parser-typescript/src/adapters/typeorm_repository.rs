@@ -81,6 +81,7 @@ impl RepoCollector<'_> {
             line: crate::line_of(self.cm, span_lo),
             raw: Some(entity),
             method: None,
+            retry_configured: None,
         });
     }
 }

@@ -12,7 +12,7 @@ fn load_for_root_absent_config_produces_the_zero_config_request() {
     let req = loaded.request.as_object().unwrap();
     assert_eq!(req["root"], dir.path().to_string_lossy().into_owned());
     assert_eq!(req["git"], serde_json::json!({}));
-    assert_eq!(req["packDefs"].as_array().unwrap().len(), 14);
+    assert_eq!(req["packDefs"].as_array().unwrap().len(), 15);
 }
 
 #[test]

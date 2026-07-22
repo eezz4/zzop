@@ -18,6 +18,23 @@ fn controller_decorator_re() -> &'static Regex {
     })
 }
 
+/// A decorator counts as coverage evidence only when it LEADS its line (first non-whitespace token) —
+/// where a real framework registration conventionally puts it (`@GetMapping("/x")`, `  @Controller('/a')`,
+/// a Java `@RequestMapping` above a class). (A modifier-preceded annotation on the same line, `public
+/// @GetMapping …`, is the rare exception this misses — an accepted FN, since the tripwire needs ≥3 files
+/// and such annotations conventionally sit on their own line.) This single lexical anchor discounts the
+/// two shapes that are mentions rather than routes, without any parser vocabulary: a doc/line comment
+/// (`/// … @GetMapping`,
+/// ` * @Controller`, `// see @Post`) trims to `/`/`*`, and a decorator embedded in a STRING LITERAL
+/// (`dir.write("a.ts", "@FastController('/a')")` — a SAST tool's own test fixtures) trims to the
+/// surrounding code, so neither begins with the match. It matters acutely when the scanned tree is
+/// itself a tool that documents/fixtures these decorators (dogfooding zzop on its own source went 57 →
+/// ~a handful of files this way). A real decorator on a real code line — including the accepted
+/// MapStruct-`@Mapping` FP surface — still leads its line and still counts.
+fn decorator_leads_line(line: &str, re: &Regex) -> bool {
+    re.find(line.trim_start()).is_some_and(|m| m.start() == 0)
+}
+
 /// Minimum distinct decorator-matching files before the S1 self-report fires — enough evidence mass
 /// that extractor blindness is plausible rather than one stray annotation.
 ///
@@ -49,11 +66,14 @@ pub(crate) const MIN_PROVIDES_FLOOR: usize = 3;
 /// so S1 now shares it rather than gating on exactly zero. Cheap on the success path: skips the disk
 /// re-read entirely once `http_provides_count >= MIN_PROVIDES_FLOOR`.
 ///
-/// Mild FP surface (accepted): `MIN_FILES`+ files matching the decorator regex while provides stay below
-/// the floor can over-fire on, e.g., a tree with a MapStruct `@Mapping` mapper cluster (the regex's
-/// `Mapping` alternative matches `@Mapping` too) alongside a genuinely tiny (1-2 route) controller.
-/// Accepted under the coverage self-report's governing principle: over-disclosure is safe, silence is
-/// fatal.
+/// Only line-LEADING decorators count ([`decorator_leads_line`]): a match inside a comment or a string
+/// literal is discounted, so a tree that merely DOCUMENTS or fixtures these decorators (a SAST tool's
+/// own source is the sharp case) no longer inflates the file count into a false silence report.
+///
+/// Mild FP surface (accepted): `MIN_FILES`+ files with a line-leading decorator while provides stay
+/// below the floor can over-fire on, e.g., a MapStruct `@Mapping` mapper cluster (the regex's `Mapping`
+/// alternative matches `@Mapping` too) alongside a genuinely tiny (1-2 route) controller. Accepted under
+/// the coverage self-report's governing principle: over-disclosure is safe, silence is fatal.
 ///
 /// Determinism: relies on `candidate_rels` already being sorted/deduped by the caller
 /// (`analyze::assemble`) — this function performs no re-sort, so an unsorted input would yield a
@@ -72,7 +92,7 @@ pub fn controller_silence_warning(
         let Ok(text) = fs::read_to_string(root.join(rel)) else {
             continue;
         };
-        if text.lines().any(|line| re.is_match(line)) {
+        if text.lines().any(|line| decorator_leads_line(line, re)) {
             matched.push(rel.as_str());
         }
     }
@@ -89,7 +109,7 @@ pub fn controller_silence_warning(
 http route(s) were extracted tree-wide — the framework's registration idiom may be unsupported; \
 cross-layer joins will be silent for this tree (e.g. {sample_str}) — project this tree's routes with a \
 Mode B overlay adapter (see the adapter examples) to restore cross-layer visibility: a partial envelope \
-covering just the provide channel is enough; contract: `zzop-mcp contract envelope-guide` on MCP hosts, \
+covering just the provide channel is enough; contract: `zzop contract envelope-guide` on MCP hosts, \
 docs/NORMALIZED_AST.md in the repo.",
         matched.len()
     ))

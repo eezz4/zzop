@@ -7,9 +7,10 @@ output shape, the rule set, CLI flags, config keys, or defaults, without prior n
 migration path. There are no backward-compatibility guarantees yet, and there is
 deliberately **no `CHANGELOG.md`** during the `0.x` series (see below).
 
-If you depend on zzop, **pin an exact version** and re-test before upgrading. The `zzop-mcp` binary is
-versioned by its release tag: download the exact `zzop-mcp-<platform>[.exe]` asset for the tag you want
-from [GitHub Releases](https://github.com/eezz4/zzop/releases) rather than tracking a "latest" link. The
+If you depend on zzop, **pin an exact version** and re-test before upgrading. Both binaries are versioned
+by the same release tag: download the exact `zzop-<platform>[.exe]` and/or `zzop-mcp-<platform>[.exe]`
+asset for the tag you want from [GitHub Releases](https://github.com/eezz4/zzop/releases) rather than
+tracking a "latest" link. The
 Claude Code plugin pins the same way, via its own `version` field in
 [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) — bump/reinstall a specific plugin version
 instead of always taking the marketplace's newest.
@@ -60,10 +61,11 @@ These change freely at any time, by design — do not build on them:
 
 ## How versions are produced
 
-The version is **tag-driven**: the workspace's `Cargo.toml` ships `0.0.0`, and a `v*` tag push
-stamps the `zzop-mcp` binary's reported version (`ZZOP_RELEASE_VERSION`, compiled in — the same
-value `zzop-mcp version` and the MCP `initialize` reply's `serverInfo.version` both report) from
-the tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). CI's `verify-plugin-version` job fails the
-release if `.claude-plugin/plugin.json`'s `"version"` doesn't match the same tag, so the binary
-and the Claude Code plugin are always released in lockstep. The git tag is the single source of
-truth for a release's version.
+The version SSOT is the workspace `Cargo.toml`'s `[workspace.package] version` (2026-07-22 reform).
+Every crate inherits it via `version.workspace = true`, and both binaries report it directly as
+`CARGO_PKG_VERSION` — the same value `zzop version` / `zzop-mcp version` print and the MCP `initialize`
+reply's `serverInfo.version` reports. A release bumps that one number in a commit, then tags it
+(`git tag vX.Y.Z && git push origin vX.Y.Z`); CI's release job fails unless the pushed tag,
+`Cargo.toml`, and `.claude-plugin/plugin.json`'s `"version"` all agree, so the binaries and the Claude
+Code plugin are always released in lockstep. (The old tag-stamped `ZZOP_RELEASE_VERSION` env and the
+`0.0.0` placeholder are gone.)

@@ -2,5 +2,29 @@
   "id": "react",
   "framework": "any",
   "schema_version": 1,
-  "rules": []
+  "rules": [
+    {
+      "id": "setstate-after-await-unmounted",
+      "severity": "warning",
+      "message": "A `setX(...)` state setter call and an `await` both appear in the same function, with no unmount/abort guard (`AbortController`/`AbortSignal`/`isMounted`/`mountedRef`/`signal:`/`cancelled`/`didCancel`) anywhere in that function's body — this is a co-occurrence heuristic: it does NOT prove the setter actually runs after the await resolves, and it does NOT prove the component can unmount while the await is in flight (a plain event handler is mounted by construction whenever it fires, so a `setX(...)` inside one is an accepted false positive here). But when the setter genuinely follows an in-flight await inside code that CAN unmount mid-request (an effect's async loader, a callback stored across a lifecycle boundary), the resolve races teardown: the classic \"Can't perform a React state update on an unmounted component\" warning, a stale-data flash overwriting newer state, or a wasted render right after remount. Thread an `AbortController` (or an `isMounted`/`mountedRef` flag) through the async function and skip the `setX(...)` call if the request was aborted or the component has unmounted. The `require_file` gate scopes this to React files (a `useEffect`/`useState` call, or a `from 'react'` import) to keep it out of non-component async helpers. The `setX(` trigger is anchored to a bare (non-member) call so a `localStorage.setItem`/`res.setHeader`/`date.setHours` is not mistaken for a state setter, and `setTimeout`/`setInterval`/`setImmediate` are vetoed — so a genuine `setX(...)` that merely coexists with a timer in the same function is an accepted under-report. Suppress a vetted case with `// setstate-await-ok`.",
+      "suppress_marker": "setstate-await-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(tsx|jsx|ts|js)$",
+        "file_exclude_pattern": "${test-paths}",
+        "require_file": "(?i)useEffect|useState|from\\s+['\"]react['\"]",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\bawait\\b", "label": "await" },
+          { "pattern": "(?:^|[^.\\w$])set[A-Z][\\w$]*\\s*\\(", "label": "setter" }
+        ],
+        "trigger": "setter",
+        "absent": [
+          { "pattern": "AbortController|AbortSignal|isMounted|mountedRef|signal\\s*:|cancelled|didCancel", "label": "guard" },
+          { "pattern": "\\bset(?:Timeout|Interval|Immediate)\\s*\\(", "label": "timer" }
+        ],
+        "snippet_max": 160
+      }
+    }
+  ]
 }

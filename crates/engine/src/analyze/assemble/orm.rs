@@ -68,6 +68,7 @@ mod tests {
             line: 1,
             raw: Some(raw.into()),
             method: None,
+            retry_configured: None,
         }
     }
 

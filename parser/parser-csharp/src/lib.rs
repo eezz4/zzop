@@ -39,30 +39,11 @@ pub use lang::symbols::parse_symbols;
 pub use lang::used_names::parse_local_identifier_refs;
 pub use project::{extract_csharp_http_provides_project, CSharpProjectProvidesReport};
 
-/// Cache key ingredient for `zzop-cache`, mirroring `zzop_parser_go`/`zzop_parser_java_21::PARSER_FINGERPRINT`'s
-/// scheme: parser id + pinned frontend + a logic-version counter.
-/// - `v1`: initial release — symbols (top-level + nested class/struct/interface/record/delegate,
-///   methods/constructors/properties, `const`/`static readonly` fields as `Const`), imports (plain/
-///   static/alias/global `using`), `used_names`, `csharp_namespaces_of`, attribute-controller + minimal-
-///   API HTTP provides, and `HttpClient` literal HTTP egress consumes.
-/// - `+csharp-route-path-tristate-v1`: a NON-LITERAL route path (`[HttpGet(Routes.List)]`) or class-level
-///   `[Route(ApiRoutes.Base)]` prefix — both valid C# `const`-string references — is no longer collapsed to
-///   the empty base by the old `first_quoted_string(..).unwrap_or_default()`, which fabricated a phantom
-///   route at the prefix (method path) / at the empty prefix (class path) AND lost the real one.
-///   `attr_path_state` now distinguishes literal / absent-base / non-literal: a non-literal method path
-///   drops the route, a non-literal class prefix blocks the class's own routes — the C# parallel of Java's
-///   `+java-method-path-tristate-v1`.
-/// - `+csharp-route-const-resolve-v1`: adds the whole-corpus `extract_csharp_http_provides_project` pass
-///   (`crate::project`) that RESOLVES the non-literal route constants the per-file tri-state above drops —
-///   a `[HttpGet(Routes.List)]` method path / `[Route(ApiRoutes.Base)]` class prefix whose `const string`
-///   lives in another file. Bumped even though the PER-FILE `extract_csharp_http_provides` output is
-///   byte-identical (the tri-state still drops/blocks with no corpus): the fingerprint tracks this crate's
-///   route-extraction logic version, and the new resolution is part of it. The bump forces a one-time
-///   re-projection of cached `.cs` per-file entries with unchanged results — harmless, and it keeps the
-///   engine's uncached project pass (which reads every `.cs` fresh and REPLACES the per-file provides) the
-///   single source of truth for C# `http` provides regardless of cache state.
-pub const PARSER_FINGERPRINT: &str =
-    "csharp/tree-sitter-c-sharp-0.23.5/v1+csharp-route-path-tristate-v1+csharp-route-const-resolve-v1";
+/// Cache-bust token for `zzop-cache`: `parser-id/pinned-toolchain/last-change-version`. The
+/// `tree-sitter-c-sharp` segment must match this crate's `Cargo.toml` pin (a grammar upgrade changes
+/// extraction → restamp); the trailing `CARGO_PKG_VERSION` is restamped when this crate's projected IR
+/// shape changes, else kept so warm C# caches survive the upgrade (2026-07-22 version reform).
+pub const PARSER_FINGERPRINT: &str = "csharp/tree-sitter-c-sharp-0.23.5/0.21.0";
 
 /// Every top-level declaration kind this crate recognizes, PLUS `global_statement` (a top-level
 /// executable statement — C#'s "top-level program" feature — never itself extracted, but still a sign

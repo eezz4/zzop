@@ -1,28 +1,28 @@
-//! `zzop-mcp` binary entry — thin argument dispatch over the library (`zzop_mcp::*`):
+//! `zzop` binary entry — the CLI: thin argument dispatch over the shared library (`zzop_mcp::*`). The
+//! MCP server is its sibling binary `zzop-mcp` (`src/bin/zzop-mcp.rs`); both are thin shims over the same
+//! `zzop_mcp` lib, so a CLI query and an MCP tool call give the identical answer.
 //!
-//!   zzop-mcp analyze <path>            — analyze ONE repo/tree, print a JSON findings summary (Node-free).
-//!   zzop-mcp analyze-envelope <file>   — Mode A: analyze a Normalized-AST envelope file in place of native parsing.
-//!   zzop-mcp validate-envelope <file>  — offline "is this envelope well-formed?" report (exit 0 valid / 1 invalid).
-//!   zzop-mcp validate-rule-pack <file> — offline "does this DSL pack load + regexes compile?" report (exit 0 / 1).
-//!   zzop-mcp cross <path>...           — analyze 2+ trees and print the cross-layer join (zzop's headline).
-//!   zzop-mcp endpoint <pattern> <path>... — definitive "is io key X provided/consumed/joined?" query.
-//!   zzop-mcp endpoint <pattern> --config <path> — same query, trees defined by a zzop.config.jsonc.
-//!   zzop-mcp contract [<name>]         — list the embedded authoring contracts / print one to stdout.
-//!   zzop-mcp version | --version       — print this binary's version (the MCP serverInfo.version value).
-//!   zzop-mcp mcp                       — the MCP server over stdio (newline-delimited JSON-RPC 2.0).
-//!   zzop-mcp help | --help | -h        — print the usage line plus one elaboration per subcommand (exit 0).
+//!   zzop analyze <path>              — analyze ONE repo/tree, print a JSON findings summary (Node-free).
+//!   zzop analyze-envelope <file>     — Mode A: analyze a Normalized-AST envelope file in place of native parsing.
+//!   zzop validate-envelope <file>    — offline "is this envelope well-formed?" report (exit 0 valid / 1 invalid).
+//!   zzop validate-rule-pack <file>   — offline "does this DSL pack load + regexes compile?" report (exit 0 / 1).
+//!   zzop cross <path>...             — analyze 2+ trees and print the cross-layer join (zzop's headline).
+//!   zzop endpoint <pattern> <path>... — definitive "is io key X provided/consumed/joined?" query.
+//!   zzop endpoint <pattern> --config <path> — same query, trees defined by a zzop.config.jsonc.
+//!   zzop contract [<name>]           — list the embedded authoring contracts / print one to stdout.
+//!   zzop version | --version         — print this binary's version (equals the MCP serverInfo.version).
+//!   zzop help | --help | -h          — print the usage line plus one elaboration per subcommand (exit 0).
 //!
 //! See `lib.rs` for the module map and the mcp-distribution decision doc for the host design.
 
 /// The one usage line — printed to stdout by `--help` (exit 0) and to stderr by every malformed
 /// invocation (exit 2), so the two surfaces can never drift apart.
-const USAGE: &str = "usage: zzop-mcp <analyze <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path>... | cross --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | contract [<name>] | version | mcp>";
+const USAGE: &str = "usage: zzop <analyze <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path>... | cross --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | contract [<name>] | version>";
 
-/// A one-line pointer at the bare-invocation/unknown-subcommand error path (exit 2) — two field agents
-/// stumbled on exactly this gap: a bare `zzop-mcp` gave no hint that `help` exists, or that `mcp` is the
-/// stdio JSON-RPC server mode (not, say, an alias for `analyze`). Kept to one short line by design (see
-/// the `help` branch below's own doc comment on why the error path itself stays bare beyond this).
-const BARE_INVOCATION_HINT: &str = "(run 'zzop-mcp help' for details; 'mcp' serves MCP over stdio)";
+/// A one-line pointer at the bare-invocation/unknown-subcommand error path (exit 2): a bare `zzop` gives
+/// no hint that `help` exists, or that MCP is the sibling `zzop-mcp` binary (not a `zzop` subcommand).
+const BARE_INVOCATION_HINT: &str =
+    "(run 'zzop help' for details; the MCP server is the 'zzop-mcp' binary)";
 
 use zzop_mcp::cli::{reject_flag_like_args, run_file_validate};
 
@@ -31,23 +31,23 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("analyze") => {
             let Some(path) = args.get(2) else {
-                eprintln!("usage: zzop-mcp analyze <path>");
+                eprintln!("usage: zzop analyze <path>");
                 std::process::exit(2);
             };
             // Fixed arity: a trailing extra arg would otherwise be DROPPED silently — the user
             // believes it was analyzed (same never-silent rule as endpoint/contract's guards).
             if args.len() > 3 {
                 eprintln!(
-                    "usage: zzop-mcp analyze <path> (one path — got {})",
+                    "usage: zzop analyze <path> (one path — got {})",
                     args.len() - 2
                 );
                 std::process::exit(2);
             }
-            reject_flag_like_args([path.as_str()], "usage: zzop-mcp analyze <path>");
+            reject_flag_like_args([path.as_str()], "usage: zzop analyze <path>");
             match zzop_mcp::tools::analyze(path) {
                 Ok(json) => println!("{json}"),
                 Err(e) => {
-                    eprintln!("zzop-mcp: {e}");
+                    eprintln!("zzop: {e}");
                     std::process::exit(1);
                 }
             }
@@ -57,31 +57,31 @@ fn main() {
         // this CLI form and a tool call give the identical answer.
         Some("analyze-envelope") => {
             let Some(path) = args.get(2) else {
-                eprintln!("usage: zzop-mcp analyze-envelope <envelope.json>");
+                eprintln!("usage: zzop analyze-envelope <envelope.json>");
                 std::process::exit(2);
             };
             if args.len() > 3 {
                 eprintln!(
-                    "usage: zzop-mcp analyze-envelope <envelope.json> (one file — got {})",
+                    "usage: zzop analyze-envelope <envelope.json> (one file — got {})",
                     args.len() - 2
                 );
                 std::process::exit(2);
             }
             reject_flag_like_args(
                 [path.as_str()],
-                "usage: zzop-mcp analyze-envelope <envelope.json>",
+                "usage: zzop analyze-envelope <envelope.json>",
             );
             let envelope_json = match std::fs::read_to_string(path) {
                 Ok(text) => text,
                 Err(e) => {
-                    eprintln!("zzop-mcp: failed to read {path}: {e}");
+                    eprintln!("zzop: failed to read {path}: {e}");
                     std::process::exit(1);
                 }
             };
             match zzop_mcp::tools::analyze_envelope(&envelope_json) {
                 Ok(json) => println!("{json}"),
                 Err(e) => {
-                    eprintln!("zzop-mcp: {e}");
+                    eprintln!("zzop: {e}");
                     std::process::exit(1);
                 }
             }
@@ -110,14 +110,14 @@ fn main() {
                         // config's trees alone define the join.
                         if args.len() > 4 {
                             eprintln!(
-                                "usage: zzop-mcp cross --config <zzop.config.jsonc> (no extra paths — the config's trees define the join)"
+                                "usage: zzop cross --config <zzop.config.jsonc> (no extra paths — the config's trees define the join)"
                             );
                             std::process::exit(2);
                         }
                         (Vec::new(), Some(cp.as_str()))
                     }
                     None => {
-                        eprintln!("usage: zzop-mcp cross --config <zzop.config.jsonc>");
+                        eprintln!("usage: zzop cross --config <zzop.config.jsonc>");
                         std::process::exit(2);
                     }
                 },
@@ -127,19 +127,19 @@ fn main() {
             // as every other malformed invocation here), not a runtime failure. The handler keeps
             // its own "at least 2 paths" error for the MCP tool path, where exit codes don't exist.
             if config_path.is_none() && paths.len() < 2 {
-                eprintln!("usage: zzop-mcp cross <path> <path>... (2+ paths) | cross --config <zzop.config.jsonc>");
+                eprintln!("usage: zzop cross <path> <path>... (2+ paths) | cross --config <zzop.config.jsonc>");
                 std::process::exit(2);
             }
             // Only the leading `--config` above is a recognized flag — a dash-shaped path (or a
             // misplaced `--config` inside the path list) is a usage error, never a path.
             reject_flag_like_args(
                 paths.iter().map(String::as_str).chain(config_path),
-                "usage: zzop-mcp cross <path> <path>... (2+ paths) | cross --config <zzop.config.jsonc>",
+                "usage: zzop cross <path> <path>... (2+ paths) | cross --config <zzop.config.jsonc>",
             );
             match zzop_mcp::tools::cross_repo(&paths, config_path) {
                 Ok(json) => println!("{json}"),
                 Err(e) => {
-                    eprintln!("zzop-mcp: {e}");
+                    eprintln!("zzop: {e}");
                     std::process::exit(1);
                 }
             }
@@ -151,16 +151,14 @@ fn main() {
             // argument), parsed exactly like `cross --config` above. Same handler as the MCP tool,
             // so a CLI query and a tool call give the identical answer.
             let Some(pattern) = args.get(2) else {
-                eprintln!("usage: zzop-mcp endpoint <pattern> <path>... | endpoint <pattern> --config <zzop.config.jsonc>");
+                eprintln!("usage: zzop endpoint <pattern> <path>... | endpoint <pattern> --config <zzop.config.jsonc>");
                 std::process::exit(2);
             };
             let (rest, config_path) = match args.get(3).map(String::as_str) {
                 Some("--config") => match args.get(4) {
                     Some(cp) => (&args[5..], Some(cp.as_str())),
                     None => {
-                        eprintln!(
-                            "usage: zzop-mcp endpoint <pattern> --config <zzop.config.jsonc>"
-                        );
+                        eprintln!("usage: zzop endpoint <pattern> --config <zzop.config.jsonc>");
                         std::process::exit(2);
                     }
                 },
@@ -170,11 +168,13 @@ fn main() {
             // tool's own argument contract); paths mode needs 1+ paths. Either shape mistake is a
             // usage error (exit 2), same as every other malformed invocation here.
             if config_path.is_some() && !rest.is_empty() {
-                eprintln!("usage: zzop-mcp endpoint <pattern> --config <zzop.config.jsonc> (no extra paths)");
+                eprintln!(
+                    "usage: zzop endpoint <pattern> --config <zzop.config.jsonc> (no extra paths)"
+                );
                 std::process::exit(2);
             }
             if config_path.is_none() && rest.is_empty() {
-                eprintln!("usage: zzop-mcp endpoint <pattern> <path>... | endpoint <pattern> --config <zzop.config.jsonc>");
+                eprintln!("usage: zzop endpoint <pattern> <path>... | endpoint <pattern> --config <zzop.config.jsonc>");
                 std::process::exit(2);
             }
             // The pattern and every path must be dash-free — `endpoint -x a b` is a usage error,
@@ -183,7 +183,7 @@ fn main() {
                 std::iter::once(pattern.as_str())
                     .chain(rest.iter().map(String::as_str))
                     .chain(config_path),
-                "usage: zzop-mcp endpoint <pattern> <path>... | endpoint <pattern> --config <zzop.config.jsonc>",
+                "usage: zzop endpoint <pattern> <path>... | endpoint <pattern> --config <zzop.config.jsonc>",
             );
             let result = match (config_path, rest.len()) {
                 (Some(_), _) => zzop_mcp::tools::check_endpoint(pattern, None, &[], config_path),
@@ -193,7 +193,7 @@ fn main() {
             match result {
                 Ok(json) => println!("{json}"),
                 Err(e) => {
-                    eprintln!("zzop-mcp: {e}");
+                    eprintln!("zzop: {e}");
                     std::process::exit(1);
                 }
             }
@@ -208,11 +208,11 @@ fn main() {
                 }
             }
             Some(_) if args.len() > 3 => {
-                eprintln!("usage: zzop-mcp contract [<name>]");
+                eprintln!("usage: zzop contract [<name>]");
                 std::process::exit(2);
             }
             Some(name) => {
-                reject_flag_like_args([name.as_str()], "usage: zzop-mcp contract [<name>]");
+                reject_flag_like_args([name.as_str()], "usage: zzop contract [<name>]");
                 match zzop_mcp::embedded::find(name) {
                     Some(doc) => {
                         use std::io::Write;
@@ -226,7 +226,7 @@ fn main() {
                         // error names every valid choice, so the caller never has to guess.
                         let known: Vec<&str> = zzop_mcp::embedded::names().collect();
                         eprintln!(
-                            "zzop-mcp: unknown contract {name:?} — known contracts: {}",
+                            "zzop: unknown contract {name:?} — known contracts: {}",
                             known.join(", ")
                         );
                         std::process::exit(1);
@@ -234,17 +234,14 @@ fn main() {
                 }
             }
         },
-        // The one version surface the binary has (`serverInfo.version` aside): release builds print
-        // the tag-stamped release version, dev builds the 0.0.0 workspace placeholder — the exact
-        // `server::version()` value, so the CLI and MCP `initialize` can never disagree.
+        // The version surface: `server::version()` = `CARGO_PKG_VERSION`, the workspace release version,
+        // shared with the `zzop-mcp` binary and MCP `initialize`, so all three can never disagree.
         Some("version") | Some("--version") => {
-            println!("zzop-mcp {}", zzop_mcp::server::version());
+            println!("zzop {}", zzop_mcp::server::version());
         }
-        Some("mcp") => zzop_mcp::server::run_stdio(),
         // The polite lane: an explicit help REQUEST prints the usage line + one elaboration per
-        // subcommand to stdout, exit 0 (D17: a bare usage line left `contract`/`mcp` a guessing game).
-        // The exit-2 stderr lane below stays a bare usage line + `BARE_INVOCATION_HINT` — an error is
-        // a pointer AT `help`, not a tutorial.
+        // subcommand to stdout, exit 0. The exit-2 stderr lane below stays a bare usage line +
+        // `BARE_INVOCATION_HINT` — an error is a pointer AT `help`, not a tutorial.
         Some("help") | Some("--help") | Some("-h") => {
             println!("{USAGE}");
             println!("  analyze <path> — analyze ONE repo/tree, print a JSON findings summary");
@@ -264,9 +261,9 @@ fn main() {
             println!(
                 "  contract [<name>] — no args lists the embedded doc resources; `contract <name>` prints one"
             );
-            println!("  version — print this binary's version (the MCP serverInfo.version value)");
+            println!("  version — print this binary's version (equals the MCP serverInfo.version)");
             println!(
-                "  mcp — serve MCP over stdio (JSON-RPC, for MCP client configs; no other subcommand speaks this protocol)"
+                "  (the MCP server is the sibling 'zzop-mcp' binary — it speaks JSON-RPC over stdio, not a 'zzop' subcommand)"
             );
         }
         _ => {

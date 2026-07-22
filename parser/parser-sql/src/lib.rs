@@ -22,8 +22,7 @@
 //!   a quote pair, e.g. `"my.table"`, no longer wrongly splits into a fake schema qualifier), and
 //!   `create_table_re` now recognizes a `GLOBAL`/`LOCAL`/`TEMP`/`TEMPORARY`/`UNLOGGED` modifier between
 //!   `CREATE` and `TABLE`.
-pub const PARSER_FINGERPRINT: &str =
-    "sql/v1+sql-quoted-dot-and-temp-table-v1+temp-table-not-provided-v1";
+pub const PARSER_FINGERPRINT: &str = "sql/0.21.0";
 
 mod extract;
 

@@ -192,7 +192,7 @@ fn row_status<'a>(row: &'a serde_json::Value, surface: &str) -> Option<&'a str> 
 }
 
 // Only one delivery surface remains: the MCP `analyze_repo`/`cross_repo` reply, which is the same
-// shaped summary the `zzop-mcp analyze`/`cross` CLI subcommands print. The JS CLI's two render
+// shaped summary the `zzop analyze`/`cross` CLI subcommands print. The JS CLI's two render
 // surfaces (`jsCliRender`/`mdReport`) were removed with the npm distribution 2026-07-20 — see the
 // registry's own `_doc` historical note.
 const SURFACES: [&str; 1] = ["mcpAnalyzeReply"];

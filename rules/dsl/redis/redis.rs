@@ -1,13 +1,18 @@
 //! End-to-end tests for `rules/dsl/redis/redis.json` — exercised via `zzop_engine::analyze_tree` so every rule runs against real fixture trees on disk, same convention as `be-reliability/be-reliability.rs`/`sql/sql.rs`/`http/http.rs`.
 //!
-//! Covers all rules in the pack, all `line-scan`: `flushall-in-code`, `keys-glob-scan`, `client-no-error-listener`.
+//! Covers all rules in the pack: `line-scan` (`flushall-in-code`, `keys-glob-scan`, `client-no-error-listener`,
+//! `redis-lock-no-ttl`) and `method-scan` (`redis-lock-get-then-set`, `redis-counter-get-set`).
 //!
 //! Each rule has >=1 positive fixture (count + line asserted), >=1 realistic negative, and a `suppress_marker`
 //! case. `keys-glob-scan` additionally guards the documented FP shapes (`Object.keys(x)`, `map.keys()`, a
 //! no-arg `.keys()` call) that a naive unscoped `.keys(` pattern would wrongly fire on — the quote-required-
 //! right-after-the-paren anchor is what tells them apart. `client-no-error-listener` additionally guards a
 //! same-named `createClient` from an unrelated library (`@supabase/supabase-js`) via the ioredis/redis import
-//! gate, and an ioredis file that DOES attach `.on('error', ...)` via `require_file_absent`.
+//! gate, and an ioredis file that DOES attach `.on('error', ...)` via `require_file_absent`. The two
+//! `method-scan` concurrency rules (`redis-lock-get-then-set`, `redis-counter-get-set`) are co-occurrence
+//! heuristics — every `patterns` entry must match somewhere within the same function span, which proves
+//! nothing about textual order — so each also pins the documented FP-adversarial negative (a lookalike shape
+//! missing one required co-occurring token, or an `absent` veto token present) at 0 findings.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -107,3 +112,6 @@ fn java_file_is_out_of_scope_for_flushall_and_keys_glob() {
 mod client_no_error_listener;
 mod flushall_in_code;
 mod keys_glob_scan;
+mod redis_counter_get_set;
+mod redis_lock_get_then_set;
+mod redis_lock_no_ttl;

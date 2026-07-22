@@ -217,6 +217,121 @@
         "skip_comment_lines": true,
         "line_pattern": "\\bprocess\\.env\\.[A-Za-z0-9_]+"
       }
+    },
+    {
+      "id": "stream-open-no-close-in-loop",
+      "severity": "warning",
+      "message": "A file/stream handle (`fs.createReadStream(`/`fs.createWriteStream(`/`fs.open(`/`fs.openSync(`) is opened structurally inside a loop body — verified against the parser's projected loop spans (the open call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — and the enclosing function never closes it (`.close(`/`.destroy(`/`pipeline(`/`finished(` anywhere in the function). Under a fan-out, the file descriptors accumulate across iterations and the process eventually hits `EMFILE: too many open files`. Note honestly: the close-absence check is whole-function scoped and matches `.close(`/`.destroy(`/`pipeline(`/`finished(` on ANY object — so a close inside a sibling branch or a callee is invisible here and the finding still fires (false positive), while an unrelated `res.close()`/`conn.destroy()` elsewhere in the function vetoes a genuine stream leak (false negative); verify before refactoring. Close the handle in a `finally` block, or use `pipeline(...)`, which closes both ends automatically. Suppress a vetted case with `// stream-in-loop-ok`.",
+      "suppress_marker": "stream-in-loop-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "require_file": "(?i)createReadStream|createWriteStream|\\bfs\\.open",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\b(?:fs\\.)?(?:createReadStream|createWriteStream)\\s*\\(|\\bfs\\.(?:open|openSync)\\s*\\(", "label": "stream-open" }
+        ],
+        "trigger": "stream-open",
+        "trigger_in_loop": true,
+        "absent": [
+          { "pattern": "\\.(?:close|destroy)\\s*\\(|\\bpipeline\\s*\\(|\\bfinished\\s*\\(", "label": "closed" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "listener-subscribe-in-loop",
+      "severity": "warning",
+      "message": "An EventEmitter listener (`.on('event',…)`/`.once(`/`.addListener(`/`.prependListener(`, anchored on a string event-name argument) is registered structurally inside a loop body — verified against the parser's projected loop spans (the subscribe call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — with no matching removal (`.off(`/`.removeListener(`/`.removeAllListeners(`) anywhere in the enclosing function. To avoid firing on same-shaped non-EventEmitter `.on('...')` calls (a frontend DOM/jQuery `$(el).on('click', …)`, a knex join builder, a D3 selection), the rule only scans files that use a Node event-emitter/server library (an `events`/`net`/`http`/`ws`/`socket.io`/... import, or a `.setMaxListeners(` call). This is the event-listener sibling of `interval-no-clear` (which covers `setInterval`): listeners pile up on every iteration, Node warns `MaxListenersExceeded`, and each event then fires the handler N times (duplicate side effects, unbounded memory growth). Note honestly: the removal-absence check is whole-function scoped — a teardown living in a different function (or an unrelated `.off(` on another object) either misses a real fix or vetoes a real leak; verify before refactoring. Register the listener once outside the loop, or collect the listeners and remove them during teardown. Suppress a vetted case with `// listener-in-loop-ok`.",
+      "suppress_marker": "listener-in-loop-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "require_file": "(?i)\\bEventEmitter\\b|\\.setMaxListeners\\s*\\(|\\bfrom\\s+['\"](?:events|node:events|net|http|https|http2|stream|ws|socket\\.io|ioredis|amqplib|kafkajs|mqtt)['\"]|\\brequire\\s*\\(\\s*['\"](?:events|net|http|https|http2|stream|ws|socket\\.io|ioredis|amqplib|kafkajs|mqtt)['\"]",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\.(?:on|once|addListener|prependListener)\\s*\\(\\s*['\"]", "label": "subscribe" }
+        ],
+        "trigger": "subscribe",
+        "trigger_in_loop": true,
+        "absent": [
+          { "pattern": "\\.(?:off|removeListener|removeAllListeners)\\s*\\(", "label": "removed" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "await-inside-promise-all-array",
+      "severity": "warning",
+      "message": "`await` used directly inside a `Promise.all(...)`/`Promise.allSettled(...)`/`Promise.race(...)` array literal — each awaited element resolves before the next element of the array is even evaluated, so the calls run one after another instead of concurrently, silently defeating the whole point of `Promise.all`. This is syntax-proven where it fires: an `await` textually between the array's `[` and `]` on the SAME line always serializes that element against the next (the line-scan only sees the single-line form — a multi-line array with each `await` on its own line is not flagged). Move the `await` out — build the array of un-awaited promises first, then await the combinator once (e.g. `Promise.all([getA(), getB()])`, or `await Promise.all(items.map((i) => getA(i)))`). Suppress a vetted case with `// promise-all-await-ok`.",
+      "suppress_marker": "promise-all-await-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "strip_string_literals": true,
+        "skip_comment_lines": true,
+        "line_pattern": "Promise\\.(?:all|allSettled|race)\\s*\\(\\s*\\[[^\\]]*\\bawait\\b"
+      }
+    },
+    {
+      "id": "emitter-async-listener",
+      "severity": "warning",
+      "message": "An `async` callback registered as an EventEmitter listener (`.on`/`.once`/`.addListener`/`.prependListener`) — the emitter fires it and discards the returned promise, so a rejection inside the handler becomes an unhandled promise rejection, which crashes the process on Node 15+ (and is a silent swallow on older Node). The rule only scans files that use a Node event-emitter/server library (an `events`/`net`/`http`/`ws`/... import, or a `.setMaxListeners(` call), so a frontend DOM `el.on('click', async …)` is not flagged. Wrap the handler body in try/catch and log/handle the error there, or wrap the callback so its promise is observed (e.g. a small `catchAsync(fn)` helper). Suppress a vetted case with `// emitter-async-ok`.",
+      "suppress_marker": "emitter-async-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "require_file": "(?i)\\bEventEmitter\\b|\\.setMaxListeners\\s*\\(|\\bfrom\\s+['\"](?:events|node:events|net|http|https|http2|stream|ws|socket\\.io|ioredis|amqplib|kafkajs|mqtt)['\"]|\\brequire\\s*\\(\\s*['\"](?:events|net|http|https|http2|stream|ws|socket\\.io|ioredis|amqplib|kafkajs|mqtt)['\"]",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\.(?:on|once|addListener|prependListener)\\s*\\(\\s*['\"][^'\"]+['\"]\\s*,\\s*async\\b", "label": "async-listener" }
+        ],
+        "trigger": "async-listener"
+      }
+    },
+    {
+      "id": "promise-race-resource-leak",
+      "severity": "info",
+      "message": "`Promise.race([...])` with no `AbortController`/`AbortSignal`/`clearTimeout`/`.abort()` visible in the same function — the operation(s) that lose the race are never cancelled, so their socket/timer/handle stays alive after the race settles, and a later rejection from a loser becomes an unhandled rejection. Wire an `AbortController` (or equivalent cancellation) through to every raced operation and abort the losers once the race settles. Heuristic, not proof: some raced operations (e.g. a plain in-memory timer promise) hold no cancellable resource, so this can over-flag. Suppress a vetted case with `// promise-race-ok`.",
+      "suppress_marker": "promise-race-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "Promise\\.race\\s*\\(", "label": "race" }
+        ],
+        "trigger": "race",
+        "absent": [
+          { "pattern": "AbortController|AbortSignal|clearTimeout|\\.abort\\s*\\(|signal\\s*:", "label": "cancels" }
+        ]
+      }
+    },
+    {
+      "id": "fs-check-then-use",
+      "severity": "warning",
+      "message": "A filesystem existence/permission check (`fs.existsSync`/`fs.access`/`fs.stat`/...) and a create/write call (`fs.writeFile`/`fs.open`/`fs.rename`/...) found in the same function, with no exclusive-create flag (`wx`/`O_EXCL`) visible anywhere in it — CWE-367 TOCTOU: between the check and the use, the path can be swapped out from under it (e.g. via a symlink) or another writer can win the race, so the check is stale by the time the write happens. This is a co-occurrence check, not proof: it does not confirm the check and the write target the same path, or that the check actually runs before the write in the control flow. Prefer opening with an exclusive-create flag (`{ flag: 'wx' }` in Node, `O_EXCL` at the syscall level), which fails atomically if the path already exists instead of trusting a separate check. Suppress a vetted case with `// fs-check-use-ok`.",
+      "suppress_marker": "fs-check-use-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "require_file": "(?i)\\bfs\\b|require\\s*\\(\\s*['\"]fs['\"]|from\\s+['\"](?:fs|node:fs)['\"]",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\bfs(?:Promises)?\\.(?:existsSync|exists|access|accessSync|stat|statSync)\\s*\\(|\\bexistsSync\\s*\\(", "label": "check" },
+          { "pattern": "\\bfs(?:Promises)?\\.(?:open|openSync|writeFile\\w*|appendFile\\w*|unlink\\w*|rename\\w*|createWriteStream)\\s*\\(", "label": "use" }
+        ],
+        "trigger": "use",
+        "absent": [
+          { "pattern": "['\"]wx['\"]|O_EXCL|flag\\s*:\\s*['\"]wx", "label": "exclusive" }
+        ]
+      }
     }
   ]
 }

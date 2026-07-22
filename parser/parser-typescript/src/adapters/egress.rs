@@ -51,9 +51,13 @@ mod body_shape;
 mod collector;
 mod concat;
 mod consts;
+mod correlation;
+mod generated_client;
 mod keying;
 mod matchers;
 mod object_shape;
+mod react_query;
+mod retry;
 mod url_resolve;
 
 pub use collector::extract_http_egress;

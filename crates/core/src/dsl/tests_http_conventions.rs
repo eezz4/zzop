@@ -1,10 +1,11 @@
 //! http-conventions fixture tests — a test-only matcher-shape demo (inlined rather than a shipped
-//! `rules/dsl/*.json`) combining io-scan and symbol-scan rules.
+//! `rules/dsl/*.json`) combining io-scan (whole-tree, via `eval_pack_io_scan`) and symbol-scan (per-file,
+//! via `eval_pack`) rules.
 
-use crate::io::IoFacts;
+use crate::io::{IoConsume, IoProvide};
 use crate::ir::SourceSymbolKind;
 
-use super::test_support::{io_consume, io_provide, symbol};
+use super::test_support::{scan_io_tree, symbol};
 use super::{eval_pack, RuleContext, RulePackDef, SourceFile};
 
 const HTTP_CONVENTIONS_JSON: &str = r#"{
@@ -60,21 +61,15 @@ fn http_conventions_pack() -> RulePackDef {
 
 #[test]
 fn http_conventions_flags_unversioned_provided_endpoint() {
-    let files = vec![SourceFile {
-        loop_spans: Vec::new(),
-        rel: "routes/authRoutes.ts".into(),
-        text: String::new(),
-        symbols: vec![],
-        io: Some(IoFacts {
-            provides: vec![io_provide("http", "GET /authen/getUserInfo", 12)],
-            consumes: vec![],
-        }),
+    let provides = vec![IoProvide {
+        kind: "http".into(),
+        key: "GET /authen/getUserInfo".into(),
+        file: "routes/authRoutes.ts".into(),
+        line: 12,
+        symbol: None,
+        body: None,
     }];
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
-    };
-    let f = eval_pack(&http_conventions_pack(), &ctx);
+    let f = scan_io_tree(&http_conventions_pack(), provides, vec![]);
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].rule_id, "http-conventions/endpoint-version-prefix");
     assert_eq!(f[0].line, 12);
@@ -82,21 +77,15 @@ fn http_conventions_flags_unversioned_provided_endpoint() {
 
 #[test]
 fn http_conventions_does_not_flag_versioned_endpoint() {
-    let files = vec![SourceFile {
-        loop_spans: Vec::new(),
-        rel: "routes/authRoutes.ts".into(),
-        text: String::new(),
-        symbols: vec![],
-        io: Some(IoFacts {
-            provides: vec![io_provide("http", "GET /api/v1/authen/getUserInfo", 12)],
-            consumes: vec![],
-        }),
+    let provides = vec![IoProvide {
+        kind: "http".into(),
+        key: "GET /api/v1/authen/getUserInfo".into(),
+        file: "routes/authRoutes.ts".into(),
+        line: 12,
+        symbol: None,
+        body: None,
     }];
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
-    };
-    let f = eval_pack(&http_conventions_pack(), &ctx);
+    let f = scan_io_tree(&http_conventions_pack(), provides, vec![]);
     assert!(f
         .iter()
         .all(|x| x.rule_id != "http-conventions/endpoint-version-prefix"));
@@ -104,25 +93,42 @@ fn http_conventions_does_not_flag_versioned_endpoint() {
 
 #[test]
 fn http_conventions_flags_unversioned_fetch_and_unresolved_dynamic_fetch() {
-    let files = vec![SourceFile {
-        loop_spans: Vec::new(),
-        rel: "src/api/client.ts".into(),
-        text: String::new(),
-        symbols: vec![],
-        io: Some(IoFacts {
-            provides: vec![],
-            consumes: vec![
-                io_consume("http", Some("GET /authen/getUserInfo"), 7),
-                io_consume("http", None, 15),
-                io_consume("http", Some("GET /api/v2/orders"), 22),
-            ],
-        }),
-    }];
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
-    };
-    let f = eval_pack(&http_conventions_pack(), &ctx);
+    let consumes = vec![
+        IoConsume {
+            kind: "http".into(),
+            key: Some("GET /authen/getUserInfo".into()),
+            file: "src/api/client.ts".into(),
+            line: 7,
+            raw: None,
+            method: None,
+            body: None,
+            client: None,
+            retry_configured: None,
+        },
+        IoConsume {
+            kind: "http".into(),
+            key: None,
+            file: "src/api/client.ts".into(),
+            line: 15,
+            raw: None,
+            method: None,
+            body: None,
+            client: None,
+            retry_configured: None,
+        },
+        IoConsume {
+            kind: "http".into(),
+            key: Some("GET /api/v2/orders".into()),
+            file: "src/api/client.ts".into(),
+            line: 22,
+            raw: None,
+            method: None,
+            body: None,
+            client: None,
+            retry_configured: None,
+        },
+    ];
+    let f = scan_io_tree(&http_conventions_pack(), vec![], consumes);
     let hits: Vec<_> = f
         .iter()
         .filter(|x| x.rule_id == "http-conventions/unversioned-fetch")

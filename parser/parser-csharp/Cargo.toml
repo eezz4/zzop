@@ -1,6 +1,6 @@
 [package]
 name = "zzop-parser-csharp"
-version = "0.0.0"
+version.workspace = true
 edition = "2021"
 publish = false
 
@@ -14,5 +14,5 @@ tree-sitter-c-sharp = "=0.23.5"
 # Runtime version requirement mirrors `zzop-parser-go`/`zzop-parser-java-21`'s "minimal compatible,
 # not exact" discipline on the tree-sitter runtime crate itself.
 tree-sitter = "0.25.8"
-zzop-core = { version = "0.0.0", path = "../../crates/core" }
+zzop-core = { path = "../../crates/core" }
 regex = { workspace = true }

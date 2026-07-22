@@ -228,3 +228,84 @@ fn parse_failure_yields_empty_vec() {
 fn empty_file_yields_empty_vec() {
     assert!(consumes("").is_empty());
 }
+
+// --- B14①: last-write-wins instance-binding resolution ---
+
+#[test]
+fn backlog_repro_reassign_to_non_client_kills_the_binding() {
+    // The exact backlog B14① false positive: `s` is bound to a client, then reassigned to something
+    // else entirely, then `.get` is called — under the old flat approximation this misread as an HTTP
+    // GET; last-write-wins now sees the kill and correctly yields nothing.
+    let out = consumes("import httpx\ns = httpx.Client()\ns = load_config()\ns.get(\"timeout\")\n");
+    assert!(out.is_empty(), "{out:?}");
+}
+
+#[test]
+fn reassigning_back_to_a_client_revives_the_binding() {
+    let out = consumes(
+        "import httpx\ns = httpx.Client()\ns = load_config()\ns = httpx.Client()\ns.get(\"/x\")\n",
+    );
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert_eq!(out[0].key.as_deref(), Some("GET /x"));
+}
+
+#[test]
+fn two_interleaved_clients_resolve_independently() {
+    // `a` is killed before its call site; `b` is never touched after its binding — each name's history
+    // is independent, so `a.get` is not a consume while `b.get` still is.
+    let out = consumes(
+        "import httpx\na = httpx.Client()\nb = httpx.Client()\na = load_config()\na.get(\"/x\")\nb.get(\"/y\")\n",
+    );
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert_eq!(out[0].key.as_deref(), Some("GET /y"));
+}
+
+#[test]
+fn kill_by_function_call_rhs() {
+    let out = consumes("import httpx\ns = httpx.Client()\ns = build_client()\ns.get(\"/x\")\n");
+    assert!(out.is_empty(), "{out:?}");
+}
+
+#[test]
+fn kill_by_dict_literal_rhs() {
+    let out = consumes("import httpx\ns = httpx.Client()\ns = {}\ns.get(\"/x\")\n");
+    assert!(out.is_empty(), "{out:?}");
+}
+
+#[test]
+fn kill_by_attribute_access_rhs() {
+    let out = consumes("import httpx\ns = httpx.Client()\ns = cfg.default_client\ns.get(\"/x\")\n");
+    assert!(out.is_empty(), "{out:?}");
+}
+
+#[test]
+fn kill_by_del_statement() {
+    let out = consumes("import httpx\ns = httpx.Client()\ndel s\ns = {}\ns.get(\"/x\")\n");
+    assert!(out.is_empty(), "{out:?}");
+}
+
+#[test]
+fn same_line_assignment_and_call_resolve_as_bound() {
+    // `s = httpx.Client(); s.get(...)` on ONE physical line: only line numbers (no columns) are tracked,
+    // so the same-line rule (module doc) treats the assignment as already in effect.
+    let out = consumes("import httpx\ns = httpx.Client(); s.get(\"/x\")\n");
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert_eq!(out[0].key.as_deref(), Some("GET /x"));
+}
+
+#[test]
+fn unrelated_name_reassignment_does_not_affect_a_tracked_client() {
+    // Reassigning (and thus "killing") an unrelated name must not perturb `s`'s own binding history.
+    let out = consumes("import httpx\ns = httpx.Client()\nother = load_config()\ns.get(\"/x\")\n");
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert_eq!(out[0].key.as_deref(), Some("GET /x"));
+}
+
+#[test]
+fn call_before_any_client_binding_on_a_later_line_is_not_a_consume() {
+    // A `.get` at a line strictly before the file's first client-constructor binding must not resolve —
+    // last-write-wins only looks at bindings at or before the call's own line.
+    let out =
+        consumes("import httpx\ndef fetch(s):\n    return s.get(\"/x\")\ns = httpx.Client()\n");
+    assert!(out.is_empty(), "{out:?}");
+}

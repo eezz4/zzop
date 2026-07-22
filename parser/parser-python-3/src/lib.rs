@@ -23,6 +23,7 @@ pub mod adapters;
 pub mod lang;
 
 pub use adapters::django::{extract_django_db_table_consumes, extract_django_db_table_provides};
+pub use adapters::django_routes::extract_django_route_fragments;
 pub use adapters::fastapi::extract_fastapi_router_fragments;
 pub use adapters::http_clients::extract_python_http_consumes;
 pub use adapters::sqlalchemy::{
@@ -33,54 +34,11 @@ pub use lang::resolve::python_import_candidates;
 pub use lang::symbols::parse_symbols;
 pub use lang::used_names::parse_local_identifier_refs;
 
-/// Cache key ingredient for `zzop-cache`, mirroring `zzop_parser_typescript::PARSER_FINGERPRINT`'s
-/// scheme: parser id + pinned ruff version + a logic-version counter. The `ruff-0.0.4` segment must
-/// match this crate's `Cargo.toml` `ruff_python_parser`/`ruff_python_ast` pin exactly (hand-synced, same
-/// TODO the swc crate carries — Phase 2 could derive it from the pin automatically).
-/// - `v1`: initial release — symbols (function/async function/class/`Class.method`/top-level simple
-///   const assignment), imports (absolute dotted + relative slash-form specifiers, star imports),
-///   `used_names`, FastAPI router-mount fragments (`FastAPI()`/`APIRouter()` receivers, verb decorators,
-///   `include_router` mounts), and `requests`/`httpx` literal HTTP egress consumes.
-/// - `v2`: adversarial-review fixes (F2/F3/F4) that change extraction output — `adapters::http_clients`
-///   now mirrors `zzop_parser_typescript::adapters::egress`'s consume-key discipline (`/`-headed literal
-///   keyed with query/fragment dropped, absolute `http(s)://` keyed as an external host-carrying key,
-///   everything else including a base-relative literal left unresolved — no invented base-relative
-///   bucket) instead of unconditionally keying every string literal, reassembles an f-string's literal
-///   parts (interpolations -> `{}`) instead of always leaving it unresolved, and discovers call sites via
-///   a generic `ruff_python_ast::visitor::Visitor` walk instead of a hand-rolled statement/expression
-///   descent that missed nested positions (chained calls, dict/list elements, keyword args, `with`
-///   context expressions); `lang::symbols` now honors a fully-static top-level `__all__` literal
-///   list/tuple for `exported` (falling back to the underscore convention when absent or
-///   partially-computed) and a `Class.method` sub-symbol inherits its class's `exported` value instead of
-///   deriving its own from the (possibly dotted) method name.
-/// - `v3`: `adapters::http_clients` now recognizes INSTANCE-based clients — a name bound to
-///   `requests.Session()`/`httpx.Client()`/`httpx.AsyncClient()` (via assignment, annotated assignment, or
-///   a `with`/`async with` binding) is tracked by a file-wide first pass, so `.get()`/`.post()`/... on it
-///   is keyed as egress. Closes the FastAPI blind spot where the idiomatic (and for async, the only)
-///   outbound pattern `async with httpx.AsyncClient() as c: await c.get(url)` produced zero consumes. New
-///   consumes appear -> projection change.
-/// - `v4`: `adapters::fastapi` reads the route path from the `path=` KEYWORD argument when it is not
-///   positional (`@app.get(path="/x")`, valid FastAPI) instead of dropping the route. New provides appear.
-/// - `v5`: `adapters::fastapi` recognizes the generic `@app.api_route(path, methods=["GET","POST"])`
-///   decorator (the form the verb shortcuts wrap), emitting one route per listed method. New provides.
-/// - `v6`: `adapters::fastapi` dedups a repeated/case-variant verb in one `api_route` `methods=[…]` list
-///   (`methods=["GET","get","POST"]` -> one GET provide, first-seen order kept) — a duplicate-route
-///   double-count fix. Fewer provides on that near-invalid shape.
-/// - `v7`: `adapters::fastapi` composes the canonical `<mod>.include_router(<sub>.router, prefix="/x")`
-///   attribute-mount form (previously only a bare `Name` first argument was accepted, so every
-///   `<mod>.router` sub-router mount was silently dropped). New mount fragments + prefix composition.
-/// - `v8`: NEW `adapters::sqlalchemy` — SQLModel/SQLAlchemy model classes project `db-table` PROVIDES
-///   (`table=True` class arg or a `__tablename__` body literal; `symbol` = class name) and query calls
-///   (`select(X)`, `session.get(X, …)`, `session.query(X)`, `.select_from(X)`) project unresolved
-///   `db-table` CONSUMES (`key: None`, `raw` = model class), resolved engine-side against the provide
-///   `symbol` index — the Python member of the ORM db-table family. New facts appear.
-/// - `v9`: NEW `adapters::django` — Django ORM. A field-driven model class (a `models.<Field>(…)` body
-///   assign, through any abstract base; `abstract = True` Meta / manager classes excluded) projects a
-///   `db-table` PROVIDE (`db_table` Meta literal or `<app_label>_<model_lower>` from the file path;
-///   `symbol` = class name), and every `<Model>.objects` manager access projects an unresolved `db-table`
-///   CONSUME (`key: None`, `raw` = model class). New facts appear.
-pub const PARSER_FINGERPRINT: &str =
-    "python3/ruff-0.0.4/v9+sqlalchemy-db-table-v1+django-db-table-v1";
+/// Cache-bust token for `zzop-cache`: `parser-id/pinned-toolchain/last-change-version`. The `ruff-0.0.4`
+/// segment must match this crate's `Cargo.toml` `ruff_python_parser`/`ruff_python_ast` pin (a ruff upgrade
+/// changes extraction → restamp); the trailing `CARGO_PKG_VERSION` is restamped when this crate's projected
+/// IR shape changes, else kept so warm Python caches survive the upgrade (2026-07-22 version reform).
+pub const PARSER_FINGERPRINT: &str = "python3/ruff-0.0.4/0.21.0";
 
 /// Parses `text` with ruff's Python parser, returning `None` on any syntax error (never panics —
 /// unexpected/malformed input degrades to `None`, letting the caller fall back to a lexical scan, same

@@ -121,6 +121,7 @@ mod tests {
                 line,
                 raw: None,
                 method: None,
+                retry_configured: None,
             },
         }
     }

@@ -107,7 +107,7 @@ pub(crate) struct ValidateReport {
 /// pack loading, no `zzop_engine::analyze_envelope` — and reports the result as a JSON `{"valid": bool,
 /// "issues": ["..."]}`. This is `analyze_envelope_json`'s validation half (see its use of
 /// `zzop_core::validate_envelope` above) split out on its own so an external adapter author gets fast,
-/// offline "is my envelope well-formed" feedback (`zzop-mcp validate-envelope <path>`) without needing a full
+/// offline "is my envelope well-formed" feedback (`zzop validate-envelope <path>`) without needing a full
 /// engine run or even a `configJson` at all.
 ///
 /// Unlike every other `*_json` function in this crate, this one never fails: an unparseable or

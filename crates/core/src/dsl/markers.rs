@@ -14,6 +14,16 @@ pub(super) fn compile_marker_sql(marker: &str) -> Option<regex::Regex> {
     regex::Regex::new(&format!(r"--\s*{}\b", regex::escape(marker))).ok()
 }
 
+/// Line-comment-neutral marker for the whole-tree io-scan pass, whose anchor lines span every language
+/// an `http` provide can come from: accepts `//` (TS/JS/Java/Go/C#) AND `#` (Python) comment leaders —
+/// a `# auth-gate-ok` on a FastAPI route line suppresses exactly like `// auth-gate-ok` on an Express
+/// one. `--` is deliberately NOT included (no `.sql` file produces route provides; see
+/// `compile_marker_sql`'s isolation note). `#` cannot false-fire in JS/TS: a marker contains `-`, which
+/// no `#private` field or hex literal continues with.
+pub(super) fn compile_marker_line_comment(marker: &str) -> Option<regex::Regex> {
+    regex::Regex::new(&format!(r"(?://|#)\s*{}\b", regex::escape(marker))).ok()
+}
+
 /// Whether `--`-comment suppress markers should be recognized for this file — gated on the `.sql`
 /// extension (case-insensitive) so `//`-only recognition stays byte-identical for every other extension.
 pub(super) fn is_sql_file(rel: &str) -> bool {

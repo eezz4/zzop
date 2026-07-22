@@ -3,7 +3,7 @@
 //! `zzop-config` front-end and `crate::trees::zero_config_trees`'s paths mode, never re-implemented),
 //! runs the SAME `analyzeTrees` engine path, then hands the output to the shared facade query core
 //! (`zzop_facade::query_io_json`) so both surfaces — the `check_endpoint` tool and the
-//! `zzop-mcp endpoint` CLI subcommand — go through this one function and give identical
+//! `zzop endpoint` CLI subcommand — go through this one function and give identical
 //! answers. Every mode routes through `analyzeTrees` — even a single `path` — because the query's
 //! sealed verdict vocabulary (linked/provided-only/...) is made of cross-layer JOIN facts, and the
 //! join runs fine over one tree (intra-tree edges included); a plain `analyze` output would be
@@ -16,7 +16,7 @@
 /// config front-end); the two fields ride the reply exactly like every sibling tool's, so
 /// `check_endpoint` cannot silently pretend a dropped config was honored. Pretty-printed for parity
 /// with the other tools — query-core keys untouched. Shared by the MCP tool and the
-/// `zzop-mcp endpoint` CLI subcommand.
+/// `zzop endpoint` CLI subcommand.
 pub fn endpoint_summary(
     pattern: &str,
     path: Option<&str>,

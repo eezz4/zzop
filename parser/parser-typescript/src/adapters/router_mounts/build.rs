@@ -13,6 +13,7 @@ use zzop_core::{ImportMap, RouterMountEntry, RouterMountFragment};
 
 use super::chain::{unwrap_expr, walk_chain, ChainRoot};
 use super::guard::{judge_guard_arg, AUTH_GUARDED_ATTR_KEY};
+use super::idempotency::{inline_handler_reads_idempotency_key, IDEMPOTENCY_GUARDED_ATTR_KEY};
 use super::use_classify::classify_use_call;
 
 /// Pass 2: walks the module in source order, classifying entries onto the right fragment.
@@ -153,15 +154,26 @@ impl FragmentBuilder<'_> {
                 // A middleware argument between the path and the last/handler arg
                 // (`router.post('/x', requireAuth, handler)`) is judged for guard vocabulary —
                 // route-level, as opposed to router-level (`.use`) — via the same helper.
-                let attr_keys = if call.args.len() > 2
+                let mut attr_keys = Vec::new();
+                if call.args.len() > 2
                     && call.args[1..call.args.len() - 1]
                         .iter()
                         .any(|a| judge_guard_arg(unwrap_expr(&a.expr)))
                 {
-                    vec![AUTH_GUARDED_ATTR_KEY.to_string()]
-                } else {
-                    Vec::new()
-                };
+                    attr_keys.push(AUTH_GUARDED_ATTR_KEY.to_string());
+                }
+                // An inline handler whose body names the idempotency-key header via a literal is
+                // judged idempotency-guarded independently of the guard judgment above (both can
+                // be present on the same entry). `.all` expansion below clones `attr_keys` to
+                // every verb, which is correct — the guard is a property of the handler, not of
+                // any one HTTP method.
+                if call
+                    .args
+                    .last()
+                    .is_some_and(|a| inline_handler_reads_idempotency_key(unwrap_expr(&a.expr)))
+                {
+                    attr_keys.push(IDEMPOTENCY_GUARDED_ATTR_KEY.to_string());
+                }
                 // `HTTP_KEY_VERBS` are already uppercase; a single verb uppercases its own spelling.
                 let methods: Vec<String> = if verb == "all" {
                     zzop_core::HTTP_KEY_VERBS

@@ -136,11 +136,12 @@ pub(crate) struct FileArtifact {
     /// `language`/`degraded` — the removed `scan_field_usage` was a raw-text regex scan, never an AST
     /// parse, so it never cared whether swc could parse the file.
     pub field_usage_tokens: Vec<String>,
-    /// Per-file loop-body line spans (`zzop_parser_typescript::extract_loop_spans`) — feeds
-    /// `zzop_core::dsl::SourceFile::loop_spans`, `Matcher::MethodScan::trigger_in_loop`'s substrate. An
-    /// AST-derived projection (unlike `field_usage_tokens`/`store_bound_models` above), so it follows the
-    /// `symbols`-style convention: real spans only for a well-formed, non-degraded TypeScript file; empty
-    /// for non-TypeScript, degraded, oversized, or dispatch-`None` files (graceful degrade, never guessed).
+    /// Per-file loop-body line spans (`zzop_parser_typescript::extract_loop_spans` /
+    /// `zzop_parser_go::extract_loop_spans`) — feeds `zzop_core::dsl::SourceFile::loop_spans`,
+    /// `Matcher::MethodScan::trigger_in_loop`'s substrate. An AST-derived projection (unlike
+    /// `field_usage_tokens`/`store_bound_models` above), so it follows the `symbols`-style convention:
+    /// real spans only for a well-formed, non-degraded TypeScript/Go file; empty for every other
+    /// language, degraded, oversized, or dispatch-`None` files (graceful degrade, never guessed).
     pub loop_spans: Vec<(u32, u32)>,
 }
 

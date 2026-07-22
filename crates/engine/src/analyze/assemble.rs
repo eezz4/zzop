@@ -1,11 +1,11 @@
 //! `assemble` — the tree-wide assembly orchestrator, split into sequential phases (each phase is a
 //! `mod` below, in the order it runs): [`collect`] the fused per-file pass's own output into
 //! per-tree substrates, [`provides`] compose whole-tree PROVIDE/CONSUME facts from those substrates,
-//! [`dep_graph`] build the dependency graph + run git-history-dependent collection, [`rules`] run
-//! every whole-graph/call-graph-BFS native analysis, [`warnings`] run the framework-silence coverage
-//! self-report, and [`metrics`] compute git-history-dependent scores/health/recommendations/critical/
-//! seams. This file is the glue tying every phase's output into the final `AnalyzeOutput` — no
-//! composition/analysis logic of its own beyond that wiring.
+//! [`dep_graph`] build the dependency graph + run git-history-dependent collection, [`rules`] run every
+//! whole-graph/call-graph-BFS native analysis (plus its own whole-tree `Matcher::IoScan` DSL sub-phase),
+//! [`warnings`] run the framework-silence coverage self-report, and [`metrics`] compute
+//! git-history-dependent scores/health/recommendations/critical/seams. This file is the glue tying every
+//! phase's output into the final `AnalyzeOutput` — no composition/analysis logic of its own beyond wiring.
 
 use zzop_core::{merge_findings, CommonIr, IoFacts, MinimalIr};
 
@@ -279,6 +279,7 @@ pub(crate) fn assemble(
         file_count,
         coverage,
         package_imports,
+        attributes: attribute_store,
         nodes,
         scores,
         health,
@@ -290,8 +291,7 @@ pub(crate) fn assemble(
         packs_loaded: crate::PackLoaded::from_config(config, &dsl_scope.files_in_scope_by_pack),
         warnings,
         config_warnings,
-        // Set by `analyze_tree` after this call returns (needs the counters that `pipeline::run_file_pass`
-        // updated during the fused pass, which are private to that call, not `assemble`'s).
+        // Set by `analyze_tree` after this returns (needs `pipeline::run_file_pass`'s private counters).
         cache: None,
         rule_timings,
         rule_overrides_applied: rule_overrides_applied(config),

@@ -13,6 +13,7 @@ fn consume(kind: &str, key: Option<&str>, source: &str, file: &str, line: u32) -
             line,
             raw: None,
             method: None,
+            retry_configured: None,
         },
     }
 }

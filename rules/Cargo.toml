@@ -42,12 +42,20 @@ name = "pack_fullstack"
 path = "dsl/fullstack/fullstack.rs"
 
 [[test]]
+name = "pack_go"
+path = "dsl/go/go.rs"
+
+[[test]]
 name = "pack_http"
 path = "dsl/http/http.rs"
 
 [[test]]
 name = "pack_perf"
 path = "dsl/perf/perf.rs"
+
+[[test]]
+name = "pack_react"
+path = "dsl/react/react.rs"
 
 [[test]]
 name = "pack_redis"

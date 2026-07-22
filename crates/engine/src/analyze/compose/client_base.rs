@@ -9,9 +9,9 @@ use zzop_core::IoConsume;
 /// convention that function's own doc describes) instead of a dedicated field.
 ///
 /// ## Grouping
-/// Sentinels are grouped by `client` (today only `"axios"` is ever emitted, but the grouping itself is
-/// generic) so a future second recognizer's own base prefix can never cross-contaminate axios's. Within
-/// one client group:
+/// Sentinels are grouped by `client` (`"axios"` from `axios.defaults.baseURL`, `"generated"` from the
+/// swagger `HttpClient.baseUrl` field — [`zzop_parser_typescript::extract_generated_client_base_prefix_marker`])
+/// so one recognizer's base prefix can never cross-contaminate another's. Within one client group:
 /// - Exactly one distinct sentinel path: every `http` consume tagged with that SAME `client` gets the
 ///   path prepended (see "Apply" below).
 /// - 2+ distinct sentinel paths: nothing is applied for that client — ONE aggregated warning names the
@@ -95,7 +95,7 @@ pub(crate) fn apply_client_base_prefixes(
                     .map(|(p, f, l)| format!("/{p} ({f}:{l})"))
                     .collect();
                 warnings.push(format!(
-                    "multiple axios.defaults.baseURL values found for client `{client}`: [{}]; skipping baseURL prefix rewrite",
+                    "multiple base-URL values found for client `{client}`: [{}]; skipping base-URL prefix rewrite",
                     detail.join(", ")
                 ));
             }

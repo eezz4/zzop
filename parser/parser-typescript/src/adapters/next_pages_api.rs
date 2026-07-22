@@ -1,247 +1,68 @@
-//! Lexical scan for Next.js `pages/api` default-export handlers: `export default <expr>` is
+//! swc AST scan for Next.js `pages/api` default-export handlers: `export default <expr>` is
 //! invisible to `parse_symbols` (which only surfaces `ExportDefaultDecl`), and one handler serves
 //! every HTTP method via `req.method` `if`/`switch` checks or a `defaultHandler({ GET: …, POST: … })` map.
 //! `zzop-engine`'s file-convention route composition calls this scan to learn whether a candidate
 //! file default-exports a handler and which methods its body names.
 //!
-//! Deliberately line-based/lexical, not AST-based. An empty `verbs` is an honest "statically
-//! unknown", which the engine maps to its documented {GET, POST} fallback.
+//! Verb signals are HANDLER-BODY-SCOPED, not whole-module: the scan first resolves the default
+//! export down to its underlying function-like value — an inline `function`/arrow expression, or
+//! (for `export default <ident>` / `export { <ident> as default }`) a same-file top-level
+//! `function <ident>(…) {…}` or `const <ident> = (…) => …` binding — and walks ONLY that value's
+//! body (including nested blocks/closures inside it). A `req.method`-shaped comparison or switch
+//! anywhere ELSE in the file (an unrelated helper above the handler, a sibling function) contributes
+//! nothing. This closes the false-positive class a whole-module walk still has: the `switch`
+//! discriminant and `defaultHandler(…)` call-argument signals were already exact-node (brace-scoped
+//! by construction to their own switch/call), but a bare `req.method === 'X'` comparison used to be
+//! collected from anywhere in the file, not just the actual handler.
+//!
+//! The comparison's request-object identifier is the handler's ACTUAL first parameter name — never
+//! hardcoded `req`/`request` — resolved once per file, so `(request, res) => …`, `(r, res) => …`, or
+//! any other binding name is recognized exactly like `(req, res) => …`.
+//!
+//! An unresolvable default export (a re-export from another module, ANY HOF-wrapped call — even one
+//! whose argument is an inline arrow, e.g. `export default withAuth((req, res) => …)`, since the
+//! wrapped expression resolves no first-parameter witness — or a destructured first parameter) yields
+//! an honest empty `verbs` — never a guess — which the engine maps to its documented UNKNOWN-verb
+//! sentinel: the route degrades from exact verbs to serve-all disclosure, the safe direction.
+//!
+//! Split into [`resolve`] (default-export resolution down to a handler value) and [`collector`]
+//! (verb-witness collection over that handler's body); this file keeps the public API and the
+//! top-level orchestration.
 
-use std::sync::OnceLock;
-
-use regex::Regex;
+mod collector;
+mod resolve;
 
 /// What `scan_pages_api_handler` learned about one candidate file.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct PagesApiHandlerScan {
-    /// 1-based line of the first non-comment `export default …` (or `export { x as default }`).
-    /// `None` means the file has no default export (e.g. a config-only file).
+    /// 1-based line of the first `export default …` (or `export { x as default }`). `None` means the
+    /// file has no default export (e.g. a config-only file) — or does not parse.
     pub default_export_line: Option<u32>,
-    /// Sorted, deduped UPPERCASE verbs named in the handler body: from `req.method`/`request.method`
-    /// comparisons against a GET|POST|PUT|PATCH|DELETE literal (either operand order), `case 'VERB':`
-    /// labels when the body `switch`es on `req.method`/`request.method`, plus `GET:`-style verb-map keys
-    /// when the file uses the `defaultHandler(` idiom (bare verb keys elsewhere are too FP-prone to
-    /// count). Comment lines are skipped.
+    /// Sorted, deduped UPPERCASE verbs the RESOLVED handler's body names — see the module doc for the
+    /// resolution + witness rules. Empty means either no method narrowing was witnessed (a genuine
+    /// serve-all handler) or the handler's underlying function/parameter could not be resolved.
     pub verbs: Vec<String>,
 }
 
-/// Scan one `pages/api` candidate file's text. Pure and allocation-light; never parses.
-pub fn scan_pages_api_handler(text: &str) -> PagesApiHandlerScan {
+/// Scan one `pages/api` candidate file's text. Parses via the shared swc entry (extension-driven
+/// syntax); a parse failure yields the empty scan (no default export, no verbs).
+pub fn scan_pages_api_handler(rel: &str, text: &str) -> PagesApiHandlerScan {
+    let Some((cm, module)) = crate::parse_with_cm(rel, text) else {
+        return PagesApiHandlerScan::default();
+    };
+    let Some(export) = resolve::find_default_export(&cm, &module) else {
+        return PagesApiHandlerScan::default();
+    };
+    let verbs = export
+        .handler
+        .body
+        .map(|body| collector::collect_verbs(&body, export.handler.param_name.as_deref()))
+        .unwrap_or_default();
     PagesApiHandlerScan {
-        default_export_line: find_default_export_line(text),
-        verbs: collect_verbs(text),
-    }
-}
-
-fn is_comment_line(line: &str) -> bool {
-    line.trim_start().starts_with("//")
-}
-
-/// First non-comment line with any `export default` form (bare identifier, function, wrapped
-/// call) or an `export { x as default }` re-export.
-fn find_default_export_line(text: &str) -> Option<u32> {
-    static DEFAULT_EXPORT: OnceLock<Regex> = OnceLock::new();
-    static REEXPORT_AS_DEFAULT: OnceLock<Regex> = OnceLock::new();
-    let default_export =
-        DEFAULT_EXPORT.get_or_init(|| Regex::new(r"\bexport\s+default\b").unwrap());
-    let reexport_as_default = REEXPORT_AS_DEFAULT
-        .get_or_init(|| Regex::new(r"export\s*\{[^}]*\bas\s+default\b").unwrap());
-
-    for (idx, raw) in text.lines().enumerate() {
-        if is_comment_line(raw) {
-            continue;
-        }
-        if default_export.is_match(raw) || reexport_as_default.is_match(raw) {
-            return Some((idx + 1) as u32);
-        }
-    }
-    None
-}
-
-/// Sorted, deduped UPPERCASE verbs — see [`PagesApiHandlerScan::verbs`] for the collection rules.
-fn collect_verbs(text: &str) -> Vec<String> {
-    static METHOD_CMP_FORWARD: OnceLock<Regex> = OnceLock::new();
-    static METHOD_CMP_REVERSE: OnceLock<Regex> = OnceLock::new();
-    static VERB_KEY: OnceLock<Regex> = OnceLock::new();
-    static METHOD_SWITCH: OnceLock<Regex> = OnceLock::new();
-    static CASE_LABEL: OnceLock<Regex> = OnceLock::new();
-
-    // `req.method`/`request.method` compared to a quoted verb literal, either operand order.
-    let forward = METHOD_CMP_FORWARD.get_or_init(|| {
-        Regex::new(
-            r#"(?:req|request)\.method\s*(?:===|!==|==|!=)\s*['"](GET|POST|PUT|PATCH|DELETE)['"]"#,
-        )
-        .unwrap()
-    });
-    let reverse = METHOD_CMP_REVERSE.get_or_init(|| {
-        Regex::new(
-            r#"['"](GET|POST|PUT|PATCH|DELETE)['"]\s*(?:===|!==|==|!=)\s*(?:req|request)\.method"#,
-        )
-        .unwrap()
-    });
-    // Verb-map object key (`GET:`, `"GET":`, `'GET':`), only consulted when `defaultHandler(` appears.
-    let verb_key =
-        VERB_KEY.get_or_init(|| Regex::new(r#"\b(GET|POST|PUT|PATCH|DELETE)\b['"]?\s*:"#).unwrap());
-    // `switch (req.method)`/`switch (request.method)` — the switch-dispatch twin of the `req.method
-    // === 'VERB'` comparison forms; when present, `case 'VERB':` labels name the served methods.
-    let method_switch =
-        METHOD_SWITCH.get_or_init(|| Regex::new(r"switch\s*\(\s*(?:req|request)\.method").unwrap());
-    let case_label = CASE_LABEL
-        .get_or_init(|| Regex::new(r#"case\s+['"](GET|POST|PUT|PATCH|DELETE)['"]"#).unwrap());
-
-    let has_verb_map_idiom = text.contains("defaultHandler(");
-    // Gated like the verb-map idiom (file-level presence, not block scope): `case 'VERB':` labels count
-    // only when the file switches on the request method. A method switch coexisting with an unrelated
-    // uppercase-verb `switch` can over-collect (the same accepted limitation the verb-map gate carries;
-    // the line-based scan does not brace-scope) — still strictly less fabrication than the fallback.
-    let has_method_switch = method_switch.is_match(text);
-
-    let mut verbs: Vec<String> = Vec::new();
-    for raw in text.lines() {
-        if is_comment_line(raw) {
-            continue;
-        }
-        for cap in forward.captures_iter(raw) {
-            push_unique_verb(&mut verbs, &cap[1]);
-        }
-        for cap in reverse.captures_iter(raw) {
-            push_unique_verb(&mut verbs, &cap[1]);
-        }
-        if has_verb_map_idiom {
-            for cap in verb_key.captures_iter(raw) {
-                push_unique_verb(&mut verbs, &cap[1]);
-            }
-        }
-        if has_method_switch {
-            for cap in case_label.captures_iter(raw) {
-                push_unique_verb(&mut verbs, &cap[1]);
-            }
-        }
-    }
-    verbs.sort();
-    verbs
-}
-
-fn push_unique_verb(verbs: &mut Vec<String>, verb: &str) {
-    if !verbs.iter().any(|v| v == verb) {
-        verbs.push(verb.to_string());
+        default_export_line: Some(export.line),
+        verbs,
     }
 }
 
 #[cfg(test)]
-mod tests {
-    //! Coverage for `scan_pages_api_handler`: default-export detection, verb extraction (both
-    //! comparison orders, `switch`/`case` labels, the `defaultHandler(` verb-map idiom, and the
-    //! bare-verb-key / unrelated-switch FP guards).
-    use super::*;
-
-    #[test]
-    fn bare_default_export_detected_not_on_line_one() {
-        let text = "import handler from './handler';\n\nexport default handler;\n";
-        let scan = scan_pages_api_handler(text);
-        assert_eq!(scan.default_export_line, Some(3));
-        assert!(scan.verbs.is_empty());
-    }
-
-    #[test]
-    fn wrapped_default_export_call_detected() {
-        let text = "export default defaultResponder(handler, \"/api/book/event\");\n";
-        let scan = scan_pages_api_handler(text);
-        assert_eq!(scan.default_export_line, Some(1));
-    }
-
-    #[test]
-    fn reexport_as_default_detected() {
-        let text = "function handler() {}\nexport { handler as default };\n";
-        let scan = scan_pages_api_handler(text);
-        assert_eq!(scan.default_export_line, Some(2));
-    }
-
-    #[test]
-    fn config_only_file_has_no_default_export() {
-        let text = "export const config = {\n  api: { bodyParser: false },\n};\n";
-        let scan = scan_pages_api_handler(text);
-        assert_eq!(scan.default_export_line, None);
-    }
-
-    #[test]
-    fn method_not_equal_string_comparison() {
-        let text = "export default function handler(req, res) {\n  if (req.method !== \"POST\") return;\n}\n";
-        let scan = scan_pages_api_handler(text);
-        assert_eq!(scan.verbs, vec!["POST".to_string()]);
-    }
-
-    #[test]
-    fn reversed_operand_order_strict_equal() {
-        let text = "if (\"DELETE\" === req.method) {}\n";
-        let scan = scan_pages_api_handler(text);
-        assert_eq!(scan.verbs, vec!["DELETE".to_string()]);
-    }
-
-    #[test]
-    fn request_dot_method_single_quoted() {
-        let text = "if (request.method === 'PUT') {}\n";
-        let scan = scan_pages_api_handler(text);
-        assert_eq!(scan.verbs, vec!["PUT".to_string()]);
-    }
-
-    #[test]
-    fn multiple_method_checks_sorted_and_deduped() {
-        let text = "if (req.method === \"GET\") {}\nif (req.method === \"POST\") {}\nif (req.method === \"GET\") {}\n";
-        let scan = scan_pages_api_handler(text);
-        assert_eq!(scan.verbs, vec!["GET".to_string(), "POST".to_string()]);
-    }
-
-    #[test]
-    fn default_handler_verb_map_idiom() {
-        let text =
-            "export default defaultHandler({ GET: import(\"./x\"), POST: import(\"./y\") });\n";
-        let scan = scan_pages_api_handler(text);
-        assert_eq!(scan.verbs, vec!["GET".to_string(), "POST".to_string()]);
-        assert_eq!(scan.default_export_line, Some(1));
-    }
-
-    #[test]
-    fn bare_verb_key_without_default_handler_contributes_nothing() {
-        let text = "const routes = {\n  GET: handleGet,\n  POST: handlePost,\n};\n";
-        let scan = scan_pages_api_handler(text);
-        assert!(scan.verbs.is_empty());
-    }
-
-    #[test]
-    fn comment_line_default_export_ignored() {
-        let text = "// export default handler\n";
-        let scan = scan_pages_api_handler(text);
-        assert_eq!(scan.default_export_line, None);
-    }
-
-    #[test]
-    fn lowercase_or_non_verb_object_keys_ignored() {
-        let text =
-            "export default defaultHandler({\n  get: handleGet,\n  TARGET: something,\n});\n";
-        let scan = scan_pages_api_handler(text);
-        assert!(scan.verbs.is_empty());
-    }
-
-    #[test]
-    fn switch_on_req_method_collects_case_label_verbs() {
-        let text = "export default function handler(req, res) {\n  switch (req.method) {\n    case 'POST':\n      return create(req, res);\n    case 'DELETE':\n      return remove(req, res);\n  }\n}\n";
-        let scan = scan_pages_api_handler(text);
-        assert_eq!(scan.verbs, vec!["DELETE".to_string(), "POST".to_string()]);
-    }
-
-    #[test]
-    fn switch_on_request_method_double_quoted_case() {
-        let text = "switch (request.method) {\n  case \"PUT\": break;\n}\n";
-        let scan = scan_pages_api_handler(text);
-        assert_eq!(scan.verbs, vec!["PUT".to_string()]);
-    }
-
-    #[test]
-    fn case_labels_without_a_method_switch_contribute_nothing() {
-        // A switch on something other than the request method must not mint verbs from its case labels.
-        let text = "switch (action) {\n  case 'POST':\n    return x;\n}\n";
-        let scan = scan_pages_api_handler(text);
-        assert!(scan.verbs.is_empty());
-    }
-}
+mod tests;

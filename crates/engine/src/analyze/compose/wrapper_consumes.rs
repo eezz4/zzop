@@ -68,6 +68,7 @@ pub(crate) fn resolve_wrapper_consumes(
                 line: call.line,
                 raw: None,
                 method: None,
+                retry_configured: None,
             });
         }
     }
@@ -186,6 +187,32 @@ mod wrapper_consume_tests {
         resolve_wrapper_consumes(defs, calls, |_, _| None, &mut consumes);
         assert_eq!(consumes.len(), 1);
         assert_eq!(consumes[0].key.as_deref(), Some("POST /ai/chat"));
+    }
+
+    #[test]
+    fn fixed_get_fetch_wrapper_resolves_to_a_keyed_consume() {
+        // The parser's `fetch-wrapper-def-v1` fixed-GET fetch wrapper produces the SAME fragment shape
+        // the axios fixed-method path does (`fixed_method: Some, method_param: None`) — so it joins
+        // through this composer with NO engine change.
+        let defs = vec![(
+            "src/lib/api.ts".to_string(),
+            vec![def("get", None, 0, Some("GET"))],
+        )];
+        let calls = vec![(
+            "src/routes/page.ts".to_string(),
+            vec![call("get", Some("@/lib/api"), vec![Some("/users/me")], 7)],
+        )];
+        let mut consumes = Vec::new();
+        resolve_wrapper_consumes(
+            defs,
+            calls,
+            resolver(&[("@/lib/api", "src/routes/page.ts", "src/lib/api.ts")]),
+            &mut consumes,
+        );
+        assert_eq!(consumes.len(), 1);
+        assert_eq!(consumes[0].key.as_deref(), Some("GET /users/me"));
+        assert_eq!(consumes[0].file, "src/routes/page.ts");
+        assert_eq!(consumes[0].line, 7);
     }
 
     #[test]

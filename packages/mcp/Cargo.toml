@@ -5,8 +5,10 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
-# The Node-free host binary (MCP server over stdio + direct CLI subcommands). `src/lib.rs` carries the
-# modules so integration tests and the bin share one crate. This crate is a THIN PROTOCOL FACADE: ALL
+# Two Node-free host binaries over one shared lib (`src/lib.rs`): `zzop` (the CLI — analyze/cross/endpoint/
+# …) and `zzop-mcp` (the MCP server over stdio). Both are thin arg-dispatch shims in `src/bin/`; the lib
+# carries every module so the two entries and the integration tests share one crate and cannot drift. This
+# crate is a THIN PROTOCOL FACADE: ALL
 # summary/shaping/filter/warning-merge logic lives in the shared `zzop-summary` crate (crates/summary)
 # so it cannot drift per-host (a future full-CLI binary reuses it too, and gets it for free instead of
 # reimplementing it). `zzop-config` stays a direct dependency only for the embedded config-surface
@@ -16,8 +18,12 @@ publish = false
 # `zzop-napi`, whose link step breaks under the local gnu toolchain even for rlib dependents — see the
 # mcp-distribution decision).
 [[bin]]
+name = "zzop"
+path = "src/bin/zzop.rs"
+
+[[bin]]
 name = "zzop-mcp"
-path = "src/main.rs"
+path = "src/bin/zzop-mcp.rs"
 
 [dependencies]
 zzop-summary = { path = "../../crates/summary" }

@@ -71,23 +71,51 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
             });
         io_provides.extend(composed);
     }
+    // `compose_router_mount_provides` also composes producer-judged attributes riding the same
+    // fragments (e.g. a recognized Express middleware guard) — kept, together with the envelope's own
+    // per-file `attributes`, in `AnalyzeOutput::attributes` below. Mode A never runs
+    // `run_callgraph_rules`/`schema_usage_findings` (see the envelope module doc, "No filesystem root
+    // -> no ... call-graph-BFS rules") and never joins `analyze_trees`' cross-layer stage, so no rule
+    // reads this store TODAY — but the field is part of `AnalyzeOutput`'s plumbing contract now
+    // (the cross-layer idempotency veto reads it for filesystem trees), and silently dropping an
+    // envelope's injected attributes here would make this mode's output lie about them.
+    let mut native_attrs: Vec<zzop_core::Attribute> = Vec::new();
     if !router_mount_pairs.is_empty() {
-        // `compose_router_mount_provides` also composes producer-judged attributes riding the same
-        // fragments (e.g. a recognized Express middleware guard) into an `AttributeStore` — dropped
-        // here: Mode A (`analyze_envelope`) never runs `run_callgraph_rules`/`schema_usage_findings`
-        // (see the envelope module doc, "No filesystem root -> no ... call-graph-BFS rules"), so no
-        // rule in this mode ever reads an `AttributeStore` — building one here would be dead weight.
-        // Mode B (`apply_adapter_overlays` + `analyze::assemble`) is the one path that actually
-        // consumes composed attributes today.
-        let (composed, _attrs) = crate::analyze::compose_router_mount_provides(
+        let (composed, attrs) = crate::analyze::compose_router_mount_provides(
             router_mount_pairs,
             |specifier, from_file, _ident| {
                 resolve_envelope_specifier(specifier, from_file, &all_paths)
             },
         );
         io_provides.extend(composed);
+        native_attrs = attrs;
     }
+    let attribute_store =
+        zzop_core::AttributeStore::from_parts(native_attrs, std::slice::from_ref(envelope));
     crate::analyze::late_resolve_cross_file_consumes(const_fragment_pairs, &mut io_consumes);
+
+    // Whole-tree `Matcher::IoScan` DSL pass — the envelope-mode counterpart of `analyze::assemble`'s own
+    // (native-path) call, run here now that `io_provides`/`io_consumes`/`attribute_store` above all exist.
+    // `anchor_line` is always `None`: an envelope carries no source text (see this module's doc, "No
+    // source text" bullet), so `anchor_exclude_pattern`/suppress-marker recognition stay honestly inactive
+    // — the same "no info available, never a guess" contract every `None` callback result gets in
+    // `eval_pack_io_scan`'s own doc. No decorator-guard minting here: Mode A never runs
+    // `run_callgraph_rules` (this module's doc, "No filesystem root" bullet), so there is no
+    // `decorator_guarded` evidence to mint from — `attribute_store` is used as-is. `enabled_packs` is
+    // already the same is_enabled/`gate_pack_rules`/`envelope_rule_pack`-gated pack list `run_file_pass`
+    // evaluated per-file above; reused here unchanged for the whole-tree pass.
+    let anchor_line = |_: &str, _: u32| None;
+    let io_scan_ctx = zzop_core::IoScanTreeContext {
+        provides: &io_provides,
+        consumes: &io_consumes,
+        attrs: &attribute_store,
+        anchor_line: &anchor_line,
+    };
+    let mut io_scan_findings = Vec::new();
+    for pack in &enabled_packs {
+        zzop_core::eval_pack_io_scan(pack, &io_scan_ctx, &mut io_scan_findings);
+    }
+    crate::pipeline::findings::append_disable_hints(&mut io_scan_findings);
 
     let cycles = circular_from_dep_excluding(&dep, &noncycle_edges);
     let dep_stats = dep_stats_from_dep(&dep);
@@ -179,7 +207,7 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     }
 
     let findings = merge_findings(
-        vec![per_file_findings, global_findings],
+        vec![per_file_findings, global_findings, io_scan_findings],
         &config.rule_config,
     );
 
@@ -247,6 +275,7 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         file_count,
         coverage,
         package_imports,
+        attributes: attribute_store,
         nodes,
         scores: None,
         health: None,

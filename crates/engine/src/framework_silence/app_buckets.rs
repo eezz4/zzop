@@ -88,6 +88,7 @@ mod tests {
             line: 1,
             raw: None,
             method: None,
+            retry_configured: None,
             body: None,
             client: None,
         }

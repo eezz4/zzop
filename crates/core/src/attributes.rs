@@ -92,6 +92,19 @@ impl AttributeStore {
         self.attrs.is_empty()
     }
 
+    /// A copy of this store with `extra` appended AFTER the existing entries — existing (overlay-first)
+    /// attributes keep first-match priority for SAME-target-shape conflicts. For engine-minted
+    /// evidence (e.g. decorator-guard -> auth-guarded) meant to fill gaps, not override injections.
+    /// Precision caveat: [`Self::route_attr`] resolves by SPECIFICITY, not insertion order — an exact
+    /// `IoKey` always beats any `PathScope` — so an appended `IoKey` entry DOES beat an existing
+    /// `PathScope` covering the same route (e.g. a minted truthy `IoKey` over an injected falsy
+    /// `PathScope`). Insertion order only breaks ties within the same specificity class.
+    pub fn extended(&self, extra: Vec<Attribute>) -> AttributeStore {
+        let mut attrs = self.attrs.clone();
+        attrs.extend(extra);
+        Self::from_attrs(attrs)
+    }
+
     /// Look up `attr_key` for a symbol by `name` (optionally disambiguated by declaring `file`). Matches an
     /// `EntityRef::Symbol` whose `name` equals `name` and whose own `file` is either absent (name-only
     /// binding) or equals `file` when both are given. Returns the first match's value. VOCAB-FREE.

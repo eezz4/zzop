@@ -4,12 +4,18 @@
 //!
 //! ## Fused execution contract
 //!
-//! Per-file DSL rules run **in the parse pass**, before the file's AST is dropped: for each file the engine
-//! parses, projects Common IR, runs the DSL rule packs against that file's slice, then drops the AST — one
-//! pass, no re-read/re-parse. Raw AST is deliberately not part of this contract, so a rule sees only source
-//! lines (`SourceFile::text`, for line-scan) and per-file spans (`SourceFile::symbols`, for method-scan). If
-//! a parser falls back lexically and cannot produce spans, `symbols` is empty and method-scan silently
-//! skips that file (line-scan still runs).
+//! Per-file DSL rules (`LineScan`/`MethodScan`/`SymbolScan`) run **in the parse pass**, before the file's
+//! AST is dropped: for each file the engine parses, projects Common IR, runs the DSL rule packs against
+//! that file's slice via `eval_pack`, then drops the AST — one pass, no re-read/re-parse. Raw AST is
+//! deliberately not part of this contract, so a rule sees only source lines (`SourceFile::text`, for
+//! line-scan) and per-file spans (`SourceFile::symbols`, for method-scan). If a parser falls back
+//! lexically and cannot produce spans, `symbols` is empty and method-scan silently skips that file
+//! (line-scan still runs).
+//!
+//! `IoScan` is the one exception, since the 2026 projection redesign: it evaluates WHOLE-TREE, via
+//! [`eval_pack_io_scan`], called by the engine once after assemble — see that function's doc and
+//! `ir_scan`'s module doc for why (assemble-composed provides and the tree-wide `AttributeStore` don't
+//! exist yet inside the per-file pass). `eval_pack`'s own `Matcher::IoScan` dispatch arm is a no-op.
 //!
 //! Module layout: `def` (serde rule-pack types), `fragments` (the `${NAME}` shared/reference mechanism
 //! `RulePackDef::expand_fragments` uses), `source` (interpreter input + minified detection), `eval` (pack
@@ -53,4 +59,5 @@ pub use def::{
 };
 pub use eval::{eval_pack, eval_pack_profiled};
 pub use fragments::FragmentError;
+pub use ir_scan::{eval_pack_io_scan, IoScanTreeContext};
 pub use source::{is_minified_or_generated, RuleContext, RuleTiming, SourceFile};

@@ -25,8 +25,8 @@ node adapter.mjs --root <javaRoot> [--source <treeId>] > overlay.json
 
 # validate loop while iterating (all offline):
 #   zzop adapter validate overlay.json        — structural check + lint hints
-#   zzop-mcp contract envelope-schema         — the JSON Schema, embedded in the binary
-#   zzop-mcp contract envelope-guide          — the full envelope contract, embedded in the binary
+#   zzop contract envelope-schema         — the JSON Schema, embedded in the binary
+#   zzop contract envelope-guide          — the full envelope contract, embedded in the binary
 
 # tests
 node --test test/adapter.test.mjs

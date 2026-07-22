@@ -1,4 +1,4 @@
-//! Orchestration coverage: verb-export wiring, pages/api lexical-scan wiring, the Remix
+//! Orchestration coverage: verb-export wiring, pages/api AST-scan wiring, the Remix
 //! resource-route gate, and the test/fixture skip. Path→URL transforms are tested per-submodule.
 use super::*;
 use zzop_core::SourceSymbolKind;

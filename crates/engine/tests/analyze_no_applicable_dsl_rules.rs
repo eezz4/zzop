@@ -47,10 +47,12 @@ impl Drop for TempDir {
 }
 
 /// Every real shipped pack under `rules/dsl/` — same resolution shape `analyze_minified.rs`'s
-/// `all_shipped_packs` uses. None of the bundled packs carry a `.go`-matching `file_pattern` (verified by
+/// `all_shipped_packs` uses. None of the bundled packs carry a `.rs`-matching `file_pattern` (verified by
 /// inspection: every shipped `file_pattern` targets `.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs`/`.java`/
-/// `.jsp`/... — no Go extension anywhere), which is exactly the real-world gap this warning exists to
-/// self-report.
+/// `.jsp`/`.go`/... — no Rust extension anywhere), which is exactly the real-world gap this warning
+/// exists to self-report. (Go WAS this gap too, until the `go` pack's `go-goroutine-in-loop` rule shipped
+/// with a `.go$` `file_pattern` — see `go_only_tree_with_default_packs_now_has_an_applicable_dsl_rule`
+/// below.)
 fn all_shipped_packs() -> Vec<RulePackDef> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/dsl");
     let result = load_dsl_packs(&dir);
@@ -71,7 +73,32 @@ fn config() -> EngineConfig {
 }
 
 #[test]
-fn go_only_tree_with_default_packs_gets_the_no_applicable_dsl_rule_warning() {
+fn rust_only_tree_with_default_packs_gets_the_no_applicable_dsl_rule_warning() {
+    let dir = TempDir::new("zzop-engine-rust-only-fixture");
+    dir.write("src/main.rs", "fn main() {\n    println!(\"hi\");\n}\n");
+    dir.write("src/service.rs", "pub fn run() -> i32 {\n    1\n}\n");
+
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        !out.packs_loaded.is_empty(),
+        "expected the shipped packs to load, got: {:?}",
+        out.packs_loaded
+    );
+    assert!(
+        out.warnings.iter().any(|w| w.contains("DSL rule(s) loaded")
+            && w.contains("file_pattern")
+            && w.contains("no applicable rules")),
+        "expected the no-applicable-DSL-rule self-report on a Rust-only tree, got: {:?}",
+        out.warnings
+    );
+}
+
+/// Closes the gap the test above (and this file's module doc example) used to document for Go too: the
+/// `go` pack's `go-goroutine-in-loop` rule (`(?i)\.go$` `file_pattern`) now makes a Go-only tree
+/// applicable, so the D16 self-report must NOT fire for one, the same as the `.ts` case below.
+#[test]
+fn go_only_tree_with_default_packs_now_has_an_applicable_dsl_rule() {
     let dir = TempDir::new("zzop-engine-go-only-fixture");
     dir.write(
         "main.go",
@@ -90,10 +117,10 @@ fn go_only_tree_with_default_packs_gets_the_no_applicable_dsl_rule_warning() {
         out.packs_loaded
     );
     assert!(
-        out.warnings.iter().any(|w| w.contains("DSL rule(s) loaded")
-            && w.contains("file_pattern")
-            && w.contains("no applicable rules")),
-        "expected the no-applicable-DSL-rule self-report on a Go-only tree, got: {:?}",
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("DSL rule(s) loaded") && w.contains("no applicable rules")),
+        "the `go` pack's `.go$` file_pattern now matches — the warning must not fire, got: {:?}",
         out.warnings
     );
 }

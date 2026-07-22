@@ -124,6 +124,7 @@ pub mod external_version_inconsistent;
 pub mod method_mismatch;
 pub mod path_near_miss;
 pub mod prefix_drift;
+pub mod retrying_write_no_idempotency;
 pub mod route_near_miss;
 pub mod sdk_import_no_visible_consume;
 pub mod shared_db_table;
@@ -153,6 +154,7 @@ pub use external_version_inconsistent::external_version_inconsistent_findings;
 pub use method_mismatch::method_mismatch_findings;
 pub use path_near_miss::path_near_miss_findings;
 pub use prefix_drift::{prefix_drift_findings, retain_non_subsumed, PrefixDriftOutput};
+pub use retrying_write_no_idempotency::{retrying_write_no_idempotency_findings, RetrySite};
 pub use route_near_miss::{
     route_near_miss_findings, route_near_miss_results, NearMissTargetRef, RouteNearMissOutput,
 };

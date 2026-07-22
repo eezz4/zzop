@@ -23,6 +23,7 @@ fn consume(kind: &str, key: Option<&str>, file: &str, line: u32) -> zzop_core::I
         line,
         raw: None,
         method: None,
+        retry_configured: None,
     }
 }
 

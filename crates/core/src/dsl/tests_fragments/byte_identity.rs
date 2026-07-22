@@ -74,6 +74,9 @@ fn pattern_bearing_field_values(rule: &RuleDef) -> Vec<(&'static str, &str)> {
         }
         Matcher::IoScan(m) => {
             out.push(("file_pattern", m.file_pattern.as_str()));
+            if let Some(p) = &m.file_exclude_pattern {
+                out.push(("file_exclude_pattern", p.as_str()));
+            }
             if let Some(p) = &m.key_pattern {
                 out.push(("key_pattern", p.as_str()));
             }
@@ -200,9 +203,13 @@ fn redis_pack_debug_output_is_unchanged_by_the_fragment_migration() {
     );
 }
 
-/// Same proof as above, for `rules/dsl/http/http.json` — a second, independent non-`sql` pack (the task
-/// asks for at least 2), and one that exercises the OTHER shared fragment name (`test-paths-stories`,
-/// vs. redis's `test-paths`).
+/// Same MECHANISM as above, for `rules/dsl/http/http.json`, exercising the OTHER shared fragment name
+/// (`test-paths-stories` vs. redis's `test-paths`) — but with a different fixture provenance: unlike
+/// redis's git-history snapshot, `http_pre_migration.json` is REGENERATED alongside every http.json edit
+/// (io-scan migration 2026-07-22 and since) as the live pack's fully-EXPANDED twin (no `${...}` refs —
+/// the no-op `expand_fragments` below enforces that). What the pin proves is therefore "fragment
+/// expansion is projection-neutral for this pack's exact current content", and it forces any http.json
+/// edit to consciously touch the fixture in the same change.
 #[test]
 fn http_pack_debug_output_is_unchanged_by_the_fragment_migration() {
     let current_text = std::fs::read_to_string(real_dsl_dir().join("http/http.json"))

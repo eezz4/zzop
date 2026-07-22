@@ -3,6 +3,7 @@
 //! router-mount fragments) and `requests`/`httpx` literal HTTP egress CONSUMES (`http_clients`).
 
 pub mod django;
+pub mod django_routes;
 pub mod fastapi;
 pub mod http_clients;
 pub mod sqlalchemy;

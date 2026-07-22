@@ -125,7 +125,7 @@ produces an ordinary `{"valid": false, "issues": [...]}` result rather than a re
 ### Validation-only: `validateRulePackOnly`
 
 `validateRulePackOnly(packJson)` is the same idea for a DSL rule pack: the pre-load, structure-only
-check behind the `zzop-mcp` binary's `validate_rule_pack` tool and `zzop-mcp validate-rule-pack <file>`
+check behind the `zzop-mcp` binary's `validate_rule_pack` tool and `zzop validate-rule-pack <file>`
 CLI subcommand (one shared facade core, `zzop_facade::validate_rule_pack_json` — identical answers
 from every host). Its
 `issues` surface exactly the judgments the engine's pack loader makes when it loads a
@@ -143,7 +143,7 @@ contract ships as [`docs/contracts/rule-pack.schema.json`](../contracts/rule-pac
 `queryIo(analysisJson, queryJson)` answers "is io key X provided/consumed/joined?" DEFINITIVELY —
 pure post-processing over an ALREADY-PRODUCED `analyzeTrees` output (no re-analysis, no cache
 interaction). It is the one shared query core: the Node-free `zzop-mcp` binary's `check_endpoint`
-tool and `zzop-mcp endpoint` CLI subcommand (see [mcp.md](mcp.md)) both call this exact function, so
+tool and `zzop endpoint` CLI subcommand (see [mcp.md](mcp.md)) both call this exact function, so
 every host driving it gives identical answers for the same analysis.
 
 - `analysisJson` — the string `analyzeTrees` returned. A single-tree `analyze` output is a guided

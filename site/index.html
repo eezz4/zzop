@@ -47,7 +47,7 @@
         <div class="code-panel__tab">Run it (binary)</div>
         <pre class="code-block"><code># download zzop-mcp from GitHub Releases (no Node.js, nothing to compile) —
 # or install the Claude Code plugin / the Claude Desktop .mcpb bundle
-zzop-mcp analyze .        # analyze this tree, print JSON findings
+zzop analyze .        # analyze this tree, print JSON findings
 zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop
 
 # Embedding instead? Depend on the zzop-facade / zzop-summary Rust crates
@@ -63,7 +63,7 @@ zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop
   "warnings":           [ /* anything this run could not provide */ ]
 }
 
-// zzop-mcp cross (multi-tree) additionally returns "crossLayerFindings"
+// zzop cross (multi-tree) additionally returns "crossLayerFindings"
 // — frontend fetch &lt;-&gt; backend route joins.</code></pre>
       </div>
     </div>
@@ -106,7 +106,7 @@ zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop
       <div class="card-grid">
         <div class="card">
           <h3>Cross-layer, cross-repo</h3>
-          <p><code>zzop-mcp cross</code> accepts multiple roots and joins them: one repo's frontend fetches against another repo's backend routes. Drift between layers becomes a finding, not a production incident.</p>
+          <p><code>zzop cross</code> accepts multiple roots and joins them: one repo's frontend fetches against another repo's backend routes. Drift between layers becomes a finding, not a production incident.</p>
         </div>
         <div class="card">
           <h3>Customizable in any environment</h3>

@@ -15,6 +15,7 @@ fn sentinel(path: &str, client: &str, file: &str, line: u32) -> IoConsume {
         line,
         raw: None,
         method: None,
+        retry_configured: None,
     }
 }
 
@@ -28,6 +29,7 @@ fn http_consume(key: &str, client: Option<&str>, file: &str, line: u32) -> IoCon
         line,
         raw: None,
         method: None,
+        retry_configured: None,
     }
 }
 
@@ -41,6 +43,7 @@ fn unresolved_consume(client: Option<&str>, raw: &str, file: &str, line: u32) ->
         line,
         raw: Some(raw.to_string()),
         method: Some("GET".to_string()),
+        retry_configured: None,
     }
 }
 
@@ -54,6 +57,31 @@ fn single_prefix_rewrites_axios_tagged_http_consumes_and_strips_the_sentinel() {
     apply_client_base_prefixes(&mut consumes, &mut warnings);
     assert_eq!(consumes.len(), 1);
     assert_eq!(consumes[0].key.as_deref(), Some("GET /api/users"));
+    assert!(warnings.is_empty());
+    assert!(consumes.iter().all(|c| c.kind != "client-base-prefix"));
+}
+
+#[test]
+fn generated_client_sentinel_prefixes_generated_consumes_and_never_crosses_into_axios() {
+    // The client-generic seam: a `client: "generated"` base (swagger `HttpClient.baseUrl`) prefixes
+    // only `client == "generated"` http consumes, and an axios base in the same run stays scoped to
+    // axios consumes — the two never cross-contaminate (fe-vue field test, 2026-07-22).
+    let mut consumes = vec![
+        sentinel("/api", "generated", "src/services/api.ts", 150),
+        sentinel("/v1", "axios", "src/bootstrap.ts", 3),
+        http_consume(
+            "GET /articles",
+            Some("generated"),
+            "src/services/api.ts",
+            602,
+        ),
+        http_consume("GET /user", Some("axios"), "src/store.ts", 20),
+    ];
+    let mut warnings = Vec::new();
+    apply_client_base_prefixes(&mut consumes, &mut warnings);
+    assert_eq!(consumes.len(), 2);
+    assert_eq!(consumes[0].key.as_deref(), Some("GET /api/articles"));
+    assert_eq!(consumes[1].key.as_deref(), Some("GET /v1/user"));
     assert!(warnings.is_empty());
     assert!(consumes.iter().all(|c| c.kind != "client-base-prefix"));
 }
@@ -148,6 +176,7 @@ fn non_http_kind_with_axios_tag_is_untouched() {
             line: 1,
             raw: None,
             method: None,
+            retry_configured: None,
         },
     ];
     let mut warnings = Vec::new();

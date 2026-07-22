@@ -229,3 +229,81 @@ fn java_pwd_ok_marker_above_the_line_suppresses_the_finding() {
         out.findings
     );
 }
+
+// --- config-file-secret ---
+
+#[test]
+fn high_entropy_secret_in_a_properties_file_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "src/main/resources/application.properties",
+        "spring.datasource.password=\njwt.secret=nRvyYC4soFxBdZ-F-5Nnzz5USXstR1YylsTd-mA0aKtI\njwt.sessionTime=86400\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "config-file-secret");
+    assert_eq!(
+        h.len(),
+        1,
+        "only jwt.secret should flag: {:?}",
+        out.findings
+    );
+    assert_eq!(h[0].line, 2);
+}
+
+#[test]
+fn empty_and_short_config_values_are_not_flagged() {
+    // An empty `password=` and a short `password: root` dev value are below the 16-char floor.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "src/main/resources/application-dev.yml",
+        "spring:\n  datasource:\n    password: root\n    username:\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "config-file-secret").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn env_reference_config_value_is_not_flagged() {
+    // `${JWT_SECRET}` is an environment reference, not a committed secret.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write("app.properties", "jwt.secret=${JWT_SECRET}\n");
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "config-file-secret").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn secret_in_a_dotenv_file_is_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(".env", "API_KEY=sk_live_abcdefghijklmnop0123\n");
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "config-file-secret").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn a_secret_in_a_code_file_is_not_a_config_file_secret() {
+    // The config rule is scoped to config files; a `.ts` secret is `hardcoded-secret`'s job, not this rule's.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/config.ts",
+        "const secret = \"abcd1234efgh5678ijkl\";\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "config-file-secret").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}

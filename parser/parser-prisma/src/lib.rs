@@ -14,7 +14,7 @@
 ///   against `zzop_parser_typescript::adapters::db_table_consume`'s bare-receiver consume follow-up).
 ///   Strictly additive (new `MinimalIr::io` field populated, no existing field's output changes), but
 ///   cached entries from before this marker must not be served as fresh since they lack the new facts.
-pub const PARSER_FINGERPRINT: &str = "prisma/v2";
+pub const PARSER_FINGERPRINT: &str = "prisma/0.21.0";
 
 mod analysis;
 mod discover;

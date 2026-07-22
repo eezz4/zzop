@@ -94,6 +94,7 @@ pub(crate) fn sample_io_consume() -> IoConsume {
         line: 25,
         raw: Some("axios.get(url)".to_string()),
         method: Some("GET".to_string()),
+        retry_configured: None,
         body: Some(sample_consume_body_shape()),
         client: Some("axios".to_string()),
     }

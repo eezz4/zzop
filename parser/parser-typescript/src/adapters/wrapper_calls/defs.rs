@@ -86,8 +86,12 @@ pub(super) fn classify_def(
 
     let mut path_param = None;
     let mut method_param = None;
+    // One entry per param, index-aligned — feeds the fetch-first-arg path fallback below. A
+    // destructuring/rest param (no simple name) is a `None` slot so positions stay correct.
+    let mut param_names: Vec<Option<String>> = Vec::with_capacity(params.len());
     for (i, pat) in params.iter().enumerate() {
         let Some((pname, ptype)) = param_info(pat) else {
+            param_names.push(None);
             continue;
         };
         if path_param.is_none() && is_path_like(&pname) {
@@ -96,8 +100,8 @@ pub(super) fn classify_def(
         if method_param.is_none() && is_method_param(&pname, ptype.as_deref()) {
             method_param = Some(i as u32);
         }
+        param_names.push(Some(pname));
     }
-    let path_param = path_param?;
 
     let sink_body = reaches_sink(name, &body_text, local_fns)?;
 
@@ -109,8 +113,19 @@ pub(super) fn classify_def(
         return None;
     }
 
+    let is_fetch = mentions_fetch_call(&sink_body);
+
+    // Path-param fallback for a builtin-`fetch` sink whose path param is NOT named path-like (e.g.
+    // `export function get(p) { return fetch(p) }`): the wrapper param passed VERBATIM as fetch's
+    // first argument IS the path. Only a bare-identifier first arg qualifies (a template/expression
+    // first arg leaves this to the name-based signal above — never guessed).
+    if path_param.is_none() && is_fetch {
+        path_param = fetch_first_arg_param(&sink_body, &param_names);
+    }
+    let path_param = path_param?;
+
     let fixed_method = if method_param.is_none() {
-        Some(single_fixed_verb(&sink_body)?)
+        Some(fixed_verb_for_sink(&sink_body, is_fetch)?)
     } else {
         None
     };
@@ -156,7 +171,7 @@ fn is_method_param(name: &str, type_name: Option<&str>) -> bool {
 }
 
 /// Does `body_text` reach an HTTP sink, directly or one hop through a local helper? Returns the body
-/// text that CONTAINS the sink call — what `single_fixed_verb` scans when there's no `method` param.
+/// text that CONTAINS the sink call — what `fixed_verb_for_sink` scans when there's no `method` param.
 fn reaches_sink(name: &str, body_text: &str, local_fns: &[(String, String)]) -> Option<String> {
     if has_direct_sink(body_text) {
         return Some(body_text.to_string());
@@ -173,10 +188,34 @@ fn reaches_sink(name: &str, body_text: &str, local_fns: &[(String, String)]) -> 
 }
 
 fn has_direct_sink(text: &str) -> bool {
-    text.contains("fetch(")
+    mentions_fetch_call(text)
         || text.contains("axios.")
         || text.contains("axios(")
         || text.contains("ky.")
+}
+
+/// A builtin `fetch(...)` call in `text` — `fetch` at a LEFT WORD BOUNDARY (start, or preceded by a
+/// non-identifier char, including a `.` member access like `window.fetch`), then `(`. The boundary is
+/// load-bearing: a bare `contains("fetch(")` also matches `refetch(` / `prefetch(` (React Query) and
+/// any `*fetch` identifier, which — combined with the fetch GET-default and positional-path fallback —
+/// fabricated a keyed http consume for a non-HTTP call (opus review, BLOCKING).
+fn mentions_fetch_call(text: &str) -> bool {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"(?:^|[^\w$])fetch\s*\(").unwrap());
+    re.is_match(text)
+}
+
+/// Whether a `fetch(...)` call passes an OPAQUE second argument — an identifier or spread rather than
+/// an inline `{...}` object literal (`fetch(url, opts)` / `fetch(url, ...cfg)`). The method may live
+/// inside that object, so the bare-`fetch` GET default must NOT apply (never guess a caller-controlled
+/// verb — opus review, BLOCKING). An inline `fetch(url, { ... })` is transparent (its verb, if any, is
+/// caught by the `method:` literal scan) and does NOT trip this.
+fn fetch_has_opaque_options(text: &str) -> bool {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r"(?:^|[^\w$])fetch\s*\([^,()]*,\s*(?:[A-Za-z_$]|\.\.\.)").unwrap()
+    });
+    re.is_match(text)
 }
 
 /// Lexical "does this body call `name(...)`" check — precision comes from the param-signature gate
@@ -185,9 +224,42 @@ fn calls_identifier(text: &str, name: &str) -> bool {
     text.contains(&format!("{name}("))
 }
 
-/// Scans `text` for `method: 'VERB'` literals; returns the single distinct UPPERCASED verb, or
-/// `None` when zero or more than one distinct verb is present (ambiguous — see module doc).
-fn single_fixed_verb(text: &str) -> Option<String> {
+/// The wrapper param index passed VERBATIM as fetch's first argument — the path param when the
+/// signature carries no path-like name. Matches ONLY a bare-identifier first arg (`fetch(p)` /
+/// `fetch(p, {...})`), the `[,)]` anchor rejecting any composite first arg (`fetch(base + p)`), then
+/// resolves that identifier to its param slot. A first-arg identifier that is not a param (e.g. a
+/// local `const url`, or a one-hop helper's own param) resolves to nothing — an honest miss.
+fn fetch_first_arg_param(sink_body: &str, param_names: &[Option<String>]) -> Option<u32> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE
+        .get_or_init(|| Regex::new(r"(?:^|[^\w$])fetch\s*\(\s*([A-Za-z_$][\w$]*)\s*[,)]").unwrap());
+    let ident = re.captures(sink_body)?.get(1)?.as_str();
+    param_names
+        .iter()
+        .position(|p| p.as_deref() == Some(ident))
+        .map(|i| i as u32)
+}
+
+/// The hardcoded verb for a wrapper with no `method` param. A single distinct `method: 'VERB'`
+/// literal wins (fetch or axios/ky alike). Zero literals defaults to GET ONLY for a builtin-`fetch`
+/// sink with NO `method` key at all — bare `fetch(url)` is a GET; a present-but-dynamic `method`
+/// (`fetch(url, { method: verb })`) is never guessed. More than one distinct literal is ambiguous.
+fn fixed_verb_for_sink(sink_body: &str, is_fetch: bool) -> Option<String> {
+    let verbs = distinct_method_verbs(sink_body);
+    if verbs.len() == 1 {
+        return verbs.into_iter().next();
+    }
+    if !verbs.is_empty() {
+        return None; // more than one distinct literal verb — ambiguous, disqualify
+    }
+    if is_fetch && !mentions_method_key(sink_body) && !fetch_has_opaque_options(sink_body) {
+        return Some("GET".to_string());
+    }
+    None
+}
+
+/// Distinct UPPERCASED verbs from `method: 'VERB'` literals in `text`, in first-seen order.
+fn distinct_method_verbs(text: &str) -> Vec<String> {
     static RE: OnceLock<Regex> = OnceLock::new();
     let re = RE.get_or_init(|| Regex::new(r#"method\s*:\s*['"]([A-Za-z]+)['"]"#).unwrap());
     let mut verbs: Vec<String> = Vec::new();
@@ -197,8 +269,13 @@ fn single_fixed_verb(text: &str) -> Option<String> {
             verbs.push(verb);
         }
     }
-    match verbs.len() {
-        1 => verbs.into_iter().next(),
-        _ => None,
-    }
+    verbs
+}
+
+/// Whether `text` mentions a `method` options key at all — a dynamic (non-literal) `method` present
+/// in a fetch options object blocks the bare-`fetch` GET default (never guess a computed verb).
+fn mentions_method_key(text: &str) -> bool {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"\bmethod\b").unwrap());
+    re.is_match(text)
 }

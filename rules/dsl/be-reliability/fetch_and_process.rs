@@ -234,3 +234,117 @@ fn process_exit_ok_marker_above_the_call_suppresses_the_finding() {
         out.findings
     );
 }
+
+// --- emitter-async-listener ---
+
+#[test]
+fn async_listener_on_a_node_event_emitter_is_flagged() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/pipeline.ts",
+        "import { EventEmitter } from \"events\";\ndeclare function save(chunk: unknown): Promise<void>;\n\nconst emitter = new EventEmitter();\n\nexport function registerListeners() {\n  emitter.on(\"data\", async (chunk: unknown) => {\n    await save(chunk);\n  });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "emitter-async-listener");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 7);
+}
+
+#[test]
+fn async_on_handler_with_no_node_event_import_is_not_flagged() {
+    // FP-adversarial pin for the `require_file` gate: same `.on("...", async ...)` call shape as the
+    // positive fixture (here via a jQuery-style DOM `.on(...)` subscription), but the file has no Node
+    // EventEmitter/events-module/net-stream-ish import anywhere — so the gate never lets method-scan run,
+    // regardless of what the callback shape looks like.
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/ui/widget.ts",
+        "declare const $: any;\ndeclare function save(e: unknown): Promise<void>;\n\nexport function registerWidget() {\n  $(\"#button\").on(\"click\", async (e: unknown) => {\n    await save(e);\n  });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "emitter-async-listener").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn non_async_listener_on_a_node_event_emitter_is_not_flagged() {
+    // Same Node EventEmitter context as the positive fixture (passes the `require_file` gate), but the
+    // callback itself is a plain synchronous function — no dropped promise, so nothing to flag.
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/pipeline.ts",
+        "import { EventEmitter } from \"events\";\ndeclare function save(chunk: unknown): void;\n\nconst emitter = new EventEmitter();\n\nexport function registerListeners() {\n  emitter.on(\"data\", (chunk: unknown) => save(chunk));\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "emitter-async-listener").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn emitter_async_ok_marker_above_the_listener_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/pipeline.ts",
+        "import { EventEmitter } from \"events\";\ndeclare function save(chunk: unknown): Promise<void>;\n\nconst emitter = new EventEmitter();\n\nexport function registerListeners() {\n  // emitter-async-ok: rejections are caught inside save() and never propagate\n  emitter.on(\"data\", async (chunk: unknown) => {\n    await save(chunk);\n  });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "emitter-async-listener").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- promise-race-resource-leak ---
+
+#[test]
+fn promise_race_with_no_cancellation_is_flagged() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/fetchWithTimeout.ts",
+        "declare const url: string;\ndeclare function timeout(ms: number): Promise<never>;\n\nexport async function fetchWithTimeout() {\n  return await Promise.race([fetch(url), timeout(5000)]);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "promise-race-resource-leak");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 5);
+}
+
+#[test]
+fn promise_race_with_an_abort_controller_signal_is_not_flagged() {
+    // FP-adversarial pin: the losing `fetch` is wired to `ac.signal`, so once the race settles the loser is
+    // actually aborted — the `AbortController`/`signal:` veto in `absent` matches and the finding is
+    // suppressed.
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/fetchWithTimeout.ts",
+        "declare const url: string;\ndeclare function timeout(ms: number): Promise<never>;\n\nexport async function fetchWithTimeout() {\n  const ac = new AbortController();\n  return await Promise.race([fetch(url, { signal: ac.signal }), timeout(5000)]);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "promise-race-resource-leak").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn promise_race_ok_marker_above_the_call_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/fetchWithTimeout.ts",
+        "declare const url: string;\ndeclare function timeout(ms: number): Promise<never>;\n\nexport async function fetchWithTimeout() {\n  // promise-race-ok: timeout() is a plain in-memory timer, nothing to cancel\n  return await Promise.race([fetch(url), timeout(5000)]);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "promise-race-resource-leak").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}

@@ -24,9 +24,9 @@
 //! - `analyze` — the `analyze`/`analyzeTrees` entry points.
 //! - `envelope` — the `analyzeEnvelope`/`validateEnvelopeOnly` entry points.
 //! - `query` — the `queryIo` entry point (definitive endpoint/io-key queries over an
-//!   already-produced analysis output — the shared core behind `zzop-mcp endpoint` and `check_endpoint`).
+//!   already-produced analysis output — the shared core behind `zzop endpoint` and `check_endpoint`).
 //! - `rule_pack` — the `validateRulePackOnly` entry point (pre-load, structure-only DSL rule-pack
-//!   check — the shared core behind `validate_rule_pack` and `zzop-mcp validate-rule-pack`).
+//!   check — the shared core behind `validate_rule_pack` and `zzop validate-rule-pack`).
 //! - `version` — the `version()` entry point.
 
 mod analyze;

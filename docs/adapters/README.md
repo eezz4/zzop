@@ -14,11 +14,11 @@ works everywhere: the config-file `overlays`/`trees[].overlays` key and the `ada
 it maps to are honored by every host, including the Node-free `zzop-mcp` binary and any direct
 `zzop-facade` embedding. **Mode A (full envelope, `analyze_envelope`)** is reachable from Rust, from a
 direct `zzop-facade` embedding, AND from the Node-free `zzop-mcp` binary — its `analyze_envelope` MCP
-tool and `zzop-mcp analyze-envelope <envelope.json>` CLI subcommand run the same facade call path
+tool and `zzop analyze-envelope <envelope.json>` CLI subcommand run the same facade call path
 (zero-config only; an envelope has no filesystem location for a config file to auto-discover).
-`zzop-mcp`'s `validate_envelope` tool (and `zzop-mcp validate-envelope <file>` subcommand) is a
+`zzop-mcp`'s `validate_envelope` tool (and `zzop validate-envelope <file>` subcommand) is a
 separate, structural-validation-only story, distinct from actually running one. To RUN a Mode A
-envelope, use the `zzop-mcp` binary (`zzop-mcp analyze-envelope <file>`, or its `analyze_envelope` MCP
+envelope, use the `zzop-mcp` binary (`zzop analyze-envelope <file>`, or its `analyze_envelope` MCP
 tool) or embed `zzop-facade` directly — there is no other runner. (The npm distribution's JS CLI
 `@zzop/cli`, removed 2026-07-20 along with the `@zzop/native` napi binding, never ran Mode A either:
 its only envelope-shaped subcommands were `zzop adapter validate <path>`, structural validation only,

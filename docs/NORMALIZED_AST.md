@@ -183,7 +183,11 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
   `{ "ioKey": { "kind", "key" } }`, or `{ "pathScope": { "prefix" } }` (a route-prefix scope; longest match
   wins). Rules consume by key — the contract is agnostic to what `key` means. First consumer:
   `mutating-route-no-auth` reads `key: "auth-guarded"` on a route's `ioKey`/`pathScope` to clear a route
-  guarded by middleware the call-graph can't see. See `docs/adapters/envelope.schema.json` `attribute`/`entityRef`.
+  guarded by middleware the call-graph can't see. Second consumer: `cross-layer/retrying-write-no-idempotency`
+  reads `key: "idempotency-guarded"` on a route's `ioKey`/`pathScope` — set natively by parser-typescript's
+  inline-handler recognizer when a handler reads the `Idempotency-Key` header (Express/Hono, TS only), or
+  injected otherwise — to veto a retry-triggered finding once a guard is witnessed. See
+  `docs/adapters/envelope.schema.json` `attribute`/`entityRef`.
 - `is_entry` — OPTIONAL (`#[serde(default)]`, default `false`). Marks this file a framework/runtime
   ENTRY loaded by convention rather than imported (a SvelteKit `hooks.*`/`+page`, a `.vue` route, ...),
   so zero in-repo importers is expected, not dead-code signal — the overlay counterpart of a
@@ -342,7 +346,7 @@ callers can refer to either unambiguously.
   path any direct `zzop-facade` embedder does. Mode A (full-envelope `analyze_envelope`) is reachable
   from Rust (`zzop_engine::analyze_envelope`), from a direct `zzop-facade` embedding
   (`analyze_envelope_json`), AND from the Node-free `zzop-mcp` binary — its `analyze_envelope` MCP tool
-  and `zzop-mcp analyze-envelope <envelope.json>` CLI subcommand both run the same
+  and `zzop analyze-envelope <envelope.json>` CLI subcommand both run the same
   `zzop_summary::analyze_envelope_summary` call path (`crates/summary`, over
   `zzop_facade::analyze_envelope_json`), zero-config only (an
   envelope carries no filesystem location, so there is no config file to auto-discover). (The npm
@@ -415,10 +419,10 @@ tens-of-lines script, not an hours-long native parser. Exhibit A:
 (dep-graph `imports`) in ~90 lines, back when Java's built-in projector was lexical and extracted
 no imports at all — the native Java parser has since closed that specific gap, but the recipe is
 unchanged for any extension still missing a channel. Iterate against the embedded contract
-(`zzop-mcp contract envelope-guide` / `zzop-mcp contract envelope-schema` print this document and
-its JSON Schema straight from the binary), validate offline with `zzop-mcp validate-envelope
+(`zzop contract envelope-guide` / `zzop contract envelope-schema` print this document and
+its JSON Schema straight from the binary), validate offline with `zzop validate-envelope
 <envelope.json>` (or the `validate_envelope` MCP tool, which performs the same check;
-`zzop-mcp contract example-envelope` prints a complete valid sample), and add further channels only
+`zzop contract example-envelope` prints a complete valid sample), and add further channels only
 when an analysis you care about needs them. The
 per-extension "no native parser" warning and the consume-silence tripwires point here for exactly
 this reason.

@@ -42,7 +42,11 @@ members = [
 ]
 
 [workspace.package]
-version = "0.0.0"
+# Version SSOT (2026-07-22 reform): the real release version lives here, bumped per release. CI verifies
+# the pushed `v*` tag, `.claude-plugin/plugin.json`, and the MCPB manifest all match this. `version_string()`
+# / the binaries report `CARGO_PKG_VERSION` directly (no `ZZOP_RELEASE_VERSION` env). Cache-bust tokens are
+# stamped with this version at their scope's last change — see the cache decision.
+version = "0.21.0"
 edition = "2021"
 license = "MIT"
 

@@ -111,7 +111,7 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
                   match, not exhaustive); test-classified files' io facts are excluded from the \
                   cross-layer join and disclosed per tree via a warning naming the dropped counts when \
                   nonzero — raw per-file facts still remain visible in `ir.io` (the raw `zzop-facade` \
-                  JSON output from embedding the engine directly; MCP tool replies and the `zzop-mcp` \
+                  JSON output from embedding the engine directly; MCP tool replies and the `zzop` \
                   CLI omit `ir`).",
         status: DisclosureStatus::Partial,
     },

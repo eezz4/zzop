@@ -161,11 +161,11 @@ pub(in crate::analyze) fn unparsed_extension_warning(
                  Mode B adapter overlay via `overlays: [...]` in zzop.config.jsonc (embedders: \
                  `adapterOverlays`) — a partial overlay covering just the missing channel/files is \
                  enough to start (a tens-of-lines script; see the examples/ adapters in the repo \
-                 (embedded: `zzop-mcp contract adapter-guide`), or `zzop-mcp contract example-envelope` \
-                 for a complete sample). The contract ships inside the binary: `zzop-mcp contract \
+                 (embedded: `zzop contract adapter-guide`), or `zzop contract example-envelope` \
+                 for a complete sample). The contract ships inside the binary: `zzop contract \
                  envelope-guide` / MCP resource `zzop://contract/envelope-guide` (machine-checkable \
-                 schema: `zzop-mcp contract envelope-schema`); repo users, see docs/NORMALIZED_AST.md. \
-                 (Mode A full-envelope analysis: `zzop-mcp analyze-envelope <file>` / MCP tool \
+                 schema: `zzop contract envelope-schema`); repo users, see docs/NORMALIZED_AST.md. \
+                 (Mode A full-envelope analysis: `zzop analyze-envelope <file>` / MCP tool \
                  `analyze_envelope`.)"
             )
         })

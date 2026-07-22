@@ -64,97 +64,19 @@ use crate::{CacheStats, EngineConfig};
 /// an old entry without erroring: a missing field silently defaulting (e.g. an empty `Vec`/`false`) is
 /// indistinguishable from "genuinely has none", which would make a cache hit against a pre-existing
 /// directory serve a wrong answer instead of a fresh recompute — the schema bump forces a clean cache
-/// instead. Bump whenever `FileIrSlice` (or the cached findings shape) gains, renames, or removes a
-/// field.
-///
-/// `v16` -> `v17`: `FileIrSlice` gains `controller_prefix_route_fragments` (`controller-prefix-ref-v1`) — a stale entry defaulting it to empty would silently drop a `@Controller(RouteKey.Asset)`-shaped controller's routes on every warm run.
-///
-/// `v17` -> `v18`: `FileIrSlice` gains `loop_spans` (`loop-spans-v1`) — a stale entry defaulting it to empty would silently starve `Matcher::MethodScan::trigger_in_loop` of loop evidence on every warm run.
-///
-/// `v18` -> `v19`: `FileIrSlice` gains `class_shape_fragments` and its `io` payload gains optional `IoConsume::body`/`IoProvide::body` shapes (`body-shape-v1`) — a stale entry defaulting them to empty/`None` would silently starve `cross-layer/body-field-drift` of both sides' evidence.
-///
-/// `v19` -> `v20`: the `io` payload's `IoConsume` gains the optional `client` provenance tag
-/// (`axios-defaults-base-v1`) — a stale entry defaulting it to `None` would silently exempt that
-/// file's axios call sites from the assemble-time `axios.defaults.baseURL` path-prefix seam on
-/// every warm run (client-scoped seams skip untagged consumes rather than guess).
-///
-/// `v20` -> `v21`: oazapfts-generated-SDK recognition was REMOVED from HTTP egress (`oazapfts-removed-v1`
-/// — generated SDKs are injection adapters, not engine vocab). Fewer consumes are recognized and a
-/// trailing `QS.` interpolation now keys as an ordinary `{}` placeholder, so a stale entry's `io` no
-/// longer matches the current projection and must recompute.
-///
-/// `v21` -> `v22`: `FileIrSlice`'s `router_mount_fragments` gain the `express-middleware-v1` shape —
-/// `RouterMountEntry::Verb`/`Mount` each gain an `attr_keys: Vec<String>` field and the enum gains a
-/// new `ScopedAttr` variant. A stale entry defaulting `attr_keys` to empty (via `#[serde(default)]`)
-/// would silently drop a recognized Express middleware guard's judgment on every warm run instead of
-/// projecting it into the composed `AttributeStore` — same "missing field silently defaults" hazard
-/// this doc's own opening paragraph describes.
-///
-/// `v22` -> `v23`: `dispatch::Language` gains the `Rust` variant (`.rs` now routes to a real structural
-/// parser, `zzop_parser_rust`) — a stale entry for a `.rs` file was cached under the PRIOR (lexical-
-/// fallback) fingerprint/projection and would otherwise be served back on a warm run instead of being
-/// recomputed with real symbols/imports/io, for any tree that contains `.rs` files.
-///
-/// `v23` -> `v24`: `dispatch::Language` gains the `Go` variant (`.go` now routes to a real structural
-/// parser, `zzop_parser_go`) — a stale entry for a `.go` file was cached under the PRIOR (lexical-
-/// fallback) fingerprint/projection and would otherwise be served back on a warm run instead of being
-/// recomputed with real symbols/imports/io, for any tree that contains `.go` files.
-///
-/// `v24` -> `v25`: `dispatch::Language::JavaLexical` is replaced by `Language::Java21` (`.java` now
-/// routes to a real structural parser, `zzop_parser_java_21`, tree-sitter-backed) — a stale entry for a
-/// `.java` file was cached under the PRIOR (lexical brace-matcher) fingerprint/projection and would
-/// otherwise be served back on a warm run instead of being recomputed with real symbols/imports/io. The
-/// Java `FileIrSlice` projection changes shape drastically: `imports` goes from always-`None` to a real
-/// `ImportMap` (dotted/glob/static specifiers), `symbols` go from unqualified lexical spans to
-/// AST-derived, dot-qualified (`Outer.Inner.method`), REAL-visibility (`exported` reflects
-/// public/protected/package-private/private, not always `true`) symbols — none of which a `#[serde(
-/// default)]`-style migration could safely backfill from an old entry.
-/// `v25` -> `v26`: no field gained/renamed/removed, but every cached DSL finding's `message` content
-/// changed — `pipeline::findings::eval_packs` now appends `zzop_core::disable_hint`'s config-disable
-/// fragment to each DSL finding's message before it reaches `AnalysisCache::put_findings` (D13①). A
-/// pre-existing cache entry's `findings` still deserializes cleanly (same `Finding` shape, `message` is
-/// still a plain `String`) — the usual "old entry satisfies the new shape" case this doc's opening
-/// paragraph says does NOT need a bump — except here staleness is invisible AND user-facing: a warm run
-/// would silently serve the OLD hint-less message forever for any unchanged file, while a cold run (or
-/// any file whose content changes even slightly) gets the new hint, splitting one tree's findings between
-/// two message shapes depending on cache luck. The bump forces every existing entry to recompute once.
-///
-/// `v26` -> `v27`: config-id diagnostics moved to the new `configWarnings` channel, DSL rule message texts revised, and `packsLoaded` gained the per-pack `filesInScope` count (invisible-staleness bump, see `v25` -> `v26`).
-///
-/// `v27` -> `v28`: pluralized unresolved-rule-id text, "where it's actually reachable" parentheticals on `ir.io` disclosures, an extraction-blindness caveat appended to `cross-layer/unconsumed-(mutation-)endpoint` findings, and the new S6 `orm_schema_silence_warning` tripwire class (invisible-staleness bump, see `v25` -> `v26`).
-///
-/// `v28` -> `v29`: several DSL pack `file_pattern`s narrowed against over-broad cross-language false-fires, and a new same-id pack-shadow warning class from the facade pack-merge chokepoint (invisible-staleness bump, see `v25` -> `v26`).
-///
-/// `v29` -> `v30`: overlay synthetic-entry warning text changed and the unparsed-extension warning's Mode A/B wording corrected (invisible-staleness bump, see `v25` -> `v26`).
-/// `v30` -> `v31`: `Language` gains `Sql` (`.sql` -> `zzop_parser_sql` db-table provides) — same bump class as Rust/Go above.
-///
-/// `v31` -> `v32`: the S5/S7 framework-silence tripwires gained a PER-APP census (`builtin_fetch_census`/`fetch_wrapper_census`) + internal-intent recount — a new app-scoped warning class and a changed set of counted `fetch(`/wrapper sites (absolute-URL/bare-const egress no longer counts; per-app gating now fires on a dark app a healthy sibling used to mask). Unlike every bump above, this one is DEFENSIVE, not required: the census runs at ASSEMBLE time (`analyze/assemble/warnings.rs`), re-reading files fresh every run off already-cached `io_consumes`, and its output is tree-level warnings that never land in a per-file cache entry — so no stale entry could have served an old verdict even without a bump. Bumped anyway on the "changed a cached artifact" reflex; a real invisible-staleness bump (v25 -> v26 and friends) changes what a CACHED entry would silently keep serving, which this one structurally cannot.
-///
-/// `v32` -> `v33`: C# route PROVIDES now project even when the `.cs` CST parse is `degraded` (Java-parity — see `io::extract_csharp_file_io`); only the egress consumes stay gated. A REQUIRED invisible-staleness bump: a degraded `.cs` file cached under v32 holds `io: None`, so without this it would keep serving zero routes for a controller with one broken method even after the fix.
-///
-/// Convention note (added with `v33`): adding a `Language` ENUM VARIANT does NOT itself require a schema bump — contrary to what the `v30 -> v31` "same bump class as Rust/Go" line above implies. `Language` is never serialized into a cache key (`dispatch.rs`); a newly-dispatched extension (`.cs` -> `Language::CSharp`) is disambiguated from a prior lexical-fallback entry by its own per-language `PARSER_FINGERPRINT` (`csharp/...` != `LEXICAL_FALLBACK_FINGERPRINT`), which IS a key ingredient — so a pre-merge lexical `.cs` entry has a different key and is never served stale. The earlier per-language bumps (Rust v22->23, Go v23->24, Java v24->25, Sql v30->31) were over-conservative: they needlessly wiped every OTHER language's warm cache. `Language::CSharp` was therefore added (in the parser-csharp merge) with no bump of its own; the `v33` bump here is for the degraded-`io` projection change above, which is a genuine cached-artifact change, not for the variant.
-/// `v33` -> `v34`: `FileIrSlice` gained `asset_refs` (raw runtime asset-URL reference strings from
-/// `parse_asset_refs` — `AudioWorklet.addModule`/`new Worker`/`importScripts`/`new URL(_,import.meta.url)`).
-/// A REQUIRED invisible-staleness bump: a file cached under v33 holds no `asset_refs`, so without this a
-/// cache-warm run would keep serving `fan_in == 0` for a `public/*.js` worklet loaded only by URL string
-/// and re-introduce its `dead-candidates` false positive. Paired with `zzop_parser_typescript`'s
-/// `+asset-refs-v1` `PARSER_FINGERPRINT` bump (which also invalidates prior TS entries by key).
-/// `v34` -> `v35`: verb-unknown route provides. `pages/api` serve-all handlers, pathname-dispatch, and
-/// Go `HandleFunc` blocks that name no method literal no longer fabricate `[GET, POST]` provides — each
-/// emits ONE `zzop_core::UNKNOWN_VERB` sentinel (`"? <path>"`, partitioned at assemble into the
-/// `cross-layer/unknown-verb-route` disclosure). A REQUIRED invisible-staleness bump: a file cached under
-/// v34 holds the OLD fabricated `GET`/`POST` provide keys, so a cache-warm run would keep serving them
-/// (and never mint the sentinel the new partition needs). Paired with `zzop_parser_typescript`'s
-/// `+unknown-verb-sentinel-v1` `PARSER_FINGERPRINT` bump.
-pub const CACHE_SCHEMA_VERSION: &str = "zzop-cache-v35";
+/// instead. "Bump" (2026-07-22 version reform) = set this to the current workspace `CARGO_PKG_VERSION`
+/// whenever `FileIrSlice` (or the cached findings shape) gains, renames, or removes a field; an unchanged
+/// release keeps the old value so warm caches survive the upgrade (see the cache decision doc).
+pub const CACHE_SCHEMA_VERSION: &str = "0.21.0";
 
 /// Fingerprint for files that never reach a structural parser crate in the fused pass: no `Language` match
 /// (`dispatch::dispatch` returned `None` — unrecognized extension), or the size-cap lexical fallback
 /// (`pipeline::compute_fresh_artifact`'s oversized branch, which short-circuits before any language-specific
 /// parse call). Both produce their result via this engine's own text-only heuristics
 /// (`pipeline::lexical_loc`), never a parser crate, so this is a fixed local marker rather than a borrowed
-/// `PARSER_FINGERPRINT` — bump the trailing counter if the engine's own lexical-fallback shape changes.
-const LEXICAL_FALLBACK_FINGERPRINT: &str = "lexical/engine-v1";
+/// `PARSER_FINGERPRINT` — restamp with the current `CARGO_PKG_VERSION` if the engine's own lexical-fallback
+/// shape changes (2026-07-22 version reform: cache-bust tokens are package-version stamps).
+const LEXICAL_FALLBACK_FINGERPRINT: &str = "lexical/0.21.0";
 
 /// `ruleset_fingerprint`'s native-rule-logic-version token for `pipeline::schema_findings`
 /// (`zzop_rules_schema::apply_schema_rules`, wired into the fused per-file pass for Prisma files). Unlike
@@ -172,12 +94,9 @@ fn schema_structural_fingerprint() -> String {
 /// `schema_structural_fingerprint` closes for native rule logic. Pack JSON already self-invalidates via
 /// `{pack:?}` above, but a pure-Rust interpreter semantics change (matcher evaluation, suppress-marker
 /// window, ...) alters findings for byte-identical source AND identical pack content — invisible to the
-/// key without this token. Bump the trailing counter on any such change.
-///
-/// `v3` -> `v4`: `MethodScan` gains `trigger_in_loop` — a structural containment gate against
-/// `SourceFile::loop_spans` that changes which trigger occurrences a rule fires on for byte-identical
-/// source and pack content.
-const DSL_INTERPRETER_FINGERPRINT: &str = "dsl-interpreter-v4";
+/// key without this token. Restamp with the current `CARGO_PKG_VERSION` on any such change (2026-07-22
+/// version reform: cache-bust tokens are package-version stamps).
+const DSL_INTERPRETER_FINGERPRINT: &str = "dsl/0.21.0";
 
 /// Opens the on-disk cache at `config.cache_dir`, if set. Never panics: an open failure (bad permissions,
 /// path collides with a plain file, disk full while writing the schema-version marker, ...) degrades to

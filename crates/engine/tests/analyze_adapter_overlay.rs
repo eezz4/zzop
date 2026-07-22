@@ -550,6 +550,7 @@ fn overlay_client_base_prefix_consume_is_dropped_and_warned() {
         line: 1,
         raw: None,
         method: None,
+        retry_configured: None,
         body: None,
         client: Some("axios".to_string()),
     });

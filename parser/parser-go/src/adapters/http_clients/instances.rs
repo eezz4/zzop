@@ -4,8 +4,10 @@
 //! shapes: `c := &http.Client{}` (short var decl), `var c = http.Client{}` (var spec with initializer),
 //! `c = &http.Client{}` (plain reassignment), `c := new(http.Client)`, and the zero-value declaration
 //! `var c http.Client` (no initializer — the zero value is a usable client). The tree-sitter counterpart
-//! of `zzop_parser_python_3::adapters::http_clients`'s instance pass (which handles the analogous Python
-//! assignment/annotation/`with` shapes).
+//! of `zzop_parser_python_3::adapters::http_clients`'s instance pass — LOOSELY: the Python side moved to
+//! last-write-wins line-ordered bindings with kill/`del` tracking (B14①, 2026-07-22) while this pass
+//! stays a flat add-only name set (`.Get`/`.Post` don't collide with a common Go stdlib method, so the
+//! rebind-FP pressure that motivated Python's upgrade is absent here); upgrade only if a live FP pulls it.
 //!
 //! Scope: only the URL-at-call-site convenience methods above. `client.Do(req)` — where the URL rides a
 //! `*http.Request` value built elsewhere (`http.NewRequest("GET", url, ...)`) — stays a v1 roadmap item

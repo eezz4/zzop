@@ -91,6 +91,7 @@ mod late_resolve_tests {
             line: 1,
             raw: Some(raw.to_string()),
             method: Some(method.to_string()),
+            retry_configured: None,
         }
     }
 

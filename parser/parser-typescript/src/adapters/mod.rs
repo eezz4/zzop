@@ -9,6 +9,7 @@
 
 pub mod class_shapes;
 pub mod client_base;
+pub mod client_base_generated;
 pub mod controller_decorators;
 pub mod db_table_consume;
 pub mod egress;

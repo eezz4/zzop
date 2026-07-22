@@ -227,7 +227,7 @@ pub(crate) fn shape_findings(
             out["note"] = serde_json::Value::String(format!(
                 "rule filter '{rule}' matched no findings and is not among this run's fired rule ids — \
                  check the id (byRule lists what fired; the `rule-catalog` contract lists all ids — \
-                 read it via the zzop://contract/rule-catalog resource or `zzop-mcp contract rule-catalog`)"
+                 read it via the zzop://contract/rule-catalog resource or `zzop contract rule-catalog`)"
             ));
         }
     }

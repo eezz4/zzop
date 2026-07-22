@@ -40,6 +40,7 @@ impl Visit for ConsumeCollector<'_> {
                         line: crate::line_of(self.cm, call.span.lo),
                         raw: None,
                         method: None,
+                        retry_configured: None,
                     }
                 }
                 None => {
@@ -57,6 +58,7 @@ impl Visit for ConsumeCollector<'_> {
                         line: crate::line_of(self.cm, call.span.lo),
                         raw: Some(format!("{chain_text} {terminal_sym}")),
                         method: Some(verb.to_string()),
+                        retry_configured: None,
                     }
                 }
             };

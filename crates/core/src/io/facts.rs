@@ -113,6 +113,20 @@ pub struct IoConsume {
     /// a client-scoped seam then leaves the consume untouched (never guessed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client: Option<String>,
+    /// `Some(true)` when this egress call site is statically witnessed to run under an automatic-retry
+    /// mechanism (an `axios-retry`-wired file, or a lexical retry wrapper like `pRetry(...)` /
+    /// `backOff(...)`) AND the call is a WRITE verb (POST/PUT/PATCH/DELETE) — i.e. a non-idempotent
+    /// request that may be replayed. Read verbs are never tagged (replaying a GET is safe), so the
+    /// field is a *risk* marker, present only where it means something. Producer: the parser-typescript
+    /// egress COLLECTOR only (TS-only — see the projection-contract language-coverage matrix); the sibling
+    /// TS consume producers (hono-client, trpc, and the engine's intra-file fetch-wrapper synthesis) leave
+    /// it `None`, so a write reached only through those paths is not yet tagged (an increment-2 gap). `None`
+    /// everywhere else too (other languages, non-egress kinds, read verbs, no retry witnessed) — absence is
+    /// a graceful skip, never a claim of "no retry". Consumed cross-tree by the
+    /// `cross-layer/retrying-write-no-idempotency` rule, which flags a retried write that resolves to a real
+    /// provider route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_configured: Option<bool>,
 }
 
 /// The IO an adapter emits for one tree (alongside MinimalIR dep/symbols/loc). See `IoProvide`'s doc re:

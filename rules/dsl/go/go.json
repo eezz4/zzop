@@ -1,0 +1,24 @@
+{
+  "id": "go",
+  "schema_version": 1,
+  "framework": "any",
+  "rules": [
+    {
+      "id": "go-goroutine-in-loop",
+      "severity": "warning",
+      "message": "A `go func(){...}()`/`go someCall(...)` statement is started structurally inside a loop body — verified against the parser's projected loop spans (the `go` statement's own line falls within a `for` statement's span), not merely co-occurring with loop syntax somewhere in the same function. Fans out one goroutine per iteration with no bound: a large `range`/count exhausts memory or file descriptors long before the loop finishes. Before Go 1.22, every goroutine launched this way also captured the SAME loop variable (all iterations sharing one underlying variable, not a per-iteration copy), so most already ran with the wrong value by the time they executed. Bound the concurrency with a worker pool or a semaphore (`chan struct{}`/`golang.org/x/sync/semaphore`/`errgroup.SetLimit`), or, on pre-1.22 toolchains, copy the loop variable into a new local before passing it into the goroutine. Suppress a vetted case with `// goroutine-in-loop-ok`.",
+      "suppress_marker": "goroutine-in-loop-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.go$",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\bgo\\s+(?:func\\b|[A-Za-z_][\\w.]*\\s*\\()", "label": "goroutine" }
+        ],
+        "trigger": "goroutine",
+        "trigger_in_loop": true,
+        "snippet_max": 160
+      }
+    }
+  ]
+}

@@ -56,47 +56,16 @@ pub use adapters::extract_go_router_fragments;
 pub use adapters::gorm::{extract_gorm_db_table_consumes, extract_gorm_db_table_provides};
 pub use adapters::http_clients::extract_go_http_consumes;
 pub use lang::imports::parse_imports;
+pub use lang::loop_spans::extract_loop_spans;
 pub use lang::resolve::go_package_dir_of;
 pub use lang::symbols::parse_symbols;
 pub use lang::used_names::parse_local_identifier_refs;
 
-/// Cache key ingredient for `zzop-cache`, mirroring `zzop_parser_rust::PARSER_FINGERPRINT`'s scheme:
-/// parser id + pinned frontend + a logic-version counter.
-/// - `v1`: initial release — symbols (top-level `func`/method/`type`/`const`/`var`, grouped
-///   declarations expanded one symbol per spec-name), imports (`import` declarations, plain/aliased/
-///   dot/blank, grouped), `used_names`, `net/http`+`gin` router-mount fragments, and `net/http` client
-///   literal HTTP egress consumes.
-/// - `gin-group-param-v1`: `adapters::gin` now also recognizes a `*gin.RouterGroup`/`*gin.Engine`
-///   FUNCTION PARAMETER as a tracked receiver (fragment named after the enclosing function), plus the
-///   cross-file call-side `pkg.Fn(<tracked receiver>)` / `pkg.Fn(<tracked>.Group("<lit>"))` mount
-///   recognizer that closes the dominant real-world gin registration idiom (`adapters::gin`'s own module
-///   doc). Extraction output changes (new `Mount`/fragment shapes now emitted), so cached entries from
-///   before this marker must not be served as fresh.
-/// - `gin-group-param-v2`: fixes an arity asymmetry bug — the def-side function-parameter registration
-///   (previous marker) already handled MULTI-parameter registration functions (`func Register(db *DB, r
-///   *gin.RouterGroup)`), but the call-side `try_call_site` only ever considered a single-argument call,
-///   so a multi-arg call site (`pkg.Register(db, api.Group("/x"))`) registered a fragment that was never
-///   mounted, surfacing its routes unprefixed as an unmounted-fragment DFS root. `try_call_site` is now
-///   arity-agnostic: any call with EXACTLY ONE mountable-receiver argument (ignoring every other
-///   argument) is a candidate; two-or-more mountable-receiver arguments is rejected as ambiguous
-///   (`adapters::gin`'s own module doc). Extraction output changes for this previously-missed call
-///   shape, so cached entries from before this marker must not be served as fresh.
-/// - `gin-any-v1`: `.Any(path, h)` (gin's every-method catch-all — proxy/health/fallthrough routes) now
-///   expands to one `Verb` entry per `HTTP_KEY_VERBS` instead of being dropped (verb name `Any` was not in
-///   `GIN_VERB_METHODS`), so the route is no longer invisible to unconsumed-endpoint/duplicate-route/
-///   cross-layer joins and its mutating (PUT/DELETE/PATCH) surface reaches `mutating-route-no-auth`. New
-///   provides appear -> cached entries from before this marker must not be served as fresh.
-/// - `http-client-instance-v1`: `adapters::http_clients` tracks names bound to an `http.Client` value
-///   (`c := &http.Client{}`/`http.Client{}`/`new(http.Client)`) so their URL-at-call-site methods
-///   `c.Get(url)`/`.Post`/`.Head`/`.PostForm` key as egress like the `http.Get(url)` free functions.
-///   `client.Do(req)` stays roadmap. New consumes appear -> cached entries must recompute.
-/// - `gorm-db-table-v1`: `adapters::gorm` adds two `db-table` shapes — a `gorm.Model`-embedding struct ->
-///   PROVIDE (default `NamingStrategy` naming or a `TableName()` literal, `symbol` = struct name), and a
-///   model composite literal in a GORM query method (`db.Model(&X{})`) -> CONSUME (`key: None`,
-///   `raw` = struct name, resolved engine-side against the provide index, same as the TypeORM side). New
-///   provides/consumes appear -> cached entries must recompute.
-pub const PARSER_FINGERPRINT: &str =
-    "go/tree-sitter-go-0.25.0/v1+gin-group-param-v2+gin-any-v1+http-client-instance-v1+http-client-instance-v2+gorm-db-table-v1+unknown-verb-sentinel-v1";
+/// Cache-bust token for `zzop-cache`: `parser-id/pinned-toolchain/last-change-version`. The
+/// `tree-sitter-go` segment must match this crate's `Cargo.toml` pin (a grammar upgrade changes
+/// extraction → restamp); the trailing `CARGO_PKG_VERSION` is restamped when this crate's projected IR
+/// shape changes, else kept so warm Go caches survive the upgrade (2026-07-22 version reform).
+pub const PARSER_FINGERPRINT: &str = "go/tree-sitter-go-0.25.0/0.21.0";
 
 /// Every top-level declaration kind `lang::symbols`/`lang::imports` recognize, PLUS `package_clause`
 /// (never itself extracted, but still a sign the file has SOME real Go in it) — `parse_tree`'s

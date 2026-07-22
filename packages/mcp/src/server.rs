@@ -10,16 +10,12 @@
 
 use std::io::{BufRead, Write};
 
-/// The version this binary reports as MCP `serverInfo.version`.
-///
-/// Release builds are stamped at compile time: the prebuild workflow's zzop-mcp build step
-/// exports `ZZOP_RELEASE_VERSION` from the release tag (`v1.2.3` → `1.2.3`) — the same tag
-/// `verify-plugin-version` checks `.claude-plugin/plugin.json` against — so the binary's reported
-/// version equals the Claude Code plugin's published version by construction. Everywhere else (local
-/// dev, CI tests, workflow_dispatch runs on a branch ref) the env var is unset and the version falls
-/// back to `CARGO_PKG_VERSION`, the workspace-wide `0.0.0` placeholder.
+/// The version this binary reports as MCP `serverInfo.version` — `CARGO_PKG_VERSION`, the workspace
+/// `[workspace.package] version` (the release SSOT since the 2026-07-22 version reform). CI verifies the
+/// pushed `v*` tag and `.claude-plugin/plugin.json` both match it, so the binary's reported version equals
+/// the release tag and the plugin's published version by construction.
 pub fn version() -> &'static str {
-    option_env!("ZZOP_RELEASE_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
+    env!("CARGO_PKG_VERSION")
 }
 
 /// MCP protocol versions this server actually supports, newest first. All three listed revisions
@@ -139,12 +135,10 @@ fn respond(stdout: &mut std::io::Stdout, value: serde_json::Value) {
 
 #[cfg(test)]
 mod tests {
-    // `ZZOP_RELEASE_VERSION` is a compile-time env (`option_env!`), so only the fallback path is
-    // testable here: test builds never set it, and this pins that the fallback is exactly
-    // `CARGO_PKG_VERSION` (the workspace `0.0.0` placeholder). The release path — the env exported
-    // from the tag in .github/workflows/prebuild.yml — is exercised live by release CI.
+    // `version()` reports `CARGO_PKG_VERSION` = the workspace version (release SSOT since the 2026-07-22
+    // version reform — no `ZZOP_RELEASE_VERSION` env). CI verifies the release tag matches it.
     #[test]
-    fn version_falls_back_to_cargo_pkg_version_when_release_env_is_unset() {
+    fn version_reports_cargo_pkg_version() {
         assert_eq!(super::version(), env!("CARGO_PKG_VERSION"));
     }
 

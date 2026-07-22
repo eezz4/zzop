@@ -1,6 +1,6 @@
 [package]
 name = "zzop-parser-go"
-version = "0.0.0"
+version.workspace = true
 edition = "2021"
 publish = false
 
@@ -15,4 +15,4 @@ tree-sitter-go = "=0.25.0"
 # crate's module doc for the full trail) with a caret requirement (">=0.25.8, <0.26"), the same
 # "minimal compatible, not exact" discipline the task brief calls for on a runtime crate.
 tree-sitter = "0.25.8"
-zzop-core = { version = "0.0.0", path = "../../crates/core" }
+zzop-core = { path = "../../crates/core" }

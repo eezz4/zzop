@@ -5,8 +5,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-/// ORM package/import specifiers this engine has NO native db-table extractor for, paired with the
-/// human-readable ORM name the warning names. Exact-segment matched the same way `SERVER_FRAMEWORK_SPECIFIERS`
+/// ORM package/import specifiers whose db-table channel this engine may leave dark — EITHER because it has
+/// no native extractor for that ORM, OR because it has one that does not recognize every idiom (e.g. Prisma
+/// and SQLAlchemy have extractors, but a bare-singleton Prisma access or an alembic/raw-SQL-schema SQLAlchemy
+/// tree still extracts zero facts). Paired with the human-readable ORM name the warning names. Exact-segment matched the same way `SERVER_FRAMEWORK_SPECIFIERS`
 /// is (`is_orm_schema_specifier` below): TS/JS npm specifiers (`typeorm`, `sequelize`, `drizzle-orm`), Java's
 /// JPA import families at the census's own first-two-dotted-segments grain (`jakarta.persistence`/
 /// `javax.persistence` — see `drain_java_candidates`'s doc), Python's `sqlalchemy` (`from sqlalchemy import
@@ -90,10 +92,12 @@ pub fn orm_schema_silence_warning(
         .join(", ");
     Some(format!(
         "ORM schema marker(s) detected but zero db-table io facts were extracted tree-wide: {orm_list} — \
-this engine has no native db-table extractor for this ORM, so its schema/table facts never reach the \
-cross-layer join (`cross-layer/shared-db-table` and any join finding keyed on a table will be silent for \
-this tree); project this tree's tables with a Mode B overlay adapter (see the adapter examples) to restore \
-visibility: a partial envelope covering just the db-table channel is enough; contract: `zzop-mcp contract \
-envelope-guide` on MCP hosts, docs/NORMALIZED_AST.md in the repo."
+either this engine has no native db-table extractor for this ORM, or it has one but this tree uses a shape \
+the extractor does not recognize (tables defined via migrations or raw SQL rather than declarative model \
+classes, or a model/query idiom outside the extractor's covered set). Its schema/table facts do not reach \
+the cross-layer join (`cross-layer/shared-db-table` and any join finding keyed on a table will be silent \
+for this tree); project this tree's tables with a Mode B overlay adapter (see the adapter examples) to \
+restore visibility: a partial envelope covering just the db-table channel is enough; contract: `zzop \
+contract envelope-guide` on MCP hosts, docs/NORMALIZED_AST.md in the repo."
     ))
 }

@@ -102,6 +102,7 @@ impl Visit for ConsumeCollector<'_> {
                 line: crate::line_of(self.cm, call.span.lo),
                 raw: None,
                 method: None,
+                retry_configured: None,
             });
         }
         call.visit_children_with(self); // recurse into nested calls

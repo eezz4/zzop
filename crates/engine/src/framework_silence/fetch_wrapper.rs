@@ -223,7 +223,7 @@ pub fn fetch_wrapper_call_site_warning(
 /// the tree-wide fallback the census may emit) — same adapter-creation on-ramp (D9) as S5's, worded for
 /// the wrapper case. Split into a `const` so the tree-wide wording stays BYTE-IDENTICAL to its
 /// pre-census form while the new app-scoped wording reuses the exact same tail.
-const WRAPPER_FUNNEL_TAIL: &str = "wrapper indirection over builtin fetch is not followed by this extraction pass, so cross-layer joins will be near-silent from this tree's consume side — project this tree's consumes with a Mode B overlay adapter (see the adapter examples) to restore cross-layer visibility: a partial envelope covering just the consume channel is enough; contract: `zzop-mcp contract envelope-guide` on MCP hosts, docs/NORMALIZED_AST.md in the repo.";
+const WRAPPER_FUNNEL_TAIL: &str = "wrapper indirection over builtin fetch is not followed by this extraction pass, so cross-layer joins will be near-silent from this tree's consume side — project this tree's consumes with a Mode B overlay adapter (see the adapter examples) to restore cross-layer visibility: a partial envelope covering just the consume channel is enough; contract: `zzop contract envelope-guide` on MCP hosts, docs/NORMALIZED_AST.md in the repo.";
 
 /// PASS 1, TREE-WIDE and unchanged from the pre-census behavior: the FIRST (sorted-order) js/ts file
 /// that both calls builtin `fetch(` and lexically exports a [`WRAPPER_EXPORT_NAMES`] binding, with the
