@@ -66,6 +66,27 @@ fn goroutine_in_loop_ok_marker_directly_above_the_go_line_suppresses_the_finding
     );
 }
 
+/// Regression pin, same defect class as `zzop_parser_go::lang::symbols`'s leading-comment
+/// `body_line_range` bug: the ENCLOSING FUNCTION's body opens with a standalone `//` comment before the
+/// loop even starts. Before the fix, that comment (an "extra" tree-sitter splices in as a named child of
+/// `block`) stole the position `body_line_range` assumed belonged to `statement_list`, so the whole
+/// function projected `body_start: None, body_end: None` — and `MethodScan` (which this rule is built
+/// on, see `crates::core::dsl::method_scan`) skips any symbol with no body span entirely, so this rule
+/// silently never fired for ANY Go function opening with a comment, loop or no loop. Proves the shipped
+/// rule now fires where it used to silently miss.
+#[test]
+fn goroutine_in_loop_fires_when_enclosing_function_body_opens_with_a_comment() {
+    let dir = TempDir::new("zzop-go");
+    dir.write(
+        "worker.go",
+        "package main\n\nfunc f(items []int) {\n\t// dispatches one worker per item\n\tfor _, it := range items {\n\t\tgo process(it)\n\t}\n}\n\nfunc process(it int) {}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "go-goroutine-in-loop");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 6);
+}
+
 /// `go func(){...}()` (anonymous closure form) is also recognized, not just a named-function call.
 #[test]
 fn goroutine_anonymous_closure_inside_loop_is_flagged() {

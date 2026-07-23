@@ -137,8 +137,8 @@
           <p>One folder per pack, each pairing its JSON rule definitions with co-located tests. Adding a rule means touching a pack folder — never the kernel.</p>
         </div>
         <div class="card">
-          <h3><code>crates/facade</code>, <code>packages/mcp</code></h3>
-          <p><code>zzop-facade</code> is the napi-free JSON-in/JSON-out contract: exactly seven functions, documented in the <a href="sdk.html">SDK reference</a>. <code>packages/mcp</code> builds it into <code>zzop-mcp</code>, the single Node-free binary that serves both the CLI subcommands and the MCP server — zzop's only shipped distribution surface today.</p>
+          <h3><code>crates/facade</code>, <code>crates/host</code></h3>
+          <p><code>zzop-facade</code> is the napi-free JSON-in/JSON-out contract: exactly seven functions, documented in the <a href="sdk.html">SDK reference</a>. <code>crates/host</code> is the shared lib two Node-free binary products build over — <code>zzop</code> (package <code>packages/cli-bin</code>, the CLI subcommands) and <code>zzop-mcp</code> (package <code>packages/mcp</code>, the MCP stdio server) — thin entrances over one shared analysis path.</p>
         </div>
       </div>
     </section>

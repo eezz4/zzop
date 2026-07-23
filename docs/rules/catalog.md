@@ -6,11 +6,11 @@ Everything the engine ships today, read directly from `rules/dsl/**/*.json` and
 semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 [authoring-guide.md](authoring-guide.md).
 
-**Totals** (machine-checked by `crates/engine/tests/rule_contracts/`'s `catalog_totals_match_loaded_rule_and_analysis_counts`): 15 DSL packs, 132 DSL rules, 45 native analysis ids. 13 packs ship rules; 2 are stub packs (see "Stub packs" below).
+**Totals** (machine-checked by `crates/engine/tests/rule_contracts/`'s `catalog_totals_match_loaded_rule_and_analysis_counts`): 15 DSL packs, 136 DSL rules, 45 native analysis ids. 13 packs ship rules; 2 are stub packs (see "Stub packs" below).
 
 ## DSL packs (`rules/dsl/<pack>/<pack>.json`)
 
-### `be-db` (20 rules)
+### `be-db` (21 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
@@ -34,8 +34,9 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `manual-tx-no-rollback` | warning | method-scan | `manual-tx-ok` | A `BEGIN`/`beginTransaction()`/`startTransaction()` call and a `COMMIT`/`.commit()` call co-occur in the same function with no `ROLLBACK`/`.rollback()` anywhere in it (co-occurrence heuristic) — an error raised between BEGIN and COMMIT has nothing to release it, poisoning the pooled connection for whichever request borrows it next. |
 | `tx-swallows-error-commits` | warning | method-scan | `tx-catch-ok` | An empty `catch {}` co-occurs with a `$transaction(`/`@Transactional`/`beginTransaction()` call in the same function (co-occurrence heuristic, doesn't prove the catch wraps the transaction) — swallowing the error prevents the throw that would trigger a rollback, so a partially-failed transaction can commit as if it succeeded. |
 | `critical-write-default-isolation` | info | method-scan | `tx-isolation-ok` | A `$transaction(`/`@Transactional` span also matches a money/inventory-named identifier (`balance`/`amount`/`payment`/`wallet`/`ledger`/`charge`/`refund`/`invoice`/`inventory`/`stock`) and a write call (`update`/`create`/`upsert`/`increment`/`decrement`), with no explicit isolation level (`isolationLevel`/`Serializable`/`RepeatableRead`) or `FOR UPDATE` row lock anywhere in it — co-occurrence heuristic, a review nudge rather than a confirmed defect (doesn't prove the write touches the money field, or that the default isolation on the target engine is actually unsafe here); the database's default isolation (e.g. Postgres READ COMMITTED) can permit lost updates/write skew on a money-critical read-modify-write. |
+| `tx-in-loop-long-hold` | warning | method-scan | `tx-loop-hold-ok` | A call on a transaction-scoped client proven via loop spans to sit structurally inside a loop body while the enclosing function also opens `$transaction(...)` (co-occurrence heuristic for the wrapping, same discipline as `external-call-in-tx`) — the transaction, and the row/table locks under it, stays open for the whole loop, so lock hold time scales with the number of rows processed. Mirror image of `write-in-loop-no-tx` (which requires the transaction to be ABSENT) — mutually exclusive by construction, never co-fires. Batch the calls (`updateMany`/`createMany`/`findMany`) or move per-row reads out of the transaction. |
 
-### `be-reliability` (19 rules)
+### `be-reliability` (20 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
@@ -58,6 +59,7 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `emitter-async-listener` | warning | method-scan | `emitter-async-ok` | An `async` callback registered as an EventEmitter listener (`.on`/`.once`/`.addListener`/`.prependListener`) — the emitter fires it and discards the returned promise, so a rejection inside the handler becomes an unhandled promise rejection, which crashes the process on Node 15+. |
 | `promise-race-resource-leak` | info | method-scan | `promise-race-ok` | `Promise.race([...])` with no `AbortController`/`AbortSignal`/`clearTimeout`/`.abort()` visible in the same function — the operation(s) that lose the race are never cancelled, so their socket/timer/handle stays alive after the race settles. Heuristic, not proof — some raced operations hold no cancellable resource and can over-flag. |
 | `fs-check-then-use` | warning | method-scan | `fs-check-use-ok` | A filesystem existence/permission check (`fs.existsSync`/`fs.access`/`fs.stat`/...) and a create/write call (`fs.writeFile`/`fs.open`/`fs.rename`/...) in the same function with no exclusive-create flag (`wx`/`O_EXCL`) visible anywhere in it — CWE-367 TOCTOU: between the check and the use, the path can be swapped out from under it or another writer can win the race. Co-occurrence check, not proof the check and the write target the same path. |
+| `fs-in-loop-serial` | warning | method-scan | `fs-loop-serial-ok` | An `await`ed `fs`/`fs.promises` call (`readFile`/`writeFile`/`unlink`/`readdir`/`stat`/... — deliberately excluding `open`/stream creation, which is `stream-open-no-close-in-loop`'s handle-leak territory) proven via loop spans to sit structurally inside a loop body, with no `Promise.all`/`Promise.allSettled` in the enclosing function — each iteration's disk I/O waits for the previous one, serializing work the filesystem would run concurrently. Generalizes `await-in-map` to ordinary `for`/`for-of`/`while` loop forms, scoped to fs receivers (DB-in-loop is `sql/nplus1`'s territory, network-in-loop is `perf/api-in-loop`'s). |
 
 ### `be-security` (42 rules)
 
@@ -143,11 +145,13 @@ semantics: [dsl-reference.md](dsl-reference.md). How to add to this list:
 | `auth-gates` | warning | io-scan | `auth-gate-ok` | Framework-neutral: any assembled `http` provide under a protected path segment (`/admin/`, `/internal/`) with no witnessed auth evidence — the `auth-guarded` attribute is absent (no native middleware/decorator/annotation guard recognized, no Mode B adapter injection). Deliberately NO same-line keyword carve-out: on a security rule a lexical token over-clearing a real unguarded route (e.g. Java's `value="/admin/..."` argument, Django's `views.AdminView`) is worse than relying on the attribute/marker escape hatches. Marker works in `//` and `#` comment languages. |
 | `route-exposure` | warning | io-scan | `route-exposure-ok` | Framework-neutral: any assembled `http` provide under a dev/debug/internal/test/playground path segment whose registration line carries no guard-hint keyword (dev/debug/internal/env/guard/isProduction/isLocal/NODE_ENV) as a later, unquoted call argument — preserves the env-gate=WHERE-axis carve-out while a quoted path string (`value="/debug"`) can no longer self-clear. Known residual: an unquoted later argument whose identifier contains a keyword (Django's `views.DebugView`) still clears — exposure hygiene tolerates that direction; `auth-gates` deliberately does not. Marker works in `//` and `#` comment languages. |
 
-### `perf` (1 rule)
+### `perf` (3 rules)
 
 | Rule id | Severity | Matcher | Suppress marker | Detects |
 |---|---|---|---|---|
 | `api-in-loop` | warning | method-scan | `api-in-loop-ok` | Network call made inside a loop or array-iteration callback — the HTTP analogue of N+1. |
+| `eager-relation-declared` | warning | line-scan | `eager-relation-ok` | Entity-level eager-load declaration — TypeORM's `eager: true` relation option, or Sequelize's same-line `include: [{ all: true }]` — that makes every finder/query of the entity join the association whether or not the caller needs it, the query-time opposite of N+1 (over-fetch). |
+| `jpa-eager-fetch` | warning | line-scan | `jpa-eager-ok` | Explicit `fetch = FetchType.EAGER` on a JPA/Hibernate mapping annotation (relation or `@ElementCollection` — fires on the attribute itself, whichever annotation carries it), forcing every finder/query of the owning entity to join and load that association; does not see `@ManyToOne`/`@OneToOne`'s implicit EAGER default when no `fetch` attribute is present at all. |
 
 ### `react` (1 rule)
 

@@ -1,6 +1,7 @@
-//! `zzop` binary entry — the CLI: thin argument dispatch over the shared library (`zzop_mcp::*`). The
-//! MCP server is its sibling binary `zzop-mcp` (`src/bin/zzop-mcp.rs`); both are thin shims over the same
-//! `zzop_mcp` lib, so a CLI query and an MCP tool call give the identical answer.
+//! `zzop` binary entry (package `zzop-cli-bin`) — the CLI: thin argument dispatch over the shared
+//! `zzop-host` library (crates/host). The MCP server is the sibling product `zzop-mcp` (package
+//! `zzop-mcp`, packages/mcp); both dispatch to the same `zzop_host::tools` handlers, so a CLI query and
+//! an MCP tool call give the identical answer.
 //!
 //!   zzop analyze <path>              — analyze ONE repo/tree, print a JSON findings summary (Node-free).
 //!   zzop analyze-envelope <file>     — Mode A: analyze a Normalized-AST envelope file in place of native parsing.
@@ -13,7 +14,10 @@
 //!   zzop version | --version         — print this binary's version (equals the MCP serverInfo.version).
 //!   zzop help | --help | -h          — print the usage line plus one elaboration per subcommand (exit 0).
 //!
-//! See `lib.rs` for the module map and the mcp-distribution decision doc for the host design.
+//! See `zzop_host`'s own `lib.rs` for the shared module map and the mcp-distribution decision doc for
+//! the host design. `cli.rs` (this crate) carries only this binary's own argv-parsing/usage helpers.
+
+mod cli;
 
 /// The one usage line — printed to stdout by `--help` (exit 0) and to stderr by every malformed
 /// invocation (exit 2), so the two surfaces can never drift apart.
@@ -24,7 +28,7 @@ const USAGE: &str = "usage: zzop <analyze <path> | analyze-envelope <envelope.js
 const BARE_INVOCATION_HINT: &str =
     "(run 'zzop help' for details; the MCP server is the 'zzop-mcp' binary)";
 
-use zzop_mcp::cli::{reject_flag_like_args, run_file_validate};
+use cli::{reject_flag_like_args, run_file_validate};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -44,7 +48,7 @@ fn main() {
                 std::process::exit(2);
             }
             reject_flag_like_args([path.as_str()], "usage: zzop analyze <path>");
-            match zzop_mcp::tools::analyze(path) {
+            match zzop_host::tools::analyze(path) {
                 Ok(json) => println!("{json}"),
                 Err(e) => {
                     eprintln!("zzop: {e}");
@@ -78,7 +82,7 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            match zzop_mcp::tools::analyze_envelope(&envelope_json) {
+            match zzop_host::tools::analyze_envelope(&envelope_json) {
                 Ok(json) => println!("{json}"),
                 Err(e) => {
                     eprintln!("zzop: {e}");
@@ -92,12 +96,12 @@ fn main() {
         Some("validate-envelope") => run_file_validate(
             &args,
             "validate-envelope <envelope.json>",
-            zzop_mcp::tools::validate_envelope,
+            zzop_host::tools::validate_envelope,
         ),
         Some("validate-rule-pack") => run_file_validate(
             &args,
             "validate-rule-pack <pack.json>",
-            zzop_mcp::tools::validate_rule_pack,
+            zzop_host::tools::validate_rule_pack,
         ),
         Some("cross") => {
             // `cross --config <path>` = config-first mode (the config's trees define the join);
@@ -136,7 +140,7 @@ fn main() {
                 paths.iter().map(String::as_str).chain(config_path),
                 "usage: zzop cross <path> <path>... (2+ paths) | cross --config <zzop.config.jsonc>",
             );
-            match zzop_mcp::tools::cross_repo(&paths, config_path) {
+            match zzop_host::tools::cross_repo(&paths, config_path) {
                 Ok(json) => println!("{json}"),
                 Err(e) => {
                     eprintln!("zzop: {e}");
@@ -186,9 +190,9 @@ fn main() {
                 "usage: zzop endpoint <pattern> <path>... | endpoint <pattern> --config <zzop.config.jsonc>",
             );
             let result = match (config_path, rest.len()) {
-                (Some(_), _) => zzop_mcp::tools::check_endpoint(pattern, None, &[], config_path),
-                (None, 1) => zzop_mcp::tools::check_endpoint(pattern, Some(&rest[0]), &[], None),
-                (None, _) => zzop_mcp::tools::check_endpoint(pattern, None, rest, None),
+                (Some(_), _) => zzop_host::tools::check_endpoint(pattern, None, &[], config_path),
+                (None, 1) => zzop_host::tools::check_endpoint(pattern, Some(&rest[0]), &[], None),
+                (None, _) => zzop_host::tools::check_endpoint(pattern, None, rest, None),
             };
             match result {
                 Ok(json) => println!("{json}"),
@@ -203,7 +207,7 @@ fn main() {
         // document's exact embedded bytes (raw, pipe-safe — `contract config-surface | jq` is byte-identical).
         Some("contract") => match args.get(2) {
             None => {
-                for doc in zzop_mcp::embedded::CONTRACT_DOCS {
+                for doc in zzop_host::embedded::CONTRACT_DOCS {
                     println!("{}  [{}]  {}", doc.name, doc.mime, doc.description);
                 }
             }
@@ -213,7 +217,7 @@ fn main() {
             }
             Some(name) => {
                 reject_flag_like_args([name.as_str()], "usage: zzop contract [<name>]");
-                match zzop_mcp::embedded::find(name) {
+                match zzop_host::embedded::find(name) {
                     Some(doc) => {
                         use std::io::Write;
                         std::io::stdout()
@@ -224,7 +228,7 @@ fn main() {
                         // An unknown NAME is a runtime lookup failure (exit 1, like an unknown
                         // resource URI over MCP), not an argument-shape mistake (exit 2) — and the
                         // error names every valid choice, so the caller never has to guess.
-                        let known: Vec<&str> = zzop_mcp::embedded::names().collect();
+                        let known: Vec<&str> = zzop_host::embedded::names().collect();
                         eprintln!(
                             "zzop: unknown contract {name:?} — known contracts: {}",
                             known.join(", ")
@@ -237,7 +241,7 @@ fn main() {
         // The version surface: `server::version()` = `CARGO_PKG_VERSION`, the workspace release version,
         // shared with the `zzop-mcp` binary and MCP `initialize`, so all three can never disagree.
         Some("version") | Some("--version") => {
-            println!("zzop {}", zzop_mcp::server::version());
+            println!("zzop {}", zzop_host::server::version());
         }
         // The polite lane: an explicit help REQUEST prints the usage line + one elaboration per
         // subcommand to stdout, exit 0. The exit-2 stderr lane below stays a bare usage line +

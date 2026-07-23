@@ -1,7 +1,8 @@
-//! `zzop-mcp` binary entry — the MCP server over stdio (newline-delimited JSON-RPC 2.0). Thin shim over
-//! the shared library (`zzop_mcp::server`); the CLI subcommands (`analyze`/`cross`/`endpoint`/…) live in
-//! the sibling binary `zzop` (`src/bin/zzop.rs`), both over the same lib so a tool call and a CLI query
-//! give the identical answer.
+//! `zzop-mcp` binary entry (package `zzop-mcp`) — the MCP server over stdio (newline-delimited
+//! JSON-RPC 2.0). Thin shim over this crate's own library (`zzop_mcp::server`); the CLI subcommands
+//! (`analyze`/`cross`/`endpoint`/…) live in the sibling product `zzop` (package `zzop-cli-bin`,
+//! `packages/cli-bin/src/main.rs`), both dispatching to the shared `zzop_host`/`zzop_summary` handlers so
+//! a tool call and a CLI query give the identical answer.
 //!
 //!   zzop-mcp            — serve MCP over stdio (the bare form MCP clients register).
 //!   zzop-mcp mcp        — same; the explicit subcommand `.mcp.json` / the MCPB manifest use in `args`.

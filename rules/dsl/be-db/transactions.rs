@@ -1,6 +1,6 @@
 //! `external-call-in-tx` + `multi-write-no-tx` + `write-in-loop-no-tx` + `unawaited-transaction` +
-//! `manual-tx-no-rollback` + `tx-swallows-error-commits` + `critical-write-default-isolation` tests
-//! (split from `be-db.rs`).
+//! `manual-tx-no-rollback` + `tx-swallows-error-commits` + `critical-write-default-isolation` +
+//! `tx-in-loop-long-hold` tests (split from `be-db.rs`).
 
 use super::*;
 
@@ -496,6 +496,83 @@ fn tx_isolation_ok_marker_directly_above_the_transaction_line_suppresses_the_fin
     let out = scan(&dir);
     assert!(
         hits(&out, "critical-write-default-isolation").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// --- tx-in-loop-long-hold ---
+
+#[test]
+fn tx_call_inside_for_of_loop_within_a_transaction_is_flagged() {
+    // Same fixture shape as `write_in_loop_wrapped_in_transaction_is_not_flagged` above (the tx-wrap
+    // veto suppresses `write-in-loop-no-tx` there) — here the presence of the SAME `$transaction(` wrap
+    // is exactly what this rule requires, so the two rules are mutually exclusive on this line.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\ndeclare const users: { id: string }[];\nexport async function activateAllTx() {\n  await prisma.$transaction(async (tx: any) => {\n    for (const u of users) {\n      await tx.account.update({ where: { id: u.id }, data: { active: true } });\n    }\n  });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "tx-in-loop-long-hold");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 6);
+    // Mirror-image assertion: `write-in-loop-no-tx` must NOT fire on this same fixture (the tx-wrap
+    // veto suppresses it), proving the two rules never co-fire on the same line.
+    assert!(
+        hits(&out, "write-in-loop-no-tx").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn write_in_loop_with_no_transaction_does_not_flag_tx_in_loop_long_hold() {
+    // Mirror image of the above: no `$transaction(` anywhere in the file, so the whole-file
+    // necessary-condition pre-skip never even reaches the per-span check regardless of the loop-proven
+    // write call. This is `write-in-loop-no-tx`'s territory instead (see
+    // `update_call_inside_for_of_loop_with_no_transaction_is_flagged` above).
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\ndeclare const users: { id: string }[];\nexport async function activateAll() {\n  for (const u of users) {\n    await prisma.account.update({ where: { id: u.id }, data: { active: true } });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "tx-in-loop-long-hold").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn tx_call_outside_any_loop_within_a_transaction_is_not_flagged() {
+    // The `$transaction(` wrap is present, but the `tx.account.update(...)` call sits directly in the
+    // callback body with no enclosing loop — `trigger_in_loop` never satisfies, since a single call per
+    // transaction invocation holds the lock for one row, not N.
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function activateOneTx(id: string) {\n  await prisma.$transaction(async (tx: any) => {\n    await tx.account.update({ where: { id }, data: { active: true } });\n  });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "tx-in-loop-long-hold").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn tx_loop_hold_ok_marker_directly_above_the_tx_call_line_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\ndeclare const users: { id: string }[];\nexport async function activateAllTxMarked() {\n  await prisma.$transaction(async (tx: any) => {\n    for (const u of users) {\n      // tx-loop-hold-ok: bounded fixture list, at most 5 rows per invocation\n      await tx.account.update({ where: { id: u.id }, data: { active: true } });\n    }\n  });\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "tx-in-loop-long-hold").is_empty(),
         "{:?}",
         out.findings
     );

@@ -1,0 +1,50 @@
+{
+  "name": "@zzop/cli",
+  "version": "0.0.0",
+  "description": "npm packaging of the native zzop CLI binary — the same binary GitHub Releases ships, installed as `zzop`. npm i -g @zzop/cli, or npx @zzop/cli analyze .",
+  "license": "MIT",
+  "repository": "github:eezz4/zzop",
+  "homepage": "https://eezz4.github.io/zzop/",
+  "bugs": "https://github.com/eezz4/zzop/issues",
+  "keywords": [
+    "sast",
+    "static-analysis",
+    "architecture",
+    "code-analysis",
+    "security",
+    "cli",
+    "typescript",
+    "javascript",
+    "python",
+    "rust",
+    "go",
+    "java",
+    "csharp",
+    "prisma",
+    "sql"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "zzop": "bin/zzop.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin/",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "sync-versions": "node scripts/sync-versions.mjs"
+  },
+  "optionalDependencies": {
+    "@zzop/cli-win32-x64-msvc": "0.0.0",
+    "@zzop/cli-darwin-x64": "0.0.0",
+    "@zzop/cli-darwin-arm64": "0.0.0",
+    "@zzop/cli-linux-x64-gnu": "0.0.0",
+    "@zzop/cli-linux-arm64-gnu": "0.0.0"
+  }
+}

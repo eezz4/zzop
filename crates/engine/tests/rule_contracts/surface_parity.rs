@@ -43,16 +43,30 @@ fn facade_analyze_tests_path() -> PathBuf {
 }
 
 fn mcp_src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/mcp/src")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../host/src")
 }
 
-/// A parallel worktree agent is moving `packages/mcp`'s shaping code into a new `crates/summary` crate
+/// A parallel worktree agent is moving `crates/host`'s shaping code into a new `crates/summary` crate
 /// (reply SHAPE preserved byte-for-byte, per this task's own brief) — scanned too, defensively, so TEST 3
 /// survives that move with no edits here. Absent today; `concat_rs_sources` simply yields an empty string
 /// for a directory that does not exist yet (`collect_rs_files` already degrades the same way — see its own
 /// doc in `main.rs`).
 fn summary_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/summary/src")
+}
+
+/// The 2026-07-23 product-layer split moved the MCP tool dispatch (`tools.rs`, `tools/definitions.rs`,
+/// `server.rs`, `resources.rs`) out of `crates/host/src` into its own `packages/mcp/src` Cargo package
+/// — scanned so TEST 3 keeps seeing every place a reply field literal could be re-emitted on the MCP
+/// wire.
+fn mcp_pkg_src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/mcp/src")
+}
+
+/// Same split moved the CLI's own argv dispatch (`main.rs`, `cli.rs`) out of `crates/host/src` into
+/// `packages/cli-bin/src` — scanned for the same reason as `mcp_pkg_src_dir`.
+fn cli_bin_src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/cli-bin/src")
 }
 
 fn load_registry() -> serde_json::Value {
@@ -143,13 +157,19 @@ fn concat_rs_sources(dir: &Path) -> String {
         .join("\x0c")
 }
 
-/// The MCP lane's scanned sources for TEST 3: today's `packages/mcp/src`, plus `crates/summary/src`
-/// defensively (see `summary_src_dir`'s doc) so this test keeps working across the parallel shaping-code
-/// move without needing an edit here.
+/// The MCP lane's scanned sources for TEST 3: `crates/host/src` (the shared dispatch + embedded
+/// contracts), `crates/summary/src` (the shaping logic — see `summary_src_dir`'s doc), and, since the
+/// 2026-07-23 product-layer split, `packages/mcp/src` (the MCP tool schemas/dispatch) and
+/// `packages/cli-bin/src` (the CLI's own argv dispatch) — every source a reply field literal could be
+/// re-emitted from, across both host products.
 fn mcp_lane_sources() -> String {
     let mut combined = concat_rs_sources(&mcp_src_dir());
     combined.push('\x0c');
     combined.push_str(&concat_rs_sources(&summary_src_dir()));
+    combined.push('\x0c');
+    combined.push_str(&concat_rs_sources(&mcp_pkg_src_dir()));
+    combined.push('\x0c');
+    combined.push_str(&concat_rs_sources(&cli_bin_src_dir()));
     combined
 }
 
@@ -192,9 +212,10 @@ fn row_status<'a>(row: &'a serde_json::Value, surface: &str) -> Option<&'a str> 
 }
 
 // Only one delivery surface remains: the MCP `analyze_repo`/`cross_repo` reply, which is the same
-// shaped summary the `zzop analyze`/`cross` CLI subcommands print. The JS CLI's two render
-// surfaces (`jsCliRender`/`mdReport`) were removed with the npm distribution 2026-07-20 — see the
-// registry's own `_doc` historical note.
+// shaped summary the `zzop-mcp analyze`/`cross` CLI subcommands print. @zzop/cli is a zero-logic shim
+// that spawns that native binary — it has no render surface of its own (no `jsCliRender`/`mdReport`,
+// which briefly existed here across the npm distribution's removal-then-restoration; see the
+// registry's own `_doc` historical note).
 const SURFACES: [&str; 1] = ["mcpAnalyzeReply"];
 
 #[test]
@@ -233,7 +254,7 @@ fn every_omit_or_conditional_row_carries_a_non_empty_note() {
 ///
 /// **Matcher**: the literal substring `"<field>":` — quote, field name, quote, colon, with no whitespace
 /// between the field name and either quote. This matches this codebase's own `serde_json::json!({ "key":
-/// value })` emission style throughout `packages/mcp/src` (confirmed by inspection: every forwarded key in
+/// value })` emission style throughout `crates/host/src` (confirmed by inspection: every forwarded key in
 /// `analyze.rs`/`tools.rs` is written exactly this way, e.g. `"fileCount": output_view["fileCount"]`).
 /// This is deliberately narrower than a bare substring search: a short field name like `ir` would otherwise
 /// false-positive inside unrelated identifiers/prose that merely CONTAIN "ir" as a substring (`circular`,
@@ -253,7 +274,8 @@ fn mcp_lane_forwards_exactly_the_rows_marked_carry_and_never_forwards_the_rows_m
     let sources = mcp_lane_sources();
     assert!(
         !sources.is_empty(),
-        "found no .rs sources under packages/mcp/src (or crates/summary/src) — path resolution likely broke"
+        "found no .rs sources under crates/host/src, crates/summary/src, packages/mcp/src, or \
+         packages/cli-bin/src — path resolution likely broke"
     );
     let fields = registry["analyzeOutputView"]
         .as_object()
@@ -267,16 +289,16 @@ fn mcp_lane_forwards_exactly_the_rows_marked_carry_and_never_forwards_the_rows_m
             "carry" => assert!(
                 present,
                 "analyzeOutputView.{field} is marked `carry` for mcpAnalyzeReply, but {key_literal:?} does \
-                 not appear as a forwarded JSON key literal anywhere under packages/mcp/src or \
-                 crates/summary/src — either the registry is stale (fix the row) or the MCP lane silently \
-                 stopped forwarding this field (fix the code)"
+                 not appear as a forwarded JSON key literal anywhere under crates/host/src, \
+                 crates/summary/src, packages/mcp/src, or packages/cli-bin/src — either the registry is \
+                 stale (fix the row) or the MCP lane silently stopped forwarding this field (fix the code)"
             ),
             "omit" => assert!(
                 !present,
                 "analyzeOutputView.{field} is marked `omit` for mcpAnalyzeReply, but {key_literal:?} DOES \
-                 appear as a forwarded JSON key literal under packages/mcp/src or crates/summary/src — \
-                 either the registry is stale (the MCP lane now forwards this field — update the row and \
-                 its note) or this is an unintended new leak"
+                 appear as a forwarded JSON key literal under crates/host/src, crates/summary/src, \
+                 packages/mcp/src, or packages/cli-bin/src — either the registry is stale (the MCP lane \
+                 now forwards this field — update the row and its note) or this is an unintended new leak"
             ),
             "carry-conditional" => { /* exempt from this strict check — see this test's own doc */ }
             other => panic!("analyzeOutputView.{field}.mcpAnalyzeReply has an unknown status {other:?}"),

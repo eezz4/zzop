@@ -30,7 +30,7 @@ impl PacksDir {
 }
 
 /// One tree's request shape (wire = camelCase via `rename_all`; full field list = this struct —
-/// `root` plus 15 optional knobs, see `docs/modules/napi.md`'s table for the authoritative
+/// `root` plus 15 optional knobs, see `docs/modules/mcp.md`'s AnalyzeRequest table for the authoritative
 /// per-field contract). `#[serde(deny_unknown_fields)]` is deliberately
 /// NOT set — an older/newer Node host sending an extra field (e.g. a future `scores_config` knob) should
 /// degrade to "ignored", not fail the whole call.
@@ -84,7 +84,8 @@ pub struct AnalyzeRequest {
     /// with a non-empty `dir` beats it on a match). `None` (the default) adds no implicit whole-tree
     /// mount. See `build_engine_config`'s fold order for exactly how this combines with `mounts`. Shape
     /// (must start with `/`, no scheme/placeholder/whitespace) is NOT validated here — that is the
-    /// mapper's fail-fast gate (`packages/cli/lib/mapper.js`); the engine's own
+    /// mapper's fail-fast gate (`crates/config/src/mapper.rs`, ported from the removed JS CLI's
+    /// `mapper.js`, 2026-07-20); the engine's own
     /// `analyze::compose::apply_config_mounts` defensively warns and skips a malformed value as a
     /// last-resort backstop.
     pub mounted_at: Option<String>,

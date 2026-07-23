@@ -80,10 +80,23 @@ fn facade_src_files() -> Vec<PathBuf> {
     out
 }
 
-/// `packages/mcp/src/**/*.rs`, recursively — the MCP host's tool descriptions, guided errors, usage
-/// text, and embedded-resource glue are the FIRST surface a binary-only user reads; they name config
-/// keys (`configPath`, `packsDir`, ...) and must stay inside the vouched vocabulary.
+/// `crates/host/src/**/*.rs`, recursively — the shared dispatch + embedded-resource glue both host
+/// products build over; it names config keys (`configPath`, `packsDir`, ...) and must stay inside the
+/// vouched vocabulary.
 fn mcp_src_files() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    collect_rs_files(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../host/src"),
+        &mut out,
+    );
+    out
+}
+
+/// `packages/mcp/src/**/*.rs`, recursively — the `zzop-mcp` product's own tool descriptions, guided
+/// errors, and resource glue (moved out of `crates/host/src` in the 2026-07-23 product-layer split):
+/// the FIRST surface an MCP-only user reads, so it must stay inside the vouched vocabulary same as
+/// `mcp_src_files` above.
+fn mcp_pkg_src_files() -> Vec<PathBuf> {
     let mut out = Vec::new();
     collect_rs_files(
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/mcp/src"),
@@ -92,9 +105,20 @@ fn mcp_src_files() -> Vec<PathBuf> {
     out
 }
 
+/// `packages/cli-bin/src/**/*.rs`, recursively — the `zzop` CLI product's own argv-dispatch usage text
+/// (moved out of `crates/host/src` in the same split): the FIRST surface a terminal-only user reads.
+fn cli_bin_src_files() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    collect_rs_files(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/cli-bin/src"),
+        &mut out,
+    );
+    out
+}
+
 /// `crates/summary/src/**/*.rs`, recursively — the shared summary/shaping crate behind every host
 /// (`zzop-mcp` today): its guided errors, tool-argument validation messages, and disclosure/warning
-/// text carry exactly the same config-key/flag references `packages/mcp/src` used to own alone before
+/// text carry exactly the same config-key/flag references `crates/host/src` used to own alone before
 /// this logic moved out into its own crate (2026-07-17 zzop-summary extraction).
 fn summary_src_files() -> Vec<PathBuf> {
     let mut out = Vec::new();
@@ -107,8 +131,9 @@ fn summary_src_files() -> Vec<PathBuf> {
 
 /// The full scanned-file set for contract 11's two real-tree checks: `rules/native/**/src/**/*.rs` +
 /// `crates/engine/src/**/*.rs` + `crates/metrics/src/**/*.rs` + `crates/config/src/**/*.rs` +
-/// `crates/facade/src/**/*.rs` + `crates/summary/src/**/*.rs` + `packages/mcp/src/**/*.rs`, sorted so a
-/// failing assertion's offender list has a stable, diffable order across runs. (The removed JS CLI's
+/// `crates/facade/src/**/*.rs` + `crates/summary/src/**/*.rs` + `crates/host/src/**/*.rs` +
+/// `packages/mcp/src/**/*.rs` + `packages/cli-bin/src/**/*.rs`, sorted so a failing assertion's
+/// offender list has a stable, diffable order across runs. (The removed JS CLI's
 /// `packages/cli/lib/*.js` was dropped from this set when the npm distribution was removed 2026-07-20 —
 /// there is no non-Rust surface left to scan.)
 fn reference_validation_scanned_files() -> Vec<PathBuf> {
@@ -119,6 +144,8 @@ fn reference_validation_scanned_files() -> Vec<PathBuf> {
     out.extend(facade_src_files());
     out.extend(summary_src_files());
     out.extend(mcp_src_files());
+    out.extend(mcp_pkg_src_files());
+    out.extend(cli_bin_src_files());
     out.sort();
     out
 }

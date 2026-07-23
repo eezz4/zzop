@@ -19,10 +19,11 @@ tool and `zzop analyze-envelope <envelope.json>` CLI subcommand run the same fac
 `zzop-mcp`'s `validate_envelope` tool (and `zzop validate-envelope <file>` subcommand) is a
 separate, structural-validation-only story, distinct from actually running one. To RUN a Mode A
 envelope, use the `zzop-mcp` binary (`zzop analyze-envelope <file>`, or its `analyze_envelope` MCP
-tool) or embed `zzop-facade` directly — there is no other runner. (The npm distribution's JS CLI
-`@zzop/cli`, removed 2026-07-20 along with the `@zzop/native` napi binding, never ran Mode A either:
-its only envelope-shaped subcommands were `zzop adapter validate <path>`, structural validation only,
-and `zzop init adapter --mode a|b`, which scaffolded starter FILES rather than running an analysis.)
+tool) or embed `zzop-facade` directly — there is no other runner. (The historical JS implementation
+of the npm CLI, retired 2026-07-20, never ran Mode A either: its only envelope-shaped subcommands
+were `zzop adapter validate <path>`, structural validation only, and `zzop init adapter --mode a|b`,
+which scaffolded starter FILES rather than running an analysis. Today's `@zzop/cli` npm package ships
+the same native `zzop` binary, so it runs Mode A via `zzop analyze-envelope`.)
 
 ## The fixture
 
@@ -85,7 +86,7 @@ health-check hitting your own base URL — still has a host, so the bypass rule 
 shape: it keys as an absolute URL and lands in `externalConsumes`, never joining that tree's own `GET
 /api/ping` provide. If you control the extraction, strip the origin and key it as the plain relative path
 instead (`"GET /api/ping"`), same as any other in-tree call. If you can't special-case it at the adapter,
-declare the tree's own host in its `hosts` config instead (see `docs/modules/napi.md`'s `hosts` field) —
+declare the tree's own host in its `hosts` config instead (see `docs/modules/mcp.md`'s `hosts` field) —
 cross-layer linking re-keys a matching absolute-URL consume back to internal at link time.
 
 (Note: [`key-normalization.fixture.json`](key-normalization.fixture.json) deliberately carries no

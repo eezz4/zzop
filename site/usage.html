@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>zzop — Usage</title>
-<meta name="description" content="zzop usage — download the Node-free zzop-mcp binary, write a zzop.config.jsonc, and read the report. Embedding the engine? See the SDK reference.">
+<meta name="description" content="zzop usage — download the Node-free zzop CLI binary (or npm i -g @zzop/cli), write a zzop.config.jsonc, and read the report. Embedding the engine? See the SDK reference.">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="assets/site.css">
 </head>
@@ -50,7 +50,7 @@
   <main class="docs-content">
     <div class="docs-content-header">
       <h1>Using zzop</h1>
-      <p>zzop ships as <code>zzop-mcp</code>, a single Node-free native binary: no Node.js, no npm, nothing to compile. Run it as a CLI over subcommands (<code>zzop analyze .</code> — no code, ESLint-style) or point an MCP client at <code>zzop-mcp mcp</code>. This page is the CLI — if you're building a tool on top of zzop instead, see the <a href="sdk.html">SDK reference</a>.</p>
+      <p>zzop ships two Node-free native binaries from one crate: no Node.js, no npm, nothing to compile. <code>zzop</code> is the CLI, run over subcommands (<code>zzop analyze .</code> — no code, ESLint-style); <code>zzop-mcp</code> is the MCP stdio server for MCP clients (<code>zzop-mcp mcp</code>). This page covers the <code>zzop</code> CLI — if you're building a tool on top of zzop instead, see the <a href="sdk.html">SDK reference</a>.</p>
     </div>
 
     <section id="install">
@@ -59,8 +59,8 @@
       <p>Three ways to get it — no source checkout or toolchain required for any of them:</p>
       <ul>
         <li><strong>Claude Code</strong> — <code>/plugin marketplace add eezz4/zzop</code>, then <code>/plugin install zzop@zzop</code>. The plugin's <code>.mcp.json</code> runs <code>zzop-mcp mcp</code> for you.</li>
-        <li><strong>Claude Desktop</strong> — the one-click <code>.mcpb</code> bundle (drag-and-drop install); it carries the platform binary. See <a href="https://github.com/eezz4/zzop/blob/main/packaging/README.md">packaging/README.md</a>.</li>
-        <li><strong>CLI / CI</strong> — download the <code>zzop-mcp-&lt;platform&gt;[.exe]</code> binary from <a href="https://github.com/eezz4/zzop/releases" target="_blank" rel="noreferrer">GitHub Releases</a> (5 platforms) and put it on <code>PATH</code> as <code>zzop-mcp</code>.</li>
+        <li><strong>Claude Desktop</strong> — the one-click <code>.mcpb</code> bundle (drag-and-drop install); it carries the platform binary. See <a href="https://github.com/eezz4/zzop/blob/main/packages/mcpb/README.md">packages/mcpb/README.md</a>.</li>
+        <li><strong>CLI / CI</strong> — download the <code>zzop-&lt;platform&gt;[.exe]</code> binary from <a href="https://github.com/eezz4/zzop/releases" target="_blank" rel="noreferrer">GitHub Releases</a> (5 platforms) and put it on <code>PATH</code> as <code>zzop</code> — or <code>npm i -g @zzop/cli</code>. Want the MCP server instead? Download <code>zzop-mcp-&lt;platform&gt;[.exe]</code> the same way and put it on <code>PATH</code> as <code>zzop-mcp</code>.</li>
       </ul>
       <div class="code-panel">
         <div class="code-panel__tab">Analyze a tree</div>
@@ -68,7 +68,7 @@
 zzop cross ../api ../web   # cross-layer join across 2+ trees
 zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop</code></pre>
       </div>
-      <p>See <a href="https://github.com/eezz4/zzop/blob/main/packages/mcp/README.md">packages/mcp/README.md</a> for the full CLI reference. (The npm distribution — the JS CLI <code>@zzop/cli</code> and the napi addon <code>@zzop/native</code>, installed via <code>npm i -D @zzop/cli</code> / <code>npx zzop</code> — was removed 2026-07-20; <code>zzop-mcp</code> is its full Node-free replacement.)</p>
+      <p>See <a href="https://github.com/eezz4/zzop/blob/main/crates/host/README.md">crates/host/README.md</a> for the full CLI reference. A fourth way to get the <code>zzop</code> binary: <code>npm i -g @zzop/cli</code> (or <code>npx @zzop/cli</code>) — a zero-logic shim that spawns this exact native binary, fetched per-platform as an npm dependency, no separate Node SDK involved. See <a href="https://github.com/eezz4/zzop/blob/main/packages/cli/README.md">packages/cli/README.md</a>.</p>
     </section>
 
     <section id="cli-config">

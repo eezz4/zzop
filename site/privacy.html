@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>zzop — Privacy</title>
+<meta name="description" content="zzop privacy policy — all analysis is local, the binaries make no network requests, and no telemetry or personal data is collected.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a href="index.html" class="brand">
+      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#1e222b"></rect><path d="M9 16.5 13.5 21 23 10.5" fill="none" stroke="#34d399" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      <span class="brand__wordmark">zzop</span>
+    </a>
+    <nav class="site-nav">
+      <a href="index.html" class="site-nav__link">Overview</a>
+      <a href="architecture.html" class="site-nav__link">Architecture</a>
+      <a href="usage.html" class="site-nav__link">Usage</a>
+      <a href="sdk.html" class="site-nav__link">SDK</a>
+      <a href="rules.html" class="site-nav__link">Rules</a>
+    </nav>
+    <div class="site-header__actions">
+      <a href="https://github.com/eezz4/zzop" target="_blank" rel="noreferrer" aria-label="GitHub" class="icon-btn">
+        <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"></path></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<main class="docs-content">
+  <section>
+    <h1>Privacy Policy</h1>
+    <p><strong>zzop collects nothing.</strong> The short version: your code never leaves your machine, and no data about you or your usage is gathered, transmitted, or stored by zzop.</p>
+
+    <h2>What zzop does with your data</h2>
+    <ul>
+      <li><strong>All analysis is local.</strong> The <code>zzop</code> CLI, the <code>zzop-mcp</code> MCP server, and the npm packages run entirely on your machine and read only the repository paths you point them at.</li>
+      <li><strong>No network access.</strong> The analysis binaries make no network requests of any kind — by design, they carry zero HTTP dependencies. This is verifiable from the source and the dependency tree.</li>
+      <li><strong>No telemetry.</strong> There is no usage tracking, no crash reporting, no analytics, no phone-home of any kind — not in the binaries, not in the MCP server, not in the Claude Code plugin.</li>
+      <li><strong>No accounts, no keys.</strong> zzop requires no sign-up, no API key, and no credentials.</li>
+      <li><strong>MCP communication stays local.</strong> The MCP server speaks JSON-RPC over stdio with your MCP client (e.g. Claude Code / Claude Desktop) on your machine. What that client then does with analysis results is governed by that client's own privacy policy, not this one.</li>
+    </ul>
+
+    <h2>Third-party services you may touch while installing</h2>
+    <p>Downloading release binaries or npm packages involves GitHub and npm's infrastructure, governed by their own policies:</p>
+    <ul>
+      <li>GitHub (releases, repository): <a href="https://docs.github.com/en/site-policy/privacy-policies" target="_blank" rel="noreferrer">GitHub privacy policies</a></li>
+      <li>npm (package registry): <a href="https://docs.npmjs.com/policies/privacy" target="_blank" rel="noreferrer">npm privacy policy</a></li>
+    </ul>
+
+    <h2>Changes</h2>
+    <p>If zzop's behavior ever changes in a way that affects this policy, this page changes in the same commit, in the public repository history.</p>
+
+    <h2>Contact</h2>
+    <p>Questions: open an issue at <a href="https://github.com/eezz4/zzop/issues" target="_blank" rel="noreferrer">github.com/eezz4/zzop/issues</a>.</p>
+  </section>
+</main>
+<!-- Standalone page: uses .docs-content for typography without the docs sidebar. -->
+
+</body>
+</html>

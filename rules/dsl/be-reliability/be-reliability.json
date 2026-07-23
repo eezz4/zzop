@@ -332,6 +332,28 @@
           { "pattern": "['\"]wx['\"]|O_EXCL|flag\\s*:\\s*['\"]wx", "label": "exclusive" }
         ]
       }
+    },
+    {
+      "id": "fs-in-loop-serial",
+      "severity": "warning",
+      "message": "An `await`ed Node `fs`/`fs.promises` call (`readFile`/`writeFile`/`appendFile`/`unlink`/`rename`/`copyFile`/`mkdir`/`rm`/`readdir`/`stat`/`access`/... — deliberately excluding `open`/`createReadStream`/`createWriteStream`, which `stream-open-no-close-in-loop` already covers for the handle-leak angle) executes structurally inside a loop body — verified against the parser's projected loop spans (the call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — with no `Promise.all`/`Promise.allSettled` anywhere in the enclosing function. Each iteration's disk I/O waits for the previous one to finish before starting, serializing work the filesystem would otherwise run concurrently; over many files this adds up to iteration-count times the single-call latency. This generalizes `await-in-map` (which only catches the `.map(async ...)` callback shape) to the ordinary `for`/`for-of`/`for-in`/`while` loop forms, scoped to `fs` I/O specifically — database calls in a loop are `sql/nplus1`'s territory and outbound network calls are `perf/api-in-loop`'s, both already covering their own receivers, so this rule only anchors on an `fs`/`fsPromises`/`fsp`/`fs.promises`-shaped receiver to stay out of their way. Gather the paths up front and run the calls concurrently with `Promise.all(...)` (bounded by a concurrency limiter if the fan-out is large), or use a single directory-level/batch operation where the API allows it. Suppress a vetted case (e.g. deliberately sequential writes to preserve on-disk ordering) with `// fs-loop-serial-ok`.",
+      "suppress_marker": "fs-loop-serial-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "require_file": "(?i)\\bfs\\b|require\\s*\\(\\s*['\"]fs['\"]|from\\s+['\"](?:fs|node:fs)['\"]",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\bawait\\s+(?:[\\w$]+\\.)*fs(?:Promises|p)?(?:\\.promises)?\\.(?:readFile|writeFile|appendFile|unlink|rename|copyFile|mkdir|rmdir|rm|readdir|stat|lstat|access|chmod|chown|truncate|realpath|symlink|link)\\w*\\s*\\(", "label": "fs-call" }
+        ],
+        "trigger": "fs-call",
+        "trigger_in_loop": true,
+        "absent": [
+          { "pattern": "Promise\\.(all|allSettled)\\s*\\(", "label": "promise-all" }
+        ],
+        "snippet_max": 160
+      }
     }
   ]
 }

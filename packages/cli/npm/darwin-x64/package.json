@@ -1,0 +1,21 @@
+{
+  "name": "@zzop/cli-darwin-x64",
+  "version": "0.0.0",
+  "description": "zzop CLI native binary for darwin/x64.",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "zzop"
+  ],
+  "license": "MIT",
+  "repository": "github:eezz4/zzop",
+  "homepage": "https://eezz4.github.io/zzop/",
+  "bugs": "https://github.com/eezz4/zzop/issues",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ]
+}

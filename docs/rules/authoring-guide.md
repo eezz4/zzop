@@ -7,7 +7,7 @@ and when to reach for a native rule instead.
 ## File placement
 
 A pack is one `<id>.json` file, loaded from a configured packs directory (the `packsDir` option — see
-[../modules/napi.md](../modules/napi.md)) via `zzop_core::pack_loader::load_dsl_packs`. Two directory shapes
+[../modules/mcp.md](../modules/mcp.md#the-zzop-facade-json-contract)) via `zzop_core::pack_loader::load_dsl_packs`. Two directory shapes
 are supported, and may be mixed in the same directory:
 
 - **Flat** — `<packsDir>/<id>.json`, directly under the directory. This is what an external/third-party
@@ -28,8 +28,8 @@ third-party pack set, but nesting works too).
 `packsDir` accepts either one directory or an array of directories — each is loaded independently with
 `load_dsl_packs` and then merged by pack `id`: if the same `id` shows up in more than one directory, the
 pack from the LATER directory in the list replaces the earlier one WHOLE (not a per-rule merge). See
-[../modules/napi.md](../modules/napi.md)'s "Defaults" section for how the JS wrapper uses this to let a
-caller add packs alongside the bundled ones instead of replacing them.
+[../modules/mcp.md](../modules/mcp.md#defaults-zero-config--full-analysis)'s "Defaults" section for how a
+host uses this to let a caller add packs alongside the bundled ones instead of replacing them.
 
 A host with no filesystem-resident pack directory at all (e.g. a self-contained binary embedding its
 packs at compile time) can instead hand already-parsed `RulePackDef` data straight to the engine via the

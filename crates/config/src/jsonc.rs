@@ -1,4 +1,4 @@
-//! JSONC stripping — the byte-for-byte port of `packages/cli/lib/jsonc.js`'s `stripJsonComments`:
+//! JSONC stripping — the byte-for-byte port of the removed JS CLI's `jsonc.js` (2026-07-20), specifically its `stripJsonComments`:
 //! two string-aware passes (comments, then trailing commas) that preserve newline COUNT so
 //! `serde_json` error positions stay meaningful. Quirks that MUST survive the port (see the JS
 //! source): `//`/`/*` inside double-quoted strings are copied through untouched; block comments

@@ -25,21 +25,6 @@ mod tests;
 pub(crate) use bucket_keys::bucket_keys;
 pub use bucket_keys::DEFAULT_BUCKET_KEYS_LIMIT;
 
-/// Output verbosity for analyze-shaped replies. `Summary` (the default) is the token-bomb-guarded
-/// shaped reply every MCP tool returns today; `Full` additionally emits the raw output fields the
-/// summary drops or compacts — the raw `zzop-facade` embedder data lane. STAGED, not yet
-/// caller-reachable: every caller constructs `FindingFilters` with `Summary`, so the `Full`
-/// branches in the analyze/cross shapers are dead today and current replies stay byte-identical. A
-/// later host<->facade parity flip exposes a `verbosity`/`raw` tool argument + `zzop-mcp` CLI flag (and
-/// must then update the tool self-descriptions that today promise the raw `ir` block is the
-/// direct-facade-embedding lane only). See the crate doc's "Host<->facade parity (staged)" section.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Verbosity {
-    #[default]
-    Summary,
-    Full,
-}
-
 /// Caller-facing filters for a findings list, straight from tool arguments.
 #[derive(Debug)]
 pub struct FindingFilters {
@@ -49,9 +34,6 @@ pub struct FindingFilters {
     pub rule: Option<String>,
     /// List cap. `None` = `DEFAULT_FINDINGS_LIMIT`.
     pub limit: Option<usize>,
-    /// Reply verbosity — [`Verbosity::Summary`] today (see [`Verbosity`]); [`Verbosity::Full`] is
-    /// staged, not yet reachable from any tool argument.
-    pub verbosity: Verbosity,
 }
 
 impl FindingFilters {
@@ -86,41 +68,7 @@ impl FindingFilters {
             min_severity,
             rule,
             limit,
-            // Staged: no tool argument reads this yet, so every parsed filter is `Summary` and the
-            // `Full` lane stays dead (see [`Verbosity`]).
-            verbosity: Verbosity::Summary,
         })
-    }
-}
-
-/// The raw `AnalyzeOutputView` fields the `Summary` reply drops or compacts, emitted verbatim only on
-/// the staged [`Verbosity::Full`] lane. `health`/`recommendations`/`critical` are the un-compacted
-/// originals of the `Summary` reply's compact `architecture` object.
-pub(crate) const FULL_ONLY_OUTPUT_FIELDS: &[&str] = &[
-    "ir",
-    "nodes",
-    "scores",
-    "seams",
-    "folders",
-    "layerCoChurn",
-    "cache",
-    "ruleTimings",
-    "health",
-    "recommendations",
-    "critical",
-];
-
-/// Inserts every present [`FULL_ONLY_OUTPUT_FIELDS`] entry from `output_view` into `map` (defensive
-/// `.get()` — a field an older engine output lacks is simply not forwarded, never `null`). The staged
-/// parity primitive the single-tree and cross-tree shapers both call behind a [`Verbosity::Full`] guard.
-pub(crate) fn insert_full_output_fields(
-    map: &mut serde_json::Map<String, serde_json::Value>,
-    output_view: &serde_json::Value,
-) {
-    for &field in FULL_ONLY_OUTPUT_FIELDS {
-        if let Some(v) = output_view.get(field) {
-            map.insert(field.to_string(), v.clone());
-        }
     }
 }
 

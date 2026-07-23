@@ -1,0 +1,26 @@
+[package]
+name = "zzop-cli-bin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# The `zzop` CLI product: argv dispatch (`analyze`/`cross`/`endpoint`/`contract`/`validate-*`/`version`)
+# over the shared `zzop-host` lib (crates/host) — the same handlers the `zzop-mcp` product (packages/mcp)
+# dispatches to, so a CLI run and an MCP tool call against the same path produce the same analysis
+# through the same code. This crate carries NO shaping/filter/summary logic of its own (that lives in
+# `zzop-summary`, pulled in transitively via `zzop-host`) — just this binary's own argv-parsing/usage/
+# exit-code contract (`cli.rs`).
+[[bin]]
+name = "zzop"
+path = "src/main.rs"
+
+[dependencies]
+zzop-host = { path = "../../crates/host" }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# Integration tests spawn the built `zzop` binary and additionally check the embedded config-surface
+# contract bytes (`contract config-surface`) against zzop-config's own embed — same fixture crate
+# crates/host's tests used before this binary moved out on its own.
+zzop-config = { path = "../../crates/config" }

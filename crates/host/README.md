@@ -1,8 +1,9 @@
-# zzop-mcp
+# zzop CLI + zzop-mcp reference
 
 The Node-free way to run zzop: two self-contained binaries with no Node.js runtime, no npm install —
-`zzop` (a plain CLI for direct/CI use) and `zzop-mcp` (an MCP server over stdio for MCP clients). Both are
-thin entries over one shared lib and the same analysis path. Full reference:
+`zzop` (a plain CLI for direct/CI use, package `packages/cli-bin`) and `zzop-mcp` (an MCP server over
+stdio for MCP clients, package `packages/mcp`). Both are thin entries over the shared `zzop-host` lib
+crate (this directory) and the same analysis path. Full reference:
 [docs/modules/mcp.md](../../docs/modules/mcp.md).
 
 Prebuilt per-platform binaries (`zzop-<platform>[.exe]` + `zzop-mcp-<platform>[.exe]`, 5 platforms each)
@@ -12,7 +13,7 @@ are attached to [GitHub Releases](https://github.com/eezz4/zzop/releases); build
 ## Build
 
 ```sh
-cargo build -p zzop-mcp --release   # builds BOTH bins: `zzop` and `zzop-mcp`
+cargo build -p zzop-cli-bin -p zzop-mcp --release   # builds BOTH bins: `zzop` and `zzop-mcp`
 ```
 
 The binaries land at `target/release/zzop` and `target/release/zzop-mcp` (`.exe` on Windows).
@@ -51,6 +52,11 @@ Point your MCP client at the built binary's `mcp` subcommand. For a `.mcp.json`-
 No further configuration is required — pass an absolute repo path in each tool call. If the target repo
 has a `zzop.config.jsonc`, it's auto-discovered and honored; otherwise zero-config defaults apply
 (bundled rule packs + git-derived signals included).
+
+`zzop-mcp` is also listed on the official MCP registry (`registry.modelcontextprotocol.io`) as
+`io.github.eezz4/zzop` (see [`server.json`](../../server.json), published by CI on every release) —
+discoverable there by MCP clients/subregistries with no registration step of your own; it points at the
+same `.mcpb` bundles above, no separate install path.
 
 ## Install as a Claude Code plugin
 

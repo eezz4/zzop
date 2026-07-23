@@ -87,7 +87,7 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     call when you control the extraction; or (2) at the CONFIG, declare the tree's own host in its
     `hosts` list (a bare hostname, no scheme/path) — cross-layer linking then re-keys any absolute-URL
     consume targeting a declared host to its internal joinable key at link time instead of routing it to
-    `externalConsumes` (see `docs/modules/napi.md`'s `hosts` field and `hostRekeyCounts`).
+    `externalConsumes` (see `docs/modules/mcp.md`'s `hosts` field and `hostRekeyCounts`).
   - OPTIONAL client provenance (additive since `axios-defaults-base-v1`; omit and nothing changes):
     an `IoConsume` may carry `client: "axios"` naming the HTTP client that produced the call site.
     `client` is a free-form string (`Option<String>` in `crates/core/src/io.rs`), not a closed enum —
@@ -231,7 +231,7 @@ the id collision), and since only
 `symbol-scan`/`io-scan` rules can fire without source text and every current bundled rule is
 `line-scan`/`method-scan`, the default currently adds pack-load confirmation, not findings. A
 caller-supplied pack reusing a bundled id keeps the existing collision semantics (a later inline def,
-or any directory pack, wins whole). See `docs/modules/napi.md`'s "Defaults" section for the full
+or any directory pack, wins whole). See `docs/modules/mcp.md`'s "Defaults" section for the full
 contract. `examples/jsp-envelope.example.json` is a hand-written,
 crude-parser-shaped fixture (symbols with no body spans, one `http` provide, one `db-table` consume, no
 imports) that validates cleanly against this contract — see `zzop-core`'s `normalized::tests::
@@ -317,7 +317,7 @@ If your framework has an equivalent concept (a global route prefix, a per-client
 the normalized `key` you emit yourself rather than trying to reproduce either native rewrite.
 
 Deployment-topology `mounts`/`mountedAt` (config-declared, not a sentinel kind — see
-[modules/napi.md](modules/napi.md#functions)'s `mounts`/`mountedAt`/`hosts` `AnalyzeRequest` fields) are
+[modules/mcp.md](modules/mcp.md#functions)'s `mounts`/`mountedAt`/`hosts` `AnalyzeRequest` fields) are
 NOT part of the reserved-kind drop above: they apply uniformly to Mode A envelopes and natively-parsed trees alike, at the structurally
 equivalent seam after fragment composition and before the IO freeze — a config mount rewrites a Mode A
 tree's `http` provide keys exactly like it would a native tree's.
@@ -349,11 +349,12 @@ callers can refer to either unambiguously.
   and `zzop analyze-envelope <envelope.json>` CLI subcommand both run the same
   `zzop_summary::analyze_envelope_summary` call path (`crates/summary`, over
   `zzop_facade::analyze_envelope_json`), zero-config only (an
-  envelope carries no filesystem location, so there is no config file to auto-discover). (The npm
-  distribution's JS CLI `@zzop/cli` — removed 2026-07-20 along with the `@zzop/native` napi binding —
-  never ran a Mode A envelope either: its only envelope-shaped commands were `zzop adapter validate
-  <path>`, structural validation only, and `zzop init adapter --mode a|b`, which scaffolded starter
-  FILES rather than running an analysis.) In short: to run a Mode A envelope, use the `zzop-mcp` binary
+  envelope carries no filesystem location, so there is no config file to auto-discover). (The
+  historical JS implementation of the npm CLI — retired 2026-07-20 — never ran a Mode A envelope
+  either: its only envelope-shaped commands were `zzop adapter validate <path>`, structural validation
+  only, and `zzop init adapter --mode a|b`, which scaffolded starter FILES rather than running an
+  analysis. Today's `@zzop/cli` npm package ships the same native `zzop` binary, so it runs Mode A via
+  `zzop analyze-envelope`.) In short: to run a Mode A envelope, use the `zzop` / `zzop-mcp` binary
   (its tool or CLI subcommand) or embed `zzop-facade` directly.
 
   Each overlay is validated with `validate_envelope` independently; an invalid overlay is skipped with

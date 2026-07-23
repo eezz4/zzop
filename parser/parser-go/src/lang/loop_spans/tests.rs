@@ -46,6 +46,19 @@ fn extract_loop_spans_single_line_for_has_equal_start_end() {
     assert_eq!(spans, vec![(4, 4)]);
 }
 
+/// Regression pin (same defect CLASS as `lang::symbols::body_line_range`'s leading-comment bug): a loop
+/// whose body opens with a `//` comment must still yield the correct loop span. Unlike `symbols`'
+/// per-statement walk, `extract_loop_spans` records the `for_statement` NODE's own whole span (its `for`
+/// keyword to its closing `}`), never inspecting the block's first/last named child — so an interior
+/// leading comment can never move either boundary. This test proves that, rather than assuming it.
+#[test]
+fn extract_loop_spans_body_opening_with_comment_is_unaffected() {
+    let src =
+        "package main\n\nfunc f() {\n\tfor cond() {\n\t\t// leading comment\n\t\tstep()\n\t}\n}\n";
+    let spans = extract_loop_spans("f.go", src);
+    assert_eq!(spans, vec![(4, 7)]);
+}
+
 #[test]
 fn extract_loop_spans_no_loop_yields_empty() {
     let src = "package main\n\nfunc f() int {\n\treturn 1\n}\n";

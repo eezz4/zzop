@@ -148,6 +148,55 @@ fn empty_body_function_has_no_body_range() {
     assert_eq!(s.body_end, None);
 }
 
+/// Regression pin: a function whose block opens with a standalone `//` comment before its first real
+/// statement must still get a correct body span — tree-sitter-go's `comment` is an "extra" that can be
+/// interleaved as a NAMED child of `block` (and of `statement_list`) anywhere a statement can appear, so
+/// naively taking the block's/statement_list's first named child breaks the moment that child is a
+/// leading comment. Before the fix, `body_line_range` bailed to `(None, None)` here because the block's
+/// first named child was the comment, not `statement_list`.
+#[test]
+fn function_body_opening_with_comment_still_gets_body_range() {
+    let src = "package main\n\nfunc f() {\n\t// leading comment\n\tx := 1\n\t_ = x\n}\n";
+    let syms = parse_symbols("a.go", src);
+    let s = sym(&syms, "f");
+    assert_eq!(s.body_start, Some(5));
+    assert_eq!(s.body_end, Some(6));
+}
+
+/// Same regression, but the comment sits between two real statements (not just leading) — the fix must
+/// be robust to comments interleaved anywhere in `statement_list`'s children, not merely skip-the-first.
+#[test]
+fn function_body_with_comment_between_statements_still_gets_body_range() {
+    let src = "package main\n\nfunc f() {\n\tx := 1\n\t// mid comment\n\t_ = x\n}\n";
+    let syms = parse_symbols("a.go", src);
+    let s = sym(&syms, "f");
+    assert_eq!(s.body_start, Some(4));
+    assert_eq!(s.body_end, Some(6));
+}
+
+/// Trailing-comment counterpart of the leading-comment pin above: a comment AFTER the last real
+/// statement (still inside the block) must not shift `body_end` onto the comment's own line.
+#[test]
+fn function_body_with_trailing_comment_still_gets_correct_body_end() {
+    let src = "package main\n\nfunc f() {\n\tx := 1\n\t_ = x\n\t// trailing comment\n}\n";
+    let syms = parse_symbols("a.go", src);
+    let s = sym(&syms, "f");
+    assert_eq!(s.body_start, Some(4));
+    assert_eq!(s.body_end, Some(5));
+}
+
+/// A body that is ENTIRELY a comment (no real statement at all) has no statement to anchor a body
+/// range to — this must fall back to `(None, None)`, the same as a truly empty `{}` body, rather than
+/// (incorrectly) reporting the comment's own line as both `body_start` and `body_end`.
+#[test]
+fn comment_only_body_has_no_body_range() {
+    let src = "package main\n\nfunc f() {\n\t// nothing but a comment\n}\n";
+    let syms = parse_symbols("a.go", src);
+    let s = sym(&syms, "f");
+    assert_eq!(s.body_start, None);
+    assert_eq!(s.body_end, None);
+}
+
 #[test]
 fn parse_symbols_empty_on_hopeless_input() {
     assert!(parse_symbols("a.go", "@@@ ### not go").is_empty());

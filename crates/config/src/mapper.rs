@@ -1,4 +1,4 @@
-//! The config→facade-request mapper — the port of `packages/cli/lib/mapper.js`'s `configToRequest`
+//! The config→facade-request mapper — the port of the removed JS CLI's `mapper.js` (2026-07-20), specifically its `configToRequest`
 //! (plus `collectConfigWarnings`), working on `serde_json::Value` exactly as the JS works on plain
 //! objects (no config structs: unknown keys must flow through to the warning walk, not fail serde).
 //!
@@ -249,7 +249,7 @@ pub fn config_to_request(
         }
     }
 
-    // `withDefaults` analog (packages/native/index.js): every tree request gets a `git: {}` default
+    // `withDefaults` analog (of the historical JS loader — the npm SDK removed 2026-07-23): every tree request gets a `git: {}` default
     // when the config named no `git` key at all, and the bundled DSL packs inline as `packDefs` — a
     // native host has no sidecar `rules/` directory to point a `packsDir` string at, so the packs
     // themselves ride inside the request instead.

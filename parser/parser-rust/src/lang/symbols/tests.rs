@@ -88,6 +88,20 @@ fn empty_function_body_has_no_start_end() {
     assert_eq!(f.body_end, None);
 }
 
+/// Same-defect-class audit pin (see `zzop_parser_go::lang::symbols`'s leading-comment `body_line_range`
+/// bug this mirrors the check for): `syn` discards `//` comments during tokenization — a `syn::Block`'s
+/// `stmts: Vec<Stmt>` never contains a comment as an item, unlike tree-sitter's `comment` "extra" node —
+/// so a function body opening with a comment line cannot shift `body_start` onto the comment. This
+/// proves that rather than assuming it.
+#[test]
+fn function_body_opening_with_comment_is_unaffected() {
+    let src = "fn f() {\n    // leading comment\n    let x = 1;\n    let y = 2;\n}\n";
+    let out = parse_symbols("a.rs", src);
+    let f = sym(&out, "f");
+    assert_eq!(f.body_start, Some(3));
+    assert_eq!(f.body_end, Some(4));
+}
+
 #[test]
 fn struct_has_no_body_range() {
     let out = parse_symbols("a.rs", "struct S {\n    a: i32,\n}\n");

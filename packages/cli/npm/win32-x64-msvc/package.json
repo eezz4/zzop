@@ -1,0 +1,21 @@
+{
+  "name": "@zzop/cli-win32-x64-msvc",
+  "version": "0.0.0",
+  "description": "zzop CLI native binary for win32/x64 (MSVC ABI).",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "zzop.exe"
+  ],
+  "license": "MIT",
+  "repository": "github:eezz4/zzop",
+  "homepage": "https://eezz4.github.io/zzop/",
+  "bugs": "https://github.com/eezz4/zzop/issues",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ]
+}

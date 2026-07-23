@@ -10,13 +10,13 @@
 
 use std::io::{BufRead, Write};
 
-/// The version this binary reports as MCP `serverInfo.version` — `CARGO_PKG_VERSION`, the workspace
-/// `[workspace.package] version` (the release SSOT since the 2026-07-22 version reform). CI verifies the
-/// pushed `v*` tag and `.claude-plugin/plugin.json` both match it, so the binary's reported version equals
-/// the release tag and the plugin's published version by construction.
-pub fn version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
-}
+/// The version this binary reports as MCP `serverInfo.version` — re-exported from the shared
+/// `zzop-host` crate (`CARGO_PKG_VERSION` there, the workspace `[workspace.package] version`, the
+/// release SSOT since the 2026-07-22 version reform) so this server and the `zzop` CLI's `version`
+/// subcommand can never disagree. CI verifies the pushed `v*` tag and `.claude-plugin/plugin.json`
+/// both match it, so a released build's reported version equals the release tag and the plugin's
+/// published version by construction.
+pub use zzop_host::server::version;
 
 /// MCP protocol versions this server actually supports, newest first. All three listed revisions
 /// are genuinely supported, not aspirational: this server's surface (`initialize`, `tools/list`/

@@ -1,21 +1,112 @@
-# Prebuild + release for the two Node-free binaries — `zzop` (CLI) and `zzop-mcp` (MCP server), both from
-# the `zzop-mcp` crate over one shared lib. On a `v*` tag push, builds both for 5 platforms and attaches
-# them PLUS per-platform MCPB (`.mcpb`) one-click Desktop bundles to the GitHub release. Version SSOT =
-# Cargo.toml `[workspace.package] version` (2026-07-22 reform): the tag, `plugin.json`, and the MCPB
-# manifest are all verified against it. No npm (removed 2026-07-20). See the mcp-distribution decision.
+# Prebuild + release for the two Node-free binaries (`zzop` CLI from package `zzop-cli-bin` +
+# `zzop-mcp` MCP server from package `zzop-mcp`, both thin binaries over the shared `zzop-host` lib
+# crate) and the 6-package npm distribution (5 `@zzop/cli-<platform>`
+# sub-packages + `@zzop/cli`, published via npm OIDC "trusted publishing" — no NPM_TOKEN secret).
+# `@zzop/cli` is a zero-logic shim that spawns the native `zzop` binary shipped in its own platform
+# sub-packages. Runs on `workflow_dispatch`, a `v*` tag push, and every push to `main`.
+#
+# The `meta` job (first, needs nothing) decides whether a run releases and what version it releases:
+# on a tag push it reads the tag and always releases; on a `main` push it reads the version SSOT —
+# Cargo.toml's `[workspace.package] version` — and, unless `v<version>` already exists on the remote,
+# creates and pushes that tag itself (autotagging). A `GITHUB_TOKEN` tag push does NOT retrigger
+# workflows, so this SAME run continues on as the release — there is no second, competing run. If the
+# tag already exists, the push is an ordinary build-only run (release=false). `workflow_dispatch` never
+# releases. Every gate that used to read `startsWith(github.ref, 'refs/tags/v')` (verify-plugin-version,
+# the MCPB per-platform version stamp, `release`, `publish`) now reads `needs.meta.outputs.release`, and
+# every version that used to come from `GITHUB_REF_NAME` now comes from `needs.meta.outputs.version`.
+# `meta` also checks `.claude-plugin/plugin.json`'s version against Cargo.toml BEFORE autotagging, so a
+# forgotten plugin-version bump blocks the tag itself on the main-push path (the standalone
+# verify-plugin-version job still re-checks it as a belt, covering the manual-tag path too).
+#
+# A release attaches the 5 platform `zzop`/`zzop-mcp` binaries PLUS per-platform MCPB (`.mcpb`) Desktop
+# bundles to the GitHub release (job `release`) and separately publishes the npm packages (job
+# `publish`) — two independent jobs that run alongside each other, not merged. See the mcp-distribution
+# and version-autotagging decisions.
 name: prebuild
 
 on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+    branches: ["main"]
+
+# Two near-simultaneous main pushes must not race the autotag (both would read "tag absent" and
+# push competing tags). Queue runs instead; never cancel a release mid-flight.
+concurrency:
+  group: prebuild-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  # Computes { release, version } for every downstream job/step to key off of, and — on an ordinary
+  # `main` push whose Cargo.toml version isn't tagged yet — creates that tag so this run becomes the
+  # release. Needs `contents: write` to push the tag.
+  #
+  # RECOVERY NOTE: after this job has pushed the tag, use "Re-run failed jobs" ONLY. "Re-run all
+  # jobs" re-executes this gate, which now sees the tag already existing and downgrades the whole
+  # run to build-only (release=false) — every release job silently skips. "Re-run failed jobs"
+  # reuses this job's cached release=true/version outputs and retries just the failed jobs.
+  meta:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release: ${{ steps.compute.outputs.release }}
+      version: ${{ steps.compute.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compute release gate + version (autotags main pushes)
+        id: compute
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            # Manual tag push: the tag itself is this run's version SSOT (current behavior).
+            VERSION="${GITHUB_REF_NAME#v}"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Tag push: releasing $VERSION (from $GITHUB_REF_NAME)."
+          elif [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            # main push: Cargo.toml [workspace.package] version is the SSOT. A forgotten
+            # .claude-plugin/plugin.json bump blocks the autotag here, before any tag is created —
+            # the standalone verify-plugin-version job re-checks this too (belt, covers manual tags).
+            VERSION=$(grep -m1 '^version = "' Cargo.toml | sed -E 's/^version = "(.*)"/\1/')
+            PLUGIN_VERSION=$(jq -r '.version' .claude-plugin/plugin.json)
+            if [ "$PLUGIN_VERSION" != "$VERSION" ]; then
+              echo "::error::.claude-plugin/plugin.json version ($PLUGIN_VERSION) does not match Cargo.toml [workspace.package] version ($VERSION) — bump .claude-plugin/plugin.json's \"version\" in the same commit that bumps the workspace version; a mismatch blocks the autotag."
+              exit 1
+            fi
+            if jq -e 'has("version")' .claude-plugin/marketplace.json >/dev/null; then
+              MARKETPLACE_VERSION=$(jq -r '.version' .claude-plugin/marketplace.json)
+              if [ "$MARKETPLACE_VERSION" != "$VERSION" ]; then
+                echo "::error::.claude-plugin/marketplace.json version ($MARKETPLACE_VERSION) does not match Cargo.toml [workspace.package] version ($VERSION) — a mismatch blocks the autotag."
+                exit 1
+              fi
+            fi
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            if [ -z "$(git ls-remote --tags origin "refs/tags/v$VERSION")" ]; then
+              git tag "v$VERSION"
+              git push origin "refs/tags/v$VERSION"
+              echo "release=true" >> "$GITHUB_OUTPUT"
+              echo "Auto-tagged v$VERSION from main; this run continues on as the release."
+            else
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              echo "v$VERSION is already tagged; ordinary build-only main push."
+            fi
+          else
+            # workflow_dispatch (or anything else): build-only, never releases. Cargo.toml's version
+            # is still surfaced for log/debug purposes even though nothing downstream gates on it.
+            VERSION=$(grep -m1 '^version = "' Cargo.toml | sed -E 's/^version = "(.*)"/\1/')
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "workflow_dispatch (or non-main/non-tag push): build-only, no release."
+          fi
+
   build:
     strategy:
       fail-fast: false
       matrix:
-        # `platform` names the zzop-mcp release asset (and the per-platform `.mcpb`) for each target.
+        # `platform` names the zzop-mcp release asset (and the per-platform `.mcpb`), and doubles as
+        # the npm/<platform> sub-package name (napi-rs/swc/Prisma convention, same mapping as
+        # packages/cli/scripts/place-artifacts.mjs) for each target.
         include:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
@@ -55,10 +146,11 @@ jobs:
           echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc' >> "$GITHUB_ENV"
       - name: Build the zzop + zzop-mcp binaries
         # The binaries report `CARGO_PKG_VERSION` (the workspace version) directly — no tag-stamping env
-        # (2026-07-22 version reform). `-p zzop-mcp` builds BOTH the crate's bins (`zzop` CLI + `zzop-mcp`
-        # server) in one invocation.
+        # (2026-07-22 version reform). `-p zzop-cli-bin -p zzop-mcp` builds both product bins (`zzop`
+        # CLI + `zzop-mcp` server, each its own Cargo package over the shared `zzop-host` lib) in one
+        # invocation.
         shell: bash
-        run: cargo build -p zzop-mcp --release --target ${{ matrix.target }}
+        run: cargo build -p zzop-cli-bin -p zzop-mcp --release --target ${{ matrix.target }}
       - name: Collect the zzop + zzop-mcp binaries
         shell: bash
         run: |
@@ -77,53 +169,60 @@ jobs:
           name: zzop-mcp-${{ matrix.target }}
           path: dist-mcp/*
 
-  # Only runs on a `v*` tag push. The Claude Code plugin marketplace reads
-  # `.claude-plugin/plugin.json`'s "version" straight from the repo at the tagged commit (no
+  # Only runs when `meta` says this run releases. The Claude Code plugin marketplace reads
+  # `.claude-plugin/plugin.json`'s "version" straight from the repo at the released commit (no
   # tag-stamping step), so a forgotten bump would silently ship a stale plugin version forever. This
-  # job fails the whole run before `release` does anything if the committed version and the tag
-  # disagree. `.claude-plugin/marketplace.json` carries no "version" field today (checked here so this
-  # job starts failing loudly the day one is added without being wired into this check).
+  # job fails the whole run before `release`/`publish` do anything if the committed version and the
+  # release version disagree. (On the main-push autotag path, `meta` already checked plugin.json
+  # before creating the tag — this is the belt, and it is what catches a manually-pushed tag whose
+  # plugin.json was never bumped.) `.claude-plugin/marketplace.json` carries no "version" field today
+  # (checked here so this job starts failing loudly the day one is added without being wired in).
   verify-plugin-version:
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: meta
+    if: needs.meta.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify Cargo.toml (version SSOT) matches the tag
-        # The workspace `[workspace.package] version` is the version SSOT (2026-07-22 reform): the tag, the
-        # plugin, and the MCPB manifest all derive from it. This fails the run before `release` if the tag
-        # was pushed without bumping Cargo.toml to the same version (or vice versa).
+      - name: Verify Cargo.toml (version SSOT) matches the release version
+        # The workspace `[workspace.package] version` is the version SSOT (2026-07-22 reform): the
+        # release version, the plugin, and the MCPB manifest all derive from it. This fails the run
+        # before `release`/`publish` if a manually-pushed tag disagrees with Cargo.toml.
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
           CARGO_VERSION=$(grep -m1 '^version = "' Cargo.toml | sed -E 's/^version = "(.*)"/\1/')
-          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error::Cargo.toml [workspace.package] version ($CARGO_VERSION) does not match tag $GITHUB_REF_NAME (expected $TAG_VERSION) — bump the workspace version in the release commit, or tag the version Cargo.toml already declares."
+          if [ "$CARGO_VERSION" != "$VERSION" ]; then
+            echo "::error::Cargo.toml [workspace.package] version ($CARGO_VERSION) does not match the release version $VERSION — bump the workspace version in the release commit, or tag the version Cargo.toml already declares."
             exit 1
           fi
-          echo "Cargo.toml version ($CARGO_VERSION) matches tag $GITHUB_REF_NAME."
-      - name: Verify .claude-plugin/plugin.json version matches the tag
+          echo "Cargo.toml version ($CARGO_VERSION) matches release version $VERSION."
+      - name: Verify .claude-plugin/plugin.json version matches the release version
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
           PLUGIN_VERSION=$(jq -r '.version' .claude-plugin/plugin.json)
-          if [ "$PLUGIN_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error::.claude-plugin/plugin.json version ($PLUGIN_VERSION) does not match tag $GITHUB_REF_NAME (expected $TAG_VERSION) — bump .claude-plugin/plugin.json's \"version\" in the same commit as the release tag."
+          if [ "$PLUGIN_VERSION" != "$VERSION" ]; then
+            echo "::error::.claude-plugin/plugin.json version ($PLUGIN_VERSION) does not match the release version $VERSION — bump .claude-plugin/plugin.json's \"version\" in the same commit as the release."
             exit 1
           fi
-          echo ".claude-plugin/plugin.json version ($PLUGIN_VERSION) matches tag $GITHUB_REF_NAME."
+          echo ".claude-plugin/plugin.json version ($PLUGIN_VERSION) matches release version $VERSION."
           if jq -e 'has("version")' .claude-plugin/marketplace.json >/dev/null; then
             MARKETPLACE_VERSION=$(jq -r '.version' .claude-plugin/marketplace.json)
-            if [ "$MARKETPLACE_VERSION" != "$TAG_VERSION" ]; then
-              echo "::error::.claude-plugin/marketplace.json version ($MARKETPLACE_VERSION) does not match tag $GITHUB_REF_NAME (expected $TAG_VERSION)."
+            if [ "$MARKETPLACE_VERSION" != "$VERSION" ]; then
+              echo "::error::.claude-plugin/marketplace.json version ($MARKETPLACE_VERSION) does not match the release version $VERSION."
               exit 1
             fi
-            echo ".claude-plugin/marketplace.json version ($MARKETPLACE_VERSION) matches tag $GITHUB_REF_NAME."
+            echo ".claude-plugin/marketplace.json version ($MARKETPLACE_VERSION) matches release version $VERSION."
           fi
 
-  # Only runs on a `v*` tag push (the build matrix above also runs for workflow_dispatch, without
-  # releasing). Attaches the 5 bare `zzop-mcp-<platform>[.exe]` binaries (PATH install / Claude Code
-  # plugin) AND 5 per-platform `zzop-<platform>.mcpb` one-click Desktop bundles to the GitHub release.
+  # Only runs when `meta` says this run releases (the build matrix above always runs, including for
+  # workflow_dispatch and ordinary main pushes, without releasing). Attaches the 5 bare
+  # `zzop-mcp-<platform>[.exe]` binaries (PATH install / Claude Code plugin) AND 5 per-platform
+  # `zzop-<platform>.mcpb` one-click Desktop bundles to the GitHub release. Runs alongside `publish`
+  # (npm), not merged into it.
   release:
-    needs: [build, verify-plugin-version]
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, verify-plugin-version, meta]
+    if: needs.meta.outputs.release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -132,7 +231,10 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          TAG="v$VERSION"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --verify-tag --generate-notes
       - name: Download zzop-mcp binaries
         uses: actions/download-artifact@v4
         with:
@@ -142,10 +244,12 @@ jobs:
       - name: Build per-platform MCPB bundles
         # One `.mcpb` per platform (all on ubuntu, where jq/zip/npx are available — avoids the
         # cross-platform zip problem): stage that platform's binary at bin/zzop-mcp[.exe], stamp the
-        # manifest version from the tag, validate against the MCPB schema, and zip. See packaging/README.md.
+        # manifest version from meta's release version, validate against the MCPB schema, and zip. See
+        # packages/mcpb/README.md.
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          jq --arg v "$VERSION" '.version=$v' packaging/mcpb/manifest.json > manifest.stamped.json
+          jq --arg v "$VERSION" '.version=$v' packages/mcpb/manifest.json > manifest.stamped.json
           npx -y @anthropic-ai/mcpb@latest validate manifest.stamped.json
           for f in mcp-artifacts/zzop-mcp-*; do
             base=$(basename "$f")                       # zzop-mcp-<platform>[.exe]
@@ -162,4 +266,151 @@ jobs:
       - name: Upload zzop-mcp binaries + MCPB bundles to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" mcp-artifacts/* ./*.mcpb --clobber
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          TAG="v$VERSION"
+          gh release upload "$TAG" mcp-artifacts/* ./*.mcpb --clobber
+
+  # Only runs when `meta` says this run releases. The release version is the single source of truth
+  # for the published version: this job overwrites every package.json's committed version with it, so
+  # there is no separate "bump packages/cli/package.json before tagging" step to forget.
+  #
+  # Publishes via npm OIDC "trusted publishing" — no NPM_TOKEN secret. Each of the 6 package names
+  # (@zzop/cli + its 5 platform sub-packages) must have a trusted publisher configured on npmjs.com
+  # pointing at this repo and this workflow file (packages/cli/README.md "Publishing"). Runs alongside
+  # `release` (GitHub release + MCPB), not merged into it.
+  publish:
+    needs: [build, verify-plugin-version, meta]
+    if: needs.meta.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Update npm (OIDC trusted publishing needs a recent npm CLI)
+        # Pinned to the 11.x line: npm@12.0.0 (published 2026-07-08) ships a broken
+        # `--provenance` path — `Cannot find module 'sigstore'` inside its own bundled
+        # libnpmpublish — which failed the v0.7.0 publish twice (run 29057344845, retry
+        # included). `@latest` floated onto that major the day after v0.6.0 shipped.
+        # Re-evaluate the pin once a fixed 12.x is out.
+        run: npm install -g npm@11
+      - name: Download zzop CLI binaries
+        # Over the binary artifacts the `build` job's "Collect the zzop + zzop-mcp binaries" step
+        # uploads (`zzop-mcp-<target>`, containing both `zzop-<platform>[.exe]` and
+        # `zzop-mcp-<platform>[.exe]`) — `place-artifacts.mjs` below picks out only the
+        # `zzop-<platform>[.exe]` binaries it needs.
+        uses: actions/download-artifact@v4
+        with:
+          pattern: zzop-mcp-*
+          path: cli-artifacts
+          merge-multiple: true
+      - name: Set version from meta (overwrites committed version everywhere)
+        # CLI package (`@zzop/cli`): bump its own version; its sync script stamps the 5 platform
+        # sub-packages' versions and the root package's optionalDependencies pins to match — there is
+        # no @zzop/native dependency to pin anymore (the shim spawns the native binary directly).
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: (cd packages/cli && npm version --no-git-tag-version "$VERSION" && node scripts/sync-versions.mjs)
+      - name: Place prebuilt binaries into cli platform packages
+        run: node packages/cli/scripts/place-artifacts.mjs cli-artifacts
+      - name: Publish all 6 packages (resumable)
+        # Resumable by design: a version already on the registry is skipped (so "Re-run failed
+        # jobs" after a partial publish heals the stragglers instead of dying on the first
+        # already-published name), and one name's failure doesn't abort the rest — every package
+        # gets its attempt, then the step fails if any attempt failed. First-publish caveat: a
+        # brand-new name has no npmjs.com trusted publisher yet, so its OIDC publish fails until
+        # the one-time manual claim (packages/cli/README.md "Publishing") — this loop shape means
+        # such failures surface per-name instead of masking the healthy ones.
+        run: |
+          failed=""
+          for dir in packages/cli/npm/*/ packages/cli/; do
+            name=$(node -p "require('./$dir/package.json').name")
+            version=$(node -p "require('./$dir/package.json').version")
+            if [ "$(npm view "$name@$version" version 2>/dev/null || true)" = "$version" ]; then
+              echo "SKIP $name@$version — already on the registry."
+              continue
+            fi
+            if (cd "$dir" && npm publish --provenance); then
+              echo "OK   $name@$version"
+            else
+              echo "::error::npm publish failed for $name@$version"
+              failed="$failed $name"
+            fi
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::publish incomplete — failed:$failed"
+            exit 1
+          fi
+
+  # Only runs when `meta` says this run releases. Lists zzop-mcp on the OFFICIAL MCP registry
+  # (registry.modelcontextprotocol.io) so MCP clients/subregistries can discover it there, alongside
+  # the existing GitHub Releases / npm / Claude Code plugin distribution channels — none of which this
+  # job touches. `needs: [release, meta]` (not just `meta`): the listing is the 5 per-platform `.mcpb`
+  # bundles `release` already built and uploaded, and this job downloads those exact release assets to
+  # hash them, so the GitHub release must exist first.
+  #
+  # Schema reality check (server.schema.json, 2025-12-11): `registryType` is one of
+  # npm/pypi/oci/nuget/mcpb only — there is no generic "direct binary download" type. The bare
+  # `zzop-mcp-<platform>[.exe]` binaries (PATH install / Claude Code plugin) have no representable
+  # package entry under this schema, so `server.json` lists only the 5 `.mcpb` bundles as `mcpb`
+  # packages; `repository`/`websiteUrl` in `server.json` remain the discovery pointer for the other
+  # install paths. Nothing is fabricated to fill the gap (e.g. no fake npm package for a server that
+  # isn't on npm).
+  #
+  # Auth is GitHub OIDC "trusted publishing" for the `io.github.eezz4` namespace — no stored secret,
+  # same shape as npm's OIDC publish in `publish` above. The committed `server.json` is NOT
+  # authoritative for a release: this job overwrites every `version`/`identifier`/`fileSha256`
+  # from `needs.meta.outputs.version` plus the freshly-hashed release assets before publishing
+  # (only `fileSha256` is a literal all-zeros placeholder in the committed file; the committed
+  # version strings are whatever release last touched them and may read stale mid-cycle), so
+  # (like `publish`'s "Set version from meta" step) there is no separate "bump server.json before
+  # tagging" step to forget. Runs alongside `release`/`publish`, not merged into either — this job
+  # failing does not affect them.
+  publish-mcp-registry:
+    needs: [release, meta]
+    if: needs.meta.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+      - name: Download the release's .mcpb bundles (to hash for server.json)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          mkdir -p mcpb-assets
+          gh release download "v$VERSION" --pattern '*.mcpb' --dir mcpb-assets
+      - name: Stamp version, identifier, and fileSha256 into server.json
+        # Rewrites the top-level version and, per platform package entry (same 5-platform list/order
+        # as the `build` matrix's `platform` values), the release-tag-specific download URL and that
+        # exact asset's SHA-256 — the registry does not itself validate this hash, but MCP clients do
+        # before install, so a stale/placeholder hash here would silently fail every client install.
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          jq --arg v "$VERSION" '.version = $v' server.json > server.tmp && mv server.tmp server.json
+          platforms=(win32-x64-msvc darwin-x64 darwin-arm64 linux-x64-gnu linux-arm64-gnu)
+          for i in "${!platforms[@]}"; do
+            plat="${platforms[$i]}"
+            sha=$(sha256sum "mcpb-assets/zzop-$plat.mcpb" | cut -d' ' -f1)
+            url="https://github.com/eezz4/zzop/releases/download/v$VERSION/zzop-$plat.mcpb"
+            jq --argjson i "$i" --arg v "$VERSION" --arg sha "$sha" --arg url "$url" \
+              '.packages[$i].version = $v | .packages[$i].fileSha256 = $sha | .packages[$i].identifier = $url' \
+              server.json > server.tmp && mv server.tmp server.json
+          done
+          cat server.json
+      - name: Authenticate to the MCP Registry (GitHub OIDC, io.github.eezz4 namespace)
+        run: ./mcp-publisher login github-oidc
+      - name: Publish server.json to the MCP Registry
+        run: ./mcp-publisher publish

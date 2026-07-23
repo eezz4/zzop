@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # version-lists-parsers guard — fails when a parser crate under parser/*/ is not reported by
-# crates/facade/src/version.rs::version_string() (the string the napi host re-exports as version()
-# and zzop-mcp mirrors). That function hand-lists every parser's PARSER_FINGERPRINT in a format!,
+# crates/facade/src/version.rs::version_string() (the string reported by `zzop version` and by the
+# MCP server's serverInfo). That function hand-lists every parser's PARSER_FINGERPRINT in a format!,
 # so adding a parser crate and wiring it into dispatch/parser_fingerprint (both COMPILER-enforced,
 # so those can't be silently forgotten) still leaves version_string() — the one host-facing parser
 # inventory with no compiler backstop — able to under-report the build's parser set.
@@ -51,7 +51,7 @@ if [ "$missing" -ne 0 ]; then
   echo
   echo "check-version-lists-parsers: every parser/*/ crate must appear in"
   echo "crates/facade/src/version.rs::version_string() as a 'zzop-parser-<x>={}' fingerprint token,"
-  echo "so every host (napi version(), zzop-mcp version) reports the complete parser build set."
+  echo "so every host (zzop version, MCP serverInfo) reports the complete parser build set."
   echo "Add the crate's PARSER_FINGERPRINT to that format! (and its arg list) -- see commit 46b53a3"
   echo "for the parser-sql precedent this guard exists to prevent recurring."
   exit 1

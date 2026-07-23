@@ -6,7 +6,7 @@
 # SSOT = the parenthesized list after "cross-layer io key (" in packages/mcp/src/tools/
 # definitions.rs's check_endpoint tool description. Token-level only (same idiom as
 # check-site-sdk-tokens.sh): every comma-separated vocabulary token must appear verbatim in BOTH
-# packages/cli/README.md's `zzop endpoint` table row and packages/mcp/README.md's `check_endpoint`
+# packages/cli/README.md's `zzop endpoint` table row and crates/host/README.md's `check_endpoint`
 # table row. Prose quality is NOT checked — only that the tokens agree with the SSOT.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -36,7 +36,7 @@ check_row() { # $1 = file, $2 = table-row anchor (PCRE)
   done
 }
 
-check_row packages/mcp/README.md '^\|\s*`check_endpoint`'
+check_row crates/host/README.md '^\|\s*`check_endpoint`'
 
 if [ "$fail" -ne 0 ]; then
   echo "check-io-key-vocab: FAILED — sync the README rows with the SSOT vocabulary ($vocab)." >&2

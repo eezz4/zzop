@@ -12,7 +12,7 @@
 #
 # crates/facade/src stays out of scope (2026-07-16): its QUERY_*_LIMIT consts are result-truncation
 # caps on already-computed output. crates/summary/src JOINED the scan (2026-07-17, facade-thinning
-# batch): the shared summary layer's DEFAULT_*_LIMIT / MAX_LIMIT caps moved there from packages/mcp
+# batch): the shared summary layer's DEFAULT_*_LIMIT / MAX_LIMIT caps moved there from crates/host
 # (previously excluded as per-host presentation) — now that every host shares them, a silent cap
 # change alters what EVERY agent-facing surface shows, so they get the same triage moment as policy
 # vocab (inventoried as presentation-cap tier, not rule policy).

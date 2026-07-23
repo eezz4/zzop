@@ -8,7 +8,7 @@ Every mainstream generator names its exported function (or class method) after t
 an `IoConsume` in a NormalizedEnvelope fed to the engine via `adapterOverlays`. See
 [examples/README.md](../README.md) for the Mode A/B overview,
 [docs/adapters/README.md](../../docs/adapters/README.md) for key-normalization parity, and
-[docs/modules/napi.md](../../docs/modules/napi.md) for the host API that accepts the overlay.
+[docs/modules/mcp.md](../../docs/modules/mcp.md#the-zzop-facade-json-contract) for the host API that accepts the overlay.
 
 ## Run
 

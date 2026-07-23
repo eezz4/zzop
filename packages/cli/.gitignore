@@ -1,0 +1,6 @@
+node_modules/
+
+# Prebuilt native binaries, placed per-platform by scripts/place-artifacts.mjs from CI release
+# artifacts (see bin/zzop.js's resolution cascade). Not committed — placed at package/publish time.
+npm/*/zzop
+npm/*/zzop.exe

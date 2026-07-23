@@ -87,7 +87,7 @@ pub struct GitStats {
 /// only `risk_score`/`hotspot_score` are zeroed for them, so they never misleadingly dominate a
 /// risk-sorted list or a folder's `totalRisk` rollup (`zzop_metrics::aggregate_by_folder`) — a large
 /// generated JSON dump is honest churn/size data but is not "risk" (misleading diagnostics are treated
-/// as product defects; see docs/modules/napi.md's `nodes` field note).
+/// as product defects; see docs/modules/mcp.md's `nodes` field note).
 pub fn build_file_nodes<F>(
     dep: &DepStats,
     git: &GitStats,

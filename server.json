@@ -1,0 +1,49 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.eezz4/zzop",
+  "title": "zzop",
+  "description": "Deterministic cross-repo contract analysis for AI agents: frontend calls vs backend endpoints.",
+  "version": "0.21.1",
+  "websiteUrl": "https://eezz4.github.io/zzop/",
+  "repository": {
+    "url": "https://github.com/eezz4/zzop",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.21.1/zzop-win32-x64-msvc.mcpb",
+      "version": "0.21.1",
+      "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "transport": { "type": "stdio" }
+    },
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.21.1/zzop-darwin-x64.mcpb",
+      "version": "0.21.1",
+      "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "transport": { "type": "stdio" }
+    },
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.21.1/zzop-darwin-arm64.mcpb",
+      "version": "0.21.1",
+      "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "transport": { "type": "stdio" }
+    },
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.21.1/zzop-linux-x64-gnu.mcpb",
+      "version": "0.21.1",
+      "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "transport": { "type": "stdio" }
+    },
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.21.1/zzop-linux-arm64-gnu.mcpb",
+      "version": "0.21.1",
+      "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "transport": { "type": "stdio" }
+    }
+  ]
+}

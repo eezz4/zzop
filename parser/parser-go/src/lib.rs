@@ -65,7 +65,7 @@ pub use lang::used_names::parse_local_identifier_refs;
 /// `tree-sitter-go` segment must match this crate's `Cargo.toml` pin (a grammar upgrade changes
 /// extraction → restamp); the trailing `CARGO_PKG_VERSION` is restamped when this crate's projected IR
 /// shape changes, else kept so warm Go caches survive the upgrade (2026-07-22 version reform).
-pub const PARSER_FINGERPRINT: &str = "go/tree-sitter-go-0.25.0/0.21.0";
+pub const PARSER_FINGERPRINT: &str = "go/tree-sitter-go-0.25.0/0.21.1";
 
 /// Every top-level declaration kind `lang::symbols`/`lang::imports` recognize, PLUS `package_clause`
 /// (never itself extracted, but still a sign the file has SOME real Go in it) — `parse_tree`'s

@@ -7,15 +7,13 @@
 //! never depend on this crate's request types (that edge would be a cycle) — if typed request sharing
 //! is ever wanted, the structs move DOWN (core or a small wire crate), never config -> facade.
 //!
-//! The consumer today is `zzop-mcp`, a Node-free binary that calls these functions directly — no napi,
-//! no Node process. (Until 2026-07-20 a second consumer, the removed `@zzop/native` napi addon
-//! `zzop-napi`, re-exported every function behind a thin `#[napi]` shim. This crate was split off as
-//! its own `rlib`-only crate because cargo builds a dependency's `cdylib` target even on an `rlib`
-//! edge: the addon's `cdylib` half failed to link under the local `gnu` toolchain once its `#[napi]`
-//! surface was compiled in, which would have poisoned any crate — like `zzop-mcp` — that depended on
-//! it only for the plain-Rust logic. The addon is gone, but keeping the facade a standalone napi-free
-//! `rlib` still gives every consumer a normal `#[test]` surface under the default toolchain with no
-//! feature flags.)
+//! The crate's sole direct consumer today is `zzop-summary`, which the `zzop-host` crate's two
+//! Node-free bins (`zzop`, `zzop-mcp`) call in turn — no napi, no Node process, and `zzop-host` never
+//! depends on this crate directly. (This crate was split off as its own `rlib`-only crate because a
+//! since-removed napi addon crate's `cdylib` half failed to link under the local `gnu` toolchain once
+//! its `#[napi]` surface was compiled in, which would have poisoned any rlib-only dependent. The addon
+//! is gone, but keeping the facade a standalone napi-free `rlib` still gives every consumer a normal
+//! `#[test]` surface under the default toolchain with no feature flags.)
 //!
 //! Module layout (every public item is re-exported here, so consumers only ever see `zzop_facade::X`):
 //! - `request` — wire-contract request types (`AnalyzeRequest` and friends) + serde defaults.

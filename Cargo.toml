@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-  # Internal engine crates (not published directly; consumed by the packages/ artifacts below)
+  # Internal engine crates (not published directly; consumed by crates/host below)
   "crates/core",
   "crates/metrics",
   "crates/engine",
@@ -11,10 +11,18 @@ members = [
   "crates/config",
   "crates/summary",
 
-  # Published artifact — the single Node-free `zzop-mcp` binary (Claude Code plugin + Desktop MCPB).
-  # The npm distribution (JS CLI `@zzop/cli` + napi `@zzop/native`) was removed 2026-07-20 — see the
-  # mcp-distribution decision: Node-free native binary is the single runtime form.
-  "packages/mcp",
+  # Host crate — lib-only shared dispatch (`tools`) + embedded contract docs (`embedded`) + the shared
+  # `version()` (`server`), consumed by BOTH product crates below. Carries no [[bin]] of its own.
+  "crates/host",
+
+  # Product layer: packages/ holds everything that SHIPS, one dir per product. `packages/cli` is a
+  # zero-logic npm shim (pure JS, spawns the native `zzop` binary — not a Cargo member); the two below
+  # are the native binaries themselves, each its own Cargo package building exactly one [[bin]] over
+  # crates/host + crates/summary. `packages/mcpb` (Desktop manifest) and `packages/cli/npm/*` (platform
+  # sub-packages) are npm/manifest-only, likewise not Cargo members. The napi addon (`@zzop/native`,
+  # formerly `packages/native`) was removed 2026-07-23 — nothing in the distribution used it.
+  "packages/cli-bin", # -> zzop[.exe]     (CLI argv dispatch + CLI helpers)
+  "packages/mcp",     # -> zzop-mcp[.exe] (stdio loop + server/resources + MCP tool schemas)
 
   # Parser frontends (former lang/ + dsl/, merged) — source -> Normalized AST / Common IR
   "parser/parser-typescript",
@@ -46,7 +54,7 @@ members = [
 # the pushed `v*` tag, `.claude-plugin/plugin.json`, and the MCPB manifest all match this. `version_string()`
 # / the binaries report `CARGO_PKG_VERSION` directly (no `ZZOP_RELEASE_VERSION` env). Cache-bust tokens are
 # stamped with this version at their scope's last change — see the cache decision.
-version = "0.21.0"
+version = "0.21.1"
 edition = "2021"
 license = "MIT"
 

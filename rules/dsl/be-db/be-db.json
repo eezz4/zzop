@@ -394,6 +394,25 @@
         ],
         "snippet_max": 160
       }
+    },
+    {
+      "id": "tx-in-loop-long-hold",
+      "severity": "warning",
+      "message": "A call on the transaction-scoped client (`tx.<model>.<method>(...)`, or a bare `prisma`/`db`/`client`/`repo`-receiver call) executes structurally inside a loop body — verified against the parser's projected loop spans (the call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — while the enclosing function also opens a `$transaction(...)` block. This is a co-occurrence heuristic for the tx-wrapping, same discipline as `external-call-in-tx`: it confirms `$transaction(` appears somewhere in the same function, not that this specific loop sits inside that transaction's own callback body — but when it does, the transaction stays open, and its underlying database locks held, for the entire loop's duration, so lock hold time scales with the number of rows processed inside it: every other transaction contending for the same rows/table queues up for as long as the loop takes to run, and one slow iteration (a large row, a stalled dependency) prolongs the hold for every row already processed. This is the mirror image of `write-in-loop-no-tx` (which fires on the SAME loop-containment shape only when NO enclosing transaction exists) — the two are mutually exclusive on a given line by construction, so they never co-fire. Move per-row reads out of the transaction where the data doesn't need to be read inside it, or replace the per-row calls with a single batch `updateMany`/`createMany`/`findMany` call inside the transaction so the lock is held for one round trip instead of N. Suppress a vetted case (e.g. a bounded, small row count) with `// tx-loop-hold-ok`.",
+      "suppress_marker": "tx-loop-hold-ok",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\$transaction\\s*\\(", "label": "tx" },
+          { "pattern": "\\b(?:tx|prisma|db|client|repo(?:sitory|sitories)?s?)\\.(?:\\w+\\.)?\\w+\\s*\\(", "label": "tx-call" }
+        ],
+        "trigger": "tx-call",
+        "trigger_in_loop": true,
+        "snippet_max": 160
+      }
     }
   ]
 }

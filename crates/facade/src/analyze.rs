@@ -16,12 +16,14 @@ use crate::request::{AnalyzeRequest, AnalyzeTreesRequest};
 /// basename (lossy `to_str` fallback: the given root string, e.g. a bare drive root). An explicit
 /// non-empty `sourceId` is never overridden.
 ///
-/// Hoisted HERE — the shared chokepoint every host funnels through (Node addon, `zzop-mcp`, engine
-/// examples via this facade) — so one naming rule holds everywhere (D14, 2026-07-17): before this, a
+/// Hoisted HERE — the shared chokepoint every caller funnels through (`zzop-summary`, which the
+/// `zzop-host` crate's bins call in turn, and engine examples via this facade directly) — so one
+/// naming rule holds everywhere (D14, 2026-07-17): before this, a
 /// config-discovered single tree with no explicit `sourceId` reached the engine as `""`, so the
 /// overlay source-mismatch warning said the envelope "declares a different source than the tree
 /// \"\"" while `check_endpoint`'s matched objects showed the directory name for the SAME tree
-/// (`zzop-mcp` defaulted the name on its endpoint path only). With the default at this chokepoint,
+/// (historically, the `zzop-mcp` binary — predating the host crate's 2026-07-23 rename to
+/// `zzop-host` — defaulted the name on its endpoint path only). With the default at this chokepoint,
 /// the mismatch warning and query output always agree, and an adapter author can read the right
 /// `source` value off either. Applied AFTER `zzop-config`'s JS-parity mapping, which stays
 /// shape-only (the mapper never invents a single-root `sourceId` — parity fixtures unaffected).

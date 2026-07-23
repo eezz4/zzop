@@ -33,6 +33,21 @@ fn body_spans_match_the_old_lexical_crate_on_the_shared_dvja_pingaction_fixture(
     assert!(symbols.iter().all(|s| s.name != "run"));
 }
 
+/// Same-defect-class audit pin (see `zzop_parser_go::lang::symbols`'s leading-comment `body_line_range`
+/// bug this mirrors the check for): unlike Go's walk, this crate's `body_start`/`body_end` come from the
+/// `body` FIELD NODE's own `line_of`/`end_line_of` (the declaration's own line, and the `{...}` node's
+/// own closing line) — never from that body's first/last named child. A `comment` extra spliced in as a
+/// leading child inside the body therefore can't shift either boundary. This proves that rather than
+/// assuming it.
+#[test]
+fn method_body_opening_with_comment_is_unaffected() {
+    let src = "public class C {\n  void run() {\n    // leading comment\n    int x = 1;\n  }\n}\n";
+    let symbols = parse_symbols("C.java", src);
+    let run = find(&symbols, "C.run");
+    assert_eq!(run.body_start, Some(2));
+    assert_eq!(run.body_end, Some(5));
+}
+
 // --- all type kinds ---
 
 #[test]

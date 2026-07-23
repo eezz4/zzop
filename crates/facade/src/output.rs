@@ -61,7 +61,7 @@ impl<'a> SingleTreeOutputView<'a> {
 ///
 /// `Finding.data` is the one exception, by design: it is opaque `serde_json::Value` authored ad hoc per
 /// rule, never a `#[derive(Serialize)]` struct with a uniform convention to enforce — see
-/// `docs/modules/napi.md`'s "Output data shapes" section for the per-rule shapes.
+/// `docs/modules/mcp.md`'s "Output data shapes" section for the per-rule shapes.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AnalyzeOutputView<'a> {

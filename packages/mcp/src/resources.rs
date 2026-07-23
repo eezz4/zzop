@@ -1,13 +1,13 @@
-//! MCP `resources/*` handlers over the embedded authoring contracts (`crate::embedded`). This is the
-//! contract-exposure half of the "author an adapter with only the binary" promise — `resources/list`
-//! advertises every contract, `resources/read` returns its full text. Deterministic: same binary,
-//! same list, same bytes.
+//! MCP `resources/*` handlers over the embedded authoring contracts (`zzop_host::embedded`, shared
+//! with the `zzop contract [<name>]` CLI subcommand). This is the contract-exposure half of the
+//! "author an adapter with only the binary" promise — `resources/list` advertises every contract,
+//! `resources/read` returns its full text. Deterministic: same binary, same list, same bytes.
 
 const URI_PREFIX: &str = "zzop://contract/";
 
 /// `resources/list` result — every embedded contract document, in embed order.
 pub fn list() -> serde_json::Value {
-    let resources: Vec<serde_json::Value> = crate::embedded::CONTRACT_DOCS
+    let resources: Vec<serde_json::Value> = zzop_host::embedded::CONTRACT_DOCS
         .iter()
         .map(|doc| {
             serde_json::json!({
@@ -31,7 +31,7 @@ pub fn read(params: Option<&serde_json::Value>) -> Result<serde_json::Value, Str
     let name = uri.strip_prefix(URI_PREFIX).unwrap_or("");
     // `embedded::find` is the shared name-lookup the `zzop contract <name>` CLI path also uses —
     // one table, one resolver, so the MCP and terminal surfaces cannot drift.
-    match crate::embedded::find(name) {
+    match zzop_host::embedded::find(name) {
         Some(doc) => Ok(serde_json::json!({
             "contents": [{
                 "uri": uri,
@@ -40,7 +40,7 @@ pub fn read(params: Option<&serde_json::Value>) -> Result<serde_json::Value, Str
             }]
         })),
         None => {
-            let known: Vec<String> = crate::embedded::names()
+            let known: Vec<String> = zzop_host::embedded::names()
                 .map(|n| format!("{URI_PREFIX}{n}"))
                 .collect();
             Err(format!(
@@ -57,8 +57,8 @@ mod tests {
     fn every_contract_doc_lists_and_reads_back_its_embedded_bytes() {
         let listed = super::list();
         let resources = listed["resources"].as_array().expect("resources array");
-        assert_eq!(resources.len(), crate::embedded::CONTRACT_DOCS.len());
-        for doc in crate::embedded::CONTRACT_DOCS {
+        assert_eq!(resources.len(), zzop_host::embedded::CONTRACT_DOCS.len());
+        for doc in zzop_host::embedded::CONTRACT_DOCS {
             let uri = format!("zzop://contract/{}", doc.name);
             let params = serde_json::json!({ "uri": uri });
             let read = super::read(Some(&params)).expect("known uri reads");
@@ -71,14 +71,14 @@ mod tests {
     fn unknown_uri_error_names_every_valid_resource() {
         let params = serde_json::json!({ "uri": "zzop://contract/nope" });
         let err = super::read(Some(&params)).unwrap_err();
-        for doc in crate::embedded::CONTRACT_DOCS {
+        for doc in zzop_host::embedded::CONTRACT_DOCS {
             assert!(err.contains(doc.name), "error should list {}", doc.name);
         }
     }
 
     #[test]
     fn embedded_json_contracts_parse_as_json() {
-        for doc in crate::embedded::CONTRACT_DOCS {
+        for doc in zzop_host::embedded::CONTRACT_DOCS {
             if doc.mime == "application/json" {
                 serde_json::from_str::<serde_json::Value>(doc.content)
                     .unwrap_or_else(|e| panic!("embedded {} is not valid JSON: {e}", doc.name));
@@ -91,7 +91,7 @@ mod tests {
     /// machine-readable twin of the `validate_rule_pack` tool.
     #[test]
     fn rule_pack_schema_resource_is_the_dsl_pack_shape_contract() {
-        let doc = crate::embedded::CONTRACT_DOCS
+        let doc = zzop_host::embedded::CONTRACT_DOCS
             .iter()
             .find(|d| d.name == "rule-pack-schema")
             .expect("rule-pack-schema resource is embedded");
@@ -110,8 +110,8 @@ mod tests {
     /// as JSON whose self-describing sections (promised by the resource description) really exist.
     #[test]
     fn config_surface_resource_is_the_self_describing_config_vocabulary() {
-        assert_eq!(crate::embedded::CONTRACT_DOCS.len(), 10);
-        let doc = crate::embedded::CONTRACT_DOCS
+        assert_eq!(zzop_host::embedded::CONTRACT_DOCS.len(), 10);
+        let doc = zzop_host::embedded::CONTRACT_DOCS
             .iter()
             .find(|d| d.name == "config-surface")
             .expect("config-surface resource is embedded");
@@ -132,7 +132,7 @@ mod tests {
     /// dsl-reference resource points at this very file, which was NOT served over MCP before this).
     #[test]
     fn rule_catalog_resource_is_the_full_rule_id_catalog_markdown() {
-        let doc = crate::embedded::CONTRACT_DOCS
+        let doc = zzop_host::embedded::CONTRACT_DOCS
             .iter()
             .find(|d| d.name == "rule-catalog")
             .expect("rule-catalog resource is embedded");

@@ -34,12 +34,12 @@ crates/engine/src/generated_banner.rs:MARKERS
 crates/engine/src/lib.rs:DEFAULT_SIZE_CAP
 crates/engine/src/pipeline/rust_workspace.rs:TARGET_SECTIONS
 crates/engine/src/trees/parallel_impl.rs:MIN_PARALLEL_IMPL_SIGNALS
+crates/summary/src/analyze/tests.rs:RAW_FACADE_ONLY_FIELDS
 crates/summary/src/output/bucket_keys.rs:DEFAULT_BUCKET_KEYS_LIMIT
 crates/summary/src/output/bucket_keys.rs:KEY_BUCKETS
 crates/summary/src/output/mod.rs:DEFAULT_DEGRADED_LIMIT
 crates/summary/src/output/mod.rs:DEFAULT_EDGES_LIMIT
 crates/summary/src/output/mod.rs:DEFAULT_FINDINGS_LIMIT
-crates/summary/src/output/mod.rs:FULL_ONLY_OUTPUT_FIELDS
 crates/summary/src/output/mod.rs:MAX_LIMIT
 crates/summary/src/siblings.rs:MAX_NAMED_SIBLINGS
 crates/summary/src/suggest.rs:BUCKETS

@@ -87,3 +87,5 @@ fn snippet(f: &Finding) -> String {
 }
 
 mod api_in_loop;
+mod eager_relation_declared;
+mod jpa_eager_fetch;

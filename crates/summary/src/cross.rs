@@ -1,7 +1,7 @@
 //! `cross_repo`'s cross-layer join summary assembly (`cross_summary`) — see the crate doc: hosts
 //! are thin protocol facades, all shaping logic lives here.
 
-use crate::output::{self, FindingFilters, Verbosity};
+use crate::output::{self, FindingFilters};
 
 /// Cross-repo analysis — zzop's headline. Config-first mode (`config_path`) runs the config's `trees`;
 /// paths mode builds zero-config trees tagged by directory name (bundled packs + git defaults still
@@ -11,6 +11,16 @@ pub fn cross_summary(
     config_path: Option<&str>,
     filters: &FindingFilters,
 ) -> Result<String, String> {
+    // Source-mode exclusivity is enforced HERE, not (only) in the hosts — the same centralization
+    // `endpoint_summary` gets from `resolve_trees_request`. Without this, a future host passing
+    // both would get a silently-narrowed join (config wins, paths ignored) — exactly the
+    // per-host-drift class this crate exists to close.
+    if config_path.is_some() && !paths.is_empty() {
+        return Err(
+            "cross_repo takes either `paths` or `configPath`, not both — pass exactly one source"
+                .to_string(),
+        );
+    }
     let loaded = match config_path {
         Some(cp) => {
             // Absolutized like every path argument (see `crate::paths`), so a relative `--config` works
@@ -76,14 +86,6 @@ pub fn cross_summary(
             // index).
             if let Some(rule_overrides_applied) = t["output"].get("ruleOverridesApplied") {
                 source["ruleOverridesApplied"] = rule_overrides_applied.clone();
-            }
-            // MCP<->CLI parity (STAGED): the `Full` lane keeps each tree's raw output fields the
-            // per-source summary drops (`ir`/`nodes`/`scores`/...). Dead today — every caller passes
-            // `Verbosity::Summary` (see `output::Verbosity`), so per-source replies stay byte-identical.
-            if filters.verbosity == Verbosity::Full {
-                if let Some(map) = source.as_object_mut() {
-                    output::insert_full_output_fields(map, &t["output"]);
-                }
             }
             source
         })

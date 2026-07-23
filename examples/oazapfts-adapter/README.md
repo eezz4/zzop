@@ -8,7 +8,7 @@ Provenance: this call family was recognized natively by the TypeScript egress ex
 under zzop's "generated SDKs = injection adapters" decision. See
 [examples/README.md](../README.md) for the Mode A/B overview,
 [docs/adapters/README.md](../../docs/adapters/README.md) for key-normalization parity, and
-[docs/modules/napi.md](../../docs/modules/napi.md) for the host API that accepts the overlay.
+[docs/modules/mcp.md](../../docs/modules/mcp.md#the-zzop-facade-json-contract) for the host API that accepts the overlay.
 
 ## Run
 

@@ -1,9 +1,9 @@
 {
-  "_doc": "SURFACE PARITY REGISTRY. This contract exists because zzop shipped the same bug class more than once: the facade computed a field (configWarnings; git-derived health/recommendations/critical; the run-level, join-scoped MultiAnalyzeOutput::warnings channel, e.g. the parallel-implementation tripwire) but the delivery surface silently dropped it. Every top-level field of AnalyzeOutputView and MultiAnalyzeOutputView (crates/facade/src/output.rs) must get exactly one row below, naming what the delivery surface — the MCP analyze_repo/cross_repo reply, which is the SAME shaped summary the `zzop analyze`/`cross` CLI subcommands print — does with it: 'carry' (forwarded unconditionally), 'carry-conditional' (forwarded only in some shaped/capped/gated form, or only when a precondition holds), or 'omit' (never surfaced by the reply). Every 'omit'/'carry-conditional' row MUST carry a non-empty 'note' explaining why and where the data IS available — which, for anything the shaped reply drops, is the raw zzop-facade output you get by embedding the engine directly (no shipped CLI/MCP surface emits the full CommonIr). HISTORICAL NOTE: until the npm distribution was removed 2026-07-20 this registry also tracked two JS-CLI render surfaces (a pretty terminal render backed by lib/format.js and a markdown report backed by lib/report.js); both were removed with the JS CLI, so only the reply lane remains, and the two extra columns were dropped. WORKFLOW FOR FUTURE BATCH AGENTS: adding a field to AnalyzeOutputView or MultiAnalyzeOutputView? Add this registry's row for it IN THE SAME COMMIT — crates/engine/tests/rule_contracts/surface_parity.rs's completeness test fails the build otherwise, by design. This file documents TODAY's truth, not an aspiration: a row reflects what the code actually does, not what it should eventually do.",
+  "_doc": "SURFACE PARITY REGISTRY. This contract exists because zzop shipped the same bug class more than once: the facade computed a field (configWarnings; git-derived health/recommendations/critical; the run-level, join-scoped MultiAnalyzeOutput::warnings channel, e.g. the parallel-implementation tripwire) but the delivery surface silently dropped it. Every top-level field of AnalyzeOutputView and MultiAnalyzeOutputView (crates/facade/src/output.rs) must get exactly one row below, naming what the delivery surface — the MCP analyze_repo/cross_repo reply, which is the SAME shaped summary the `zzop-mcp analyze`/`cross` CLI subcommands print — does with it: 'carry' (forwarded unconditionally), 'carry-conditional' (forwarded only in some shaped/capped/gated form, or only when a precondition holds), or 'omit' (never surfaced by the reply). Every 'omit'/'carry-conditional' row MUST carry a non-empty 'note' explaining why and where the data IS available — which, for anything the shaped reply drops, is the raw zzop-facade output you get by embedding the engine directly (no shipped CLI/MCP surface emits the full CommonIr). HISTORICAL NOTE: this registry briefly tracked two JS-CLI render surfaces (a pretty terminal render backed by lib/format.js and a markdown report backed by lib/report.js) across the npm distribution's 2026-07-20 removal-then-restoration; @zzop/cli is now a zero-logic shim that spawns the native `zzop` binary with no render logic of its own, so those two columns are dropped again and only the reply lane remains. WORKFLOW FOR FUTURE BATCH AGENTS: adding a field to AnalyzeOutputView or MultiAnalyzeOutputView? Add this registry's row for it IN THE SAME COMMIT — crates/engine/tests/rule_contracts/surface_parity.rs's completeness test fails the build otherwise, by design. This file documents TODAY's truth, not an aspiration: a row reflects what the code actually does, not what it should eventually do.",
   "analyzeOutputView": {
     "cache": {
       "mcpAnalyzeReply": "omit",
-      "note": "Internal engine cache-hit/miss diagnostic (CacheStatsView). Not referenced anywhere in packages/mcp/src or crates/summary/src. Available only via the raw zzop-facade output (direct engine embedding) — a deliberate internal-only performance diagnostic, not part of any curated summary."
+      "note": "Internal engine cache-hit/miss diagnostic (CacheStatsView). Not referenced anywhere in crates/host/src or crates/summary/src. Available only via the raw zzop-facade output (direct engine embedding) — a deliberate internal-only performance diagnostic, not part of any curated summary."
     },
     "configWarnings": {
       "mcpAnalyzeReply": "carry",
@@ -35,7 +35,7 @@
     },
     "folders": {
       "mcpAnalyzeReply": "omit",
-      "note": "FolderAggregates is never referenced anywhere in packages/mcp/src or crates/summary/src — no folder-level rollup rides the reply. Available only via the raw zzop-facade output (direct engine embedding); unlike nodes/health/recommendations/critical, folders gets not even a compact summary cameo."
+      "note": "FolderAggregates is never referenced anywhere in crates/host/src or crates/summary/src — no folder-level rollup rides the reply. Available only via the raw zzop-facade output (direct engine embedding); unlike nodes/health/recommendations/critical, folders gets not even a compact summary cameo."
     },
     "gitWindow": {
       "mcpAnalyzeReply": "carry-conditional",
@@ -51,7 +51,7 @@
     },
     "layerCoChurn": {
       "mcpAnalyzeReply": "omit",
-      "note": "Never referenced anywhere in packages/mcp/src or crates/summary/src. Available only via the raw zzop-facade output (direct engine embedding)."
+      "note": "Never referenced anywhere in crates/host/src or crates/summary/src. Available only via the raw zzop-facade output (direct engine embedding)."
     },
     "nodes": {
       "mcpAnalyzeReply": "omit",
@@ -67,7 +67,7 @@
     },
     "ruleTimings": {
       "mcpAnalyzeReply": "omit",
-      "note": "Per-rule performance-timing diagnostic, never referenced in packages/mcp/src or crates/summary/src. Available only via the raw zzop-facade output (direct engine embedding) — not meant for a curated AI-consumer or human-facing summary."
+      "note": "Per-rule performance-timing diagnostic, never referenced in crates/host/src or crates/summary/src. Available only via the raw zzop-facade output (direct engine embedding) — not meant for a curated AI-consumer or human-facing summary."
     },
     "scores": {
       "mcpAnalyzeReply": "omit",
@@ -75,7 +75,7 @@
     },
     "seams": {
       "mcpAnalyzeReply": "omit",
-      "note": "SeamCandidate list never referenced in packages/mcp/src or crates/summary/src. Available only via the raw zzop-facade output (direct engine embedding)."
+      "note": "SeamCandidate list never referenced in crates/host/src or crates/summary/src. Available only via the raw zzop-facade output (direct engine embedding)."
     },
     "warnings": {
       "mcpAnalyzeReply": "carry",

@@ -1,8 +1,10 @@
 # Packaging — Node-free native binary for Claude Desktop (MCPB) and Claude Code (plugin)
 
-zzop ships **one** native `zzop-mcp` binary (no Node runtime, no per-server Node tax) and packages it
-two ways from the same binary. Discovery + version updates are handled by each host's own mechanism —
-there is **no custom version-check hook** and no npm.
+These packaging lanes (MCPB + Claude Code plugin) ship the native `zzop-mcp` server binary specifically
+(no Node runtime, no per-server Node tax) — the same binary, packaged two ways. (zzop also ships a
+second native binary, the `zzop` CLI, distributed separately via GitHub Releases and npm; see the repo
+root [`README.md`](../README.md).) Discovery + version updates are handled by each host's own
+mechanism — there is **no custom version-check hook** and no npm.
 
 ## Claude Desktop — MCPB bundle (`mcpb/manifest.json`)
 
@@ -24,7 +26,7 @@ Build per target (in prebuild CI, after `cargo build -p zzop-mcp --release --tar
 ```sh
 # stamp version, stage the binary, zip, and structurally validate
 mkdir -p out/bin && cp target/<triple>/release/zzop-mcp[.exe] out/bin/
-jq --arg v "$VERSION" '.version=$v' packaging/mcpb/manifest.json > out/manifest.json
+jq --arg v "$VERSION" '.version=$v' packages/mcpb/manifest.json > out/manifest.json
 npx -y @anthropic-ai/mcpb validate out/manifest.json   # build-time only; not a runtime dep
 (cd out && zip -r ../zzop-<platform>.mcpb manifest.json bin)
 ```

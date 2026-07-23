@@ -3,13 +3,13 @@
 //! A) — the two share one post-facade shaper (`shape_analyze_output`) so the same cap/disclosure/
 //! config-warning contract holds for both entry points.
 
-use crate::output::{self, FindingFilters, Verbosity};
+use crate::output::{self, FindingFilters};
 
 #[cfg(test)]
 mod tests;
 
-/// Analyze ONE tree: config auto-discovery via `zzop-config`, execution via `zzop-facade` (the same
-/// engine code path as the Node addon), summary-first shaping. A config declaring multiple trees is a
+/// Analyze ONE tree: config auto-discovery via `zzop-config`, execution via `zzop-facade` (one
+/// engine code path for every host), summary-first shaping. A config declaring multiple trees is a
 /// guided error — that analysis is `cross_repo`'s job.
 pub fn analyze_summary(path: &str, filters: &FindingFilters) -> Result<String, String> {
     // Absolutized at the host boundary (see `paths`): `zzop-config` requires an absolute root.
@@ -206,14 +206,6 @@ fn shape_analyze_output(
     // forward" instead of a missing-key panic.
     if let Some(git_window) = output_view.get("gitWindow") {
         summary.insert("gitWindow".to_string(), git_window.clone());
-    }
-    // MCP<->CLI parity (STAGED): the `Full` lane additionally emits the raw output fields this summary
-    // drops or compacts (`ir`/`nodes`/`scores`/... and the un-compacted health/recommendations/critical
-    // behind the compact `architecture` above). Dead today — every caller passes `Verbosity::Summary`
-    // (see `output::Verbosity`), so this never runs and the reply is byte-identical; a later flip makes
-    // a host reply match the raw `zzop-facade` output.
-    if filters.verbosity == Verbosity::Full {
-        output::insert_full_output_fields(&mut summary, output_view);
     }
     serde_json::Value::Object(summary)
 }

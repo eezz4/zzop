@@ -15,7 +15,7 @@ node analyze.mjs envelope.json
 
 `analyze.mjs` spawns the Node-free `zzop-mcp` binary's `analyze-envelope` subcommand and prints its
 JSON summary — it looks for `zzop-mcp`/`zzop-mcp.exe` on `PATH`, falling back to an in-checkout
-`target/release/zzop-mcp` or `target/debug/zzop-mcp` build (`cargo build -p zzop-mcp [--release]`), so
+`target/release/zzop-mcp` or `target/debug/zzop-mcp` build (`cargo build -p zzop-cli-bin [--release]`), so
 it runs inside the zzop repo with no separate install. Pass `--bin <path>` to point at a specific
 binary. (The npm distribution's `@zzop/native` napi binding, which this script used to `require()`
 in-process, was removed 2026-07-20 along with the `@zzop/cli` JS CLI.)

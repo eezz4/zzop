@@ -15,7 +15,7 @@
 //   node analyze.mjs envelope.json [--bin <path-to-zzop>]
 //
 // `--bin` defaults to `zzop` on PATH, falling back to an in-checkout `target/release/zzop` or
-// `target/debug/zzop` build (`cargo build -p zzop-mcp [--release]`) so the example runs inside the
+// `target/debug/zzop` build (`cargo build -p zzop-cli-bin [--release]`) so the example runs inside the
 // zzop repo without a separate install.
 import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -53,7 +53,7 @@ const result = spawnSync(bin, ['analyze-envelope', path.resolve(envelopePath)], 
 if (result.error) {
   console.error(`failed to run '${bin}': ${result.error.message}`);
   console.error(
-    'build it with `cargo build -p zzop-mcp --release`, put zzop on your PATH, or pass --bin <path>'
+    'build it with `cargo build -p zzop-cli-bin --release`, put zzop on your PATH, or pass --bin <path>'
   );
   process.exit(1);
 }

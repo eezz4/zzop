@@ -1,4 +1,4 @@
-//! CLI argv-dispatch helpers shared by the `zzop` binary's subcommand match (`src/bin/zzop.rs`) — kept out of the binary entry so
+//! CLI argv-dispatch helpers shared by the `zzop` binary's subcommand match (`src/main.rs`) — kept out of the binary entry so
 //! it stays a thin dispatch table. Both exit the process directly (a CLI arg mistake is terminal) and
 //! carry the exit-code contract: 2 = argument-shape error, 1 = runtime (unreadable file / invalid).
 

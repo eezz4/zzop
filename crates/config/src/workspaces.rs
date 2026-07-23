@@ -1,4 +1,4 @@
-//! `trees: "auto"` workspace expansion — the port of `packages/cli/lib/workspaces.js`'s
+//! `trees: "auto"` workspace expansion — the port of the removed JS CLI's `workspaces.js` (2026-07-20), specifically its
 //! `expandAutoTrees`. Only activates when `trees` is EXACTLY the string `"auto"`; every other shape
 //! passes through untouched. The JS algorithm is hand-rolled and must be ported as-is, not replaced
 //! with a general glob/YAML crate (a "smarter" matcher would change which packages get discovered):

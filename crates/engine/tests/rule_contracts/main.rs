@@ -68,9 +68,19 @@
 //!     `--repo=`, `scanners.vocabulary.commitTypePatterns`). These two tests are the machine contract that
 //!     prevents recurrence: every `--flag`-shaped token and every backtick-quoted config-key-shaped token
 //!     sitting near the word "config" in a shipped Rust/JS source file must name a real knob from
-//!     `packages/cli/lib/config-surface.json` — the single vocabulary file this test shares with
-//!     `packages/cli/lib/mapper.js`'s `KNOWN_KEYS`. See each test's own doc for exactly what its pragmatic
+//!     `crates/config/config-surface.json` — the single vocabulary file (originally shared with the
+//!     removed JS CLI's `mapper.js` and its `KNOWN_KEYS`). See each test's own doc for exactly what its pragmatic
 //!     textual-proximity extraction can and cannot prove.
+//! 12. **Capability matrix** (`capability_matrix.rs`) — machine-pinned parser × channel reachability FACTS
+//!     (which of `symbols`/`method_spans`/`loop_spans`/`io_provides`/`io_consumes` each of the 8 parser
+//!     environments plus the lexical fallback actually projects, read off `pipeline::fresh.rs`'s own match
+//!     arms and confirmed against one canary fixture per environment via the real `analyze_tree` path),
+//!     cross-checked against every shipped rule's matcher so a `file_pattern` can never silently admit an
+//!     environment whose required channel this engine does not project. A prior audit found this exact
+//!     fact had drifted from prose ("loop spans are TS-only") while the code moved on
+//!     (`parser/parser-go/src/lang/loop_spans.rs`, `go/go-goroutine-in-loop`). MINIMAL-EXISTENCE scope only
+//!     — see that file's own module doc for the full claim boundary before reading a green run here as
+//!     anything more than "the wiring exists" / "the wiring is definitely absent".
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -79,6 +89,7 @@ use zzop_core::{load_dsl_packs, RuleMeta, RulePackDef, RuleRegistry};
 use zzop_engine::register_all_native;
 
 mod bare_words;
+mod capability_matrix;
 mod catalog_sync;
 mod config_surface;
 mod id_hygiene;

@@ -24,8 +24,8 @@ rechecks.
 
 ## Quick start
 
-zzop ships as two Node-free binaries — `zzop` (CLI) and `zzop-mcp` (MCP server) — no Node.js, no npm,
-nothing to compile. Get them one of three ways:
+zzop's primary distribution is two Node-free binaries — `zzop` (CLI) and `zzop-mcp` (MCP server) — no
+Node.js, no npm, nothing to compile. Get them one of four ways:
 
 - **Download the binaries.** Grab the `zzop-<platform>[.exe]` (CLI) and/or `zzop-mcp-<platform>[.exe]`
   (MCP server) assets for your platform from [GitHub Releases](https://github.com/eezz4/zzop/releases)
@@ -33,7 +33,11 @@ nothing to compile. Get them one of three ways:
 - **Claude Code plugin.** `/plugin marketplace add eezz4/zzop`, then `/plugin install zzop@zzop` —
   see [Use in Claude Code](#use-in-claude-code-mcp-plugin) below.
 - **Claude Desktop.** One-click `.mcpb` bundle (drag-and-drop install) — see
-  [packaging/README.md](packaging/README.md).
+  [packages/mcpb/README.md](packages/mcpb/README.md).
+- **npm.** `npm i -g @zzop/cli` installs the exact same `zzop` binary above, fetched for your platform
+  as an npm dependency — same subcommands (`analyze`/`cross`/`endpoint`/`contract`/`validate-*`), same
+  output, no Node runtime involved beyond a tiny launcher script. Convenient when a project already
+  manages its toolchain through npm. See [packages/cli/README.md](packages/cli/README.md).
 
 Write a `zzop.config.jsonc` and run it, ESLint-style:
 
@@ -42,7 +46,7 @@ zzop analyze .                          # analyze one repo/tree -> JSON findings
 zzop cross --config zzop.config.jsonc   # cross-layer join, driven by that config
 ```
 
-See [packages/mcp/README.md](packages/mcp/README.md) for the full CLI and config reference.
+See [crates/host/README.md](crates/host/README.md) for the full CLI and config reference.
 
 To embed the engine instead of running the binary, depend on the `zzop-facade`/`zzop-summary` Rust
 crates and call the JSON-in/JSON-out contract directly — or shell out to `zzop-mcp`'s JSON subcommands,
@@ -62,7 +66,7 @@ let report: serde_json::Value =
    `zzop-mcp` (`zzop-mcp.exe` on Windows).
 2. In Claude Code: `/plugin marketplace add eezz4/zzop`, then `/plugin install zzop@zzop`.
 
-See [packages/mcp/README.md](packages/mcp/README.md) for the full install/build reference.
+See [crates/host/README.md](crates/host/README.md) for the full install/build reference.
 
 ### Result (abridged)
 
@@ -131,11 +135,12 @@ Semantic Versioning and a maintained changelog begin at `1.0.0`. Full policy:
 - `crates/cache` — per-file IR/findings cache (content hash + parser fingerprint + ruleset
   fingerprint)
 - `crates/facade` — pure-JSON `analyze`/`analyzeTrees`/`analyzeEnvelope`/`validateEnvelopeOnly`/`validateRulePackOnly`/`queryIo`/`version` contract
-  that `packages/mcp` calls directly — no Node, no native addon in between
+  that `crates/host` calls directly — no Node, no native addon in between
 - `crates/config` — shared Rust config front end (`zzop.config.jsonc` discovery → JSONC strip →
-  config→facade-request mapper → `trees: "auto"` workspace expansion), used by `packages/mcp`
-- `packages/mcp` — two Node-free host binaries over one shared lib: `zzop` (CLI subcommands) and
-  `zzop-mcp` (MCP stdio server), built on `zzop-config` + `zzop-facade`
+  config→facade-request mapper → `trees: "auto"` workspace expansion), used by `crates/host`
+- `crates/host` (`zzop-host`) — lib-only shared dispatch + embedded contract docs consumed by the two
+  Node-free host products: `zzop` (CLI subcommands, package `packages/cli-bin`) and `zzop-mcp` (MCP
+  stdio server, package `packages/mcp`), both built on `zzop-config` + `zzop-summary`
 - `parser/` — parser frontends: source → Common IR, including HTTP route/consume extraction across
   languages and frameworks ([parser/README.md](parser/README.md))
 - `rules/native/` — whole-graph native rules (`rules-graph`, `rules-http`, `rules-cross-layer`, `rules-schema`) plus `rules/dsl/`
@@ -153,8 +158,8 @@ cargo clippy --workspace --all-targets   # kept at 0 warnings
 cargo fmt --all
 ```
 
-See [`packages/mcp/README.md`](packages/mcp/README.md) for building/running the `zzop-mcp` binary
-(`cargo build -p zzop-mcp --release`).
+See [`crates/host/README.md`](crates/host/README.md) for building/running the `zzop`/`zzop-mcp` binaries
+(`cargo build -p zzop-cli-bin -p zzop-mcp --release`).
 
 Cold/warm benchmark over a real tree:
 

@@ -2,13 +2,13 @@
 
 The fastest path from "nothing installed" to a report on your own repo, plus how to read that report and
 quiet a false positive. For the full config schema and CLI flag reference, see
-[`packages/mcp/README.md`](../packages/mcp/README.md) — this page does not duplicate it.
+[`crates/host/README.md`](../crates/host/README.md) — this page does not duplicate it.
 
 ## Install & first run
 
-zzop ships as two Node-free binaries — `zzop` (the CLI, for the terminal workflow below) and `zzop-mcp`
-(the MCP server, for AI-agent clients) — no Node.js, no npm, no Rust toolchain needed. Get them one of
-three ways:
+zzop's primary distribution is two Node-free binaries — `zzop` (the CLI, for the terminal workflow
+below) and `zzop-mcp` (the MCP server, for AI-agent clients) — no Node.js, no npm, no Rust toolchain
+needed. Get them one of four ways:
 
 - **Download the binaries.** Grab the `zzop-<platform>[.exe]` (CLI) and/or `zzop-mcp-<platform>[.exe]`
   (MCP server) assets for your platform from [GitHub Releases](https://github.com/eezz4/zzop/releases)
@@ -16,7 +16,11 @@ three ways:
 - **Claude Code plugin.** `/plugin marketplace add eezz4/zzop`, then `/plugin install zzop@zzop` (the
   plugin's bundled `.mcp.json` runs `zzop-mcp mcp` from `PATH`).
 - **Claude Desktop.** One-click `.mcpb` bundle (drag-and-drop install) — see
-  [`packaging/README.md`](../packaging/README.md).
+  [`packages/mcpb/README.md`](../packages/mcpb/README.md).
+- **npm.** `npm i -g @zzop/cli` installs the exact same `zzop` binary above, fetched for your platform
+  as an npm dependency — identical subcommands (`analyze`/`cross`/`endpoint`/`contract`/`validate-*`),
+  identical output; a tiny launcher script is the only Node involvement, no separate JS
+  implementation to drift from the native binary. See [`packages/cli/README.md`](../packages/cli/README.md).
 
 ```sh
 zzop analyze .          # analyzes the current directory and prints a report
@@ -24,13 +28,13 @@ zzop cross ./frontend ./backend   # cross-layer join across 2+ trees
 ```
 
 There is no scaffolding subcommand — write `zzop.config.jsonc` by hand (or copy one from
-[`packages/mcp/README.md`](../packages/mcp/README.md)) and pass it explicitly:
+[`crates/host/README.md`](../crates/host/README.md)) and pass it explicitly:
 
 ```sh
 zzop cross --config zzop.config.jsonc
 ```
 
-See [`packages/mcp/README.md`](../packages/mcp/README.md) for the full `zzop.config.jsonc` schema
+See [`crates/host/README.md`](../crates/host/README.md) for the full `zzop.config.jsonc` schema
 (`roots`/`trees` — including per-tree `mountedAt`/`mounts`/`hosts` connection topology — `packs`, `rules`,
 `git`, `cacheDir`, `sizeCap`, `format`, `report`, `failOn`).
 
@@ -61,8 +65,10 @@ MCP tool returns — the CLI subcommand and the tool share one handler, so they 
 The binary does **not** gate its exit code on finding severity: it is an analysis + summary surface, not
 a CI linter. To gate CI, read the JSON counts yourself (e.g. fail the job when `bySeverity.critical > 0`).
 The `format`, `report`, and `failOn` config keys are *recognized* (they do not trigger unknown-key
-warnings) but the Node-free binary does not render terminal reports, write report files, or gate exit
-codes on them — that presentation layer belonged to the removed JS CLI and has not been re-added.
+warnings) but nothing acts on them today — no shipped surface renders a terminal report, writes a
+report file, or gates its exit code on them; `@zzop/cli` (see
+[`packages/cli/README.md`](../packages/cli/README.md)) is the identical native binary, not a separate
+presentation layer.
 
 ## Suppressing findings
 
@@ -95,7 +101,7 @@ is used as-is (e.g. `dead-candidates` — and note some native ids contain a sla
 ```
 
 (`failOn` is a recognized severity-threshold key but the Node-free binary does not act on it today — see
-"Reading the output" above.) Full schema in [`packages/mcp/README.md`](../packages/mcp/README.md).
+"Reading the output" above.) Full schema in [`crates/host/README.md`](../crates/host/README.md).
 
 **(c) SDK/embedding-level (per call, when embedding the engine directly).** Callers embedding
 `zzop-facade` directly — or driving the engine JSON contract via `zzop`'s subcommands — pass
@@ -106,16 +112,16 @@ is used as-is (e.g. `dead-candidates` — and note some native ids contain a sla
 { "suppressions": [{ "rule": "sql/nplus1", "path": "legacy/" }] }
 ```
 
-Full field shapes in [modules/napi.md](modules/napi.md) (see `AnalyzeRequest`).
+Full field shapes in [modules/mcp.md](modules/mcp.md#the-zzop-facade-json-contract) (see `AnalyzeRequest`).
 
 **(d) Caveat: native cross-layer analyses are disable-only.** The `cross-layer/*` native rules (run
 over the cross-layer join, `zzop cross`) have no source line to anchor an inline marker against — silence
 one only via `disabledRules`/config `rules` `"off"`, never a comment. See
-[modules/napi.md](modules/napi.md) for why (no single tree owns a cross-layer finding).
+[modules/mcp.md](modules/mcp.md) for why (no single tree owns a cross-layer finding).
 
 ## Where to next
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how a tree gets processed: the IR, route/IO extraction, caching, degraded files.
-- [modules/napi.md](modules/napi.md) — embed the engine directly (the `zzop-facade` JSON contract, request/response shapes).
+- [modules/mcp.md](modules/mcp.md#the-zzop-facade-json-contract) — embed the engine directly (the `zzop-facade` JSON contract, request/response shapes).
 - [rules/authoring-guide.md](rules/authoring-guide.md) — write and ship a new DSL rule pack.
 - [NORMALIZED_AST.md](NORMALIZED_AST.md) and [../examples/](../examples/README.md) — extend zzop to a new language or framework via an external parser/adapter.

@@ -19,7 +19,7 @@ fn version_prints_the_shared_server_version_and_exits_zero() {
         assert!(out.status.success(), "`zzop-mcp {arg}` must exit 0");
         assert_eq!(
             String::from_utf8_lossy(&out.stdout).trim(),
-            format!("zzop-mcp {}", zzop_mcp::server::version()),
+            format!("zzop-mcp {}", zzop_host::server::version()),
             "`zzop-mcp {arg}` prints the same server::version() the CLI's `zzop version` reports"
         );
         assert!(out.stderr.is_empty(), "no stderr on success");

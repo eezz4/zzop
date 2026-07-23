@@ -15,14 +15,18 @@ cargo clippy --workspace --all-targets -- -D warnings   # kept at 0 warnings
 cargo fmt --all
 ```
 
-zzop's one published artifact is `zzop-mcp`, a plain Rust binary — no Node, no native-addon toolchain
-needed to build it:
+zzop ships two plain Rust binaries, each its own Cargo package over the shared `zzop-host` lib crate —
+`zzop` (package `zzop-cli-bin`, the CLI) and `zzop-mcp` (package `zzop-mcp`, the MCP server) — no Node,
+no native-addon toolchain needed to build them:
 
 ```sh
-cargo build -p zzop-mcp --release
+cargo build -p zzop-cli-bin -p zzop-mcp --release
 ```
 
-See [`packages/mcp/README.md`](packages/mcp/README.md) for build/toolchain details.
+See [`crates/host/README.md`](crates/host/README.md) for build/toolchain details. Pushing a workspace
+version bump to `main` auto-tags and releases both binaries (the `meta` job in
+[`.github/workflows/prebuild.yml`](.github/workflows/prebuild.yml)) — see [VERSIONING.md](VERSIONING.md)
+for details.
 
 ## CI guards
 
@@ -43,7 +47,7 @@ A PR must pass every job in [`.github/workflows/ci.yml`](.github/workflows/ci.ym
   (`docs/README.md`), and every `examples/` entry from `examples/README.md`, so a new page cannot
   ship orphaned from the surfaces readers start at.
 - **io-key-vocab-guard** — the io-key kind vocabulary ("http routes, env keys, DB tables,
-  topics") stated in `packages/mcp/README.md`'s `check_endpoint` row must match its SSOT, the
+  topics") stated in `crates/host/README.md`'s `check_endpoint` row must match its SSOT, the
   `check_endpoint` tool description in `packages/mcp/src/tools/definitions.rs`.
 - **max-file-lines-guard** — Rust **source** files stay under 300 lines (oversized files are
   split into directory modules). Test files are exempt and may grow freely — keep unit tests
@@ -87,7 +91,7 @@ git config core.hooksPath .githooks
 - **Rule contributions.** Follow [`docs/rules/authoring-guide.md`](docs/rules/authoring-guide.md) for
   DSL rule packs. Keep `site/rules.html`'s rule listing in sync with
   [`docs/rules/catalog.md`](docs/rules/catalog.md) (CI-checked).
-- **CLI docs.** Keep `packages/mcp/README.md` in sync with `zzop-mcp help`.
+- **CLI docs.** Keep `crates/host/README.md` in sync with `zzop help`.
 
 ## PR process
 

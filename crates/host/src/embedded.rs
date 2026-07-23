@@ -16,9 +16,9 @@ pub struct ContractDoc {
 }
 
 /// Looks up an embedded contract document by its `<name>` (the `zzop://contract/<name>` URI tail).
-/// The ONE lookup both surfaces share — the MCP `resources/read` handler (`crate::resources`) and the
-/// `zzop contract <name>` CLI path (`src/bin/zzop.rs`) resolve names through this function, so the
-/// two surfaces cannot drift on which names exist.
+/// The ONE lookup both surfaces share — the MCP `resources/read` handler (package `zzop-mcp`'s
+/// `resources.rs`) and the `zzop contract <name>` CLI path (package `zzop-cli-bin`'s `main.rs`) resolve
+/// names through this function, so the two surfaces cannot drift on which names exist.
 pub fn find(name: &str) -> Option<&'static ContractDoc> {
     CONTRACT_DOCS.iter().find(|doc| doc.name == name)
 }
@@ -84,7 +84,7 @@ pub static CONTRACT_DOCS: &[ContractDoc] = &[
         description: "Machine-verified config vocabulary — every config key, dotted path, CLI flag, and embedder field zzop accepts (the purpose/configKeys/configPaths/embedderFields sections self-describe). Usage: config lives in zzop.config.jsonc at the repo root; multi-tree analysis declares trees[] (or trees: \"auto\"), where one DB/schema directory joins as its own tree; unknown keys warn, never fail.",
         mime: "application/json",
         // Reused from `zzop-config` (this crate already depends on it), which embeds the same
-        // `packages/cli/lib/config-surface.json` for unknown-key warnings — one embed, one truth.
+        // `crates/config/config-surface.json` for unknown-key warnings — one embed, one truth.
         content: zzop_config::CONFIG_SURFACE_JSON,
     },
     ContractDoc {

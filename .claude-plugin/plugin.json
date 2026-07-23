@@ -1,6 +1,6 @@
 {
   "name": "zzop",
-  "version": "0.21.0",
+  "version": "0.21.1",
   "description": "Deterministic cross-repo contract analysis for AI agents: which frontend calls hit which backend endpoints (and which don't) — exact joins, disclosed blind spots, no guessing. TypeScript/JavaScript, Python, Java, C#, Rust, Go, Prisma, SQL natively; anything else via a documented adapter envelope.",
   "author": {
     "name": "eezz4",

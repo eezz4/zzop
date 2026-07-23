@@ -1,9 +1,11 @@
-//! MCP tool surface: definitions (`tools/list`) and dispatch (`tools/call`), plus the CLI entry points
-//! (`zzop analyze|analyze-envelope|cross|endpoint`) that share the same handlers. This module is pure protocol
-//! dispatch: extract the tool's arguments (`zzop_summary::args`), call the matching `zzop_summary`
-//! function (config auto-discovery + facade call + summary assembly all live there — see its crate
-//! doc), and wrap the result into the MCP reply shape. No shaping/filtering/warning-merge logic lives
-//! here — if it did, it would be exactly the per-host drift the `zzop-summary` split exists to prevent.
+//! MCP tool surface: definitions (`tools/list`) and dispatch (`tools/call`). This module is pure
+//! protocol dispatch: extract the tool's arguments (`zzop_summary::args`), call the matching
+//! `zzop_summary` function (config auto-discovery + facade call + summary assembly all live there —
+//! see its crate doc), and wrap the result into the MCP reply shape. No shaping/filtering/warning-merge
+//! logic lives here — if it did, it would be exactly the per-host drift the `zzop-summary` split exists
+//! to prevent. The `zzop` CLI's twin subcommands (`analyze`/`cross`/`endpoint`/…) dispatch to the same
+//! `zzop_summary` functions through the shared `zzop-host` crate's own `tools.rs` — see that module for
+//! the CLI-facing wrappers this crate does NOT duplicate.
 
 mod definitions;
 #[cfg(test)]
@@ -73,57 +75,5 @@ pub fn call(params: Option<&serde_json::Value>) -> serde_json::Value {
             "content": [{ "type": "text", "text": format!("zzop error: {e}") }],
             "isError": true
         }),
-    }
-}
-
-/// CLI `zzop analyze <path>` — default filters. Thin re-export: all shaping lives in
-/// `zzop_summary::analyze_summary`.
-pub fn analyze(path: &str) -> Result<String, String> {
-    zzop_summary::analyze_summary(path, &default_filters())
-}
-
-/// CLI `zzop analyze-envelope <envelope.json>` — default filters. Thin re-export: all shaping
-/// (and the facade call) lives in `zzop_summary::analyze_envelope_summary`.
-pub fn analyze_envelope(envelope_json: &str) -> Result<String, String> {
-    zzop_summary::analyze_envelope_summary(envelope_json, &default_filters())
-}
-
-/// CLI `zzop cross <path>...` / `zzop cross --config <path>` — default filters. Thin
-/// re-export: all shaping lives in `zzop_summary::cross_summary`.
-pub fn cross_repo(paths: &[String], config_path: Option<&str>) -> Result<String, String> {
-    zzop_summary::cross_summary(paths, config_path, &default_filters())
-}
-
-/// `check_endpoint` MCP tool / `zzop endpoint` CLI subcommand — thin re-export: the tree
-/// resolution and query core both live in `zzop_summary::endpoint_summary`.
-pub fn check_endpoint(
-    pattern: &str,
-    path: Option<&str>,
-    paths: &[String],
-    config_path: Option<&str>,
-) -> Result<String, String> {
-    zzop_summary::endpoint_summary(pattern, path, paths, config_path)
-}
-
-/// CLI `zzop validate-envelope <path>` — offline Normalized-AST envelope shape check (the
-/// `validate_envelope` MCP tool's answer, from a terminal). Returns the infallible
-/// `{"valid":bool,"issues":[…]}` report as a string; `main` reads `valid` for the exit code. Thin
-/// re-export: the check lives in `zzop_summary` (same function the tool dispatch calls above).
-pub fn validate_envelope(envelope_json: &str) -> String {
-    zzop_summary::validate_envelope_only_json(envelope_json)
-}
-
-/// CLI `zzop validate-rule-pack <path>` — offline DSL rule-pack shape + matcher-regex check (the
-/// `validate_rule_pack` MCP tool's answer). Same infallible report contract as [`validate_envelope`].
-pub fn validate_rule_pack(pack_json: &str) -> String {
-    zzop_summary::validate_rule_pack_json(pack_json)
-}
-
-fn default_filters() -> FindingFilters {
-    FindingFilters {
-        min_severity: None,
-        rule: None,
-        limit: None,
-        verbosity: Default::default(),
     }
 }

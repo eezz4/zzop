@@ -56,16 +56,19 @@ These change freely at any time, by design — do not build on them:
   to release. Gate CI by reading the severity/rule-id counts you care about from the JSON
   output, not on an exact total finding count.
 - **The Rust crates (`zzop-*`)** — internal workspace crates, not a published stable library
-  API. The consumer surfaces are the `zzop-mcp` binary (CLI subcommands + MCP tools), the Claude
-  Code plugin / Claude Desktop `.mcpb` bundle built from it, and the Normalized AST protocol.
+  API. The consumer surfaces are the `zzop` CLI binary and the `zzop-mcp` binary (MCP tools), the
+  Claude Code plugin / Claude Desktop `.mcpb` bundle built from the latter, and the Normalized AST
+  protocol.
 
 ## How versions are produced
 
 The version SSOT is the workspace `Cargo.toml`'s `[workspace.package] version` (2026-07-22 reform).
 Every crate inherits it via `version.workspace = true`, and both binaries report it directly as
 `CARGO_PKG_VERSION` — the same value `zzop version` / `zzop-mcp version` print and the MCP `initialize`
-reply's `serverInfo.version` reports. A release bumps that one number in a commit, then tags it
-(`git tag vX.Y.Z && git push origin vX.Y.Z`); CI's release job fails unless the pushed tag,
+reply's `serverInfo.version` reports. A release bumps that one number in a commit and pushes it to
+`main`; an auto-tag lane picks up the bump, creates the matching `vX.Y.Z` tag, and runs the full release
+from there — no separate manual `git tag`/`git push` step needed. CI's release job fails unless the tag,
 `Cargo.toml`, and `.claude-plugin/plugin.json`'s `"version"` all agree, so the binaries and the Claude
 Code plugin are always released in lockstep. (The old tag-stamped `ZZOP_RELEASE_VERSION` env and the
-`0.0.0` placeholder are gone.)
+`0.0.0` placeholder are gone.) The npm packages (`@zzop/cli` and its 5 platform sub-packages) are
+stamped with the same number at publish time from the release tag, verified by the same CI gate.

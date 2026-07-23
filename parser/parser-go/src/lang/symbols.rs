@@ -153,17 +153,34 @@ fn receiver_type_name(ty: Node, src: &str) -> Option<String> {
     }
 }
 
-/// A `block`'s line range, taken from its `statement_list`'s first NAMED child's START line and last
-/// NAMED child's END line (a body-less `{}` or an entirely-erased body yields `(None, None)`) — module
-/// doc's "`body_start`/`body_end`" section explains why the last child needs its END, not its start.
+/// A `block`'s line range, taken from its `statement_list`'s first/last NON-COMMENT NAMED child's
+/// START/END line (a body-less `{}`, a comment-only body, or an entirely-erased body all yield
+/// `(None, None)`) — module doc's "`body_start`/`body_end`" section explains why the last child needs
+/// its END, not its start.
+///
+/// Two comment pitfalls this guards against, both from `tree-sitter-go` treating `comment` as an
+/// "extra": it can be spliced in as a named child ANYWHERE a statement could appear, not just between
+/// statements.
+/// 1. At the `block` level: `statement_list` is not necessarily `block`'s first named child — a
+///    comment sitting before the block's first real statement attaches to `block` itself, ahead of
+///    `statement_list` (e.g. `func f() {\n// hi\nx := 1\n}` puts the comment before `statement_list`
+///    among `block`'s own children). Locating `statement_list` by KIND rather than by position handles
+///    this regardless of how many leading comments precede it.
+/// 2. Within `statement_list`: a comment can also be spliced in as `statement_list`'s own leading or
+///    trailing named child (no real statement around it, e.g. the whole body is one comment, or a
+///    comment sits after the last statement). Filtering `comment` out of the candidate children before
+///    taking first/last keeps `body_start`/`body_end` anchored to the first/last REAL statement.
 fn body_line_range(block: Node) -> (Option<u32>, Option<u32>) {
-    let Some(stmts) = valid_named_children(block).into_iter().next() else {
+    let Some(stmts) = valid_named_children(block)
+        .into_iter()
+        .find(|n| n.kind() == "statement_list")
+    else {
         return (None, None);
     };
-    if stmts.kind() != "statement_list" {
-        return (None, None);
-    }
-    let children = valid_named_children(stmts);
+    let children: Vec<Node> = valid_named_children(stmts)
+        .into_iter()
+        .filter(|n| n.kind() != "comment")
+        .collect();
     let start = children.first().map(|n| line_of(*n));
     let end = children.last().map(|n| end_line_of(*n));
     (start, end)

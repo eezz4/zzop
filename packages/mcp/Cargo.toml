@@ -5,27 +5,25 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
-# Two Node-free host binaries over one shared lib (`src/lib.rs`): `zzop` (the CLI — analyze/cross/endpoint/
-# …) and `zzop-mcp` (the MCP server over stdio). Both are thin arg-dispatch shims in `src/bin/`; the lib
-# carries every module so the two entries and the integration tests share one crate and cannot drift. This
-# crate is a THIN PROTOCOL FACADE: ALL
-# summary/shaping/filter/warning-merge logic lives in the shared `zzop-summary` crate (crates/summary)
-# so it cannot drift per-host (a future full-CLI binary reuses it too, and gets it for free instead of
-# reimplementing it). `zzop-config` stays a direct dependency only for the embedded config-surface
-# contract resource (`embedded.rs`) and end-to-end test fixtures (`zzop_config::BUNDLED_PACK_SOURCES`),
-# not for any shaping logic — `zzop-facade` is no longer a direct dependency at all: every facade call
-# this crate used to make directly now happens inside `zzop-summary` (extracted from the cdylib crate
-# `zzop-napi`, whose link step breaks under the local gnu toolchain even for rlib dependents — see the
-# mcp-distribution decision).
-[[bin]]
-name = "zzop"
-path = "src/bin/zzop.rs"
+# The `zzop-mcp` product: the MCP server over stdio (newline-delimited JSON-RPC 2.0) — `initialize`,
+# `tools/*` (schemas in `src/tools/definitions.rs`, dispatch in `src/tools.rs`), `resources/*` (the
+# embedded authoring contracts, via the shared `zzop-host` crate's `embedded` module). A thin lib +
+# bin split (like the former `zzop-host` crate) so `src/tests/*` unit tests AND external integration
+# tests (`tests/surface_prose.rs`, reading this crate's `tools::list()` as a library call) both work.
+# THIS CRATE IS ALSO A THIN PROTOCOL FACADE: no shaping/filter/summary logic lives here — every
+# `tools/call` handler extracts its arguments (`zzop_summary::args`) and calls the shared
+# `zzop-summary` crate, exactly like the `zzop` CLI (package `zzop-cli-bin`) does through
+# `zzop-host`'s own `tools.rs`, so a CLI query and an MCP tool call give the identical answer.
+[lib]
+name = "zzop_mcp"
+path = "src/lib.rs"
 
 [[bin]]
 name = "zzop-mcp"
 path = "src/bin/zzop-mcp.rs"
 
 [dependencies]
+zzop-host = { path = "../../crates/host" }
 zzop-summary = { path = "../../crates/summary" }
 zzop-config = { path = "../../crates/config" }
 serde_json = { workspace = true }

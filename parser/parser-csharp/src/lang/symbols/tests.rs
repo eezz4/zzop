@@ -20,6 +20,21 @@ fn top_level_class_and_method() {
     assert!(method.body_start.is_some());
 }
 
+/// Same-defect-class audit pin (see `zzop_parser_go::lang::symbols`'s leading-comment `body_line_range`
+/// bug this mirrors the check for): `body_start`/`body_end` here come from the `body` FIELD NODE's own
+/// `line_of`/`end_line_of` (the method's own declaration line, and the `{...}` node's own closing line)
+/// — never from that body's first/last named child — so a `comment` extra spliced in as a leading child
+/// inside the body can't shift either boundary. This proves that rather than assuming it.
+#[test]
+fn method_body_opening_with_comment_is_unaffected() {
+    let src =
+        "public class C {\n  public void M() {\n    // leading comment\n    int x = 1;\n  }\n}\n";
+    let syms = parse_symbols("f.cs", src);
+    let method = syms.iter().find(|s| s.name == "C.M").unwrap();
+    assert_eq!(method.body_start, Some(2));
+    assert_eq!(method.body_end, Some(5));
+}
+
 #[test]
 fn nested_type_dot_qualification() {
     let src = "class Outer { class Inner { void M() {} } }";

@@ -30,6 +30,45 @@
         ],
         "snippet_max": 160
       }
+    },
+    {
+      "id": "eager-relation-declared",
+      "severity": "warning",
+      "message": "TypeORM's `eager: true` relation option (typically on `@OneToMany`/`@ManyToOne`/`@OneToOne`/`@ManyToMany`/`@JoinTable` option objects — the matcher fires on any `eager: true` line in a file with TypeORM/Sequelize signals, a deliberate heuristic), or Sequelize's `include: [{ all: true }]` — an entity-level eager-load declaration that makes EVERY finder/query of this entity join the association, whether or not that particular caller needs it: the query-time opposite of N+1, over-fetching on every read instead of under-fetching per iteration. Default relations to lazy and opt in per query instead — TypeORM's `relations: [...]`/`relations: { ... }` on the specific `find`/`findOne` call, or Sequelize's own `include: [...]` at the call site — so only the queries that actually use the association pay for the join. Suppress a vetted case (e.g. a small lookup table genuinely read together on every access) with `// eager-relation-ok`.",
+      "suppress_marker": "eager-relation-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(?:ts|tsx|js|jsx|mts|cts)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "require_file": "(?i)@(?:OneToMany|ManyToOne|OneToOne|ManyToMany|JoinTable)\\s*\\(|\\btypeorm\\b|\\bsequelize\\b|\\binclude\\s*:\\s*\\[",
+        "skip_comment_lines": true,
+        "any": [
+          {
+            "pattern": "(?i)\\beager\\s*:\\s*true\\b",
+            "label": "typeorm-eager"
+          },
+          {
+            "pattern": "(?i)include\\s*:\\s*\\[?\\s*\\{[^}]*\\ball\\s*:\\s*true\\b",
+            "label": "sequelize-include-all"
+          }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "jpa-eager-fetch",
+      "severity": "warning",
+      "message": "An explicit `fetch = FetchType.EAGER` on a JPA/Hibernate mapping annotation (`@OneToMany`/`@ManyToOne`/`@OneToOne`/`@ManyToMany`/`@ElementCollection` — the matcher fires on the `fetch = FetchType.EAGER` attribute itself, whichever annotation carries it) forces every finder/query of the owning entity to join and load that association, whether or not the caller needs it — most expensive on `@OneToMany`/`@ManyToMany` collections, where it can pull an unbounded child set on every parent read. Prefer `FetchType.LAZY` and fetch the association explicitly per query that needs it (a JPQL `JOIN FETCH`, an entity graph, or a dedicated projection). Disclosure: this rule only catches the EXPLICIT declaration above — `@ManyToOne`/`@OneToOne` default to EAGER in the JPA spec with no `fetch` attribute at all, so a clean scan here is not proof the entity has no eager-loading cost. Suppress a vetted case with `// jpa-eager-ok`.",
+      "suppress_marker": "jpa-eager-ok",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.java$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "require_file": "\\bFetchType\\.EAGER\\b",
+        "skip_comment_lines": true,
+        "line_pattern": "\\bfetch\\s*=\\s*FetchType\\.EAGER\\b",
+        "snippet_max": 160
+      }
     }
   ]
 }

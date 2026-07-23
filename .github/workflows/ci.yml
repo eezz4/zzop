@@ -19,8 +19,8 @@ jobs:
   # the shallow checkout the other guards need, which is why the two former drift-guards fold in here).
   #
   # NOTE for maintainers: consolidating renames the required status checks. Any branch-protection rule
-  # on `main` listing the old per-guard job names must be updated to `{ guards, test }` or the gate
-  # silently voids. (The former `napi-addon-build` job went away with the npm/napi removal, 2026-07-20.)
+  # on `main` listing the old per-guard job names must be updated to `{ guards, test, cli-shim-test }`
+  # or the gate silently voids.
   guards:
     runs-on: ubuntu-latest
     steps:
@@ -73,3 +73,23 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+
+  cli-shim-test:
+    # Proves the @zzop/cli npm shim actually works against a real native `zzop` binary. Mirrors
+    # prebuild.yml's non-cross x86_64-unknown-linux-gnu matrix entry: ubuntu-latest's host target
+    # already *is* x86_64-unknown-linux-gnu, so no --target/cross-linker setup is needed, and Node is
+    # preinstalled on the runner image.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build native zzop CLI binary
+        # @zzop/cli is a zero-logic shim that spawns the native `zzop` binary — its own dev-fallback
+        # path resolution only checks a release build (../../target/release/zzop[.exe] relative to
+        # packages/cli, no debug fallback), so this needs --release, not a debug build.
+        run: cargo build -p zzop-cli-bin --release
+      - name: CLI shim tests
+        # Glob form (not a bare directory) — `node --test test/` fails on Node v22+ (verified: the
+        # bare-directory form throws MODULE_NOT_FOUND on this runner's Node version).
+        run: node --test packages/cli/test/*.test.js

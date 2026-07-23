@@ -181,3 +181,17 @@ fn empty_all_dunder_exports_nothing() {
     let out = parse_symbols("a.py", src);
     assert!(!sym(&out, "a").exported);
 }
+
+/// Same-defect-class audit pin (see `zzop_parser_go::lang::symbols`'s leading-comment `body_line_range`
+/// bug this mirrors the check for): ruff's AST (`StmtFunctionDef::body: Vec<Stmt>`) never represents a
+/// standalone `#` comment as a statement at all — comments are discarded during tokenization, not
+/// retained as body nodes the way tree-sitter's `comment` "extra" is — so a function body opening with a
+/// comment line cannot shift `body_start` onto the comment. This proves that rather than assuming it.
+#[test]
+fn function_body_opening_with_comment_is_unaffected() {
+    let src = "def f():\n    # leading comment\n    x = 1\n    return x\n";
+    let out = parse_symbols("a.py", src);
+    let s = sym(&out, "f");
+    assert_eq!(s.body_start, Some(3));
+    assert_eq!(s.body_end, Some(4));
+}

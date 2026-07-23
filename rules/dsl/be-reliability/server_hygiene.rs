@@ -259,3 +259,112 @@ fn dom_style_on_click_in_loop_in_a_file_with_no_node_event_library_is_not_flagge
         out.findings
     );
 }
+
+// --- fs-in-loop-serial ---
+
+#[test]
+fn fs_promises_readfile_await_inside_for_of_loop_with_no_promise_all_is_flagged() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/ingest.ts",
+        "import fs from \"fs\";\ndeclare const paths: string[];\nexport async function readAll() {\n  const out: string[] = [];\n  for (const p of paths) {\n    const content = await fs.promises.readFile(p, \"utf8\");\n    out.push(content);\n  }\n  return out;\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "fs-in-loop-serial");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 6);
+}
+
+#[test]
+fn fs_writefile_await_inside_foreach_callback_is_flagged() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/dump.ts",
+        "import fs from \"fs\";\ndeclare const records: { path: string; data: string }[];\nexport async function dumpAll() {\n  records.forEach(async (r) => {\n    await fs.writeFile(r.path, r.data);\n  });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "fs-in-loop-serial");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 5);
+}
+
+#[test]
+fn fs_readfile_await_wrapped_in_promise_all_map_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/ingest.ts",
+        "import fs from \"fs\";\ndeclare const paths: string[];\nexport async function readAllParallel() {\n  return Promise.all(\n    paths.map(async (p) => {\n      return await fs.promises.readFile(p, \"utf8\");\n    })\n  );\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "fs-in-loop-serial").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn single_fs_readfile_await_outside_any_loop_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/load.ts",
+        "import fs from \"fs\";\nexport async function readOne(p: string) {\n  return await fs.promises.readFile(p, \"utf8\");\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "fs-in-loop-serial").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+/// FP-adversarial (nearest harmless lookalike): `open`/`createReadStream` are deliberately excluded from
+/// this rule's call set — `stream-open-no-close-in-loop` already owns the resource-leak angle for those,
+/// and doubling up here would just co-fire noise on the same line for a different assertion.
+#[test]
+fn create_read_stream_inside_loop_is_not_fs_in_loop_serial() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/copy.ts",
+        "declare const paths: string[];\ndeclare const dst: any;\ndeclare const fs: any;\nexport function copyAll() {\n  for (const p of paths) {\n    const s = fs.createReadStream(p);\n    s.pipe(dst);\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "fs-in-loop-serial").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn fs_loop_serial_ok_marker_directly_above_the_call_suppresses_the_finding() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/ingest.ts",
+        "import fs from \"fs\";\ndeclare const paths: string[];\nexport async function readAllMarked() {\n  const out: string[] = [];\n  for (const p of paths) {\n    // fs-loop-serial-ok: deliberately sequential, must preserve on-disk read order\n    const content = await fs.promises.readFile(p, \"utf8\");\n    out.push(content);\n  }\n  return out;\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "fs-in-loop-serial").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn fs_in_loop_serial_require_file_gate_skips_a_file_with_no_fs_signal() {
+    // The `require_file` gate (an `fs` word / fs import) must keep the scanner out of files with a
+    // non-fs receiver that merely matches the awaited-call shape lexically — pins the gate's
+    // contribution, which no other fs-in-loop-serial test exercises.
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/ingest.ts",
+        "declare const paths: string[];\ndeclare const helper: { readFile(p: string, e: string): Promise<string> };\nexport async function readAll() {\n  const out: string[] = [];\n  for (const p of paths) {\n    out.push(await helper.readFile(p, \"utf8\"));\n  }\n  return out;\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "fs-in-loop-serial").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}

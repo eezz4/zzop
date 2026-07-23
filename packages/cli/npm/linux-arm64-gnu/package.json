@@ -1,0 +1,24 @@
+{
+  "name": "@zzop/cli-linux-arm64-gnu",
+  "version": "0.0.0",
+  "description": "zzop CLI native binary for linux/arm64 (glibc).",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "zzop"
+  ],
+  "license": "MIT",
+  "repository": "github:eezz4/zzop",
+  "homepage": "https://eezz4.github.io/zzop/",
+  "bugs": "https://github.com/eezz4/zzop/issues",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "libc": [
+    "glibc"
+  ]
+}

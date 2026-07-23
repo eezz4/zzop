@@ -1,8 +1,9 @@
-//! Binary-level tests for the `zzop` CLI binary's argument dispatch (`src/bin/zzop.rs`) — the thin layer
-//! the crate's unit tests (`tools/tests.rs`, handler-level) never exercise. Spawns the real `zzop`
-//! executable (`CARGO_BIN_EXE_zzop`, built by cargo for integration tests), so exit codes and the
-//! stdout/stderr split are pinned exactly as a shell sees them. The sibling `zzop-mcp` server binary is
-//! smoke-tested at the bottom (its non-serving surfaces — `version`, unknown-arg).
+//! Binary-level tests for the `zzop` CLI binary's argument dispatch (`src/main.rs`, package
+//! `zzop-cli-bin`) — the thin layer the shared `zzop-host` crate's own unit tests (`tools/tests.rs`,
+//! handler-level) never exercise. Spawns the real `zzop` executable (`CARGO_BIN_EXE_zzop`, built by
+//! cargo for integration tests), so exit codes and the stdout/stderr split are pinned exactly as a
+//! shell sees them. The sibling `zzop-mcp` server binary's own non-serving surfaces (`version`,
+//! unknown-arg) are smoke-tested separately in the `zzop-mcp` package (packages/mcp/tests/server_bin.rs).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -42,7 +43,7 @@ fn version_subcommand_and_flag_print_the_server_version_and_exit_zero() {
         assert!(out.status.success(), "`zzop {arg}` must exit 0");
         assert_eq!(
             stdout(&out).trim(),
-            format!("zzop {}", zzop_mcp::server::version()),
+            format!("zzop {}", zzop_host::server::version()),
             "`zzop {arg}` must print the server::version() value"
         );
         assert!(stderr(&out).is_empty(), "no stderr on success");
@@ -134,7 +135,7 @@ fn contract_with_no_name_lists_every_embedded_resource() {
     let out = run(&["contract"]);
     assert!(out.status.success(), "`zzop contract` must exit 0");
     let text = stdout(&out);
-    for doc in zzop_mcp::embedded::CONTRACT_DOCS {
+    for doc in zzop_host::embedded::CONTRACT_DOCS {
         assert!(
             text.contains(doc.name),
             "list must name {}: {text}",
@@ -178,7 +179,7 @@ fn contract_unknown_name_exits_one_and_names_every_valid_contract() {
         "unknown name is a lookup failure"
     );
     let err = stderr(&out);
-    for doc in zzop_mcp::embedded::CONTRACT_DOCS {
+    for doc in zzop_host::embedded::CONTRACT_DOCS {
         assert!(
             err.contains(doc.name),
             "error must list {}: {err}",

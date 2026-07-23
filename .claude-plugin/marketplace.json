@@ -1,5 +1,6 @@
 {
   "name": "zzop",
+  "description": "Self-hosted marketplace for the zzop plugin — deterministic cross-repo contract analysis (frontend calls x backend routes x DB tables) for AI agents.",
   "owner": {
     "name": "eezz4",
     "url": "https://github.com/eezz4"

@@ -23,7 +23,7 @@ fn rule_count(n: usize) -> String {
 /// The shadow-warning text for [`base_engine_config`]'s same-id collision branches (both the
 /// `pack_defs` loop and the `packs_dirs` loop): a same-id pack from ANY later source silently
 /// replaces an earlier one WHOLE (never a rule-level merge — see this function's callers' doc), and
-/// that replacement itself is unchanged/intentional (the override path `docs/modules/napi.md`'s
+/// that replacement itself is unchanged/intentional (the override path `docs/modules/mcp.md`'s
 /// "Defaults" section documents). What was missing before this warning existed is the SIGNAL — a
 /// custom pack shipped via `packs.extraDirs`/`packDefs` reusing a bundled (or any other already-loaded)
 /// pack's id silently dropped every rule the earlier pack contributed, with zero acknowledgment
@@ -62,7 +62,7 @@ fn pack_shadow_warning(
 ///    a `RulePackDef::id` with a pack already in the list, the LATER one REPLACES the earlier one whole —
 ///    not a rule-level merge inside that pack id. Since directories are always folded in AFTER `pack_defs`,
 ///    a directory pack always wins a same-id collision against an inline def — this is the intentional
-///    override path (see `docs/modules/napi.md`'s "Defaults" section) — `zzop-config` puts
+///    override path (see `docs/modules/mcp.md`'s "Defaults" section) — `zzop-config` puts
 ///    the bundled default pack dir first and any caller-supplied `packsDir` after it, so a caller's pack
 ///    always wins a collision against a shipped one with the same id, while packs with distinct ids from
 ///    every source all stay loaded together. Per-directory load errors (a malformed `rules/dsl/*.json`, an
