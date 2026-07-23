@@ -157,10 +157,10 @@ jobs:
           mkdir -p dist-mcp
           case "${{ matrix.target }}" in
             *windows*)
-              cp "target/${{ matrix.target }}/release/zzop.exe" "dist-mcp/zzop-${{ matrix.platform }}.exe"
+              cp "target/${{ matrix.target }}/release/zzop.exe" "dist-mcp/zzop-cli-${{ matrix.platform }}.exe"
               cp "target/${{ matrix.target }}/release/zzop-mcp.exe" "dist-mcp/zzop-mcp-${{ matrix.platform }}.exe" ;;
             *)
-              cp "target/${{ matrix.target }}/release/zzop" "dist-mcp/zzop-${{ matrix.platform }}"
+              cp "target/${{ matrix.target }}/release/zzop" "dist-mcp/zzop-cli-${{ matrix.platform }}"
               cp "target/${{ matrix.target }}/release/zzop-mcp" "dist-mcp/zzop-mcp-${{ matrix.platform }}" ;;
           esac
           ls -la dist-mcp
@@ -218,7 +218,7 @@ jobs:
   # Only runs when `meta` says this run releases (the build matrix above always runs, including for
   # workflow_dispatch and ordinary main pushes, without releasing). Attaches the 5 bare
   # `zzop-mcp-<platform>[.exe]` binaries (PATH install / Claude Code plugin) AND 5 per-platform
-  # `zzop-<platform>.mcpb` one-click Desktop bundles to the GitHub release. Runs alongside `publish`
+  # `zzop-mcp-<platform>.mcpb` one-click Desktop bundles to the GitHub release. Runs alongside `publish`
   # (npm), not merged into it.
   release:
     needs: [build, verify-plugin-version, meta]
@@ -260,7 +260,7 @@ jobs:
               *)     cp "$f" out/bin/zzop-mcp && chmod +x out/bin/zzop-mcp ;;
             esac
             cp manifest.stamped.json out/manifest.json
-            (cd out && zip -r "../zzop-$plat.mcpb" manifest.json bin)
+            (cd out && zip -r "../zzop-mcp-$plat.mcpb" manifest.json bin)
           done
           ls -la ./*.mcpb
       - name: Upload zzop-mcp binaries + MCPB bundles to the release
@@ -303,7 +303,7 @@ jobs:
         # Over the binary artifacts the `build` job's "Collect the zzop + zzop-mcp binaries" step
         # uploads (`zzop-mcp-<target>`, containing both `zzop-<platform>[.exe]` and
         # `zzop-mcp-<platform>[.exe]`) — `place-artifacts.mjs` below picks out only the
-        # `zzop-<platform>[.exe]` binaries it needs.
+        # `zzop-cli-<platform>[.exe]` binaries it needs.
         uses: actions/download-artifact@v4
         with:
           pattern: zzop-mcp-*
@@ -403,8 +403,8 @@ jobs:
           platforms=(win32-x64-msvc darwin-x64 darwin-arm64 linux-x64-gnu linux-arm64-gnu)
           for i in "${!platforms[@]}"; do
             plat="${platforms[$i]}"
-            sha=$(sha256sum "mcpb-assets/zzop-$plat.mcpb" | cut -d' ' -f1)
-            url="https://github.com/eezz4/zzop/releases/download/v$VERSION/zzop-$plat.mcpb"
+            sha=$(sha256sum "mcpb-assets/zzop-mcp-$plat.mcpb" | cut -d' ' -f1)
+            url="https://github.com/eezz4/zzop/releases/download/v$VERSION/zzop-mcp-$plat.mcpb"
             jq --argjson i "$i" --arg v "$VERSION" --arg sha "$sha" --arg url "$url" \
               '.packages[$i].version = $v | .packages[$i].fileSha256 = $sha | .packages[$i].identifier = $url' \
               server.json > server.tmp && mv server.tmp server.json

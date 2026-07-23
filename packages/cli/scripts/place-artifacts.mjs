@@ -1,15 +1,15 @@
 // Copies prebuilt `zzop` CLI binaries out of a flat CI-artifact directory into their npm/<platform>/
 // sub-package, where bin/zzop.js's resolution cascade expects to find them at install time.
 //
-// Expects files named `zzop-<platform>[.exe]` — the exact naming prebuild.yml's "Collect the zzop +
-// zzop-mcp binaries" step already produces (e.g. `zzop-win32-x64-msvc.exe`, `zzop-linux-x64-gnu`).
+// Expects files named `zzop-cli-<platform>[.exe]` — the exact naming prebuild.yml's "Collect the zzop +
+// zzop-mcp binaries" step already produces (e.g. `zzop-cli-win32-x64-msvc.exe`, `zzop-cli-linux-x64-gnu`).
 // No target-triple -> platform translation is needed here: `<platform>` in the artifact name IS the
 // npm/<platform> sub-package directory name already (the workflow's `matrix.platform`, the same
 // napi-rs-style token used throughout this repo). If the
 // artifacts were downloaded via `actions/download-artifact` per-job (one dir per `zzop-mcp-<target>`
 // artifact name, which also contains the `zzop-mcp-*` sibling binaries), flatten them into one
 // directory first — this script does not recurse, and simply ignores files that don't match the
-// `zzop-<platform>[.exe]` pattern (e.g. the `zzop-mcp-*` binaries living alongside them).
+// `zzop-cli-<platform>[.exe]` pattern (e.g. the `zzop-mcp-*` siblings living alongside them).
 //
 // GitHub artifact zips drop the unix executable bit, and npm pack/publish preserves whatever mode the
 // tarball entry has — so this script chmods the placed binary to 0o755 itself, which is what makes
@@ -51,12 +51,11 @@ function main() {
   let placed = 0;
 
   for (const entry of entries) {
-    const match = /^zzop-(.+?)(\.exe)?$/.exec(entry);
+    // Match ONLY the CLI binaries (`zzop-cli-<platform>[.exe]`), never the `zzop-mcp-<platform>`
+    // siblings that share the same artifact set — the `-cli-` infix keeps the two apart with no
+    // separate skip needed (an mcp binary simply doesn't match this pattern).
+    const match = /^zzop-cli-(.+?)(\.exe)?$/.exec(entry);
     if (!match) continue;
-    // Skip the `zzop-mcp-*` sibling binaries that live in the same artifact set — they aren't
-    // this CLI's binary, and `.+?` (non-greedy) would otherwise capture "mcp-<platform>" as if it
-    // were a platform token.
-    if (entry.startsWith('zzop-mcp-')) continue;
 
     const platform = match[1];
     const binaryName = PLATFORM_BINARY_NAMES[platform];
@@ -79,7 +78,7 @@ function main() {
   }
 
   if (placed === 0) {
-    console.error(`place-artifacts: no recognized "zzop-<platform>[.exe]" files found in ${artifactsDir}`);
+    console.error(`place-artifacts: no recognized "zzop-cli-<platform>[.exe]" files found in ${artifactsDir}`);
     process.exit(1);
   }
 

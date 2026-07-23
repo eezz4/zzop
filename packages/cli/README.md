@@ -54,7 +54,7 @@ a `v*` tag, or auto-tagged by the `meta` job when a version bump lands on `main`
 the published version. Its `publish` job builds all 5 platform targets, overwrites every package's `0.0.0`
 placeholder with the release version, and runs `npm publish --provenance` for each of the 6 packages
 (`@zzop/cli` plus its 5 `npm/<platform>/` sub-packages) — this package's own 5 are placed by
-`scripts/place-artifacts.mjs` from the workflow's `zzop-<platform>[.exe]` build artifacts before publish.
+`scripts/place-artifacts.mjs` from the workflow's `zzop-cli-<platform>[.exe]` build artifacts before publish.
 
 Publishing uses npm's OIDC **trusted publishing** — the workflow authenticates via GitHub Actions'
 `id-token`, no `NPM_TOKEN` secret is stored anywhere. One-time setup required on npmjs.com before the first

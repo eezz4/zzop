@@ -12,35 +12,35 @@
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.21.1/zzop-win32-x64-msvc.mcpb",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.21.1/zzop-mcp-win32-x64-msvc.mcpb",
       "version": "0.21.1",
       "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.21.1/zzop-darwin-x64.mcpb",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.21.1/zzop-mcp-darwin-x64.mcpb",
       "version": "0.21.1",
       "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.21.1/zzop-darwin-arm64.mcpb",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.21.1/zzop-mcp-darwin-arm64.mcpb",
       "version": "0.21.1",
       "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.21.1/zzop-linux-x64-gnu.mcpb",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.21.1/zzop-mcp-linux-x64-gnu.mcpb",
       "version": "0.21.1",
       "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.21.1/zzop-linux-arm64-gnu.mcpb",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.21.1/zzop-mcp-linux-arm64-gnu.mcpb",
       "version": "0.21.1",
       "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "transport": { "type": "stdio" }

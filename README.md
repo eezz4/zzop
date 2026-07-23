@@ -1,6 +1,7 @@
 # zzop ( Zero Zone Of Pain )
 
 [![CI](https://github.com/eezz4/zzop/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/eezz4/zzop/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@zzop/cli?logo=npm)](https://www.npmjs.com/package/@zzop/cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 zzop is built for an AI agent working in one repo — say the frontend — that needs to verify or
@@ -27,7 +28,7 @@ rechecks.
 zzop's primary distribution is two Node-free binaries — `zzop` (CLI) and `zzop-mcp` (MCP server) — no
 Node.js, no npm, nothing to compile. Get them one of four ways:
 
-- **Download the binaries.** Grab the `zzop-<platform>[.exe]` (CLI) and/or `zzop-mcp-<platform>[.exe]`
+- **Download the binaries.** Grab the `zzop-cli-<platform>[.exe]` (CLI) and/or `zzop-mcp-<platform>[.exe]`
   (MCP server) assets for your platform from [GitHub Releases](https://github.com/eezz4/zzop/releases)
   and run them directly.
 - **Claude Code plugin.** `/plugin marketplace add eezz4/zzop`, then `/plugin install zzop@zzop` —

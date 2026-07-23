@@ -5,7 +5,8 @@
 //! a tool call and a CLI query give the identical answer.
 //!
 //!   zzop-mcp            — serve MCP over stdio (the bare form MCP clients register).
-//!   zzop-mcp mcp        — same; the explicit subcommand `.mcp.json` / the MCPB manifest use in `args`.
+//!   zzop-mcp mcp        — same; the explicit subcommand a client's own `.mcp.json`, the Claude Code
+//!                          plugin's `plugin.json` `mcpServers`, and the MCPB manifest all use in `args`.
 //!   zzop-mcp version | --version — print this binary's version (equals the MCP serverInfo.version).
 //!   zzop-mcp help | --help | -h  — print the usage line (exit 0).
 //!
@@ -16,8 +17,9 @@ const USAGE: &str =
 
 fn main() {
     match std::env::args().nth(1).as_deref() {
-        // The registered form (`.mcp.json` / MCPB manifest pass `args: ["mcp"]`) AND the bare form both
-        // serve — a plain `zzop-mcp` on PATH is the server, no subcommand needed.
+        // The registered form (a client's own `.mcp.json` / the plugin's `plugin.json` `mcpServers` /
+        // the MCPB manifest all pass `args: ["mcp"]`) AND the bare form both serve — a plain `zzop-mcp`
+        // on PATH is the server, no subcommand needed.
         None | Some("mcp") => zzop_mcp::server::run_stdio(),
         Some("version") | Some("--version") => {
             println!("zzop-mcp {}", zzop_mcp::server::version());

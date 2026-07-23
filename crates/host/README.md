@@ -61,16 +61,16 @@ same `.mcpb` bundles above, no separate install path.
 ## Install as a Claude Code plugin
 
 The repo doubles as a self-hosted plugin marketplace (`.claude-plugin/marketplace.json` +
-`.mcp.json` bundle the MCP server):
+`.claude-plugin/plugin.json`'s `mcpServers` field declare the MCP server):
 
-1. Put the binary on `PATH` **under the name `zzop-mcp`** — the bundled `.mcp.json` invokes exactly
+1. Put the binary on `PATH` **under the name `zzop-mcp`** — `plugin.json`'s `mcpServers` invokes exactly
    that command. Prebuilt assets on [GitHub Releases](https://github.com/eezz4/zzop/releases) are
    named `zzop-mcp-<platform>[.exe]` (5 platforms, self-contained static binary, no Node needed): download
    yours and rename/link it to `zzop-mcp` (`zzop-mcp.exe` on Windows). Building from source (see
    Build above) needs the same rename of the `target/release` artifact.
 2. In Claude Code: `/plugin marketplace add eezz4/zzop`, then `/plugin install zzop@zzop`.
 
-The bundled `.mcp.json` invokes `zzop-mcp mcp` from `PATH` — deliberately pre-installed rather than
+`plugin.json`'s `mcpServers` invokes `zzop-mcp mcp` from `PATH` — deliberately pre-installed rather than
 fetched-on-first-run, so the plugin stays runtime-free and you always know exactly which binary runs.
 
 ## Tools

@@ -54,7 +54,7 @@ members = [
 # the pushed `v*` tag, `.claude-plugin/plugin.json`, and the MCPB manifest all match this. `version_string()`
 # / the binaries report `CARGO_PKG_VERSION` directly (no `ZZOP_RELEASE_VERSION` env). Cache-bust tokens are
 # stamped with this version at their scope's last change — see the cache decision.
-version = "0.21.1"
+version = "0.22.0"
 edition = "2021"
 license = "MIT"
 

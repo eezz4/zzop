@@ -58,9 +58,9 @@
       <h2>Install &amp; run the binary</h2>
       <p>Three ways to get it — no source checkout or toolchain required for any of them:</p>
       <ul>
-        <li><strong>Claude Code</strong> — <code>/plugin marketplace add eezz4/zzop</code>, then <code>/plugin install zzop@zzop</code>. The plugin's <code>.mcp.json</code> runs <code>zzop-mcp mcp</code> for you.</li>
+        <li><strong>Claude Code</strong> — <code>/plugin marketplace add eezz4/zzop</code>, then <code>/plugin install zzop@zzop</code>. The plugin's <code>plugin.json</code> declares the MCP server and runs <code>zzop-mcp mcp</code> for you.</li>
         <li><strong>Claude Desktop</strong> — the one-click <code>.mcpb</code> bundle (drag-and-drop install); it carries the platform binary. See <a href="https://github.com/eezz4/zzop/blob/main/packages/mcpb/README.md">packages/mcpb/README.md</a>.</li>
-        <li><strong>CLI / CI</strong> — download the <code>zzop-&lt;platform&gt;[.exe]</code> binary from <a href="https://github.com/eezz4/zzop/releases" target="_blank" rel="noreferrer">GitHub Releases</a> (5 platforms) and put it on <code>PATH</code> as <code>zzop</code> — or <code>npm i -g @zzop/cli</code>. Want the MCP server instead? Download <code>zzop-mcp-&lt;platform&gt;[.exe]</code> the same way and put it on <code>PATH</code> as <code>zzop-mcp</code>.</li>
+        <li><strong>CLI / CI</strong> — download the <code>zzop-cli-download the <code>zzop-&lt;platform&gt;[.exe]</code> binarylt;platformdownload the <code>zzop-&lt;platform&gt;[.exe]</code> binarygt;[.exe]</code> binary from <a href="https://github.com/eezz4/zzop/releases" target="_blank" rel="noreferrer">GitHub Releases</a> (5 platforms) and put it on <code>PATH</code> as <code>zzop</code> — or <code>npm i -g @zzop/cli</code>. Want the MCP server instead? Download <code>zzop-mcp-&lt;platform&gt;[.exe]</code> the same way and put it on <code>PATH</code> as <code>zzop-mcp</code>.</li>
       </ul>
       <div class="code-panel">
         <div class="code-panel__tab">Analyze a tree</div>
@@ -185,6 +185,7 @@ zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop</code>
   <div class="site-footer__inner">
     <span class="site-footer__brand">zzop</span>
     <span>— Zero Zone Of Pain · MIT License · © 2026</span>
+    <a href="privacy.html" class="site-footer__gh">Privacy</a>
     <a href="https://github.com/eezz4/zzop" target="_blank" rel="noreferrer" class="site-footer__gh">GitHub</a>
   </div>
 </footer>

@@ -6,8 +6,9 @@ engine with no Node.js runtime at all. These binaries call
 (`crates/facade/src/lib.rs`) directly — the `zzop-facade` JSON contract documented in full under
 [The `zzop-facade` JSON contract](#the-zzop-facade-json-contract) below:
 
-- **`zzop-mcp`** — the **MCP server** over stdio (bare `zzop-mcp`, or the `zzop-mcp mcp` form `.mcp.json`
-  and the MCPB manifest register). For MCP clients.
+- **`zzop-mcp`** — the **MCP server** over stdio (bare `zzop-mcp`, or the `zzop-mcp mcp` form a client's
+  own `.mcp.json`, the Claude Code plugin's `plugin.json` `mcpServers`, and the MCPB manifest all
+  register). For MCP clients.
 - **`zzop`** — the **CLI** (`zzop analyze <path>` / `zzop analyze-envelope <envelope.json>` / `zzop cross
   <path>...` / `zzop endpoint <pattern> <path>...` / `zzop contract` / `zzop validate-…`). For direct
   terminal/CI use, no MCP client required.

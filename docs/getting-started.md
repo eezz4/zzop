@@ -10,11 +10,11 @@ zzop's primary distribution is two Node-free binaries — `zzop` (the CLI, for t
 below) and `zzop-mcp` (the MCP server, for AI-agent clients) — no Node.js, no npm, no Rust toolchain
 needed. Get them one of four ways:
 
-- **Download the binaries.** Grab the `zzop-<platform>[.exe]` (CLI) and/or `zzop-mcp-<platform>[.exe]`
+- **Download the binaries.** Grab the `zzop-cli-<platform>[.exe]` (CLI) and/or `zzop-mcp-<platform>[.exe]`
   (MCP server) assets for your platform from [GitHub Releases](https://github.com/eezz4/zzop/releases)
   and put them on `PATH`.
 - **Claude Code plugin.** `/plugin marketplace add eezz4/zzop`, then `/plugin install zzop@zzop` (the
-  plugin's bundled `.mcp.json` runs `zzop-mcp mcp` from `PATH`).
+  plugin's `plugin.json` declares the MCP server, running `zzop-mcp mcp` from `PATH`).
 - **Claude Desktop.** One-click `.mcpb` bundle (drag-and-drop install) — see
   [`packages/mcpb/README.md`](../packages/mcpb/README.md).
 - **npm.** `npm i -g @zzop/cli` installs the exact same `zzop` binary above, fetched for your platform
