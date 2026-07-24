@@ -70,7 +70,7 @@ fn sql_truncate_app_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "src/cleanup.ts",
-        "export async function reset(db: any) {\n  // sql-truncate-app-ok: dedicated nightly cache-reset job\n  return db.exec(`TRUNCATE TABLE users`);\n}\n",
+        "export async function reset(db: any) {\n  // truncate-in-app-code-ok: dedicated nightly cache-reset job\n  return db.exec(`TRUNCATE TABLE users`);\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -84,7 +84,7 @@ fn sql_truncate_app_ok_marker_suppresses_the_finding() {
 fn jsx_truncate_boolean_prop_is_not_flagged() {
     // A JSX boolean prop `truncate` sits after the CLOSING quote of
     // a sibling attribute (`size="sm" truncate style=...`). The rule now requires a CLOSED string
-    // literal (a quote after the table name, like its `sql-delete-no-where` siblings), so `truncate`
+    // literal (a quote after the table name, like its `delete-no-where` siblings), so `truncate`
     // as prose outside any quoted SQL string no longer fires.
     let dir = TempDir::new("zzop-sql");
     dir.write(

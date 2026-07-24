@@ -59,7 +59,7 @@ fn location_assign_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-browser");
     dir.write(
         "vetted-loc.ts",
-        "declare const target: string;\nexport function go() {\n  // location-assign-ok: target is checked against an allowlist above\n  location.href = target;\n}\n",
+        "declare const target: string;\nexport function go() {\n  // location-assign-dynamic-ok: target is checked against an allowlist above\n  location.href = target;\n}\n",
     );
     let out = scan(&dir);
     assert!(

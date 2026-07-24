@@ -41,20 +41,19 @@ impl Drop for TempDir {
     }
 }
 
-/// Loads the real `rules/dsl/be-security/be-security.json` from the repo, resolved from
+/// Loads the real `rules/dsl/security/security.json` from the repo, resolved from
 /// `CARGO_MANIFEST_DIR` (`crates/engine` -> up two -> repo root -> `rules/dsl/...`), filtered to the
 /// three Java security-concern rules (`sql-taint`/`weak-crypto`/`cmd-injection`) that moved into
-/// `be-security` when the language-named `java-security` pack was dissolved (v0.15). Filtering keeps
+/// `security` when the language-named `java-security` pack was dissolved (v0.15). Filtering keeps
 /// this fixture a small, fully-`.java`-applicable pack (every rule fires only on the `.java` fixture
 /// file), which the profiling/degradation tests below rely on. Goes through `zzop_core::parse_dsl_pack`
 /// (not a raw `serde_json::from_str`) so this pack's `${NAME}` fragment refs (its shared test-path
 /// `file_exclude_pattern`) resolve exactly like they do at real load time.
-fn be_security_java_pack() -> RulePackDef {
-    let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/dsl/be-security/be-security.json");
+fn security_java_pack() -> RulePackDef {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/dsl/security/security.json");
     let text = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-    let mut pack: RulePackDef = zzop_core::parse_dsl_pack(&text).expect("parse be-security.json");
+    let mut pack: RulePackDef = zzop_core::parse_dsl_pack(&text).expect("parse security.json");
     pack.rules
         .retain(|r| matches!(r.id.as_str(), "sql-taint" | "weak-crypto" | "cmd-injection"));
     pack
@@ -65,7 +64,7 @@ fn be_security_java_pack() -> RulePackDef {
 /// - `c.ts`: imports a module that does not exist (dangling import — must not panic, must not resolve
 ///   to an edge).
 /// - `db/schema.prisma`: a `User` model.
-/// - `legacy/C.java`: a SQL-taint pattern the `be-security` pack's `sql-taint` line-scan rule matches.
+/// - `legacy/C.java`: a SQL-taint pattern the `security` pack's `sql-taint` line-scan rule matches.
 /// - `generated/big.ts`: exceeds `size_cap` -> oversized lexical fallback.
 /// - `broken.ts`: unbalanced braces -> structurally-broken lexical fallback.
 fn fixture_tree() -> TempDir {
@@ -102,7 +101,7 @@ fn config(size_cap: usize) -> EngineConfig {
     EngineConfig {
         source_id: "fixture".to_string(),
         size_cap,
-        packs: vec![be_security_java_pack()],
+        packs: vec![security_java_pack()],
         ..EngineConfig::default()
     }
 }
@@ -122,16 +121,16 @@ fn circular_ts_import_pair_produces_a_circular_finding() {
 }
 
 #[test]
-fn be_security_java_line_scan_rules_fire_on_the_java_file() {
+fn security_java_line_scan_rules_fire_on_the_java_file() {
     let dir = fixture_tree();
     let out = analyze_tree(dir.path(), &config(DEFAULT_SIZE_CAP));
     let hit = out
         .findings
         .iter()
-        .find(|f| f.rule_id == "be-security/sql-taint");
+        .find(|f| f.rule_id == "security/sql-taint");
     assert!(
         hit.is_some(),
-        "expected a be-security/sql-taint finding, got: {:?}",
+        "expected a security/sql-taint finding, got: {:?}",
         out.findings
     );
     assert_eq!(hit.unwrap().file, "legacy/C.java");
@@ -220,14 +219,12 @@ fn yarn_dir_is_never_walked() {
 fn disabling_a_pack_removes_its_findings() {
     let dir = fixture_tree();
     let mut cfg = config(DEFAULT_SIZE_CAP);
-    cfg.rule_config
-        .disabled_rules
-        .push("be-security".to_string());
+    cfg.rule_config.disabled_rules.push("security".to_string());
     let out = analyze_tree(dir.path(), &cfg);
     assert!(!out
         .findings
         .iter()
-        .any(|f| f.rule_id.starts_with("be-security/")));
+        .any(|f| f.rule_id.starts_with("security/")));
 }
 
 #[test]
@@ -249,9 +246,9 @@ fn dsl_finding_message_carries_the_config_disable_hint_for_its_own_id() {
     let hit = out
         .findings
         .iter()
-        .find(|f| f.rule_id == "be-security/sql-taint")
-        .expect("expected a be-security/sql-taint finding");
-    let hint = zzop_core::disable_hint("be-security/sql-taint");
+        .find(|f| f.rule_id == "security/sql-taint")
+        .expect("expected a security/sql-taint finding");
+    let hint = zzop_core::disable_hint("security/sql-taint");
     assert!(
         hit.message.ends_with(&hint),
         "expected the DSL finding's message to end with disable_hint's fragment {hint:?}, got: {:?}",
@@ -268,7 +265,7 @@ fn rule_overrides_applied_lists_only_ids_that_actually_matched() {
     let mut cfg = config(DEFAULT_SIZE_CAP);
     cfg.rule_config
         .disabled_rules
-        .push("be-security/sql-taint".to_string());
+        .push("security/sql-taint".to_string());
     cfg.rule_config
         .disabled_rules
         .push("no-such-rule-typo".to_string());
@@ -279,7 +276,7 @@ fn rule_overrides_applied_lists_only_ids_that_actually_matched() {
     let applied = out
         .rule_overrides_applied
         .expect("expected Some — disabled_rules/severity_overrides were both non-empty");
-    assert_eq!(applied.disabled, vec!["be-security/sql-taint".to_string()]);
+    assert_eq!(applied.disabled, vec!["security/sql-taint".to_string()]);
     assert_eq!(applied.severity_remapped, vec!["circular".to_string()]);
     assert!(!applied.disabled.contains(&"no-such-rule-typo".to_string()));
     assert!(!applied
@@ -424,14 +421,91 @@ fn trpc_router_composes_across_files_and_joins_to_a_client_consume() {
     assert_eq!(consume.file, "page.tsx");
 }
 
+#[test]
+fn trpc_leaf_imported_as_a_single_procedure_is_composed_not_dropped() {
+    let dir = TempDir::new("zzop-engine-trpc-leaf-import");
+    // `getUser.ts`: ONE procedure, exported on its own — no `router({...})` anywhere in the file. This
+    // is the per-file-procedure layout (cal.com, many t3 apps) the router below mounts as a leaf.
+    dir.write(
+        "getUser.ts",
+        "import { authedProcedure } from './trpc';\nexport const getUser = authedProcedure.input(z.object({})).query(({ ctx }) => ctx.user);\n",
+    );
+    // `_router.ts`: mounts the imported procedure as a single leaf under `getUser` (shorthand), next to
+    // an inline sibling so a regression here can't be mistaken for "the whole router vanished".
+    dir.write(
+        "_router.ts",
+        "import { getUser } from './getUser';\nexport const userRouter = router({ getUser, ping: publicProcedure.query(() => 1) });\n",
+    );
+    let out = analyze_tree(
+        dir.path(),
+        &EngineConfig {
+            source_id: "fixture".to_string(),
+            ..EngineConfig::default()
+        },
+    );
+    let io = out.ir.ir.io.expect("expected io facts");
+    let provide = io
+        .provides
+        .iter()
+        .find(|p| p.kind == "trpc" && p.key == "QUERY getUser")
+        .unwrap_or_else(|| panic!("expected a trpc provide, got: {:?}", io.provides));
+    assert_eq!(
+        provide.file, "getUser.ts",
+        "the composed provide must anchor on the procedure's own file, not the mounting router's"
+    );
+    assert_eq!(provide.line, 2);
+    assert!(
+        io.provides
+            .iter()
+            .any(|p| p.kind == "trpc" && p.key == "QUERY ping"),
+        "the inline sibling must survive"
+    );
+}
+
+#[test]
+fn trpc_leaf_mount_with_no_static_evidence_stays_silent() {
+    let dir = TempDir::new("zzop-engine-trpc-leaf-import-neg");
+    // The mounted ident IS defined in a resolvable local file, but not as anything statically
+    // recognizable as a tRPC procedure — a re-exported opaque value. Nothing may be invented for it.
+    dir.write("opaque.ts", "export const getUser = makeProcedure(cfg);\n");
+    // ...and this one is mounted from an external package the resolver cannot reach at all.
+    dir.write(
+        "_router.ts",
+        concat!(
+            "import { getUser } from './opaque';\n",
+            "import { billing } from '@acme/trpc-procedures';\n",
+            "export const userRouter = router({ getUser, billing, ping: publicProcedure.query(() => 1) });\n"
+        ),
+    );
+    let out = analyze_tree(
+        dir.path(),
+        &EngineConfig {
+            source_id: "fixture".to_string(),
+            ..EngineConfig::default()
+        },
+    );
+    let io = out.ir.ir.io.expect("expected io facts");
+    let trpc: Vec<_> = io
+        .provides
+        .iter()
+        .filter(|p| p.kind == "trpc")
+        .map(|p| p.key.as_str())
+        .collect();
+    assert_eq!(
+        trpc,
+        vec!["QUERY ping"],
+        "only the inline procedure has static evidence; the two leaf mounts must stay absent"
+    );
+}
+
 // --- Positive pack-load confirmation (`AnalyzeOutput::packs_loaded`) ---
 
 #[test]
 fn packs_loaded_reports_every_pack_sorted_with_provenance_and_inline_default() {
     let dir = fixture_tree();
     let mut cfg = config(DEFAULT_SIZE_CAP);
-    // A second pack whose id sorts BEFORE `be-security` — output order must be id-sorted, not load
-    // order. It gets an explicit `Dir` provenance entry; `be-security` gets none, so it must report
+    // A second pack whose id sorts BEFORE `security` — output order must be id-sorted, not load
+    // order. It gets an explicit `Dir` provenance entry; `security` gets none, so it must report
     // the documented `"inline"` default.
     let extra: RulePackDef = serde_json::from_str(
         r#"{"id":"aaa-extra","framework":"any","rules":[{"id":"r1","severity":"info","message":"m","matcher":{"type":"line-scan","file_pattern":"\\.ts$","line_pattern":"NEVER_MATCHES"}}]}"#,
@@ -451,7 +525,7 @@ fn packs_loaded_reports_every_pack_sorted_with_provenance_and_inline_default() {
         summary,
         vec![
             ("aaa-extra", 1, "dir"),
-            ("be-security", 3, "inline"), // no pack_sources entry -> inline default
+            ("security", 3, "inline"), // no pack_sources entry -> inline default
         ],
         "packs_loaded must be sorted by id and carry per-pack provenance"
     );
@@ -463,16 +537,16 @@ fn packs_loaded_counts_rules_as_loaded_even_when_the_pack_is_disabled() {
     // LOADED, so the positive confirmation must keep reporting it (with its full loaded rule count).
     let dir = fixture_tree();
     let mut cfg = config(DEFAULT_SIZE_CAP);
-    cfg.rule_config.disabled_rules = vec!["be-security".to_string()];
+    cfg.rule_config.disabled_rules = vec!["security".to_string()];
     let out = analyze_tree(dir.path(), &cfg);
     assert!(
         !out.findings
             .iter()
-            .any(|f| f.rule_id.starts_with("be-security/")),
+            .any(|f| f.rule_id.starts_with("security/")),
         "the disabled pack must not fire"
     );
     assert_eq!(out.packs_loaded.len(), 1);
-    assert_eq!(out.packs_loaded[0].id, "be-security");
+    assert_eq!(out.packs_loaded[0].id, "security");
     assert_eq!(out.packs_loaded[0].rules, 3);
 }
 
@@ -502,10 +576,10 @@ fn packs_loaded_reports_per_pack_files_in_scope_zero_vs_nonzero() {
         0,
         "a pack whose scope matches no analyzed file must report filesInScope 0"
     );
-    // `be-security`'s rules include a `(?i)\.java$`-scoped rule — exactly one fixture file
+    // `security`'s rules include a `(?i)\.java$`-scoped rule — exactly one fixture file
     // (`legacy/C.java`) is in scope, and the count is exact per-file, not extension-bucket-wide.
     assert!(
-        by_id("be-security").files_in_scope >= 1,
+        by_id("security").files_in_scope >= 1,
         "the matching pack must report a nonzero in-scope file count, got: {:?}",
         out.packs_loaded
     );

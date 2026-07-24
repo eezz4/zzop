@@ -13,7 +13,7 @@
 //! with NO `EngineConfig::io.router_names` override — proving the fix works on the default config.
 //! `duplicate-route` is native, not a DSL rule, so its findings carry the plain rule id
 //! `"duplicate-route"` (no pack prefix) and require no `packs` to be loaded (same convention as
-//! `tests/pack_fullstack.rs`'s own `duplicate-route` coverage).
+//! `tests/pack_egress.rs`'s own `duplicate-route` coverage).
 //!
 //! `express_named_import_router_composes_across_controller_routes_and_main` exercises the same
 //! `compose_router_mount_provides` pass through the OTHER vocabulary (Express, not Hono) — the
@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use zzop_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
 
 /// A self-cleaning temp directory (std-only mkdtemp equivalent — same pattern as `pack_sql.rs`/
-/// `pack_fullstack.rs`).
+/// `pack_egress.rs`).
 struct TempDir(PathBuf);
 
 impl TempDir {

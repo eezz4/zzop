@@ -1,0 +1,339 @@
+{
+  "id": "reliability",
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "async-route-no-catch",
+      "severity": "warning",
+      "message": "Async Express/router handler with no surrounding try/catch, `next(err)`, or `.catch()` — on Express 4, an unhandled rejection in an async handler crashes or hangs the process; Express 5 forwards async rejections to error-handling middleware automatically, so there it's a style/consistency concern rather than a crash bug. Wrap in try/catch and call `next(err)`, or attach `.catch(next)`. A route wrapped by error-handling middleware like `express-async-handler` or `express-async-errors` is also safe, but that wrapping isn't visible in the handler body this rule scans — the rule's biggest real-world false-positive source. Suppress a vetted case with `// async-route-no-catch-ok`.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\b(app|router)\\.(get|post|put|patch|delete|all|use)\\s*\\(.*\\basync\\b", "label": "async-route" }
+        ],
+        "trigger": "async-route",
+        "absent": [
+          { "pattern": "\\btry\\s*\\{", "label": "try-guard" },
+          { "pattern": "\\bnext\\s*\\(", "label": "next-err" },
+          { "pattern": "\\.catch\\s*\\(", "label": "catch-call" }
+        ]
+      }
+    },
+    {
+      "id": "sync-fs-in-handler",
+      "severity": "warning",
+      "message": "Synchronous fs/child_process call (`readFileSync`, `execSync`, etc.) alongside request-handler evidence (a `req.`/`request.` member access, or a response-API call like `res.status(...)`/`res.send(...)` — deliberately NOT `res.json(`/`res.text(`, which a fetch `Response` also has, so a handler whose only response evidence is a bare `res.json(x)` is accepted as a miss rather than risking fetch-response false positives) — a blocking call on the request path stalls Node's event loop for every concurrent request. Use the async `fs.promises`/`child_process` APIs, or move CPU-heavy work to a worker thread. Suppress a vetted case with `// sync-fs-in-handler-ok`.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|scripts?|tools|bin)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\b(readFileSync|writeFileSync|appendFileSync|execSync|spawnSync|readdirSync|statSync)\\s*\\(", "label": "sync-call" },
+          { "pattern": "\\breq\\.[a-zA-Z_$]|\\brequest\\.(?:params|query|body|headers|method)\\b|\\bres\\.(?:status|send|setHeader|sendFile|redirect|render|writeHead|end)\\s*\\(|\\breply\\.[a-zA-Z_$][\\w$]*\\s*\\(|\\bctx\\.(?:req|request|params|query|body|status|throw|set)\\b", "label": "handler-context" }
+        ],
+        "trigger": "sync-call"
+      }
+    },
+    {
+      "id": "await-in-map",
+      "severity": "warning",
+      "message": "`.map(async ...)` used without wrapping the result in `Promise.all`/`Promise.allSettled` — `.map` returns pending Promises, so a rejection becomes unhandled and any ordering/completion guarantee is lost. Wrap the call in `Promise.all(...)` (or `Promise.allSettled(...)` for expected partial failures). Suppress a vetted case with `// await-in-map-ok`.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\.map\\s*\\(\\s*async\\b", "label": "map-async" }
+        ],
+        "trigger": "map-async",
+        "absent": [
+          { "pattern": "Promise\\.(all|allSettled)\\s*\\(", "label": "promise-all" }
+        ]
+      }
+    },
+    {
+      "id": "env-nonnull-assert",
+      "severity": "warning",
+      "message": "`process.env.X!` non-null assertion — bypasses the null check and defers the crash from startup to first use, wherever that happens to be. Validate required env vars once at startup (a config module that throws if any are missing) and reference the validated value elsewhere. Suppress a vetted case with `// env-nonnull-assert-ok`.",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.tsx?$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "skip_comment_lines": true,
+        "line_pattern": "process\\.env\\.[A-Za-z0-9_]+!([^=]|$)"
+      }
+    },
+    {
+      "id": "debug-true-committed",
+      "severity": "warning",
+      "message": "Debug flag or disabled TLS verification (`debug: true`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `rejectUnauthorized: false`) committed to source — ships a dev backdoor or TLS bypass to production if deployed unchanged. Remove the flag or gate it behind an environment check (e.g. `NODE_ENV !== 'production'`). Suppress a vetted line with `// debug-true-committed-ok`.",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "skip_comment_lines": true,
+        "any": [
+          { "pattern": "\\bdebug\\s*:\\s*true\\b", "label": "debug-flag" },
+          { "pattern": "NODE_TLS_REJECT_UNAUTHORIZED\\s*[=:]\\s*['\"]?0", "label": "tls-verify-off" },
+          { "pattern": "rejectUnauthorized\\s*:\\s*false", "label": "reject-unauthorized" }
+        ]
+      }
+    },
+    {
+      "id": "promise-all-writes",
+      "severity": "warning",
+      "message": "`Promise.all(...)` used with DB write calls on a DB-client-shaped receiver (`prisma`/`db`/`tx`/`client`/`repo`) — non-atomic: some writes land and others don't when one rejects, with no rollback for what committed. Wrap the writes in a transaction, or use `Promise.allSettled(...)` with compensation logic. Co-occurrence heuristic, not proof — it flags a `Promise.all(...)` and a write call in the same function, not that the writes are actually inside the `Promise.all(...)` array; confirm before acting. Suppress a vetted case with `// promise-all-writes-ok`.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "Promise\\.all\\s*\\(", "label": "pall" },
+          { "pattern": "\\b(?:prisma|db|tx|client|repo(?:sitory|sitories)?s?)\\.(?:\\w+\\.)?(?:create|update|delete|upsert)(?:Many)?\\s*\\(", "label": "write" }
+        ],
+        "trigger": "pall"
+      }
+    },
+    {
+      "id": "json-parse-no-try",
+      "severity": "warning",
+      "message": "`JSON.parse(...)` called directly on apparent external input (`req`/`body`/`params`/`query`/`payload`/`event`) without a surrounding `try` — malformed input throws, turning a bad request into a 500 or a process crash. Wrap the parse in try/catch and return a proper 4xx on failure. Suppress a vetted case with `// json-parse-no-try-ok`.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "JSON\\.parse\\s*\\(\\s*(?:await\\s+)?(?:req|request|body|params|query|payload|message|event)\\s*(?:[.,)]|\\?\\.)", "label": "parse" }
+        ],
+        "trigger": "parse",
+        "absent": [
+          { "pattern": "\\btry\\s*\\{", "label": "try-guard" }
+        ]
+      }
+    },
+    {
+      "id": "fetch-no-timeout",
+      "severity": "warning",
+      "message": "Outbound HTTP call (`fetch`/`axios`/`got`) in server/worker code with no timeout or `AbortController` visible in the same function — `fetch` has no default timeout, so a hung upstream hangs the request and can exhaust the connection pool. Pass an explicit timeout (e.g. `AbortSignal.timeout(...)`) or wire up an `AbortController`. A timeout set on a shared client instance in another file (e.g. `axios.create({ timeout })` in a helper module) isn't visible to this per-function check — this is the rule's biggest real-world false-positive vector. Suppress a vetted case with `// fetch-no-timeout-ok`.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "skip_comment_lines": true,
+        "require_file": "(?i)(from\\s+['\"](express|fastify|koa|hono|@nestjs)|require\\(\\s*['\"](express|fastify|koa|hono)|createServer\\s*\\(|\\.listen\\s*\\(\\s*[0-9]|itty-router|\\bD1Database\\b|\\bKVNamespace\\b|\\bExecutionContext\\b|\\.prepare\\s*\\(|export\\s+default\\s*\\{)",
+        "patterns": [
+          { "pattern": "\\b(fetch|axios|got)\\s*[.(]", "label": "egress" }
+        ],
+        "trigger": "egress",
+        "absent": [
+          { "pattern": "(?i)timeout", "label": "timeout" },
+          { "pattern": "Abort(Controller|Signal)|signal\\s*:", "label": "abort" }
+        ]
+      }
+    },
+    {
+      "id": "process-exit-in-lib",
+      "severity": "warning",
+      "message": "`process.exit(...)` called inside a function — skips pending I/O flushes and cleanup handlers, killing the entire process, not just the current request. Throw (or reject) instead and let a top-level handler decide; legitimate only in a CLI entrypoint or a signal-handling module. Suppress a vetted case with `// process-exit-in-lib-ok`.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)(^|/)(scripts?|tools|bin)/",
+        "skip_comment_lines": true,
+        "strip_string_literals": true,
+        "require_file_absent": ["process\\.on\\s*\\(\\s*['\"]SIG"],
+        "patterns": [
+          { "pattern": "process\\.exit\\s*\\(", "label": "exit" }
+        ],
+        "trigger": "exit"
+      }
+    },
+    {
+      "id": "body-limit-missing",
+      "severity": "info",
+      "message": "Body parser (`express.json`/`urlencoded`, `bodyParser.json`/`urlencoded`) configured without an explicit `limit` — the code relies on the implicit 100kb default, which is too small for some legitimate endpoints and simply unexamined for the rest. Set an explicit `limit` (e.g. `{ limit: '1mb' }`) sized to the endpoint's needs. Suppress a vetted case with `// body-limit-missing-ok`.",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "skip_comment_lines": true,
+        "line_pattern": "(express|bodyParser)\\.(json|urlencoded)\\s*\\(",
+        "exclude_pattern": "limit\\s*:"
+      }
+    },
+    {
+      "id": "console-in-be",
+      "severity": "info",
+      "message": "`console.*` call in backend-path source (`api/`, `server/`, `backend/`, `be/`, `routes/`, `controllers/`, `services/`) — console writes are synchronous and unstructured. Use the project's structured logger instead so output is queryable, non-blocking, and carries request context. Suppress a vetted case with `// console-in-be-ok`.",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)(^|/)(api|server|backend|be|routes|controllers|services)/.*\\.(ts|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "skip_comment_lines": true,
+        "line_pattern": "console\\.(log|error|warn|info)\\s*\\("
+      }
+    },
+    {
+      "id": "interval-no-clear",
+      "severity": "warning",
+      "message": "`setInterval(...)` with no matching `clearInterval(...)` anywhere in this file — a leaked timer keeps the process (or page) alive and re-fires forever, since nothing cancels it. Store the return value in a handle and call `clearInterval(handle)` during teardown/cleanup. Suppress a vetted case with `// interval-no-clear-ok`.",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "skip_comment_lines": true,
+        "line_pattern": "\\bsetInterval\\s*\\(",
+        "require_file_absent": ["\\bclearInterval\\s*\\("]
+      }
+    },
+    {
+      "id": "env-outside-config",
+      "severity": "info",
+      "message": "`process.env.X` accessed outside a config module — scatters env parsing/validation across the codebase, making it hard to know what env vars the app depends on or validate them at startup. Centralize env reads in one config module and import the validated value elsewhere. Suppress a vetted case with `// env-outside-config-ok`.",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)(^|/)(config|env|constants?)[^/]*\\.(ts|js|mjs|cjs)$|(^|/)(config|settings)/|\\.config\\.(ts|tsx|js|mjs|cjs)$|\\.conf\\.(ts|tsx|js|mjs|cjs)$|(^|/)\\.[A-Za-z0-9_-]*rc\\.(ts|tsx|js|mjs|cjs)$|(^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)scripts?/",
+        "skip_comment_lines": true,
+        "line_pattern": "\\bprocess\\.env\\.[A-Za-z0-9_]+"
+      }
+    },
+    {
+      "id": "stream-open-no-close-in-loop",
+      "severity": "warning",
+      "message": "A file/stream handle (`fs.createReadStream(`/`fs.createWriteStream(`/`fs.open(`/`fs.openSync(`) is opened structurally inside a loop body — verified against the parser's projected loop spans (the open call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — and the enclosing function never closes it (`.close(`/`.destroy(`/`pipeline(`/`finished(` anywhere in the function). Under a fan-out, the file descriptors accumulate across iterations and the process eventually hits `EMFILE: too many open files`. Note honestly: the close-absence check is whole-function scoped and matches `.close(`/`.destroy(`/`pipeline(`/`finished(` on ANY object — so a close inside a sibling branch or a callee is invisible here and the finding still fires (false positive), while an unrelated `res.close()`/`conn.destroy()` elsewhere in the function vetoes a genuine stream leak (false negative); verify before refactoring. Close the handle in a `finally` block, or use `pipeline(...)`, which closes both ends automatically. Suppress a vetted case with `// stream-open-no-close-in-loop-ok`.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "require_file": "(?i)createReadStream|createWriteStream|\\bfs\\.open",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\b(?:fs\\.)?(?:createReadStream|createWriteStream)\\s*\\(|\\bfs\\.(?:open|openSync)\\s*\\(", "label": "stream-open" }
+        ],
+        "trigger": "stream-open",
+        "trigger_in_loop": true,
+        "absent": [
+          { "pattern": "\\.(?:close|destroy)\\s*\\(|\\bpipeline\\s*\\(|\\bfinished\\s*\\(", "label": "closed" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "listener-subscribe-in-loop",
+      "severity": "warning",
+      "message": "An EventEmitter listener (`.on('event',…)`/`.once(`/`.addListener(`/`.prependListener(`, anchored on a string event-name argument) is registered structurally inside a loop body — verified against the parser's projected loop spans (the subscribe call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — with no matching removal (`.off(`/`.removeListener(`/`.removeAllListeners(`) anywhere in the enclosing function. To avoid firing on same-shaped non-EventEmitter `.on('...')` calls (a frontend DOM/jQuery `$(el).on('click', …)`, a knex join builder, a D3 selection), the rule only scans files that use a Node event-emitter/server library (an `events`/`net`/`http`/`ws`/`socket.io`/... import, or a `.setMaxListeners(` call). This is the event-listener sibling of `interval-no-clear` (which covers `setInterval`): listeners pile up on every iteration, Node warns `MaxListenersExceeded`, and each event then fires the handler N times (duplicate side effects, unbounded memory growth). Note honestly: the removal-absence check is whole-function scoped — a teardown living in a different function (or an unrelated `.off(` on another object) either misses a real fix or vetoes a real leak; verify before refactoring. Register the listener once outside the loop, or collect the listeners and remove them during teardown. Suppress a vetted case with `// listener-subscribe-in-loop-ok`.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "require_file": "(?i)\\bEventEmitter\\b|\\.setMaxListeners\\s*\\(|\\bfrom\\s+['\"](?:events|node:events|net|http|https|http2|stream|ws|socket\\.io|ioredis|amqplib|kafkajs|mqtt)['\"]|\\brequire\\s*\\(\\s*['\"](?:events|net|http|https|http2|stream|ws|socket\\.io|ioredis|amqplib|kafkajs|mqtt)['\"]",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\.(?:on|once|addListener|prependListener)\\s*\\(\\s*['\"]", "label": "subscribe" }
+        ],
+        "trigger": "subscribe",
+        "trigger_in_loop": true,
+        "absent": [
+          { "pattern": "\\.(?:off|removeListener|removeAllListeners)\\s*\\(", "label": "removed" }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "await-inside-promise-all-array",
+      "severity": "warning",
+      "message": "`await` used directly inside a `Promise.all(...)`/`Promise.allSettled(...)`/`Promise.race(...)` array literal — each awaited element resolves before the next element of the array is even evaluated, so the calls run one after another instead of concurrently, silently defeating the whole point of `Promise.all`. This is syntax-proven where it fires: an `await` textually between the array's `[` and `]` on the SAME line always serializes that element against the next (the line-scan only sees the single-line form — a multi-line array with each `await` on its own line is not flagged). Move the `await` out — build the array of un-awaited promises first, then await the combinator once (e.g. `Promise.all([getA(), getB()])`, or `await Promise.all(items.map((i) => getA(i)))`). Suppress a vetted case with `// await-inside-promise-all-array-ok`.",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "strip_string_literals": true,
+        "skip_comment_lines": true,
+        "line_pattern": "Promise\\.(?:all|allSettled|race)\\s*\\(\\s*\\[[^\\]]*\\bawait\\b"
+      }
+    },
+    {
+      "id": "emitter-async-listener",
+      "severity": "warning",
+      "message": "An `async` callback registered as an EventEmitter listener (`.on`/`.once`/`.addListener`/`.prependListener`) — the emitter fires it and discards the returned promise, so a rejection inside the handler becomes an unhandled promise rejection, which crashes the process on Node 15+ (and is a silent swallow on older Node). The rule only scans files that use a Node event-emitter/server library (an `events`/`net`/`http`/`ws`/... import, or a `.setMaxListeners(` call), so a frontend DOM `el.on('click', async …)` is not flagged. Wrap the handler body in try/catch and log/handle the error there, or wrap the callback so its promise is observed (e.g. a small `catchAsync(fn)` helper). Suppress a vetted case with `// emitter-async-listener-ok`.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "require_file": "(?i)\\bEventEmitter\\b|\\.setMaxListeners\\s*\\(|\\bfrom\\s+['\"](?:events|node:events|net|http|https|http2|stream|ws|socket\\.io|ioredis|amqplib|kafkajs|mqtt)['\"]|\\brequire\\s*\\(\\s*['\"](?:events|net|http|https|http2|stream|ws|socket\\.io|ioredis|amqplib|kafkajs|mqtt)['\"]",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\.(?:on|once|addListener|prependListener)\\s*\\(\\s*['\"][^'\"]+['\"]\\s*,\\s*async\\b", "label": "async-listener" }
+        ],
+        "trigger": "async-listener"
+      }
+    },
+    {
+      "id": "promise-race-resource-leak",
+      "severity": "info",
+      "message": "`Promise.race([...])` with no `AbortController`/`AbortSignal`/`clearTimeout`/`.abort()` visible in the same function — the operation(s) that lose the race are never cancelled, so their socket/timer/handle stays alive after the race settles, and a later rejection from a loser becomes an unhandled rejection. Wire an `AbortController` (or equivalent cancellation) through to every raced operation and abort the losers once the race settles. Heuristic, not proof: some raced operations (e.g. a plain in-memory timer promise) hold no cancellable resource, so this can over-flag. Suppress a vetted case with `// promise-race-resource-leak-ok`.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "Promise\\.race\\s*\\(", "label": "race" }
+        ],
+        "trigger": "race",
+        "absent": [
+          { "pattern": "AbortController|AbortSignal|clearTimeout|\\.abort\\s*\\(|signal\\s*:", "label": "cancels" }
+        ]
+      }
+    },
+    {
+      "id": "fs-check-then-use",
+      "severity": "warning",
+      "message": "A filesystem existence/permission check (`fs.existsSync`/`fs.access`/`fs.stat`/...) and a create/write call (`fs.writeFile`/`fs.open`/`fs.rename`/...) found in the same function, with no exclusive-create flag (`wx`/`O_EXCL`) visible anywhere in it — CWE-367 TOCTOU: between the check and the use, the path can be swapped out from under it (e.g. via a symlink) or another writer can win the race, so the check is stale by the time the write happens. This is a co-occurrence check, not proof: it does not confirm the check and the write target the same path, or that the check actually runs before the write in the control flow. Prefer opening with an exclusive-create flag (`{ flag: 'wx' }` in Node, `O_EXCL` at the syscall level), which fails atomically if the path already exists instead of trusting a separate check. Suppress a vetted case with `// fs-check-then-use-ok`.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "require_file": "(?i)\\bfs\\b|require\\s*\\(\\s*['\"]fs['\"]|from\\s+['\"](?:fs|node:fs)['\"]",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\bfs(?:Promises)?\\.(?:existsSync|exists|access|accessSync|stat|statSync)\\s*\\(|\\bexistsSync\\s*\\(", "label": "check" },
+          { "pattern": "\\bfs(?:Promises)?\\.(?:open|openSync|writeFile\\w*|appendFile\\w*|unlink\\w*|rename\\w*|createWriteStream)\\s*\\(", "label": "use" }
+        ],
+        "trigger": "use",
+        "absent": [
+          { "pattern": "['\"]wx['\"]|O_EXCL|flag\\s*:\\s*['\"]wx", "label": "exclusive" }
+        ]
+      }
+    },
+    {
+      "id": "fs-in-loop-serial",
+      "severity": "warning",
+      "message": "An `await`ed Node `fs`/`fs.promises` call (`readFile`/`writeFile`/`appendFile`/`unlink`/`rename`/`copyFile`/`mkdir`/`rm`/`readdir`/`stat`/`access`/... — deliberately excluding `open`/`createReadStream`/`createWriteStream`, which `stream-open-no-close-in-loop` already covers for the handle-leak angle) executes structurally inside a loop body — verified against the parser's projected loop spans (the call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — with no `Promise.all`/`Promise.allSettled` anywhere in the enclosing function. Each iteration's disk I/O waits for the previous one to finish before starting, serializing work the filesystem would otherwise run concurrently; over many files this adds up to iteration-count times the single-call latency. This generalizes `await-in-map` (which only catches the `.map(async ...)` callback shape) to the ordinary `for`/`for-of`/`for-in`/`while` loop forms, scoped to `fs` I/O specifically — database calls in a loop are `sql/nplus1`'s territory and outbound network calls are `perf/api-in-loop`'s, both already covering their own receivers, so this rule only anchors on an `fs`/`fsPromises`/`fsp`/`fs.promises`-shaped receiver to stay out of their way. Gather the paths up front and run the calls concurrently with `Promise.all(...)` (bounded by a concurrency limiter if the fan-out is large), or use a single directory-level/batch operation where the API allows it. Suppress a vetted case (e.g. deliberately sequential writes to preserve on-disk ordering) with `// fs-in-loop-serial-ok`.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "require_file": "(?i)\\bfs\\b|require\\s*\\(\\s*['\"]fs['\"]|from\\s+['\"](?:fs|node:fs)['\"]",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "\\bawait\\s+(?:[\\w$]+\\.)*fs(?:Promises|p)?(?:\\.promises)?\\.(?:readFile|writeFile|appendFile|unlink|rename|copyFile|mkdir|rmdir|rm|readdir|stat|lstat|access|chmod|chown|truncate|realpath|symlink|link)\\w*\\s*\\(", "label": "fs-call" }
+        ],
+        "trigger": "fs-call",
+        "trigger_in_loop": true,
+        "absent": [
+          { "pattern": "Promise\\.(all|allSettled)\\s*\\(", "label": "promise-all" }
+        ],
+        "snippet_max": 160
+      }
+    }
+  ]
+}

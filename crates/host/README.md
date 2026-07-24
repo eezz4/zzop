@@ -6,7 +6,7 @@ stdio for MCP clients, package `packages/mcp`). Both are thin entries over the s
 crate (this directory) and the same analysis path. Full reference:
 [docs/modules/mcp.md](../../docs/modules/mcp.md).
 
-Prebuilt per-platform binaries (`zzop-<platform>[.exe]` + `zzop-mcp-<platform>[.exe]`, 5 platforms each)
+Prebuilt per-platform binaries (`zzop-cli-<platform>[.exe]` + `zzop-mcp-<platform>[.exe]`, 5 platforms each)
 are attached to [GitHub Releases](https://github.com/eezz4/zzop/releases); building from a source checkout
 (below) remains an option.
 
@@ -30,6 +30,7 @@ zzop cross --config ./zzop.config.jsonc
 zzop endpoint users ./frontend ./backend
 zzop contract                 # list the embedded authoring contracts
 zzop contract config-surface  # print one to stdout (raw bytes, pipe-safe)
+zzop explain sql/nplus1       # print one bundled DSL rule's compiled-in data (id/pack/severity/message/…)
 ```
 
 Prints pretty-printed JSON to stdout; a failure prints to stderr and exits non-zero.
@@ -56,22 +57,50 @@ has a `zzop.config.jsonc`, it's auto-discovered and honored; otherwise zero-conf
 `zzop-mcp` is also listed on the official MCP registry (`registry.modelcontextprotocol.io`) as
 `io.github.eezz4/zzop` (see [`server.json`](../../server.json), published by CI on every release) —
 discoverable there by MCP clients/subregistries with no registration step of your own; it points at the
-same `.mcpb` bundles above, no separate install path.
+same `.mcpb` bundles above, no separate install path. In the committed `server.json` the versions are
+release-gated to match the workspace version, but each entry's `fileSha256` is a placeholder: CI
+recomputes it (and re-stamps the version and download URL) from the actual uploaded assets at release
+time, since no hash of a not-yet-built asset can be committed honestly.
 
 ## Install as a Claude Code plugin
 
 The repo doubles as a self-hosted plugin marketplace (`.claude-plugin/marketplace.json` +
 `.claude-plugin/plugin.json`'s `mcpServers` field declare the MCP server):
 
-1. Put the binary on `PATH` **under the name `zzop-mcp`** — `plugin.json`'s `mcpServers` invokes exactly
-   that command. Prebuilt assets on [GitHub Releases](https://github.com/eezz4/zzop/releases) are
-   named `zzop-mcp-<platform>[.exe]` (5 platforms, self-contained static binary, no Node needed): download
-   yours and rename/link it to `zzop-mcp` (`zzop-mcp.exe` on Windows). Building from source (see
-   Build above) needs the same rename of the `target/release` artifact.
-2. In Claude Code: `/plugin marketplace add eezz4/zzop`, then `/plugin install zzop@zzop`.
+1. `/plugin marketplace add eezz4/zzop`
+2. `/plugin install zzop@zzop` — note these are two separate steps; adding the marketplace only puts
+   the plugin in the catalog.
+3. Start a new session. A `SessionStart` hook (`.claude-plugin/hooks/bootstrap.sh`) downloads the
+   `zzop-mcp` binary for your platform from [GitHub
+   Releases](https://github.com/eezz4/zzop/releases) into the plugin's own data directory, and
+   `plugin.json`'s `mcpServers` runs it from there. Nothing to place on `PATH`.
 
-`plugin.json`'s `mcpServers` invokes `zzop-mcp mcp` from `PATH` — deliberately pre-installed rather than
-fetched-on-first-run, so the plugin stays runtime-free and you always know exactly which binary runs.
+**Updates are reported, never applied.** Once a binary is installed the hook only tells you when a
+newer release exists — a new analyzer version changes findings and invalidates the analysis cache, so
+when to take it is your call. To take it, delete the binary the hook names and start a new session.
+
+**Windows: the hook needs a POSIX shell.** Claude Code documents Git Bash for shell-form hooks and
+falls back to PowerShell when it is absent — and this script cannot run under PowerShell. The script
+itself is not Git-Bash-specific (it recognizes MSYS/MinGW/Cygwin alike), but whether Claude Code
+discovers some other bash is not documented, so treat Git for Windows as the supported path. It
+usually costs nothing: a marketplace IS a git clone, so you already have git, and on Windows that
+overwhelmingly means Git for Windows, which installs `bash.exe` next to `git.exe`.
+
+Where it does fail, you get one `hook error` line per session and no binary. It cannot block your
+session, but it will not stop nagging either. Two ways out:
+
+- Install [Git for Windows](https://gitforwindows.org/) (this is the one-step fix), **or**
+- Disable this plugin and register the server yourself. Download `zzop-mcp-win32-x64-msvc.exe` from
+  [Releases](https://github.com/eezz4/zzop/releases) and point a project `.mcp.json` at it:
+  `{"mcpServers":{"zzop":{"command":"C:\\path\\to\\zzop-mcp.exe","args":["mcp"]}}}`. Placing the
+  binary while leaving the plugin enabled does NOT silence the hook — the hook is what fails, not
+  the download.
+
+There is no PowerShell twin of the hook, deliberately. A second hook entry would run on macOS and
+Linux too (`shell: "powershell"` is ignored there, so it executes under bash), putting a permanent
+error line in every Unix session to serve a narrow Windows corner; the hook schema has no per-OS
+condition, and Windows PowerShell 5.1 has no `||` to short-circuit a polyglot one-liner. The Node
+wrapper that would close the gap outright is the exact dependency zzop is built to not need.
 
 ## Tools
 

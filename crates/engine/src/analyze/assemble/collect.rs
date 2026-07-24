@@ -25,11 +25,12 @@ pub(super) use types::Collected;
 /// manifest/index scans below ([`crate::pipeline::scan_rust_workspace`] / `scan_go_modules` /
 /// `scan_java_index` / `scan_csharp_index`) — see each resolver's own doc (`super::helpers::
 /// resolve_rust_import` / `resolve_go_import_package_dir` / `resolve_java_import` /
-/// `resolve_csharp_import`).
+/// `resolve_csharp_import`). `overlay_covered_paths` is described at its single use below.
 pub(super) fn collect(
     root: &std::path::Path,
     artifacts: Vec<FileArtifact>,
     config: &EngineConfig,
+    overlay_covered_paths: &HashSet<String>,
 ) -> Collected {
     let file_count = artifacts.len();
     // Built up front (before the artifact-consuming loop below, which needs `rel` strings the loop's own
@@ -85,34 +86,20 @@ pub(super) fn collect(
         std::collections::BTreeMap::new();
     // `.vue`/`.svelte` SFC pre-scan substrate — see `Collected::sfc_rels`'s doc.
     let mut sfc_rels: Vec<String> = Vec::new();
-    // The "bring an adapter" disclosure's overlay-exclusion set: every path any `config.adapter_overlays`
-    // entry declares a `FileProjection` for THAT ITSELF CARRIES A REAL FACT (`envelope::
-    // overlay_file_carries_facts` — non-empty io/symbols/imports/fragments/attributes, or `is_entry`) —
-    // built once, straight from config (same source the `dead-candidates` block in `super::rules` reads
-    // for its own `is_entry` union, not re-validated here either), so a file an adapter overlay already
-    // covers with REAL data is never told it "has no native parser": the overlay IS the parser for it, and
-    // both `apply_adapter_overlays` merge branches (onto an existing native artifact, or a brand-new
-    // synthetic one) land that same `rel` in `artifacts` either way, so checking `config` directly here
-    // tracks artifact provenance for every VALID overlay.
+    // `overlay_covered_paths` — the "bring an adapter" disclosure's exclusion set, handed down from
+    // `envelope::apply_adapter_overlays`' own return value (see its doc): the paths for which an overlay
+    // that PASSED validation actually merged at least one real extracted fact. A file an adapter really
+    // parsed is never told it "has no native parser" (the overlay IS its parser); every other file is,
+    // including one behind an overlay the apply step rejected outright (`validate_envelope` failure —
+    // nothing of it merged, so nothing about it is covered) and one whose projection carried no facts at
+    // all (G8b). Both of those were previously excluded here — read straight from `config` — which
+    // silenced the disclosure for files nothing had actually parsed: the exact misleading-diagnosis shape
+    // `analyze::diagnostics::capability` exists to prevent. Sourcing the set from the apply result instead
+    // of from config is what makes "declared coverage" and "real coverage" impossible to confuse.
     //
-    // Was previously ANY declared path, regardless of whether its projection carried any facts at all — a
-    // bad/empty adapter (every entry's `io`/`symbols`/`imports`/fragments/`attributes` empty, `is_entry:
-    // false`) still counted as "coverage" and thereby SUPPRESSED this very disclosure for files it does
-    // nothing for. Narrowed to fact-carrying paths so a zero-fact "coverage" claim no longer silences the
-    // disclosure (`apply_adapter_overlays` separately warns about the zero-fact overlay itself). Still not
-    // exact for an overlay `apply_adapter_overlays` itself rejects (fails `validate_envelope`, e.g. a bad
-    // `format` string) — that overlay's fact-carrying declared paths are excluded here even though nothing
-    // actually merged, so a file behind a rejected overlay stays silently un-warned rather than reported.
-    // Accepted as the same trade-off the `dead-candidates` `is_entry` union in `super::rules` already
-    // makes (also read straight from `config.adapter_overlays`, unvalidated) — not a new gap this change
-    // introduces.
-    let overlay_covered_paths: HashSet<&str> = config
-        .adapter_overlays
-        .iter()
-        .flat_map(|overlay| overlay.files.iter())
-        .filter(|file| crate::envelope::overlay_file_carries_facts(file))
-        .map(|file| file.path.as_str())
-        .collect();
+    // NOTE the `dead-candidates` `is_entry` union in `super::rules` still reads `config.adapter_overlays`
+    // directly and so still honors a rejected overlay's `is_entry` declarations — a separate (opposite-
+    // direction, non-disclosure) gap, untouched here.
 
     for artifact in artifacts {
         loc_by_path.insert(artifact.rel.clone(), artifact.loc);
@@ -141,7 +128,7 @@ pub(super) fn collect(
         record_unparsed_extension(
             &artifact.rel,
             dispatch_lang,
-            &overlay_covered_paths,
+            overlay_covered_paths,
             &mut unparsed_extensions,
         );
         // `.vue`/`.svelte` SFC pre-scan substrate: only dispatch-`None` files (a real structural-parser

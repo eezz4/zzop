@@ -72,7 +72,7 @@ fn main() {
         .findings
         .iter()
         .filter(|f| {
-            f.rule_id == "be-reliability/env-outside-config" && f.file.contains("constants.ts")
+            f.rule_id == "reliability/env-outside-config" && f.file.contains("constants.ts")
         })
         .count();
     println!("--- env-outside-config findings in any constants.ts file: {constants_env} ---");

@@ -1,21 +1,20 @@
-//! `assemble` — the tree-wide assembly orchestrator, split into sequential phases (each phase is a
-//! `mod` below, in the order it runs): [`collect`] the fused per-file pass's own output into
-//! per-tree substrates, [`provides`] compose whole-tree PROVIDE/CONSUME facts from those substrates,
-//! [`dep_graph`] build the dependency graph + run git-history-dependent collection, [`rules`] run every
-//! whole-graph/call-graph-BFS native analysis (plus its own whole-tree `Matcher::IoScan` DSL sub-phase),
-//! [`warnings`] run the framework-silence coverage self-report, and [`metrics`] compute
-//! git-history-dependent scores/health/recommendations/critical/seams. This file is the glue tying every
-//! phase's output into the final `AnalyzeOutput` — no composition/analysis logic of its own beyond wiring.
+//! `assemble` — the tree-wide assembly orchestrator, split into sequential phases (each a `mod` below,
+//! in the order it runs): [`collect`] the fused per-file pass's output into per-tree substrates,
+//! [`provides`] compose whole-tree PROVIDE/CONSUME facts from them, [`dep_graph`] build the dependency
+//! graph + run git-history-dependent collection, [`rules`] run every whole-graph/call-graph-BFS native
+//! analysis (plus its own whole-tree `Matcher::IoScan` DSL sub-phase), [`warnings`] run the
+//! framework-silence coverage self-report, [`metrics`] compute git-history-dependent
+//! scores/health/recommendations/critical/seams. Glue only — no composition or analysis logic of its
+//! own beyond wiring each phase's output into the final `AnalyzeOutput`.
 
 use zzop_core::{merge_findings, CommonIr, IoFacts, MinimalIr};
 
 use crate::analyze::diagnostics::{
     compute_dsl_scope, minified_files_warning, no_applicable_dsl_rule_warning,
-    rule_overrides_applied, run_diagnostics, unmatched_global_exclude_warnings,
-    unmatched_suppression_warnings, unparsed_extension_warning,
+    rule_overrides_applied, run_diagnostics, uncompilable_rule_warnings,
+    unmatched_global_exclude_warnings, unmatched_suppression_warnings, unparsed_extension_warning,
 };
-use crate::pipeline::FileArtifact;
-use crate::{AnalyzeOutput, EngineConfig};
+use crate::{pipeline::FileArtifact, AnalyzeOutput, EngineConfig};
 
 mod collect;
 mod dep_graph;
@@ -28,15 +27,16 @@ mod sfc;
 mod warnings;
 
 /// Consumes the fused pass's per-file artifacts and produces the final `AnalyzeOutput`. `artifacts` must
-/// already be sorted by `rel` (an invariant `pipeline::run_file_pass` upholds), which is what makes
-/// `ir.ir.symbols` deterministic. `root` is only used for the optional git collection (and the phases
-/// below that read from disk: Java project pass, file-convention routes, framework-silence probes).
+/// already be sorted by `rel` (`pipeline::run_file_pass`'s invariant), which is what makes `ir.ir.symbols`
+/// deterministic. `root` is only used for the optional git collection and the phases below that read from
+/// disk (Java project pass, file-convention routes, framework-silence probes). `overlay_covered_paths` is
+/// `envelope::apply_adapter_overlays`' own return value — see [`collect`]'s own use of it.
 pub(crate) fn assemble(
     root: &std::path::Path,
     artifacts: Vec<FileArtifact>,
     config: &EngineConfig,
+    overlay_covered_paths: &std::collections::HashSet<String>,
 ) -> AnalyzeOutput {
-    let collected = collect::collect(root, artifacts, config);
     let collect::Collected {
         file_count,
         per_file_findings,
@@ -72,7 +72,7 @@ pub(crate) fn assemble(
         java_index,
         csharp_index,
         sfc_rels,
-    } = collected;
+    } = collect::collect(root, artifacts, config, overlay_covered_paths);
 
     let sfc_import_pairs = sfc::collect_sfc_import_pairs(root, &sfc_rels);
     let provides::ProvidesResult {
@@ -170,12 +170,12 @@ pub(crate) fn assemble(
     let rels: Vec<&str> = loc_by_path.keys().map(String::as_str).collect();
     warnings.extend(unmatched_suppression_warnings(config, &rels));
     warnings.extend(unmatched_global_exclude_warnings(config, &rels));
-    // One census, two consumers: the zero-applicability warning below and `packs_loaded`'s per-pack
-    // `files_in_scope` count (see `compute_dsl_scope`'s doc for the cost model).
+    // One census, two consumers: the warning below and `packs_loaded`'s `files_in_scope` count.
     let dsl_scope = compute_dsl_scope(&config.packs, &rels);
     if let Some(w) = no_applicable_dsl_rule_warning(&config.packs, &dsl_scope) {
         warnings.push(w);
     }
+    warnings.extend(uncompilable_rule_warnings(&config.packs)); // dead rule != quiet rule
     helpers::sort_io_provides(&mut io_provides);
     helpers::sort_io_consumes(&mut io_consumes);
 

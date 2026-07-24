@@ -28,6 +28,33 @@ version bump to `main` auto-tags and releases both binaries (the `meta` job in
 [`.github/workflows/prebuild.yml`](.github/workflows/prebuild.yml)) — see [VERSIONING.md](VERSIONING.md)
 for details.
 
+### Pointing an MCP client at your local build (dogfooding)
+
+The published install paths (the Claude Code plugin, the `.mcpb` Desktop bundle) all resolve a
+RELEASED binary — none of them will ever pick up the one you just built. To test your working tree,
+point the client straight at the build output with an absolute path. In the repo you want to analyze,
+create `.mcp.json`:
+
+```jsonc
+{
+  "mcpServers": {
+    "zzop": {
+      "command": "/absolute/path/to/zzop/target/release/zzop-mcp",  // .exe on Windows
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Then restart the client (MCP servers are spawned once, at session start). On startup `zzop-mcp` writes
+its own version to stderr, which the client shows in its server log — check that line first whenever a
+result looks like it came from a different build than you expect.
+
+Note the plugin route (`/plugin marketplace add eezz4/zzop` then `/plugin install`) installs a
+RELEASED binary into the plugin's data directory via its `SessionStart` hook — it will never pick up
+your working tree, and it will not overwrite a binary that is already there. Use the `.mcp.json`
+above for local work; the two live side by side.
+
 ## CI guards
 
 A PR must pass every job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml):

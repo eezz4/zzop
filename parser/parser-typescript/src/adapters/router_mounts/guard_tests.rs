@@ -2,7 +2,9 @@
 //! `extract_router_mount_fragments`'s Express `.use`/route-level middle-arg classification
 //! (express-middleware-v1): `ScopedAttr`/`attr_keys` emission, the router-name veto, the
 //! guard-name true/false vocabulary, `MIDDLEWARE_GUARD_CALLEES` certainty, multi-middleware
-//! independent judgment, and the Hono/non-Express negative space.
+//! independent judgment, and the Hono/non-Express negative space — plus
+//! `guard::judge_guard_wrapper_arg`'s higher-order-function last-arg judgment (`hof_*` /
+//! `commonjs_require_*` below) and the handler-identifier shapes it must still NOT clear.
 use super::extract_router_mount_fragments;
 use super::guard::AUTH_GUARDED_ATTR_KEY;
 use super::tests_hono::frag;
@@ -265,7 +267,10 @@ fn route_level_middle_arg_guard_ident_and_call_both_judge_the_verb() {
 }
 
 #[test]
-fn two_arg_verb_never_carries_attr_keys() {
+fn two_arg_verb_with_a_plain_handler_carries_no_attr_keys() {
+    // A bare ident/member last arg is the handler itself and is NEVER name-judged — that is the
+    // removed "keyword in a handler identifier clears the finding" over-clear. Only a CALL last arg
+    // reaches the wrapper judgment (see `hof_*` tests below).
     let src = concat!(
         "const router = express.Router();\n",
         "router.post('/a', handlerA);\n"
@@ -279,6 +284,176 @@ fn two_arg_verb_never_carries_attr_keys() {
             handler: Some("handlerA".into()),
             line: 2,
             attr_keys: vec![],
+        }]
+    );
+}
+
+#[test]
+fn admin_named_handler_ident_last_arg_still_carries_no_attr_keys() {
+    // The exact shape the removed same-line keyword belt over-cleared. `adminHandlers.list` is a
+    // NAME, not evidence — the wrapper judgment must not resurrect it.
+    let src = concat!(
+        "const router = express.Router();\n",
+        "router.get('/admin/users', adminHandlers.list);\n"
+    );
+    let out = extract_router_mount_fragments("router.ts", src, &[]);
+    assert_eq!(
+        frag(&out, "router").entries,
+        vec![RouterMountEntry::Verb {
+            method: "GET".into(),
+            path: "/admin/users".into(),
+            handler: Some("adminHandlers.list".into()),
+            line: 2,
+            attr_keys: vec![],
+        }]
+    );
+}
+
+#[test]
+fn hof_wrapper_last_arg_with_guard_vocabulary_judges_the_verb() {
+    // The higher-order-function guard idiom: the guard wraps the handler instead of preceding it.
+    // `requireAdmin`/`ensureOwner`/`restrictToRole` come from the wrapper-position widening (a
+    // rejection verb), `withAuth` from the shared middleware vocabulary. `handler` stays None (a
+    // call has no nameable handler symbol) — the attribute is the point, not the symbol.
+    for callee in ["requireAdmin", "withAuth", "ensureOwner", "restrictToRole"] {
+        let src = format!(
+            "const router = express.Router();\nrouter.get('/admin/settings', {callee}(handlers.settings));\n"
+        );
+        let out = extract_router_mount_fragments("router.ts", &src, &[]);
+        let entries = frag(&out, "router").entries.clone();
+        assert_eq!(
+            entries,
+            vec![RouterMountEntry::Verb {
+                method: "GET".into(),
+                path: "/admin/settings".into(),
+                handler: None,
+                line: 2,
+                attr_keys: vec![AUTH_GUARDED_ATTR_KEY.to_string()],
+            }],
+            "{callee}(handler) must judge as a route-level guard: {entries:?}"
+        );
+    }
+}
+
+#[test]
+fn hof_wrapper_last_arg_without_guard_vocabulary_does_not_judge_the_verb() {
+    // The wrapper family that is NOT authorization: async/error/observability wrappers, a factory
+    // whose name merely CONTAINS an authz noun (`createRoleHandler` — the over-recognition this
+    // widening is shape-gated to avoid), a pure narrowing adverb (`adminOnly`, dropped because
+    // `nodeEnvOnly` rode the same suffix), and rejection verbs on the ENV axis, which gates WHERE
+    // code runs, not WHO may call it — `route-exposure`'s question, not this attribute's.
+    for callee in [
+        "asyncHandler",
+        "catchAsync",
+        "withLogging",
+        "createRoleHandler",
+        "makeAdminHandler",
+        "adminOnly",
+        "nodeEnvOnly",
+        "requireProduction",
+        "ensureLocal",
+    ] {
+        let src = format!(
+            "const router = express.Router();\nrouter.get('/admin/settings', {callee}(handlers.settings));\n"
+        );
+        let out = extract_router_mount_fragments("router.ts", &src, &[]);
+        let entries = frag(&out, "router").entries.clone();
+        assert_eq!(
+            entries,
+            vec![RouterMountEntry::Verb {
+                method: "GET".into(),
+                path: "/admin/settings".into(),
+                handler: None,
+                line: 2,
+                attr_keys: vec![],
+            }],
+            "{callee}(handler) must NOT judge as a guard: {entries:?}"
+        );
+    }
+}
+
+#[test]
+fn commonjs_require_last_arg_is_never_judged_a_guard() {
+    // `require('./handlers')` is a module load, not a gate. Split out from the loop above because
+    // its argument is a string literal, and because getting this one wrong would clear routes
+    // across every lazy-require codebase at once.
+    let src = concat!(
+        "const router = express.Router();\n",
+        "router.get('/admin/settings', require('./settings'));\n"
+    );
+    let out = extract_router_mount_fragments("router.ts", src, &[]);
+    assert_eq!(
+        frag(&out, "router").entries,
+        vec![RouterMountEntry::Verb {
+            method: "GET".into(),
+            path: "/admin/settings".into(),
+            handler: None,
+            line: 2,
+            attr_keys: vec![],
+        }]
+    );
+}
+
+#[test]
+fn hof_wrapper_vetoed_by_the_router_name_suffix() {
+    // `protectedRoutes(deps)` starts with a rejection-verb prefix but names a sub-router factory —
+    // the shared sub-router/DI veto outranks the wrapper widening.
+    let src = concat!(
+        "const router = express.Router();\n",
+        "router.get('/admin/settings', protectedRoutes(deps));\n"
+    );
+    let out = extract_router_mount_fragments("router.ts", src, &[]);
+    assert_eq!(
+        frag(&out, "router").entries,
+        vec![RouterMountEntry::Verb {
+            method: "GET".into(),
+            path: "/admin/settings".into(),
+            handler: None,
+            line: 2,
+            attr_keys: vec![],
+        }]
+    );
+}
+
+#[test]
+fn hof_wrapper_and_middleware_guard_together_mint_one_attribute() {
+    // Both route-level guard shapes on one registration must not double-push the same key —
+    // `attr_keys` is a contract list the compose pass replays verbatim.
+    let src = concat!(
+        "const router = express.Router();\n",
+        "router.post('/admin/x', requireAuth, requireAdmin(handlerX));\n"
+    );
+    let out = extract_router_mount_fragments("router.ts", src, &[]);
+    assert_eq!(
+        frag(&out, "router").entries,
+        vec![RouterMountEntry::Verb {
+            method: "POST".into(),
+            path: "/admin/x".into(),
+            handler: None,
+            line: 2,
+            attr_keys: vec![AUTH_GUARDED_ATTR_KEY.to_string()],
+        }]
+    );
+}
+
+#[test]
+fn hono_verb_hof_wrapper_is_judged_too() {
+    // The wrapper judgment lives in the framework-agnostic verb arm, not behind the Express-only
+    // `.use` gate — Hono's `app.get(p, requireAdmin(h))` is the same idiom and gets the same
+    // attribute.
+    let src = concat!(
+        "const route = new Hono();\n",
+        "route.get('/admin/x', requireAdmin(h));\n"
+    );
+    let out = extract_router_mount_fragments("route.ts", src, &[]);
+    assert_eq!(
+        frag(&out, "route").entries,
+        vec![RouterMountEntry::Verb {
+            method: "GET".into(),
+            path: "/admin/x".into(),
+            handler: None,
+            line: 2,
+            attr_keys: vec![AUTH_GUARDED_ATTR_KEY.to_string()],
         }]
     );
 }

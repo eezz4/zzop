@@ -9,7 +9,7 @@ fn query_logic_ok_marker_directly_above_the_case_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "ok.ts",
-        "export const q = `\n  SELECT id,\n  // query-logic-ok: legacy pricing view, owned by analytics\n  CASE WHEN a THEN 1 WHEN b THEN 2 END FROM t WHERE x\n`;\n",
+        "export const q = `\n  SELECT id,\n  // query-logic-density-ok: legacy pricing view, owned by analytics\n  CASE WHEN a THEN 1 WHEN b THEN 2 END FROM t WHERE x\n`;\n",
     );
     let out = scan(&dir);
     assert!(
@@ -25,7 +25,7 @@ fn n_plus_1_ok_marker_above_the_store_call_whitelists_the_for_of_loop() {
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "domains/notification/routes/createNotifHandlers.ts",
-        "declare const notifStore: any;\ndeclare const users: any[];\nexport async function f() {\n  for (const u of users) {\n    // n+1-ok: intentional sequential processing for cascade delete\n    await notifStore.delete(u.id);\n  }\n}\n",
+        "declare const notifStore: any;\ndeclare const users: any[];\nexport async function f() {\n  for (const u of users) {\n    // nplus1-ok: intentional sequential processing for cascade delete\n    await notifStore.delete(u.id);\n  }\n}\n",
     );
     let out = scan(&dir);
     assert!(hits(&out, "nplus1").is_empty(), "{:?}", out.findings);
@@ -36,7 +36,7 @@ fn n_plus_1_ok_marker_above_the_store_call_whitelists_the_map_callback() {
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "api/createMigrateHandlers.ts",
-        "declare const legacyStore: any;\ndeclare const items: any[];\nexport async function f() {\n  await Promise.all(items.map(async (item) => {\n    // n+1-ok: one-time migration job\n    await legacyStore.create(item);\n  }));\n}\n",
+        "declare const legacyStore: any;\ndeclare const items: any[];\nexport async function f() {\n  await Promise.all(items.map(async (item) => {\n    // nplus1-ok: one-time migration job\n    await legacyStore.create(item);\n  }));\n}\n",
     );
     let out = scan(&dir);
     assert!(hits(&out, "nplus1").is_empty(), "{:?}", out.findings);
@@ -58,7 +58,7 @@ fn app_agg_ok_marker_suppresses_the_reduce_finding() {
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "ok2.ts",
-        "export async function total(store: any) {\n  const rows = await store.findMany();\n  // app-agg-ok: bounded to <=50 rows by upstream guard\n  return rows.reduce((s: number, r: any) => s + r.amount, 0);\n}\n",
+        "export async function total(store: any) {\n  const rows = await store.findMany();\n  // app-side-aggregation-reduce-ok: bounded to <=50 rows by upstream guard\n  return rows.reduce((s: number, r: any) => s + r.amount, 0);\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -71,11 +71,11 @@ fn app_agg_ok_marker_suppresses_the_reduce_finding() {
 #[test]
 fn app_agg_filter_ok_marker_suppresses_the_filter_length_finding() {
     // `app-side-aggregation-reduce` and `app-side-aggregation-filter-length` each need their own marker
-    // (`app-agg-ok` vs `app-agg-filter-ok`) so suppressing one can't silently suppress the other.
+    // (`app-side-aggregation-reduce-ok` vs `app-side-aggregation-filter-length-ok`) so suppressing one can't silently suppress the other.
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "ok3.ts",
-        "export async function count(store: any) {\n  const rows = await store.findMany();\n  // app-agg-filter-ok: bounded to <=50 rows by upstream guard\n  return rows.filter((r: any) => r.active).length;\n}\n",
+        "export async function count(store: any) {\n  const rows = await store.findMany();\n  // app-side-aggregation-filter-length-ok: bounded to <=50 rows by upstream guard\n  return rows.filter((r: any) => r.active).length;\n}\n",
     );
     let out = scan(&dir);
     assert!(

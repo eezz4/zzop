@@ -6,8 +6,7 @@
     {
       "id": "flushall-in-code",
       "severity": "critical",
-      "message": "`.flushall(`/`.flushdb(` (or a quoted `'FLUSHALL'`/`'FLUSHDB'` command literal, e.g. `sendCommand(['FLUSHALL'])`) wipes EVERY key in the database/instance — reachable from application code, this is one bug or one exposed admin endpoint away from total data loss. Scope deletes to explicit keys (`UNLINK`) or per-namespace expiry, and keep flush commands in ops/migration scripts outside the served codebase. Suppress a vetted case (e.g. a dedicated cache-reset job) with `// redis-flush-ok`.",
-      "suppress_marker": "redis-flush-ok",
+      "message": "`.flushall(`/`.flushdb(` (or a quoted `'FLUSHALL'`/`'FLUSHDB'` command literal, e.g. `sendCommand(['FLUSHALL'])`) wipes EVERY key in the database/instance — reachable from application code, this is one bug or one exposed admin endpoint away from total data loss. Scope deletes to explicit keys (`UNLINK`) or per-namespace expiry, and keep flush commands in ops/migration scripts outside the served codebase. Suppress a vetted case (e.g. a dedicated cache-reset job) with `// flushall-in-code-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -20,8 +19,7 @@
     {
       "id": "keys-glob-scan",
       "severity": "warning",
-      "message": "`.keys(...)` called with a string-literal argument (or a quoted `'KEYS'` command literal, e.g. `sendCommand(['KEYS', pattern])`) walks the ENTIRE keyspace and blocks the single-threaded Redis server for the duration — on a production dataset this stalls every other client. Use the SCAN cursor family instead (`scanStream`/`scan_iter`, `MATCH`+`COUNT`) or maintain an explicit index set. Suppress a vetted case (tiny fixed keyspace, offline script) with `// redis-keys-ok`.",
-      "suppress_marker": "redis-keys-ok",
+      "message": "`.keys(...)` called with a string-literal argument (or a quoted `'KEYS'` command literal, e.g. `sendCommand(['KEYS', pattern])`) walks the ENTIRE keyspace and blocks the single-threaded Redis server for the duration — on a production dataset this stalls every other client. Use the SCAN cursor family instead (`scanStream`/`scan_iter`, `MATCH`+`COUNT`) or maintain an explicit index set. Suppress a vetted case (tiny fixed keyspace, offline script) with `// keys-glob-scan-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -34,8 +32,7 @@
     {
       "id": "client-no-error-listener",
       "severity": "warning",
-      "message": "A redis client created with `createClient(...)` (node-redis v4) or `new Redis(...)`/`new Redis.Cluster(...)` (ioredis) with no `.on('error', ...)` listener anywhere in this file — node-redis/ioredis's client is an EventEmitter that emits `'error'` on every connection blip, and with no listener attached Node's default unhandled-`error`-event behavior CRASHES the process on the first one. Note the cross-file limitation: the client may be created here and the `'error'` listener attached in another module — that's exactly the case `// redis-error-ok` is for. Attach `.on('error', ...)` where the client is created (log it, and let the reconnect strategy do its job) so a connection error degrades to a cache miss instead of killing the process.",
-      "suppress_marker": "redis-error-ok",
+      "message": "A redis client created with `createClient(...)` (node-redis v4) or `new Redis(...)`/`new Redis.Cluster(...)` (ioredis) with no `.on('error', ...)` listener anywhere in this file — node-redis/ioredis's client is an EventEmitter that emits `'error'` on every connection blip, and with no listener attached Node's default unhandled-`error`-event behavior CRASHES the process on the first one. Note the cross-file limitation: the client may be created here and the `'error'` listener attached in another module — that's exactly the case `// client-no-error-listener-ok` is for. Attach `.on('error', ...)` where the client is created (log it, and let the reconnect strategy do its job) so a connection error degrades to a cache miss instead of killing the process.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -47,10 +44,9 @@
       }
     },
     {
-      "id": "redis-lock-get-then-set",
+      "id": "lock-get-then-set",
       "severity": "warning",
-      "message": "A `.get(`/`.exists(` read and a `.set(` call both appear in the same function alongside a lock-ish identifier — a co-occurrence heuristic for a non-atomic check-then-set lock: this doesn't prove the set follows the read (both patterns just match somewhere in the same function span), but that shape (check whether a lock key is free, then set it) is a classic TOCTOU race — two concurrent callers can both pass the check before either writes, and both end up believing they hold the lock. Acquire the lock atomically instead with `SET key value NX` (add `EX`/`PX` for a TTL), a `WATCH`/`MULTI` transaction, an `.eval(` Lua script, or a redlock library. Suppress a vetted case (e.g. an atomic acquire the regex can't see) with `// redis-lock-atomic-ok`.",
-      "suppress_marker": "redis-lock-atomic-ok",
+      "message": "A `.get(`/`.exists(` read and a `.set(` call both appear in the same function alongside a lock-ish identifier — a co-occurrence heuristic for a non-atomic check-then-set lock: this doesn't prove the set follows the read (both patterns just match somewhere in the same function span), but that shape (check whether a lock key is free, then set it) is a classic TOCTOU race — two concurrent callers can both pass the check before either writes, and both end up believing they hold the lock. Acquire the lock atomically instead with `SET key value NX` (add `EX`/`PX` for a TTL), a `WATCH`/`MULTI` transaction, an `.eval(` Lua script, or a redlock library. Suppress a vetted case (e.g. an atomic acquire the regex can't see) with `// lock-get-then-set-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -70,10 +66,9 @@
       }
     },
     {
-      "id": "redis-lock-no-ttl",
+      "id": "lock-no-ttl",
       "severity": "warning",
-      "message": "A lock is acquired with `SET key value NX` (or `setnx`) with no `EX`/`PX`/`EXAT`/`PXAT` expiry on that same call — if the holder crashes or is killed before releasing it, the key lives forever and wedges every future caller waiting on that lock. Always pair `NX` with a TTL (e.g. `SET key value NX EX 30`) so an abandoned lock self-clears instead of requiring manual intervention. Suppress a vetted case (e.g. a separate `PEXPIRE` set right after) with `// lock-ttl-ok`.",
-      "suppress_marker": "lock-ttl-ok",
+      "message": "A lock is acquired with `SET key value NX` (or `setnx`) with no `EX`/`PX`/`EXAT`/`PXAT` expiry on that same call — if the holder crashes or is killed before releasing it, the key lives forever and wedges every future caller waiting on that lock. Always pair `NX` with a TTL (e.g. `SET key value NX EX 30`) so an abandoned lock self-clears instead of requiring manual intervention. Suppress a vetted case (e.g. a separate `PEXPIRE` set right after) with `// lock-no-ttl-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -85,10 +80,9 @@
       }
     },
     {
-      "id": "redis-counter-get-set",
+      "id": "counter-get-set",
       "severity": "warning",
-      "message": "A `.get(` read followed by a `.set(` call whose value looks like arithmetic (`n++`, `n + 1`, `n - 1`, `Number(...)`, `parseInt(...)`) both appear in the same function — a co-occurrence heuristic for a read-modify-write counter, not proof the set actually follows the read from the same key (both patterns just match somewhere in the same function span). When it genuinely is read-then-recompute-then-write, it isn't atomic: two concurrent requests can both read the same starting value and both write the same incremented result, silently losing one of the two increments under load. Use Redis's atomic `INCR`/`INCRBY`/`DECR`/`DECRBY`/`HINCRBY` instead. Suppress a vetted case with `// redis-counter-ok`.",
-      "suppress_marker": "redis-counter-ok",
+      "message": "A `.get(` read followed by a `.set(` call whose value looks like arithmetic (`n++`, `n + 1`, `n - 1`, `Number(...)`, `parseInt(...)`) both appear in the same function — a co-occurrence heuristic for a read-modify-write counter, not proof the set actually follows the read from the same key (both patterns just match somewhere in the same function span). When it genuinely is read-then-recompute-then-write, it isn't atomic: two concurrent requests can both read the same starting value and both write the same incremented result, silently losing one of the two increments under load. Use Redis's atomic `INCR`/`INCRBY`/`DECR`/`DECRBY`/`HINCRBY` instead. Suppress a vetted case with `// counter-get-set-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",

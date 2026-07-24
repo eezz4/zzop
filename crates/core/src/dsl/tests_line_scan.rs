@@ -1,4 +1,4 @@
-//! Line-scan matcher tests: the be-security `sql-taint`/`weak-crypto` rules end-to-end, plus the
+//! Line-scan matcher tests: the security `sql-taint`/`weak-crypto` rules end-to-end, plus the
 //! `exclude_pattern` (v2 #2), `file_exclude_pattern` (v3), and `require_file_absent` (v4) extensions.
 
 use super::test_support::{label, rule_pack, scan, scan_pack, snippet};

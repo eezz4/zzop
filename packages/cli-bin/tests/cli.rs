@@ -358,6 +358,127 @@ fn analyze_envelope_subcommand_reports_an_unreadable_file_as_a_runtime_error() {
     );
 }
 
+// ---------------------------------------------------------------------------------------------
+// `zzop explain <rule-id>` — the read-only lookup over the DSL rule data compiled into this binary
+// (`zzop_host::explain`). The ambiguous-bare-id lane (a bare id shared by two packs) is NOT pinned
+// here: `derived_suppress_markers_are_globally_unique`
+// (`crates/engine/tests/rule_contracts/markers.rs`) machine-enforces that every shipped rule id is
+// globally unique today, so real bundled data has no bare-id collision to spawn the binary against —
+// that lane is instead pinned against a fabricated pack pair in `crates/host/src/explain/tests.rs`
+// (`a_bare_id_shared_by_two_packs_is_ambiguous_and_lists_both_full_ids`).
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn explain_full_id_prints_the_rule_and_exits_zero() {
+    let out = run(&["explain", "sql/nplus1"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.contains("id: sql/nplus1"), "got: {text}");
+    assert!(text.contains("pack: sql"), "got: {text}");
+    assert!(text.contains("severity: warning"), "got: {text}");
+    assert!(text.contains("suppress marker: nplus1-ok"), "got: {text}");
+    assert!(text.contains("matcher: method-scan"), "got: {text}");
+    assert!(text.contains("exclude_pattern: no"), "got: {text}");
+    assert!(stderr(&out).is_empty(), "no stderr on success");
+}
+
+#[test]
+fn explain_bare_id_resolves_when_unambiguous() {
+    // Every shipped rule id is globally unique (see this section's header comment), so any bare id
+    // resolves to the exact same rule its full form does.
+    let out = run(&["explain", "nplus1"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert!(
+        stdout(&out).contains("id: sql/nplus1"),
+        "got: {}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn explain_unknown_id_exits_one_and_points_at_the_catalog() {
+    let out = run(&["explain", "no-such-rule-anywhere"]);
+    assert_eq!(out.status.code(), Some(1), "unknown id is a lookup failure");
+    let err = stderr(&out);
+    assert!(err.contains("unknown rule id"), "got: {err}");
+    assert!(err.contains("rule-catalog"), "got: {err}");
+    assert!(stdout(&out).is_empty(), "nothing on stdout for a failure");
+}
+
+#[test]
+fn explain_native_analysis_id_exits_one_and_names_it_native_not_missing() {
+    // `circular` is a native analysis (`rules/native/rules-graph`), never a bundled DSL pack — the
+    // message must say so, not imply the id does not exist.
+    let out = run(&["explain", "circular"]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "native ids are a lookup failure here too"
+    );
+    let err = stderr(&out);
+    assert!(err.contains("native analysis id"), "got: {err}");
+    assert!(err.contains("rule-catalog"), "got: {err}");
+}
+
+#[test]
+fn explain_usage_errors_exit_two() {
+    let missing = run(&["explain"]);
+    assert_eq!(
+        missing.status.code(),
+        Some(2),
+        "missing id is a usage error"
+    );
+    assert!(
+        stderr(&missing).contains("usage: zzop explain"),
+        "got: {}",
+        stderr(&missing)
+    );
+
+    let extra = run(&["explain", "sql/nplus1", "extra"]);
+    assert_eq!(extra.status.code(), Some(2), "extra arg is a usage error");
+    assert!(stderr(&extra).contains("one id"), "got: {}", stderr(&extra));
+
+    let flag_like = run(&["explain", "--help"]);
+    assert_eq!(
+        flag_like.status.code(),
+        Some(2),
+        "flag-like id is a usage error"
+    );
+    assert!(
+        !stderr(&flag_like).contains("unknown rule id"),
+        "a dash-shaped arg must never be treated as a query: {}",
+        stderr(&flag_like)
+    );
+}
+
+/// Every rule id shipped in every bundled DSL pack must be explainable (exit 0) — no shipped rule can
+/// be un-explainable. Loads the packs the exact same way `zzop_host::explain` does
+/// (`zzop_core::parse_dsl_pack` over `zzop_config::BUNDLED_PACK_SOURCES`), never a hand-copied id list,
+/// so this can't drift from what actually ships.
+#[test]
+fn every_bundled_dsl_rule_id_is_explainable() {
+    let mut offenders = Vec::new();
+    for (rel_path, source) in zzop_config::BUNDLED_PACK_SOURCES {
+        let pack = zzop_core::parse_dsl_pack(source)
+            .unwrap_or_else(|e| panic!("bundled pack {rel_path} must parse: {e}"));
+        for rule in &pack.rules {
+            let full_id = format!("{}/{}", pack.id, rule.id);
+            let out = run(&["explain", &full_id]);
+            if !out.status.success() {
+                offenders.push(format!(
+                    "{full_id}: exit {:?}, stderr: {}",
+                    out.status.code(),
+                    stderr(&out)
+                ));
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "shipped rule ids that `zzop explain` cannot explain: {offenders:#?}"
+    );
+}
+
 #[test]
 fn analyze_envelope_subcommand_requires_a_file_argument() {
     let out = run(&["analyze-envelope"]);

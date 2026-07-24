@@ -1,7 +1,7 @@
 //! End-to-end coverage for the whole-tree `Matcher::IoScan` DSL pass (the 2026 projection redesign's
 //! engine half): `eval_pack_io_scan`, run once after assemble/ingest rather than per-file, wired through
 //! both `analyze_tree` (native) and `analyze_envelope` (Mode A). One inline custom pack (`io-scan-e2e`,
-//! built as a `RulePackDef` literal — same pattern `analyze_profiling.rs`'s `be_security_java_pack`/
+//! built as a `RulePackDef` literal — same pattern `analyze_profiling.rs`'s `security_java_pack`/
 //! `analyze_rule_config.rs` use for injecting packs via `EngineConfig::packs`) carries every `IoScan` rule
 //! this file needs. Proves:
 //!
@@ -17,8 +17,8 @@
 //! - Suppress-marker recognition (`marker-scan`) via the native `anchor_line` channel: a `// my-rule-ok`
 //!   comment on the route's own registration line suppresses; its absence fires.
 //! - Envelope mode (`envelope-idempotency-scan`): `attr_absent` honors an envelope-injected attribute, and
-//!   a configured `suppress_marker` has no effect (envelope mode's `anchor_line` is always `None` — no
-//!   source text to check).
+//!   the derived `<id>-ok` suppress marker has no effect (envelope mode's `anchor_line` is always `None` —
+//!   no source text to check).
 //! - `disabled_rules` gates an `IoScan` rule exactly like every other rule id.
 //!
 //! Self-contained `TempDir`/`config` helpers, same pattern as `analyze_native_middleware.rs`/
@@ -73,13 +73,14 @@ impl Drop for TempDir {
     }
 }
 
-fn io_scan_rule(id: &str, m: IoScan, suppress_marker: Option<&str>) -> RuleDef {
+fn io_scan_rule(id: &str, m: IoScan) -> RuleDef {
+    // Suppress marker is derived `<id>-ok` (see `RuleDef::suppress_marker`), so the rule's id alone
+    // determines the marker text a fixture comment must carry — e.g. `marker-scan` -> `// marker-scan-ok`.
     RuleDef {
         id: id.to_string(),
         severity: Severity::Warning,
         message: format!("io-scan-e2e/{id} fired"),
         matcher: Matcher::IoScan(m),
-        suppress_marker: suppress_marker.map(str::to_string),
     }
 }
 
@@ -106,7 +107,6 @@ fn pack() -> RulePackDef {
                     attr_present: None,
                     anchor_exclude_pattern: None,
                 },
-                Some("admin-route-scan-ok"),
             ),
             // (b)/(c) attr_absent veto — native middleware guard AND minted decorator-guard evidence.
             io_scan_rule(
@@ -123,7 +123,6 @@ fn pack() -> RulePackDef {
                     attr_present: None,
                     anchor_exclude_pattern: None,
                 },
-                None,
             ),
             // (d) suppress-marker recognition via the native anchor_line channel.
             io_scan_rule(
@@ -140,7 +139,6 @@ fn pack() -> RulePackDef {
                     attr_present: None,
                     anchor_exclude_pattern: None,
                 },
-                Some("my-rule-ok"),
             ),
             // (e) envelope mode: attr_absent honors an injected attribute; suppress_marker is inert there.
             io_scan_rule(
@@ -157,7 +155,6 @@ fn pack() -> RulePackDef {
                     attr_present: None,
                     anchor_exclude_pattern: None,
                 },
-                Some("my-rule-ok"),
             ),
         ],
     }
@@ -323,7 +320,7 @@ fn suppress_marker_on_the_registration_line_suppresses_without_it_fires() {
     let marked = TempDir::new("zzop-io-scan-tree-marker-present");
     marked.write(
         "routes/api.ts",
-        "const app = express();\napp.post('/orders', createOrder); // my-rule-ok\n",
+        "const app = express();\napp.post('/orders', createOrder); // marker-scan-ok\n",
     );
     marked.write(
         "routes/handlers.ts",
@@ -332,7 +329,7 @@ fn suppress_marker_on_the_registration_line_suppresses_without_it_fires() {
     let out = analyze_tree(marked.path(), &config());
     assert!(
         hits(&out, "marker-scan").is_empty(),
-        "the // my-rule-ok comment on the registration line must suppress: {:?}",
+        "the // marker-scan-ok comment on the registration line must suppress: {:?}",
         out.findings
     );
 
@@ -394,8 +391,8 @@ fn envelope_mode_attr_absent_honors_injected_attribute_and_ignores_the_inert_sup
         parser: "io-scan-e2e-adapter/1".to_string(),
         source: "test".to_string(),
         files: vec![
-            // No injected attribute — fires, and the rule's own `suppress_marker: "my-rule-ok"` has no
-            // effect (envelope mode's `anchor_line` is always `None` — no source text to check).
+            // No injected attribute — fires, and the rule's own derived marker `envelope-idempotency-scan-ok`
+            // has no effect (envelope mode's `anchor_line` is always `None` — no source text to check).
             envelope_projection("routes/a.json", "POST /orders", Vec::new()),
             // Injected `idempotent` attribute on this exact route — attr_absent clears it.
             envelope_projection(

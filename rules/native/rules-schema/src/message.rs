@@ -182,7 +182,8 @@ pub fn schema_issue_message(issue: &SchemaIssue) -> String {
 
 /// Message vocabulary for `join::JoinIssue` — JOIN rules anchored at a query call site rather than a model
 /// declaration (see `join`'s module doc). Each message states the problem, the fix, and how to disable it,
-/// since native rules carry no inline suppression marker.
+/// since these rules carry no inline suppression marker (a blanket "no native rule does" would be false —
+/// `zzop_rules_http`'s `non-idempotent-write`/`unsafe-read-endpoint` honor a hand-written `// idempotent-ok:`).
 pub fn join_issue_message(issue: &JoinIssue) -> String {
     let field = issue.field.as_deref().unwrap_or("?");
     let method = issue
@@ -198,8 +199,8 @@ pub fn join_issue_message(issue: &JoinIssue) -> String {
              not-deleted convention) to the `where` clause. Note: a Prisma middleware (`$use`) or `$extends` \
              client extension that injects this filter globally is invisible to this static check — if your \
              app relies on one, this rule will false-positive on every call site for the model; disable it \
-             {} (native \
-             rules have no inline suppression marker).",
+             {} (this rule \
+             has no inline suppression marker).",
             issue.model,
             disable_hint_tail("soft-delete-bypass")
         ),
@@ -209,7 +210,7 @@ pub fn join_issue_message(issue: &JoinIssue) -> String {
              table scan or filesort as the table grows. Add `@@index([{field}])` to the schema (or make \
              {field} the leading column of an existing composite index). If this is intentional (e.g. a \
              small, bounded table), disable this finding {} \
-             (native rules have no inline suppression marker).",
+             (this rule has no inline suppression marker).",
             issue.model,
             disable_hint_tail("orderby-unindexed")
         ),
@@ -235,7 +236,7 @@ pub fn join_issue_message(issue: &JoinIssue) -> String {
                  a direct `{field}: '...'` literal-object site is checked; a literal inside an `in: [...]` \
                  array, a variable, or a computed expression is not. If this literal is intentional, disable \
                  this finding {} \
-                 (native rules have no inline suppression marker).",
+                 (this rule has no inline suppression marker).",
                 issue.model,
                 disable_hint_tail("enum-string-drift")
             )

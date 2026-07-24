@@ -109,7 +109,7 @@ pub fn controller_silence_warning(
 http route(s) were extracted tree-wide — the framework's registration idiom may be unsupported; \
 cross-layer joins will be silent for this tree (e.g. {sample_str}) — project this tree's routes with a \
 Mode B overlay adapter (see the adapter examples) to restore cross-layer visibility: a partial envelope \
-covering just the provide channel is enough; contract: `zzop contract envelope-guide` on MCP hosts, \
+covering just the provide channel is enough; contract: MCP resource `zzop://contract/envelope-guide` on MCP hosts (`zzop contract envelope-guide` with the CLI binary), \
 docs/NORMALIZED_AST.md in the repo.",
         matched.len()
     ))

@@ -26,7 +26,6 @@ fn line_scan_rule(id: &str, file_exclude_pattern: Option<&str>) -> RuleDef {
             file_exclude_pattern: file_exclude_pattern.map(str::to_string),
             snippet_max: 160,
         }),
-        suppress_marker: None,
     }
 }
 
@@ -215,7 +214,6 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
             file_exclude_pattern: Some("${file-exclude-pattern}".to_string()),
             snippet_max: 160,
         }),
-        suppress_marker: None,
     };
     let method_scan_rule = RuleDef {
         id: "ms".to_string(),
@@ -241,7 +239,6 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
             file_exclude_pattern: Some("${file-exclude-pattern}".to_string()),
             snippet_max: 160,
         }),
-        suppress_marker: None,
     };
     let symbol_scan_rule = RuleDef {
         id: "ss".to_string(),
@@ -254,7 +251,6 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
             exported: None,
             negate: false,
         }),
-        suppress_marker: None,
     };
     let io_scan_rule = RuleDef {
         id: "is".to_string(),
@@ -272,7 +268,6 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
             attr_present: None,
             anchor_exclude_pattern: None,
         }),
-        suppress_marker: None,
     };
 
     let mut pack = minimal_pack(

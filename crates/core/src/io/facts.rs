@@ -5,6 +5,13 @@
 use serde::{Deserialize, Serialize};
 
 /// The boundary an interface crosses. Open-ended (String) so an adapter may introduce its own kind.
+/// Casing convention: kebab-case (lowercase, hyphens between words — `"http"`, `"db-table"`,
+/// `"client-base-prefix"`, `"nest-global-prefix"`), the same house style rule ids use — though nothing
+/// enforces it for `kind`; the `id_hygiene` contract test only checks rule/pack ids, not io kind
+/// strings. Convention only because `IoKind` is a plain `String` VALUE, not an enum variant: the
+/// containing structs' `#[serde(rename_all = "camelCase")]` renames FIELD names on the wire, never the
+/// `kind` field's own string value, so `"db-table"` round-trips exactly as an adapter writes it — it is
+/// never camelCased to `"dbTable"`.
 pub type IoKind = String;
 
 /// The statically witnessed shape of a request-body object literal at an HTTP consume site.

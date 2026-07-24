@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use super::specifier::{resolve_file, try_ext};
+use super::specifier::{resolve_file, strip_resource_query, try_ext};
 use super::tsconfig::{governing_tsconfig, resolve_via_base_url, resolve_via_paths, TsconfigPaths};
 
 /// A workspace (monorepo) package as seen by the import resolver, resolving both a bare `<name>` and a
@@ -60,6 +60,10 @@ pub fn resolve_file_with_workspace(
     workspace_pkgs: &HashMap<String, WorkspacePkg>,
     tsconfigs: &BTreeMap<String, TsconfigPaths>,
 ) -> Option<String> {
+    // A bundler resource query (`?worker`, `?url`, ...) is stripped here too, not only in `resolve_file`
+    // below: the tsconfig-`paths`/`baseUrl`/workspace-package branches match the specifier TEXT, so an
+    // aliased `@/workers/w?worker` would otherwise miss every one of them.
+    let specifier = strip_resource_query(specifier);
     if specifier.starts_with('.') {
         return resolve_file(specifier, from_file, all_paths);
     }
@@ -229,6 +233,28 @@ mod tests {
                 &no_tsconfigs()
             ),
             None
+        );
+    }
+
+    #[test]
+    fn resolve_file_with_workspace_strips_bundler_resource_query_on_a_pkg_subpath() {
+        // The workspace/tsconfig branches match specifier TEXT, so the `?worker` strip has to happen
+        // before them too — a cross-package worker entry (`@acme/utils-core/w?worker`) is imported only
+        // this way, and an unresolved import means a `dead-candidates` FP on the worker file.
+        let all = paths(&[
+            "packages/utils-core/src/index.ts",
+            "packages/utils-core/w.ts",
+        ]);
+        assert_eq!(
+            resolve_file_with_workspace(
+                "@acme/utils-core/w?worker",
+                "a.ts",
+                &all,
+                &ws_pkgs(),
+                &no_tsconfigs()
+            )
+            .as_deref(),
+            Some("packages/utils-core/w.ts")
         );
     }
 

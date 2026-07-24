@@ -69,7 +69,7 @@ fn as_any_cast_and_any_array_and_generic_any_shapes_are_flagged() {
 fn any_ok_marker_on_the_same_line_suppresses_the_finding() {
     let f = any_findings(&[(
         "marked.ts",
-        "export function process(data: any) { return data; } // any-ok: untyped legacy plugin payload\n",
+        "export function process(data: any) { return data; } // no-explicit-any-ok: untyped legacy plugin payload\n",
     )]);
     assert!(f.is_empty(), "{f:?}");
 }

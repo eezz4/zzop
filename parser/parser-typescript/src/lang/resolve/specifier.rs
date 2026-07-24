@@ -25,6 +25,7 @@ pub fn resolve_file(
     from_file: &str,
     all_paths: &HashSet<String>,
 ) -> Option<String> {
+    let specifier = strip_resource_query(specifier);
     if specifier.starts_with('.') {
         let joined = normalize(&format!("{}/{}", dirname(from_file), specifier));
         return try_ext(&joined, all_paths);
@@ -48,6 +49,26 @@ pub fn resolve_file(
         return try_ext(&format!("src/lib/{rest}"), all_paths);
     }
     None
+}
+
+/// Strips a bundler RESOURCE QUERY off a specifier: `./worker?worker` -> `./worker`, `./a.svg?url` ->
+/// `./a.svg`. Vite/webpack/Next carry loader instructions in a query suffix (`?worker`,
+/// `?sharedworker`, `?worker&inline`, `?url`, `?raw`, a cache-busting `?v=1`) that the module resolver
+/// never sees — the file on disk has no `?` in its name. Without this, Vite's documented worker-import
+/// form (`import MyWorker from "./worker?worker"`) resolves to nothing, so the worker ENTRY — imported
+/// only that way — gets `fan_in == 0` and false-fires `dead-candidates`, the FP class this strip exists
+/// to close.
+///
+/// Blanket-strips at the first `?` rather than matching a known-query vocabulary: `?` is not a legal
+/// filename character on Windows and never appears in a tracked path, and resolution still requires the
+/// stripped base to be a REAL entry in `all_paths` — so this can never invent a target, only recover one
+/// that was already there (never-guess). A leading `?` (no base at all) is left alone, as is Node's
+/// `#subpath` import prefix — a real specifier form, not a query.
+pub(super) fn strip_resource_query(specifier: &str) -> &str {
+    match specifier.split_once('?') {
+        Some((base, _)) if !base.is_empty() => base,
+        _ => specifier,
+    }
 }
 
 /// NodeNext-style literal extension -> real TypeScript source extension(s): `.js`/`.mjs`/`.cjs` imports
@@ -158,6 +179,42 @@ mod tests {
             resolve_file("./bar.cjs", "a/b.ts", &all).as_deref(),
             Some("a/bar.cts")
         );
+    }
+
+    #[test]
+    fn strips_bundler_resource_query() {
+        // Vite's documented worker-import form + the asset queries that share the shape. Without the
+        // strip the worker ENTRY has no importer and false-fires `dead-candidates`.
+        let all = paths(&["src/worker.ts", "src/a.svg", "features/x.ts"]);
+        for spec in [
+            "./worker?worker",
+            "./worker?sharedworker",
+            "./worker?worker&inline",
+        ] {
+            assert_eq!(
+                resolve_file(spec, "src/main.ts", &all).as_deref(),
+                Some("src/worker.ts"),
+                "{spec}"
+            );
+        }
+        assert_eq!(
+            resolve_file("./a.svg?url", "src/main.ts", &all).as_deref(),
+            Some("src/a.svg")
+        );
+        assert_eq!(
+            resolve_file("@/features/x?raw", "anywhere/deep.ts", &all).as_deref(),
+            Some("features/x.ts")
+        );
+    }
+
+    #[test]
+    fn resource_query_strip_never_invents_a_target() {
+        // The stripped base must still be a REAL tracked file — a query does not make a miss a hit.
+        let all = paths(&["src/worker.ts"]);
+        assert_eq!(resolve_file("./nope?worker", "src/main.ts", &all), None);
+        // A leading `?` leaves nothing to resolve, and Node's `#subpath` prefix is not a query.
+        assert_eq!(resolve_file("?worker", "src/main.ts", &all), None);
+        assert_eq!(resolve_file("#internal/x", "src/main.ts", &all), None);
     }
 
     #[test]

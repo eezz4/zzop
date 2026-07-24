@@ -1,7 +1,7 @@
 # How the engine processes your tree
 
 A short orientation for making sense of the `analyze`/`analyzeTrees` output — full field-by-field
-shapes are in [modules/mcp.md](modules/mcp.md#the-zzop-facade-json-contract); this page just explains
+shapes are in [modules/facade.md](modules/facade.md#the-zzop-facade-json-contract); this page just explains
 what's actually happening underneath so the output makes sense.
 
 ## The IR your `ir` field contains
@@ -211,7 +211,7 @@ The join itself carries three integrity gates on top of the raw `(kind, key)` ma
   many unrelated services legitimately share) is still emitted, but tagged so a consumer can discount it.
 
 A per-tree deployment-topology declaration (`mountedAt`/`mounts`/`hosts` — see
-[modules/mcp.md](modules/mcp.md#functions)'s `AnalyzeRequest` field table) supplies the one class of join
+[modules/facade.md](modules/facade.md#functions)'s `AnalyzeRequest` field table) supplies the one class of join
 information that lives only in infra, not in either repo's source: a gateway/ingress mount prefix, and
 which hosts a tree owns. Mounts apply as the last provide-key transform, stacking on top of any
 code-extracted prefix (e.g. NestJS's `setGlobalPrefix`); a declared host re-keys a matching absolute-URL
@@ -227,7 +227,7 @@ rather than inventing a `{GET, POST}` pair. A route zzop cannot resolve from sou
 verb-unknown handler, a non-literal path (`@GetMapping(ApiPaths.USERS)`), or a computed client URL — is
 completed by **injecting the concrete route fact**: either a full Normalized AST adapter overlay, or, for a
 handful of routes, the lightweight per-tree `routes: [{ key, role }]` declaration (see
-[modules/mcp.md](modules/mcp.md#functions)'s `AnalyzeRequest` field table), which expands into a
+[modules/facade.md](modules/facade.md#functions)'s `AnalyzeRequest` field table), which expands into a
 synthetic overlay and joins through the identical path. **Deployment-config routing is the same boundary**: zzop does **not** read
 deployment config files (`next.config` `rewrites`/`redirects`, `vercel.json`, nginx/ingress). A uniform
 gateway/ingress prefix or host is injected via the `mountedAt`/`mounts`/`hosts` declaration above; an

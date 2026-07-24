@@ -11,7 +11,7 @@
 //! - A NestJS `@UseGuards` decorator-guarded route clears it EVEN WITH the native `mutating-route-no-auth`
 //!   rule disabled in config — proving the A2 decoupling (`callgraph::packs_read_io_scan_attrs`): the
 //!   shipped pack's `attr_absent: "auth-guarded"` gate alone is enough to keep the evidence flowing.
-//! - `// auth-gate-ok` on the route's own registration line suppresses it.
+//! - `// auth-gates-ok` on the route's own registration line suppresses it.
 //! - A route registered in a test file (`${test-paths-stories}`) never fires — `file_exclude_pattern`.
 //! - An unguarded `/debug` route fires `route-exposure`.
 //! - A registration line also containing `isProduction` does not fire `route-exposure` —
@@ -207,7 +207,7 @@ fn decorator_guarded_route_clears_auth_gates_even_with_the_native_rule_disabled(
 }
 
 // ---------------------------------------------------------------------------------------------
-// `// auth-gate-ok` on the registration line suppresses.
+// `// auth-gates-ok` on the registration line suppresses.
 // ---------------------------------------------------------------------------------------------
 
 #[test]
@@ -215,7 +215,7 @@ fn auth_gate_ok_marker_on_the_registration_line_suppresses() {
     let dir = TempDir::new("zzop-http-pack-marker");
     dir.write(
         "routes/api.ts",
-        "const app = express();\napp.post('/admin/widgets', createWidget); // auth-gate-ok\n",
+        "const app = express();\napp.post('/admin/widgets', createWidget); // auth-gates-ok\n",
     );
     dir.write(
         "routes/handlers.ts",
@@ -225,7 +225,7 @@ fn auth_gate_ok_marker_on_the_registration_line_suppresses() {
     let out = analyze_tree(dir.path(), &config());
     assert!(
         hits(&out, "auth-gates").is_empty(),
-        "the // auth-gate-ok comment on the registration line must suppress: {:?}",
+        "the // auth-gates-ok comment on the registration line must suppress: {:?}",
         out.findings
     );
 }

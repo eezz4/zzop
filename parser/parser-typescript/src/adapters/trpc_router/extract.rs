@@ -36,7 +36,8 @@ pub fn extract_procedure_router_fragments(rel: &str, text: &str) -> Vec<Procedur
 }
 
 /// Classifies one top-level `const <name> = <init>` binding as a router fragment, or `None` when `init`
-/// is neither a recognized router-factory call nor `mergeRouters(...)` — see module doc.
+/// is neither a recognized router-factory call, `mergeRouters(...)`, nor a standalone procedure — see
+/// module doc.
 fn classify_top_level_init(
     name: String,
     init: &Expr,
@@ -50,7 +51,9 @@ fn classify_top_level_init(
         return None;
     };
     let Expr::Ident(id) = unwrap_expr(callee) else {
-        return None;
+        // A non-identifier callee: a builder chain's `<base>.<...>.query` member callee is the only
+        // recognized shape here.
+        return standalone_procedure_fragment(name, call, cm);
     };
     if is_router_factory(&id.sym) {
         let entries = call
@@ -80,8 +83,70 @@ fn classify_top_level_init(
         }
         Some(ProcedureRouterFragment { name, entries })
     } else {
-        None
+        standalone_procedure_fragment(name, call, cm)
     }
+}
+
+/// A top-level `const <name> = <procedureBuilder>...query(fn)` — one procedure declared on its own,
+/// with no `router({...})` in sight, so that some other file can `import` it and mount it as a single
+/// leaf. Projected as a one-entry fragment whose `Leaf` has an EMPTY key: the mounting `Ref` supplies
+/// the route segment, exactly like `mergeRouters`' empty-key `Ref` means "add no segment of my own".
+///
+/// Gated on the builder chain's BASE looking like tRPC procedure vocabulary (`procedure`,
+/// `publicProcedure`, `t.procedure`, ...), unlike the in-router `classify_entry` leaf: inside a
+/// `router({...})` object literal the surrounding call is already the evidence, but a bare top-level
+/// const has no such context and `something.query(...)` is an extremely common non-tRPC chain
+/// (query builders, DB clients). Under-report over over-claim.
+fn standalone_procedure_fragment(
+    name: String,
+    call: &swc_core::ecma::ast::CallExpr,
+    cm: &SourceMap,
+) -> Option<ProcedureRouterFragment> {
+    let verb = verb_of_call_chain(call)?;
+    if !is_procedure_base(chain_base(call)?) {
+        return None;
+    }
+    Some(ProcedureRouterFragment {
+        name,
+        entries: vec![ProcedureRouterEntry::Leaf {
+            key: String::new(),
+            verb,
+            line: crate::line_of(cm, call.span.lo),
+        }],
+    })
+}
+
+/// The leftmost object of a builder chain `base.a(...).b(...)` — swc nests each earlier step inside the
+/// next call's `callee.obj`, so this descends the same links `verb_of_call_chain` walks and returns the
+/// expression the chain starts from.
+fn chain_base(call: &swc_core::ecma::ast::CallExpr) -> Option<&Expr> {
+    let Callee::Expr(callee) = &call.callee else {
+        return None;
+    };
+    let Expr::Member(m) = unwrap_expr(callee) else {
+        return None;
+    };
+    match unwrap_expr(&m.obj) {
+        Expr::Call(inner) => chain_base(inner),
+        other => Some(other),
+    }
+}
+
+/// tRPC procedure-builder vocabulary: a bare `procedure`/`*Procedure` identifier, or a member access
+/// ending in one (`t.procedure`, `trpc.publicProcedure`). Nothing else — never guessed.
+fn is_procedure_base(base: &Expr) -> bool {
+    match base {
+        Expr::Ident(id) => is_procedure_name(&id.sym),
+        Expr::Member(m) => match &m.prop {
+            MemberProp::Ident(p) => is_procedure_name(&p.sym),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn is_procedure_name(s: &str) -> bool {
+    s == "procedure" || s.ends_with("Procedure")
 }
 
 fn is_router_factory(name: &str) -> bool {

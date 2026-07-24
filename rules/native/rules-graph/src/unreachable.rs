@@ -3,6 +3,11 @@
 //!
 //! `unreachable_findings` is the `"unreachable"` native-analysis Finding-shaping wrapper the engine calls
 //! (moved here alongside the algorithm it shapes).
+//!
+//! **vs. [`crate::dead_candidates`]**: disjoint by construction. That module only ever flags a file with
+//! ZERO importers (`fan_in == 0`); this one only ever flags a file with ONE OR MORE importers (`fan_in >
+//! 0`, see `find_unreachable`'s own `n.fan_in > 0` filter below) that are themselves unreachable from any
+//! entrypoint — a closed island, not an orphan. A given file can never be flagged by both.
 
 use std::collections::{HashSet, VecDeque};
 use std::sync::OnceLock;

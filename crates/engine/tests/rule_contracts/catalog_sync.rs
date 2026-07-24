@@ -88,3 +88,31 @@ fn catalog_mentions_every_dsl_pack_id() {
         "DSL pack ids loaded but absent from docs/rules/catalog.md's text: {missing:?}"
     );
 }
+
+/// The gap the v0.23.0 release audit found: the pins above cover TOTALS, native ids and PACK ids, so a
+/// count-preserving rule-id RENAME — exactly what `df78842` did to 7 ids — would ship with the catalog
+/// still naming the old ids and no test objecting. That matters more than an ordinary doc drift: the
+/// catalog is `include_str!`-embedded as the MCP resource `zzop://contract/rule-catalog`
+/// (`crates/host/src/embedded.rs`), and `scripts/check-docs-rule-ids.sh` DERIVES its valid-id universe
+/// from this same file — so one stale id here becomes a stale wire contract AND blesses stale ids in
+/// every other doc the guard checks.
+///
+/// Matched as `` `<id>` `` (backticked), which is how every rule row spells its id — a bare `contains`
+/// would let a rule id that appears only inside prose about a different rule count as present.
+#[test]
+fn catalog_mentions_every_dsl_rule_id() {
+    let text = catalog_text();
+    let packs = load_all_packs();
+    let missing: Vec<String> = packs
+        .iter()
+        .flat_map(|p| p.rules.iter().map(move |r| (p.id.as_str(), r.id.as_str())))
+        .filter(|(_, rule_id)| !text.contains(&format!("`{rule_id}`")))
+        .map(|(pack_id, rule_id)| format!("{pack_id}/{rule_id}"))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "DSL rule ids loaded but absent from docs/rules/catalog.md as `<id>`: {missing:?} — a rule \
+         rename must update the catalog in the same commit (it is the MCP rule-catalog resource and \
+         check-docs-rule-ids.sh's id universe)"
+    );
+}

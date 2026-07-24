@@ -28,17 +28,22 @@ rechecks.
 zzop's primary distribution is two Node-free binaries — `zzop` (CLI) and `zzop-mcp` (MCP server) — no
 Node.js, no npm, nothing to compile. Get them one of four ways:
 
+<!-- Canonical install-lane list for repo readers. docs/getting-started.md, docs/modules/mcp.md and
+     VERSIONING.md link here instead of restating it; site/usage.html is the site-side twin (one copy
+     per audience, not one per page). Add a lane here first, then link. -->
+
 - **Download the binaries.** Grab the `zzop-cli-<platform>[.exe]` (CLI) and/or `zzop-mcp-<platform>[.exe]`
   (MCP server) assets for your platform from [GitHub Releases](https://github.com/eezz4/zzop/releases)
-  and run them directly.
+  and run them directly, or put them on `PATH`.
 - **Claude Code plugin.** `/plugin marketplace add eezz4/zzop`, then `/plugin install zzop@zzop` —
   see [Use in Claude Code](#use-in-claude-code-mcp-plugin) below.
 - **Claude Desktop.** One-click `.mcpb` bundle (drag-and-drop install) — see
   [packages/mcpb/README.md](packages/mcpb/README.md).
 - **npm.** `npm i -g @zzop/cli` installs the exact same `zzop` binary above, fetched for your platform
-  as an npm dependency — same subcommands (`analyze`/`cross`/`endpoint`/`contract`/`validate-*`), same
-  output, no Node runtime involved beyond a tiny launcher script. Convenient when a project already
-  manages its toolchain through npm. See [packages/cli/README.md](packages/cli/README.md).
+  as an npm dependency — same subcommands (`analyze`/`cross`/`endpoint`/`contract`/`explain`/`validate-*`),
+  same output, no Node runtime involved beyond a tiny launcher script and no separate JS implementation
+  that could drift from the native binary. Convenient when a project already manages its toolchain
+  through npm. See [packages/cli/README.md](packages/cli/README.md).
 
 Write a `zzop.config.jsonc` and run it, ESLint-style:
 
@@ -62,10 +67,9 @@ let report: serde_json::Value =
 
 `zzop-mcp` is a self-contained binary with an MCP server built in:
 
-1. Download the `zzop-mcp-<platform>[.exe]` asset for your platform from [GitHub
-   Releases](https://github.com/eezz4/zzop/releases) and put it on `PATH` under the exact name
-   `zzop-mcp` (`zzop-mcp.exe` on Windows).
-2. In Claude Code: `/plugin marketplace add eezz4/zzop`, then `/plugin install zzop@zzop`.
+1. `/plugin marketplace add eezz4/zzop` — then `/plugin install zzop@zzop` (two separate steps).
+2. Start a new session. The plugin downloads the binary for your platform on first run; nothing goes
+   on `PATH`. Once installed, a newer release is reported to you, never installed behind your back.
 
 See [crates/host/README.md](crates/host/README.md) for the full install/build reference.
 
@@ -81,7 +85,7 @@ Every finding carries a rule id, severity, and a `file:line` location, e.g.:
       "severity": "warning",
       "file": "src/routes/orders.ts",
       "line": 42,
-      "message": "await on a store/ORM call (`Repository`/`Store`/`prisma`/`db`/`orm`/`tx`/`trx`) verified structurally inside a for/for-of/for-in/while/do-while statement or an array-iteration callback — checked against the parser's projected loop spans, not merely co-occurring with loop syntax somewhere in the same function — N+1 query pattern. Batch the fetch (e.g. `findMany` with an `in` filter) instead of one call per item. Suppress a vetted case with `// n+1-ok`."
+      "message": "await on a store/ORM call (`Repository`/`Store`/`prisma`/`db`/`orm`/`tx`/`trx`) verified structurally inside a for/for-of/for-in/while/do-while statement or an array-iteration callback — checked against the parser's projected loop spans, not merely co-occurring with loop syntax somewhere in the same function — N+1 query pattern. Batch the fetch (e.g. `findMany` with an `in` filter) instead of one call per item. Suppress a vetted case with `// nplus1-ok`."
     }
   ],
   "scores":             { /* structural subscores, 0-100 */ },

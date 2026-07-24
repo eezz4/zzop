@@ -19,7 +19,7 @@
       <a href="index.html" class="site-nav__link is-active">Overview</a>
       <a href="architecture.html" class="site-nav__link">Architecture</a>
       <a href="usage.html" class="site-nav__link">Usage</a>
-      <a href="sdk.html" class="site-nav__link">SDK</a>
+      <a href="reference.html" class="site-nav__link">Reference</a>
       <a href="rules.html" class="site-nav__link">Rules</a>
     </nav>
     <div class="site-header__actions">
@@ -50,8 +50,8 @@
 zzop analyze .        # analyze this tree, print JSON findings
 zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop
 
-# Embedding instead? Depend on the zzop-facade / zzop-summary Rust crates
-# and call the JSON-in / JSON-out contract functions directly.</code></pre>
+# Embedding instead? Shell out to this same binary's JSON-in / JSON-out
+# subcommands — one stable contract, no Node, no separate SDK to install.</code></pre>
       </div>
       <div class="code-panel">
         <div class="code-panel__tab">Result (abridged)</div>
@@ -74,7 +74,7 @@ zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop
       <span class="eyebrow">WHY ZZOP</span>
       <h2 class="section-title">Why zzop</h2>
       <p class="prose-block">An agent working in a large repository cannot read every file — the context window is its scarcest resource. zzop condenses the whole codebase into one compact, machine-readable report: what is risky, what is dead, what drifted between frontend and backend, and where to refactor first. Agents and humans alike start from the map, not the territory.</p>
-      <p class="prose-block">That is also where it parts ways with traditional static analyzers. A classic linter or SAST tool hands you a flat list of findings and stops; zzop is built to give direction — every finding carries its fix and its exclude config, structural results are ranked by refactor ROI, and cross-repo joins turn "two codebases quietly disagree" into a first-class, actionable finding.</p>
+      <p class="prose-block">That is also where it parts ways with traditional static analyzers. A classic linter or SAST tool hands you a flat list of findings and stops; zzop is built to give direction — every finding names the exact config to silence it (DSL rule findings additionally carry a concrete fix and a one-line suppress marker), structural results are ranked by refactor ROI, and cross-repo joins turn "two codebases quietly disagree" into a first-class, actionable finding.</p>
     </div>
   </section>
 
@@ -117,8 +117,8 @@ zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop
           <p>Same input, byte-identical output — no timestamps, no unstable ordering. A capability a run cannot provide is absent and self-reported in <code>warnings</code>, never stubbed. An empty array always means analyzed, found nothing.</p>
         </div>
         <div class="card">
-          <h3>Zero config, actionable findings</h3>
-          <p><code>{ root: "." }</code> is the entire required configuration. Every finding reports three things: the problem, the fix, and the exact exclude config to suppress it deliberately.</p>
+          <h3>Zero config to start</h3>
+          <p><code>{ root: "." }</code> is all a first run needs; the real leverage is tuning it per environment (custom packs, parser injection). Every finding names the exact config to silence it deliberately — DSL rule findings additionally carry the concrete fix.</p>
         </div>
       </div>
     </div>

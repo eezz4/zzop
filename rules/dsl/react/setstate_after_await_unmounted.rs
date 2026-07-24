@@ -88,7 +88,7 @@ fn setstate_await_ok_marker_directly_above_the_setter_line_suppresses_the_findin
     let dir = TempDir::new("zzop-react");
     dir.write(
         "src/Widget.tsx",
-        "import { useEffect, useState } from 'react';\nexport function Widget({ url }: { url: string }) {\n  const [data, setData] = useState(null);\n  useEffect(() => {\n    const load = async () => {\n      const d = await fetch(url);\n      // setstate-await-ok: fire-and-forget admin diagnostics widget, unmount race accepted\n      setData(d);\n    };\n    load();\n  }, [url]);\n  return null;\n}\n",
+        "import { useEffect, useState } from 'react';\nexport function Widget({ url }: { url: string }) {\n  const [data, setData] = useState(null);\n  useEffect(() => {\n    const load = async () => {\n      const d = await fetch(url);\n      // setstate-after-await-unmounted-ok: fire-and-forget admin diagnostics widget, unmount race accepted\n      setData(d);\n    };\n    load();\n  }, [url]);\n  return null;\n}\n",
     );
     let out = scan(&dir);
     assert!(

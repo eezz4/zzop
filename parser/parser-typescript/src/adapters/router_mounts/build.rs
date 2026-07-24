@@ -12,7 +12,7 @@ use swc_core::ecma::visit::{Visit, VisitWith};
 use zzop_core::{ImportMap, RouterMountEntry, RouterMountFragment};
 
 use super::chain::{unwrap_expr, walk_chain, ChainRoot};
-use super::guard::{judge_guard_arg, AUTH_GUARDED_ATTR_KEY};
+use super::guard::{judge_guard_arg, judge_guard_wrapper_arg, AUTH_GUARDED_ATTR_KEY};
 use super::idempotency::{inline_handler_reads_idempotency_key, IDEMPOTENCY_GUARDED_ATTR_KEY};
 use super::use_classify::classify_use_call;
 
@@ -151,14 +151,22 @@ impl FragmentBuilder<'_> {
                     .args
                     .last()
                     .and_then(|a| handler_name(unwrap_expr(&a.expr)));
-                // A middleware argument between the path and the last/handler arg
-                // (`router.post('/x', requireAuth, handler)`) is judged for guard vocabulary —
-                // route-level, as opposed to router-level (`.use`) — via the same helper.
+                // Two route-level guard shapes, one attribute. (a) A middleware argument between
+                // the path and the last/handler arg (`router.post('/x', requireAuth, handler)`).
+                // (b) The higher-order-function idiom, where the guard WRAPS the handler and so
+                // occupies the last arg itself (`router.get('/admin/x', requireAdmin(handler))`) —
+                // judged by `judge_guard_wrapper_arg`, which is (a)'s vocabulary plus a
+                // wrapper-position-only widening (see its doc for why the position earns it, and
+                // for the under-recognition this knowingly keeps).
                 let mut attr_keys = Vec::new();
-                if call.args.len() > 2
+                if (call.args.len() > 2
                     && call.args[1..call.args.len() - 1]
                         .iter()
-                        .any(|a| judge_guard_arg(unwrap_expr(&a.expr)))
+                        .any(|a| judge_guard_arg(unwrap_expr(&a.expr))))
+                    || call
+                        .args
+                        .last()
+                        .is_some_and(|a| judge_guard_wrapper_arg(unwrap_expr(&a.expr)))
                 {
                     attr_keys.push(AUTH_GUARDED_ATTR_KEY.to_string());
                 }

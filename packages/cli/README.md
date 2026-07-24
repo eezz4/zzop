@@ -3,7 +3,7 @@
 An npm packaging of the native `zzop` CLI binary — identical to the binary [GitHub
 Releases](https://github.com/eezz4/zzop/releases) ships, same subcommands (`zzop analyze`, `zzop cross`,
 `zzop endpoint`, `zzop analyze-envelope`, `zzop validate-envelope`, `zzop validate-rule-pack`, `zzop
-contract`, …). This package carries **no logic of its own** — `bin/zzop.js` is a thin launcher that
+contract`, `zzop explain`, …). This package carries **no logic of its own** — `bin/zzop.js` is a thin launcher that
 resolves the right platform binary and passes every argument straight through
 (`spawnSync(binaryPath, process.argv.slice(2), { stdio: 'inherit' })`), exiting with the child's own
 status code. For the full command/flag reference, config file format, and output contract, see the repo

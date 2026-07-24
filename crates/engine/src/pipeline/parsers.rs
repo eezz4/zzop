@@ -4,9 +4,9 @@
 
 use zzop_core::{ir::SourceSymbol, ImportMap};
 
-/// Non-blank, non-comment line count computed from raw text alone (no parse) — used for oversized
-/// files, lexical-only files, and the fallback when a parse panics. Approximate for Prisma text
-/// (also uses `//` comments), acceptable for a fallback-only path.
+/// RAW physical line count computed from raw text alone (no parse) — delegates to
+/// `zzop_parser_typescript::count_loc`, so blank and comment lines COUNT (see `MinimalIr::loc`'s doc for
+/// the contract). Used for oversized files, lexical-only files, and the fallback when a parse panics.
 pub(super) fn lexical_loc(text: &str) -> u32 {
     zzop_parser_typescript::count_loc(text)
 }
@@ -62,11 +62,26 @@ pub(super) fn parse_typescript(
 /// line-based regex scanner with no AST step, so a malformed schema degrades to "zero models found"
 /// rather than panicking; `catch_unwind` is still applied as defense in depth. Prisma files never
 /// participate in the TS dep graph (`imports: None`, always).
+///
+/// Unlike every other arm here, this one ALSO returns the bridge's `IoFacts` (the per-model
+/// `db-table` PROVIDEs `build_common_ir` computes): the other parsers' io is projected by a separate
+/// extractor call in `pipeline::fresh`, but Prisma's rides along inside the same `CommonIr` this
+/// function already builds, so returning it costs nothing. It was previously DROPPED on the floor here
+/// — `crates/engine/tests/rule_contracts/capability_matrix.rs` documented that orphaned capability as a
+/// canary-guarded fact ("computed, then discarded by `parse_prisma`"); this is the wiring that closes
+/// it, so a `schema.prisma` model's table now reaches the whole-tree provide list and the cross-layer
+/// join like a `CREATE TABLE`'s does.
 pub(super) fn parse_prisma(
     source_id: &str,
     rel: &str,
     text: &str,
-) -> (Vec<SourceSymbol>, Option<ImportMap>, u32, bool) {
+) -> (
+    Vec<SourceSymbol>,
+    Option<ImportMap>,
+    u32,
+    bool,
+    Option<zzop_core::IoFacts>,
+) {
     let owned = (rel.to_string(), text.to_string());
     let result = std::panic::catch_unwind(|| {
         zzop_parser_prisma::build_common_ir(source_id, std::slice::from_ref(&owned))
@@ -79,9 +94,9 @@ pub(super) fn parse_prisma(
                 .get(rel)
                 .copied()
                 .unwrap_or_else(|| lexical_loc(text));
-            (ir.ir.symbols, None, loc, false)
+            (ir.ir.symbols, None, loc, false, ir.ir.io)
         }
-        Err(_) => (Vec::new(), None, lexical_loc(text), true),
+        Err(_) => (Vec::new(), None, lexical_loc(text), true, None),
     }
 }
 

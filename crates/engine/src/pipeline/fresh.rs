@@ -63,10 +63,15 @@ pub(super) fn compute_fresh_artifact(
         };
     }
 
+    // Prisma is the one language whose io PROJECTION is computed by the same call that produces its
+    // symbols (`build_common_ir` returns a whole `CommonIr`), not by a separate extractor in the `io`
+    // match below — so it is carried out of the parse match in this slot and read back there.
+    let mut prisma_io: Option<IoFacts> = None;
     let (symbols, imports, loc, degraded, used_names) = match language {
         Some(Language::TypeScript) => parse_typescript(rel, text),
         Some(Language::Prisma) => {
-            let (symbols, imports, loc, degraded) = parse_prisma(&config.source_id, rel, text);
+            let (symbols, imports, loc, degraded, io) = parse_prisma(&config.source_id, rel, text);
+            prisma_io = io;
             (symbols, imports, loc, degraded, Vec::new())
         }
         Some(Language::Java21) => parse_java21(rel, text),
@@ -77,70 +82,10 @@ pub(super) fn compute_fresh_artifact(
         Some(Language::CSharp) => parse_csharp(rel, text),
         None => (Vec::new(), None, lexical_loc(text), false, Vec::new()),
     };
-    // IO projection. Egress consumes (TS/Python/Rust/Go/C#) run only on a well-formed, in-size-cap file. Route provides come
-    // io-direct for TS (Hono), Java (Spring), and C# (attribute controllers + minimal APIs); Java's + C#'s provides project for ANY
-    // `.java`/`.cs` file regardless of `degraded` (extractors return empty rather than guess — C# gates only its consumes). Python/Rust/Go ROUTE provides travel as `router_mount_fragments`; Python (SQLModel) & Go (GORM) ALSO emit io-direct `db-table` provides too.
-    let io = match language {
-        Some(Language::TypeScript) if !degraded => {
-            crate::io::extract_file_io(rel, text, &config.io)
-        }
-        Some(Language::Java21) => crate::io::extract_java_file_io(rel, text),
-        Some(Language::Python) if !degraded => {
-            let mut consumes = zzop_parser_python_3::extract_python_http_consumes(rel, text);
-            // ORM db-table facts (keyed engine-side): SQLModel/SQLAlchemy + Django — touches -> consumes, models -> provides.
-            consumes.extend(zzop_parser_python_3::extract_sqlalchemy_db_table_consumes(
-                rel, text,
-            ));
-            consumes.extend(zzop_parser_python_3::extract_django_db_table_consumes(
-                rel, text,
-            ));
-            let mut provides =
-                zzop_parser_python_3::extract_sqlalchemy_db_table_provides(rel, text);
-            provides.extend(zzop_parser_python_3::extract_django_db_table_provides(
-                rel, text,
-            ));
-            if consumes.is_empty() && provides.is_empty() {
-                None
-            } else {
-                Some(IoFacts { provides, consumes })
-            }
-        }
-        Some(Language::Rust) if !degraded => {
-            let consumes = zzop_parser_rust::extract_rust_http_consumes(rel, text);
-            if consumes.is_empty() {
-                None
-            } else {
-                Some(IoFacts {
-                    provides: Vec::new(),
-                    consumes,
-                })
-            }
-        }
-        Some(Language::Go) if !degraded => {
-            let mut consumes = zzop_parser_go::extract_go_http_consumes(rel, text);
-            // GORM db-table facts: model touches -> consumes (keyed engine-side), `gorm.Model` structs -> provides.
-            consumes.extend(zzop_parser_go::extract_gorm_db_table_consumes(rel, text));
-            let provides = zzop_parser_go::extract_gorm_db_table_provides(rel, text);
-            if consumes.is_empty() && provides.is_empty() {
-                None
-            } else {
-                Some(IoFacts { provides, consumes })
-            }
-        }
-        Some(Language::Sql) => {
-            let provides = zzop_parser_sql::extract_db_table_provides(rel, text);
-            (!provides.is_empty()).then(|| IoFacts {
-                provides,
-                consumes: Vec::new(),
-            })
-        }
-        // C# projects BOTH provides (attribute controllers + minimal APIs, io-direct — no
-        // `router_mount_fragments` arm) and `HttpClient` egress consumes. Unlike the egress-only arms
-        // above, this is NOT gated `if !degraded`: `extract_csharp_file_io` runs its route-PROVIDES side
-        // unconditionally (Java-parity), gating only the consumes internally — see its own doc.
-        Some(Language::CSharp) => crate::io::extract_csharp_file_io(rel, text, degraded),
-        _ => None,
-    };
+    // Per-file IO projection (route/egress/`db-table` provides + consumes, by language) —
+    // `io_projection::project_file_io`'s own doc carries the per-language contract.
+    let io =
+        super::io_projection::project_file_io(language, rel, text, degraded, config, prisma_io);
     // The next projections are all TypeScript-only, reusing `text` already in hand (no second file read): const-map fragment (feeds
     // `analyze::assemble`'s merge + late consume re-resolution), tRPC router fragment (`analyze::compose_trpc_provides`), router-mount
     // fragment (Hono builders/cross-file mounts, for `analyze::compose_router_mount_provides`), wrapper def/call fragments (assemble-time wrapper-consume join, defs indexed by `(file, name)`), controller-prefix route fragment (assemble-time controller-prefix composer, against the same const map), and query-call-site facts (`run_schema_join_rules` substrate).

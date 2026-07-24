@@ -86,7 +86,7 @@ health-check hitting your own base URL — still has a host, so the bypass rule 
 shape: it keys as an absolute URL and lands in `externalConsumes`, never joining that tree's own `GET
 /api/ping` provide. If you control the extraction, strip the origin and key it as the plain relative path
 instead (`"GET /api/ping"`), same as any other in-tree call. If you can't special-case it at the adapter,
-declare the tree's own host in its `hosts` config instead (see `docs/modules/mcp.md`'s `hosts` field) —
+declare the tree's own host in its `hosts` config instead (see `docs/modules/facade.md`'s `hosts` field) —
 cross-layer linking re-keys a matching absolute-URL consume back to internal at link time.
 
 (Note: [`key-normalization.fixture.json`](key-normalization.fixture.json) deliberately carries no

@@ -30,7 +30,11 @@ pub(in crate::analyze::assemble) struct Collected {
     pub(in crate::analyze::assemble) degraded: Vec<String>,
     /// `pipeline::eval_packs`' minified/generated skip — a separate list from `degraded` (see
     /// `pipeline::FileArtifact::minified_or_generated`'s doc), surfaced as one aggregate `warnings`
-    /// entry (`minified_files_warning`) rather than a per-file entry.
+    /// entry (`minified_files_warning`) rather than a per-file entry. Field name is short for
+    /// `minified_or_generated`: a file lands here on EITHER prong of `is_minified_or_generated`. Both
+    /// prongs are purely LINE-LENGTH tests (a 5000+ byte line, or 500+ byte lines dominating half the
+    /// file's bytes) — "generated" is in the name because bundler output usually trips them, NOT because
+    /// generation is detected. A generated file with ordinary line lengths is never flagged here.
     pub(in crate::analyze::assemble) minified: Vec<String>,
     pub(in crate::analyze::assemble) io_provides: Vec<IoProvide>,
     pub(in crate::analyze::assemble) io_consumes: Vec<IoConsume>,

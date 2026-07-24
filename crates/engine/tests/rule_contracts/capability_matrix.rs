@@ -5,7 +5,7 @@
 //!
 //! This contract exists because the fact it pins previously lived only as prose, and prose had ALREADY
 //! drifted from the code: an audit found "loop spans are TS-only" stated somewhere while
-//! `parser/parser-go/src/lang/loop_spans.rs` and `go/go-goroutine-in-loop`'s `trigger_in_loop` matcher had
+//! `parser/parser-go/src/lang/loop_spans.rs` and `go/goroutine-in-loop`'s `trigger_in_loop` matcher had
 //! moved reality out from under that sentence. This module replaces the sentence with a table read
 //! straight from `crates/engine/src/pipeline/fresh.rs`'s own per-language match arms (ground truth) and a
 //! canary fixture per parser environment that empirically confirms the table against the REAL engine path
@@ -72,23 +72,21 @@
 //! | java-21             | yes     | yes           | no         | yes         | no          |
 //! | rust                | yes     | yes           | no         | yes         | yes         |
 //! | go                  | yes     | yes           | yes        | yes         | yes         |
-//! | prisma              | yes     | no            | no         | no          | no          |
+//! | prisma              | yes     | no            | no         | yes         | no          |
 //! | sql                 | no      | no            | no         | yes         | no          |
 //! | csharp              | yes     | yes           | no         | yes         | yes         |
 //! | lexical-fallback    | no      | no            | no         | no          | no          |
 //!
-//! `prisma`'s `io_provides: no` is worth a second look: `zzop_parser_prisma::build_common_ir` DOES compute
-//! a `db-table` `IoProvide` per model (`analysis.rs`'s own doc: "a `(kind="db-table", ...)` io PROVIDE at
-//! the model's declaration line"). But the ENGINE's sole call site
-//! (`crates/engine/src/pipeline/parsers.rs::parse_prisma`) discards `ir.ir.io`, keeping only
-//! `ir.ir.symbols`/`ir.ir.loc` — that computed provide never reaches `assemble`'s whole-tree list. This is
-//! not a bug this contract flags (no shipped rule's `file_pattern` admits `.prisma` with an `IoScan`
-//! matcher today, so nothing is silently broken by it) but it IS a real orphaned capability, surfaced in
-//! the report this test's author filed rather than fixed here (out of this test's scope — see the human
-//! report for the pointer). If a future change threads that discarded `IoFacts` through, `prisma`'s
-//! `io_provides` canary goes non-empty and the bidirectional check above starts failing until this row is
-//! updated — exactly the forward-looking regression guard the "gains can't hide behind green" mandate asks
-//! for.
+//! `prisma`'s `io_provides` flipped `no` -> `yes` when the orphan this table originally DOCUMENTED was
+//! wired up. The orphan was: `zzop_parser_prisma::build_common_ir` computed a `db-table` `IoProvide` per
+//! model, but the ENGINE's sole call site (`crates/engine/src/pipeline/parsers.rs::parse_prisma`)
+//! discarded `ir.ir.io`, keeping only `ir.ir.symbols`/`ir.ir.loc` — so the computed provide never reached
+//! `assemble`'s whole-tree list. `parse_prisma` now returns that `IoFacts` and `pipeline::fresh`'s io
+//! match has a `Language::Prisma` arm reading it, so a `model` block's table joins the cross-layer
+//! `db-table` channel exactly like a `CREATE TABLE`'s does. The canary below (declared-present must be
+//! non-empty) is what pins that it stayed wired: this row going back to `no` fails the test, and the
+//! prisma fixture's model is what makes it non-empty. `io_consumes` stays `no` — PSL declares tables, it
+//! never calls one (the CONSUME side is parser-typescript's `db_table_consume`, a `.ts` environment).
 //!
 //! `lexical-fallback` has no parser crate (it is `dispatch`'s `None` arm, not `Language::*`) — it is a
 //! synthetic 9th row, excluded from the parser-crate SSOT pin below.
@@ -173,7 +171,7 @@ const ENVIRONMENTS: &[(&str, Capabilities)] = &[
             symbols: true,
             method_spans: false,
             loop_spans: false,
-            io_provides: false,
+            io_provides: true,
             io_consumes: false,
         },
     ),

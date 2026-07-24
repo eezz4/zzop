@@ -6,12 +6,14 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
+use std::time::Instant;
 
 use zzop_core::{
     eval_pack_io_scan, is_enabled, Attribute, AttributeStore, EntityRef, Finding, IoConsume,
-    IoProvide, IoScanTreeContext, RulePackDef,
+    IoProvide, IoScanTreeContext, Matcher, RulePackDef,
 };
 
+use crate::analyze::record_native_timing;
 use crate::EngineConfig;
 
 /// Mints an `auth-guarded` [`Attribute`] (`zzop_rules_http::mutating_route_no_auth::AUTH_GUARDED_ATTR`)
@@ -100,9 +102,11 @@ impl<'a> LineCache<'a> {
 /// producing evidence that config actually consumes, not free (see `callgraph/mod.rs`'s
 /// `need_decorator_guarded` note).
 ///
-/// Rule-timing/profiling parity note: unlike every per-file DSL rule and every native whole-graph rule
-/// above, this pass's `IoScan` rules are NOT wired into `EngineConfig::profile_rules`/`rule_timings` in
-/// this v1 — a deliberate, documented gap, not an oversight.
+/// Rule-timing/profiling parity: under `EngineConfig::profile_rules` this pass contributes one
+/// `"{pack}/{rule}"` entry per `IoScan` rule that ran, into the same `rule_time` accumulator every
+/// per-file DSL rule and whole-graph native rule feeds — see [`eval_pack_timed`] for the granularity and
+/// the reason the profiled path splits the pack. Mode A (`envelope::ingest`'s own `eval_pack_io_scan`
+/// call) needs no counterpart: it emits `rule_timings: None` unconditionally, for every rule class.
 pub(super) fn run(
     root: &std::path::Path,
     config: &EngineConfig,
@@ -110,11 +114,12 @@ pub(super) fn run(
     io_consumes: &[IoConsume],
     attribute_store: &AttributeStore,
     decorator_guarded: &BTreeSet<(String, u32)>,
+    rule_time: &mut HashMap<String, (u128, usize)>,
 ) -> Vec<Finding> {
     let minted = mint_auth_guarded(io_provides, decorator_guarded);
     let augmented = attribute_store.extended(minted);
 
-    let gated_packs: Vec<RulePackDef> = config
+    let mut gated_packs: Vec<RulePackDef> = config
         .packs
         .iter()
         .filter(|p| is_enabled(&config.rule_config, &p.id))
@@ -130,10 +135,62 @@ pub(super) fn run(
         anchor_line: &anchor_line,
     };
 
+    // Same profiled/unprofiled branch `pipeline::findings::eval_packs` uses for the per-file pass
+    // (`eval_pack_profiled` vs `eval_pack`): an unprofiled run keeps the exact whole-pack call it always
+    // made, so it pays no `Instant::now()` and no pack surgery at all.
     let mut findings = Vec::new();
-    for pack in &gated_packs {
-        eval_pack_io_scan(pack, &ctx, &mut findings);
+    if config.profile_rules {
+        for pack in &mut gated_packs {
+            eval_pack_timed(pack, &ctx, rule_time, &mut findings);
+        }
+    } else {
+        for pack in &gated_packs {
+            eval_pack_io_scan(pack, &ctx, &mut findings);
+        }
     }
     crate::pipeline::findings::append_disable_hints(&mut findings);
     findings
 }
+
+/// Profiled counterpart of the plain `eval_pack_io_scan(pack, ..)` call above: evaluates ONE `IoScan`
+/// rule at a time so each gets its own `"{pack}/{rule}"` entry in `rule_time`, the exact key shape and
+/// accumulator `record_native_timing`'s callers (and the per-file DSL pass, via `RuleTiming`) already use.
+///
+/// Granularity is per rule per whole-tree pass — ONE clock read around a rule's entire provides+consumes
+/// sweep, never per IO entry — matching `eval_pack_profiled`, which likewise times a rule's whole dispatch
+/// rather than its inner iteration.
+///
+/// WHY the pack is split rather than timed inside the evaluator: `zzop_core` exposes only the whole-pack
+/// `eval_pack_io_scan` (its per-rule `eval_io_scan_rule` is private), and the per-file pass's profiled
+/// entry point has no io-scan twin. Feeding it a one-rule view of the pack is therefore the only
+/// engine-side way to attribute time to a rule id. Findings are byte-identical to the whole-pack call:
+/// `eval_pack_io_scan` is a straight in-order loop over `pack.rules` with no cross-rule state, so running
+/// the same rules in the same order through it appends the same findings in the same order.
+///
+/// `pack` is drained (a moved-out rule list, non-`IoScan` rules dropped) instead of cloned per rule —
+/// `gated_packs` is this function's own local, dead after the loop, so mutating it costs nothing and
+/// avoids an O(rules^2) clone of every pack.
+fn eval_pack_timed(
+    pack: &mut RulePackDef,
+    ctx: &IoScanTreeContext,
+    rule_time: &mut HashMap<String, (u128, usize)>,
+    findings: &mut Vec<Finding>,
+) {
+    for rule in std::mem::take(&mut pack.rules) {
+        // Non-`IoScan` rules are no-ops here (the per-file pass owns them); timing them would mint a
+        // spurious entry for a rule this pass never ran.
+        if !matches!(rule.matcher, Matcher::IoScan(_)) {
+            continue;
+        }
+        let id = format!("{}/{}", pack.id, rule.id);
+        pack.rules.clear();
+        pack.rules.push(rule);
+        let before = findings.len();
+        let t0 = Instant::now();
+        eval_pack_io_scan(pack, ctx, findings);
+        record_native_timing(rule_time, Some(t0), &id, findings.len() - before);
+    }
+}
+
+#[cfg(test)]
+mod tests;

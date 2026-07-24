@@ -4,6 +4,10 @@
 //! found 0" apart from "this channel was dark". `join_contribution_zero` is the active-blindness FACT
 //! (not a heuristic): a tree that contributed NO io to the cross-layer join. See
 //! decision doc coverage-disclosure.md (Stage 1).
+//!
+//! **Not test coverage**: despite the filename, nothing here measures which lines a test suite exercises.
+//! "Coverage" means analysis-CHANNEL fill — did the io/dep/symbol extractors find anything for this tree
+//! at all — not `pytest --cov`/`nyc`-style executed-line percentages.
 
 use zzop_core::CommonIr;
 

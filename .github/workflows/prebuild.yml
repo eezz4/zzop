@@ -81,6 +81,18 @@ jobs:
                 exit 1
               fi
             fi
+            # server.json's versions too. `publish-mcp-registry` REWRITES every version/identifier/
+            # fileSha256 at release time from the real assets, so the committed values never reach the
+            # registry — but a human (or an agent) reading the repo sees them and takes them for the
+            # shipped version. Keeping them honest costs one bump per release; leaving them stale cost a
+            # dogfooding session (2026-07-24: committed 0.21.1 read as "the version", against 0.22.0
+            # everywhere else). Only `version` is gated: `fileSha256` genuinely cannot be known before
+            # the assets exist.
+            SERVER_VERSIONS=$(jq -r '[.version] + [.packages[].version] | unique | join(",")' server.json)
+            if [ "$SERVER_VERSIONS" != "$VERSION" ]; then
+              echo "::error::server.json declares version(s) [$SERVER_VERSIONS] but Cargo.toml [workspace.package] is $VERSION — bump server.json's top-level \"version\" and every packages[].version (and their download URLs) in the same commit; a mismatch blocks the autotag."
+              exit 1
+            fi
             echo "version=$VERSION" >> "$GITHUB_OUTPUT"
             if [ -z "$(git ls-remote --tags origin "refs/tags/v$VERSION")" ]; then
               git tag "v$VERSION"
@@ -214,6 +226,19 @@ jobs:
             fi
             echo ".claude-plugin/marketplace.json version ($MARKETPLACE_VERSION) matches release version $VERSION."
           fi
+      - name: Verify server.json's committed versions match the release version
+        # Belt for the `meta` autotag gate above (covers the manual-tag path). `publish-mcp-registry`
+        # overwrites these before publishing, so this protects READERS of the repo, not the registry
+        # payload — see that gate's comment for why a stale placeholder is worth failing a run over.
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          SERVER_VERSIONS=$(jq -r '[.version] + [.packages[].version] | unique | join(",")' server.json)
+          if [ "$SERVER_VERSIONS" != "$VERSION" ]; then
+            echo "::error::server.json declares version(s) [$SERVER_VERSIONS] but the release version is $VERSION — bump server.json's top-level \"version\" and every packages[].version (and their download URLs) in the release commit."
+            exit 1
+          fi
+          echo "server.json versions ($SERVER_VERSIONS) match release version $VERSION."
 
   # Only runs when `meta` says this run releases (the build matrix above always runs, including for
   # workflow_dispatch and ordinary main pushes, without releasing). Attaches the 5 bare

@@ -18,7 +18,12 @@ use std::collections::{BTreeMap, BTreeSet};
 /// `prisma.<model>.<method>` style (the most common idiom; a documented staged follow-up) extracts ZERO
 /// db-table facts, and excluding prisma here masked exactly that gap. The exact-zero-fact gate makes the
 /// entry self-correcting: when the native path DOES extract facts, the count is nonzero and this tripwire
-/// stays silent regardless of the import.
+/// stays silent regardless of the import. Two later changes shrank prisma's reachable window to
+/// "`@prisma/client` imported, but NO `schema.prisma` in the tree and no recognized call shape": the
+/// bare-singleton consume idiom is now covered (`db_table_consume::receivers`), and a `schema.prisma`'s
+/// own model PROVIDEs now reach the tree-wide count (`pipeline::fresh`'s `Language::Prisma` io arm) — so
+/// a schema-bearing tree is never called dark, exactly as a TypeORM tree with `@Entity` provides and no
+/// recognized repository consume already was not. The entry stays: that residual window is real.
 const ORM_SCHEMA_SPECIFIERS: &[(&str, &str)] = &[
     ("@prisma/client", "Prisma"),
     ("typeorm", "TypeORM"),
@@ -97,7 +102,8 @@ the extractor does not recognize (tables defined via migrations or raw SQL rathe
 classes, or a model/query idiom outside the extractor's covered set). Its schema/table facts do not reach \
 the cross-layer join (`cross-layer/shared-db-table` and any join finding keyed on a table will be silent \
 for this tree); project this tree's tables with a Mode B overlay adapter (see the adapter examples) to \
-restore visibility: a partial envelope covering just the db-table channel is enough; contract: `zzop \
-contract envelope-guide` on MCP hosts, docs/NORMALIZED_AST.md in the repo."
+restore visibility: a partial envelope covering just the db-table channel is enough; contract: MCP \
+resource `zzop://contract/envelope-guide` on MCP hosts (`zzop contract envelope-guide` with the CLI \
+binary), docs/NORMALIZED_AST.md in the repo."
     ))
 }

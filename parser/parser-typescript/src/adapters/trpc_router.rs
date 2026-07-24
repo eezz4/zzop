@@ -29,8 +29,18 @@
 //! argument order — the empty key signals "splice this sub-router's entries in here" (there is no
 //! key: `mergeRouters` flattens its arguments into ONE namespace). A non-identifier argument is
 //! skipped, not recursed into — v1 only recognizes a plain sub-router
-//! `mergeRouters(fooRouter, barRouter)` call. A top-level `const` whose initializer is neither a
-//! router factory nor `mergeRouters(...)` produces no fragment at all.
+//! `mergeRouters(fooRouter, barRouter)` call.
+//!
+//! ## Standalone procedures (leaf-import mounts)
+//! A top-level `const <name> = publicProcedure.input(z...).query(fn)` — a procedure declared alone in
+//! its own file so another file can `import` it and mount it as a SINGLE leaf (`router({ getUser })`)
+//! rather than as a whole sub-router — is captured as a one-entry fragment whose `Leaf` has an EMPTY
+//! key. The empty key means the same thing it does for `mergeRouters`' `Ref`s: add no path segment of
+//! my own, the mount site names me. Without this the mounting `Ref` resolves to nothing and the route
+//! is silently dropped. The chain's BASE must be tRPC procedure vocabulary (`procedure`,
+//! `*Procedure`, or a member ending in one, e.g. `t.procedure`) — a bare top-level const has none of
+//! the surrounding-`router({...})` evidence an in-router leaf has, and `x.query(...)` is a very common
+//! non-tRPC chain. Any other top-level `const` still produces no fragment at all.
 //!
 //! Object-literal spread properties (`...someSubRouter`) are not expanded into entries — skipped, same
 //! "never guess" stance as everything else above. Shorthand object properties (`{ bookings }`) ARE

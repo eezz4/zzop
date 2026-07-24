@@ -10,6 +10,17 @@
 # alter extraction output (docs, comments, internal refactors with identical results). The core
 # shared-type check below uses the same grammar with token `[no-projection-change: core]`.
 #
+# The marker must stand ON ITS OWN LINE — leading/trailing whitespace allowed, nothing else on it:
+# a git-trailer-like shape, and what nearly every marker in this repo's history already looks like.
+# Bit for real 2026-07-24: a bare substring search cannot tell a claim from a mention of one. A
+# message recording that a fingerprint had been restamped "rather than using
+# [no-projection-change: rules-schema]" — an explicit REFUSAL of the hatch — made this guard
+# announce that lane as skipped-by-marker: right verdict (the lane had a real bump), lying reason,
+# and the same sentence on a day the bump was missing would wave a stale cache through. Prose can
+# mention the token, quote it, or negate it; a line holding nothing but it cannot be written by
+# accident, and stays as greppable as before. All four scopes below (parser crates / core shared
+# surface / dsl / rules-schema) share the rule — they shared the defect.
+#
 # Diff range: ${FINGERPRINT_DIFF_RANGE:-origin/main...HEAD}, overridable via env. CI computes this
 # against the PR base (or the previous commit on a direct push) — see .github/workflows/ci.yml.
 # Local runs commonly lack a fetched origin/main; that degrades gracefully (skip with a notice,
@@ -62,7 +73,21 @@ if ! changed_files="$(git diff --name-only "$range" -- 2>&1)"; then
   exit 0
 fi
 
-commit_messages="$(git log --format=%B "$range" -- 2>/dev/null || true)"
+# Every commit message in the range, one line per line, with surrounding whitespace stripped — so
+# the own-line marker test is a plain whole-line literal compare and indentation cannot defeat it.
+marker_scan="$(git log --format=%B "$range" -- 2>/dev/null | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' || true)"
+
+# True only when some line in the range IS the marker for scope $1 ("parser-java" / "core" / "dsl" /
+# "rules-schema") and nothing else — see the header for why a mid-sentence mention must not count.
+#   -x pins the match to a whole line; -F keeps the bracketed token a literal, so no scope name
+#      ever needs regex escaping.
+#   Herestring, never `printf big-blob | grep -q`: under pipefail, grep -q exiting on first match
+#      SIGPIPEs printf (exit 141) once the blob exceeds the pipe buffer (~64KB) — a REAL match then
+#      reads as pipeline failure. Bit for real: a 79KB squash message made this check fail despite
+#      the marker being present.
+has_skip_marker() {
+  grep -qxF "[no-projection-change: $1]" <<< "$marker_scan"
+}
 
 fail=0
 for crate_dir in parser/*/; do
@@ -81,11 +106,7 @@ for crate_dir in parser/*/; do
   crate_changed="$(printf '%s\n' "$changed_files" | grep -F "$crate/src/" || true)"
   [ -z "$crate_changed" ] && continue
 
-  # Herestring, never `printf big-blob | grep -q`: under pipefail, grep -q exiting on first match
-  # SIGPIPEs printf (exit 141) once the blob exceeds the pipe buffer (~64KB) — a REAL match then
-  # reads as pipeline failure. Bit for real: a 79KB squash message made this marker check fail
-  # despite the marker being present.
-  if grep -qF "[no-projection-change: $crate_name]" <<< "$commit_messages"; then
+  if has_skip_marker "$crate_name"; then
     echo "check-parser-fingerprint-bump: $crate_name — src/** changed but skipped via [no-projection-change: $crate_name] marker."
     continue
   fi
@@ -97,7 +118,7 @@ for crate_dir in parser/*/; do
     echo "  means a change to what/how this crate extracts could keep being served from a stale cache entry." >&2
     echo "  Fix: bump PARSER_FINGERPRINT (e.g. append a new '+label-vN' segment, or bump an existing segment's version)." >&2
     echo "  Escape hatch: if this change provably does not alter extraction output, add '[no-projection-change: $crate_name]'" >&2
-    echo "  to a commit message in the range." >&2
+    echo "  to a commit message in the range, ON A LINE OF ITS OWN — a mention inside a sentence does not count." >&2
     fail=1
   fi
 done
@@ -130,7 +151,7 @@ for f in "${CORE_SHARED_FILES[@]}"; do
   fi
 done
 if [ -n "$core_changed" ]; then
-  if grep -qF "[no-projection-change: core]" <<< "$commit_messages"; then
+  if has_skip_marker core; then
     echo "check-parser-fingerprint-bump: core — shared-type surface changed but skipped via [no-projection-change: core] marker."
   else
     schema_files="$(grep -rlE '^[[:space:]]*pub const CACHE_SCHEMA_VERSION' crates/*/src 2>/dev/null || true)"
@@ -155,7 +176,8 @@ if [ -n "$core_changed" ]; then
         echo "  crates/core — keep being served as valid even though the shapes they carry have changed." >&2
         echo "  Fix: bump CACHE_SCHEMA_VERSION in $schema_file (a bump bulk-wipes the cache — see its doc comment)." >&2
         echo "  Escape hatch: if this change provably does not alter any projected/cached shape, add" >&2
-        echo "  '[no-projection-change: core]' to a commit message in the range." >&2
+        echo "  '[no-projection-change: core]' to a commit message in the range, ON A LINE OF ITS OWN — a mention" >&2
+        echo "  inside a sentence does not count." >&2
         fail=1
       fi
     fi
@@ -174,7 +196,7 @@ fi
 # pack content and DSL rule catalogs elsewhere are not the interpreter itself.
 dsl_changed="$(printf '%s\n' "$changed_files" | grep -E '^crates/core/src/dsl/' || true)"
 if [ -n "$dsl_changed" ]; then
-  if grep -qF "[no-projection-change: dsl]" <<< "$commit_messages"; then
+  if has_skip_marker dsl; then
     echo "check-parser-fingerprint-bump: dsl — crates/core/src/dsl/** changed but skipped via [no-projection-change: dsl] marker."
   else
     dsl_fp_files="$(grep -rlE '^[[:space:]]*(pub[[:space:]]+)?const DSL_INTERPRETER_FINGERPRINT' crates/*/src 2>/dev/null || true)"
@@ -206,7 +228,8 @@ if [ -n "$dsl_changed" ]; then
         echo "  served from a stale per-file findings cache entry." >&2
         echo "  Fix: bump DSL_INTERPRETER_FINGERPRINT's trailing counter in $dsl_fp_file (see its own doc comment for the scheme)." >&2
         echo "  Escape hatch: if this change provably does not alter any DSL rule's findings, add" >&2
-        echo "  '[no-projection-change: dsl]' to a commit message in the range." >&2
+        echo "  '[no-projection-change: dsl]' to a commit message in the range, ON A LINE OF ITS OWN — a mention" >&2
+        echo "  inside a sentence does not count." >&2
         fail=1
       fi
     fi
@@ -224,7 +247,7 @@ fi
 # is also accepted, same escape valve as the two checks above.
 schema_src_changed="$(printf '%s\n' "$changed_files" | grep -E '^rules/native/rules-schema/src/' || true)"
 if [ -n "$schema_src_changed" ]; then
-  if grep -qF "[no-projection-change: rules-schema]" <<< "$commit_messages"; then
+  if has_skip_marker rules-schema; then
     echo "check-parser-fingerprint-bump: rules-schema — rules/native/rules-schema/src/** changed but skipped via [no-projection-change: rules-schema] marker."
   else
     struct_fp_files="$(grep -rlE '^[[:space:]]*pub const STRUCTURAL_RULES_VERSION' rules/native/*/src 2>/dev/null || true)"
@@ -254,7 +277,8 @@ if [ -n "$schema_src_changed" ]; then
         echo "  keep being served from a stale per-file findings cache entry." >&2
         echo "  Fix: bump STRUCTURAL_RULES_VERSION in $struct_fp_file." >&2
         echo "  Escape hatch: if this change provably does not alter any schema/* finding's output, add" >&2
-        echo "  '[no-projection-change: rules-schema]' to a commit message in the range." >&2
+        echo "  '[no-projection-change: rules-schema]' to a commit message in the range, ON A LINE OF ITS OWN — a" >&2
+        echo "  mention inside a sentence does not count." >&2
         fail=1
       fi
     fi

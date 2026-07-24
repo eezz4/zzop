@@ -13,8 +13,10 @@ use super::super::helpers::{
 
 /// "Bring an adapter" per-extension disclosure (`unparsed_extension_warning`)'s collection step: records
 /// `rel`'s extension when `dispatch_lang` is `None` (no native parser frontend claims it) AND `rel` is
-/// not already covered by a fact-carrying adapter overlay (`overlay_covered_paths`) AND the extension
-/// isn't one of the deliberately-silent `NON_SOURCE_EXTENSIONS`.
+/// not already covered by an APPLIED, fact-carrying adapter overlay (`overlay_covered_paths` — built by
+/// `envelope::apply_adapter_overlays` from what it really merged, so a rejected or zero-fact overlay's
+/// declared paths are NOT in it) AND the extension isn't one of the deliberately-silent
+/// `NON_SOURCE_EXTENSIONS`.
 ///
 /// Deliberately NOT gated on `!artifact.degraded`: a normal-sized dispatch-`None` file has `degraded:
 /// false` (no adapter to run, but nothing failed either); an OVERSIZED file of the same unparsed
@@ -29,7 +31,7 @@ use super::super::helpers::{
 pub(super) fn record_unparsed_extension(
     rel: &str,
     dispatch_lang: Option<crate::dispatch::Language>,
-    overlay_covered_paths: &HashSet<&str>,
+    overlay_covered_paths: &HashSet<String>,
     unparsed_extensions: &mut BTreeMap<String, (usize, Vec<String>)>,
 ) {
     if dispatch_lang.is_some() || overlay_covered_paths.contains(rel) {

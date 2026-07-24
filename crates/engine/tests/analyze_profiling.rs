@@ -48,29 +48,28 @@ impl Drop for TempDir {
     }
 }
 
-/// The real `rules/dsl/be-security/be-security.json`, filtered to the three Java security-concern rules
-/// (`sql-taint`/`weak-crypto`/`cmd-injection`) that moved into `be-security` when the language-named
+/// The real `rules/dsl/security/security.json`, filtered to the three Java security-concern rules
+/// (`sql-taint`/`weak-crypto`/`cmd-injection`) that moved into `security` when the language-named
 /// `java-security` pack was dissolved (v0.15) — all three share a `.java`-ish `file_pattern`, so every one
 /// of them gets evaluated, and therefore timed, against any `.java` file the pack applies to (see
 /// `zzop_core::pack_loader::applies_to`'s "any rule matches" semantics). Filtering to exactly these three
-/// keeps the timed-rule set deterministic (loading the full be-security pack would time every
+/// keeps the timed-rule set deterministic (loading the full security pack would time every
 /// `.java`-applicable rule in it). Resolved from `CARGO_MANIFEST_DIR` the same way `zzop_engine`'s own
 /// crate tests do.
-fn be_security_java_pack() -> RulePackDef {
-    let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/dsl/be-security/be-security.json");
+fn security_java_pack() -> RulePackDef {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/dsl/security/security.json");
     let text = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
     // Goes through `zzop_core::parse_dsl_pack` (not a raw `serde_json::from_str`) so this pack's
     // `${NAME}` fragment refs resolve exactly like they do at real load time.
-    let mut pack: RulePackDef = zzop_core::parse_dsl_pack(&text).expect("parse be-security.json");
+    let mut pack: RulePackDef = zzop_core::parse_dsl_pack(&text).expect("parse security.json");
     pack.rules
         .retain(|r| matches!(r.id.as_str(), "sql-taint" | "weak-crypto" | "cmd-injection"));
     pack
 }
 
 /// A circular TS import pair (exercises the `circular` native analysis id) plus a Java file matching
-/// `be-security/sql-taint` (exercises a DSL finding; `weak-crypto`/`cmd-injection` still run against this
+/// `security/sql-taint` (exercises a DSL finding; `weak-crypto`/`cmd-injection` still run against this
 /// same file — they just don't fire, since the file has no weak-crypto/exec pattern). No git history is
 /// configured, so `scores`/`health`/`recommendations`/`criticality`/`seams` never run (see
 /// `analyze::assemble`'s git-gating) — this keeps the expected native-analysis-id set to exactly the
@@ -98,7 +97,7 @@ fn fixture_tree() -> TempDir {
 fn config(profile_rules: bool) -> EngineConfig {
     EngineConfig {
         source_id: "fixture".to_string(),
-        packs: vec![be_security_java_pack()],
+        packs: vec![security_java_pack()],
         profile_rules,
         ..EngineConfig::default()
     }
@@ -113,9 +112,9 @@ const EXPECTED_IDS: &[&str] = &[
     "duplicate-route",
     "route-shadowing",
     "unprovided-consume",
-    "be-security/sql-taint",
-    "be-security/weak-crypto",
-    "be-security/cmd-injection",
+    "security/sql-taint",
+    "security/weak-crypto",
+    "security/cmd-injection",
 ];
 
 #[test]
@@ -189,12 +188,12 @@ fn sql_taint_dsl_rule_timing_reflects_the_finding_it_produced() {
     let timings = out.rule_timings.expect("profiling on -> Some(timings)");
     let sql_taint = timings
         .iter()
-        .find(|t| t.rule_id == "be-security/sql-taint")
+        .find(|t| t.rule_id == "security/sql-taint")
         .expect("sql-taint timing present");
     assert_eq!(sql_taint.findings, 1, "{sql_taint:?}");
 
     // weak-crypto/cmd-injection still ran (same pack, same file) but matched nothing in this fixture.
-    for id in ["be-security/weak-crypto", "be-security/cmd-injection"] {
+    for id in ["security/weak-crypto", "security/cmd-injection"] {
         let t = timings
             .iter()
             .find(|t| t.rule_id == id)

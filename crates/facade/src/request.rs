@@ -30,7 +30,7 @@ impl PacksDir {
 }
 
 /// One tree's request shape (wire = camelCase via `rename_all`; full field list = this struct —
-/// `root` plus 15 optional knobs, see `docs/modules/mcp.md`'s AnalyzeRequest table for the authoritative
+/// `root` plus 15 optional knobs, see `docs/modules/facade.md`'s AnalyzeRequest table for the authoritative
 /// per-field contract). `#[serde(deny_unknown_fields)]` is deliberately
 /// NOT set — an older/newer Node host sending an extra field (e.g. a future `scores_config` knob) should
 /// degrade to "ignored", not fail the whole call.

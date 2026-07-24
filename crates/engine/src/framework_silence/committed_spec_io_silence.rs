@@ -81,8 +81,9 @@ joinable io ({io_provides_count} provide(s) / {io_consumes_keyed_count} keyed co
 talks through a GENERATED client (SDK class/methods) rather than direct calls, native extraction cannot \
 see those calls; project the generated client with the Mode B openapi-sdk-adapter (see the adapter \
 examples for its generated class-method client support) to restore cross-layer visibility: a partial \
-envelope covering just the missing io channel is enough; contract: `zzop contract envelope-guide` \
-on MCP hosts, docs/NORMALIZED_AST.md in the repo."
+envelope covering just the missing io channel is enough; contract: MCP resource \
+`zzop://contract/envelope-guide` on MCP hosts (`zzop contract envelope-guide` with the CLI binary), \
+docs/NORMALIZED_AST.md in the repo."
         ));
     }
     None

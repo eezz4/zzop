@@ -144,6 +144,69 @@ fn build_common_ir_lower_firsts_multi_word_pascal_model_names() {
     assert_eq!(io.provides[0].key, "table:userProfile");
 }
 
+/// The `table:` keys `build_common_ir` provides for `schema`, in emission order.
+fn provide_keys(schema: &str) -> Vec<String> {
+    build_common_ir("svc", &[("schema.prisma".to_string(), schema.to_string())])
+        .ir
+        .io
+        .map(|io| io.provides.into_iter().map(|p| p.key).collect())
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_model_without_at_map_provides_exactly_one_accessor_key() {
+    // Pins the pre-existing single-key behavior explicitly: the `@@map` handling below is additive, and
+    // an ordinary model must never gain a second, invented key.
+    assert_eq!(
+        provide_keys("model Article {\n  id String @id\n}\n"),
+        vec!["table:article"]
+    );
+}
+
+#[test]
+fn an_at_mapped_model_provides_the_accessor_key_and_the_physical_table_key() {
+    // `model Article { @@map("articles") }`: the client spells `prisma.article`, the database spells
+    // `articles`. Both are real identities of one model, so both are provided — accessor first.
+    assert_eq!(
+        provide_keys("model Article {\n  id String @id\n  @@map(\"articles\")\n}\n"),
+        vec!["table:article", "table:articles"]
+    );
+}
+
+#[test]
+fn an_at_map_target_is_channel_cased_like_a_ddl_table_name() {
+    // The SQL side lower-firsts `CREATE TABLE "Articles"` to `table:articles`
+    // (`zzop_core::db_table_channel_casing`); the `@@map` key must apply the SAME transform or the two
+    // sides would ride different keys for one physical table.
+    assert_eq!(
+        provide_keys("model Article {\n  id String @id\n  @@map(\"Articles\")\n}\n"),
+        vec!["table:article", "table:articles"]
+    );
+}
+
+#[test]
+fn an_at_map_that_restates_the_accessor_name_does_not_duplicate_the_key() {
+    // `@@map("article")` (and `@@map("Article")`, which cases to the same thing) says nothing the
+    // accessor key did not already say — one key, not two identical ones.
+    assert_eq!(
+        provide_keys("model Article {\n  id String @id\n  @@map(\"article\")\n}\n"),
+        vec!["table:article"]
+    );
+    assert_eq!(
+        provide_keys("model Article {\n  id String @id\n  @@map(\"Article\")\n}\n"),
+        vec!["table:article"]
+    );
+}
+
+#[test]
+fn at_map_keys_are_emitted_per_model_not_merged_across_models() {
+    let keys = provide_keys(concat!(
+        "model Article {\n  id String @id\n  @@map(\"articles\")\n}\n",
+        "model Tag {\n  id String @id\n}\n",
+    ));
+    assert_eq!(keys, vec!["table:article", "table:articles", "table:tag"]);
+}
+
 #[test]
 fn build_common_ir_emits_no_io_for_schema_with_no_models() {
     // An (unrealistic but honest) schema with zero models must not emit an empty-but-`Some` IoFacts —

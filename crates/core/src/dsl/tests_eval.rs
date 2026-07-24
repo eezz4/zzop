@@ -137,7 +137,7 @@ fn eval_pack_profiled_findings_match_eval_pack_exactly() {
     let ids: std::collections::HashSet<&str> = timings.iter().map(|t| t.rule_id.as_str()).collect();
     assert_eq!(ids.len(), timings.len(), "duplicate rule_id in timings");
     for t in &timings {
-        assert!(t.rule_id.starts_with("be-security/"));
+        assert!(t.rule_id.starts_with("security/"));
     }
     let total_findings: usize = timings.iter().map(|t| t.findings).sum();
     assert_eq!(total_findings, plain.len());

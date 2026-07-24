@@ -9,17 +9,16 @@ use super::ir_scan::{eval_pack_io_scan, IoScanTreeContext};
 use super::{eval_pack, RuleContext, RulePackDef, SourceFile};
 
 /// The three Java security-concern rules (`sql-taint`/`weak-crypto`/`cmd-injection`) that moved into
-/// `be-security` when the language-named `java-security` pack was dissolved (v0.15). We load the real
-/// `be-security.json` and filter to just those three so the fixture stays a small, fully-`.java`-applicable
+/// `security` when the language-named `java-security` pack was dissolved (v0.15). We load the real
+/// `security.json` and filter to just those three so the fixture stays a small, fully-`.java`-applicable
 /// set. Goes through `crate::parse_dsl_pack` (not a raw `serde_json::from_str`) so this pack's `${NAME}`
 /// fragment refs (its shared test-path `file_exclude_pattern`) resolve exactly like they do at real load
 /// time — a raw struct deserialize would leave the literal `"${test-paths-stories}"`/`"${test-paths}"`
 /// strings in place, which are not valid regexes and would silently no-op every affected rule.
 pub(super) fn pack() -> RulePackDef {
-    let mut p: RulePackDef = crate::parse_dsl_pack(include_str!(
-        "../../../../rules/dsl/be-security/be-security.json"
-    ))
-    .expect("parse be-security.json");
+    let mut p: RulePackDef =
+        crate::parse_dsl_pack(include_str!("../../../../rules/dsl/security/security.json"))
+            .expect("parse security.json");
     p.rules
         .retain(|r| matches!(r.id.as_str(), "sql-taint" | "weak-crypto" | "cmd-injection"));
     p
@@ -198,8 +197,8 @@ pub(super) fn findings_as_json(f: &[Finding]) -> Vec<serde_json::Value> {
     f.iter().map(|x| serde_json::to_value(x).unwrap()).collect()
 }
 
-/// Builds a one-rule pack from a full inline rule JSON object — needed here since `suppress_marker`
-/// lives on `RuleDef`, not inside `matcher`.
+/// Builds a one-rule pack from a full inline rule JSON object — the rule's fields (`id`, `severity`,
+/// `message`, `matcher`) live on `RuleDef`, so a test needs the full rule shape, not just a `matcher`.
 pub(super) fn rule_pack(rule_json: &str) -> RulePackDef {
     let src = format!(r#"{{"id":"t","framework":"any","rules":[{rule_json}]}}"#);
     serde_json::from_str(&src).expect("parse inline rule pack")

@@ -8,15 +8,15 @@
 //! flagged with the receiver kept in the snippet; a call on an unrelated receiver, or a clean file,
 //! produces no findings.
 //!
-//! `// browser-ok` (on the finding's line or the 3 lines above) suppresses `no-system-dialogs`;
-//! `// document-write-ok` does the same for `no-document-write` — distinct markers, since a shared one
+//! `// no-system-dialogs-ok` (on the finding's line or the 3 lines above) suppresses `no-system-dialogs`;
+//! `// no-document-write-ok` does the same for `no-document-write` — distinct markers, since a shared one
 //! would let suppressing one rule silently suppress the other (the `rule_contracts` meta-test checks this).
 //!
-//! `postmessage-wildcard` flags `postMessage(..., '*')`; `// postmessage-target-ok` suppresses it.
+//! `postmessage-wildcard` flags `postMessage(..., '*')`; `// postmessage-wildcard-ok` suppresses it.
 //! `unsafe-html-sink` flags a non-literal `.innerHTML`/`.outerHTML` assignment (`innerhtml-assign`), a
 //! backtick template assignment that interpolates (`innerhtml-template`), `insertAdjacentHTML(...)` whose
 //! html argument isn't a plain literal (`insert-adjacent`), or JSX `dangerouslySetInnerHTML={{ __html: ... }}`
-//! whose value isn't a plain literal (`dangerously-set`); `// unsafe-html-ok` suppresses it. Both rules are
+//! whose value isn't a plain literal (`dangerously-set`); `// unsafe-html-sink-ok` suppresses it. Both rules are
 //! source-free (unlike `security/taint-flow`, which needs a request-derived source in the same function and
 //! only looks at `.ts`/`.tsx`) and cover `.js`/`.jsx` too.
 //!
@@ -27,14 +27,14 @@
 //!
 //! `location-assign-dynamic` flags a non-literal assignment to the client navigation sink (`location`/
 //! `window.location`/`location.href` = ..., or `location.assign(...)`/`location.replace(...)`);
-//! `// location-assign-ok` suppresses it. Receiver-aware like `no-document-write` (an arbitrary object's
+//! `// location-assign-dynamic-ok` suppresses it. Receiver-aware like `no-document-write` (an arbitrary object's
 //! own `.location` field, e.g. `user.location = x`, is never matched — only the bare global/`window.`
 //! form is); a literal string/`/`-prefixed path stays silent; a `const location = ...` declaration
 //! (the React Router `useLocation()` shape) is excluded via `exclude_pattern`.
 //!
 //! `jquery-html-sink` flags a jQuery HTML-insertion method (`.html`/`.append`/`.prepend`/`.after`/
 //! `.before`/`.wrapAll`) called with a non-literal argument, gated on the file mentioning `jquery` or a
-//! `$(` call; `// jquery-html-ok` suppresses it.
+//! `$(` call; `// jquery-html-sink-ok` suppresses it.
 //!
 //! `vue-v-html` flags Vue's `v-html` directive (`.vue` files, plus `.ts`/`.tsx`/`.js`/`.jsx`);
 //! `// vue-v-html-ok` suppresses it.
@@ -42,7 +42,7 @@
 //! `unsanitized-markdown-html` (method-scan) flags a markdown-render call (`marked(`/`markdownit(`/
 //! `md.render(`/`remark(`/`showdown(`) co-occurring with an HTML sink (`innerHTML`/`outerHTML`/
 //! `dangerouslySetInnerHTML`/`v-html`) in the same function span, with no `DOMPurify`/`sanitize`/
-//! `sanitizeHtml`/`xss` token anywhere in that span; `// markdown-html-ok` suppresses it. `.vue` is in its
+//! `sanitizeHtml`/`xss` token anywhere in that span; `// unsanitized-markdown-html-ok` suppresses it. `.vue` is in its
 //! file pattern for forward-compatibility only — this engine has no symbol/span parser for `.vue` today
 //! (see `docs/rules/dsl-reference.md`'s method-scan doc), so a `.vue` SFC's `<script>`+`<template>`
 //! pairing never actually co-fires; only same-file `.ts`/`.tsx`/`.js`/`.jsx` co-occurrence does.

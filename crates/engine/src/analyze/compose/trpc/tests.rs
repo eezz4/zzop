@@ -218,6 +218,163 @@ fn unresolvable_ref_is_skipped_sibling_leaf_survives() {
 }
 
 #[test]
+fn imported_standalone_procedure_mounted_as_a_single_leaf_composes() {
+    // `_router.ts` mounts `getUser` — imported from `getUser.ts`, where it is a lone procedure, not a
+    // sub-router. Its fragment's single leaf carries an EMPTY key, so the mount key supplies the whole
+    // segment and the provide anchors on the procedure's own file/line.
+    let fragments = vec![
+        (
+            "_router.ts".to_string(),
+            vec![frag(
+                "userRouter",
+                vec![
+                    ProcedureRouterEntry::Ref {
+                        key: "getUser".into(),
+                        ident: "getUser".into(),
+                        specifier: Some("./getUser".into()),
+                    },
+                    ProcedureRouterEntry::Leaf {
+                        key: "ping".into(),
+                        verb: "QUERY".into(),
+                        line: 9,
+                    },
+                ],
+            )],
+        ),
+        (
+            "getUser.ts".to_string(),
+            vec![frag(
+                "getUser",
+                vec![ProcedureRouterEntry::Leaf {
+                    key: String::new(),
+                    verb: "QUERY".into(),
+                    line: 4,
+                }],
+            )],
+        ),
+    ];
+    let out = compose_trpc_provides(
+        fragments,
+        resolver(&[("./getUser", "_router.ts", "getUser.ts")]),
+    );
+    assert_eq!(
+        keys(&out),
+        vec![
+            ("QUERY getUser".to_string(), "getUser.ts".to_string(), 4),
+            ("QUERY ping".to_string(), "_router.ts".to_string(), 9),
+        ]
+    );
+}
+
+#[test]
+fn standalone_procedure_nested_deeper_keeps_the_full_dotted_path() {
+    let fragments = vec![
+        (
+            "app.ts".to_string(),
+            vec![frag(
+                "appRouter",
+                vec![ProcedureRouterEntry::Ref {
+                    key: "user".into(),
+                    ident: "userRouter".into(),
+                    specifier: Some("./user".into()),
+                }],
+            )],
+        ),
+        (
+            "user.ts".to_string(),
+            vec![frag(
+                "userRouter",
+                vec![ProcedureRouterEntry::Nested {
+                    key: "admin".into(),
+                    entries: vec![ProcedureRouterEntry::Ref {
+                        key: "createLicense".into(),
+                        ident: "createLicense".into(),
+                        specifier: Some("./createLicense".into()),
+                    }],
+                }],
+            )],
+        ),
+        (
+            "createLicense.ts".to_string(),
+            vec![frag(
+                "createLicense",
+                vec![ProcedureRouterEntry::Leaf {
+                    key: String::new(),
+                    verb: "MUTATION".into(),
+                    line: 7,
+                }],
+            )],
+        ),
+    ];
+    let out = compose_trpc_provides(
+        fragments,
+        resolver(&[
+            ("./user", "app.ts", "user.ts"),
+            ("./createLicense", "user.ts", "createLicense.ts"),
+        ]),
+    );
+    assert_eq!(
+        keys(&out),
+        vec![(
+            "MUTATION user.admin.createLicense".to_string(),
+            "createLicense.ts".to_string(),
+            7
+        )]
+    );
+}
+
+#[test]
+fn unmounted_standalone_procedure_emits_nothing_rather_than_a_bare_path() {
+    // Nothing in the corpus mounts `getUser`, so it is a root — and a root whose only leaf has an empty
+    // key has NO knowable route name. Silence, never a fabricated `QUERY ` provide.
+    let fragments = vec![(
+        "getUser.ts".to_string(),
+        vec![frag(
+            "getUser",
+            vec![ProcedureRouterEntry::Leaf {
+                key: String::new(),
+                verb: "QUERY".into(),
+                line: 4,
+            }],
+        )],
+    )];
+    let out = compose_trpc_provides(fragments, no_resolver());
+    assert_eq!(keys(&out), Vec::new());
+}
+
+#[test]
+fn standalone_procedure_whose_mount_specifier_does_not_resolve_stays_silent() {
+    // The mount is there but its specifier resolves to nothing, so the procedure fragment is never
+    // reached through a key — and, being ref-named, it is not promoted to a root either. Under-report.
+    let fragments = vec![
+        (
+            "_router.ts".to_string(),
+            vec![frag(
+                "userRouter",
+                vec![ProcedureRouterEntry::Ref {
+                    key: "getUser".into(),
+                    ident: "getUser".into(),
+                    specifier: Some("@some/package".into()),
+                }],
+            )],
+        ),
+        (
+            "getUser.ts".to_string(),
+            vec![frag(
+                "getUser",
+                vec![ProcedureRouterEntry::Leaf {
+                    key: String::new(),
+                    verb: "QUERY".into(),
+                    line: 4,
+                }],
+            )],
+        ),
+    ];
+    let out = compose_trpc_provides(fragments, no_resolver());
+    assert_eq!(keys(&out), Vec::new());
+}
+
+#[test]
 fn self_referencing_cycle_is_guarded_without_infinite_recursion() {
     let fragments = vec![(
         "app.ts".to_string(),

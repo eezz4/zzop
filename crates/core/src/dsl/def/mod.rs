@@ -241,13 +241,19 @@ pub struct RuleDef {
     /// Human-facing message (cause / fix hint).
     pub message: String,
     pub matcher: Matcher,
-    /// Inline ok-marker suppression, applied uniformly to `LineScan` and `MethodScan` findings. A finding
-    /// is suppressed when its own line, or the line directly above it (`MARKER_LOOKBACK_LINES`), contains a
-    /// `//`-comment naming this marker (`// n+1-ok` or `// n+1-ok: reason` both suppress `suppress_marker:
-    /// "n+1-ok"`). For a file whose extension is `.sql` (case-insensitive, see `is_sql_file`), a `--`-comment
-    /// naming the marker suppresses identically (`-- n+1-ok`) — `--` is a line comment in SQL but not in
-    /// JS/TS (`--x` is a decrement there), so this recognition is gated to `.sql` files only and never
-    /// changes behavior for any other extension.
-    #[serde(default)]
-    pub suppress_marker: Option<String>,
+}
+
+impl RuleDef {
+    /// Inline ok-marker for this rule, DERIVED as `<id>-ok` (never stored on the rule) — e.g. rule
+    /// `float-money-compare` suppresses on `// float-money-compare-ok`. Applied uniformly to `LineScan` and
+    /// `MethodScan` findings: a finding is suppressed when its own line, or the line directly above it
+    /// (`MARKER_LOOKBACK_LINES`), carries a `//`-comment naming this marker (`// <id>-ok` or
+    /// `// <id>-ok: reason` both suppress). For a file whose extension is `.sql` (case-insensitive, see
+    /// `is_sql_file`), a `--`-comment naming the marker suppresses identically (`-- <id>-ok`) — `--` is a
+    /// line comment in SQL but not in JS/TS (`--x` is a decrement there), so that recognition is gated to
+    /// `.sql` files only. Deriving (vs storing a per-rule string) means the marker is always predictable
+    /// from the id and can never drift out of the `-ok` convention.
+    pub fn suppress_marker(&self) -> String {
+        format!("{}-ok", self.id)
+    }
 }

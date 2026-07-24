@@ -84,7 +84,7 @@ fn browser_ok_comment_on_or_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-browser");
     dir.write(
         "exempt.ts",
-        "export function f() {\n  // document-write-ok: legacy print path\n  document.write(\"x\");\n  alert(\"y\"); // browser-ok: deliberate\n}\n",
+        "export function f() {\n  // no-document-write-ok: legacy print path\n  document.write(\"x\");\n  alert(\"y\"); // no-system-dialogs-ok: deliberate\n}\n",
     );
     let out = scan(&dir);
     assert!(

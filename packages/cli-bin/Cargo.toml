@@ -24,3 +24,7 @@ serde_json = { workspace = true }
 # contract bytes (`contract config-surface`) against zzop-config's own embed — same fixture crate
 # crates/host's tests used before this binary moved out on its own.
 zzop-config = { path = "../../crates/config" }
+# `explain`'s meta-test loads every bundled DSL pack the exact same way `zzop_host::explain` does
+# (`zzop_core::parse_dsl_pack` over `zzop_config::BUNDLED_PACK_SOURCES`), to assert every shipped rule
+# id is explainable through the real spawned binary — never a hand-copied id list that could drift.
+zzop-core = { path = "../../crates/core" }

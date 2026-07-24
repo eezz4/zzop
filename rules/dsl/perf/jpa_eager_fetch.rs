@@ -127,7 +127,7 @@ fn commented_out_fetch_type_eager_line_is_not_flagged() {
 fn jpa_eager_ok_marker_above_the_declaration_suppresses_it() {
     let f = jpa_scan(
         "User.java",
-        "package com.example;\n\nimport javax.persistence.*;\nimport java.util.List;\n\n@Entity\npublic class User {\n  // jpa-eager-ok: small fixed reference list, always needed with the parent\n  @OneToMany(mappedBy = \"user\", fetch = FetchType.EAGER)\n  private List<Photo> photos;\n}\n",
+        "package com.example;\n\nimport javax.persistence.*;\nimport java.util.List;\n\n@Entity\npublic class User {\n  // jpa-eager-fetch-ok: small fixed reference list, always needed with the parent\n  @OneToMany(mappedBy = \"user\", fetch = FetchType.EAGER)\n  private List<Photo> photos;\n}\n",
     );
     assert!(f.is_empty(), "{f:?}");
 }

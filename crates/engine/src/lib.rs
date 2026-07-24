@@ -114,15 +114,20 @@ pub fn analyze_tree(root: &Path, config: &EngineConfig) -> AnalyzeOutput {
         ));
     }
     let mut overlay_warnings = Vec::new();
-    if !config.adapter_overlays.is_empty() {
+    // `overlay_covered_paths` is the apply loop's OWN verdict on which files an overlay really parsed
+    // (validation passed AND the projection carried a fact) — `assemble` uses it as the "no native parser"
+    // disclosure's exclusion set. Empty when there are no overlays: nothing to exclude.
+    let overlay_covered_paths = if config.adapter_overlays.is_empty() {
+        std::collections::HashSet::new()
+    } else {
         envelope::apply_adapter_overlays(
             &mut artifacts,
             &config.adapter_overlays,
             &config.source_id,
             &mut overlay_warnings,
-        );
-    }
-    let mut output = analyze::assemble(root, artifacts, config);
+        )
+    };
+    let mut output = analyze::assemble(root, artifacts, config, &overlay_covered_paths);
 
     // Scope warnings lead: they qualify every other line ("about nothing"), so a reader hits them first.
     if !scope_warnings.is_empty() {

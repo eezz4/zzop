@@ -61,7 +61,7 @@ fn redis_keys_ok_marker_above_the_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-redis");
     dir.write(
         "src/debug.ts",
-        "declare const client: any;\nexport async function debugListAllKeys() {\n  // redis-keys-ok: offline debug script, tiny fixed keyspace\n  return client.keys(\"*\");\n}\n",
+        "declare const client: any;\nexport async function debugListAllKeys() {\n  // keys-glob-scan-ok: offline debug script, tiny fixed keyspace\n  return client.keys(\"*\");\n}\n",
     );
     let out = scan(&dir);
     assert!(

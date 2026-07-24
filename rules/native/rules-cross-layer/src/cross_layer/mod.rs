@@ -87,8 +87,10 @@
 //! None of these rules honor an inline `// <marker>-ok` suppression comment. Checked against how the
 //! existing native rules in this crate do it: `duplicate_route`/`route_shadowing`/`unprovided_consume`
 //! carry no marker support either, and `mutating_route_no_auth`'s own message says so explicitly ("this
-//! rule has no inline suppression marker") — inline markers are a DSL-only mechanism
-//! (`zzop_core::dsl::RuleDef::suppress_marker`), never wired into any native rule's `Finding` construction.
+//! rule has no inline suppression marker") — DERIVED markers (`zzop_core::dsl::RuleDef::suppress_marker`,
+//! `<id>-ok`) are DSL-only, never wired into a native `Finding`. Not the same as "no native rule reads a
+//! comment", though: `zzop_rules_http`'s `non-idempotent-write`/`unsafe-read-endpoint` honor a HAND-WRITTEN
+//! `// idempotent-ok:` literal (`rules-http/src/http_scan.rs`) matching no id. No rule in THIS crate does.
 //! Every rule here is disable-only via `RuleConfig::disabled_rules` (message text says so).
 //!
 //! ## The provide-key universe

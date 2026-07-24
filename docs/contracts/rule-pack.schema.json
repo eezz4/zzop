@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://zzop.dev/schema/rule-pack.v1.json",
   "title": "zzop DSL rule pack v1",
-  "description": "The DSL rule-pack contract (docs/rules/dsl-reference.md; crates/core/src/dsl/def.rs). Field names, required-ness, and defaults below mirror the Rust serde types field-for-field: a field is 'required' here exactly when its Rust struct field has neither #[serde(default)] nor an Option type; DSL pack fields are snake_case (packs are DSL-authored data files, not part of the camelCase JS-facing config boundary). Machine-check a pack without a schema validator via the validate_rule_pack MCP tool / `zzop pack validate <path>` — both run the engine's own loader judgments (structure only, never rule-quality semantics).",
+  "description": "The DSL rule-pack contract (docs/rules/dsl-reference.md; crates/core/src/dsl/def.rs). Field names, required-ness, and defaults below mirror the Rust serde types field-for-field: a field is 'required' here exactly when its Rust struct field has neither #[serde(default)] nor an Option type; DSL pack fields are snake_case (packs are DSL-authored data files, not part of the camelCase JS-facing config boundary). Machine-check a pack without a schema validator via the validate_rule_pack MCP tool / `zzop validate-rule-pack <path>` — both run the engine's own loader judgments (structure only, never rule-quality semantics).",
   "$comment": "TOLERANCE CONTRACT: additionalProperties is true at every object level — the engine's serde derive silently ignores fields it does not recognize (no deny_unknown_fields anywhere in dsl/def.rs), same tolerant-input philosophy as the envelope schema (docs/adapters/envelope.schema.json). A pack authored against a FUTURE additive field still loads on an older engine. Only an incompatible revision of the matcher/pack shape itself bumps schema_version (see pack_loader::SUPPORTED_DSL_SCHEMA_VERSION's gate).",
   "type": "object",
   "required": ["id", "rules"],
@@ -27,7 +27,7 @@
       "type": "object",
       "default": {},
       "additionalProperties": { "type": "string" },
-      "description": "Named regex fragments. A pattern-bearing field below (any field whose description ends '${NAME} fragment reference supported') can be spelled as a whole string EXACTLY `${NAME}` instead of a literal regex — the loader replaces it with the fragment's text before the pack is hashed or evaluated. Merged UNDER a shared bundled fragment set the engine ships (`zzop_core::dsl::fragments`, no filesystem dependency — resolved identically whether the pack arrives from a `packsDir` file or an inline `packDefs` entry): a name declared here WINS a collision against a shared fragment of the same name, letting a pack locally override a shared idiom. `${NAME}` is collision-safe as a sentinel: under the `regex` crate's syntax a bare `{` is only valid as a numeric repetition quantifier, so `${<kebab-case-name>}` can never simultaneously be a value a pack author would hand-write as a real pattern and compile as one. Resolution is single-pass, not recursive — a fragment whose own value is itself a `${...}` reference is a load error, not a silent no-op or a chained expansion. After resolution this map is CLEARED, so a pack authored with fragments and the equivalent pack authored with patterns spelled out inline are load-time indistinguishable (identical cache fingerprint, identical findings). An unresolved/unknown/malformed `${NAME}` reference fails the pack load outright — `zzop pack validate`/`validate_rule_pack` report it as an issue, same severity as a bad JSON body. Default `{}` for a pack that references only shared fragments, or none at all."
+      "description": "Named regex fragments. A pattern-bearing field below (any field whose description ends '${NAME} fragment reference supported') can be spelled as a whole string EXACTLY `${NAME}` instead of a literal regex — the loader replaces it with the fragment's text before the pack is hashed or evaluated. Merged UNDER a shared bundled fragment set the engine ships (`zzop_core::dsl::fragments`, no filesystem dependency — resolved identically whether the pack arrives from a `packsDir` file or an inline `packDefs` entry): a name declared here WINS a collision against a shared fragment of the same name, letting a pack locally override a shared idiom. `${NAME}` is collision-safe as a sentinel: under the `regex` crate's syntax a bare `{` is only valid as a numeric repetition quantifier, so `${<kebab-case-name>}` can never simultaneously be a value a pack author would hand-write as a real pattern and compile as one. Resolution is single-pass, not recursive — a fragment whose own value is itself a `${...}` reference is a load error, not a silent no-op or a chained expansion. After resolution this map is CLEARED, so a pack authored with fragments and the equivalent pack authored with patterns spelled out inline are load-time indistinguishable (identical cache fingerprint, identical findings). An unresolved/unknown/malformed `${NAME}` reference fails the pack load outright — `zzop validate-rule-pack`/`validate_rule_pack` report it as an issue, same severity as a bad JSON body. Default `{}` for a pack that references only shared fragments, or none at all."
     },
     "rules": {
       "type": "array",
@@ -41,17 +41,13 @@
       "required": ["id", "severity", "message", "matcher"],
       "additionalProperties": true,
       "properties": {
-        "id": { "type": "string", "description": "Rule id — combined with the pack id as `<pack id>/<rule id>` in findings." },
+        "id": { "type": "string", "description": "Rule id — combined with the pack id as `<pack id>/<rule id>` in findings. Also the sole source of the rule's inline suppress marker, which is DERIVED as `<rule id>-ok` (never authored as a field): a `// <rule id>-ok` comment on the finding's line or the line above suppresses it (`-- <rule id>-ok` in .sql files, `#` in Python for io-scan). Note the marker carries NO pack prefix — rule `security/hardcoded-secret` suppresses on `// hardcoded-secret-ok`." },
         "severity": {
           "enum": ["critical", "warning", "info"],
           "description": "Finding severity (zzop_core::Severity, lowercase serde form)."
         },
         "message": { "type": "string", "description": "Human-facing finding message (cause / fix hint)." },
-        "matcher": { "$ref": "#/definitions/matcher" },
-        "suppress_marker": {
-          "type": ["string", "null"],
-          "description": "Inline ok-marker: a `// <marker>` comment on the finding's line or the line above suppresses it (`-- <marker>` in .sql files). Absent or null = no inline suppression."
-        }
+        "matcher": { "$ref": "#/definitions/matcher" }
       }
     },
     "matcher": {
@@ -68,7 +64,7 @@
       "required": ["pattern", "label"],
       "additionalProperties": true,
       "properties": {
-        "pattern": { "type": "string", "description": "Regex (Rust `regex` crate syntax — no lookaround/backreferences). A non-compiling pattern silently no-ops its rule; `zzop pack validate` names it. ${NAME} fragment reference supported (used for `any[].pattern`, `patterns[].pattern`, `absent[].pattern`)." },
+        "pattern": { "type": "string", "description": "Regex (Rust `regex` crate syntax — no lookaround/backreferences). A non-compiling pattern silently no-ops its rule; `zzop validate-rule-pack` names it. ${NAME} fragment reference supported (used for `any[].pattern`, `patterns[].pattern`, `absent[].pattern`)." },
         "label": { "type": "string", "description": "Classification label — lands in the finding's `data.label` (line-scan `any`) or names the pattern for `trigger`/veto roles (method-scan)." }
       }
     },
@@ -156,7 +152,12 @@
           "description": "Exact match against the io entry's kind string (open vocabulary — e.g. \"http\", \"db-table\", \"env\", \"topic\"). Absent = any kind."
         },
         "key_pattern": { "type": ["string", "null"], "description": "Regex on the entry's normalized key — fires on a match, or on a NON-match under `negate: true`. An entry with an unresolved (null) key never matches; under `negate: true` that makes it a hit. ${NAME} fragment reference supported." },
-        "negate": { "type": "boolean", "default": false, "description": "Flips `key_pattern` from \"must match\" to \"must not match\"." }
+        "negate": { "type": "boolean", "default": false, "description": "Flips `key_pattern` from \"must match\" to \"must not match\"." },
+        "file_exclude_pattern": { "type": ["string", "null"], "description": "Path regex evaluated right after `file_pattern` (cheapest gate first) — an entry whose file matches is skipped entirely. Same shape as line-scan's field of the same name. ${NAME} fragment reference supported." },
+        "symbol_pattern": { "type": ["string", "null"], "description": "Regex on a provide's `symbol` — PROVIDES-ONLY evidence: a consume never carries a symbol, and a provide whose symbol is absent never matches (never-guess). `negate` does NOT flip this field; it is a plain must-match gate applied after `negate` has resolved `key_pattern`." },
+        "attr_absent": { "type": ["string", "null"], "description": "Matches only when the tree's AttributeStore has NO truthy value for this attribute on the entry's route (exact IoKey wins, else the longest covering PathScope). An entry with no resolved key always satisfies this gate. A plain attribute name, NOT a regex." },
+        "attr_present": { "type": ["string", "null"], "description": "Matches only when that same attribute lookup IS truthy. An entry with no resolved key never satisfies this gate. A plain attribute name, NOT a regex." },
+        "anchor_exclude_pattern": { "type": ["string", "null"], "description": "Regex applied to the anchor line's own source text (the provide/consume's own line). When no source text is reachable (envelope mode with no native source) the exclusion simply does not apply — never a guessed match." }
       }
     }
   }

@@ -54,4 +54,4 @@ mod resolve;
 mod tests;
 
 pub use ingest::analyze_envelope;
-pub(crate) use overlay::{apply_adapter_overlays, overlay_file_carries_facts};
+pub(crate) use overlay::apply_adapter_overlays;

@@ -7,7 +7,7 @@ and when to reach for a native rule instead.
 ## File placement
 
 A pack is one `<id>.json` file, loaded from a configured packs directory (the `packsDir` option — see
-[../modules/mcp.md](../modules/mcp.md#the-zzop-facade-json-contract)) via `zzop_core::pack_loader::load_dsl_packs`. Two directory shapes
+[../modules/facade.md](../modules/facade.md#the-zzop-facade-json-contract)) via `zzop_core::pack_loader::load_dsl_packs`. Two directory shapes
 are supported, and may be mixed in the same directory:
 
 - **Flat** — `<packsDir>/<id>.json`, directly under the directory. This is what an external/third-party
@@ -28,7 +28,7 @@ third-party pack set, but nesting works too).
 `packsDir` accepts either one directory or an array of directories — each is loaded independently with
 `load_dsl_packs` and then merged by pack `id`: if the same `id` shows up in more than one directory, the
 pack from the LATER directory in the list replaces the earlier one WHOLE (not a per-rule merge). See
-[../modules/mcp.md](../modules/mcp.md#defaults-zero-config--full-analysis)'s "Defaults" section for how a
+[../modules/facade.md](../modules/facade.md#defaults-zero-config--full-analysis)'s "Defaults" section for how a
 host uses this to let a caller add packs alongside the bundled ones instead of replacing them.
 
 A host with no filesystem-resident pack directory at all (e.g. a self-contained binary embedding its
@@ -40,7 +40,9 @@ one more way the finished JSON reaches the engine.
 ## Worked example
 
 A pack that flags a hardcoded `X-Debug-Token` header value (should come from config/env, not be baked
-into source) — a small but realistic `line-scan` rule with a suppress marker:
+into source) — a small but realistic `line-scan` rule. Note there is no `suppress_marker` field: the
+inline marker is derived as `<id>-ok` (here `hardcoded-debug-token-ok`), and the `message` names it so a
+reader sees how to silence a vetted case:
 
 ```json
 {
@@ -51,8 +53,7 @@ into source) — a small but realistic `line-scan` rule with a suppress marker:
     {
       "id": "hardcoded-debug-token",
       "severity": "warning",
-      "message": "X-Debug-Token header set to a string literal — this bypasses per-environment config and risks shipping a real token. Read it from env/config instead.",
-      "suppress_marker": "debug-token-ok",
+      "message": "X-Debug-Token header set to a string literal — this bypasses per-environment config and risks shipping a real token. Read it from env/config instead. Suppress a vetted case with `// hardcoded-debug-token-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
@@ -68,8 +69,9 @@ into source) — a small but realistic `line-scan` rule with a suppress marker:
 
 - `require_file` is a cheap whole-text pre-skip: most files never mention `X-Debug-Token` at all, so this
   avoids running the real (costlier) pattern against every line of every file.
-- `// debug-token-ok: rotated in CI` on the offending line or the single line directly above it suppresses
-  the finding (see `docs/rules/dsl-reference.md#suppress-marker-semantics`).
+- `// hardcoded-debug-token-ok: rotated in CI` on the offending line or the single line directly above it
+  suppresses the finding — the marker is the rule's id plus `-ok`, derived automatically, never declared
+  (see `docs/rules/dsl-reference.md#suppress-marker-semantics`).
 - Drop this into a `RuleContext` (or run it through `zzop_engine::analyze_tree` with `packs` including it)
   and it behaves exactly like any shipped pack — there is no first-party/third-party distinction at the
   interpreter level.
@@ -96,7 +98,7 @@ hand-written copy. This happens once, before the finding reaches `AnalysisCache:
 hint text is baked into the cached `message` and is not re-appended on a warm cache hit.
 
 **What this means for your `message` field**: write the cause, the fix, and (per the "Message triple"
-contract below) your rule's own `suppress_marker` name — that is the full contract for what you author.
+contract below) your rule's own derived marker `<id>-ok` — that is the full contract for what you author.
 Do NOT write your own "Disable via config ..." sentence in `message`: the engine adds the hint for you,
 and a hand-written copy renders TWICE in the finding a reader actually sees.
 
@@ -183,9 +185,10 @@ exactly which rule/pack/doc line to fix — do not silence the test, fix the off
 
 What it checks:
 
-- **Marker presence** — every DSL rule has a non-empty `suppress_marker`, and no two rules in the same pack
-  share one (a shared marker would silently co-suppress both rules' findings).
-- **Message triple** — every DSL rule's `message` names its own suppress marker (or, for a disable-only
+- **Derived-marker uniqueness** — markers are derived `<id>-ok`, so presence and the `-ok` shape are
+  construction guarantees; what the test still enforces is that no two rules — in any pack — derive the same
+  marker (i.e. rule ids are globally unique), since a shared marker would silently co-suppress both.
+- **Message triple** — every DSL rule's `message` names its own derived marker (or, for a disable-only
   rule, the literal `disabled_rules`/`disabledRules` string) somewhere in the text — the "how to exclude"
   leg every finding must carry alongside its problem/fix explanation.
 - **Native message contract** — a pragmatic grep over `rules/native/*/src/**/*.rs`: any file that
@@ -224,18 +227,18 @@ through before it ships:
    *does* at runtime (a missing `await`, a wildcard CORS origin, an unbounded query) — call this
    **deployed-surface**: a test file exercising the same code shape isn't a production bug, so exclude test
    paths. A minority of rules reason about a literal value simply being *present in the repo*
-   (`be-security/hardcoded-secret`, `be-security/hardcoded-password`) — call this **repo-content**: a
+   (`security/hardcoded-secret`, `security/hardcoded-password`) — call this **repo-content**: a
    secret committed inside a test fixture is still a leaked credential the moment it's pushed, so these must
    scan every path, test directories included. Decide which one a new rule is, and for deployed-surface
    rules add the shared canonical test-path exclude (copy it verbatim, do not invent a new regex):
    ```
    "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?)/|\\.(test|spec)\\.|\\.stories\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress)\\.config\\.)"
    ```
-   This is the same string `be-reliability/debug-true-committed` and `fullstack/localhost-egress-committed`
+   This is the same string `reliability/debug-true-committed` and `egress/localhost-egress-committed`
    already used before the sweep unified every other deployed-surface DSL rule onto it. If a rule already
-   has a `file_exclude_pattern` for an unrelated reason (e.g. `be-reliability/process-exit-in-lib` excludes
+   has a `file_exclude_pattern` for an unrelated reason (e.g. `reliability/process-exit-in-lib` excludes
    `scripts?/tools/bin` as CLI-entrypoint dirs), leave that alone rather than conflating two different
-   exclude reasons into one regex. (`be-reliability/env-outside-config` is a deliberate exception: it
+   exclude reasons into one regex. (`reliability/env-outside-config` is a deliberate exception: it
    excludes config-file basenames AND folds in the canonical test-path/`scripts/` exclusion, documented
    in its own `message` — see that rule for the reasoning.)
 
@@ -248,7 +251,7 @@ through before it ships:
    "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)"
    ```
 3. **Does the message carry problem + fix + suppress?** Every DSL rule's `message` must explain what's wrong,
-   how to fix it, and name its own `suppress_marker` — already machine-enforced by the "Message triple" check
+   how to fix it, and name its own derived marker `<id>-ok` — already machine-enforced by the "Message triple" check
    above, but worth checking by eye while drafting: a reviewer should never have to guess how to vet a
    false positive.
 4. **Does the message make a claim about what the matcher does or doesn't flag?** If the message
@@ -267,15 +270,15 @@ through before it ships:
    `\bUPDATE\b`), never a bare word alone. Machine-checked by the `rule_contracts` meta-test's
    `dangerous_bare_words_are_syntax_anchored_not_bare_prose_matches` test (see that test's own doc comment
    for the curated word list and exactly what the check can/cannot prove) — this is the fix that shipped for
-   `perf/api-in-loop` (bare `\bdo\b`) and `be-security/sql-taint` (bare `UPDATE`).
+   `perf/api-in-loop` (bare `\bdo\b`) and `security/sql-taint` (bare `UPDATE`).
 6. **What is the nearest benign lookalike, and is it pinned as a negative fixture?** Before shipping,
    name the most common INNOCENT code that matches the same surface shape the rule keys on, and pin it
    as a negative test in the pack's `.rs` — not a synthetic near-miss, but the real-world idiom a scan
    of an ordinary repo will actually hit. Field-audit examples of rules that shipped without this and
    fired on their lookalike immediately: `sql/truncate-in-app-code` (SQL `TRUNCATE` vs a JSX `truncate`
-   boolean prop AND Tailwind's `truncate` utility class), `be-security/private-key-committed` (a PEM
+   boolean prop AND Tailwind's `truncate` utility class), `security/private-key-committed` (a PEM
    header carrying a key vs a doc/i18n sentence merely *naming* the header),
-   `be-reliability/sync-fs-in-handler` (Express's `res` vs `const res = await fetch(...)`), and
+   `reliability/sync-fs-in-handler` (Express's `res` vs `const res = await fetch(...)`), and
    `perf/api-in-loop` (a request-per-iteration loop vs the universal single-fetch-then-`.map()`
    response transform). A positive fixture proves the rule CAN fire; only the benign-lookalike negative
    proves it knows when NOT to.
@@ -285,6 +288,6 @@ through before it ships:
    structural fact the parser projects (e.g. `MethodScan::trigger_in_loop` over `loop_spans`, the fix
    that replaced `perf/api-in-loop`/`sql/nplus1`/`sql/count-in-loop`'s loop-token co-occurrence after a
    field audit found 11/11 false positives), or (b) keep the co-occurrence matcher but make the message
-   SAY co-occurrence, in the `be-db/multi-write-no-tx` house style ("This is a co-occurrence heuristic,
+   SAY co-occurrence, in the `db/multi-write-no-tx` house style ("This is a co-occurrence heuristic,
    not proof ..."), and cap severity at `warning` — `critical` is reserved for matchers that PROVE their
    claim (a closed literal, an unambiguous token). Never ship a structural claim on a textual matcher.

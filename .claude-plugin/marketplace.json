@@ -9,7 +9,7 @@
     {
       "name": "zzop",
       "source": "./",
-      "description": "Deterministic cross-repo contract analysis for AI agents: which frontend calls hit which backend endpoints (and which don't) — exact joins, disclosed blind spots, no guessing. Requires the zzop-mcp binary on PATH (self-contained static binary, 5 platforms on GitHub Releases — no Node needed)."
+      "description": "Deterministic cross-repo contract analysis for AI agents: which frontend calls hit which backend endpoints (and which don't) — exact joins, disclosed blind spots, no guessing. Run /plugin install after adding this marketplace; the plugin then fetches its own self-contained binary (5 platforms, no Node) on first session — nothing to put on PATH. On Windows that step needs a POSIX shell; Git for Windows supplies one, and a plugin marketplace is a git clone anyway."
     }
   ]
 }

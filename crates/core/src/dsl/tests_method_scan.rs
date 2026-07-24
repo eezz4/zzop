@@ -1,4 +1,4 @@
-//! Method-scan matcher tests: the be-security `cmd-injection` rule (hand-supplied method spans — no Java
+//! Method-scan matcher tests: the security `cmd-injection` rule (hand-supplied method spans — no Java
 //! parser yet), plus the `absent` veto (v2 #1), innermost-span priority (v2 #4), `file_exclude_pattern`
 //! (v3), and `require_file_absent` (v4) extensions.
 

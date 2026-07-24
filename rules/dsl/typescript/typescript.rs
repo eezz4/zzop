@@ -97,9 +97,9 @@ fn lines_of(findings: &[Finding]) -> Vec<u32> {
 // use the broadened `file_pattern` `(?i)\.(ts|tsx|js|jsx|mjs|cjs)$` — every fixture file below uses a
 // `.js`/`.ts` mix on purpose to exercise that breadth.
 
-/// Loads both the `typescript` and `be-db` packs together, for the `float-equality` /
-/// `float-money-compare` dual-pack boundary fixture below (be-db.json ships in the same `dsl/` tree).
-fn typescript_and_be_db_packs() -> Vec<RulePackDef> {
+/// Loads both the `typescript` and `db` packs together, for the `float-equality` /
+/// `float-money-compare` dual-pack boundary fixture below (db.json ships in the same `dsl/` tree).
+fn typescript_and_db_packs() -> Vec<RulePackDef> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("dsl");
     let result = load_dsl_packs(&dir);
     assert!(
@@ -111,7 +111,7 @@ fn typescript_and_be_db_packs() -> Vec<RulePackDef> {
         .packs
         .into_iter()
         .map(|(_, pack)| pack)
-        .filter(|p| p.id == "typescript" || p.id == "be-db")
+        .filter(|p| p.id == "typescript" || p.id == "db")
         .collect();
     assert_eq!(packs.len(), 2, "{packs:?}");
     packs.sort_by(|a, b| a.id.cmp(&b.id));
@@ -119,7 +119,7 @@ fn typescript_and_be_db_packs() -> Vec<RulePackDef> {
 }
 
 fn analyze_with_packs(files: &[(&str, &str)], packs: Vec<RulePackDef>) -> Vec<Finding> {
-    let dir = TempDir::new("zzop-typescript-be-db-pack");
+    let dir = TempDir::new("zzop-typescript-db-pack");
     for (rel, content) in files {
         dir.write(rel, content);
     }

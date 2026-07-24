@@ -3,9 +3,8 @@
 use crate::finding::Finding;
 
 use super::def::{LineScan, RuleDef};
-use super::markers::{
-    compile_marker, compile_marker_sql, compile_require_all, is_sql_file, marker_suppresses,
-};
+use super::diagnostics::RuleDiag;
+use super::markers::{compile_marker, compile_marker_sql, is_sql_file, marker_suppresses};
 use super::source::RuleContext;
 
 /// A compiled per-line matcher — single or labeled alternatives.
@@ -23,76 +22,64 @@ pub(super) fn eval_line_scan(
     // pre-filter is disabled (scan every file).
     file_candidates: Option<&[bool]>,
     out: &mut Vec<Finding>,
+    // Rule-skip sink — see `diagnostics`'s module doc. A rule that cannot compile is skipped, never
+    // fatal (analysis is best-effort), but the skip is REPORTED so its silence can't read as "clean".
+    diagnostics: &mut Vec<String>,
 ) {
-    // Skip the rule if a regex fails to compile (TODO: report via diagnostics).
-    let Ok(file_re) = regex::Regex::new(&m.file_pattern) else {
+    let rule_id = format!("{}/{}", pack_id, rule.id);
+    let mut diag = RuleDiag::new(&rule_id, diagnostics);
+    let Some(file_re) = diag.compile("file_pattern", &m.file_pattern) else {
         return;
     };
     // Path-negation escape hatch — see `LineScan::file_exclude_pattern` doc.
-    let file_exclude_re = match &m.file_exclude_pattern {
-        Some(p) => match regex::Regex::new(p) {
-            Ok(r) => Some(r),
-            Err(_) => return,
-        },
-        None => None,
-    };
-    let require_re = match &m.require_file {
-        Some(p) => match regex::Regex::new(p) {
-            Ok(r) => Some(r),
-            Err(_) => return,
-        },
-        None => None,
-    };
-    let Some(require_all) = compile_require_all(&m.require_file_all) else {
+    let Some(file_exclude_re) =
+        diag.compile_opt("file_exclude_pattern", m.file_exclude_pattern.as_ref())
+    else {
         return;
     };
-    // Negated mirror of require_file_all — see `LineScan::require_file_absent` doc. Reuses
-    // `compile_require_all`; ANY-vs-ALL semantics are applied by the caller below.
-    let Some(require_absent) = compile_require_all(&m.require_file_absent) else {
+    let Some(require_re) = diag.compile_opt("require_file", m.require_file.as_ref()) else {
         return;
     };
-    let exclude_re = match &m.exclude_pattern {
-        Some(p) => match regex::Regex::new(p) {
-            Ok(r) => Some(r),
-            Err(_) => return,
-        },
-        None => None,
+    let Some(require_all) = diag.compile_all("require_file_all", &m.require_file_all) else {
+        return;
     };
-    let marker_re = match &rule.suppress_marker {
-        Some(marker) => match compile_marker(marker) {
-            Some(r) => Some(r),
-            None => return,
-        },
-        None => None,
+    // Negated mirror of require_file_all — see `LineScan::require_file_absent` doc. Compiled the same
+    // way; ANY-vs-ALL semantics are applied by the caller below.
+    let Some(require_absent) = diag.compile_all("require_file_absent", &m.require_file_absent)
+    else {
+        return;
+    };
+    let Some(exclude_re) = diag.compile_opt("exclude_pattern", m.exclude_pattern.as_ref()) else {
+        return;
+    };
+    let marker = rule.suppress_marker();
+    // The marker regexes are built from the rule id (escaped), so failure here means the id itself is
+    // unusable — structural, not a pattern the author wrote wrong, but just as fatal to the rule.
+    let Some(marker_re) = compile_marker(&marker) else {
+        diag.malformed("its derived suppress marker does not compile as a regex");
+        return;
     };
     // SQL-comment counterpart of `marker_re`, only ever consulted below when `is_sql_file(&f.rel)` — see
     // `compile_marker_sql`'s doc.
-    let marker_re_sql = match &rule.suppress_marker {
-        Some(marker) => match compile_marker_sql(marker) {
-            Some(r) => Some(r),
-            None => return,
-        },
-        None => None,
+    let Some(marker_re_sql) = compile_marker_sql(&marker) else {
+        diag.malformed("its derived suppress marker does not compile as a regex");
+        return;
     };
     // `any` (labeled alternatives) takes precedence, else `line_pattern` (single). Neither -> invalid DSL -> skip.
     let matcher = match (&m.any, &m.line_pattern) {
-        (Some(alts), _) => {
-            let mut v = Vec::with_capacity(alts.len());
-            for lp in alts {
-                let Ok(re) = regex::Regex::new(&lp.pattern) else {
-                    return;
-                };
-                v.push((re, lp.label.clone()));
-            }
-            LineMatch::Any(v)
-        }
-        (None, Some(p)) => match regex::Regex::new(p) {
-            Ok(re) => LineMatch::Single(re),
-            Err(_) => return,
+        (Some(alts), _) => match diag.compile_labeled("any[].pattern", alts) {
+            Some(v) => LineMatch::Any(v),
+            None => return,
         },
-        (None, None) => return,
+        (None, Some(p)) => match diag.compile("line_pattern", p) {
+            Some(re) => LineMatch::Single(re),
+            None => return,
+        },
+        (None, None) => {
+            diag.malformed("it declares neither `line_pattern` nor `any`");
+            return;
+        }
     };
-    let rule_id = format!("{}/{}", pack_id, rule.id);
 
     for (file_idx, f) in ctx.files.iter().enumerate() {
         if let Some(cand) = file_candidates {
@@ -154,17 +141,11 @@ pub(super) fn eval_line_scan(
                     .map(|(_, label)| label.as_str()),
             };
             let Some(label) = label else { continue };
-            if let Some(re) = &marker_re {
-                if marker_suppresses(re, &lines, i) {
-                    continue;
-                }
+            if marker_suppresses(&marker_re, &lines, i) {
+                continue;
             }
-            if is_sql {
-                if let Some(re) = &marker_re_sql {
-                    if marker_suppresses(re, &lines, i) {
-                        continue;
-                    }
-                }
+            if is_sql && marker_suppresses(&marker_re_sql, &lines, i) {
+                continue;
             }
             let snippet: String = line.trim().chars().take(m.snippet_max).collect();
             let data = if label.is_empty() {

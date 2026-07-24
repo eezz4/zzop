@@ -8,9 +8,9 @@ migration path. There are no backward-compatibility guarantees yet, and there is
 deliberately **no `CHANGELOG.md`** during the `0.x` series (see below).
 
 If you depend on zzop, **pin an exact version** and re-test before upgrading. Both binaries are versioned
-by the same release tag: download the exact `zzop-<platform>[.exe]` and/or `zzop-mcp-<platform>[.exe]`
-asset for the tag you want from [GitHub Releases](https://github.com/eezz4/zzop/releases) rather than
-tracking a "latest" link. The
+by the same release tag, so pin by tag: take the assets for the tag you want from [GitHub
+Releases](https://github.com/eezz4/zzop/releases) rather than tracking a "latest" link (the install lanes
+themselves are listed once in the [README's Quick start](README.md#quick-start)). The
 Claude Code plugin pins the same way, via its own `version` field in
 [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) — bump/reinstall a specific plugin version
 instead of always taking the marketplace's newest.

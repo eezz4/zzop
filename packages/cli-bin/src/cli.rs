@@ -46,3 +46,36 @@ pub fn run_file_validate(args: &[String], usage_tail: &str, validate: fn(&str) -
         .unwrap_or(false);
     std::process::exit(if valid { 0 } else { 1 });
 }
+
+/// `explain <rule-id>`: the one-arg "call a `Result<String, String>` lookup and print" shape shared by
+/// any read-only subcommand that answers from in-process data rather than a file — today just
+/// `zzop_host::explain::explain`. Missing/extra/flag-shaped args exit 2 (same usage-error contract as
+/// every sibling subcommand); `Ok` prints to stdout and exits 0; `Err` prints `zzop: <message>` to
+/// stderr and exits 1 (a runtime lookup failure, never a usage error — the id was well-formed, just not
+/// explainable).
+pub fn run_lookup(
+    args: &[String],
+    usage_tail: &str,
+    lookup: fn(&str) -> Result<String, String>,
+) -> ! {
+    let usage = format!("usage: zzop {usage_tail}");
+    let Some(query) = args.get(2) else {
+        eprintln!("{usage}");
+        std::process::exit(2);
+    };
+    if args.len() > 3 {
+        eprintln!("{usage} (one id — got {})", args.len() - 2);
+        std::process::exit(2);
+    }
+    reject_flag_like_args([query.as_str()], &usage);
+    match lookup(query) {
+        Ok(text) => {
+            println!("{text}");
+            std::process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("zzop: {e}");
+            std::process::exit(1);
+        }
+    }
+}

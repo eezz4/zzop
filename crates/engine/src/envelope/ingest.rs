@@ -173,6 +173,9 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     if let Some(w) = crate::analyze::no_applicable_dsl_rule_warning(&config.packs, &dsl_scope) {
         warnings.push(w);
     }
+    // Same disclosure Mode B's native twin makes (`analyze::assemble`) — an uncompilable rule is dead in
+    // envelope mode too, and a caller who injected the pack inline never ran `validate-rule-pack` on it.
+    warnings.extend(crate::analyze::uncompilable_rule_warnings(&config.packs));
 
     let mut global_findings = Vec::new();
     if is_enabled(&config.rule_config, "circular") {

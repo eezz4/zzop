@@ -1,4 +1,4 @@
-//! `go-goroutine-in-loop` tests (split from `go.rs`, mirroring `rules/dsl/be-db/client_lifecycle.rs`'s
+//! `goroutine-in-loop` tests (split from `go.rs`, mirroring `rules/dsl/db/client_lifecycle.rs`'s
 //! own per-rule split).
 
 use super::*;
@@ -11,7 +11,7 @@ fn goroutine_started_inside_a_range_loop_is_flagged() {
         "package main\n\nfunc f(items []int) {\n\tfor _, it := range items {\n\t\tgo process(it)\n\t}\n}\n\nfunc process(it int) {}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "go-goroutine-in-loop");
+    let h = hits(&out, "goroutine-in-loop");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 5);
 }
@@ -28,7 +28,7 @@ fn goroutine_outside_any_loop_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "go-goroutine-in-loop").is_empty(),
+        hits(&out, "goroutine-in-loop").is_empty(),
         "{:?}",
         out.findings
     );
@@ -45,7 +45,7 @@ fn synchronous_call_inside_loop_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "go-goroutine-in-loop").is_empty(),
+        hits(&out, "goroutine-in-loop").is_empty(),
         "{:?}",
         out.findings
     );
@@ -60,7 +60,7 @@ fn goroutine_in_loop_ok_marker_directly_above_the_go_line_suppresses_the_finding
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "go-goroutine-in-loop").is_empty(),
+        hits(&out, "goroutine-in-loop").is_empty(),
         "{:?}",
         out.findings
     );
@@ -82,7 +82,7 @@ fn goroutine_in_loop_fires_when_enclosing_function_body_opens_with_a_comment() {
         "package main\n\nfunc f(items []int) {\n\t// dispatches one worker per item\n\tfor _, it := range items {\n\t\tgo process(it)\n\t}\n}\n\nfunc process(it int) {}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "go-goroutine-in-loop");
+    let h = hits(&out, "goroutine-in-loop");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 6);
 }
@@ -96,7 +96,7 @@ fn goroutine_anonymous_closure_inside_loop_is_flagged() {
         "package main\n\nfunc f(items []int) {\n\tfor _, it := range items {\n\t\tgo func() {\n\t\t\tprocess(it)\n\t\t}()\n\t}\n}\n\nfunc process(it int) {}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "go-goroutine-in-loop");
+    let h = hits(&out, "goroutine-in-loop");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 5);
 }

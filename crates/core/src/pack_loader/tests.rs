@@ -244,7 +244,7 @@ fn pack_regex_issues_names_the_rule_and_field_of_a_bad_regex() {
     let pack = parse_dsl_pack(&bad).unwrap();
     let issues = pack_regex_issues(&pack);
     assert_eq!(issues.len(), 1, "{issues:?}");
-    assert!(issues[0].contains("rule \"r1\""), "{issues:?}");
+    assert!(issues[0].contains("rule \"p/r1\""), "{issues:?}");
     assert!(issues[0].contains("`line_pattern`"), "{issues:?}");
     assert!(issues[0].contains("never fire"), "{issues:?}");
 }
@@ -269,11 +269,14 @@ fn pack_regex_issues_walks_every_matcher_kind() {
     let pack = parse_dsl_pack(pack_json).unwrap();
     let issues = pack_regex_issues(&pack);
     let text = issues.join("\n");
-    assert!(text.contains("rule \"ls\": `file_pattern`"), "{text}");
-    assert!(text.contains("rule \"ls\": `any[].pattern`"), "{text}");
-    assert!(text.contains("rule \"ms\": `patterns[].pattern`"), "{text}");
-    assert!(text.contains("rule \"ss\": `name_pattern`"), "{text}");
-    assert!(text.contains("rule \"is\": `key_pattern`"), "{text}");
+    assert!(text.contains("rule \"p/ls\": `file_pattern`"), "{text}");
+    assert!(text.contains("rule \"p/ls\": `any[].pattern`"), "{text}");
+    assert!(
+        text.contains("rule \"p/ms\": `patterns[].pattern`"),
+        "{text}"
+    );
+    assert!(text.contains("rule \"p/ss\": `name_pattern`"), "{text}");
+    assert!(text.contains("rule \"p/is\": `key_pattern`"), "{text}");
     assert_eq!(issues.len(), 5, "{issues:?}");
 }
 

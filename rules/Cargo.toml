@@ -22,24 +22,24 @@ zzop-engine = { path = "../crates/engine" }
 serde_json = { workspace = true }
 
 [[test]]
-name = "pack_be_db"
-path = "dsl/be-db/be-db.rs"
+name = "pack_db"
+path = "dsl/db/db.rs"
 
 [[test]]
-name = "pack_be_reliability"
-path = "dsl/be-reliability/be-reliability.rs"
+name = "pack_reliability"
+path = "dsl/reliability/reliability.rs"
 
 [[test]]
-name = "pack_be_security"
-path = "dsl/be-security/be-security.rs"
+name = "pack_security"
+path = "dsl/security/security.rs"
 
 [[test]]
 name = "pack_browser"
 path = "dsl/browser/browser.rs"
 
 [[test]]
-name = "pack_fullstack"
-path = "dsl/fullstack/fullstack.rs"
+name = "pack_egress"
+path = "dsl/egress/egress.rs"
 
 [[test]]
 name = "pack_go"
@@ -60,10 +60,6 @@ path = "dsl/react/react.rs"
 [[test]]
 name = "pack_redis"
 path = "dsl/redis/redis.rs"
-
-[[test]]
-name = "pack_security"
-path = "dsl/security/security.rs"
 
 [[test]]
 name = "pack_sql"

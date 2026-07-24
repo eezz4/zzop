@@ -1,7 +1,7 @@
-//! End-to-end tests for `rules/dsl/redis/redis.json` — exercised via `zzop_engine::analyze_tree` so every rule runs against real fixture trees on disk, same convention as `be-reliability/be-reliability.rs`/`sql/sql.rs`/`http/http.rs`.
+//! End-to-end tests for `rules/dsl/redis/redis.json` — exercised via `zzop_engine::analyze_tree` so every rule runs against real fixture trees on disk, same convention as `reliability/reliability.rs`/`sql/sql.rs`/`http/http.rs`.
 //!
 //! Covers all rules in the pack: `line-scan` (`flushall-in-code`, `keys-glob-scan`, `client-no-error-listener`,
-//! `redis-lock-no-ttl`) and `method-scan` (`redis-lock-get-then-set`, `redis-counter-get-set`).
+//! `lock-no-ttl`) and `method-scan` (`lock-get-then-set`, `counter-get-set`).
 //!
 //! Each rule has >=1 positive fixture (count + line asserted), >=1 realistic negative, and a `suppress_marker`
 //! case. `keys-glob-scan` additionally guards the documented FP shapes (`Object.keys(x)`, `map.keys()`, a
@@ -9,7 +9,7 @@
 //! right-after-the-paren anchor is what tells them apart. `client-no-error-listener` additionally guards a
 //! same-named `createClient` from an unrelated library (`@supabase/supabase-js`) via the ioredis/redis import
 //! gate, and an ioredis file that DOES attach `.on('error', ...)` via `require_file_absent`. The two
-//! `method-scan` concurrency rules (`redis-lock-get-then-set`, `redis-counter-get-set`) are co-occurrence
+//! `method-scan` concurrency rules (`lock-get-then-set`, `counter-get-set`) are co-occurrence
 //! heuristics — every `patterns` entry must match somewhere within the same function span, which proves
 //! nothing about textual order — so each also pins the documented FP-adversarial negative (a lookalike shape
 //! missing one required co-occurring token, or an `absent` veto token present) at 0 findings.
@@ -57,7 +57,7 @@ impl Drop for TempDir {
 }
 
 /// Loads the real `rules/dsl/redis/redis.json` from the repo, filtered to just the `redis` pack so this test
-/// is unaffected by sibling packs under concurrent development (same convention as `be-reliability/be-reliability.rs`).
+/// is unaffected by sibling packs under concurrent development (same convention as `reliability/reliability.rs`).
 fn redis_pack() -> RulePackDef {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("dsl");
     let result = load_dsl_packs(&dir);

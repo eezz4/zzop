@@ -8,7 +8,9 @@
 //! signal), and EXCLUDING any file an adapter overlay already covers WITH A REAL EXTRACTED FACT
 //! (`envelope::overlay_file_carries_facts`) — a zero-fact overlay entry (every channel empty, `is_entry:
 //! false`) does NOT exempt its file: see `zero_fact_overlay_does_not_suppress_the_unparsed_warning` below,
-//! the G8 "unmask" regression guard.
+//! the G8 "unmask" regression guard. Nor does an overlay `apply_adapter_overlays` REJECTED outright
+//! (`validate_envelope` failure — nothing of it merged): see
+//! `rejected_overlay_does_not_suppress_the_unparsed_warning_but_its_valid_twin_still_does`.
 //!
 //! Fixture extensions: `.vb` and `.rb` stand in for "a real source extension with no native parser frontend
 //! in this workspace" — `.sql` used to fill that role here, but `zzop-parser-sql` now gives `.sql` a real
@@ -386,6 +388,64 @@ fn zero_fact_overlay_does_not_suppress_the_unparsed_warning() {
         ),
         "{zero_fact_line}"
     );
+}
+
+#[test]
+fn rejected_overlay_does_not_suppress_the_unparsed_warning_but_its_valid_twin_still_does() {
+    // The exclusion set is built from what `apply_adapter_overlays` ACTUALLY MERGED, not from what
+    // `EngineConfig::adapter_overlays` DECLARED. An overlay whose envelope fails `validate_envelope` is
+    // skipped whole — zero facts merge from it — so its declared paths must NOT be exempted from the
+    // per-extension disclosure: a file with no native parser AND no working overlay would otherwise be
+    // covered by neither and reported by nothing.
+    //
+    // Both halves run here off ONE fact-carrying projection, so the only variable between them is the
+    // validation verdict: the rejected run must keep the disclosure, and the accepted twin must still
+    // suppress it (the noise-regression half — narrowing the set must not disable overlay coverage).
+    let dir = fixture_tree();
+
+    let mut rejected = overlay("vb-adapter/1", vec![projection_with_io("a.vb")]);
+    rejected.format = "not-a-normalized-ast/1".to_string(); // the `validate_envelope` tripwire
+    let mut cfg = config();
+    cfg.adapter_overlays = vec![rejected];
+    let out = analyze_tree(dir.path(), &cfg);
+
+    let vb_line = out
+        .warnings
+        .iter()
+        .find(|w| w.contains("extension .vb"))
+        .unwrap_or_else(|| panic!("expected a .vb warning, got: {:?}", out.warnings));
+    assert!(
+        vb_line.starts_with("2 file(s) with extension .vb"),
+        "a rejected overlay merges nothing, so a.vb must stay in the disclosure: {vb_line}"
+    );
+    assert!(vb_line.contains("a.vb"), "{vb_line}");
+    assert!(vb_line.contains("b.vb"), "{vb_line}");
+
+    // The rejection itself is disclosed too — the two warnings together tell the whole truth (the overlay
+    // did not run, and the file it claimed is still unparsed).
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.starts_with("adapter overlay 'vb-adapter/1' skipped:")
+                && w.contains("unknown format")),
+        "expected the overlay-skipped warning: {:?}",
+        out.warnings
+    );
+
+    // The accepted twin: identical projection, valid envelope -> still suppresses.
+    let mut cfg = config();
+    cfg.adapter_overlays = vec![overlay("vb-adapter/1", vec![projection_with_io("a.vb")])];
+    let out = analyze_tree(dir.path(), &cfg);
+    let vb_line = out
+        .warnings
+        .iter()
+        .find(|w| w.contains("extension .vb"))
+        .unwrap_or_else(|| panic!("expected a .vb warning, got: {:?}", out.warnings));
+    assert!(
+        vb_line.starts_with("1 file(s) with extension .vb"),
+        "an ACCEPTED overlay must still exempt the file it really parsed: {vb_line}"
+    );
+    assert!(!vb_line.contains("a.vb"), "{vb_line}");
 }
 
 #[test]

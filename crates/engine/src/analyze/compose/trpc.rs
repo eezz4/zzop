@@ -28,6 +28,12 @@ use zzop_core::IoProvide;
 /// fragment's file, not the file containing the `Ref`). An `ancestry` stack guards against a cyclic
 /// `Ref` chain — a fragment already on the stack is skipped rather than recursed into again.
 ///
+/// A `Leaf` with an EMPTY key is a STANDALONE-PROCEDURE fragment (a procedure declared alone in its own
+/// file and mounted elsewhere as a single leaf — see the producer's `trpc_router` module doc): it emits
+/// at the current path unchanged, since the `Ref` that reached it already pushed the mount key. Reached
+/// at the ROOT — meaning nothing in the corpus mounts it — its route name is unknowable and it emits
+/// nothing rather than a fabricated bare path.
+///
 /// Deduped on `(kind, key, file, line)` and sorted to match the ordering `assemble` applies to every
 /// other `IoProvide` before freezing `MinimalIr::io`.
 pub(crate) fn compose_trpc_provides(
@@ -120,10 +126,16 @@ pub(crate) fn compose_trpc_provides(
         for entry in entries {
             match entry {
                 ProcedureRouterEntry::Leaf { key, verb, line } => {
-                    let full_path = if path.is_empty() {
-                        key.clone()
-                    } else {
-                        format!("{}.{key}", path.join("."))
+                    let full_path = match (path.is_empty(), key.is_empty()) {
+                        // A standalone-procedure fragment's empty-key leaf reached at the ROOT — i.e.
+                        // nothing in the corpus mounts it, so its route name is simply unknown. Emitting
+                        // it would invent a path; skip.
+                        (true, true) => continue,
+                        (true, false) => key.clone(),
+                        // Empty key = "the mount site named me" (a standalone procedure reached through
+                        // a `Ref` that already pushed its key) — add no segment of our own.
+                        (false, true) => path.join("."),
+                        (false, false) => format!("{}.{key}", path.join(".")),
                     };
                     out.push(IoProvide {
                         body: None,

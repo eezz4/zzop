@@ -87,7 +87,7 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     call when you control the extraction; or (2) at the CONFIG, declare the tree's own host in its
     `hosts` list (a bare hostname, no scheme/path) — cross-layer linking then re-keys any absolute-URL
     consume targeting a declared host to its internal joinable key at link time instead of routing it to
-    `externalConsumes` (see `docs/modules/mcp.md`'s `hosts` field and `hostRekeyCounts`).
+    `externalConsumes` (see `docs/modules/facade.md`'s `hosts` field and `hostRekeyCounts`).
   - OPTIONAL client provenance (additive since `axios-defaults-base-v1`; omit and nothing changes):
     an `IoConsume` may carry `client: "axios"` naming the HTTP client that produced the call site.
     `client` is a free-form string (`Option<String>` in `crates/core/src/io.rs`), not a closed enum —
@@ -231,7 +231,7 @@ the id collision), and since only
 `symbol-scan`/`io-scan` rules can fire without source text and every current bundled rule is
 `line-scan`/`method-scan`, the default currently adds pack-load confirmation, not findings. A
 caller-supplied pack reusing a bundled id keeps the existing collision semantics (a later inline def,
-or any directory pack, wins whole). See `docs/modules/mcp.md`'s "Defaults" section for the full
+or any directory pack, wins whole). See `docs/modules/facade.md`'s "Defaults" section for the full
 contract. `examples/jsp-envelope.example.json` is a hand-written,
 crude-parser-shaped fixture (symbols with no body spans, one `http` provide, one `db-table` consume, no
 imports) that validates cleanly against this contract — see `zzop-core`'s `normalized::tests::
@@ -317,7 +317,7 @@ If your framework has an equivalent concept (a global route prefix, a per-client
 the normalized `key` you emit yourself rather than trying to reproduce either native rewrite.
 
 Deployment-topology `mounts`/`mountedAt` (config-declared, not a sentinel kind — see
-[modules/mcp.md](modules/mcp.md#functions)'s `mounts`/`mountedAt`/`hosts` `AnalyzeRequest` fields) are
+[modules/facade.md](modules/facade.md#functions)'s `mounts`/`mountedAt`/`hosts` `AnalyzeRequest` fields) are
 NOT part of the reserved-kind drop above: they apply uniformly to Mode A envelopes and natively-parsed trees alike, at the structurally
 equivalent seam after fragment composition and before the IO freeze — a config mount rewrites a Mode A
 tree's `http` provide keys exactly like it would a native tree's.
@@ -403,7 +403,9 @@ callers can refer to either unambiguously.
     a mismatch is usually a typo.
   - An entry counts as adapter coverage for the per-extension "no native parser" diagnostic (the
     self-report warning a file whose extension has no native parser, naming the `overlays: [...]`
-    remedy) only if it carries at least one fact the merge actually consumes: non-reserved `io`, `imports`,
+    remedy) only if its overlay PASSED the validation above — a skipped overlay merges nothing, so it
+    covers nothing and every file it declared keeps triggering the diagnostic — and only if the entry
+    carries at least one fact the merge actually consumes: non-reserved `io`, `imports`,
     `re_exports`, `dynamic_imports`, a fragment channel, non-empty `attributes`, or `is_entry: true`.
     **`symbols` does not count** — neither merge branch above reads an overlay projection's `symbols`,
     so a symbols-only entry is empty coverage. An overlay whose every entry carries none of these gets

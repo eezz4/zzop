@@ -19,7 +19,7 @@
       <a href="index.html" class="site-nav__link">Overview</a>
       <a href="architecture.html" class="site-nav__link is-active">Architecture</a>
       <a href="usage.html" class="site-nav__link">Usage</a>
-      <a href="sdk.html" class="site-nav__link">SDK</a>
+      <a href="reference.html" class="site-nav__link">Reference</a>
       <a href="rules.html" class="site-nav__link">Rules</a>
     </nav>
     <div class="site-header__actions">
@@ -42,7 +42,7 @@
       <a href="index.html" class="docs-nav__link">Overview</a>
       <a href="architecture.html" class="docs-nav__link is-active">Architecture</a>
       <a href="usage.html" class="docs-nav__link">Usage</a>
-      <a href="sdk.html" class="docs-nav__link">SDK</a>
+      <a href="reference.html" class="docs-nav__link">Reference</a>
       <a href="rules.html" class="docs-nav__link">Rules</a>
     </div>
   </aside>
@@ -50,7 +50,7 @@
   <main class="docs-content">
     <div class="docs-content-header">
       <h1>How the engine processes a tree</h1>
-      <p>A short orientation for making sense of an <code>analyze</code>/<code>analyzeTrees</code> report — what each stage does, what languages are understood natively, and how the engine handles what it can't fully parse. For the field-by-field output shape, see the <a href="sdk.html">SDK reference</a>.</p>
+      <p>A short orientation for making sense of an <code>analyze</code>/<code>analyzeTrees</code> report — what each stage does, what languages are understood natively, and how the engine handles what it can't fully parse. For the field-by-field input/output shape, see the <a href="reference.html">Reference</a>.</p>
     </div>
 
     <section id="pipeline">
@@ -138,7 +138,7 @@
         </div>
         <div class="card">
           <h3><code>crates/facade</code>, <code>crates/host</code></h3>
-          <p><code>zzop-facade</code> is the napi-free JSON-in/JSON-out contract: exactly seven functions, documented in the <a href="sdk.html">SDK reference</a>. <code>crates/host</code> is the shared lib two Node-free binary products build over — <code>zzop</code> (package <code>packages/cli-bin</code>, the CLI subcommands) and <code>zzop-mcp</code> (package <code>packages/mcp</code>, the MCP stdio server) — thin entrances over one shared analysis path.</p>
+          <p><code>zzop-facade</code> is the JSON-in/JSON-out contract every surface shares, documented in the <a href="reference.html">Reference</a>. <code>crates/host</code> is the shared lib two Node-free binary products build over — <code>zzop</code> (package <code>packages/cli-bin</code>, the CLI subcommands) and <code>zzop-mcp</code> (package <code>packages/mcp</code>, the MCP stdio server) — thin entrances over one shared analysis path.</p>
         </div>
       </div>
     </section>
@@ -179,7 +179,7 @@
         </div>
       </div>
       <p>The <code>cross-layer/*</code> native analyses run on top of this join — matched-edge diagnostics (unconsumed endpoints, method mismatches, version skew, path near-misses, shared database tables, duplicate routes), external-egress checks (shadowed internal routes, secrets in URLs, IP literals, host fan-out, base-URL drift, and more), and a tRPC procedure-coverage check (an unconsumed procedure joined from cross-file router fragments) — cataloged in the <a href="rules.html">rule reference</a>.</p>
-      <p>A per-tree deployment-topology declaration (<code>mountedAt</code>/<code>mounts</code>/<code>hosts</code> config) supplies the one class of join information that lives only in infra, not in either repo's source: a gateway/ingress mount prefix, and which hosts a tree owns. Mounts apply as the last provide-key transform, stacking on top of any code-extracted prefix; a declared host re-keys a matching absolute-URL consume to an internal joinable key before the external-egress gate above applies. Both self-disclose via a warning when they turn out to have zero effect. See the <a href="sdk.html">SDK reference</a>.</p>
+      <p>A per-tree deployment-topology declaration (<code>mountedAt</code>/<code>mounts</code>/<code>hosts</code> config) supplies the one class of join information that lives only in infra, not in either repo's source: a gateway/ingress mount prefix, and which hosts a tree owns. Mounts apply as the last provide-key transform, stacking on top of any code-extracted prefix; a declared host re-keys a matching absolute-URL consume to an internal joinable key before the external-egress gate above applies. Both self-disclose via a warning when they turn out to have zero effect. See the <a href="reference.html">Reference</a>.</p>
     </section>
 
     <section id="degraded">
@@ -200,6 +200,8 @@
       <p>A normal-sized file whose extension has no native parser is a third, distinct case — not counted in <code>degraded</code> — that also self-reports: one aggregate <code>warnings</code> entry per extension, naming a file count and a path sample, pointing at the <code>overlays: [...]</code> config knob. An oversized file of that same unparsed extension gets both facts at once (<code>degraded</code> for its size, plus the per-extension warning for its language).</p>
       <p>Every run also emits a structural <strong>coverage census</strong> per tree (<code>coverage</code> in the output) — vocab-free counts of how much of each channel it actually filled (files, symbols, import edges, and IO), plus the <code>degraded</code> count above — so a consumer can tell "analyzed and found nothing" apart from "this channel was dark". When a tree analyzes files but extracts zero IO, its <code>coverage.joinContributionZero</code> flag asserts the blindness outright: the tree is invisible to the cross-layer join, so any join finding that references it is structurally weak (a client the extractor can't see — a hand-rolled HTTP wrapper, a generated SDK — is a common cause). And a run-global <code>disclosure</code> registry names the classes of silent failure zzop does, and does <em>not</em> yet, actively detect — so the tool never quietly claims to be complete.</p>
     </section>
+
+    <p>This page is a conceptual orientation. For the exhaustive, per-decision architecture reference — the public source of truth this page indexes rather than restates — see <a href="https://github.com/eezz4/zzop/blob/main/docs/ARCHITECTURE.md">docs/ARCHITECTURE.md</a>, plus each crate's own <code>README</code> under <a href="https://github.com/eezz4/zzop/tree/main/crates">crates/</a>.</p>
 
   </main>
 

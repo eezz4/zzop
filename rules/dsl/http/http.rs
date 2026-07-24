@@ -1,6 +1,13 @@
 //! Exercises `rules/dsl/http/http.json`'s HTTP-route rules end-to-end via `zzop_engine::analyze_tree` against
 //! real swc-parsed TypeScript fixtures. See `http.json` for each rule's exact matcher shape and message.
 //!
+//! **`read-model-path`'s name**: "read model" means "the path of a read (GET) endpoint" here — not a
+//! CQRS/DDD read-model or a DB read-replica. The rule flags an `apiRoutes.get(...)`-registered GET route
+//! carrying no `// cache:`/`// no-cache:` annotation on its own line (`http.json`'s message has the exact
+//! contract); it never inspects request/response shape or persistence. A vetted case is suppressed by the
+//! DERIVED marker `// read-model-path-ok` — that channel is not the annotation channel: it also accepts the
+//! line above, and its trailing colon is optional.
+//!
 //! Ordering-aware and graph-shaped route checks (auth-state-machine transitions, API churn, unsafe-read-endpoint,
 //! non-idempotent-write, FE/BE spec drift) are out of scope for a per-file DSL matcher and stay on the native-analysis backlog.
 //!

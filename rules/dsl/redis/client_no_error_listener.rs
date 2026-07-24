@@ -96,7 +96,7 @@ fn redis_error_ok_marker_above_the_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-redis");
     dir.write(
         "src/redisClient.ts",
-        "import { createClient } from \"redis\";\n// redis-error-ok: error listener attached in bootstrap.ts\nexport const client = createClient({ url: process.env.REDIS_URL });\n",
+        "import { createClient } from \"redis\";\n// client-no-error-listener-ok: error listener attached in bootstrap.ts\nexport const client = createClient({ url: process.env.REDIS_URL });\n",
     );
     let out = scan(&dir);
     assert!(

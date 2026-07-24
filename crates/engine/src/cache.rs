@@ -96,7 +96,7 @@ fn schema_structural_fingerprint() -> String {
 /// window, ...) alters findings for byte-identical source AND identical pack content — invisible to the
 /// key without this token. Restamp with the current `CARGO_PKG_VERSION` on any such change (2026-07-22
 /// version reform: cache-bust tokens are package-version stamps).
-const DSL_INTERPRETER_FINGERPRINT: &str = "dsl/0.21.0";
+const DSL_INTERPRETER_FINGERPRINT: &str = "dsl/0.22.0";
 
 /// Opens the on-disk cache at `config.cache_dir`, if set. Never panics: an open failure (bad permissions,
 /// path collides with a plain file, disk full while writing the schema-version marker, ...) degrades to

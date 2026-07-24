@@ -83,7 +83,7 @@ fn nested_prisma_model_receiver_toggle_is_flagged() {
 fn transaction_wrapped_toggle_is_still_flagged() {
     // A bare $transaction does NOT close a check-then-act race at READ COMMITTED — two concurrent
     // transactions can both read empty and both insert. The old `tx-guard` veto encoded the wrong
-    // fix (matching the be-db sibling `find-then-create-no-unique` correction), so this fixture,
+    // fix (matching the db sibling `find-then-create-no-unique` correction), so this fixture,
     // previously pinned as a negative, is now a positive.
     let dir = TempDir::new("zzop-sql");
     dir.write(
@@ -122,7 +122,7 @@ fn toctou_ok_marker_directly_above_the_read_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "api/createMarkedHandlers.ts",
-        "declare const likeStore: any;\nexport async function toggle() {\n  // toctou-ok: intentional single-writer admin path\n  const existing = await likeStore.findOne((l: any) => l.id === \"x\");\n  if (existing) {\n    await likeStore.delete(existing.id);\n  } else {\n    await likeStore.create({ id: \"y\" });\n  }\n}\n",
+        "declare const likeStore: any;\nexport async function toggle() {\n  // race-condition-toctou-ok: intentional single-writer admin path\n  const existing = await likeStore.findOne((l: any) => l.id === \"x\");\n  if (existing) {\n    await likeStore.delete(existing.id);\n  } else {\n    await likeStore.create({ id: \"y\" });\n  }\n}\n",
     );
     let out = scan(&dir);
     assert!(

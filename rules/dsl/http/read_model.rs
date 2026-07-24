@@ -63,7 +63,7 @@ fn read_model_ok_marker_on_the_same_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
-        "import { Hono } from \"hono\";\nconst apiRoutes = new Hono();\ndeclare const api: any;\napiRoutes.get(\"/api/items\", api.itemList); // read-model-ok: legacy endpoint, cache handled at CDN layer\nexport { apiRoutes };\n",
+        "import { Hono } from \"hono\";\nconst apiRoutes = new Hono();\ndeclare const api: any;\napiRoutes.get(\"/api/items\", api.itemList); // read-model-path-ok: legacy endpoint, cache handled at CDN layer\nexport { apiRoutes };\n",
     );
     let out = scan(&dir);
     assert!(
@@ -78,7 +78,7 @@ fn read_model_ok_marker_one_line_before_suppresses_the_finding() {
     let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
-        "import { Hono } from \"hono\";\nconst apiRoutes = new Hono();\ndeclare const api: any;\n// read-model-ok: static data served at edge, no server cache needed\napiRoutes.get(\"/api/items/:id\", api.itemDetail);\nexport { apiRoutes };\n",
+        "import { Hono } from \"hono\";\nconst apiRoutes = new Hono();\ndeclare const api: any;\n// read-model-path-ok: static data served at edge, no server cache needed\napiRoutes.get(\"/api/items/:id\", api.itemDetail);\nexport { apiRoutes };\n",
     );
     let out = scan(&dir);
     assert!(
@@ -95,7 +95,7 @@ fn read_model_ok_marker_two_lines_before_does_not_suppress() {
     let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
-        "import { Hono } from \"hono\";\nconst apiRoutes = new Hono();\ndeclare const api: any;\n// read-model-ok: static data, no cache needed\n// line 2\napiRoutes.get(\"/api/feed\", api.feed);\nexport { apiRoutes };\n",
+        "import { Hono } from \"hono\";\nconst apiRoutes = new Hono();\ndeclare const api: any;\n// read-model-path-ok: static data, no cache needed\n// line 2\napiRoutes.get(\"/api/feed\", api.feed);\nexport { apiRoutes };\n",
     );
     let out = scan(&dir);
     assert_eq!(hits(&out, "read-model-path").len(), 1, "{:?}", out.findings);
@@ -107,7 +107,7 @@ fn read_model_ok_marker_four_lines_before_does_not_suppress() {
     let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
-        "import { Hono } from \"hono\";\nconst apiRoutes = new Hono();\ndeclare const api: any;\n// read-model-ok: this is too far above\n// line 2\n// line 3\n// line 4\napiRoutes.get(\"/api/feed\", api.feed);\nexport { apiRoutes };\n",
+        "import { Hono } from \"hono\";\nconst apiRoutes = new Hono();\ndeclare const api: any;\n// read-model-path-ok: this is too far above\n// line 2\n// line 3\n// line 4\napiRoutes.get(\"/api/feed\", api.feed);\nexport { apiRoutes };\n",
     );
     let out = scan(&dir);
     assert_eq!(hits(&out, "read-model-path").len(), 1, "{:?}", out.findings);

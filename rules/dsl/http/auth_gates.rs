@@ -65,7 +65,7 @@ fn extra_path_segments_after_protected_segment_is_still_flagged() {
 // NOT clear a security finding. The old same-line token belt over-cleared exactly these shapes (and,
 // systematically, Django's `views.AdminView` / Java's `value="/admin/..."` argument) — a lexical name
 // is not auth evidence. Real evidence = the `auth-guarded` attribute (native recognizer or Mode B
-// injection); vetted cases use the `// auth-gate-ok` marker. These pins keep the carve-out removed.
+// injection); vetted cases use the `// auth-gates-ok` marker. These pins keep the carve-out removed.
 
 #[test]
 fn handler_identifier_containing_admin_keyword_no_longer_clears() {
@@ -90,21 +90,24 @@ fn handler_identifier_containing_role_keyword_no_longer_clears() {
 }
 
 #[test]
-fn require_admin_hof_wrapper_fires_as_a_known_fp_until_natively_recognized() {
-    // `apiRoutes.get(path, requireAdmin(handler))` IS a genuine route-level guard idiom, but a
-    // wrapped-handler LAST argument is not judged by the native guard recognizer today (it only judges
-    // middleware args BETWEEN path and handler), so no `auth-guarded` attribute exists and the rule
-    // fires. Deliberate trade (documented, backlog follow-up: judge a call-expression last-arg's
-    // guard-vocab callee natively): a noisy-but-escapable FP (marker/attr/disable) beats the removed
-    // belt's silent over-clear on names like `adminHandlers`. If the native recognizer learns this
-    // idiom, flip this pin to assert the attribute veto instead.
+fn require_admin_hof_wrapper_is_recognized_natively_and_the_attribute_vetoes_the_finding() {
+    // `apiRoutes.get(path, requireAdmin(handler))` is the higher-order-function guard idiom — the
+    // guard WRAPS the handler instead of preceding it as middleware. The TS recognizer now judges a
+    // route's CALL-shaped last argument by its callee's guard vocabulary
+    // (`router_mounts::guard::judge_guard_wrapper_arg`) and mints `auth-guarded` on that route: the
+    // same open-vocabulary attribute channel a Mode B overlay injects, so this rule's `attr_absent`
+    // veto clears the finding with no rule change. This test was a KNOWN-FP pin before the recognizer
+    // existed; it now pins the recognition itself. Its negative half — a handler IDENTIFIER merely NAMED
+    // `adminHandlers.userList` must still fire, because a name is not evidence — is the
+    // `handler_identifier_containing_admin_keyword_no_longer_clears` test above, and the recognizer
+    // judges only CALL last-args precisely to keep that split.
     let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
         "declare const apiRoutes: any;\ndeclare const handlers: any;\ndeclare function requireAdmin(h: any): any;\napiRoutes.get(\"/api/admin/settings\", requireAdmin(handlers.settings));\n",
     );
     let out = scan(&dir);
-    assert_eq!(hits(&out, "auth-gates").len(), 1, "{:?}", out.findings);
+    assert!(hits(&out, "auth-gates").is_empty(), "{:?}", out.findings);
 }
 
 #[test]
@@ -158,7 +161,7 @@ fn auth_gate_ok_marker_on_the_same_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-http");
     dir.write(
         "src/routes/apiRoutes.ts",
-        "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/admin/users\", api.userList); // auth-gate-ok: reviewed, gated at the API gateway layer\n",
+        "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/admin/users\", api.userList); // auth-gates-ok: reviewed, gated at the API gateway layer\n",
     );
     let out = scan(&dir);
     assert!(hits(&out, "auth-gates").is_empty(), "{:?}", out.findings);

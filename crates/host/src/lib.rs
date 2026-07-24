@@ -19,6 +19,9 @@
 //!   `check_endpoint`/`validate_envelope`/`validate_rule_pack` functions the `zzop` CLI's subcommands
 //!   call directly, and the same functions the `zzop-mcp` package's `tools/call` dispatch calls (via
 //!   `zzop-summary`) for its tool twins.
+//! - `explain`  — `zzop explain <rule-id>`'s read-only lookup over the DSL rule data compiled into this
+//!   binary. CLI-only (MCP already reaches the same data via the `rule-catalog` embedded contract
+//!   resource), so it sits outside `tools`' MCP-mirrored dispatch — see its own module doc.
 //! - `embedded` — compile-time embedded contract documents (`zzop://contract/<name>` over MCP,
 //!   `zzop contract [<name>]` from a terminal) — the ONE table both surfaces resolve names through.
 //! - `server`   — `version()` only: `CARGO_PKG_VERSION`, the workspace release SSOT, shared by the
@@ -30,5 +33,6 @@
 //! map configs identically.
 
 pub mod embedded;
+pub mod explain;
 pub mod server;
 pub mod tools;

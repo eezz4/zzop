@@ -1,5 +1,5 @@
-//! Contract 12: cross-pack policy-vocabulary pin — be-reliability/sync-fs-in-handler and
-//! be-db/client-per-request must share one "handler-context" evidence definition.
+//! Contract 12: cross-pack policy-vocabulary pin — reliability/sync-fs-in-handler and
+//! db/client-per-request must share one "handler-context" evidence definition.
 
 use zzop_core::{Matcher, RuleDef, RulePackDef};
 
@@ -38,7 +38,7 @@ fn method_scan_pattern_by_label<'a>(rule: &'a RuleDef, label: &str) -> &'a str {
     }
 }
 
-/// Policy pin: `be-reliability/sync-fs-in-handler` and `be-db/client-per-request` both approximate "this
+/// Policy pin: `reliability/sync-fs-in-handler` and `db/client-per-request` both approximate "this
 /// function looks like a request handler" with a `patterns[]` entry labeled `handler-context` — the SAME
 /// evidence definition, deliberately duplicated across the two packs (a DSL rule can't reference another
 /// pack's pattern). Nothing else stops one pack's copy drifting from the other's during an unrelated edit —
@@ -49,13 +49,13 @@ fn method_scan_pattern_by_label<'a>(rule: &'a RuleDef, label: &str) -> &'a str {
 /// copied inline fixture), extracts each rule's own `handler-context` pattern string, and asserts they are
 /// byte-identical, so a future edit to one without the other fails loudly here instead of drifting unnoticed.
 #[test]
-fn handler_context_pattern_is_identical_across_be_reliability_and_be_db() {
+fn handler_context_pattern_is_identical_across_reliability_and_db() {
     let packs = load_all_packs();
-    let be_reliability = find_pack(&packs, "be-reliability");
-    let be_db = find_pack(&packs, "be-db");
+    let reliability = find_pack(&packs, "reliability");
+    let db = find_pack(&packs, "db");
 
-    let sync_fs_rule = find_rule(be_reliability, "sync-fs-in-handler");
-    let client_per_request_rule = find_rule(be_db, "client-per-request");
+    let sync_fs_rule = find_rule(reliability, "sync-fs-in-handler");
+    let client_per_request_rule = find_rule(db, "client-per-request");
 
     let sync_fs_pattern = method_scan_pattern_by_label(sync_fs_rule, "handler-context");
     let client_per_request_pattern =
@@ -63,7 +63,7 @@ fn handler_context_pattern_is_identical_across_be_reliability_and_be_db() {
 
     assert_eq!(
         sync_fs_pattern, client_per_request_pattern,
-        "be-reliability/sync-fs-in-handler and be-db/client-per-request's `handler-context` patterns have \
+        "reliability/sync-fs-in-handler and db/client-per-request's `handler-context` patterns have \
          drifted — they encode the same handler-evidence policy and must stay byte-identical (see this \
          test's own doc comment)"
     );

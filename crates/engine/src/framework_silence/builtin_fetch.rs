@@ -105,7 +105,7 @@ pub fn builtin_fetch_lexical_warning(
 /// envelope over just the consume channel, plus the embedded-contract pointer. Split into a `const` so
 /// the tree-wide wording stays BYTE-IDENTICAL to its pre-census form while the new app-scoped wording
 /// reuses the exact same tail.
-const FUNNEL_TAIL: &str = "builtin fetch has no package import for the http-client tripwire to anchor on, and the call idiom is likely a hand-rolled wrapper whose computed URLs this extraction pass cannot key; cross-layer joins will be near-silent from this tree's consume side — project this tree's consumes with a Mode B overlay adapter (see the adapter examples) to restore cross-layer visibility: a partial envelope covering just the consume channel is enough; contract: `zzop contract envelope-guide` on MCP hosts, docs/NORMALIZED_AST.md in the repo.";
+const FUNNEL_TAIL: &str = "builtin fetch has no package import for the http-client tripwire to anchor on, and the call idiom is likely a hand-rolled wrapper whose computed URLs this extraction pass cannot key; cross-layer joins will be near-silent from this tree's consume side — project this tree's consumes with a Mode B overlay adapter (see the adapter examples) to restore cross-layer visibility: a partial envelope covering just the consume channel is enough; contract: MCP resource `zzop://contract/envelope-guide` on MCP hosts (`zzop contract envelope-guide` with the CLI binary), docs/NORMALIZED_AST.md in the repo.";
 
 /// Counts INTERNAL-INTENT builtin `fetch(` call sites (per [`region_is_internal_intent`], classifying
 /// each match's first-argument region via [`ArgSpan::First`] so a later options-object literal cannot

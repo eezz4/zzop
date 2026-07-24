@@ -167,7 +167,7 @@ fn suppress_marker_on_the_anchor_lines_own_text_suppresses_the_finding() {
     let provides = vec![io_provide("http", "GET /legacy", 5)];
     let attrs = AttributeStore::from_attrs(Vec::new());
     let pack = rule_pack(
-        r#"{"id":"r","severity":"info","message":"m","matcher":{"type":"io-scan","file_pattern":"\\.ts$","direction":"provides"},"suppress_marker":"legacy-ok"}"#,
+        r#"{"id":"legacy","severity":"info","message":"m","matcher":{"type":"io-scan","file_pattern":"\\.ts$","direction":"provides"}}"#,
     );
     let mut out = Vec::new();
     let ctx = IoScanTreeContext {
@@ -187,7 +187,7 @@ fn suppress_marker_on_the_line_directly_above_the_anchor_suppresses_the_finding(
     let provides = vec![io_provide("http", "GET /legacy", 5)];
     let attrs = AttributeStore::from_attrs(Vec::new());
     let pack = rule_pack(
-        r#"{"id":"r","severity":"info","message":"m","matcher":{"type":"io-scan","file_pattern":"\\.ts$","direction":"provides"},"suppress_marker":"legacy-ok"}"#,
+        r#"{"id":"legacy","severity":"info","message":"m","matcher":{"type":"io-scan","file_pattern":"\\.ts$","direction":"provides"}}"#,
     );
     let mut out = Vec::new();
     let ctx = IoScanTreeContext {
@@ -207,8 +207,8 @@ fn suppress_marker_on_the_line_directly_above_the_anchor_suppresses_the_finding(
 
 #[test]
 fn suppress_marker_recognizes_the_python_hash_comment_leader() {
-    // io-scan anchor lines span every provide-producing language — `# auth-gate-ok` on a FastAPI route
-    // line must suppress exactly like `// auth-gate-ok` on an Express one (`compile_marker_line_comment`).
+    // io-scan anchor lines span every provide-producing language — `# auth-gates-ok` on a FastAPI route
+    // line must suppress exactly like `// auth-gates-ok` on an Express one (`compile_marker_line_comment`).
     let provides = vec![IoProvide {
         kind: "http".into(),
         key: "GET /legacy".into(),
@@ -219,7 +219,7 @@ fn suppress_marker_recognizes_the_python_hash_comment_leader() {
     }];
     let attrs = AttributeStore::from_attrs(Vec::new());
     let pack = rule_pack(
-        r#"{"id":"r","severity":"info","message":"m","matcher":{"type":"io-scan","file_pattern":"\\.py$","direction":"provides"},"suppress_marker":"legacy-ok"}"#,
+        r#"{"id":"legacy","severity":"info","message":"m","matcher":{"type":"io-scan","file_pattern":"\\.py$","direction":"provides"}}"#,
     );
     let mut out = Vec::new();
     let ctx = IoScanTreeContext {

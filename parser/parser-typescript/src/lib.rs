@@ -79,7 +79,8 @@ pub use symbols::parse_symbols;
 /// extraction → must restamp). The trailing `CARGO_PKG_VERSION` is restamped whenever this crate's
 /// projected IR shape changes; an unchanged release keeps the old value so warm TS caches survive the
 /// upgrade (2026-07-22 version reform — the "what changed" narrative lives in git, not this string).
-pub const PARSER_FINGERPRINT: &str = "typescript/swc_core-71.0.5/0.21.0";
+pub const PARSER_FINGERPRINT: &str =
+    "typescript/swc_core-71.0.5/0.22.0+resource-query-v1+trpc-leaf-procedure-v1";
 
 /// POLICY VOCABULARY — array-iteration callback methods whose first function-shaped argument runs once
 /// per element (`Array.prototype` iteration methods only; `Map`/`Set`/`for...in` etc. are out of scope).

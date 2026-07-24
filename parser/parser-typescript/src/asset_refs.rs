@@ -198,6 +198,34 @@ mod tests {
     }
 
     #[test]
+    fn nested_new_worker_new_url_is_captured() {
+        // The canonical Vite/webpack worker idiom — the `new URL(...)` is the FIRST ARG of `new Worker`,
+        // not a separate statement. `new Worker`'s own first-arg capture sees a non-literal and yields
+        // nothing; the nested `new URL(_, import.meta.url)` must still be captured by the child visit.
+        assert_eq!(
+            refs("const w = new Worker(new URL(\"./worker.ts\", import.meta.url));\n"),
+            vec!["./worker.ts".to_string()]
+        );
+        assert_eq!(
+            refs(
+                "const w = new Worker(new URL(\"./worker.ts\", import.meta.url), { type: \"module\" });\n"
+            ),
+            vec!["./worker.ts".to_string()]
+        );
+        assert_eq!(
+            refs("new SharedWorker(new URL(\"../shared/w.ts\", import.meta.url));\n"),
+            vec!["../shared/w.ts".to_string()]
+        );
+    }
+
+    #[test]
+    fn nested_new_worker_with_computed_url_is_skipped() {
+        // never-guess: a computed/interpolated URL argument yields NO reference at all.
+        assert!(refs("new Worker(new URL(name, import.meta.url));\n").is_empty());
+        assert!(refs("new Worker(new URL(`./${name}.ts`, import.meta.url));\n").is_empty());
+    }
+
+    #[test]
     fn non_literal_arg_is_skipped() {
         assert!(refs("const p = getPath(); new Worker(p);\n").is_empty());
     }

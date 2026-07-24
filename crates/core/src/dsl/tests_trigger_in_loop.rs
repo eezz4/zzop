@@ -5,7 +5,7 @@ use super::RulePackDef;
 
 fn trigger_in_loop_pack() -> RulePackDef {
     rule_pack(
-        r#"{"id":"r","severity":"warning","message":"Network call issued inside a loop","suppress_marker":"fetch-ok","matcher":{"type":"method-scan","file_pattern":"\\.ts$","patterns":[{"pattern":"\\bfetch\\s*\\(","label":"network"}],"trigger":"network","trigger_in_loop":true}}"#,
+        r#"{"id":"fetch","severity":"warning","message":"Network call issued inside a loop","matcher":{"type":"method-scan","file_pattern":"\\.ts$","patterns":[{"pattern":"\\bfetch\\s*\\(","label":"network"}],"trigger":"network","trigger_in_loop":true}}"#,
     )
 }
 

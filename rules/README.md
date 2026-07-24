@@ -44,15 +44,15 @@ whether the rule is common or environment-specific).
   compiled in, not shipped as data.
 - **Extensibility**: same DSL schema for first-party and third-party — a user can drop in a JSON rule.
 - **Why DSL over WASM?** Redistribution is needed regardless, so the DSL gives the same build-free / platform-independent benefits while wasmtime, the ABI, the boundary cost, and the ~3x slowdown all disappear. (Biome GritQL / ast-grep / Semgrep model.)
-- **Status**: 14 packs shipped (`rules/dsl/<pack>/<pack>.json`), most with rules implemented, a handful
-  still `"rules": []` stubs. Java security-concern rules live in `be-security` (concern-named, not
+- **Status**: 12 packs shipped (`rules/dsl/<pack>/<pack>.json`), most with rules implemented, a handful
+  still `"rules": []` stubs. Java security-concern rules live in `security` (concern-named, not
   language-named), including `cmd-injection` (a `method-scan` co-occurrence of `exec`/`ProcessBuilder`
   with string concatenation — no Java CST needed after all). Full pack/rule list:
   [`docs/rules/catalog.md`](../docs/rules/catalog.md).
 
 ### DSL matchers (`core::dsl::Matcher`)
 - Shipped: `line-scan`, `method-scan`, `symbol-scan`, `io-scan`, each with a growing set of v2/v3 fields
-  (`require_file_all`, `exclude_pattern`, `absent`, `suppress_marker`, `file_exclude_pattern`, ...) added as
+  (`require_file_all`, `exclude_pattern`, `absent`, `file_exclude_pattern`, ...) added as
   real packs needed them. Full field-by-field semantics: [`docs/rules/dsl-reference.md`](../docs/rules/dsl-reference.md).
 - Roadmap: a `graph` matcher for structural/whole-IR queries the current scanners can't express.
 - Rules the DSL cannot express -> `rules/native/`, or (once built) a JS/TS quick-custom rule.

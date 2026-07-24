@@ -89,8 +89,32 @@ pub static CONTRACT_DOCS: &[ContractDoc] = &[
     },
     ContractDoc {
         name: "rule-catalog",
-        description: "Every rule id the engine ships today (14 DSL packs + all native analysis ids), with severity/matcher/suppress-marker/detection prose per rule — the ONE place a rule id can be looked up without a source checkout. Pair with the `rule` tool argument on analyze_repo/cross_repo/check_endpoint (an id absent here never fires) and the dsl-reference resource for matcher semantics.",
+        description: "Every rule id the engine ships today (12 DSL packs + all native analysis ids), with severity/matcher/detection prose per rule (a DSL rule's suppress marker is derived, `<rule id>-ok`) — the ONE place a rule id can be looked up without a source checkout. Pair with the `rule` tool argument on analyze_repo/cross_repo/check_endpoint (an id absent here never fires) and the dsl-reference resource for matcher semantics.",
         mime: "text/markdown",
         content: include_str!("../../../docs/rules/catalog.md"),
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::CONTRACT_DOCS;
+
+    /// The `rule-catalog` description hardcodes the bundled DSL pack COUNT, and this exact string ships
+    /// over MCP `resources/list` — a reader's only pack-count signal without a source checkout. Nothing
+    /// checked it: it read "14" here and "15" in `docs/modules/mcp.md` while the truth was 12 (found in
+    /// review, 2026-07-24), the same hardcoded-inventory class as the "2 -> 44" security-rule miscount one
+    /// commit earlier. Pinned to the one compile-time truth so the count cannot drift again.
+    #[test]
+    fn rule_catalog_description_states_the_real_bundled_pack_count() {
+        let doc = CONTRACT_DOCS
+            .iter()
+            .find(|d| d.name == "rule-catalog")
+            .expect("the rule-catalog contract doc must exist");
+        let expected = format!("({} DSL packs", zzop_config::BUNDLED_PACK_SOURCES.len());
+        assert!(
+            doc.description.contains(&expected),
+            "rule-catalog description must state `{expected}`; it reads: {}",
+            doc.description
+        );
+    }
+}

@@ -10,8 +10,7 @@
     {
       "id": "query-logic-density",
       "severity": "info",
-      "message": "SQL embeds 2+ conditional-logic constructs (CASE WHEN branches / IF·IIF calls) — filtering/aggregation in SQL is fine, but conditional business rules here are hard to test and easy to duplicate. Consider whether the policy belongs in app code instead. Suppress a vetted case with `// query-logic-ok`.",
-      "suppress_marker": "query-logic-ok",
+      "message": "SQL embeds 2+ conditional-logic constructs (CASE WHEN branches / IF·IIF calls) — filtering/aggregation in SQL is fine, but conditional business rules here are hard to test and easy to duplicate. Consider whether the policy belongs in app code instead. Suppress a vetted case with `// query-logic-density-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
@@ -28,8 +27,7 @@
     {
       "id": "nplus1",
       "severity": "warning",
-      "message": "await on a store/ORM call (`Repository`/`Store`/`prisma`/`db`/`orm`/`tx`/`trx`) verified structurally inside a for/for-of/for-in/while/do-while statement or an array-iteration callback — checked against the parser's projected loop spans, not merely co-occurring with loop syntax somewhere in the same function — N+1 query pattern. Batch the fetch (e.g. `findMany` with an `in` filter) instead of one call per item. Suppress a vetted case with `// n+1-ok`.",
-      "suppress_marker": "n+1-ok",
+      "message": "await on a store/ORM call (`Repository`/`Store`/`prisma`/`db`/`orm`/`tx`/`trx`) verified structurally inside a for/for-of/for-in/while/do-while statement or an array-iteration callback — checked against the parser's projected loop spans, not merely co-occurring with loop syntax somewhere in the same function — N+1 query pattern. Batch the fetch (e.g. `findMany` with an `in` filter) instead of one call per item. Suppress a vetted case with `// nplus1-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "^(?:domains/[^/]+/routes/.+|api/.+)\\.ts$",
@@ -51,7 +49,6 @@
       "id": "count-in-loop",
       "severity": "warning",
       "message": "`store.count()`/`prisma.<model>.count()` called structurally inside a for/for-of/for-in/while/do-while statement or an array-iteration callback — checked against the parser's projected loop spans, not merely co-occurring with loop syntax somewhere in the same function — one count() per entity (N calls). Use a single GROUP BY query or a denormalized counter column. Suppress a vetted case with `// count-in-loop-ok`.",
-      "suppress_marker": "count-in-loop-ok",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.tsx?$",
@@ -72,8 +69,7 @@
     {
       "id": "app-side-aggregation-reduce",
       "severity": "info",
-      "message": "A `findMany()`/raw `prepare(...).all()` result is reduced in application code (`.reduce(...)`) — if the row set is large, a SQL aggregate (SUM/COUNT/GROUP BY) avoids transferring it; if small and reused, app-side is fine. Decide by data volume. Suppress a vetted case with `// app-agg-ok`.",
-      "suppress_marker": "app-agg-ok",
+      "message": "A `findMany()`/raw `prepare(...).all()` result is reduced in application code (`.reduce(...)`) — if the row set is large, a SQL aggregate (SUM/COUNT/GROUP BY) avoids transferring it; if small and reused, app-side is fine. Decide by data volume. Suppress a vetted case with `// app-side-aggregation-reduce-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.tsx?$",
@@ -97,8 +93,7 @@
     {
       "id": "app-side-aggregation-filter-length",
       "severity": "info",
-      "message": "A `findMany()`/raw `prepare(...).all()` result is counted in application code via `.filter(...).length` — if the row set is large, a SQL aggregate (SUM/COUNT/GROUP BY) avoids transferring it; if small and reused, app-side is fine. Decide by data volume. Suppress a vetted case with `// app-agg-filter-ok`.",
-      "suppress_marker": "app-agg-filter-ok",
+      "message": "A `findMany()`/raw `prepare(...).all()` result is counted in application code via `.filter(...).length` — if the row set is large, a SQL aggregate (SUM/COUNT/GROUP BY) avoids transferring it; if small and reused, app-side is fine. Decide by data volume. Suppress a vetted case with `// app-side-aggregation-filter-length-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.tsx?$",
@@ -126,8 +121,7 @@
     {
       "id": "race-condition-toctou",
       "severity": "warning",
-      "message": "A read (`findOne`/`findById`/`findUnique`) and a `create`/`upsert`/`insert` write both appear in the same function — this is a co-occurrence heuristic, not proof the read feeds a branch that reaches the write, but when it's a get-or-create/toggle shape: concurrent requests can both pass the check and both write (duplicate row / unique-constraint violation) — a TOCTOU race. Add a unique constraint and replace the check-then-act with an upsert; wrapping it in a `$transaction` alone does NOT close this race at the database's default READ COMMITTED isolation level — two concurrent transactions can both read empty and both insert. If you must keep the read+write shape, use `SELECT ... FOR UPDATE` or serializable isolation instead. Suppress a vetted case with `// toctou-ok`.",
-      "suppress_marker": "toctou-ok",
+      "message": "A read (`findOne`/`findById`/`findUnique`) and a `create`/`upsert`/`insert` write both appear in the same function — this is a co-occurrence heuristic, not proof the read feeds a branch that reaches the write, but when it's a get-or-create/toggle shape: concurrent requests can both pass the check and both write (duplicate row / unique-constraint violation) — a TOCTOU race. Add a unique constraint and replace the check-then-act with an upsert; wrapping it in a `$transaction` alone does NOT close this race at the database's default READ COMMITTED isolation level — two concurrent transactions can both read empty and both insert. If you must keep the read+write shape, use `SELECT ... FOR UPDATE` or serializable isolation instead. Suppress a vetted case with `// race-condition-toctou-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)(?:(?:^|/)api/.*\\.tsx?$|.*/routes/.*\\.tsx?$|.*/controllers/.*\\.tsx?$|.*handler\\.tsx?$|.*controller\\.tsx?$)",
@@ -163,10 +157,9 @@
       }
     },
     {
-      "id": "sql-delete-no-where",
+      "id": "delete-no-where",
       "severity": "critical",
-      "message": "A CLOSED string literal contains `DELETE FROM <table>` with nothing else before the closing quote — the entire SQL statement is one complete literal with no interpolation, so there is provably no WHERE clause arriving from anywhere else, and this deletes every row in the table. Any sign the statement isn't fully closed right here — a `${...}` placeholder, a `'`/`\"` string-concatenation `+`, or a trailing `?` bound-parameter tail — means we can't prove a WHERE is missing, so the rule stays silent rather than guess (never-guess). Migration paths are out of this rule's scope: a whole-table write in a committed migration is a deliberate one-time backfill, covered at disclosure severity by `sql/destructive-migration` instead. Add a WHERE clause, or if a full-table delete is genuinely intended, make it explicit (e.g. a dedicated `truncateTable()`/`deleteAll()` helper) and suppress with `// sql-delete-no-where-ok`.",
-      "suppress_marker": "sql-delete-no-where-ok",
+      "message": "A CLOSED string literal contains `DELETE FROM <table>` with nothing else before the closing quote — the entire SQL statement is one complete literal with no interpolation, so there is provably no WHERE clause arriving from anywhere else, and this deletes every row in the table. Any sign the statement isn't fully closed right here — a `${...}` placeholder, a `'`/`\"` string-concatenation `+`, or a trailing `?` bound-parameter tail — means we can't prove a WHERE is missing, so the rule stays silent rather than guess (never-guess). Migration paths are out of this rule's scope: a whole-table write in a committed migration is a deliberate one-time backfill, covered at disclosure severity by `sql/destructive-migration` instead. Add a WHERE clause, or if a full-table delete is genuinely intended, make it explicit (e.g. a dedicated `truncateTable()`/`deleteAll()` helper) and suppress with `// delete-no-where-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -179,10 +172,9 @@
       }
     },
     {
-      "id": "sql-update-no-where",
+      "id": "update-no-where",
       "severity": "critical",
-      "message": "A CLOSED string literal contains `UPDATE <table> SET <assignments>` with nothing else before the closing quote — same discipline as `sql/sql-delete-no-where`: the entire statement is one complete literal with no interpolation, so there is provably no WHERE clause arriving from anywhere else, and this updates every row in the table. Any sign the statement isn't fully closed right here — a `${...}` placeholder, a `'`/`\"` string-concatenation `+` — means we can't prove a WHERE is missing, so the rule stays silent rather than guess (never-guess). Migration paths are out of this rule's scope: a whole-table write in a committed migration is a deliberate one-time backfill, covered at disclosure severity by `sql/destructive-migration` instead. Add a WHERE clause, or if a full-table update is genuinely intended, make it explicit and suppress with `// sql-update-no-where-ok`.",
-      "suppress_marker": "sql-update-no-where-ok",
+      "message": "A CLOSED string literal contains `UPDATE <table> SET <assignments>` with nothing else before the closing quote — same discipline as `sql/delete-no-where`: the entire statement is one complete literal with no interpolation, so there is provably no WHERE clause arriving from anywhere else, and this updates every row in the table. Any sign the statement isn't fully closed right here — a `${...}` placeholder, a `'`/`\"` string-concatenation `+` — means we can't prove a WHERE is missing, so the rule stays silent rather than guess (never-guess). Migration paths are out of this rule's scope: a whole-table write in a committed migration is a deliberate one-time backfill, covered at disclosure severity by `sql/destructive-migration` instead. Add a WHERE clause, or if a full-table update is genuinely intended, make it explicit and suppress with `// update-no-where-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -197,8 +189,7 @@
     {
       "id": "truncate-in-app-code",
       "severity": "critical",
-      "message": "A syntax-anchored `TRUNCATE [TABLE] <table>` string literal appears in application code (not a migration) — the SQL analog of `redis/flushall-in-code`: TRUNCATE wipes every row in the table and, on most engines, cannot be rolled back once committed. Move destructive schema/data operations into a migration script outside the served codebase, or if this is a genuinely intentional runtime reset (e.g. a dedicated cache-reset job), suppress with `// sql-truncate-app-ok`.",
-      "suppress_marker": "sql-truncate-app-ok",
+      "message": "A syntax-anchored `TRUNCATE [TABLE] <table>` string literal appears in application code (not a migration) — the SQL analog of `redis/flushall-in-code`: TRUNCATE wipes every row in the table and, on most engines, cannot be rolled back once committed. Move destructive schema/data operations into a migration script outside the served codebase, or if this is a genuinely intentional runtime reset (e.g. a dedicated cache-reset job), suppress with `// truncate-in-app-code-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -212,8 +203,7 @@
     {
       "id": "destructive-migration",
       "severity": "info",
-      "message": "A destructive statement in a migration file: `DROP TABLE`/`DROP COLUMN`/`TRUNCATE [TABLE]`, or a closed-string-literal whole-table `DELETE FROM <table>` / `UPDATE <table> SET` with no WHERE (the same complete-literal shapes `sql/sql-delete-no-where`/`sql/sql-update-no-where` flag in app code — in a migration they are a deliberate one-time backfill, so they surface here at disclosure severity instead). Committed destructive migrations are usually deliberate, so this is info-level review-time disclosure, not a CI gate — its value is attention on NEW migrations at review, not archaeology of old ones. Verify the object name against the PR/ticket, back the data up first, and prefer a two-phase pattern (deprecate/stop-reading in one release, drop in a later one) over a same-release drop when the table might still be read. Suppress a vetted, reviewed migration with `// sql-destructive-migration-ok` (or `-- sql-destructive-migration-ok` in a `.sql` file).",
-      "suppress_marker": "sql-destructive-migration-ok",
+      "message": "A destructive statement in a migration file: `DROP TABLE`/`DROP COLUMN`/`TRUNCATE [TABLE]`, or a closed-string-literal whole-table `DELETE FROM <table>` / `UPDATE <table> SET` with no WHERE (the same complete-literal shapes `sql/delete-no-where`/`sql/update-no-where` flag in app code — in a migration they are a deliberate one-time backfill, so they surface here at disclosure severity instead). Committed destructive migrations are usually deliberate, so this is info-level review-time disclosure, not a CI gate — its value is attention on NEW migrations at review, not archaeology of old ones. Verify the object name against the PR/ticket, back the data up first, and prefer a two-phase pattern (deprecate/stop-reading in one release, drop in a later one) over a same-release drop when the table might still be read. Suppress a vetted, reviewed migration with `// destructive-migration-ok` (or `-- destructive-migration-ok` in a `.sql` file).",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)(^|/)(migrations?|migrate)/.*\\.(sql|ts|js|mjs)$",
@@ -240,8 +230,7 @@
     {
       "id": "select-star",
       "severity": "info",
-      "message": "`SELECT * FROM` inside a string literal — over-fetching every column couples the caller to the table's exact shape (a later `ALTER TABLE ADD COLUMN` silently changes what this query returns) and pulls columns nobody reads across the wire. List the columns you actually use instead. Suppress a vetted case with `// sql-select-star-ok`.",
-      "suppress_marker": "sql-select-star-ok",
+      "message": "`SELECT * FROM` inside a string literal — over-fetching every column couples the caller to the table's exact shape (a later `ALTER TABLE ADD COLUMN` silently changes what this query returns) and pulls columns nobody reads across the wire. List the columns you actually use instead. Suppress a vetted case with `// select-star-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -255,8 +244,7 @@
     {
       "id": "like-leading-wildcard",
       "severity": "info",
-      "message": "A `LIKE` pattern with a leading `%` wildcard (e.g. `LIKE '%term'`) can't use a standard B-tree index prefix — the engine falls back to a full table/index scan on every call. If this needs to stay a substring/suffix search, reach for full-text search or a reversed-column index; a trailing-only wildcard (`LIKE 'term%'`) stays index-friendly. Suppress a vetted case (small table, offline query) with `// sql-like-leading-wildcard-ok`.",
-      "suppress_marker": "sql-like-leading-wildcard-ok",
+      "message": "A `LIKE` pattern with a leading `%` wildcard (e.g. `LIKE '%term'`) can't use a standard B-tree index prefix — the engine falls back to a full table/index scan on every call. If this needs to stay a substring/suffix search, reach for full-text search or a reversed-column index; a trailing-only wildcard (`LIKE 'term%'`) stays index-friendly. Suppress a vetted case (small table, offline query) with `// like-leading-wildcard-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",

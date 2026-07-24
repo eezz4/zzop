@@ -1,11 +1,8 @@
-//! Exercises `rules/dsl/security/security.json`'s `taint-flow` and `eval-dynamic-code` rules end-to-end
-//! via `zzop_engine::analyze_tree` against real swc-parsed TypeScript/TSX fixtures. `taint-flow` is an
-//! explicitly coarse approximation (source+sink co-occurrence within a method-scan span, no real
-//! per-variable dataflow) — see the rule's `message` for the full list of precision limits.
-//!
-//! `eval-dynamic-code` is source-free and js-inclusive (unlike `taint-flow`, which needs a request-derived
-//! source in the same function and only looks at `.ts`/`.tsx`): `eval(...)` with a non-literal argument
-//! (`eval-nonliteral`) or any `new Function(...)` call, literal args included (`new-function`).
+//! End-to-end tests for `rules/dsl/security/security.json` (41 backend-security rules), exercised via
+//! `zzop_engine::analyze_tree` so `Matcher::MethodScan` rules run against real parser-derived
+//! `SourceSymbol` body spans (TypeScript via swc), not hand-built spans. Each rule below has at least
+//! one positive fixture (asserting finding count AND line number) and one realistic negative
+//! (near-miss) fixture; a handful of cases also exercise `suppress_marker`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -49,7 +46,12 @@ impl Drop for TempDir {
     }
 }
 
-/// Loads the real `rules/dsl/security/security.json` from the repo, filtered to just the `security` pack.
+/// Loads the real `rules/dsl/security/security.json` from the repo, filtered to just the `security` pack
+/// so this test is unaffected by sibling packs under concurrent development (same convention as
+/// `http/http.rs`).
+///
+/// `CARGO_MANIFEST_DIR` is the `rules` crate root (`rules/Cargo.toml`), so `dsl/` is `rules/dsl` — this
+/// pack's own `security.json` lives one level down, at `rules/dsl/security/security.json`.
 fn security_pack() -> RulePackDef {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("dsl");
     let result = load_dsl_packs(&dir);
@@ -85,4 +87,32 @@ fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {
         .collect()
 }
 
+fn label_of(f: &zzop_core::Finding) -> Option<&str> {
+    f.data
+        .as_ref()
+        .and_then(|d| d.get("label"))
+        .and_then(|v| v.as_str())
+}
+
+mod conn_string_credentials;
+mod cors_csp;
+mod crypto;
+mod frontend_exposure;
+mod html_injection;
+mod http_exposure;
+mod java_moved_rules;
+mod java_security;
+mod jwt;
+mod jwt_sign_secret;
+mod mass_assignment;
+mod private_key_committed;
+mod request_targets;
+mod scan_scope;
+mod secrets;
+mod secrets_vetoes;
+mod shell_exec;
+mod sql_injection;
 mod taint_and_eval;
+mod template_output;
+mod timing_compare;
+mod vendor_token_committed;

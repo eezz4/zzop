@@ -22,6 +22,7 @@ mod csharp_index;
 pub(crate) mod findings;
 mod fresh;
 mod go_module;
+mod io_projection;
 mod java_index;
 mod manifest;
 mod package_json;

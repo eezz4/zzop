@@ -21,4 +21,13 @@ publish = false
 [dependencies]
 zzop-summary = { path = "../summary" }
 zzop-config = { path = "../config" }
+# Direct deps ONLY for `explain.rs`'s read-only `zzop explain <rule-id>` lookup — it reads the DSL rule
+# data compiled into this binary (`zzop_config::BUNDLED_PACK_SOURCES`, parsed with the same loader path
+# the engine uses: `zzop_core::parse_dsl_pack`) and the native-analysis id registry
+# (`zzop_engine::register_all_native` over a `zzop_core::RuleRegistry`), so the answer can never drift
+# from what the engine actually runs. `explain` is CLI-only (no `tools/call` twin — see its module doc),
+# so this is the one place `zzop-host` reaches past `zzop-summary`/`zzop-config` into the analysis
+# crates directly; every other handler in this crate stays a thin `zzop-summary` re-export.
+zzop-core = { path = "../core" }
+zzop-engine = { path = "../engine" }
 serde_json = { workspace = true }

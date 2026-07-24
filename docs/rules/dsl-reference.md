@@ -6,9 +6,12 @@ those files — if they diverge, the Rust source wins.
 
 See also: [authoring-guide.md](authoring-guide.md) (how to write a pack), [catalog.md](catalog.md) (what
 ships today). A machine-readable JSON Schema for this shape ships at
-[../contracts/rule-pack.schema.json](../contracts/rule-pack.schema.json), and `zzop pack validate
+[../contracts/rule-pack.schema.json](../contracts/rule-pack.schema.json), and `zzop validate-rule-pack
 <path>` (CLI) / the `validate_rule_pack` MCP tool check a pack file against the loader's own load-time
-judgments — structure only, never rule quality — before you ship it.
+judgments — structure only, never rule quality — before you ship it. That includes the dead-rule
+census: a matcher regex that does not compile, and the two structural shapes that parse fine and can
+never fire (a line-scan declaring neither `line_pattern` nor `any`; a method-scan whose `trigger`
+names a label no `patterns` entry declares).
 
 ## Pack shape (`RulePackDef`)
 
@@ -71,8 +74,8 @@ fragments never reach the DSL interpreter or the cache fingerprint.
 itself a whole-value `${...}` reference is a hard load error (`FragmentError::Nested`), never a silent
 no-op or a chained expansion. An unknown fragment name (`${typo}` naming nothing in either the pack's own
 `fragments` or the shared set) is likewise a hard load error (`FragmentError::Unknown`) — exactly like a
-malformed JSON body or an unsupported `schema_version`, never a rule that silently never fires. `zzop pack
-validate`/the `validate_rule_pack` MCP tool surface either as an ordinary issue.
+malformed JSON body or an unsupported `schema_version`, never a rule that silently never fires. `zzop
+validate-rule-pack`/the `validate_rule_pack` MCP tool surface either as an ordinary issue.
 
 **Why two near-identical test-path fragments, not one.** `test-paths` and `test-paths-stories` differ only
 in whether they also exclude `.stories.`/`.storybook/` files — a real, pre-existing behavioral split across
@@ -89,13 +92,16 @@ factored out the duplication, it never changed which files any rule scans.
 | `severity` | `"critical"` \| `"warning"` \| `"info"` | — | Default severity (overridable per-id via `RuleConfig::severity_overrides`). |
 | `message` | string | — | Human-facing cause/fix-hint, copied verbatim into every finding — but NOT the whole of what ships: the engine auto-appends a disable hint at runtime (see the note right below this table). |
 | `matcher` | `Matcher` | — | One of the four matcher shapes below (`type` tag, kebab-case). |
-| `suppress_marker` | string \| null | `null` | Inline ok-marker name — see [Suppress-marker semantics](#suppress-marker-semantics). |
+
+There is **no `suppress_marker` field** — the inline ok-marker is DERIVED as `<id>-ok`
+(`RuleDef::suppress_marker()`), so it is never authored or stored. See
+[Suppress-marker semantics](#suppress-marker-semantics).
 
 **Do not hand-write a disable hint in `message`.** At runtime the engine appends one more sentence to
 every DSL finding's `message`, after whatever you write: `` Disable via config `rules: { "<pack>/<rule>": "off" }` (embedders: `disabled_rules`) `` (`zzop_core::disable_hint`, appended by
 `crates/engine/src/pipeline/findings.rs::append_disable_hints`) — the exact same fragment native findings
-carry, built from the one shared helper. Write the cause, the fix, and your rule's own `suppress_marker`
-name in `message`; a hand-written "disable via config ..." sentence renders TWICE. See
+carry, built from the one shared helper. Write the cause, the fix, and your rule's own derived `<id>-ok`
+marker in `message`; a hand-written "disable via config ..." sentence renders TWICE. See
 [authoring-guide.md](authoring-guide.md#the-auto-appended-disable-hint) for the full contract.
 
 ## Matchers
@@ -247,8 +253,14 @@ the exclusion.
 
 ## Suppress-marker semantics
 
-`RuleDef.suppress_marker` (e.g. `"n+1-ok"`) applies to `line-scan`, `method-scan`, AND `io-scan` findings
-(not `symbol-scan`, which still has no source-line concept to anchor a comment against):
+The inline ok-marker is DERIVED from the rule id — `RuleDef::suppress_marker()` returns `<id>-ok` (rule
+`float-money-compare` → `float-money-compare-ok`). It is not authored or stored, so it can never drift out
+of the `-ok` convention and is always predictable from the RULE id — note that a finding carries the
+PACK-QUALIFIED id, and the marker strips that prefix: `security/hardcoded-secret` suppresses on
+`// hardcoded-secret-ok`, never `// security/hardcoded-secret-ok` (the marker regex anchors right after
+`//`, so the prefixed form silently matches nothing). It applies to
+`line-scan`, `method-scan`, AND `io-scan` findings (not `symbol-scan`, which still has no source-line
+concept to anchor a comment against):
 
 - A `line-scan`/`method-scan` finding is suppressed when a `//`-comment naming the marker appears on the
   finding's **own line, or the single line directly above it** — a fixed 1-line lookback window used
@@ -256,8 +268,8 @@ the exclusion.
   silently suppress unrelated, unvetted findings on the lines below it. Place the marker on the finding's
   own line, or directly above it — nowhere further back.
 - Matches `// <marker>` or `// <marker>: <reason>` — the marker text is regex-escaped before compiling
-  (`//\s*{escaped-marker}\b`), so a marker containing regex metacharacters (`n+1-ok`'s `+`) matches
-  literally, not as regex syntax.
+  (`//\s*{escaped-marker}\b`). Derived markers are always `<kebab-id>-ok` (no regex metacharacters), so the
+  escaping is defensive; it stays correct even if an id ever carried a regex-special character.
 - For a file whose extension is `.sql` (case-insensitive), a `--`-comment naming the marker suppresses
   identically (`-- <marker>` or `-- <marker>: <reason>`), same lookback window and escaping rules. This is
   gated to `.sql` files only, and to `line-scan`/`method-scan` only: `--` is a line comment in SQL but not

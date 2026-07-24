@@ -38,9 +38,11 @@
 #
 # Severity/disable token vocabulary (pass A): the UNION of crates/core's wire-level `Severity` enum
 # (crates/core/src/finding.rs: `#[serde(rename_all = "lowercase")] enum Severity { Critical, Warning,
-# Info }`) and packages/cli/lib/mapper.js's `SEVERITY_ALIASES` (that file's own header calls it "the
-# SINGLE source of truth for turning friendly config severities into the engine's Severity serde values",
-# and cites finding.rs directly) plus the off/none/disable/disabled family it maps to a disabled rule.
+# Info }`) and crates/config/src/mapper/severity.rs's `SEVERITY_ALIASES` — the single table turning
+# friendly config severities into those serde values, whose declaration ORDER is load-bearing (its own
+# doc says so: the order is reproduced verbatim in the "Expected one of: ..." error text). Plus the
+# off/none/disable/disabled family it maps to a disabled rule. (Was packages/cli/lib/mapper.js until the
+# JS front-end was removed 2026-07-20 and ported to crates/config.)
 # The full alias set matters: real examples write "warn", not "warning" — a narrower token set would
 # silently skip exactly the shape most likely to recur.
 #
@@ -118,13 +120,13 @@ is_in() { # $1 = candidate, $2 = newline-separated set
 }
 
 # Pass-A allowlist: config keys that legitimately carry a severity-like STRING value without being a rule
-# id. Source: packages/cli/lib/config-surface.json — `configKeys.top` includes `failOn`;
+# id. Source: crates/config/config-surface.json — `configKeys.top` includes `failOn`;
 # `configKeys.ruleObject` includes `severity` (the nested field of the object form).
 severity_key_allowlist="severity
 failOn"
 
 # Pass-B allowlist: structural config keys that legitimately take an OBJECT value without being a rule
-# id. Source: packages/cli/lib/config-surface.json's `configKeys.top` — of its 12 top-level keys, exactly
+# id. Source: crates/config/config-surface.json's `configKeys.top` — of its 12 top-level keys, exactly
 # these four take an object literal (`rules`, `packs`, `git`, `report`); the rest take strings/arrays/
 # scalars and can never match pass B's `"<key>": {` shape.
 object_key_allowlist="rules

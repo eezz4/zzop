@@ -2,6 +2,8 @@
 //! shared fact-census predicate `overlay_file_carries_facts`, and the io `file`-field normalizer the
 //! two merge branches (see `merge`) share.
 
+use std::collections::HashSet;
+
 use zzop_core::{IoFacts, NormalizedEnvelope};
 
 use super::merge::{merge_projection_onto_artifact, synthetic_artifact_from_projection};
@@ -54,6 +56,15 @@ use super::reserved::{
 /// `artifacts` is re-sorted by `rel` before returning — `analyze::assemble` relies on that order for
 /// `ir.ir.symbols`'s determinism.
 ///
+/// RETURNS the set of paths this call ACTUALLY covered: one entry per projection that (a) belonged to an
+/// overlay that passed validation above (a skipped overlay contributes nothing — nothing of it merged) and
+/// (b) carries a real fact post reserved-io-drop ([`overlay_file_carries_facts`]). `analyze::assemble`
+/// consumes it as the exclusion set for the per-extension "no native parser, bring an adapter" disclosure,
+/// so that disclosure is silenced for exactly the files an overlay really did parse — never for a file
+/// behind a REJECTED overlay (which would leave it covered by neither the overlay nor the disclosure) and
+/// never for a zero-fact declaration (G8b). Deriving it here, from the apply loop itself, is what keeps
+/// "declared" and "applied" from drifting: a config-read set cannot see the validation verdict.
+///
 /// Before either merge branch, every reserved engine-internal sentinel `IoProvide`/`IoConsume` (kinds
 /// `nest-global-prefix`/`client-base-prefix`, see [`is_reserved_provide_kind`]/[`is_reserved_consume_kind`])
 /// is dropped from the projection's `io` — a producer-forbidden pair only the native TS parser may emit
@@ -70,7 +81,8 @@ pub(crate) fn apply_adapter_overlays(
     overlays: &[NormalizedEnvelope],
     source_id: &str,
     warnings: &mut Vec<String>,
-) {
+) -> HashSet<String> {
+    let mut covered_paths: HashSet<String> = HashSet::new();
     let mut ordered: Vec<&NormalizedEnvelope> = overlays.iter().collect();
     ordered.sort_by(|a, b| a.parser.cmp(&b.parser));
 
@@ -153,6 +165,11 @@ pub(crate) fn apply_adapter_overlays(
             reserved_dropped += dropped;
             if overlay_file_carries_facts(&cleaned) {
                 fact_carrying += 1;
+                // Only recorded from inside this loop — i.e. only for an overlay that survived the
+                // `validate_envelope` gate above — so the returned set is "what applied", not "what was
+                // declared". Both merge branches below land `cleaned.path` in `artifacts` either way, so
+                // one insert here covers merge-onto-native and synthetic alike.
+                covered_paths.insert(cleaned.path.clone());
             }
             if let Some(artifact) = artifacts.iter_mut().find(|a| a.rel == cleaned.path) {
                 merge_projection_onto_artifact(artifact, &cleaned);
@@ -198,6 +215,7 @@ pub(crate) fn apply_adapter_overlays(
     }
 
     artifacts.sort_by(|a, b| a.rel.cmp(&b.rel));
+    covered_paths
 }
 
 /// True iff `file` contributes at least one extraction FACT that an overlay merge actually acts on —
@@ -219,10 +237,11 @@ pub(crate) fn apply_adapter_overlays(
 /// disclosure alive. `used_names` and `loop_spans` are excluded for the same reason: neither is read by
 /// either merge branch in a way that reaches an actual consumer today.
 ///
-/// Shared by [`apply_adapter_overlays`]'s own per-overlay zero-fact census (G8b) and
-/// `analyze::assemble`'s overlay-exclusion set for the "no native parser" per-extension disclosure (G8's
-/// unmasking half) — one rule, two call sites, so they can never drift apart.
-pub(crate) fn overlay_file_carries_facts(file: &zzop_core::FileProjection) -> bool {
+/// Called from exactly one place — [`apply_adapter_overlays`]'s per-projection loop — where its verdict
+/// feeds BOTH the per-overlay zero-fact census (G8b) and the returned covered-path set `analyze::assemble`
+/// uses to exclude a file from the "no native parser" per-extension disclosure (G8's unmasking half). One
+/// rule, one evaluation, so the two can never drift apart.
+fn overlay_file_carries_facts(file: &zzop_core::FileProjection) -> bool {
     file.io
         .provides
         .iter()

@@ -14,6 +14,7 @@ use crate::finding::Finding;
 use crate::io::{IoConsume, IoProvide};
 
 use super::def::{IoDirection, IoScan, Matcher, RuleDef, RulePackDef, SymbolScan};
+use super::diagnostics::RuleDiag;
 use super::markers::{compile_marker_line_comment, marker_suppresses};
 use super::source::RuleContext;
 
@@ -23,19 +24,17 @@ pub(super) fn eval_symbol_scan(
     m: &SymbolScan,
     ctx: &RuleContext,
     out: &mut Vec<Finding>,
+    // Rule-skip sink — see `diagnostics`'s module doc.
+    diagnostics: &mut Vec<String>,
 ) {
-    // Skip the rule if a regex fails to compile (TODO: report via diagnostics).
-    let Ok(file_re) = regex::Regex::new(&m.file_pattern) else {
+    let rule_id = format!("{}/{}", pack_id, rule.id);
+    let mut diag = RuleDiag::new(&rule_id, diagnostics);
+    let Some(file_re) = diag.compile("file_pattern", &m.file_pattern) else {
         return;
     };
-    let name_re = match &m.name_pattern {
-        Some(p) => match regex::Regex::new(p) {
-            Ok(r) => Some(r),
-            Err(_) => return,
-        },
-        None => None,
+    let Some(name_re) = diag.compile_opt("name_pattern", m.name_pattern.as_ref()) else {
+        return;
     };
-    let rule_id = format!("{}/{}", pack_id, rule.id);
 
     for f in ctx.files {
         if !file_re.is_match(&f.rel) {
@@ -109,14 +108,29 @@ pub struct IoScanTreeContext<'a> {
 ///    an entry with no resolved key has nothing to look up (fails `attr_present`, satisfies `attr_absent`).
 /// 7. `anchor_exclude_pattern` — regex against `ctx.anchor_line(entry.file, entry.line)`; a `None` callback
 ///    result means the exclusion does not apply.
-/// 8. Suppress-marker: `rule.suppress_marker`, checked against the anchor line's own text and the line
+/// 8. Suppress-marker: `rule.suppress_marker()` (derived `<id>-ok`), checked against the anchor line's own text and the line
 ///    directly above it (the same one-line lookback `line_scan`/`method_scan` use), via `ctx.anchor_line`.
 pub fn eval_pack_io_scan(pack: &RulePackDef, ctx: &IoScanTreeContext, out: &mut Vec<Finding>) {
+    eval_pack_io_scan_into(pack, ctx, out, &mut Vec::new());
+}
+
+/// [`eval_pack_io_scan`] with the rule-skip diagnostics channel attached: every io-scan rule this pass
+/// SKIPS because one of its regexes does not compile appends one line to `diagnostics` (see the
+/// `diagnostics` module doc for the wording and the dedupe contract). Findings are identical to
+/// `eval_pack_io_scan`'s — the sink only makes an already-happening skip visible. `eval_pack_io_scan`
+/// itself drops the messages, which is exactly the gap a caller with a warnings channel closes by
+/// calling this instead.
+pub fn eval_pack_io_scan_into(
+    pack: &RulePackDef,
+    ctx: &IoScanTreeContext,
+    out: &mut Vec<Finding>,
+    diagnostics: &mut Vec<String>,
+) {
     for rule in &pack.rules {
         let Matcher::IoScan(m) = &rule.matcher else {
             continue;
         };
-        eval_io_scan_rule(&pack.id, rule, m, ctx, out);
+        eval_io_scan_rule(&pack.id, rule, m, ctx, out, diagnostics);
     }
 }
 
@@ -136,50 +150,38 @@ fn eval_io_scan_rule(
     m: &IoScan,
     ctx: &IoScanTreeContext,
     out: &mut Vec<Finding>,
+    // Rule-skip sink — see `diagnostics`'s module doc. Same contract as every other DSL matcher: a rule
+    // whose regex does not compile is skipped, not fatal, and never silent.
+    diagnostics: &mut Vec<String>,
 ) {
-    // Skip the rule if a regex fails to compile (TODO: report via diagnostics) — same contract as every
-    // other DSL matcher.
-    let Ok(file_re) = regex::Regex::new(&m.file_pattern) else {
+    let rule_id = format!("{}/{}", pack_id, rule.id);
+    let mut diag = RuleDiag::new(&rule_id, diagnostics);
+    let Some(file_re) = diag.compile("file_pattern", &m.file_pattern) else {
         return;
     };
-    let file_exclude_re = match &m.file_exclude_pattern {
-        Some(p) => match regex::Regex::new(p) {
-            Ok(r) => Some(r),
-            Err(_) => return,
-        },
-        None => None,
+    let Some(file_exclude_re) =
+        diag.compile_opt("file_exclude_pattern", m.file_exclude_pattern.as_ref())
+    else {
+        return;
     };
-    let key_re = match &m.key_pattern {
-        Some(p) => match regex::Regex::new(p) {
-            Ok(r) => Some(r),
-            Err(_) => return,
-        },
-        None => None,
+    let Some(key_re) = diag.compile_opt("key_pattern", m.key_pattern.as_ref()) else {
+        return;
     };
-    let symbol_re = match &m.symbol_pattern {
-        Some(p) => match regex::Regex::new(p) {
-            Ok(r) => Some(r),
-            Err(_) => return,
-        },
-        None => None,
+    let Some(symbol_re) = diag.compile_opt("symbol_pattern", m.symbol_pattern.as_ref()) else {
+        return;
     };
-    let anchor_exclude_re = match &m.anchor_exclude_pattern {
-        Some(p) => match regex::Regex::new(p) {
-            Ok(r) => Some(r),
-            Err(_) => return,
-        },
-        None => None,
+    let Some(anchor_exclude_re) =
+        diag.compile_opt("anchor_exclude_pattern", m.anchor_exclude_pattern.as_ref())
+    else {
+        return;
     };
     // Line-comment-NEUTRAL marker (`//` or `#`) — io-scan anchor lines span every provide-producing
-    // language, Python included, unlike the `//`-only per-file line/method-scan marker.
-    let marker_re = match &rule.suppress_marker {
-        Some(marker) => match compile_marker_line_comment(marker) {
-            Some(r) => Some(r),
-            None => return,
-        },
-        None => None,
+    // language, Python included, unlike the `//`-only per-file line/method-scan marker. Built from the
+    // rule id (escaped), so a failure is structural rather than an author's bad pattern.
+    let Some(marker_re) = compile_marker_line_comment(&rule.suppress_marker()) else {
+        diag.malformed("its derived suppress marker does not compile as a regex");
+        return;
     };
-    let rule_id = format!("{}/{}", pack_id, rule.id);
 
     // Determinism contract: provides then consumes, each in input order.
     let mut entries: Vec<IoEntry> = Vec::new();
@@ -259,14 +261,10 @@ fn eval_io_scan_rule(
             }
         }
         // `anchor_exclude_pattern` — a `None` callback result means the exclusion does not apply (see
-        // `IoScan::anchor_exclude_pattern`'s doc). Fetched only when some anchor-text feature is in
-        // play: a rule using neither exclusion nor marker must not drive the engine's line cache to
-        // read source files at all.
-        let anchor_text = if anchor_exclude_re.is_some() || marker_re.is_some() {
-            (ctx.anchor_line)(e.file, e.line)
-        } else {
-            None
-        };
+        // `IoScan::anchor_exclude_pattern`'s doc). Fetched unconditionally: the suppress-marker channel
+        // below is DERIVED from the rule id, so every io-scan rule always has an anchor-text feature in
+        // play (the old `anchor_exclude_re.is_some() || marker_re.is_some()` gate could never be false).
+        let anchor_text = (ctx.anchor_line)(e.file, e.line);
         if let Some(re) = &anchor_exclude_re {
             if anchor_text.as_deref().is_some_and(|t| re.is_match(t)) {
                 continue;
@@ -276,14 +274,10 @@ fn eval_io_scan_rule(
         // applied to the anchor line's own text and the line directly above it. A line whose text is
         // unreachable (`anchor_line` returns `None`) contributes an empty string — never a match, so an
         // absent line simply never suppresses, same "honestly absent" treatment as `anchor_exclude_pattern`.
-        if let Some(re) = &marker_re {
-            let above_text =
-                (ctx.anchor_line)(e.file, e.line.saturating_sub(1)).unwrap_or_default();
-            let current_text = anchor_text.unwrap_or_default();
-            let lines = [above_text.as_str(), current_text.as_str()];
-            if marker_suppresses(re, &lines, 1) {
-                continue;
-            }
+        let above_text = (ctx.anchor_line)(e.file, e.line.saturating_sub(1)).unwrap_or_default();
+        let current_text = anchor_text.unwrap_or_default();
+        if marker_suppresses(&marker_re, &[above_text.as_str(), current_text.as_str()], 1) {
+            continue;
         }
         let snippet = e.key.unwrap_or("<unresolved>").to_string();
         out.push(Finding {

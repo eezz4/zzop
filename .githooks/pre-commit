@@ -26,6 +26,9 @@ GUARDS=(
   check-policy-census
   check-shell-pipe-sigpipe
   check-version-lists-parsers
+  check-asset-name-prose
+  check-deploy-facts-prose
+  check-overclaim-prose
 )
 
 for g in "${GUARDS[@]}"; do

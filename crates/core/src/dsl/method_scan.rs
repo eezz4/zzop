@@ -3,9 +3,8 @@
 use crate::finding::Finding;
 
 use super::def::{MethodScan, RuleDef};
-use super::markers::{
-    compile_marker, compile_marker_sql, compile_require_all, is_sql_file, marker_suppresses,
-};
+use super::diagnostics::RuleDiag;
+use super::markers::{compile_marker, compile_marker_sql, is_sql_file, marker_suppresses};
 use super::source::RuleContext;
 
 pub(super) fn eval_method_scan(
@@ -14,69 +13,59 @@ pub(super) fn eval_method_scan(
     m: &MethodScan,
     ctx: &RuleContext,
     out: &mut Vec<Finding>,
+    // Rule-skip sink — see `diagnostics`'s module doc. Same contract as `line_scan`: skip, never fail,
+    // but say so.
+    diagnostics: &mut Vec<String>,
 ) {
-    // Skip the rule if a regex fails to compile (TODO: report via diagnostics).
-    let Ok(file_re) = regex::Regex::new(&m.file_pattern) else {
+    let rule_id = format!("{}/{}", pack_id, rule.id);
+    let mut diag = RuleDiag::new(&rule_id, diagnostics);
+    let Some(file_re) = diag.compile("file_pattern", &m.file_pattern) else {
         return;
     };
     // Path-negation escape hatch — see `LineScan::file_exclude_pattern` doc.
-    let file_exclude_re = match &m.file_exclude_pattern {
-        Some(p) => match regex::Regex::new(p) {
-            Ok(r) => Some(r),
-            Err(_) => return,
-        },
-        None => None,
-    };
-    let require_re = match &m.require_file {
-        Some(p) => match regex::Regex::new(p) {
-            Ok(r) => Some(r),
-            Err(_) => return,
-        },
-        None => None,
-    };
-    let mut patterns = Vec::with_capacity(m.patterns.len());
-    for lp in &m.patterns {
-        let Ok(re) = regex::Regex::new(&lp.pattern) else {
-            return;
-        };
-        patterns.push((re, lp.label.clone()));
-    }
-    // The trigger label must be one of `patterns` — otherwise the DSL rule is malformed, skip it.
-    let Some(trigger_idx) = patterns.iter().position(|(_, label)| *label == m.trigger) else {
+    let Some(file_exclude_re) =
+        diag.compile_opt("file_exclude_pattern", m.file_exclude_pattern.as_ref())
+    else {
         return;
     };
-    // Veto patterns (guard present -> not a violation) — compiled like `patterns` above.
-    let mut absent = Vec::with_capacity(m.absent.len());
-    for lp in &m.absent {
-        let Ok(re) = regex::Regex::new(&lp.pattern) else {
-            return;
-        };
-        absent.push(re);
-    }
-    let marker_re = match &rule.suppress_marker {
-        Some(marker) => match compile_marker(marker) {
-            Some(r) => Some(r),
-            None => return,
-        },
-        None => None,
+    let Some(require_re) = diag.compile_opt("require_file", m.require_file.as_ref()) else {
+        return;
+    };
+    let Some(patterns) = diag.compile_labeled("patterns[].pattern", &m.patterns) else {
+        return;
+    };
+    // The trigger label must be one of `patterns` — otherwise the DSL rule is malformed, skip it.
+    let Some(trigger_idx) = patterns.iter().position(|(_, label)| *label == m.trigger) else {
+        diag.malformed(&format!(
+            "its `trigger` names label \"{}\", which no `patterns` entry declares",
+            m.trigger
+        ));
+        return;
+    };
+    // Veto patterns (guard present -> not a violation) — compiled like `patterns` above; labels unused.
+    let Some(absent) = diag.compile_labeled("absent[].pattern", &m.absent) else {
+        return;
+    };
+    let marker = rule.suppress_marker();
+    // Derived from the rule id (escaped) — a failure here is structural, see `line_scan`'s twin note.
+    let Some(marker_re) = compile_marker(&marker) else {
+        diag.malformed("its derived suppress marker does not compile as a regex");
+        return;
     };
     // SQL-comment counterpart of `marker_re`, only ever consulted below when `is_sql_file(&f.rel)` — see
     // `compile_marker_sql`'s doc.
-    let marker_re_sql = match &rule.suppress_marker {
-        Some(marker) => match compile_marker_sql(marker) {
-            Some(r) => Some(r),
-            None => return,
-        },
-        None => None,
+    let Some(marker_re_sql) = compile_marker_sql(&marker) else {
+        diag.malformed("its derived suppress marker does not compile as a regex");
+        return;
     };
-    let Some(require_all) = compile_require_all(&m.require_file_all) else {
+    let Some(require_all) = diag.compile_all("require_file_all", &m.require_file_all) else {
         return;
     };
     // Negated mirror of require_file_all, see `MethodScan::require_file_absent` doc.
-    let Some(require_absent) = compile_require_all(&m.require_file_absent) else {
+    let Some(require_absent) = diag.compile_all("require_file_absent", &m.require_file_absent)
+    else {
         return;
     };
-    let rule_id = format!("{}/{}", pack_id, rule.id);
 
     for f in ctx.files {
         if !file_re.is_match(&f.rel) {
@@ -186,7 +175,7 @@ pub(super) fn eval_method_scan(
                         }
                     }
                 }
-                if !vetoed && absent.iter().any(|re| re.is_match(&scan)) {
+                if !vetoed && absent.iter().any(|(re, _)| re.is_match(&scan)) {
                     vetoed = true;
                 }
             }
@@ -196,17 +185,11 @@ pub(super) fn eval_method_scan(
             let Some((i, line)) = trigger_hit else {
                 continue; // unreachable: satisfied[trigger_idx] implies trigger_hit is Some
             };
-            if let Some(re) = &marker_re {
-                if marker_suppresses(re, &lines, start_idx + i) {
-                    continue;
-                }
+            if marker_suppresses(&marker_re, &lines, start_idx + i) {
+                continue;
             }
-            if is_sql {
-                if let Some(re) = &marker_re_sql {
-                    if marker_suppresses(re, &lines, start_idx + i) {
-                        continue;
-                    }
-                }
+            if is_sql && marker_suppresses(&marker_re_sql, &lines, start_idx + i) {
+                continue;
             }
             let snippet: String = line.trim().chars().take(m.snippet_max).collect();
             out.push(Finding {

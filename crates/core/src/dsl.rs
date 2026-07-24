@@ -17,13 +17,25 @@
 //! `ir_scan`'s module doc for why (assemble-composed provides and the tree-wide `AttributeStore` don't
 //! exist yet inside the per-file pass). `eval_pack`'s own `Matcher::IoScan` dispatch arm is a no-op.
 //!
+//! ## Rule-skip visibility
+//!
+//! A rule whose pattern does not compile is SKIPPED, never fatal — one malformed rule must not fail the
+//! run. Skipping SILENTLY, though, is the misleading-diagnosis failure this project treats as a cardinal
+//! sin: the rule never fires and the run reads as clean. Every matcher therefore reports its skips into a
+//! caller-owned `Vec<String>` (`diagnostics` module), reachable via the `*_into` entry points
+//! ([`eval_pack_into`], [`eval_pack_profiled_into`], [`eval_pack_io_scan_into`]). The older
+//! sink-less entry points still exist and still drop those messages — a caller that owns a warning
+//! channel should call the `_into` twin.
+//!
 //! Module layout: `def` (serde rule-pack types), `fragments` (the `${NAME}` shared/reference mechanism
 //! `RulePackDef::expand_fragments` uses), `source` (interpreter input + minified detection), `eval` (pack
-//! evaluation entry points), `prefilter` (RegexSet line-scan pre-filter), `markers`
+//! evaluation entry points), `diagnostics` (rule-skip warning sink), `prefilter` (RegexSet line-scan
+//! pre-filter), `markers`
 //! (suppress-marker/require-file helpers), and one module per matcher family (`line_scan`,
 //! `method_scan`, `ir_scan`). Every public item stays importable at `crate::dsl::X`.
 
 mod def;
+mod diagnostics;
 mod eval;
 mod fragments;
 mod ir_scan;
@@ -36,6 +48,8 @@ mod string_mask;
 
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod tests_diagnostics;
 #[cfg(test)]
 mod tests_eval;
 #[cfg(test)]
@@ -57,7 +71,7 @@ pub use def::{
     IoDirection, IoScan, LabeledPattern, LineScan, Matcher, MethodScan, RuleDef, RulePackDef,
     SymbolScan,
 };
-pub use eval::{eval_pack, eval_pack_profiled};
+pub use eval::{eval_pack, eval_pack_into, eval_pack_profiled, eval_pack_profiled_into};
 pub use fragments::FragmentError;
-pub use ir_scan::{eval_pack_io_scan, IoScanTreeContext};
+pub use ir_scan::{eval_pack_io_scan, eval_pack_io_scan_into, IoScanTreeContext};
 pub use source::{is_minified_or_generated, RuleContext, RuleTiming, SourceFile};

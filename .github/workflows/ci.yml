@@ -55,6 +55,12 @@ jobs:
         run: bash scripts/check-shell-pipe-sigpipe.sh
       - name: version-string parser-completeness guard
         run: bash scripts/check-version-lists-parsers.sh
+      - name: release-asset name prose drift guard
+        run: bash scripts/check-asset-name-prose.sh
+      - name: deployment/inventory count prose drift guard
+        run: bash scripts/check-deploy-facts-prose.sh
+      - name: overclaim prose guard
+        run: bash scripts/check-overclaim-prose.sh
       - name: parser fingerprint bump guard
         # CI-only (the pre-commit hook omits it): diffs against the PR base / previous commit, which
         # the `fetch-depth: 0` checkout above is what makes available.

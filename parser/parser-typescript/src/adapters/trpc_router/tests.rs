@@ -231,6 +231,74 @@ fn non_router_consts_produce_no_fragment() {
     assert!(out.is_empty(), "{out:?}");
 }
 
+// --- standalone procedures (leaf-import mounts) ---
+
+#[test]
+fn standalone_exported_procedure_is_an_empty_key_leaf_fragment() {
+    let src = concat!(
+        "import { authedProcedure } from \"../../trpc\";\n",
+        "export const getUser = authedProcedure.input(z.object({})).query(({ ctx }) => ctx.user);\n"
+    );
+    let out = extract_procedure_router_fragments("getUser.ts", src);
+    assert_eq!(
+        frag(&out, "getUser").entries,
+        vec![ProcedureRouterEntry::Leaf {
+            key: String::new(),
+            verb: "QUERY".into(),
+            line: 2
+        }]
+    );
+}
+
+#[test]
+fn standalone_procedure_base_vocabulary_variants() {
+    for (src, verb) in [
+        ("export const a = procedure.mutation(fn);\n", "MUTATION"),
+        ("export const a = t.procedure.query(fn);\n", "QUERY"),
+        (
+            "export const a = trpc.publicProcedure.use(mw).subscription(fn);\n",
+            "SUBSCRIPTION",
+        ),
+        (
+            "export const a = protectedProcedure.input(x).mutation(fn);\n",
+            "MUTATION",
+        ),
+    ] {
+        let out = extract_procedure_router_fragments("p.ts", src);
+        assert_eq!(
+            frag(&out, "a").entries,
+            vec![ProcedureRouterEntry::Leaf {
+                key: String::new(),
+                verb: verb.into(),
+                line: 1
+            }],
+            "{src}"
+        );
+    }
+}
+
+#[test]
+fn non_procedure_call_chain_with_a_query_link_is_not_a_procedure_fragment() {
+    // The evidence gate: an ordinary builder chain ending in `.query(...)` is NOT tRPC vocabulary, so
+    // it must produce no fragment at all rather than a fabricated route.
+    for src in [
+        "export const rows = db.select().from(users).query(sql);\n",
+        "export const r = knex(\"users\").where({ id }).query();\n",
+        "export const r = buildProcedure().query(fn);\n", // call base, not an ident/member
+        "export const r = someProcedureFactory(x).query(fn);\n",
+    ] {
+        let out = extract_procedure_router_fragments("p.ts", src);
+        assert!(out.is_empty(), "{src} -> {out:?}");
+    }
+}
+
+#[test]
+fn standalone_procedure_without_a_verb_link_produces_no_fragment() {
+    // `.meta()`/`.input()` alone is not a procedure — tRPC only finalizes on query/mutation/subscription.
+    let src = "export const half = publicProcedure.input(z.string());\n";
+    assert!(extract_procedure_router_fragments("p.ts", src).is_empty());
+}
+
 #[test]
 fn multiple_fragments_in_one_file_keep_declaration_order() {
     let src = concat!(

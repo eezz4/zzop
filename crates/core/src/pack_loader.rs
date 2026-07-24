@@ -22,6 +22,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod rule_issues;
+pub use rule_issues::pack_regex_issues;
+
 use crate::dsl::{Matcher, RulePackDef};
 
 /// The highest `RulePackDef::schema_version` this engine build understands (see `docs/rules/dsl-reference.md`'s
@@ -97,98 +100,6 @@ pub fn check_dsl_schema_version(pack: &RulePackDef) -> Result<(), String> {
         ));
     }
     Ok(())
-}
-
-/// Every regex-typed field in `pack` that fails to compile, as one issue string each (deterministic:
-/// rule order, then field order within the matcher). This surfaces, at validation time, the exact
-/// judgment the DSL interpreter applies at eval time — `regex::Regex::new(p)` failing — where the
-/// interpreter's contract is to silently no-op the affected rule (see `dsl::line_scan`/`method_scan`/
-/// `ir_scan` and [`applies_to`] below) rather than panic. A pack with such an issue still LOADS; it
-/// just carries a rule that can never fire, which is exactly what a pack author wants told before
-/// shipping it.
-pub fn pack_regex_issues(pack: &RulePackDef) -> Vec<String> {
-    let mut issues = Vec::new();
-    for rule in &pack.rules {
-        let mut check = |field: &str, pattern: &str| {
-            if let Err(err) = regex::Regex::new(pattern) {
-                issues.push(format!(
-                    "rule \"{}\": `{field}` is not a valid regex (the rule would silently never fire): {err}",
-                    rule.id
-                ));
-            }
-        };
-        match &rule.matcher {
-            Matcher::LineScan(m) => {
-                check("file_pattern", &m.file_pattern);
-                if let Some(p) = &m.require_file {
-                    check("require_file", p);
-                }
-                for p in &m.require_file_all {
-                    check("require_file_all", p);
-                }
-                for p in &m.require_file_absent {
-                    check("require_file_absent", p);
-                }
-                if let Some(p) = &m.line_pattern {
-                    check("line_pattern", p);
-                }
-                for lp in m.any.iter().flatten() {
-                    check("any[].pattern", &lp.pattern);
-                }
-                if let Some(p) = &m.exclude_pattern {
-                    check("exclude_pattern", p);
-                }
-                if let Some(p) = &m.file_exclude_pattern {
-                    check("file_exclude_pattern", p);
-                }
-            }
-            Matcher::MethodScan(m) => {
-                check("file_pattern", &m.file_pattern);
-                if let Some(p) = &m.require_file {
-                    check("require_file", p);
-                }
-                for p in &m.require_file_all {
-                    check("require_file_all", p);
-                }
-                for p in &m.require_file_absent {
-                    check("require_file_absent", p);
-                }
-                for lp in &m.patterns {
-                    check("patterns[].pattern", &lp.pattern);
-                }
-                for lp in &m.absent {
-                    check("absent[].pattern", &lp.pattern);
-                }
-                if let Some(p) = &m.file_exclude_pattern {
-                    check("file_exclude_pattern", p);
-                }
-            }
-            Matcher::SymbolScan(m) => {
-                check("file_pattern", &m.file_pattern);
-                if let Some(p) = &m.name_pattern {
-                    check("name_pattern", p);
-                }
-            }
-            Matcher::IoScan(m) => {
-                check("file_pattern", &m.file_pattern);
-                if let Some(p) = &m.file_exclude_pattern {
-                    check("file_exclude_pattern", p);
-                }
-                if let Some(p) = &m.key_pattern {
-                    check("key_pattern", p);
-                }
-                if let Some(p) = &m.symbol_pattern {
-                    check("symbol_pattern", p);
-                }
-                if let Some(p) = &m.anchor_exclude_pattern {
-                    check("anchor_exclude_pattern", p);
-                }
-                // `attr_present`/`attr_absent` are plain attribute-key strings, not regexes — never
-                // checked here (see `IoScan`'s doc).
-            }
-        }
-    }
-    issues
 }
 
 /// Reads every `*.json` file directly under `dir`, PLUS every `*.json` file one level down inside a

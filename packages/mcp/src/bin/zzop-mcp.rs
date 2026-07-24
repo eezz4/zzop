@@ -20,7 +20,21 @@ fn main() {
         // The registered form (a client's own `.mcp.json` / the plugin's `plugin.json` `mcpServers` /
         // the MCPB manifest all pass `args: ["mcp"]`) AND the bare form both serve — a plain `zzop-mcp`
         // on PATH is the server, no subcommand needed.
-        None | Some("mcp") => zzop_mcp::server::run_stdio(),
+        None | Some("mcp") => {
+            // Announce which build is actually serving, on stderr (stdout is the JSON-RPC channel and
+            // must carry nothing else). An MCP client shows stderr in its server log, so "which zzop is
+            // running?" stops being a question the operator has to answer by hunting the filesystem —
+            // the 2026-07-24 dogfooding session lost time to exactly that, with a 0.18.0 binary on PATH
+            // while every manifest in the repo said 0.22.0. This is the binary's own compiled-in
+            // version, NOT a check against the latest release: the binary stays network-free by
+            // decision (see the mcp-distribution doc), so "is there a newer one?" belongs to the
+            // delivery layer, never here.
+            eprintln!(
+                "zzop-mcp {} — serving MCP over stdio. Newer releases: https://github.com/eezz4/zzop/releases",
+                zzop_mcp::server::version()
+            );
+            zzop_mcp::server::run_stdio()
+        }
         Some("version") | Some("--version") => {
             println!("zzop-mcp {}", zzop_mcp::server::version());
         }

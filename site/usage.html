@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>zzop — Usage</title>
-<meta name="description" content="zzop usage — download the Node-free zzop CLI binary (or npm i -g @zzop/cli), write a zzop.config.jsonc, and read the report. Embedding the engine? See the SDK reference.">
+<meta name="description" content="zzop usage — download the Node-free zzop CLI binary (or npm i -g @zzop/cli), write a zzop.config.jsonc, and read the report. For the shared input/output JSON contract, see the Reference.">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="assets/site.css">
 </head>
@@ -19,7 +19,7 @@
       <a href="index.html" class="site-nav__link">Overview</a>
       <a href="architecture.html" class="site-nav__link">Architecture</a>
       <a href="usage.html" class="site-nav__link is-active">Usage</a>
-      <a href="sdk.html" class="site-nav__link">SDK</a>
+      <a href="reference.html" class="site-nav__link">Reference</a>
       <a href="rules.html" class="site-nav__link">Rules</a>
     </nav>
     <div class="site-header__actions">
@@ -42,7 +42,7 @@
       <a href="index.html" class="docs-nav__link">Overview</a>
       <a href="architecture.html" class="docs-nav__link">Architecture</a>
       <a href="usage.html" class="docs-nav__link is-active">Usage</a>
-      <a href="sdk.html" class="docs-nav__link">SDK</a>
+      <a href="reference.html" class="docs-nav__link">Reference</a>
       <a href="rules.html" class="docs-nav__link">Rules</a>
     </div>
   </aside>
@@ -50,17 +50,20 @@
   <main class="docs-content">
     <div class="docs-content-header">
       <h1>Using zzop</h1>
-      <p>zzop ships two Node-free native binaries from one crate: no Node.js, no npm, nothing to compile. <code>zzop</code> is the CLI, run over subcommands (<code>zzop analyze .</code> — no code, ESLint-style); <code>zzop-mcp</code> is the MCP stdio server for MCP clients (<code>zzop-mcp mcp</code>). This page covers the <code>zzop</code> CLI — if you're building a tool on top of zzop instead, see the <a href="sdk.html">SDK reference</a>.</p>
+      <p>zzop ships two Node-free native binaries from one crate: no Node.js, no npm, nothing to compile. <code>zzop</code> is the CLI, run over subcommands (<code>zzop analyze .</code> — no code, ESLint-style); <code>zzop-mcp</code> is the MCP stdio server for MCP clients (<code>zzop-mcp mcp</code>). This page covers the <code>zzop</code> CLI. For the input/output JSON contract every surface shares (<code>AnalyzeRequest</code> in, <code>AnalyzeOutputView</code> out), see the <a href="reference.html">Reference</a>.</p>
     </div>
 
     <section id="install">
       <span class="eyebrow eyebrow--sm">Command line</span>
       <h2>Install &amp; run the binary</h2>
-      <p>Three ways to get it — no source checkout or toolchain required for any of them:</p>
+      <!-- Canonical install-lane list for site visitors (the repo-side twin is README.md's "Quick start").
+           One copy per audience: the other site pages link here rather than restate the lanes. -->
+      <p>Four ways to get it — no source checkout or toolchain required for any of them:</p>
       <ul>
         <li><strong>Claude Code</strong> — <code>/plugin marketplace add eezz4/zzop</code>, then <code>/plugin install zzop@zzop</code>. The plugin's <code>plugin.json</code> declares the MCP server and runs <code>zzop-mcp mcp</code> for you.</li>
         <li><strong>Claude Desktop</strong> — the one-click <code>.mcpb</code> bundle (drag-and-drop install); it carries the platform binary. See <a href="https://github.com/eezz4/zzop/blob/main/packages/mcpb/README.md">packages/mcpb/README.md</a>.</li>
-        <li><strong>CLI / CI</strong> — download the <code>zzop-cli-download the <code>zzop-&lt;platform&gt;[.exe]</code> binarylt;platformdownload the <code>zzop-&lt;platform&gt;[.exe]</code> binarygt;[.exe]</code> binary from <a href="https://github.com/eezz4/zzop/releases" target="_blank" rel="noreferrer">GitHub Releases</a> (5 platforms) and put it on <code>PATH</code> as <code>zzop</code> — or <code>npm i -g @zzop/cli</code>. Want the MCP server instead? Download <code>zzop-mcp-&lt;platform&gt;[.exe]</code> the same way and put it on <code>PATH</code> as <code>zzop-mcp</code>.</li>
+        <li><strong>CLI / CI</strong> — download the <code>zzop-cli-&lt;platform&gt;[.exe]</code> binary from <a href="https://github.com/eezz4/zzop/releases" target="_blank" rel="noreferrer">GitHub Releases</a> (5 platforms) and put it on <code>PATH</code> as <code>zzop</code>. Want the MCP server instead? Download <code>zzop-mcp-&lt;platform&gt;[.exe]</code> the same way and put it on <code>PATH</code> as <code>zzop-mcp</code>.</li>
+        <li><strong>npm</strong> — <code>npm i -g @zzop/cli</code> (or <code>npx @zzop/cli</code>): a zero-logic shim that spawns this exact native binary, fetched per-platform as an npm dependency, no separate Node SDK involved. See <a href="https://github.com/eezz4/zzop/blob/main/packages/cli/README.md">packages/cli/README.md</a>.</li>
       </ul>
       <div class="code-panel">
         <div class="code-panel__tab">Analyze a tree</div>
@@ -68,7 +71,7 @@
 zzop cross ../api ../web   # cross-layer join across 2+ trees
 zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop</code></pre>
       </div>
-      <p>See <a href="https://github.com/eezz4/zzop/blob/main/crates/host/README.md">crates/host/README.md</a> for the full CLI reference. A fourth way to get the <code>zzop</code> binary: <code>npm i -g @zzop/cli</code> (or <code>npx @zzop/cli</code>) — a zero-logic shim that spawns this exact native binary, fetched per-platform as an npm dependency, no separate Node SDK involved. See <a href="https://github.com/eezz4/zzop/blob/main/packages/cli/README.md">packages/cli/README.md</a>.</p>
+      <p>See <a href="https://github.com/eezz4/zzop/blob/main/crates/host/README.md">crates/host/README.md</a> for the full CLI reference.</p>
     </section>
 
     <section id="cli-config">
@@ -136,8 +139,9 @@ zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop</code>
             <tr><td><code>zzop endpoint &lt;pattern&gt; &lt;path&gt;...</code> / <code>endpoint &lt;pattern&gt; --config &lt;path&gt;</code></td><td>Definitive "is io key X provided/consumed/joined?" query: <code>pattern</code> is substring-matched against every cross-layer io key, answered with a sealed verdict (<code>linked</code> / <code>provided-only</code> / <code>consumed-unprovided</code> / <code>external</code> / <code>unresolved-only</code> / <code>ambiguous</code> / <code>mixed</code> / <code>not-found</code>).</td></tr>
             <tr><td><code>zzop analyze-envelope &lt;envelope.json&gt;</code></td><td>Mode A: the envelope file replaces native parsing entirely for this run; prints the same JSON findings summary shape as <code>analyze</code>.</td></tr>
             <tr><td><code>zzop validate-envelope &lt;envelope.json&gt;</code></td><td>Offline "is this envelope well-formed?" check. Prints <code>{"valid":…,"issues":[…]}</code>; exits <code>0</code> valid / <code>1</code> invalid.</td></tr>
-            <tr><td><code>zzop validate-rule-pack &lt;pack.json&gt;</code></td><td>Offline "does this DSL pack load and every matcher regex compile?" check. Same <code>{valid,issues}</code>/exit-code contract as <code>validate-envelope</code>.</td></tr>
+            <tr><td><code>zzop validate-rule-pack &lt;pack.json&gt;</code></td><td>Offline "does this DSL pack load, and can every rule in it actually fire?" check — bad shape, uncompilable matcher regex, and the structural dead-rule shapes (nothing to match, <code>trigger</code> naming an undeclared label). Same <code>{valid,issues}</code>/exit-code contract as <code>validate-envelope</code>.</td></tr>
             <tr><td><code>zzop contract [&lt;name&gt;]</code></td><td>No name lists the embedded authoring-contract resources (schemas, guides, the rule catalog, <code>config-surface</code>); a name prints that document's exact bytes to stdout.</td></tr>
+            <tr><td><code>zzop explain &lt;rule-id&gt;</code></td><td>Print one bundled DSL rule's compiled-in data (id, pack, severity, message, derived suppress marker, matcher kind, whether it carries an <code>exclude_pattern</code>) straight from the rule data compiled into this binary — never <code>docs/rules/catalog.md</code> prose. Accepts the full <code>&lt;pack&gt;/&lt;rule&gt;</code> id or a bare <code>&lt;rule&gt;</code> id when unambiguous.</td></tr>
             <tr><td><code>zzop-mcp mcp</code></td><td>Serve MCP over stdio (newline-delimited JSON-RPC 2.0) — what a Claude Code/Desktop config points at.</td></tr>
             <tr><td><code>zzop version</code> / <code>--version</code></td><td>Print the binary's version (the same value MCP's <code>initialize</code> reports as <code>serverInfo.version</code>).</td></tr>
             <tr><td><code>zzop help</code> / <code>--help</code> / <code>-h</code></td><td>Print the usage line plus one elaboration per subcommand, exit 0 (the <code>zzop-mcp</code> server binary has its own <code>help</code>).</td></tr>
@@ -147,10 +151,22 @@ zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop</code>
       <p>Exit codes are uniform across every subcommand: <code>0</code> = ran successfully; <code>1</code> = a runtime failure (unreadable path, invalid envelope/config) — for <code>validate-envelope</code>/<code>validate-rule-pack</code> specifically, <code>1</code> instead means "ran fine, found the input invalid"; <code>2</code> = an argument-shape mistake (missing/extra/flag-shaped argument). There is no severity-gated CI exit code today — <code>failOn</code> is a recognized-but-inert config key (see above); gate a build by parsing the JSON output's <code>findings</code>/<code>crossLayerFindings</code> severities yourself.</p>
     </section>
 
+    <section id="adapt">
+      <span class="eyebrow eyebrow--sm">Adapt to your stack</span>
+      <h2>Making zzop fit your environment</h2>
+      <p>No two repositories are the same shape, and zzop is meant to be tuned to yours rather than run one-size-fits-all. Every way in is <strong>data, not an engine fork</strong>:</p>
+      <ul>
+        <li><strong>Custom rule packs.</strong> Rules are JSON. Put a pack of your own conventions in a directory and point <code>packs.extraDirs</code> at it — a custom pack whose id matches a bundled one wins. The <a href="rules.html">rule catalog</a> shows the shape; <code>zzop validate-rule-pack &lt;pack.json&gt;</code> checks one before you ship it. Full DSL reference: <a href="https://github.com/eezz4/zzop/blob/main/docs/rules/authoring-guide.md">docs/rules/authoring-guide.md</a>.</li>
+        <li><strong>Parser injection for what the engine can't read natively.</strong> A language or framework zzop doesn't parse — or a hand-rolled HTTP client it can't see — need not be a blind spot. An external adapter (any language) emits a Normalized-AST envelope: <em>Mode B</em> overlays (<code>adapterOverlays</code> — just the IO/fragment facts for a few files, merged on top of native analysis) or <em>Mode A</em> (a full envelope that replaces native parsing for a run, via <code>zzop analyze-envelope</code>). Worked adapters ship in the repo (OpenAPI-SDK, Svelte, wrapper, react-query). See <a href="https://github.com/eezz4/zzop/blob/main/docs/NORMALIZED_AST.md">NORMALIZED_AST.md</a> and the <a href="reference.html#config-reference"><code>adapterOverlays</code></a> field.</li>
+        <li><strong>Topology facts only you know.</strong> A gateway mount prefix, which hosts a tree owns, a route zzop couldn't resolve from source — declare them in config (<code>mounts</code> / <code>mountedAt</code> / <code>hosts</code> / <code>routes</code>) so the cross-layer join sees your real deployment shape, not just what's literal in the source.</li>
+      </ul>
+      <p>This is where zzop pairs naturally with an AI agent over MCP: the agent runs an analysis, reads the <code>coverage</code> census and <code>warnings</code> to see exactly what came back <em>dark</em> (a channel with zero extraction, a language with no native parser), and you tune the config or add an adapter together until the map is complete. The tool tells you what it cannot see instead of guessing — so the loop converges on <em>your</em> environment.</p>
+    </section>
+
     <section id="suppressing">
       <span class="eyebrow eyebrow--sm">Findings</span>
       <h2>Suppressing &amp; disabling findings</h2>
-      <p>DSL pack rules (the <code>typescript/no-explicit-any</code>, <code>sql/nplus1</code>-style ids) each carry an inline suppress marker — a short comment placed in the flagged code, e.g. <code>// any-ok</code> — that silences just that occurrence; see the <a href="rules.html">rule catalog</a>'s "Suppress marker" column for each rule's exact marker. Native analyses, including every <code>cross-layer/*</code> rule, don't support inline suppression — turn them off entirely via config instead.</p>
+      <p>DSL pack rules (the <code>typescript/no-explicit-any</code>, <code>sql/nplus1</code>-style ids) each carry an inline suppress marker — a short comment placed in the flagged code, e.g. <code>// no-explicit-any-ok</code> — that silences just that occurrence. The marker is derived from the rule id, so you never look it up: strip the pack prefix from the finding's id and append <code>-ok</code> (<code>sql/nplus1</code> → <code>// nplus1-ok</code>). Native analyses are disable-only via config, with two comment-driven exceptions: <code>non-idempotent-write</code>/<code>unsafe-read-endpoint</code> honor a hand-written <code>// idempotent-ok: &lt;reason&gt;</code> on the handler's body-start line or up to 3 lines above it (trailing colon required), and <code>dead-candidates</code>/<code>dead-exports</code> skip files carrying a generated-file banner (<code>@generated</code> and friends) in their first 8 lines.</p>
       <div class="code-panel">
         <div class="code-panel__tab">Disable a native analysis</div>
         <pre class="code-block"><code>{
@@ -166,7 +182,7 @@ zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop</code>
     <section id="embedding">
       <span class="eyebrow eyebrow--sm">Programmatic / embedding</span>
       <h2>Embedding the engine</h2>
-      <p>Building a tool on top of zzop rather than running it as a CLI? Depend on the <code>zzop-facade</code> / <code>zzop-summary</code> Rust crates directly, or shell out to this same binary's JSON subcommands — either way it's the same engine the CLI drives, JSON in / JSON out. The <a href="sdk.html">SDK reference</a> documents the seven functions, the request/output shapes, and multi-repo (<code>cross</code>) analysis.</p>
+      <p>Building a tool on top of zzop rather than running it as a CLI? Shell out to this same binary's JSON subcommands — the same engine the CLI drives, JSON in / JSON out, one stable contract, no Node and no separate SDK to install. (The <code>zzop-facade</code> / <code>zzop-summary</code> crates it is built from are workspace-internal and <strong>not published to crates.io</strong>, so an in-process Rust dependency means vendoring the workspace, not <code>cargo add</code>.) See <a href="https://github.com/eezz4/zzop/blob/main/crates/host/README.md">crates/host/README.md</a> for the JSON subcommand reference.</p>
     </section>
 
   </main>
@@ -175,8 +191,9 @@ zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop</code>
     <div class="docs-toc__label">On this page</div>
     <a href="#install" class="docs-toc__link">Install &amp; run the CLI</a>
     <a href="#cli-config" class="docs-toc__link">CLI config</a>
+    <a href="#adapt" class="docs-toc__link">Adapt to your stack</a>
     <a href="#suppressing" class="docs-toc__link">Suppressing &amp; disabling</a>
-    <a href="#embedding" class="docs-toc__link">Embedding &rarr; SDK</a>
+    <a href="#embedding" class="docs-toc__link">Embedding</a>
   </aside>
 
 </div>

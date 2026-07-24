@@ -1,11 +1,11 @@
 //! End-to-end tests for `rules/dsl/go/go.json`, exercised via `zzop_engine::analyze_tree` so
 //! `Matcher::MethodScan`'s `trigger_in_loop` gate runs against real `zzop_parser_go`-derived loop spans
 //! (not hand-built spans) — the same "real parser, not a stubbed fixture" discipline
-//! `rules/dsl/be-db/be-db.rs`'s own module doc describes for TypeScript.
+//! `rules/dsl/db/db.rs`'s own module doc describes for TypeScript.
 //!
-//! `go-goroutine-in-loop`'s `suppress_marker` is exercised once below, with the marker directly above
+//! `goroutine-in-loop`'s `suppress_marker` is exercised once below, with the marker directly above
 //! the reported/trigger line (`MARKER_LOOKBACK_LINES` = 1 — the only lookback distance that suppresses),
-//! mirroring `rules/dsl/be-db/be-db.rs`'s own convention.
+//! mirroring `rules/dsl/db/db.rs`'s own convention.
 
 use std::fs;
 use std::path::{Path, PathBuf};

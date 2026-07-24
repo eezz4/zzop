@@ -15,7 +15,7 @@ fn real_dsl_dir() -> PathBuf {
 
 /// Every field `expand_fragments` treats as a `${NAME}`-eligible pattern — the EXACT same field set, so
 /// this guard can never drift from what the mechanism actually resolves. Deliberately narrower than "every
-/// string in the JSON file": `message`/`id`/`suppress_marker`/`label` legitimately mention `${...}` as
+/// string in the JSON file": `message`/`id`/`label` legitimately mention `${...}` as
 /// PROSE (e.g. a message explaining what a template-literal placeholder looks like) — those are not
 /// pattern fields and must not be flagged.
 fn pattern_bearing_field_values(rule: &RuleDef) -> Vec<(&'static str, &str)> {
@@ -90,8 +90,8 @@ fn pattern_bearing_field_values(rule: &RuleDef) -> Vec<(&'static str, &str)> {
 /// expansion) text — a plain `serde_json::from_str`, deliberately NOT `parse_dsl_pack`, so a sentinel is
 /// still visible for this check to see — and asserts every `pattern_bearing_field_values` entry containing
 /// the substring `"${"` is EXACTLY a whole-value `${NAME}` reference (`fragment_ref_name` returns `Some`),
-/// never a partial/substring occurrence. `message`/`id`/`suppress_marker`/`label` are out of scope (see
-/// `pattern_bearing_field_values`'s doc) — `be-security/shell-exec` and `sql/sql-delete-no-where`'s
+/// never a partial/substring occurrence. `message`/`id`/`label` are out of scope (see
+/// `pattern_bearing_field_values`'s doc) — `security/shell-exec` and `sql/delete-no-where`'s
 /// messages legitimately describe `${...}` template-literal/placeholder syntax in prose. Paired with
 /// `real_dsl_tree_loads_with_zero_errors` below, which proves every real reference actually resolves (an
 /// unknown name is a hard load error, not a silent skip) — together the two prove expansion is total AND
@@ -178,8 +178,11 @@ fn real_dsl_tree_loads_with_zero_errors() {
 
 /// Part 3 of the task's mandatory byte-identity proof: the CURRENT `rules/dsl/redis/redis.json` (migrated
 /// — every `file_exclude_pattern` is now a `${test-paths}` ref) parses+expands to a `RulePackDef` whose
-/// `Debug` output is IDENTICAL to the PRE-MIGRATION file's (`tests_fixtures/redis_pre_migration.json`, a
-/// byte-for-byte copy of this file's content before the migration in this pass, taken from git history).
+/// `Debug` output is IDENTICAL to the PRE-MIGRATION file's (`tests_fixtures/redis_pre_migration.json`).
+/// That fixture STARTED as a byte-for-byte copy taken from git history, but it is REGENERATED alongside
+/// every later `redis.json` edit that changes `RuleDef`'s shape or content (the suppress-marker derivation
+/// pass rewrote both) — same standing as the http twin below. So it witnesses that THIS migration is
+/// projection-neutral; it is not an independent snapshot of the pack's whole history.
 /// `redis` never touches `sql`'s intentional `\bWHERE\b` fix, so this is a clean non-`sql` witness that
 /// expand-then-clear is projection-neutral: `{pack:?}` — the cache-fingerprint input
 /// (`crates/engine/src/cache.rs`) — is byte-for-byte unchanged by this migration.

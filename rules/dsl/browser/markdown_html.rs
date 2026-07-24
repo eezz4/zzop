@@ -114,7 +114,7 @@ fn markdown_html_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-browser");
     dir.write(
         "vetted-md.tsx",
-        "import { marked } from 'marked';\ndeclare const el: HTMLElement;\ndeclare const article: { body: string };\nexport function render() {\n  // markdown-html-ok: sanitize option enabled in marked config\n  const html = marked(article.body);\n  el.innerHTML = html;\n}\n",
+        "import { marked } from 'marked';\ndeclare const el: HTMLElement;\ndeclare const article: { body: string };\nexport function render() {\n  // unsanitized-markdown-html-ok: sanitize option enabled in marked config\n  const html = marked(article.body);\n  el.innerHTML = html;\n}\n",
     );
     let out = scan(&dir);
     assert!(

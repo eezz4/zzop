@@ -17,7 +17,7 @@ fn escalates_item_with_critical_finding_into_urgent_group_and_removes_from_home(
     // A second, still-`Critical`-severity group (circular) that does NOT carry a critical finding —
     // proves urgency_rank, not severity_rank alone, is what puts the urgent group first.
     let circular = vec![vec!["cyc-a.ts".to_string(), "cyc-b.ts".to_string()]];
-    let findings = [critical_finding("bug.ts", "be-db/update-delete-no-where")];
+    let findings = [critical_finding("bug.ts", "db/update-delete-no-where")];
     let input = BuildRecInput {
         nodes: &nodes,
         dep: &dep,
@@ -39,7 +39,7 @@ fn escalates_item_with_critical_finding_into_urgent_group_and_removes_from_home(
     assert_eq!(escalated.escalated_from, Some(RecId::BugProne));
     assert_eq!(
         escalated.bug_evidence,
-        vec!["1 critical finding(s) in this file: be-db/update-delete-no-where".to_string()]
+        vec!["1 critical finding(s) in this file: db/update-delete-no-where".to_string()]
     );
 
     // Home group (bug-prone) had only this one item -> dropped entirely, never double-reported.
@@ -120,7 +120,7 @@ fn bug_evidence_order_is_critical_findings_then_fix_ratio_then_hotspot() {
     }];
     let dep = DepGraph::new();
     let coupling = CouplingMap::new();
-    let findings = [critical_finding("bug.ts", "be-db/update-delete-no-where")];
+    let findings = [critical_finding("bug.ts", "db/update-delete-no-where")];
     let input = BuildRecInput {
         nodes: &nodes,
         dep: &dep,
@@ -137,7 +137,7 @@ fn bug_evidence_order_is_critical_findings_then_fix_ratio_then_hotspot() {
     assert_eq!(
         urgent.items[0].bug_evidence,
         vec![
-            "1 critical finding(s) in this file: be-db/update-delete-no-where".to_string(),
+            "1 critical finding(s) in this file: db/update-delete-no-where".to_string(),
             "6 of 10 changes are bug-fix commits".to_string(),
             "frequently changed and imported by 5 files".to_string(),
         ]
@@ -161,7 +161,7 @@ fn build_recommendations_is_deterministic_across_two_runs() {
     ];
     let dep = DepGraph::new();
     let coupling = CouplingMap::new();
-    let findings = [critical_finding("bug.ts", "be-db/update-delete-no-where")];
+    let findings = [critical_finding("bug.ts", "db/update-delete-no-where")];
     let input = BuildRecInput {
         nodes: &nodes,
         dep: &dep,

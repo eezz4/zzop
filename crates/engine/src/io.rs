@@ -23,8 +23,8 @@ use zzop_core::{IoConsume, IoFacts, IoProvide};
 /// concern: under per-file fusion every file is its own sole candidate (see [`extract_file_io`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IoOptions {
-    /// Identifier names treated as a Hono-style router (`<name>.get(...)`, `<name>.route(...)`)
-    /// by the router-mount fragment recognizer. Default: `["apiRoutes"]`.
+    /// Escape-hatch identifier allowlist for the router-mount recognizer — vocabulary-agnostic ROUTE rules only (`.get/.post/.put/.patch/.delete/.all`, `.route()`), not just Hono-style.
+    /// It does NOT confer `.use()` mounting: that is gated on `is_express`, which only the AST recognizer sets (`express()`/`express.Router()`/an imported `Router`). Default: `["apiRoutes"]`.
     pub router_names: Vec<String>,
 }
 

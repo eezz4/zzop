@@ -8,7 +8,7 @@ use super::RulePackDef;
 
 fn marker_line_pack() -> RulePackDef {
     rule_pack(
-        r#"{"id":"r","severity":"info","message":"m","suppress_marker":"as-ok","matcher":{"type":"line-scan","file_pattern":"\\.ts$","line_pattern":"\\bas\\b"}}"#,
+        r#"{"id":"as","severity":"info","message":"m","matcher":{"type":"line-scan","file_pattern":"\\.ts$","line_pattern":"\\bas\\b"}}"#,
     )
 }
 
@@ -89,7 +89,7 @@ fn no_marker_at_all_does_not_suppress() {
 
 fn marker_line_pack_sql() -> RulePackDef {
     rule_pack(
-        r#"{"id":"r","severity":"info","message":"m","suppress_marker":"as-ok","matcher":{"type":"line-scan","file_pattern":"\\.sql$","line_pattern":"\\bas\\b"}}"#,
+        r#"{"id":"as","severity":"info","message":"m","matcher":{"type":"line-scan","file_pattern":"\\.sql$","line_pattern":"\\bas\\b"}}"#,
     )
 }
 
@@ -120,7 +120,7 @@ fn dash_dash_marker_is_not_recognized_outside_a_sql_file() {
     // Same rule, same marker text, but a `.ts` file — `--` is not a comment there (`--x` is a
     // decrement), so the `--`-marker recognizer must never activate for it.
     let pack = rule_pack(
-        r#"{"id":"r","severity":"info","message":"m","suppress_marker":"as-ok","matcher":{"type":"line-scan","file_pattern":"\\.(ts|sql)$","line_pattern":"\\bas\\b"}}"#,
+        r#"{"id":"as","severity":"info","message":"m","matcher":{"type":"line-scan","file_pattern":"\\.(ts|sql)$","line_pattern":"\\bas\\b"}}"#,
     );
     let f = scan_pack(
         &pack,
@@ -157,7 +157,7 @@ fn dash_dash_unrelated_marker_text_does_not_suppress_in_a_sql_file() {
 
 fn marker_method_pack_sql() -> RulePackDef {
     rule_pack(
-        r#"{"id":"r","severity":"warning","message":"m","suppress_marker":"n+1-ok","matcher":{"type":"method-scan","file_pattern":"\\.sql$","patterns":[{"pattern":"\\bfor\\s*\\(","label":"loop"},{"pattern":"\\bfindOne\\(","label":"call"}],"trigger":"call"}}"#,
+        r#"{"id":"n+1","severity":"warning","message":"m","matcher":{"type":"method-scan","file_pattern":"\\.sql$","patterns":[{"pattern":"\\bfor\\s*\\(","label":"loop"},{"pattern":"\\bfindOne\\(","label":"call"}],"trigger":"call"}}"#,
     )
 }
 
@@ -188,7 +188,7 @@ fn dash_dash_marker_absent_leaves_method_scan_finding_intact_in_a_sql_file() {
 
 fn marker_method_pack() -> RulePackDef {
     rule_pack(
-        r#"{"id":"r","severity":"warning","message":"m","suppress_marker":"n+1-ok","matcher":{"type":"method-scan","file_pattern":"\\.ts$","patterns":[{"pattern":"\\bfor\\s*\\(","label":"loop"},{"pattern":"\\bfindOne\\(","label":"call"}],"trigger":"call"}}"#,
+        r#"{"id":"n+1","severity":"warning","message":"m","matcher":{"type":"method-scan","file_pattern":"\\.ts$","patterns":[{"pattern":"\\bfor\\s*\\(","label":"loop"},{"pattern":"\\bfindOne\\(","label":"call"}],"trigger":"call"}}"#,
     )
 }
 

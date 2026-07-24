@@ -34,6 +34,11 @@ pub(super) struct FilePassState {
     /// composed once after (path-paired so composition can sort for deterministic first-writer-wins).
     pub(super) trpc_fragment_pairs: Vec<(String, Vec<zzop_core::ProcedureRouterFragment>)>,
     pub(super) router_mount_pairs: Vec<(String, Vec<zzop_core::RouterMountFragment>)>,
+    /// Each file's own `const_map_fragment` (dotted-constant-name -> literal string value, e.g.
+    /// `"ControlKey.AUTHEN.getUserInfo" -> "/authen/getUserInfo"`), paired with its path — despite the
+    /// short name this is NOT a code/AST fragment, it's specifically the late-cross-file-consume-
+    /// resolution substrate `analyze::late_resolve_cross_file_consumes` re-resolves unresolved
+    /// `IoConsume`s against below.
     pub(super) const_fragment_pairs: Vec<(String, HashMap<String, String>)>,
     /// Same summary `analyze::assemble` builds natively — see `AnalyzeOutput::package_imports`.
     pub(super) package_import_files:

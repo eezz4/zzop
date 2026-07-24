@@ -76,7 +76,7 @@ fn redis_flush_ok_marker_above_the_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-redis");
     dir.write(
         "src/cache.ts",
-        "declare const client: any;\nexport async function resetCache() {\n  // redis-flush-ok: dedicated cache-reset job, vetted\n  await client.flushAll();\n}\n",
+        "declare const client: any;\nexport async function resetCache() {\n  // flushall-in-code-ok: dedicated cache-reset job, vetted\n  await client.flushAll();\n}\n",
     );
     let out = scan(&dir);
     assert!(

@@ -129,7 +129,7 @@ fn soft_delete_bypass_message_ends_with_the_exact_disable_hint() {
     assert!(
         msg.ends_with(
             "disable it via config `rules: { \"soft-delete-bypass\": \"off\" }` (embedders: \
-             `disabled_rules`) (native rules have no inline suppression marker)."
+             `disabled_rules`) (this rule has no inline suppression marker)."
         ),
         "unexpected message tail: {msg:?}"
     );
@@ -142,7 +142,7 @@ fn orderby_unindexed_message_ends_with_the_exact_disable_hint() {
     assert!(
         msg.ends_with(
             "disable this finding via config `rules: { \"orderby-unindexed\": \"off\" }` (embedders: \
-             `disabled_rules`) (native rules have no inline suppression marker)."
+             `disabled_rules`) (this rule has no inline suppression marker)."
         ),
         "unexpected message tail: {msg:?}"
     );
@@ -159,7 +159,7 @@ fn enum_string_drift_message_ends_with_the_exact_disable_hint() {
     assert!(
         msg.ends_with(
             "disable this finding via config `rules: { \"enum-string-drift\": \"off\" }` (embedders: \
-             `disabled_rules`) (native rules have no inline suppression marker)."
+             `disabled_rules`) (this rule has no inline suppression marker)."
         ),
         "unexpected message tail: {msg:?}"
     );

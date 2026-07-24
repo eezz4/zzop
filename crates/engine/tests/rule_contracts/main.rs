@@ -1,7 +1,7 @@
 //! Meta-tests — machine-enforced cross-cutting contracts every shipped rule (DSL and native) must honor.
 //!
-//! These contracts previously existed only as human convention (a prior audit found real drift: DSL rules
-//! shipped with no `suppress_marker`, rule messages that never told the reader how to exclude a finding,
+//! These contracts previously existed only as human convention (a prior audit found real drift: rule
+//! messages that never told the reader how to exclude a finding,
 //! and `docs/rules/catalog.md` totals out of sync with the actual pack/registry data). This file loads
 //! every shipped DSL pack (`rules/dsl/*.json`, via `zzop_core::load_dsl_packs`) and the native registry
 //! (`zzop_engine::register_all_native`, composing `zzop_rules_graph`/`zzop_rules_http`/
@@ -14,14 +14,13 @@
 //! summary of what a failing test here means.
 //!
 //! ## Contracts covered
-//! 1. **Marker presence + convention** (`every_dsl_rule_has_a_non_empty_suppress_marker`,
-//!    `suppress_markers_are_unique_within_each_pack`,
-//!    `every_suppress_marker_follows_the_dash_ok_naming_convention`) — every DSL rule has a non-empty
-//!    `suppress_marker`, no two rules in the same pack share one (co-suppression risk), and every marker
-//!    keeps the `-ok` suffix shape users learn from the first rule they suppress.
+//! 1. **Derived-marker uniqueness** (`derived_suppress_markers_are_globally_unique`) — markers are DERIVED
+//!    `<id>-ok` (`RuleDef::suppress_marker()`), so presence and the `-ok` shape are construction guarantees;
+//!    what still needs guarding is that no two rules — in any pack — derive the same marker (that would be a
+//!    cross-rule co-suppression), i.e. rule ids are globally unique.
 //! 2. **Message triple** (`every_dsl_rule_message_documents_how_to_exclude_it`) — every DSL rule's
-//!    `message` names its own suppress marker OR the literal `disabled_rules`/`disabledRules` string — the
-//!    "how to exclude" leg of the problem+fix+exclude finding contract.
+//!    `message` names its own derived marker (`<id>-ok`) OR the literal `disabled_rules`/`disabledRules`
+//!    string — the "how to exclude" leg of the problem+fix+exclude finding contract.
 //! 3. **Native message contract** (`native_rule_files_that_build_findings_mention_disabled_rules`,
 //!    `disable_hint_literal_args_are_known_ids_matching_the_files_own_findings`) — a
 //!    pragmatic grep-based proxy (native findings are built in code, not read from declarative data — see
@@ -50,7 +49,7 @@
 //!    shipped DSL rule's regex matches a keyword-shaped English word (`do`/`for`/`while`/`update`/`delete`/
 //!    `select`) as a bare `\bword\b` with no adjacent syntax anchor — the defect class that shipped live in
 //!    `perf/api-in-loop` (bare `\bdo\b` matched inside prose like `"logged in to do this"`) and
-//!    `be-security/sql-taint` (bare `UPDATE` matched inside prose), both fixed in the same commit that
+//!    `security/sql-taint` (bare `UPDATE` matched inside prose), both fixed in the same commit that
 //!    added this contract (a pragmatic textual-proximity proxy, not a regex semantics engine — see that
 //!    test's own doc for exactly what it can/cannot prove).
 //! 10. **Kebab-case id hygiene** (`rule_ids_are_kebab_case`) — every loaded DSL pack id, every loaded DSL
@@ -78,7 +77,7 @@
 //!     cross-checked against every shipped rule's matcher so a `file_pattern` can never silently admit an
 //!     environment whose required channel this engine does not project. A prior audit found this exact
 //!     fact had drifted from prose ("loop spans are TS-only") while the code moved on
-//!     (`parser/parser-go/src/lang/loop_spans.rs`, `go/go-goroutine-in-loop`). MINIMAL-EXISTENCE scope only
+//!     (`parser/parser-go/src/lang/loop_spans.rs`, `go/goroutine-in-loop`). MINIMAL-EXISTENCE scope only
 //!     — see that file's own module doc for the full claim boundary before reading a green run here as
 //!     anything more than "the wiring exists" / "the wiring is definitely absent".
 

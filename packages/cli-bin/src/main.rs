@@ -6,11 +6,12 @@
 //!   zzop analyze <path>              — analyze ONE repo/tree, print a JSON findings summary (Node-free).
 //!   zzop analyze-envelope <file>     — Mode A: analyze a Normalized-AST envelope file in place of native parsing.
 //!   zzop validate-envelope <file>    — offline "is this envelope well-formed?" report (exit 0 valid / 1 invalid).
-//!   zzop validate-rule-pack <file>   — offline "does this DSL pack load + regexes compile?" report (exit 0 / 1).
+//!   zzop validate-rule-pack <file>   — offline "does this DSL pack load, and can every rule fire?" report (exit 0 / 1).
 //!   zzop cross <path>...             — analyze 2+ trees and print the cross-layer join (zzop's headline).
 //!   zzop endpoint <pattern> <path>... — definitive "is io key X provided/consumed/joined?" query.
 //!   zzop endpoint <pattern> --config <path> — same query, trees defined by a zzop.config.jsonc.
 //!   zzop contract [<name>]           — list the embedded authoring contracts / print one to stdout.
+//!   zzop explain <rule-id>           — print one bundled DSL rule's compiled-in data to stdout.
 //!   zzop version | --version         — print this binary's version (equals the MCP serverInfo.version).
 //!   zzop help | --help | -h          — print the usage line plus one elaboration per subcommand (exit 0).
 //!
@@ -21,14 +22,14 @@ mod cli;
 
 /// The one usage line — printed to stdout by `--help` (exit 0) and to stderr by every malformed
 /// invocation (exit 2), so the two surfaces can never drift apart.
-const USAGE: &str = "usage: zzop <analyze <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path>... | cross --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | contract [<name>] | version>";
+const USAGE: &str = "usage: zzop <analyze <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path>... | cross --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | contract [<name>] | explain <rule-id> | version>";
 
 /// A one-line pointer at the bare-invocation/unknown-subcommand error path (exit 2): a bare `zzop` gives
 /// no hint that `help` exists, or that MCP is the sibling `zzop-mcp` binary (not a `zzop` subcommand).
 const BARE_INVOCATION_HINT: &str =
     "(run 'zzop help' for details; the MCP server is the 'zzop-mcp' binary)";
 
-use cli::{reject_flag_like_args, run_file_validate};
+use cli::{reject_flag_like_args, run_file_validate, run_lookup};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -238,6 +239,13 @@ fn main() {
                 }
             }
         },
+        // Read-only lookup over the DSL rule data compiled INTO this binary (`zzop_host::explain`, never
+        // `docs/rules/catalog.md` prose — see that module's doc). Fixed arity (unlike `contract`'s
+        // optional name): a rule id is always required. Same two-lane contract as `contract`: a
+        // dash-shaped/missing/extra id is a usage error (exit 2, `run_lookup`); a real-but-unexplainable
+        // id (unknown, ambiguous, a whole pack, or a native analysis id) is a runtime lookup failure
+        // (exit 1, `zzop_host::explain::explain`'s own `Err` message).
+        Some("explain") => run_lookup(&args, "explain <rule-id>", zzop_host::explain::explain),
         // The version surface: `server::version()` = `CARGO_PKG_VERSION`, the workspace release version,
         // shared with the `zzop-mcp` binary and MCP `initialize`, so all three can never disagree.
         Some("version") | Some("--version") => {
@@ -256,7 +264,7 @@ fn main() {
                 "  validate-envelope <envelope.json> — offline: is this envelope well-formed? print {{valid,issues}}, exit 0 valid / 1 invalid"
             );
             println!(
-                "  validate-rule-pack <pack.json> — offline: does this DSL rule pack load + every matcher regex compile? print {{valid,issues}}, exit 0/1"
+                "  validate-rule-pack <pack.json> — offline: does this DSL rule pack load, and can every rule in it actually fire? print {{valid,issues}}, exit 0/1"
             );
             println!("  cross <path>... | cross --config <path> — analyze 2+ trees, print the cross-layer join");
             println!(
@@ -264,6 +272,9 @@ fn main() {
             );
             println!(
                 "  contract [<name>] — no args lists the embedded doc resources; `contract <name>` prints one"
+            );
+            println!(
+                "  explain <rule-id> — print one bundled DSL rule's compiled-in data (full <pack>/<rule> id or an unambiguous bare id)"
             );
             println!("  version — print this binary's version (equals the MCP serverInfo.version)");
             println!(

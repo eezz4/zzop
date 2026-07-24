@@ -8,7 +8,7 @@
 //! proves, and its explicit distinction from "degraded" (which still runs line-scan rules).
 //!
 //! Loads the REAL shipped packs from `rules/dsl/` (not stubs) so this exercises two independently-shipped
-//! packs' rules at once: `be-db/empty-catch-on-write` (method-scan) and `be-security/raw-query-interpolation`
+//! packs' rules at once: `db/empty-catch-on-write` (method-scan) and `security/raw-query-interpolation`
 //! (line-scan) — proving the skip applies across matcher types and across packs, not just to the one rule
 //! the 500-char heuristic used to be hard-coded onto.
 
@@ -55,7 +55,7 @@ impl Drop for TempDir {
 
 /// Every real shipped pack under `rules/dsl/` — resolved from `CARGO_MANIFEST_DIR`
 /// (`crates/engine` -> up two -> repo root -> `rules/dsl`), same resolution shape
-/// `zzop_engine`'s own `lib.rs` test module (`be_security_java_pack`) and `analyze_cache.rs`'s
+/// `zzop_engine`'s own `lib.rs` test module (`security_java_pack`) and `analyze_cache.rs`'s
 /// `typescript_pack` already use.
 fn all_shipped_packs() -> Vec<RulePackDef> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/dsl");
@@ -69,8 +69,8 @@ fn all_shipped_packs() -> Vec<RulePackDef> {
 }
 
 /// A single fat line (6000+ chars, no newline) containing BOTH trigger shapes at once: a DB write followed
-/// by an empty `catch {}` in the same function (`be-db/empty-catch-on-write`, a method-scan rule) and a
-/// `$queryRawUnsafe` call (`be-security/raw-query-interpolation`, a line-scan rule). The long string literal
+/// by an empty `catch {}` in the same function (`db/empty-catch-on-write`, a method-scan rule) and a
+/// `$queryRawUnsafe` call (`security/raw-query-interpolation`, a line-scan rule). The long string literal
 /// (`bundled`) is only padding — 6000 chars deliberately trips the classifier's ABSOLUTE prong (5000+ char
 /// single line, minified regardless of file-byte ratio), so this fixture stays classified minified no
 /// matter what other lines future edits add to it; none of the padding is itself part of either trigger
@@ -191,11 +191,11 @@ fn the_same_trigger_shapes_on_normal_length_lines_still_fire() {
         .map(|f| f.rule_id.as_str())
         .collect();
     assert!(
-        normal_findings.contains(&"be-db/empty-catch-on-write"),
+        normal_findings.contains(&"db/empty-catch-on-write"),
         "expected empty-catch-on-write to fire on the normal-length control file, got: {normal_findings:?}"
     );
     assert!(
-        normal_findings.contains(&"be-security/raw-query-interpolation"),
+        normal_findings.contains(&"security/raw-query-interpolation"),
         "expected raw-query-interpolation to fire on the normal-length control file, got: {normal_findings:?}"
     );
 }
@@ -213,7 +213,7 @@ fn one_long_string_literal_line_in_a_normal_file_does_not_cost_it_dsl_coverage()
         out.findings
             .iter()
             .any(|f| f.file == "src/prompt-tool.mjs"
-                && f.rule_id == "be-security/raw-query-interpolation"),
+                && f.rule_id == "security/raw-query-interpolation"),
         "expected raw-query-interpolation to still fire on the one-long-line normal file, got: {:?}",
         out.findings
     );

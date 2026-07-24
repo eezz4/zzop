@@ -57,24 +57,21 @@ fn integer_literal_strict_equality_is_not_flagged() {
 
 #[test]
 fn money_named_float_comparison_fires_only_float_money_compare_not_float_equality() {
-    // Boundary: be-db/float-money-compare already owns money-named-identifier-vs-float-literal — this
-    // dual-pack fixture proves `price === 19.99` fires exactly one finding total (from be-db), and a
+    // Boundary: db/float-money-compare already owns money-named-identifier-vs-float-literal — this
+    // dual-pack fixture proves `price === 19.99` fires exactly one finding total (from db), and a
     // non-money-named comparison (`ratio === 0.1`) fires exactly one finding total (from typescript).
     let files: &[(&str, &str)] = &[(
         "money.ts",
         "export function isBasicPlan(price: number, ratio: number) {\n  const a = price === 19.99;\n  const b = ratio === 0.1;\n  return a || b;\n}\n",
     )];
-    let f = analyze_with_packs(files, typescript_and_be_db_packs());
+    let f = analyze_with_packs(files, typescript_and_db_packs());
 
     let money_line = 2u32;
     let ratio_line = 3u32;
 
     let on_money_line: Vec<&Finding> = f.iter().filter(|x| x.line == money_line).collect();
     assert_eq!(on_money_line.len(), 1, "{f:?}");
-    assert_eq!(
-        on_money_line[0].rule_id, "be-db/float-money-compare",
-        "{f:?}"
-    );
+    assert_eq!(on_money_line[0].rule_id, "db/float-money-compare", "{f:?}");
 
     let on_ratio_line: Vec<&Finding> = f.iter().filter(|x| x.line == ratio_line).collect();
     assert_eq!(on_ratio_line.len(), 1, "{f:?}");
@@ -89,7 +86,7 @@ fn float_eq_ok_marker_suppresses_the_finding() {
     let f = rule_findings(
         &[(
             "calc.ts",
-            "export function isDone(ratio: number) {\n  return ratio === 0.1; // float-eq-ok: tolerance checked elsewhere\n}\n",
+            "export function isDone(ratio: number) {\n  return ratio === 0.1; // float-equality-ok: tolerance checked elsewhere\n}\n",
         )],
         "float-equality",
     );
@@ -181,7 +178,7 @@ fn always_false_ok_marker_suppresses_the_finding() {
     let f = rule_findings(
         &[(
             "v.ts",
-            "export function isBad(x: number) {\n  // always-false-ok: legacy guard, dead code path\n  return x === NaN;\n}\n",
+            "export function isBad(x: number) {\n  // always-false-comparison-ok: legacy guard, dead code path\n  return x === NaN;\n}\n",
         )],
         "always-false-comparison",
     );
@@ -255,7 +252,7 @@ fn numeric_string_cmp_ok_marker_suppresses_the_finding() {
     let f = rule_findings(
         &[(
             "v.js",
-            "export function cmp(x) {\n  return x < '9'; // numeric-string-cmp-ok: x is itself a formatted string here\n}\n",
+            "export function cmp(x) {\n  return x < '9'; // numeric-string-comparison-ok: x is itself a formatted string here\n}\n",
         )],
         "numeric-string-comparison",
     );

@@ -8,7 +8,9 @@
 //! one 3-line transform — see each crate's own module doc: `parser-prisma/src/analysis.rs`'s
 //! `accessor_casing` doc and `parser-sql/src/extract.rs`'s module doc "Casing"). Nothing besides this
 //! test enforces the twins agree: a future edit to either one alone would silently break the `db-table`
-//! join for any non-lowercase table/model name. Same T1-twin-pin pattern as
+//! join for any non-lowercase table/model name. The last two tests extend the same pin to `@@map`, where
+//! the accessor key and the physical-table key necessarily differ and the schema side provides BOTH (see
+//! `zzop_parser_prisma::analysis::db_table_provide_keys`). Same T1-twin-pin pattern as
 //! `crates/engine/src/analyze/native_rules/prisma_client_getter_consistency_tests.rs` (parser-typescript's
 //! `PRISMA_CLIENT_GETTER` == parser-prisma's `DEFAULT_PRISMA_CLIENT_GETTER_FN`), just living in
 //! `tests/` instead of `src/` since both producers here are public API of crates `zzop-engine` already
@@ -62,4 +64,50 @@ fn multi_word_pascal_table_name_produces_the_identical_provide_key_on_both_sides
          or a Prisma-generated migration's CREATE TABLE would ride a different key than the schema's \
          own model provide"
     );
+}
+
+/// Every `table:` key `build_common_ir` provides for `schema`, in emission order — the multi-key
+/// counterpart of `prisma_table_key` above (a `@@map`ed model provides two).
+fn prisma_table_keys(schema: &str) -> Vec<String> {
+    let ir = zzop_parser_prisma::build_common_ir(
+        "svc",
+        &[("schema.prisma".to_string(), schema.to_string())],
+    );
+    ir.ir
+        .io
+        .expect("non-empty schema must produce io provides")
+        .provides
+        .into_iter()
+        .map(|p| p.key)
+        .collect()
+}
+
+#[test]
+fn an_at_mapped_model_provides_a_key_equal_to_the_ddl_key_for_its_physical_table() {
+    // The gap this pin closes: `@@map` renames the physical table, so the model's ACCESSOR key
+    // (`table:article`, what `prisma.article...` consumes spell) can no longer equal the DDL key. The
+    // schema side therefore provides BOTH — and the second one must be byte-identical to what
+    // parser-sql independently produces for `CREATE TABLE articles`, or the Prisma layer and the
+    // migration layer describe one physical table under two un-joinable keys.
+    let sql_key = sql_table_key("CREATE TABLE articles (id TEXT);\n");
+    let prisma_keys =
+        prisma_table_keys("model Article {\n  id String @id\n  @@map(\"articles\")\n}\n");
+    assert_eq!(sql_key, "table:articles");
+    assert_eq!(prisma_keys, vec!["table:article", "table:articles"]);
+    assert!(
+        prisma_keys.contains(&sql_key),
+        "the @@map-derived provide key must equal parser-sql's key for the mapped table, got: \
+         {prisma_keys:?} vs {sql_key}"
+    );
+}
+
+#[test]
+fn a_quoted_pascal_at_map_target_and_its_quoted_ddl_name_land_on_one_key() {
+    // Both sides run `zzop_core::db_table_channel_casing` as their LAST step, so a `@@map("Articles")`
+    // and a Prisma-generated `CREATE TABLE "Articles"` still meet.
+    let sql_key = sql_table_key("CREATE TABLE \"Articles\" (id TEXT);\n");
+    let prisma_keys =
+        prisma_table_keys("model Article {\n  id String @id\n  @@map(\"Articles\")\n}\n");
+    assert_eq!(sql_key, "table:articles");
+    assert!(prisma_keys.contains(&sql_key), "got: {prisma_keys:?}");
 }

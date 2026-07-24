@@ -175,7 +175,13 @@ pub struct ApiEndpoint {
 }
 
 /// The minimal IR a parser must produce.
-/// `dep` = internal import edges, `symbols` = exported declarations, `loc` = rel -> non-blank/non-comment line count.
+/// `dep` = internal import edges, `symbols` = exported declarations, `loc` = rel -> RAW physical line
+/// count (`text.split('\n').count()`, matching `zzop_parser_typescript::count_loc`) — blank lines,
+/// comment-only lines, and lines inside a block comment/multi-line string all count. It is NOT a
+/// "meaningful code lines" count the name might suggest; nothing here excludes blank/comment lines.
+/// ONE shipped parser deviates and it is not a bug to "fix" silently: `parser-prisma` fills this from its
+/// own `count_schema_loc`, which DOES drop blank and `//`-comment lines. Read a Prisma tree's `loc` as
+/// meaningful-lines; every other parser's as raw physical lines.
 /// `io` (optional) = the parser projects its framework boundaries to normalized contract keys (cross-layer join input).
 /// `#[serde(rename_all = "camelCase")]` is a no-op today (every field is one word) — kept for
 /// consistency with every other output-facing type in this crate.

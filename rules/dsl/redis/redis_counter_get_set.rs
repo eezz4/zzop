@@ -1,6 +1,6 @@
 use super::{hits, scan, TempDir};
 
-// --- redis-counter-get-set ---
+// --- counter-get-set ---
 
 #[test]
 fn read_then_increment_and_set_counter_is_flagged() {
@@ -10,7 +10,7 @@ fn read_then_increment_and_set_counter_is_flagged() {
         "import { redis } from \"./redis\";\nexport async function bumpHitCount(key: string) {\n  const n = await redis.get(key);\n  await redis.set(key, Number(n) + 1);\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "redis-counter-get-set");
+    let h = hits(&out, "counter-get-set");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 4);
 }
@@ -23,7 +23,7 @@ fn read_then_parseint_plus_one_set_counter_is_flagged() {
         "import { redis } from \"./redis\";\nexport async function bumpViewCount(key: string) {\n  const raw = await redis.get(key);\n  await redis.set(key, parseInt(raw as string) + 1);\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "redis-counter-get-set");
+    let h = hits(&out, "counter-get-set");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 4);
 }
@@ -42,7 +42,7 @@ fn arith_set_shape_alongside_a_real_incr_call_is_vetoed_by_absent() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "redis-counter-get-set").is_empty(),
+        hits(&out, "counter-get-set").is_empty(),
         "{:?}",
         out.findings
     );
@@ -60,7 +60,7 @@ fn plain_incr_with_no_arithmetic_set_at_all_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "redis-counter-get-set").is_empty(),
+        hits(&out, "counter-get-set").is_empty(),
         "{:?}",
         out.findings
     );
@@ -71,11 +71,11 @@ fn redis_counter_ok_marker_above_the_set_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-redis");
     dir.write(
         "src/hitCounterSuppressed.ts",
-        "import { redis } from \"./redis\";\nexport async function bumpHitCount(key: string) {\n  const n = await redis.get(key);\n  // redis-counter-ok: single-writer cron job, no concurrent access possible\n  await redis.set(key, Number(n) + 1);\n}\n",
+        "import { redis } from \"./redis\";\nexport async function bumpHitCount(key: string) {\n  const n = await redis.get(key);\n  // counter-get-set-ok: single-writer cron job, no concurrent access possible\n  await redis.set(key, Number(n) + 1);\n}\n",
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "redis-counter-get-set").is_empty(),
+        hits(&out, "counter-get-set").is_empty(),
         "{:?}",
         out.findings
     );
@@ -93,7 +93,7 @@ fn hyphen_suffixed_string_key_cache_set_is_not_a_counter_and_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "redis-counter-get-set").is_empty(),
+        hits(&out, "counter-get-set").is_empty(),
         "{:?}",
         out.findings
     );

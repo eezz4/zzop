@@ -1,6 +1,6 @@
 use super::{hits, scan, TempDir};
 
-// --- redis-lock-get-then-set ---
+// --- lock-get-then-set ---
 
 #[test]
 fn check_then_set_lock_is_flagged() {
@@ -10,7 +10,7 @@ fn check_then_set_lock_is_flagged() {
         "import { redis } from \"./redis\";\nexport async function runJob() {\n  if (!(await redis.get(\"lock:job\"))) {\n    await redis.set(\"lock:job\", 1);\n  }\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "redis-lock-get-then-set");
+    let h = hits(&out, "lock-get-then-set");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 4);
 }
@@ -23,7 +23,7 @@ fn exists_then_set_lock_is_flagged() {
         "import { redis } from \"./redis\";\nexport async function runJob() {\n  const held = await redis.exists(\"lock:job\");\n  if (!held) {\n    await redis.set(\"lock:job\", 1);\n  }\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "redis-lock-get-then-set");
+    let h = hits(&out, "lock-get-then-set");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 5);
 }
@@ -39,7 +39,7 @@ fn cache_aside_read_through_with_no_lock_token_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "redis-lock-get-then-set").is_empty(),
+        hits(&out, "lock-get-then-set").is_empty(),
         "{:?}",
         out.findings
     );
@@ -56,7 +56,7 @@ fn set_nx_atomic_lock_acquire_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "redis-lock-get-then-set").is_empty(),
+        hits(&out, "lock-get-then-set").is_empty(),
         "{:?}",
         out.findings
     );
@@ -67,11 +67,11 @@ fn redis_lock_atomic_ok_marker_above_the_set_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-redis");
     dir.write(
         "src/jobLockSuppressed.ts",
-        "import { redis } from \"./redis\";\nexport async function runJob() {\n  if (!(await redis.get(\"lock:job\"))) {\n    // redis-lock-atomic-ok: acquire is delegated to a vetted redlock wrapper not visible to regex\n    await redis.set(\"lock:job\", 1);\n  }\n}\n",
+        "import { redis } from \"./redis\";\nexport async function runJob() {\n  if (!(await redis.get(\"lock:job\"))) {\n    // lock-get-then-set-ok: acquire is delegated to a vetted redlock wrapper not visible to regex\n    await redis.set(\"lock:job\", 1);\n  }\n}\n",
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "redis-lock-get-then-set").is_empty(),
+        hits(&out, "lock-get-then-set").is_empty(),
         "{:?}",
         out.findings
     );
@@ -89,7 +89,7 @@ fn blocklist_cache_get_then_set_is_not_a_lock_and_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "redis-lock-get-then-set").is_empty(),
+        hits(&out, "lock-get-then-set").is_empty(),
         "{:?}",
         out.findings
     );

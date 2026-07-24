@@ -208,7 +208,10 @@ pub(super) fn run(
     );
 
     // Whole-tree `Matcher::IoScan` DSL pass — runs last, now that `decorator_guarded` (just above) is
-    // fully accumulated, so `io_scan::run` can mint from it. See that fn's doc.
+    // fully accumulated, so `io_scan::run` can mint from it. See that fn's doc. Takes `rule_time` for the
+    // same reason every rule call above does: its rules are profiled into the shared accumulator, keyed
+    // `"{pack}/{rule}"` (it reads `config.profile_rules` itself rather than taking the `profile` bool,
+    // since it also branches its evaluation shape on it).
     global_findings.extend(io_scan::run(
         root,
         config,
@@ -216,6 +219,7 @@ pub(super) fn run(
         io_consumes,
         attribute_store,
         &decorator_guarded,
+        rule_time,
     ));
 
     global_findings

@@ -7,7 +7,7 @@
 //! by any unmount/abort guard token (`AbortController`/`AbortSignal`/`isMounted`/`mountedRef`/`signal:`/
 //! `cancelled`/`didCancel`) anywhere in that function's body. This is a co-occurrence heuristic, not proof
 //! of order or of unmount risk — see the rule's own message and the fixtures below for the accepted
-//! false-positive/false-negative shapes. `// setstate-await-ok` suppresses it.
+//! false-positive/false-negative shapes. `// setstate-after-await-unmounted-ok` suppresses it.
 
 use std::fs;
 use std::path::{Path, PathBuf};

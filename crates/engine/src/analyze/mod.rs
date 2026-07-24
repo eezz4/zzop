@@ -34,7 +34,8 @@ pub(crate) use compose::{
 // both entry points).
 pub(crate) use diagnostics::{
     compute_dsl_scope, no_applicable_dsl_rule_warning, rule_overrides_applied, run_diagnostics,
-    unmatched_global_exclude_warnings, unmatched_suppression_warnings, zero_packs_warning,
+    uncompilable_rule_warnings, unmatched_global_exclude_warnings, unmatched_suppression_warnings,
+    zero_packs_warning,
 };
 // `envelope::analyze_envelope` also imports these four native-analysis delegates by this path (same
 // convention `circular_findings`'s own doc describes) — re-exported, not merely imported, so they stay

@@ -126,6 +126,108 @@ fn public_worklet_loaded_by_add_module_is_not_dead_but_orphan_and_script_stay() 
     );
 }
 
+/// The canonical bundler worker idiom with the `new URL(...)` NESTED as `new Worker`'s first argument
+/// (`new Worker(new URL("./worker.ts", import.meta.url), { type: "module" })`) — the shape the backlog FP
+/// report named. `new Worker`'s own first-arg capture sees a non-literal here, so the reference is only
+/// visible through the nested `new URL` visit. Both the module-relative worker and a `../`-relative
+/// `SharedWorker` must drop out of `dead-candidates` without becoming false `unreachable` islands, while a
+/// sibling module nobody references at all MUST stay flagged (never-over-suppress control).
+#[test]
+fn nested_new_worker_new_url_is_not_dead_but_unreferenced_sibling_stays() {
+    let dir = TempDir::new("zzop-engine-assetref-nested");
+    dir.write("src/main.ts", "import { boot } from './boot';\nboot();\n");
+    dir.write(
+        "src/boot.ts",
+        "export function boot() {\n  \
+         const w = new Worker(new URL(\"./worker.ts\", import.meta.url), { type: \"module\" });\n  \
+         const s = new SharedWorker(new URL(\"../shared/bus.ts\", import.meta.url));\n  \
+         return [w, s];\n}\n",
+    );
+    dir.write("src/worker.ts", "self.onmessage = () => {};\nexport {};\n");
+    dir.write("shared/bus.ts", "export const bus = 1;\n");
+    // Nothing references this at all — it MUST stay a dead-candidate, or the fix is a blanket suppression.
+    dir.write("src/stale.ts", "export const stale = 1;\n");
+
+    let out = analyze_tree(dir.path(), &config());
+    let dead = dead_candidates(&out);
+    let unreach = unreachable(&out);
+
+    for live in ["src/worker.ts", "shared/bus.ts"] {
+        assert!(
+            !dead.contains(&live.to_string()),
+            "{live} is referenced by a nested new Worker(new URL(_, import.meta.url)) and must NOT be a dead-candidate, got dead: {dead:?}"
+        );
+        assert!(
+            !unreach.contains(&live.to_string()),
+            "{live} must NOT be a false unreachable island (extra_entries seed), got unreachable: {unreach:?}"
+        );
+    }
+    assert!(
+        dead.contains(&"src/stale.ts".to_string()),
+        "an unreferenced module must STAY a dead-candidate, got dead: {dead:?}"
+    );
+}
+
+/// The OTHER half of the bundler worker idiom: the constructor import
+/// (`import MyWorker from "./worker?worker"`, Vite's documented form). The `?worker` resource query is a
+/// bundler instruction, not part of the filename, so the specifier must resolve to `src/worker.ts` like
+/// any other relative import — otherwise the worker entry has no importer and false-fires
+/// `dead-candidates`. `?url`/`?raw` (asset queries) resolve the same way; an unreferenced sibling must
+/// still be flagged.
+#[test]
+fn resource_query_import_resolves_the_worker_entry() {
+    let dir = TempDir::new("zzop-engine-assetref-query");
+    dir.write(
+        "src/main.ts",
+        "import MyWorker from './worker?worker';\nimport Shared from './bus?sharedworker';\nimport css from './style.ts?url';\nnew MyWorker();\nnew Shared();\nconsole.log(css);\n",
+    );
+    dir.write("src/worker.ts", "self.onmessage = () => {};\nexport {};\n");
+    dir.write("src/bus.ts", "export const bus = 1;\n");
+    dir.write("src/style.ts", "export const style = 1;\n");
+    dir.write("src/stale.ts", "export const stale = 1;\n");
+
+    let out = analyze_tree(dir.path(), &config());
+    let dead = dead_candidates(&out);
+    let unreach = unreachable(&out);
+
+    for live in ["src/worker.ts", "src/bus.ts", "src/style.ts"] {
+        assert!(
+            !dead.contains(&live.to_string()),
+            "{live} is imported with a bundler resource query and must NOT be a dead-candidate, got dead: {dead:?}"
+        );
+        assert!(
+            !unreach.contains(&live.to_string()),
+            "{live} must NOT be unreachable — it is imported by the entry, got unreachable: {unreach:?}"
+        );
+    }
+    assert!(
+        dead.contains(&"src/stale.ts".to_string()),
+        "an unreferenced module must STAY a dead-candidate, got dead: {dead:?}"
+    );
+}
+
+/// Never-guess bound for the worker shape: a COMPUTED worker URL
+/// (`new Worker(new URL(name, import.meta.url))`) yields no reference, so a module that merely LOOKS like
+/// it could be that worker is still reported dead. Guessing here would suppress real dead code tree-wide.
+#[test]
+fn computed_worker_url_does_not_revive_a_candidate() {
+    let dir = TempDir::new("zzop-engine-assetref-computed");
+    dir.write("src/main.ts", "import { boot } from './boot';\nboot();\n");
+    dir.write(
+        "src/boot.ts",
+        "export function boot(name: string) {\n  \
+         return new Worker(new URL(name, import.meta.url), { type: \"module\" });\n}\n",
+    );
+    dir.write("src/worker.ts", "self.onmessage = () => {};\nexport {};\n");
+
+    let out = analyze_tree(dir.path(), &config());
+    let dead = dead_candidates(&out);
+    assert!(
+        dead.contains(&"src/worker.ts".to_string()),
+        "a computed worker URL must not revive anything (never-guess), got dead: {dead:?}"
+    );
+}
+
 /// The relative-resolution branch: `new URL("./worker.ts", import.meta.url)` (the Vite worker/asset
 /// idiom) resolves the sibling like a normal module import. The worker file, referenced ONLY this way,
 /// must drop out of `dead-candidates` and not become a false `unreachable` island.

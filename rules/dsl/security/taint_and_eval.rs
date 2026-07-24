@@ -114,7 +114,7 @@ fn taint_ok_marker_directly_above_the_sink_suppresses_the_finding() {
     let dir = TempDir::new("zzop-security");
     dir.write(
         "marked.ts",
-        "import type { Context } from \"hono\";\nexport const h = async (c: Context) => {\n  const cmd = c.req.query(\"cmd\");\n  // taint-ok: admin only, internal tooling\n  eval(cmd);\n  return c.json({});\n};\n",
+        "import type { Context } from \"hono\";\nexport const h = async (c: Context) => {\n  const cmd = c.req.query(\"cmd\");\n  // taint-flow-ok: admin only, internal tooling\n  eval(cmd);\n  return c.json({});\n};\n",
     );
     let out = scan(&dir);
     assert!(hits(&out, "taint-flow").is_empty(), "{:?}", out.findings);
@@ -257,7 +257,7 @@ fn eval_dynamic_ok_marker_above_the_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-security");
     dir.write(
         "sandboxed.ts",
-        "declare const pluginCode: string;\nexport function run() {\n  // eval-dynamic-ok: sandboxed plugin worker, no user-controlled input\n  eval(pluginCode);\n}\n",
+        "declare const pluginCode: string;\nexport function run() {\n  // eval-dynamic-code-ok: sandboxed plugin worker, no user-controlled input\n  eval(pluginCode);\n}\n",
     );
     let out = scan(&dir);
     assert!(

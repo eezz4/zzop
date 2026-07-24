@@ -5,3 +5,10 @@
 # repo-wide `* text=auto` to keep this a targeted fix (no mass renormalization).
 scripts/policy-census.txt text eol=lf
 docs/adapters/*.fixture.json text eol=lf
+
+# The plugin's SessionStart hook, pinned for the same reason in a nastier place: Claude Code clones
+# this repo as a marketplace onto the USER's machine, and on Windows (autocrlf on by default in Git
+# for Windows) that checkout would rewrite the script as CRLF. A `#!/usr/bin/env bash\r` shebang is
+# the classic "bad interpreter" failure, on exactly the platform where this hook is already the most
+# fragile — and the hook was verified working as LF, so pin what was tested.
+.claude-plugin/hooks/*.sh text eol=lf

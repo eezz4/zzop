@@ -36,7 +36,8 @@
 //! Attribute ABSENCE means "no guard witnessed by either channel", not "proven unguarded" — a handler can be
 //! naturally idempotent in a way neither channel expresses (a deterministic upsert keyed on a client-supplied
 //! id, a database unique constraint that silently no-ops on conflict, ...) and this rule has no way to see
-//! that. The per-site disable marker remains the escape hatch for a handler known-idempotent by inspection.
+//! that. This rule honors NO inline marker (see this module's parent doc) — for a handler known-idempotent
+//! by inspection the escape hatch is injecting the `idempotency-guarded` attribute, or a config `exclude`.
 
 use std::collections::{BTreeMap, BTreeSet};
 

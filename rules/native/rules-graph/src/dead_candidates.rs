@@ -58,6 +58,12 @@
 //! exemption in `dead_exports` — a generated file is regenerated, not hand-edited, so flagging it dead is
 //! non-actionable for both. Native (on-disk) analysis path only; the envelope/Mode-A path can't read file
 //! heads, see that call site.
+//!
+//! **vs. [`crate::unreachable`]**: disjoint by construction, not merely similarly named. This module only
+//! ever flags a file with ZERO importers (`fan_in == 0` — nothing in the tree points at it at all);
+//! `unreachable` only ever flags a file with ONE OR MORE importers (`fan_in > 0`) that are themselves
+//! unreachable from any entrypoint — a "closed island" of files that reference each other but that nothing
+//! live reaches. A given file can therefore never be flagged by both.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;

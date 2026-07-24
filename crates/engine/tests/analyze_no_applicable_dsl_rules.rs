@@ -50,7 +50,7 @@ impl Drop for TempDir {
 /// `all_shipped_packs` uses. None of the bundled packs carry a `.rs`-matching `file_pattern` (verified by
 /// inspection: every shipped `file_pattern` targets `.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs`/`.java`/
 /// `.jsp`/`.go`/... — no Rust extension anywhere), which is exactly the real-world gap this warning
-/// exists to self-report. (Go WAS this gap too, until the `go` pack's `go-goroutine-in-loop` rule shipped
+/// exists to self-report. (Go WAS this gap too, until the `go` pack's `goroutine-in-loop` rule shipped
 /// with a `.go$` `file_pattern` — see `go_only_tree_with_default_packs_now_has_an_applicable_dsl_rule`
 /// below.)
 fn all_shipped_packs() -> Vec<RulePackDef> {
@@ -95,7 +95,7 @@ fn rust_only_tree_with_default_packs_gets_the_no_applicable_dsl_rule_warning() {
 }
 
 /// Closes the gap the test above (and this file's module doc example) used to document for Go too: the
-/// `go` pack's `go-goroutine-in-loop` rule (`(?i)\.go$` `file_pattern`) now makes a Go-only tree
+/// `go` pack's `goroutine-in-loop` rule (`(?i)\.go$` `file_pattern`) now makes a Go-only tree
 /// applicable, so the D16 self-report must NOT fire for one, the same as the `.ts` case below.
 #[test]
 fn go_only_tree_with_default_packs_now_has_an_applicable_dsl_rule() {

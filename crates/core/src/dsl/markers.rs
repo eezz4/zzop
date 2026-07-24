@@ -1,8 +1,11 @@
-//! Shared helpers for line-scan and method-scan evaluation: suppress-marker compilation/matching and
-//! `require_file_all`/`require_file_absent` compilation.
+//! Shared helpers for line-scan and method-scan evaluation: suppress-marker compilation and matching.
+//! Author-written pattern fields compile through `diagnostics::RuleDiag` instead, so their failures are
+//! reported rather than silently skipped; the markers here are DERIVED from the rule id, so they have no
+//! author-facing field name to report and stay plain `Option` returns.
 
-/// Builds the regex for `RuleDef::suppress_marker` — matches a `//` comment naming the marker (regex-escaped
-/// so metacharacters like `n+1-ok`'s `+` match literally), optionally followed by `:` and free text.
+/// Builds the regex for the derived `RuleDef::suppress_marker()` (`<id>-ok`) — matches a `//` comment
+/// naming the marker (regex-escaped; derived markers are `<kebab-id>-ok` with no metacharacters, so the
+/// escape is defensive), optionally followed by `:` and free text.
 pub(super) fn compile_marker(marker: &str) -> Option<regex::Regex> {
     regex::Regex::new(&format!(r"//\s*{}\b", regex::escape(marker))).ok()
 }
@@ -16,7 +19,7 @@ pub(super) fn compile_marker_sql(marker: &str) -> Option<regex::Regex> {
 
 /// Line-comment-neutral marker for the whole-tree io-scan pass, whose anchor lines span every language
 /// an `http` provide can come from: accepts `//` (TS/JS/Java/Go/C#) AND `#` (Python) comment leaders —
-/// a `# auth-gate-ok` on a FastAPI route line suppresses exactly like `// auth-gate-ok` on an Express
+/// a `# auth-gates-ok` on a FastAPI route line suppresses exactly like `// auth-gates-ok` on an Express
 /// one. `--` is deliberately NOT included (no `.sql` file produces route provides; see
 /// `compile_marker_sql`'s isolation note). `#` cannot false-fire in JS/TS: a marker contains `-`, which
 /// no `#private` field or hex literal continues with.
@@ -31,11 +34,6 @@ pub(super) fn is_sql_file(rel: &str) -> bool {
         .extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("sql"))
-}
-
-/// Compiles `require_file_all`. `None` when any pattern fails to compile, skipping the whole rule.
-pub(super) fn compile_require_all(patterns: &[String]) -> Option<Vec<regex::Regex>> {
-    patterns.iter().map(|p| regex::Regex::new(p).ok()).collect()
 }
 
 /// How far above a finding a `// <marker>-ok` comment still suppresses it, one uniform window across every

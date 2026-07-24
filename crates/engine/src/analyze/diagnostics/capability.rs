@@ -1,6 +1,11 @@
-//! Capability self-reports with a fixed message each: git-not-requested, zero-DSL-packs, and the
-//! per-extension "bring an adapter" disclosure. Message strings are a user-visible contract (docs
-//! and tests pin their shape) — extend in the existing voice, never rewrite the pinned head.
+//! Capability self-reports, one fixed message shape each: git-not-requested, zero-DSL-packs,
+//! dead-rule (uncompilable OR structurally empty), no-applicable-DSL-rule, and the per-extension
+//! "bring an adapter" disclosure. Message strings are a user-visible contract (docs and tests pin
+//! their shape) — extend in the existing voice, never rewrite the pinned head.
+//!
+//! Reach differs by report: the dead-rule and no-applicable ones are config-derived, so they fire on
+//! `analyze_envelope` too; git-not-requested and the per-extension disclosure need a filesystem walk
+//! that path never performs. `docs/modules/facade.md` states that split for consumers.
 
 use std::collections::BTreeMap;
 
@@ -35,6 +40,37 @@ pub(crate) fn zero_packs_warning(config: &EngineConfig) -> Option<String> {
     Some(format!(
         "no DSL rule packs loaded: only the {native_count} built-in native analyses ran. If you expected the bundled packs, reinstall/check the package (the bundled packs directory may be missing); to add your own, set `packs: {{ extraDirs: [...] }}` in zzop.config.jsonc (embedders: `packsDir`)."
     ))
+}
+
+/// Every loaded rule whose own pattern will not compile, as one warning line each. A rule like that is
+/// not "quiet" — it is DEAD: the evaluator skips it and the run reports clean, which is exactly the
+/// misleading-diagnosis failure this engine refuses to commit. `validate-rule-pack` catches it ahead of a
+/// scan, but nothing forces that call: an inline `packDefs` entry, a `packsDir` pack, or a bundled pack
+/// all reach the evaluator unvalidated.
+///
+/// Derived from `zzop_core::pack_regex_issues`, the same judgment `validate-rule-pack` reports (regex
+/// fields AND the two structural dead-rule shapes), over the LOADED pack set — so it names a rule that
+/// can never fire even when no file this run visited would have matched its `file_pattern` anyway.
+/// (`zzop_core::dsl::RuleDiag` reports the narrower run-scoped fact from the compile sites themselves;
+/// see `dsl::eval_pack`'s doc for why the shipped engine discloses at load scope instead.)
+///
+/// `packs` is the LOADED set, before `disabled_rules` gating — the same convention `compute_dsl_scope`
+/// documents. So a rule inside a wholly disabled pack is still named here: the message says only that
+/// THIS rule cannot fire, never that the rest of the pack is running.
+///
+/// One line per bad FIELD, not per rule: a rule with two uncompilable patterns produces two lines, each
+/// naming its own field. That is the shape `validate-rule-pack` has always emitted and what an author
+/// fixing patterns one at a time wants.
+pub(crate) fn uncompilable_rule_warnings(packs: &[zzop_core::RulePackDef]) -> Vec<String> {
+    packs
+        .iter()
+        .flat_map(zzop_core::pack_regex_issues)
+        .map(|issue| {
+            format!(
+                "{issue} — that rule is SKIPPED and can never fire; the pack's other rules are unaffected by it. Run `zzop validate-rule-pack <pack.json>` to catch this before a scan."
+            )
+        })
+        .collect()
 }
 
 /// Per-pack DSL applicability census (D16 follow-up): for each loaded pack, how many of this tree's

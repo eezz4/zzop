@@ -1,6 +1,6 @@
 use crate::{hits, scan, TempDir};
 
-// --- sql-delete-no-where (critical: complete-literal anchor, never-guess) ---
+// --- delete-no-where (critical: complete-literal anchor, never-guess) ---
 
 #[test]
 fn delete_from_closed_literal_with_no_where_is_flagged() {
@@ -10,7 +10,7 @@ fn delete_from_closed_literal_with_no_where_is_flagged() {
         "export async function purge(db: any) {\n  return db.query(\"DELETE FROM users\");\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "sql-delete-no-where");
+    let h = hits(&out, "delete-no-where");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 2);
 }
@@ -24,7 +24,7 @@ fn delete_from_with_where_clause_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "sql-delete-no-where").is_empty(),
+        hits(&out, "delete-no-where").is_empty(),
         "{:?}",
         out.findings
     );
@@ -40,7 +40,7 @@ fn delete_from_template_interpolation_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "sql-delete-no-where").is_empty(),
+        hits(&out, "delete-no-where").is_empty(),
         "{:?}",
         out.findings
     );
@@ -55,7 +55,7 @@ fn delete_from_string_concatenation_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "sql-delete-no-where").is_empty(),
+        hits(&out, "delete-no-where").is_empty(),
         "{:?}",
         out.findings
     );
@@ -74,7 +74,7 @@ fn delete_from_backtick_concatenation_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "sql-delete-no-where").is_empty(),
+        hits(&out, "delete-no-where").is_empty(),
         "{:?}",
         out.findings
     );
@@ -89,7 +89,7 @@ fn delete_from_prefix_concatenation_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "sql-delete-no-where").is_empty(),
+        hits(&out, "delete-no-where").is_empty(),
         "{:?}",
         out.findings
     );
@@ -111,7 +111,7 @@ fn delete_from_sessions_on_a_line_also_calling_log_somewhere_now_fires() {
         "export async function purge(db: any, id: string) {\n  db.query(\"DELETE FROM sessions\"); logSomewhere(id);\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "sql-delete-no-where");
+    let h = hits(&out, "delete-no-where");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 2);
 }
@@ -127,7 +127,7 @@ fn delete_from_sessions_with_a_real_where_id_1_clause_is_still_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "sql-delete-no-where").is_empty(),
+        hits(&out, "delete-no-where").is_empty(),
         "{:?}",
         out.findings
     );
@@ -138,11 +138,11 @@ fn sql_delete_no_where_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "db.ts",
-        "export async function purge(db: any) {\n  // sql-delete-no-where-ok: admin-only reset endpoint, reviewed\n  return db.query(\"DELETE FROM users\");\n}\n",
+        "export async function purge(db: any) {\n  // delete-no-where-ok: admin-only reset endpoint, reviewed\n  return db.query(\"DELETE FROM users\");\n}\n",
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "sql-delete-no-where").is_empty(),
+        hits(&out, "delete-no-where").is_empty(),
         "{:?}",
         out.findings
     );
@@ -157,7 +157,7 @@ fn delete_from_no_where_in_a_test_fixture_path_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "sql-delete-no-where").is_empty(),
+        hits(&out, "delete-no-where").is_empty(),
         "{:?}",
         out.findings
     );
@@ -165,7 +165,7 @@ fn delete_from_no_where_in_a_test_fixture_path_is_not_flagged() {
 
 #[test]
 fn delete_from_no_where_in_a_migration_path_is_destructive_migration_turf_not_critical() {
-    // Real-corpus calibration (immich, 564 files): the only sql-delete-no-where hit was a migration
+    // Real-corpus calibration (immich, 564 files): the only delete-no-where hit was a migration
     // backfill (src/schema/migrations/...-AddAssetEditSequence.ts). A whole-table DELETE in a committed
     // migration is a deliberate, reviewed one-time write — critical firing there is severity inflation,
     // so migration paths are excluded from the critical rule and covered by `destructive-migration`
@@ -177,7 +177,7 @@ fn delete_from_no_where_in_a_migration_path_is_destructive_migration_turf_not_cr
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "sql-delete-no-where").is_empty(),
+        hits(&out, "delete-no-where").is_empty(),
         "{:?}",
         out.findings
     );
@@ -195,7 +195,7 @@ fn delete_from_no_where_in_a_migration_path_is_destructive_migration_turf_not_cr
     );
 }
 
-// --- sql-update-no-where (critical: complete-literal anchor, never-guess) ---
+// --- update-no-where (critical: complete-literal anchor, never-guess) ---
 
 #[test]
 fn update_set_closed_literal_with_no_where_is_flagged() {
@@ -205,7 +205,7 @@ fn update_set_closed_literal_with_no_where_is_flagged() {
         "export async function activateAll(db: any) {\n  return db.query(\"UPDATE users SET active = 1\");\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "sql-update-no-where");
+    let h = hits(&out, "update-no-where");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 2);
 }
@@ -219,7 +219,7 @@ fn update_set_with_where_clause_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "sql-update-no-where").is_empty(),
+        hits(&out, "update-no-where").is_empty(),
         "{:?}",
         out.findings
     );
@@ -234,7 +234,7 @@ fn update_set_template_interpolation_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "sql-update-no-where").is_empty(),
+        hits(&out, "update-no-where").is_empty(),
         "{:?}",
         out.findings
     );
@@ -249,7 +249,7 @@ fn update_set_string_concatenation_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "sql-update-no-where").is_empty(),
+        hits(&out, "update-no-where").is_empty(),
         "{:?}",
         out.findings
     );
@@ -260,11 +260,11 @@ fn sql_update_no_where_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "db.ts",
-        "export async function activateAll(db: any) {\n  // sql-update-no-where-ok: admin-only bulk reactivation, reviewed\n  return db.query(\"UPDATE users SET active = 1\");\n}\n",
+        "export async function activateAll(db: any) {\n  // update-no-where-ok: admin-only bulk reactivation, reviewed\n  return db.query(\"UPDATE users SET active = 1\");\n}\n",
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "sql-update-no-where").is_empty(),
+        hits(&out, "update-no-where").is_empty(),
         "{:?}",
         out.findings
     );
@@ -279,7 +279,7 @@ fn update_set_no_where_in_a_test_fixture_path_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "sql-update-no-where").is_empty(),
+        hits(&out, "update-no-where").is_empty(),
         "{:?}",
         out.findings
     );
@@ -297,7 +297,7 @@ fn update_set_no_where_in_a_migration_path_is_destructive_migration_turf_not_cri
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "sql-update-no-where").is_empty(),
+        hits(&out, "update-no-where").is_empty(),
         "{:?}",
         out.findings
     );

@@ -1,105 +1,91 @@
-//! Contracts 1-2: suppress-marker presence/uniqueness/convention and the message "how to exclude" leg.
+//! Contracts 1-2: derived suppress-marker global uniqueness and the message "how to exclude" leg.
+//!
+//! Markers are no longer stored per rule — `RuleDef::suppress_marker()` DERIVES `<id>-ok` (see its doc).
+//! That collapses three formerly-hand-guarded invariants into construction guarantees: every rule now has a
+//! non-empty marker (ids are never empty), and every marker ends in `-ok` by definition. What derivation
+//! does NOT guarantee is cross-pack uniqueness — two rules in different packs sharing an id would derive the
+//! same marker and co-suppress — so that is the one presence/uniqueness invariant still worth a test.
 
 use std::collections::BTreeMap;
 
 use crate::load_all_packs;
 
 // ---------------------------------------------------------------------------------------------
-// 1. Marker presence
+// 1. Derived-marker global uniqueness
 // ---------------------------------------------------------------------------------------------
 
-/// Every DSL rule ships a non-empty `suppress_marker`. A rule with no marker (or an empty-string one)
-/// cannot be suppressed inline (see `RuleDef::suppress_marker`'s doc in `crates/core/src/dsl.rs`) — the
-/// only way to quiet a single false positive is `disabled_rules`, which throws away every future true
-/// positive from that rule too. A prior audit found DSL rules shipped with no marker at all; this test
-/// makes that class of drift a hard failure instead of a convention someone has to remember.
+/// No two shipped rules — in the same pack OR across packs — may derive the same suppress marker. Since the
+/// marker is `<id>-ok`, this is exactly "rule ids are globally unique". It matters because a `// x-ok`
+/// comment a reader placed to vet ONE rule's finding would silently also suppress any OTHER rule that
+/// derives `x-ok` wherever their line/lookback windows overlap — the reader never opted into that. The
+/// within-pack case was the old contract; deriving from the id widened the blast radius to every pack, so
+/// the guard widens with it.
 #[test]
-fn every_dsl_rule_has_a_non_empty_suppress_marker() {
+fn derived_suppress_markers_are_globally_unique() {
     let packs = load_all_packs();
-    let mut offenders = Vec::new();
+    let mut by_marker: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for pack in &packs {
         for rule in &pack.rules {
-            let ok = rule
-                .suppress_marker
-                .as_deref()
-                .is_some_and(|m| !m.trim().is_empty());
-            if !ok {
-                offenders.push(format!("{}/{}", pack.id, rule.id));
-            }
+            by_marker
+                .entry(rule.suppress_marker())
+                .or_default()
+                .push(format!("{}/{}", pack.id, rule.id));
         }
     }
+    let offenders: Vec<String> = by_marker
+        .into_iter()
+        .filter(|(_, rules)| rules.len() > 1)
+        .map(|(marker, rules)| {
+            format!("marker `{marker}` shared by rules {rules:?} (co-suppression risk)")
+        })
+        .collect();
     assert!(
         offenders.is_empty(),
-        "DSL rules with no non-empty suppress_marker: {offenders:#?}"
+        "rules that derive a duplicate suppress marker: {offenders:#?}"
     );
 }
 
-/// Within one pack, no two rules may share a `suppress_marker`. Two rules sharing a marker co-suppress: a
-/// `// marker-ok` comment a reader placed to vet ONE rule's finding silently also suppresses the OTHER
-/// rule's finding wherever its own line/lookback window overlaps — the reader never opted into that.
+/// Uniqueness above compares markers for EQUALITY, which is not the whole aliasing surface: `compile_marker`
+/// anchors the marker as `//\s*<marker>\b`, and `\b` fires at a word/non-word boundary — so rule `x`'s marker
+/// `x-ok` also matches inside rule `x-ok-y`'s marker `x-ok-y-ok` (the boundary sits between `k` and `-`).
+/// A reader annotating a `x-ok-y` finding would silently suppress `x` on that line too, having opted into
+/// neither. Zero shipped ids have this shape today (it needs an id containing `-ok-` or ending `-ok`), which
+/// is exactly why it is worth pinning now — nothing else stops the first such id from being authored.
 #[test]
-fn suppress_markers_are_unique_within_each_pack() {
+fn no_derived_marker_is_a_word_boundary_prefix_of_another() {
     let packs = load_all_packs();
-    let mut offenders = Vec::new();
-    for pack in &packs {
-        let mut by_marker: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-        for rule in &pack.rules {
-            if let Some(marker) = rule.suppress_marker.as_deref() {
-                if !marker.trim().is_empty() {
-                    by_marker.entry(marker).or_default().push(rule.id.as_str());
-                }
-            }
-        }
-        for (marker, rules) in by_marker {
-            if rules.len() > 1 {
-                offenders.push(format!(
-                    "pack `{}`: marker `{marker}` shared by rules {rules:?} (co-suppression risk)",
-                    pack.id
-                ));
-            }
-        }
-    }
+    let ids: Vec<String> = packs
+        .iter()
+        .flat_map(|pack| pack.rules.iter().map(|rule| rule.id.clone()))
+        .collect();
+    let offenders: Vec<String> = ids
+        .iter()
+        .flat_map(|shorter| {
+            let prefix = format!("{shorter}-ok");
+            ids.iter()
+                .filter(move |longer| longer.as_str() != shorter && longer.starts_with(&prefix))
+                .map(move |longer| {
+                    format!(
+                        "rule `{shorter}` (marker `{shorter}-ok`) also fires inside rule `{longer}`'s marker \
+                         `{longer}-ok` (co-suppression risk)"
+                    )
+                })
+        })
+        .collect();
     assert!(
         offenders.is_empty(),
-        "duplicate suppress_marker within a pack: {offenders:#?}"
-    );
-}
-
-/// Every `suppress_marker` ends in `-ok` — the naming convention every one of the shipped markers follows
-/// (a 2026-07-13 uniformity sweep measured 112/112) and the shape the authoring guide's example teaches
-/// (`debug-token-ok`). The convention is load-bearing for users, not cosmetic: someone who has learned
-/// `// <marker>-ok` from one rule will type that shape for the next rule from memory, and a rule whose
-/// marker deviates (`nplus1_allow`, `skip-x`) silently fails to suppress for them. Deviating on purpose is
-/// a policy change: adjust this test in the same commit and say why.
-#[test]
-fn every_suppress_marker_follows_the_dash_ok_naming_convention() {
-    let packs = load_all_packs();
-    let mut offenders = Vec::new();
-    for pack in &packs {
-        for rule in &pack.rules {
-            if let Some(marker) = rule.suppress_marker.as_deref() {
-                if !marker.trim().is_empty() && !marker.ends_with("-ok") {
-                    offenders.push(format!("{}/{}: `{marker}`", pack.id, rule.id));
-                }
-            }
-        }
-    }
-    assert!(
-        offenders.is_empty(),
-        "suppress_marker values deviating from the `-ok` suffix convention every other marker follows: \
-         {offenders:#?}"
+        "rule ids whose derived markers alias by word boundary: {offenders:#?}"
     );
 }
 
 // ---------------------------------------------------------------------------------------------
-// 2. Message triple — problem (the rest of `message`) + fix (the rest of `message`) + exclude (this leg)
+// 2. Message triple — problem + fix + exclude (this leg)
 // ---------------------------------------------------------------------------------------------
 
-/// Every DSL rule's `message` names its own suppress marker OR the literal `disabled_rules`/`disabledRules`
-/// string somewhere in the text — the "how to exclude" leg of zzop's finding contract (every finding must
-/// tell the reader the problem, the fix, AND how to turn it off — zzop's finding-output design
-/// principle; see docs/rules/authoring-guide.md's quality bar). A rule that legitimately has no
-/// per-finding marker (native-analysis-style disable-only rules ported into the DSL, if any ever are) still
+/// Every DSL rule's `message` names its own derived suppress marker (`<id>-ok`) OR the literal
+/// `disabled_rules`/`disabledRules` string somewhere in the text — the "how to exclude" leg of zzop's
+/// finding contract (every finding must tell the reader the problem, the fix, AND how to turn it off; see
+/// docs/rules/authoring-guide.md's quality bar). A rule that legitimately has no per-finding marker still
 /// passes via the `disabled_rules` leg — this test accepts EITHER, not just the marker.
 #[test]
 fn every_dsl_rule_message_documents_how_to_exclude_it() {
@@ -107,17 +93,15 @@ fn every_dsl_rule_message_documents_how_to_exclude_it() {
     let mut offenders = Vec::new();
     for pack in &packs {
         for rule in &pack.rules {
-            let marker_leg = rule
-                .suppress_marker
-                .as_deref()
-                .is_some_and(|m| !m.trim().is_empty() && rule.message.contains(m));
+            let marker = rule.suppress_marker();
+            let marker_leg = rule.message.contains(&marker);
             let disabled_leg =
                 rule.message.contains("disabled_rules") || rule.message.contains("disabledRules");
             if !(marker_leg || disabled_leg) {
                 offenders.push(format!(
-                    "{}/{} (suppress_marker={:?}) — message mentions neither its own marker nor \
+                    "{}/{} (derived marker `{marker}`) — message mentions neither its own marker nor \
                      disabled_rules/disabledRules",
-                    pack.id, rule.id, rule.suppress_marker
+                    pack.id, rule.id
                 ));
             }
         }
