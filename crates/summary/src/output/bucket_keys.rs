@@ -3,8 +3,10 @@
 /// Default cap for `cross_repo`'s `bucketKeys` distinct-key lists (see `bucket_keys`).
 pub const DEFAULT_BUCKET_KEYS_LIMIT: usize = 20;
 
-/// The five non-edge cross-layer buckets, in engine (`CrossLayerResult`) field order.
-const KEY_BUCKETS: [&str; 5] = [
+/// The five non-edge cross-layer buckets, in engine (`CrossLayerResult`) field order. Shared
+/// (`pub(crate)`) with `crate::manifest`, which walks the same five buckets to record bucket
+/// MEMBERSHIP: one vocabulary, so a sixth bucket cannot reach one surface and not the other.
+pub(crate) const KEY_BUCKETS: [&str; 5] = [
     "unconsumedProvides",
     "unprovidedConsumes",
     "unresolvedConsumes",

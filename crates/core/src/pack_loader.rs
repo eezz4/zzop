@@ -8,16 +8,20 @@
 //! Both are valid; nesting is never required.
 //!
 //! ## Where "appliesTo" lives (design call)
-//! Gating a whole pack on the TARGET environment (fe/be/ext-chrome/...) belongs on `RulePackDef` (dsl.rs)'s
-//! `framework` field ("any" | "react" | "prisma" | ...) — and that's exactly what `RuleMeta::applies_to`
-//! (registry.rs) already gates on for every rule layer uniformly. `RulePackDef` does NOT carry a file-path
+//! Gating a whole pack on the TARGET environment (fe/be/ext-chrome/...) would belong on `RulePackDef`
+//! (dsl.rs)'s `framework` field ("any" | "react" | "prisma" | ...). NOTHING GATES ON IT TODAY: `framework`
+//! has zero production readers, and there is no target gating anywhere to wire it into — nothing in the
+//! engine answers "what target is this tree", so target gating is not merely unwired, it has no input.
+//! `docs/rules/dsl-reference.md` and
+//! `docs/contracts/rule-pack.schema.json` already state the public half of this ("currently
+//! informational"); this note is the internal half. `RulePackDef` does NOT carry a file-path
 //! / language-extension
 //! field at the pack level, though: file-path gating lives PER RULE, inside its matcher
 //! (`Matcher::{LineScan,MethodScan}.file_pattern`) — a single pack can mix, say, a `.java` rule and a `.jsp`
 //! rule. So `applies_to` below is a narrower, additional pre-filter: "does at least one rule in this pack
 //! even look at files shaped like `file_path`" — useful for a caller that wants to skip considering a pack
-//! entirely for a tree of files none of its rules could ever match. It is NOT a substitute for the
-//! framework/target gating, which stays on `RuleMeta::applies_to`.
+//! entirely for a tree of files none of its rules could ever match. It is NOT framework/target gating,
+//! which does not exist.
 
 use std::fs;
 use std::path::{Path, PathBuf};

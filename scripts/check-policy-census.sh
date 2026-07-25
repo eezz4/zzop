@@ -1,10 +1,33 @@
 #!/usr/bin/env bash
 # Mechanical census of every policy-shaped constant under the crates that hold rule/extraction logic
 # (crates/engine/src, crates/core/src, parser/*/src, rules/native/*/src). This is the "continuous
-# drift review" mechanism (A5): the census tracks EXISTENCE (path:CONST_NAME), never values — values
-# change legitimately and are not what this guard is for. Its job is to force a triage moment (tier
-# T1/T2/T3, or "not policy") every time a *new* policy-shaped constant is introduced, by failing CI
-# until the committed snapshot (scripts/policy-census.txt) is regenerated to include it.
+# drift review" mechanism (A5): the census tracks EXISTENCE (path:NAME), never values — values change
+# legitimately and are not what this guard is for. Its job is to force a triage moment (tier
+# T1/T2/T3, or "not policy") every time a *new* policy-shaped name is introduced, by failing CI until
+# the committed snapshot (scripts/policy-census.txt) is regenerated to include it.
+#
+# ## Sibling axis: DSL pack `${NAME}` fragments — censused in Rust, not here
+# A Rust-const-only census has a structural evasion hole, not just a gap: policy vocabulary MOVED out
+# of a Rust `const` and into a pack's `fragments` map would bypass the triage moment at zero cost, and
+# an escape hatch that cheap always gets used eventually. So `${NAME}` fragment NAMES are censused
+# too — but by `zzop_core::dsl::tests_fragments::name_census`, which reads them through `serde_json`,
+# NOT by this script.
+#
+# That axis lived here for one day (2026-07-25) as a line-oriented `awk` extractor over
+# `rules/dsl/**/*.json`, and this header asserted the line orientation "fails LOUD, never silent".
+# Measured false, on inputs that are all VALID JSON, with no JSON formatter guard anywhere in this
+# repo to prevent them: a second key appended to the line after `"fragments": {` was dropped SILENTLY
+# (census output unchanged -> guard green -> triage moment bypassed, i.e. the evasion route reopened),
+# a key sharing the opening-brace line was dropped, and a minified map yielded a PHANTOM name from the
+# surrounding object rather than the promised `removed:`. Fixing the `awk` would mean a hand-rolled,
+# string-aware, brace-depth-tracking JSON tokenizer in `awk` — fragment values are regexes, and 4 of
+# the 9 shipped ones already contain a `"` — one crate away from a real parser this repo already runs
+# over those exact files. The subtraction was to delete the second parser, not improve it. See that
+# module's header for the full table and the rejected alternatives.
+#
+# What stays here is the Rust half, and its line orientation is ENFORCED rather than assumed:
+# `cargo fmt --all --check` is a CI gate, so a `const` declaration cannot be reflowed onto a shared
+# line the way a hand-edited JSON key can.
 #
 # crates/metrics/src is DELIBERATELY out of scope (2026-07-16): its thresholds (e.g. SEAMS_MIN_FILES)
 # are metric eligibility/presentation floors, not rule/extraction policy vocab — the one value that
@@ -43,7 +66,8 @@
 # referenced everywhere else by symbol), so a future rename can no longer silently desync even though
 # the census itself won't catch a NEW instance of the same mistake pattern.
 #
-# No deps beyond grep/sed/sort/comm.
+# No deps beyond grep/sed/sort/comm. (No JSON reader — deliberately: this repo's shells have neither
+# jq nor a usable python, which is the practical half of why the fragment axis moved to Rust.)
 set -euo pipefail
 
 # Collation-pinned: the snapshot mixes lowercase paths, '/:._-' and uppercase const names — exactly
@@ -64,9 +88,12 @@ for d in crates/engine/src crates/core/src crates/summary/src parser/*/src rules
   [ -d "$d" ] && dirs+=("$d")
 done
 
-current="$(grep -rnE "$pattern" "${dirs[@]}" 2>/dev/null \
-  | sed -E 's/^([^:]+):[0-9]+:[[:space:]]*(pub(\((crate|super|in [^)]+)\))? )?const ([A-Z_][A-Z0-9_]*):.*/\1:\5/' \
-  | sort -u)"
+rust_consts() {
+  grep -rnE "$pattern" "${dirs[@]}" 2>/dev/null \
+    | sed -E 's/^([^:]+):[0-9]+:[[:space:]]*(pub(\((crate|super|in [^)]+)\))? )?const ([A-Z_][A-Z0-9_]*):.*/\1:\5/'
+}
+
+current="$(rust_consts | sort -u)"
 
 if [ "${1:-}" = "--update" ]; then
   printf '%s\n' "$current" > "$census_file"

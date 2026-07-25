@@ -19,6 +19,9 @@
 //! - The `withDefaults` layer folds in here for native hosts: bundled packs are injected as inline
 //!   `packDefs` (`crate::BUNDLED_PACK_SOURCES`), and `git: {}` is injected when the config has no
 //!   `git` key, so zero-config still collects git signals (30-day default) exactly like the JS CLI.
+//!   `cacheDir` joins that set (`options::build_shared_options`), defaulting to
+//!   `zzop_cache::DEFAULT_CACHE_DIR` — this one has NO JS counterpart (the JS CLI shipped `.zzop-cache`
+//!   only as an `init` template value, so an author who never wrote the key ran cold forever).
 //! - CLI-presentation keys (`failOn`/`format`/`report.*`) are NOT forwarded into the request.
 //!
 //! Deliberate deviation (documented in the crate doc): `root`/`cacheDir`/`packsDir` resolve against

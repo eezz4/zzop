@@ -139,5 +139,15 @@ if ! mv -f "$TMP" "$DEST" 2>/dev/null; then
   exit 0
 fi
 
+# The restart line below is not decoration — it is the difference between "installed" and "working".
+# A client fixes its MCP tool list when the session starts, and this hook runs inside that startup:
+# on the session that FIRST downloads the binary, `mcpServers.zzop` is registered correctly and the
+# server is healthy, yet no zzop tool is listed, because the list was settled before this download
+# finished. Measured 2026-07-25 on Windows: the hook ran, fetched the binary, and all six tools
+# answered — but only after a restart. Without this line the honest reading of that session is
+# "I installed the plugin and it does nothing", which is where a first-time user leaves. Every later
+# session takes the already-installed branch above and never prints it.
 echo "zzop-mcp $LATEST installed at $DEST (first run of this plugin)."
+echo "Restart Claude Code once to load the zzop tools: this session's tool list was fixed before the"
+echo "download finished, so they appear from the next session on."
 exit 0

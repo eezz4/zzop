@@ -1,14 +1,16 @@
 # zzop CLI + zzop-mcp reference
 
 The Node-free way to run zzop: two self-contained binaries with no Node.js runtime, no npm install —
-`zzop` (a plain CLI for direct/CI use, package `packages/cli-bin`) and `zzop-mcp` (an MCP server over
-stdio for MCP clients, package `packages/mcp`). Both are thin entries over the shared `zzop-host` lib
-crate (this directory) and the same analysis path. Full reference:
+`zzop` (a plain CLI for direct/CI use) and `zzop-mcp` (an MCP server over stdio for MCP clients). They
+are two separate PACKAGES, each building exactly one bin — `packages/cli-bin` → `zzop`,
+`packages/mcp` → `zzop-mcp` — over this shared library. `zzop-host` (this directory) is **lib-only: it
+declares no `[[bin]]` at all**; it is the dispatch both packages call, which is what keeps a CLI query
+and an MCP tool call on the same analysis path. Full reference:
 [docs/modules/mcp.md](../../docs/modules/mcp.md).
 
-Prebuilt per-platform binaries (`zzop-cli-<platform>[.exe]` + `zzop-mcp-<platform>[.exe]`, 5 platforms each)
-are attached to [GitHub Releases](https://github.com/eezz4/zzop/releases); building from a source checkout
-(below) remains an option.
+Prebuilt per-platform binaries are attached to GitHub Releases, and there are three other install
+lanes — the repo README carries the canonical list for repo readers, so it is not restated here:
+[Quick start](../../README.md#quick-start). Building from a source checkout (below) remains an option.
 
 ## Build
 
@@ -28,12 +30,23 @@ zzop validate-rule-pack ./pack.json    # offline: pack loads + regexes compile? 
 zzop cross ./frontend ./backend
 zzop cross --config ./zzop.config.jsonc
 zzop endpoint users ./frontend ./backend
+zzop manifest ./frontend ./backend > contracts.json   # structural contract manifest: identity only, no file/line
+zzop diff ./contracts.json ./contracts.new.json       # what MOVED between two runs (bucket transitions first)
 zzop contract                 # list the embedded authoring contracts
 zzop contract config-surface  # print one to stdout (raw bytes, pipe-safe)
 zzop explain sql/nplus1       # print one bundled DSL rule's compiled-in data (id/pack/severity/message/…)
+                              # Also answers for a schema issue label (e.g. schema/dead-model) by naming
+                              # the family gate that disables it; an io-scan rule's marker is printed
+                              # with its native-parse-only condition.
 ```
 
 Prints pretty-printed JSON to stdout; a failure prints to stderr and exits non-zero.
+
+`manifest`/`diff` are the structural-drift pair: commit a manifest next to the code, and a later
+`diff` reports what MOVED (a route leaving `edges` for `unprovidedConsumes` is a broken contract, not
+just a `-`). They are CLI-only — no MCP tool twin — and `diff` refuses two manifests produced by
+different zzop builds unless you pass `--allow-tool-drift`. Full contract:
+[docs/modules/facade.md](../../docs/modules/facade.md#structural-drift-zzop-manifest--zzop-diff).
 
 ## Register as an MCP server
 
@@ -73,7 +86,9 @@ The repo doubles as a self-hosted plugin marketplace (`.claude-plugin/marketplac
 3. Start a new session. A `SessionStart` hook (`.claude-plugin/hooks/bootstrap.sh`) downloads the
    `zzop-mcp` binary for your platform from [GitHub
    Releases](https://github.com/eezz4/zzop/releases) into the plugin's own data directory, and
-   `plugin.json`'s `mcpServers` runs it from there. Nothing to place on `PATH`.
+   `plugin.json`'s `mcpServers` runs it from there. Nothing to place on `PATH`. **That first session
+   will not list the zzop tools** — a session's tool list is settled before the download finishes — so
+   restart Claude Code once and they appear; the hook prints this too.
 
 **Updates are reported, never applied.** Once a binary is installed the hook only tells you when a
 newer release exists — a new analyzer version changes findings and invalidates the analysis cache, so

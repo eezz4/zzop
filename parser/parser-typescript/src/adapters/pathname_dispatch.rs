@@ -76,13 +76,61 @@
 //! route, evaluated independently; letting its verb scan leak into the parent would
 //! cross-contaminate two different routes) — else a single `zzop_core::UNKNOWN_VERB` sentinel (the
 //! path is served, method unknown — the engine lifts it to the `cross-layer/unknown-verb-route`
-//! disclosure). One provide is emitted per (path × verb); `line` is the path test's own line, `symbol` is the enclosing
-//! function's name when nameable (`FnDecl` ident, class-method/object-method key, or `const name
-//! = () => {}` binding name).
+//! disclosure). One provide is emitted per (path × verb); `line` is the path test's own line.
+//!
+//! ## `symbol` — per-BRANCH, two cases
+//! 1. **Branch target**, when the branch's body is a SINGLE statement making EXACTLY ONE call, to a
+//!    bare-identifier callee (`if (m && method === "POST") return createGroup(request, env);`, plus
+//!    its one-statement-block, `await` and paren wrappings, and a bare expression statement): that
+//!    CALLEE (`createGroup`) is the route's real handler and becomes the symbol.
+//! 2. **Enclosing function**, for anything else — a multi-statement block, an inline arrow, an
+//!    unnameable expression (`new Response(...)`), a member callee (`handlers.create(...)`, where
+//!    picking one property off the chain would be a guess), or a WRAPPER call whose arguments
+//!    themselves invoke something (`return ok(handleThing(req));`,
+//!    `return json(await createGroup(req, env));`). Its name when nameable (`FnDecl` ident,
+//!    class-method/object-method key, or `const name = () => {}` binding name).
+//!
+//! Case 1 is the SYMBOL-axis twin of the verb-axis cross-contamination guard above. A dispatch
+//! function serves N routes from one body, so pinning all N provides to `dispatch` makes any
+//! consumer that walks the call graph FROM `symbol` — THREE native rules start a BFS there:
+//! `mutating-route-no-auth`, `unsafe-read-endpoint`, and `non-idempotent-write` — see the UNION of
+//! every sibling route's reachability. Measured on a real Worker repo: one sibling calling a
+//! guard-named function silenced `mutating-route-no-auth` for genuinely unauthenticated siblings,
+//! and a GET route "reached" an INSERT that lives in a POST sibling's handler in another file.
+//!
+//! ### Case-2 residual: an ARGUMENT-COERCION call also blocks attribution
+//! "arguments themselves invoke something" is a purely lexical test, so it fires on
+//! `return getRevision(request, env, m[1], Number.parseInt(m[2], 10));` too — there the outer callee
+//! IS the handler and the inner call only coerces an argument, yet the branch still falls back to the
+//! enclosing dispatcher. This is deliberate, not an oversight: nothing lexical separates "the outer
+//! call is a response wrapper hiding the real handler" from "the outer call is the handler and the
+//! inner one is a coercion", and getting that backwards on the wrapper shape makes
+//! `mutating-route-no-auth` ACCUSE a guarded route (case 2's whole reason to exist). Falling back
+//! only ever over-reaches. Measured cost, 2026-07-25 mono-hub: of 6 `unsafe-read-endpoint` findings
+//! that per-branch attribution was expected to clear, exactly 1 survived on this shape
+//! (`settle-hub-be` `GET /api/ledger/{}/revision/{}`, whose handler call parses a numeric path
+//! segment inline). Pinned by `tests/branch_symbol.rs`.
+//!
+//! Case 2 never guesses: an unattributable branch keeps the old, honest-if-coarse enclosing symbol.
+//! The wrapper-call exclusion is why "exactly one call" is load-bearing rather than pedantic —
+//! taking the OUTERMOST callee of `return ok(createGroup(req, env));` would aim all three BFSes at
+//! `ok`, which reaches neither the guard nor the write inside `createGroup`. That is not coarse,
+//! it is wrong in a new direction: `mutating-route-no-auth` would newly ACCUSE a guarded write
+//! route. The enclosing symbol only ever over-reaches, exactly as it did before this rule existed.
+//!
+//! A FOURTH consumer reads `symbol` by EQUALITY rather than by BFS: `duplicate-route` skips a
+//! repeat registration that resolves to the SAME handler symbol as the first (the
+//! trailing-slash-tolerance idiom is not a shadow). Case 1 therefore makes that rule newly fire
+//! when two branches of one dispatcher register the same key with two different handlers — correct
+//! (the second branch is genuinely dead), and a deliberate detection increase pinned e2e in
+//! `crates/engine/tests/analyze_routes_pathname_dispatch.rs` together with the case-2 control that
+//! must stay silent.
 //!
 //! A `SwitchStmt` whose discriminant is a pathname-provenanced receiver is handled the same way,
 //! grouping consecutive empty-body cases onto the next non-empty body (fallthrough), scanning
-//! that shared body for verb mentions (else fallback), with `line` = the case's own line.
+//! that shared body for verb mentions (else fallback), with `line` = the case's own line. The
+//! grouped body is also the branch body for the `symbol` rule above — every case path in a group
+//! is genuinely served by it, so sharing its derived symbol is not cross-contamination.
 //!
 //! Exact-duplicate `(key, line, symbol)` triples are deduped; output order is deterministic
 //! (occurrence order).

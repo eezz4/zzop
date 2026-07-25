@@ -15,16 +15,9 @@ fn line_scan_rule(id: &str, file_exclude_pattern: Option<&str>) -> RuleDef {
         message: "m".to_string(),
         matcher: Matcher::LineScan(LineScan {
             file_pattern: "(?i)\\.ts$".to_string(),
-            require_file: None,
-            require_file_all: vec![],
-            require_file_absent: vec![],
-            skip_comment_lines: false,
-            strip_string_literals: false,
             line_pattern: Some("TODO".to_string()),
-            any: None,
-            exclude_pattern: None,
             file_exclude_pattern: file_exclude_pattern.map(str::to_string),
-            snippet_max: 160,
+            ..LineScan::default()
         }),
     }
 }
@@ -212,7 +205,10 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
             }]),
             exclude_pattern: Some("${exclude-pattern}".to_string()),
             file_exclude_pattern: Some("${file-exclude-pattern}".to_string()),
-            snippet_max: 160,
+            // Every PATTERN-bearing field is spelled out above on purpose (that is what this fixture
+            // proves). The attribute gates are plain attribute-key strings, never fragment-expanded, so
+            // they belong on the default side of this literal — see `LineScan::attr_present`'s doc.
+            ..LineScan::default()
         }),
     };
     let method_scan_rule = RuleDef {
@@ -232,6 +228,8 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
             }],
             trigger: "t".to_string(),
             trigger_in_loop: false,
+            after: None,
+            after_in_same_function: false,
             absent: vec![LabeledPattern {
                 pattern: "${absent-pattern}".to_string(),
                 label: "a".to_string(),

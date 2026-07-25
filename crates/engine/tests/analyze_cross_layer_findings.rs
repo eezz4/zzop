@@ -163,8 +163,25 @@ fn blind_fe_tree() -> TempDir {
     dir
 }
 
+/// BE tree providing one unconsumed READ route (`GET /api/group/{}`) and one unconsumed WRITE route
+/// (`POST /api/group`) — nobody in the run calls either. Needed wherever a test wants BOTH
+/// `cross-layer/unconsumed-endpoint` and `cross-layer/unconsumed-mutation-endpoint` to have a finding: the
+/// two no longer co-fire at one site (the specialization reports write routes in the general rule's place),
+/// so a write-only tree yields the mutation finding alone.
+fn read_and_write_be_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-xlf-read-write-be");
+    dir.write(
+        "routes/group.controller.ts",
+        "const groupRoutes = new Hono();\n\
+         groupRoutes.get(\"/api/group/:id\", api.getGroup);\n\
+         groupRoutes.post(\"/api/group\", api.createGroup);\n",
+    );
+    dir
+}
+
 /// BE tree providing a single unconsumed write route (`POST /api/group`) — nobody in the run calls it,
-/// driving both `cross-layer/unconsumed-endpoint` and `cross-layer/unconsumed-mutation-endpoint`.
+/// driving `cross-layer/unconsumed-mutation-endpoint` (and, by the handoff, NOT
+/// `cross-layer/unconsumed-endpoint`).
 fn write_only_be_tree() -> TempDir {
     let dir = TempDir::new("zzop-engine-xlf-write-be");
     dir.write(
@@ -930,14 +947,15 @@ fn unconsumed_mutation_endpoint_stays_warning_when_the_run_has_no_blind_source()
     assert!(!mutation[0].message.contains("severity here is reduced"));
 }
 
-/// Class-parity guard (the recurrence guard): given the same unconsumed write provide + the same unresolved
-/// http consumes, BOTH `unconsumed-endpoint` and `unconsumed-mutation-endpoint` carry
+/// Class-parity guard (the recurrence guard): in one run with the same unresolved http consumes, BOTH
+/// `unconsumed-endpoint` (on the read route) and `unconsumed-mutation-endpoint` (on the write route) carry
 /// `data.unresolvedHttpConsumeCount` with the SAME value — so a future edit can never let the warning-
-/// severity variant silently drop the blind-spot disclosure its info sibling makes.
+/// severity variant silently drop the blind-spot disclosure its info sibling makes. Two routes, not one
+/// site: the specialization now reports write routes in the general rule's place.
 #[test]
 fn unconsumed_endpoint_and_unconsumed_mutation_endpoint_disclose_the_same_unresolved_count() {
     let fe = blind_fe_tree();
-    let be = write_only_be_tree();
+    let be = read_and_write_be_tree();
     let trees = vec![
         (fe.path().to_path_buf(), config("fe")),
         (be.path().to_path_buf(), config("be")),
@@ -945,15 +963,22 @@ fn unconsumed_endpoint_and_unconsumed_mutation_endpoint_disclose_the_same_unreso
     let out = analyze_trees(&trees);
 
     let unconsumed = find(&out.cross_layer_findings, "cross-layer/unconsumed-endpoint");
-    let unconsumed_write = unconsumed
+    let unconsumed_read = unconsumed
         .iter()
-        .find(|f| f.message.contains("POST /api/group"))
+        .find(|f| f.message.contains("GET /api/group/{}"))
         .unwrap_or_else(|| {
             panic!(
-                "expected unconsumed-endpoint to also co-fire on the write route: {:?}",
+                "expected an unconsumed-endpoint finding for the read route: {:?}",
                 unconsumed
             )
         });
+    assert!(
+        !unconsumed
+            .iter()
+            .any(|f| f.message.contains("POST /api/group")),
+        "the write route must be reported by the specialization alone: {:?}",
+        unconsumed
+    );
 
     let mutation = find(
         &out.cross_layer_findings,
@@ -961,10 +986,60 @@ fn unconsumed_endpoint_and_unconsumed_mutation_endpoint_disclose_the_same_unreso
     );
     assert_eq!(mutation.len(), 1, "{:?}", mutation);
 
-    let info_count = unconsumed_write.data.as_ref().unwrap()["unresolvedHttpConsumeCount"].clone();
+    let info_count = unconsumed_read.data.as_ref().unwrap()["unresolvedHttpConsumeCount"].clone();
     let warning_count = mutation[0].data.as_ref().unwrap()["unresolvedHttpConsumeCount"].clone();
     assert_eq!(info_count, warning_count);
     assert_eq!(info_count, serde_json::json!(3));
+}
+
+/// Double-report seal, end to end: one unconsumed write route yields exactly ONE finding across the
+/// general/specialized pair. Dogfood measured `POST /api/ledger/{}/verify` reported by BOTH rules at the
+/// identical `file:line` — one route billed as two problems.
+#[test]
+fn an_unconsumed_write_route_yields_exactly_one_finding_across_both_rules() {
+    let be = write_only_be_tree();
+    let trees = vec![(be.path().to_path_buf(), config("be"))];
+    let out = analyze_trees(&trees);
+
+    let both: Vec<_> = out
+        .cross_layer_findings
+        .iter()
+        .filter(|f| {
+            f.message.contains("POST /api/group")
+                && (f.rule_id == "cross-layer/unconsumed-endpoint"
+                    || f.rule_id == "cross-layer/unconsumed-mutation-endpoint")
+        })
+        .collect();
+    assert_eq!(both.len(), 1, "{:?}", both);
+    assert_eq!(both[0].rule_id, "cross-layer/unconsumed-mutation-endpoint");
+}
+
+/// The other state of that contract, and the regression guard against "simplifying" the handoff into an
+/// unconditional write-verb veto: with the specialization DISABLED nothing reported that site, so
+/// `unconsumed-endpoint` must cover the write route itself. Disabling one rule may never punch a hole in a
+/// rule the user did not disable.
+#[test]
+fn disabling_the_mutation_specialization_moves_write_routes_back_to_unconsumed_endpoint() {
+    let be = write_only_be_tree();
+    let mut be_config = config("be");
+    be_config.rule_config.disabled_rules =
+        vec!["cross-layer/unconsumed-mutation-endpoint".to_string()];
+    let trees = vec![(be.path().to_path_buf(), be_config)];
+    let out = analyze_trees(&trees);
+
+    assert!(find(
+        &out.cross_layer_findings,
+        "cross-layer/unconsumed-mutation-endpoint"
+    )
+    .is_empty());
+    let unconsumed = find(&out.cross_layer_findings, "cross-layer/unconsumed-endpoint");
+    assert!(
+        unconsumed
+            .iter()
+            .any(|f| f.message.contains("POST /api/group")),
+        "disabling one rule must not silence the route in the rule the user kept: {:?}",
+        unconsumed
+    );
 }
 
 // --- Severity calibration, symmetric sibling (opus-reviewer class-extrapolation) ---
@@ -1105,7 +1180,7 @@ fn both_mutation_rules_downgrade_together_when_their_respective_side_is_blind() 
 fn unconsumed_findings_carry_the_extraction_blindness_caveat_when_a_sibling_tree_has_zero_joinable_io(
 ) {
     let blind = zero_io_tree();
-    let be = write_only_be_tree();
+    let be = read_and_write_be_tree();
     let trees = vec![
         (blind.path().to_path_buf(), config("blind-fe")),
         (be.path().to_path_buf(), config("write-be")),
@@ -1115,7 +1190,7 @@ fn unconsumed_findings_carry_the_extraction_blindness_caveat_when_a_sibling_tree
     let unconsumed = find(&out.cross_layer_findings, "cross-layer/unconsumed-endpoint");
     assert!(
         !unconsumed.is_empty(),
-        "expected an unconsumed-endpoint finding for POST /api/group"
+        "expected an unconsumed-endpoint finding for GET /api/group/{{}}"
     );
     for f in &unconsumed {
         assert!(
@@ -1152,7 +1227,7 @@ fn unconsumed_findings_carry_the_extraction_blindness_caveat_when_a_sibling_tree
 #[test]
 fn unconsumed_findings_carry_no_caveat_when_every_tree_contributes_joinable_io() {
     let fe = fe_tree();
-    let be = write_only_be_tree();
+    let be = read_and_write_be_tree();
     let trees = vec![
         (fe.path().to_path_buf(), config("fe")),
         (be.path().to_path_buf(), config("write-be")),
@@ -1162,7 +1237,7 @@ fn unconsumed_findings_carry_no_caveat_when_every_tree_contributes_joinable_io()
     let unconsumed = find(&out.cross_layer_findings, "cross-layer/unconsumed-endpoint");
     assert!(
         !unconsumed.is_empty(),
-        "expected an unconsumed-endpoint finding for POST /api/group"
+        "expected an unconsumed-endpoint finding for GET /api/group/{{}}"
     );
     for f in &unconsumed {
         assert!(

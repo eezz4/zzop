@@ -45,8 +45,30 @@
 //! a ternary with two string-literal arms is a `Slot` (cartesian fan-out, capped at 2 slots — same
 //! bounded-output rule as `cond-literal-fanout-v1`); anything else falls back to the old `{}`
 //! placeholder.
+//!
+//! `same-file-const-prepend-v1`: a URL's LEADING slot — `` `${BASE}/x` `` or `BASE + '/x'` — resolves
+//! against a bare `const`/`let` constant declared in the SAME file, when that name clears four never-guess
+//! gates (single binding in the file, no reassignment, no parameter/destructuring shadow, plain string
+//! literal initializer); see [`binding_census`] for the first three and [`local_consts`] for the fourth,
+//! plus why the project-wide `consts` map still refuses bare names. Head only: a mid-path interpolation is
+//! a route parameter and `{}` is its correct normalization, whereas at the head `{}` forces
+//! `consume_key_for`'s base-carrier head-drop to ASSUME the base carries no scheme or host — which
+//! silently files a third-party call as an internal route when the constant is an absolute URL. Any gate
+//! failure leaves the old opaque-`{}` behavior untouched.
+//!
+//! `same-file-url-binding-v1`: the same file, the OTHER position — a bare identifier standing alone as the
+//! whole url argument (`fetch(URL)`, `fetch(url, { method })`) resolves to whatever its same-file binding's
+//! initializer resolves to, ONE hop, and only when that initializer resolves on its own
+//! (`const url = ``${BASE}/x`` ` does; `const url = other` and `const base = process.env.X` do not). The
+//! same [`binding_census`] gates apply, so the name is proven to be bound exactly once in this file.
+//! Unlike the head slot this position has nothing to assume — there is no head-drop bucket in front of it —
+//! so the substitution is exactly equivalent to finding that expression written at the call site. Nesting
+//! is not a gate here: a function-local `const url = …` qualifies like a top-level one, because "bound
+//! exactly once in the file" is what carries the scope argument. Interprocedural resolution (a wrapper
+//! parameter, a component prop) remains out of scope — that is value resolution, not constant reading.
 
 mod angular;
+mod binding_census;
 mod body_shape;
 mod collector;
 mod concat;
@@ -54,11 +76,14 @@ mod consts;
 mod correlation;
 mod generated_client;
 mod keying;
+mod local_consts;
 mod matchers;
 mod object_shape;
 mod react_query;
 mod retry;
 mod url_resolve;
+#[cfg(test)]
+mod url_resolve_tests;
 
 pub use collector::extract_http_egress;
 pub use consts::{const_map_fragment, resolve_raw_path};

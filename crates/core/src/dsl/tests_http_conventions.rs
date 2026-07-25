@@ -142,6 +142,7 @@ fn http_conventions_flags_unversioned_fetch_and_unresolved_dynamic_fetch() {
 fn http_conventions_flags_exported_handler_with_bad_naming() {
     let files = vec![SourceFile {
         loop_spans: Vec::new(),
+        function_spans: Vec::new(),
         rel: "routes/authRoutes.ts".into(),
         text: String::new(),
         symbols: vec![

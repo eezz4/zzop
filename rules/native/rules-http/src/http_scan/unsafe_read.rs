@@ -7,7 +7,10 @@ use zzop_core::{
     disable_hint, ApiEndpoint, Finding, NonIdempotentKind, Severity, SourceSymbol, WriteSite,
 };
 
-use super::{build_name_index, is_whitelisted, resolve_handler, SAFE_METHODS};
+use super::{
+    build_name_index, is_whitelisted, resolve_handler, with_ok_marker_near_miss,
+    write_site_sightline, SAFE_METHODS,
+};
 
 /// Input for [`scan_unsafe_read_endpoint`].
 pub struct ScanUnsafeReadEndpointInput<'a> {
@@ -78,18 +81,27 @@ pub fn scan_unsafe_read_endpoint(input: &ScanUnsafeReadEndpointInput) -> Vec<Fin
                 e.path, site.sink
             )
         };
-        let hint = format!(
+        // Near-miss disclosure is appended AFTER the rule's own message so `data.hint` and `message`
+        // stay the same string (both are `hint` below).
+        let hint = with_ok_marker_near_miss(
+            format!(
             "{where_} — GET/HEAD must be safe & idempotent. Move the write behind a mutating method \
              (POST/PUT/PATCH/DELETE), or make this endpoint genuinely read-only. If the write is \
              deliberate and safe to repeat (e.g. a fire-and-forget audit log), mark it with \
-             `// idempotent-ok: <reason>` on the line above the handler, or disable {} if this applies \
-             more broadly.",
+             `// idempotent-ok: <reason>` on the {}, or disable {} if this applies \
+             more broadly. {sightline}",
+                super::marker_window_phrase(),
             // `disable_hint` always starts with "Disable " — this site already supplies "disable"
             // mid-sentence (after "or"), so only the "via config ..." remainder is spliced in, same
             // technique `rules-schema/src/message.rs`'s `disable_hint_tail` uses.
-            disable_hint("unsafe-read-endpoint")
-                .strip_prefix("Disable ")
-                .expect("disable_hint always starts with \"Disable \"")
+                disable_hint("unsafe-read-endpoint")
+                    .strip_prefix("Disable ")
+                    .expect("disable_hint always starts with \"Disable \""),
+                sightline = write_site_sightline()
+            ),
+            &handler_symbol,
+            input.symbols,
+            input.files,
         );
         out.push(Finding {
             rule_id: "unsafe-read-endpoint".to_string(),

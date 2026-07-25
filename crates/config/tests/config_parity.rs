@@ -37,9 +37,14 @@ fn unresolve(value: &str) -> String {
 
 /// Reverses the two documented Rust-side deltas on one tree request, in place:
 /// path resolution (`root`/`cacheDir`/`packsDir`) and the `withDefaults` fold-in (`packDefs`
-/// always; `git: {}` only when the fixture config declared no `git` key). The injections are
-/// asserted before being stripped — a Rust mapper that STOPPED injecting them fails here.
-fn normalize_tree(tree: &mut serde_json::Map<String, Value>, config_has_git: bool) {
+/// always; `git: {}` and the default `cacheDir` only when the fixture config declared no such key).
+/// The injections are asserted before being stripped — a Rust mapper that STOPPED injecting them
+/// fails here.
+fn normalize_tree(
+    tree: &mut serde_json::Map<String, Value>,
+    config_has_git: bool,
+    config_has_cache_dir: bool,
+) {
     for key in ["root", "cacheDir"] {
         if let Some(s) = tree.get(key).and_then(Value::as_str) {
             let raw = unresolve(s);
@@ -72,6 +77,20 @@ fn normalize_tree(tree: &mut serde_json::Map<String, Value>, config_has_git: boo
             "the injected git default must be exactly the empty object"
         );
     }
+    if !config_has_cache_dir {
+        // Post-JS-era injection with no fixture counterpart (the JS front end left an omitted
+        // `cacheDir` omitted, i.e. permanently cold): asserted here, then stripped, so the committed
+        // fixture keeps recording the JS-era request shape and every OTHER key still deep-equals.
+        let cache_dir = tree
+            .remove("cacheDir")
+            .expect("the Rust mapper must inject the default cacheDir when the config has none");
+        assert_eq!(
+            cache_dir.as_str().map(unresolve).as_deref(),
+            Some(zzop_cache::DEFAULT_CACHE_DIR),
+            "the injected cacheDir default must be {} resolved against the config directory",
+            zzop_cache::DEFAULT_CACHE_DIR
+        );
+    }
 }
 
 #[test]
@@ -100,6 +119,7 @@ fn rust_mapper_emits_the_committed_request_json_for_every_fixture_case() {
         assert_eq!(method, expected_method, "case {name:?}: method drifted");
 
         let config_has_git = config.get("git").is_some();
+        let config_has_cache_dir = config.get("cacheDir").is_some();
         let mut request = mapped.request;
         match &mut request {
             Value::Object(single) if single.contains_key("trees") => {
@@ -109,10 +129,10 @@ fn rust_mapper_emits_the_committed_request_json_for_every_fixture_case() {
                     .expect("trees array")
                 {
                     let tree_obj = tree.as_object_mut().expect("tree object");
-                    normalize_tree(tree_obj, config_has_git);
+                    normalize_tree(tree_obj, config_has_git, config_has_cache_dir);
                 }
             }
-            Value::Object(single) => normalize_tree(single, config_has_git),
+            Value::Object(single) => normalize_tree(single, config_has_git, config_has_cache_dir),
             other => panic!("case {name:?}: request is not an object: {other}"),
         }
 

@@ -1,4 +1,4 @@
-//! `cross-layer/*` — 24 native rules that run over `zzop_core::CrossLayerResult`, the multi-tree join result
+//! `cross-layer/*` — 25 native rules that run over `zzop_core::CrossLayerResult`, the multi-tree join result
 //! `zzop_engine::analyze_trees` produces (see `crates/core/src/io.rs`'s module doc for the join itself:
 //! exact `(kind, key)` join with an ambiguity gate for keys provided by 2+ distinct source trees, an
 //! external-egress gate for host-carrying consume keys, and a low-confidence tag for generic paths).
@@ -15,8 +15,7 @@
 //! - [`version_skew`]: `version_skew_findings` — an unprovided consume whose key differs from a provide only in
 //!   a version path segment (`cross-layer/version-skew`, warning).
 //! - [`path_near_miss`]: `path_near_miss_findings` — an unprovided consume whose key matches a provide after
-//!   allowing `{}` positions to differ, but is otherwise segment-identical (`cross-layer/path-near-miss`,
-//!   info).
+//!   allowing `{}` positions to differ, but is otherwise segment-identical (`cross-layer/path-near-miss`, info).
 //! - [`route_near_miss`]: `route_near_miss_findings` — an unprovided consume whose key differs from a
 //!   same-method provide by exactly one of `case`/`prefix` (an all-literal 1-2 segment base path),
 //!   disjoint from `path_near_miss`'s parameter-generalization case (`cross-layer/route-near-miss`, info).
@@ -38,12 +37,10 @@
 //! - [`external_shadow_internal`]: an external consume whose normalized method+path matches a route an
 //!   analyzed tree provides — the caller hardcodes an environment host instead of the relative/proxy path
 //!   (`cross-layer/external-shadow-internal`, warning).
-//! - [`external_secret_in_url`]: a secret-named query parameter in an external URL
-//!   (`cross-layer/external-secret-in-url`, warning).
+//! - [`external_secret_in_url`]: a secret-named query parameter in an external URL (`cross-layer/external-secret-in-url`, warning).
 //! - [`external_duplicated_integration`]: the same external host called directly from 2+ distinct trees
 //!   (`cross-layer/external-duplicated-integration`, warning).
-//! - [`external_host_fanout`]: the same external host called directly from 3+ distinct files
-//!   (`cross-layer/external-host-fanout`, info).
+//! - [`external_host_fanout`]: the same external host called directly from 3+ distinct files (`cross-layer/external-host-fanout`, info).
 //! - [`external_base_url_drift`]: the same external path consumed against 2+ different hosts
 //!   (`cross-layer/external-base-url-drift`, info).
 //! - [`external_version_inconsistent`]: one host consumed through both version-shaped and versionless paths
@@ -55,7 +52,7 @@
 //! - [`unconsumed_mutation_endpoint`]: an unconsumed provide with a write method — standing attack surface
 //!   (`cross-layer/unconsumed-mutation-endpoint`, warning; downgraded to info, with a named-source
 //!   explanation, when the run has 1+ [`majority_unresolved_http_sources`] BLIND source — a confident
-//!   "unconsumed" verdict requires a resolved consume side; co-fires with `unconsumed-endpoint` by design).
+//!   "unconsumed" verdict requires a resolved consume side; reports write routes in `unconsumed-endpoint`'s place).
 //! - [`unprovided_mutation_call`]: an unprovided consume with a write method — a state-changing call going nowhere
 //!   visible (`cross-layer/unprovided-mutation-call`, warning; co-fires with the unprovided-diagnosis trio).
 //! - [`cross_tree_route_shadowing`]: a `{}`-pattern route in one tree that would shadow a same-method
@@ -77,6 +74,9 @@
 //!   body literal (`body-shape-v1`'s `ConsumeBodyShape`) disagrees with the BE handler's resolved DTO
 //!   (`ProvideBodyShape`): a missing required field, an undeclared extra key (only when the DTO's field
 //!   list is complete), or a missing `@Body('subKey')` wrapper (`cross-layer/body-field-drift`, warning).
+//! - [`retrying_write_no_idempotency`]: a retry-configured frontend WRITE (`IoConsume::retry_configured`)
+//!   resolving to a provider route with no witnessed `idempotency-guarded` attribute — the two-sided check
+//!   that justifies critical (`cross-layer/retrying-write-no-idempotency`, emitted at critical).
 //! - [`unknown_verb_route`]: `unknown_verb_route_findings` — a route whose path is statically served but
 //!   whose HTTP method(s) could not be determined (an all-verb `pages/api` handler, a `pathname`-dispatch
 //!   block, or a Go `HandleFunc` with no method literal): the honest-disclosure half of the 1b fabrication
@@ -96,9 +96,9 @@
 //! ## The provide-key universe
 //! `method_mismatch`/`version_skew`/`path_near_miss`/`route_near_miss`/`external_shadow_internal`/
 //! `cross_tree_route_shadowing` need to compare against every `http` provide across every tree, not just the
-//! ones `CrossLayerResult`
-//! happens to expose (`unconsumed_provides` excludes ambiguous-candidate provides; `edges`/`ambiguous_consumes` only cover
-//! provides some consume already matched). That full universe is deliberately NOT threaded through
+//! ones `CrossLayerResult` happens to expose (`unconsumed_provides` excludes ambiguous-candidate provides;
+//! `edges`/`ambiguous_consumes` only cover provides some consume already matched). That full universe is
+//! deliberately NOT threaded through
 //! `zzop_core::io::link_cross_layer_io`'s return type (`crates/core` stays rule-vocabulary-free by design —
 //! the kernel carries mechanisms, never rule data); instead the engine call site
 //! (`zzop_engine::analyze_trees`) derives a flat `Vec<HttpProvideSite>` straight from the same `SourceIo`
@@ -109,8 +109,8 @@
 //! One unprovided consume CAN legitimately fire 2+ of `method_mismatch`/`version_skew`/`path_near_miss`/
 //! `route_near_miss`/`unprovided_mutation_call` at once when different comparisons hold (e.g. consume `POST /api/v1/orders` against
 //! provides `PUT /api/v1/orders` and `POST /api/v2/orders`). That co-firing is intentional, not a dedup
-//! bug — each finding carries a distinct diagnosis of the same broken call. Likewise `unconsumed_mutation_endpoint`
-//! intentionally co-fires with `unconsumed_endpoint` (same site, severity-split diagnosis).
+//! bug — each finding carries a distinct diagnosis of the same broken call. `unconsumed_mutation_endpoint` does NOT co-fire: it is a strict specialization, so `unconsumed_endpoint` stands
+//! down on the ROUTES it reported — keyed `(source, file, line, key)`, never the anchor alone (one line can carry several routes, e.g. gin `router.Any`, and a coarser key would silence a co-located read route); output-keyed, never a second copy of the predicate (`crates/engine/src/cross_layer_findings/unconsumed_family.rs`); disabling it hands those routes back.
 
 pub mod ambiguous_consume;
 pub mod body_field_drift;
@@ -199,15 +199,24 @@ pub(crate) fn path_segments(path: &str) -> Vec<&str> {
     path.split('/').filter(|s| !s.is_empty()).collect()
 }
 
-/// Consume-side minimum-information gate for the near-miss rules.
+/// This crate's CONTENTLESS-PATH gate: does this path carry zero literal evidence?
 ///
-/// True when every segment is the opaque `{}` placeholder (or the path has no
-/// segments at all). Such keys are typically head-drop artifacts (e.g.
-/// `` `${base}/${x}` `` keying as `GET /{}`): they carry zero literal evidence,
-/// so a near-miss suggestion computed from them is vacuous — an all-slot key
-/// "resembles" every same-length route. Deliberately asymmetric: only consume
-/// keys are gated. An all-slot *provide* is a declared catch-all route (e.g.
-/// `app.get('/:page')`) and remains a legitimate suggestion target.
+/// True when every segment is the opaque `{}` placeholder AND when the path has no segments at all (the
+/// root `/`). Neither shape names a particular endpoint — an all-slot path is typically a head-drop
+/// artifact (`` `${base}/${x}` `` keying as `GET /{}`), a bare root is answered by every HTTP host alive
+/// — so a claim resting on one is satisfied by ANY pair, i.e. is not a claim. The near-miss pair
+/// (`path_near_miss`/`route_near_miss`): a suggestion computed from an all-slot consume key "resembles"
+/// every same-length route — deliberately asymmetric, only CONSUME keys are gated, since an all-slot
+/// *provide* is a declared catch-all route (`app.get('/:page')`) and stays a legitimate target. The
+/// external-egress family (`external_shadow_internal`, `external_base_url_drift`,
+/// `external_version_inconsistent`): for a host-carrying consume key the HOST is the identity and these
+/// rules compare the host-STRIPPED path, so a contentless path decides nothing — `https://v2ex.com/`
+/// and `https://google.com/` both project onto `/`.
+///
+/// NOT the same question as `zzop_core::key_carries_route_identity` (the linker's
+/// unprovided-vs-unresolved gate), which deliberately answers the OPPOSITE at the root: there a `GET /`
+/// consume names a fully-known target, so a miss on it is a real unprovided route rather than a lost one.
+/// Kept apart on purpose — that function's doc holds the other half, `shared_tests.rs` pins the disagreement.
 pub(crate) fn is_all_slot_path(segments: &[&str]) -> bool {
     segments.iter().all(|s| *s == "{}")
 }
@@ -287,14 +296,4 @@ pub(crate) fn is_write_method(method: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn is_all_slot_path_pins_the_gate_shape() {
-        assert!(is_all_slot_path(&["{}"]));
-        assert!(is_all_slot_path(&["{}", "{}"]));
-        assert!(is_all_slot_path(&[]));
-        assert!(!is_all_slot_path(&["users", "{}"]));
-    }
-}
+mod shared_tests;

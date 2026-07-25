@@ -28,7 +28,7 @@ names a label no `patterns` entry declares).
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `id` | string | — | Pack id; a finding's `rule_id` is `"{id}/{rule.id}"`. |
-| `framework` | string | `"any"` | Declared target environment (`"any"` \| `"react"` \| `"prisma"` \| ...). Currently informational: it is carried on `RuleMeta.framework`, but no engine code path filters on it today — `RuleMeta::applies_to` (crates/core/src/registry.rs) ignores its target argument and gates only on `enabled`. The per-file pre-filter that does run is path-based (`pack_loader::applies_to`, over each rule's `file_pattern`), not framework-based. |
+| `framework` | string | `"any"` | Declared target environment (`"any"` \| `"react"` \| `"prisma"` \| ...). Currently informational: it is parsed and carried on the loaded pack, but no engine code path filters on it today — nothing in the engine decides "what target is this tree", so there is no target gating for it to feed. The per-file pre-filter that does run is path-based (`pack_loader::applies_to`, over each rule's `file_pattern`), not framework-based. |
 | `schema_version` | u32 | `1` | DSL schema this pack was authored against — see [Schema version policy](#schema-version-policy). |
 | `fragments` | `{ name: regex }` | `{}` | Named regex fragments this pack can reference by `${NAME}` — see [Fragments (`${NAME}` references)](#fragments-name-references). |
 | `rules` | `RuleDef[]` | — | The pack's rules. |
@@ -125,9 +125,22 @@ Per-line regex scan over a file's raw text — the DSL's lexical matcher.
 | `line_pattern` | regex \| null | `null` | Single flag regex — mutually exclusive with `any` (see below). |
 | `any` | `LabeledPattern[]` \| null | `null` | Labeled alternatives; **first match per line wins**, its `label` becomes `data.label`. Takes precedence over `line_pattern` when both are present. |
 | `exclude_pattern` | regex \| null | `null` | A line that matches the main pattern is skipped entirely when it **also** matches this regex (e.g. excluding `^\s*import` lines from an `as`-cast scan). |
+| `attr_present` | string \| null | `null` | Attribute gate — plain attribute name, **not** a regex and **not** fragment-expanded. Keeps a finding only when this file carries a truthy attribute of that name. See [Attribute gates](#attribute-gates-consuming-a-declaration). |
+| `attr_absent` | string \| null | `null` | Same lookup, inverted: keeps a finding only when the file carries **no** truthy value for the attribute. |
+| `require_attr_declared` | string \| null | `null` | The rule runs only when that attribute name is declared *somewhere* in the analysis. Nothing declared = the rule emits nothing and the run's `warnings` say so. |
 | `snippet_max` | usize | `160` | Truncates the reported snippet (chars, after `line.trim()`). |
 
 `LabeledPattern`: `{ "pattern": "<regex>", "label": "<string>" }`.
+
+A `label` is an identification tag, not a description: the bundled packs keep every label to
+`^[a-z0-9]+(-[a-z0-9]+)*$` (`ecb-mode`, not `ECB mode (no diffusion)`) — explanation is the rule's
+`message`, which already carries it and would otherwise rot in two places. In `any[]` the label also ships
+to consumers verbatim as `data.label`, where it is the only stable "which alternative fired" key a
+multi-alternative rule has (`snippet` is raw source text); in `patterns[]`/`absent[]` it is an identifier
+`trigger`/`after` resolve by exact string. Scope is rule-local — labels are never typed by a user and are
+free to repeat across unrelated rules. This is a house convention machine-checked over the bundled packs
+only (`crates/engine/tests/rule_contracts/`'s `dsl_pattern_labels_are_kebab_case`); the pack schema does
+not constrain the value, so a third-party pack is free to label differently.
 
 If neither `any` nor `line_pattern` is set, or any regex fails to compile, the rule is skipped
 (zero findings) rather than erroring the whole pack.
@@ -148,6 +161,8 @@ one function" matcher (e.g. `Runtime.exec` + string concatenation in the same me
 | `patterns` | `LabeledPattern[]` | required | **All** must each match at least one line inside a symbol's span (lines don't need to share a line — "co-occurrence", not "one regex"). |
 | `trigger` | string | required | Must equal one `patterns[].label`; that pattern's first (top-down) match anchors the finding's `line`/snippet. A `trigger` naming no real label makes the rule malformed → skipped. |
 | `trigger_in_loop` | bool | `false` | Structural containment gate on the trigger pattern only: when `true`, a trigger-pattern line match counts (for both satisfaction and the finding's line) only if that line falls within one of the file's projected `loop_spans` (see below) — i.e. the call is textually INSIDE a loop statement or an array-iteration callback body, not merely co-occurring with loop tokens somewhere in the same function. Non-trigger `patterns`/`absent` entries are unaffected. A file with no projected loop spans can never satisfy the trigger, so the rule is silent there — same graceful-degrade policy as a file with no symbol spans. |
+| `after` | string \| null | `null` | Lexical-ORDER gate on the trigger pattern: names another `patterns[].label` that must already have matched **before** a trigger match counts (for both satisfaction and the finding's line). "Before" = an earlier line in the same span, or — on the **same** line — the ordering pattern's FIRST match starting before the trigger pattern's FIRST match. Only those two first-match offsets are compared, never every match: `p.then(r => setX(r))` counts, `setX(v); await f();` does not, and `setX(a); await f(); setY(b);` on one line does NOT count either, because the trigger's first match (`setX`) precedes the boundary even though `setY` follows it (an accepted under-report on dense one-liners). Proves lexical order in the source text, **not** execution order — a trigger in an `else` branch, or one that follows a boundary which only runs conditionally, still counts; a rule using it should say "lexically after". Naming a label no `patterns` entry declares is malformed → the rule is skipped. |
+| `after_in_same_function` | bool | `false` | Structural PAIRING gate on `after` (no-op without it): the ordering match must fall **inside** the innermost `function_spans` entry (see below) that contains the trigger — not merely inside the same symbol body span. CONTAINMENT, not span identity: the test is "ordering line ≥ that entry's START line" (it is already at or before the trigger line, which is inside the entry). Identity would be wrong — a line holding both an outer `await` and a merged continuation callback (`await import(m).then((x) => x.f());`) resolves innermost to the callback, which would hide the enclosing function's own boundary from the setter on the next line. Exists because a method-scan span is a *declared symbol's* body — a React component's whole function — so `after` otherwise pairs a setter in one closure with an `await` in an unrelated **sibling** closure. A file with no projected `function_spans` degrades to a **no-op** (every line resolves to "no enclosing function", so all lines count as the same one), leaving the rule's pre-gate behavior intact — the opposite direction from `trigger_in_loop`, and deliberate: this gate only ever *removes* pairings, so "remove nothing" preserves coverage instead of deleting it. |
 | `absent` | `LabeledPattern[]` | `[]` | Veto patterns: after every `patterns` entry is satisfied, the finding is dropped if **any** of these also matches a line in the **same span** (encodes "a guard makes this not a violation" — e.g. a `try {` wrapping a read-then-write, or a `$transaction(` wrapper). |
 | `snippet_max` | usize | `160` | Same as line-scan. |
 
@@ -175,6 +190,41 @@ Span semantics:
   even if it is, byte-wise, outside the loop (e.g. a receiver expression on the same line as a one-line
   `.map()` callback). Empty when the parser has no support / falls back lexically, same graceful-degrade
   policy as `symbols`.
+- **Function spans** (`after_in_same_function`'s substrate): the parser also projects each file's
+  `function_spans` — 1-based, inclusive line ranges, one per function-like node (declaration,
+  expression, arrow, class/object method, constructor, accessor). Nested functions overlap; the gate
+  resolves the **innermost** span containing a line (greatest start; ties by smallest end, then first
+  emitted). One merge is applied at projection time: a function-shaped ARGUMENT of a
+  `.then(...)`/`.catch(...)`/`.finally(...)` member call has its span **start** pulled up to that call's
+  property-token line, so a promise continuation shares a span with the boundary that schedules it.
+  The merge only changes anything when the callback OPENS ON A LATER LINE than the `.then` token — the
+  formatting a printer produces once the argument list breaks:
+
+  ```ts
+  loadRates().then(     // line 1 — the boundary token
+    (d) => {            // line 2 — the callback's own start
+      setRates(d);      // line 3
+    },
+  );
+  ```
+  Projected span: `[1, 5]`, not `[2, 5]`. Unmerged, `innermost(3)` would start at line 2 and the
+  boundary on line 1 would fall outside it, so the pair breaks. In the common one-line spelling
+  (`loadRates().then((d) => {`) the token and the callback already share a line and the merge is a
+  no-op. Nothing else merges (`.map`, `setTimeout`, `useEffect`, a bare or aliased `then`). Empty when
+  the parser has no support — see the field's row above for why the degrade is a no-op rather than
+  silence. **TypeScript only today** (`loop_spans` is TypeScript + Go); the coverage matrix lives in
+  [`NORMALIZED_AST.md`](../NORMALIZED_AST.md).
+
+  The no-op degrade is decided **per line, not per file**, and that is the contract, not an accident: a
+  trigger line inside *no* projected span means "no gate on this line", never "no pair here". A missing
+  span is absence of evidence, and this gate only ever deletes pairings the projection *proves* sit in
+  different functions — so a silent projection re-admits the pre-gate scope instead of deleting a
+  finding on the strength of a fact nobody has. This is reachable with spans **present**: a class body's
+  own top level. A class's body span is the scanned unit whenever the class declares no
+  method/constructor (a component written purely with property initializers), and a property-initializer
+  line there sits inside no function span — so a setter on it still pairs with an `await` from a sibling
+  arrow property. An external parser that projects `function_spans` only partially lands in the same
+  place.
 
 ### `symbol-scan` (`SymbolScan`)
 
@@ -239,6 +289,42 @@ io-scan iterates the tree's already-assembled `provides` then `consumes` lists d
 order (the determinism contract). Finding `data` is `{ "snippet": <key or "<unresolved>">, "kind": <kind> }`;
 `line` is the entry's own line.
 
+## Attribute gates: consuming a declaration
+
+Some rules rest on a fact the source cannot state — which directory is the config module, which tree is
+generated, which routes a middleware guards. Inferring such a fact from names or code shape is guessing,
+and a guess that is right half the time is worse than a rule that says it does not know. The attribute
+gates let a rule read the project's own **declaration** instead.
+
+The declaration channel is the one every cross-cutting fact already uses: an overlay's per-file
+`attributes` (`overlays: [...]` in `zzop.config.jsonc`; `adapterOverlays` for embedders), each entry
+`{"target": ..., "key": "<name>", "value": <json>}`. `examples/auth-overlay-adapter` is a working one.
+
+| Matcher | Gate is looked up against | Resolution |
+|---|---|---|
+| `line-scan` | the scanned file's repo-relative path | exact `{"file": {"path": ...}}` wins, else the longest covering `{"pathScope": {"prefix": ...}}` |
+| `io-scan` | the io entry's `(kind, key)` | exact `{"ioKey": ...}` wins, else the longest covering `{"pathScope": {"prefix": ...}}` (route paths) |
+
+A value is "present" when it is truthy — `null`/`false`/`0`/`""` count as absent, so a narrow explicit
+`false` can carve one file (or route) out of a scope declared wholesale.
+
+**`require_attr_declared` and the silence it buys.** `attr_absent` alone is inert when nobody declares
+the name: every file trivially lacks it, so the rule fires everywhere — which is exactly the guess the
+declaration was meant to replace. That is fine for an attribute the *engine* mints (io-scan's
+`auth-guarded`: a tree where nothing is guarded really is a tree of unguarded routes) and wrong for one a
+*user* declares. `require_attr_declared` closes it: with nothing declared the rule emits nothing, and the
+run's `warnings` disclose which rule did not run, which name it needed, how many candidate sites went
+unjudged, and how to declare one. A rule with no candidate sites stays quiet — `0` there is a real `0`.
+
+**Where the gate runs, and what that constrains.** Line-scan attribute gates are a whole-tree
+**post-filter** applied after the per-file pass, not a check inside it. A per-file finding is cached under
+`(content hash, parser fingerprint, scope, ruleset fingerprint)` and the attribute set is none of those:
+gating inside the cached unit would freeze a declaration into entries that outlive it, so editing the
+declaration would leave stale findings behind. The cache therefore stores ungated findings and the gate is
+recomputed every run — the same placement `severityOverrides`/`suppressions` use. Two consequences for a
+pack author: an attribute gate can only ever **remove** findings, and its predicate is **whole-file**. A
+gate that had to change which lines match could not live here.
+
 ## Path-exclusion semantics
 
 `file_exclude_pattern` (on `line-scan` and `method-scan`) exists for one reason: `file_pattern` is
@@ -267,6 +353,24 @@ concept to anchor a comment against):
   uniformly across every pack. A wider lookback window over-suppresses: a marker aimed at one call can
   silently suppress unrelated, unvetted findings on the lines below it. Place the marker on the finding's
   own line, or directly above it — nowhere further back.
+- A comment SHAPED like a marker but not THIS rule's marker suppresses nothing — and is now NAMED in the
+  finding's message alongside the marker the rule does honor, instead of failing silently. The check is
+  vocabulary-free: it compares against this rule's own derived marker and nothing else, so it reports a
+  plain typo (`// as-cst-ok`), another rule's marker (`// n+1-ok`), and an invented word
+  (`// legacy-route-ok`) identically — it cannot and does not know which of those names a real rule.
+  The accepted shape is a token over `[a-z0-9+]` with `-`-joined segments, ending in `-ok` — lowercase
+  only, with `+` in the alphabet so `n+1`-style ids are recognized — standing as the FIRST token of a line
+  comment (only whitespace between the leader and the token) and terminated by an ATTACHED `:` or by the
+  end of the line (`// as-ok: reason`, `// as-ok`). "Line comment" means exactly the leaders that could
+  have SUPPRESSED this finding in the first place: `//` for `line-scan`/`method-scan`, `--` only in a
+  `.sql` file, and `//` or `#` for `io-scan` (see the three bullets below) — a leader that never had
+  suppression power is never blamed for failing to use it, so a Python `# foo-ok` above a `line-scan`
+  finding is silent, exactly as it is for suppression. A `-ok` word inside a sentence is never accused
+  (`// half-ok for now, revisit`, `// TODO: not-ok yet`, `// NOT-ok:`), but a comment that is ONLY a
+  hyphenated lowercase `-ok` word (`// half-ok`) IS reported — by shape it is indistinguishable from a
+  bare marker, and a bare marker is a legal spelling, so there is nothing left to discriminate on.
+  Accepted cost. Two deliberate conservative misses: `// as-ok reason` (no colon) and `// as-ok : reason`
+  (detached colon) go unreported — a missed disclosure is recoverable, a false typo accusation is not.
 - Matches `// <marker>` or `// <marker>: <reason>` — the marker text is regex-escaped before compiling
   (`//\s*{escaped-marker}\b`). Derived markers are always `<kebab-id>-ok` (no regex metacharacters), so the
   escaping is defensive; it stays correct even if an id ever carried a regex-special character.

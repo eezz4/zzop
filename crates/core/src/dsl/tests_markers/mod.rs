@@ -1,5 +1,10 @@
 //! Inline ok-marker suppression tests (v2 extension #3): `//`-comment markers for line-scan and
-//! method-scan, plus the `--`-comment recognition gated to `.sql` files.
+//! method-scan, plus the `--`-comment recognition gated to `.sql` files. The sibling `near_miss_tests`
+//! covers the DISCLOSURE half — a comment merely SHAPED like a marker, which suppresses nothing and is
+//! named in the finding's message instead. Split purely to stay under the repo's per-file line cap
+//! (`scripts/check-max-file-lines.sh`); one logical suite across the two files.
+
+mod near_miss_tests;
 
 use super::test_support::{method, rule_pack, scan_pack};
 use super::RulePackDef;

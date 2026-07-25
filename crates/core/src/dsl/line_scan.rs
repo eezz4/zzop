@@ -4,7 +4,10 @@ use crate::finding::Finding;
 
 use super::def::{LineScan, RuleDef};
 use super::diagnostics::RuleDiag;
-use super::markers::{compile_marker, compile_marker_sql, is_sql_file, marker_suppresses};
+use super::markers::{
+    compile_marker, compile_marker_sql, is_sql_file, marker_suppresses, message_with_near_miss,
+    Leaders,
+};
 use super::source::RuleContext;
 
 /// A compiled per-line matcher — single or labeled alternatives.
@@ -147,6 +150,14 @@ pub(super) fn eval_line_scan(
             if is_sql && marker_suppresses(&marker_re_sql, &lines, i) {
                 continue;
             }
+            // Marker-shaped comment that is NOT this rule's marker -> disclose it in the message (the
+            // finding still fires; see `message_with_near_miss`). Message-only: no gate above changes.
+            let leaders = if is_sql {
+                Leaders::SlashOrSql
+            } else {
+                Leaders::Slash
+            };
+            let message = message_with_near_miss(leaders, &marker, &lines, i, &rule.message);
             let snippet: String = line.trim().chars().take(m.snippet_max).collect();
             let data = if label.is_empty() {
                 serde_json::json!({ "snippet": snippet })
@@ -158,7 +169,7 @@ pub(super) fn eval_line_scan(
                 severity: rule.severity,
                 file: f.rel.clone(),
                 line: (i + 1) as u32,
-                message: rule.message.clone(),
+                message,
                 data: Some(data),
             });
         }

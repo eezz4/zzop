@@ -103,7 +103,7 @@ use std::collections::HashMap;
 
 use regex::Regex;
 use zzop_core::callgraph::{bfs_reachable, SymbolGraph};
-use zzop_core::{disable_hint, Finding, Severity, SourceSymbol};
+use zzop_core::{Finding, Severity, SourceSymbol};
 
 use crate::http_scan::{build_name_index, resolve_handler_scoped};
 use zzop_core::is_test_file;
@@ -253,28 +253,7 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
         if reaches_guard(&handler_symbol) {
             continue;
         }
-        let hint = format!(
-            "{method} {path} (handler `{handler_ref}`) never reaches a call whose name looks like an auth \
-             guard ({}) anywhere in its call graph — this mutating route may be missing an authorization \
-             check. Add an explicit, named guard call reachable from the handler (e.g. requireAuth(), \
-             verifySession()), or confirm auth is actually enforced. Exemption: routes whose path is itself \
-             on the auth-acquisition surface are never checked by this rule, since that surface cannot \
-             require pre-existing auth to reach itself — either a standalone segment (`/auth/...`, \
-             `/login`, `/logout`, `/signin`, `/signup`), or a segment like `/register`, `/token`, \
-             `/refresh`, `/password`, `/otp` PAIRED WITH an auth-family segment elsewhere in the same path \
-             (e.g. `/auth/register` is exempt, but `/devices/register` is NOT — `register` alone isn't \
-             enough). A route registered in a test/fixture file (`__tests__/`, `__test__/`, `tests?/`, \
-             `spec/`, `*.test.*`, `*.spec.*`, and similar per-language conventions) is also never checked — \
-             a route only ever defined/called from a test is not exposed application surface. \
-             Precision limit: this is a call-graph-BFS, vocabulary-based check — route-level middleware (e.g. \
-             `apiRoutes.post(\"{path}\", requireAuth, {handler_ref})`, or a router-wide `.use(authMiddleware)`) \
-             never appears as a call FROM the handler itself, so it is invisible to this check and WILL \
-             false-positive on a route guarded only that way — this finding starts at Info severity until \
-             this check becomes middleware-aware. {} if your auth happens at the middleware layer (this \
-             rule has no inline suppression marker).",
-            input.auth_guard_pattern,
-            disable_hint("mutating-route-no-auth")
-        );
+        let hint = message::missing_auth_hint(method, path, handler_ref, input.auth_guard_pattern);
         out.push(Finding {
             rule_id: "mutating-route-no-auth".to_string(),
             severity: Severity::Info,
@@ -294,6 +273,7 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
     out
 }
 
+mod message;
 mod qualifier;
 
 #[cfg(test)]

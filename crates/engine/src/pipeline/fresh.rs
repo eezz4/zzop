@@ -5,7 +5,7 @@ use zzop_core::{ImportMap, IoFacts, RulePackDef};
 use crate::dispatch::Language;
 use crate::EngineConfig;
 
-use super::findings::{eval_packs, schema_findings, schema_findings_eligible};
+use super::findings::{eval_packs, schema_findings, schema_findings_eligible, SpanFacts};
 use super::parsers::{
     lexical_loc, parse_csharp, parse_go, parse_java21, parse_prisma, parse_python, parse_rust,
     parse_typescript,
@@ -34,8 +34,18 @@ pub(super) fn compute_fresh_artifact(
         // Oversized: loc counted lexically, no symbols/imports/io, but the text is still scanned by line-scan DSL rules
         // (lexical-only files are excluded from structural projection, not rule evaluation). `store_bound_models`/`field_usage_tokens` are raw-text regex scans, never an AST parse, so they run here too (like the removed `scan_store_map`/`scan_field_usage` walks), unaffected by the size cap.
         let loc = lexical_loc(text);
-        let (findings, rule_timings, minified_or_generated) =
-            eval_packs(packs, rel, text, &[], None, &[], config.profile_rules);
+        let (findings, rule_timings, minified_or_generated) = eval_packs(
+            packs,
+            rel,
+            text,
+            &[],
+            None,
+            SpanFacts {
+                loop_spans: &[],
+                function_spans: &[],
+            },
+            config.profile_rules,
+        );
         return FileArtifact {
             rel: rel.to_string(),
             symbols: Vec::new(),
@@ -50,6 +60,7 @@ pub(super) fn compute_fresh_artifact(
             io: None,
             rule_timings,
             used_names: Vec::new(),
+            exported_signature_names: Vec::new(),
             const_map_fragment: std::collections::HashMap::new(),
             procedure_router_fragments: Vec::new(),
             router_mount_fragments: Vec::new(),
@@ -59,6 +70,7 @@ pub(super) fn compute_fresh_artifact(
             class_shape_fragments: Vec::new(),
             query_call_sites: Vec::new(),
             loop_spans: Vec::new(),
+            function_spans: Vec::new(),
             field_usage_tokens: sorted_field_usage_tokens(rel, text),
         };
     }
@@ -144,6 +156,19 @@ pub(super) fn compute_fresh_artifact(
         text,
         zzop_parser_typescript::parse_asset_refs,
     );
+    // Public-signature type names: the position-aware companion to `used_names`, which rides the
+    // language-neutral parse tuple above. Deliberately on THIS TS-only lane instead — widening that
+    // tuple for a TypeScript-only fact would touch six parser fns and every non-TS arm to thread a
+    // value they can never produce. Empty for non-TS/degraded = no `dead-exports` exemptions = the
+    // pre-existing behavior. Cost: one more independent swc parse per fresh TS file (the same
+    // known tradeoff `parsers.rs`'s own doc records for `used_names`), paid only on a cache MISS —
+    // `FileIrSlice::exported_signature_names` carries it on every warm run.
+    let exported_signature_names = ts_only(
+        is_ts_fresh,
+        rel,
+        text,
+        zzop_parser_typescript::parse_exported_signature_names,
+    );
     let (wrapper_def_fragments, wrapper_call_fragments) = match language {
         Some(Language::TypeScript) if !degraded => {
             zzop_parser_typescript::extract_wrapper_fragments(rel, text)
@@ -178,6 +203,16 @@ pub(super) fn compute_fresh_artifact(
         Some(Language::Go) if !degraded => zzop_parser_go::extract_loop_spans(rel, text),
         _ => Vec::new(),
     };
+    // Function line spans with promise-continuation callbacks merged into their call site
+    // (`function-spans-v1`): same AST-derived gate as `loop_spans` above — `MethodScan::
+    // after_in_same_function`'s substrate. TypeScript only today; every other language is a documented
+    // matrix blank, where the gate degrades to a no-op rather than to silence (see the field's doc).
+    let function_spans = match language {
+        Some(Language::TypeScript) if !degraded => {
+            zzop_parser_typescript::extract_function_spans(rel, text)
+        }
+        _ => Vec::new(),
+    };
     // Store-binding and field-usage-token facts are both raw-text regex scans, never an AST parse, so — like the removed `scan_store_map`/`scan_field_usage` filesystem walks they replace — they run unconditionally on `rel`/`text` here regardless of `language`/`degraded`; each gates its own applicability internally (the store-file convention, the `.ts`/`.tsx` extension, respectively).
     let field_usage_tokens = sorted_field_usage_tokens(rel, text);
     let (mut findings, rule_timings, minified_or_generated) = eval_packs(
@@ -186,7 +221,10 @@ pub(super) fn compute_fresh_artifact(
         text,
         &symbols,
         io.clone(),
-        &loop_spans,
+        SpanFacts {
+            loop_spans: &loop_spans,
+            function_spans: &function_spans,
+        },
         config.profile_rules,
     );
     if schema_findings_eligible(language, degraded) {
@@ -206,6 +244,7 @@ pub(super) fn compute_fresh_artifact(
         io,
         rule_timings,
         used_names,
+        exported_signature_names,
         const_map_fragment,
         procedure_router_fragments,
         router_mount_fragments,
@@ -216,6 +255,7 @@ pub(super) fn compute_fresh_artifact(
         query_call_sites,
         field_usage_tokens,
         loop_spans,
+        function_spans,
     }
 }
 

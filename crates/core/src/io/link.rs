@@ -1,5 +1,9 @@
 //! The cross-layer linker: an exact `(kind, key)` join of trees' IO with the ambiguity /
-//! external-egress / low-confidence gates documented in the [`crate::io`] module doc.
+//! external-egress / route-identity / low-confidence gates documented in the [`crate::io`] module doc.
+//! The structural gate sequence in front of the join — no-key, deployment-topology host re-key, and the
+//! external-egress gate that must follow it — is [`consume_join::classify_consume_join`], shared verbatim
+//! with the single-tree `http/unprovided-consume` rule; the route-identity predicate (asked only of a
+//! provider MISS, so it is not part of that sequence) is [`super::key::key_carries_route_identity`].
 
 use std::collections::HashMap;
 
@@ -7,7 +11,11 @@ use super::facts::{
     AmbiguousConsume, CrossLayerEdge, CrossLayerResult, EdgeFrom, EdgeTo, IoConsume, SourceIo,
     TaggedConsume, TaggedProvide,
 };
-use super::key::http_consume_interface_key;
+use super::key::key_carries_route_identity;
+
+mod consume_join;
+mod host_rekey;
+pub use consume_join::{classify_consume_join, ConsumeJoin};
 
 /// Injectable options for [`link_cross_layer_io`]. Mirrors `zzop_git::CollectOptions::commit_type_patterns`'s
 /// mechanism/vocabulary split: this crate owns the injectable mechanism (matching a compiled pattern against
@@ -32,8 +40,8 @@ pub struct LinkOptions {
     pub internal_hosts: Vec<String>,
 }
 
-/// Exact join of trees' IO on (kind, key), with the ambiguity/external/low-confidence gates documented in
-/// this module's doc. Pure function (given `opts`).
+/// Exact join of trees' IO on (kind, key), with the ambiguity/external/route-identity/low-confidence
+/// gates documented in this module's doc. Pure function (given `opts`).
 pub fn link_cross_layer_io(trees: &[SourceIo], opts: &LinkOptions) -> CrossLayerResult {
     // Index providers by (kind, key). Multiple providers for one key is legal (e.g. two services expose one topic).
     let mut providers_by_key: HashMap<String, Vec<TaggedProvide>> = HashMap::new();
@@ -86,20 +94,8 @@ pub fn link_cross_layer_io(trees: &[SourceIo], opts: &LinkOptions) -> CrossLayer
 
     for SourceIo { source, io } in trees {
         for c in &io.consumes {
-            let Some(key) = &c.key else {
-                unresolved_consumes.push(TaggedConsume {
-                    source: source.clone(),
-                    consume: c.clone(),
-                });
-                continue;
-            };
-            // Deployment-topology host re-key — MUST run BEFORE the `"://"` external-egress gate right
-            // below: an absolute-URL consume whose authority matches a declared internal host is a
-            // same-deployment call that merely happens to spell its own gateway host out loud, not
-            // third-party egress. A miss (no host declared, or none matches) falls through to the
-            // ordinary external gate byte-for-byte — this never changes behavior for a tree that declares
-            // no hosts.
-            let rekeyed;
+            // The structural gate sequence (no-key -> host re-key -> `"://"` egress), run by the one
+            // shared function so its ORDER cannot drift between this join and the single-tree rule.
             // On a re-key, downstream buckets must carry the JOIN key, not the original absolute
             // URL — `unprovided_consumes`/`ambiguous_consumes` feed the near-miss family, whose
             // segment logic has never seen (and must not see) a scheme-carrying key. Provenance
@@ -107,29 +103,38 @@ pub fn link_cross_layer_io(trees: &[SourceIo], opts: &LinkOptions) -> CrossLayer
             // late-resolved consume keeps its richer const-expr provenance — the earlier stage
             // wins, same contract as late cross-file resolution filling `key` in).
             let mut rekeyed_consume: Option<IoConsume> = None;
-            let key: &String = match rekey_if_internal_host(key, &opts.internal_hosts) {
-                Some((new_key, host)) => {
-                    if let Some(entry) = host_rekey_counts.iter_mut().find(|(h, _)| *h == host) {
-                        entry.1 += 1;
-                    }
-                    let mut cc = c.clone();
-                    cc.raw = cc.raw.take().or_else(|| cc.key.clone());
-                    cc.key = Some(new_key.clone());
-                    rekeyed_consume = Some(cc);
-                    rekeyed = new_key;
-                    &rekeyed
+            let key = match classify_consume_join(c.key.as_deref(), &opts.internal_hosts) {
+                ConsumeJoin::Unresolved => {
+                    unresolved_consumes.push(TaggedConsume {
+                        source: source.clone(),
+                        consume: c.clone(),
+                    });
+                    continue;
                 }
-                None => key,
+                ConsumeJoin::External => {
+                    // A host-carrying key is third-party egress — never cross-tree joined, never
+                    // `unprovidedConsumes`. Unreachable after a re-key, so `c` is the whole record.
+                    external_consumes.push(TaggedConsume {
+                        source: source.clone(),
+                        consume: c.clone(),
+                    });
+                    continue;
+                }
+                ConsumeJoin::Joinable { key, rekeyed_host } => {
+                    if let Some(host) = rekeyed_host {
+                        if let Some(entry) = host_rekey_counts.iter_mut().find(|(h, _)| *h == host)
+                        {
+                            entry.1 += 1;
+                        }
+                        let mut cc = c.clone();
+                        cc.raw = cc.raw.take().or_else(|| cc.key.clone());
+                        cc.key = Some(key.to_string());
+                        rekeyed_consume = Some(cc);
+                    }
+                    key
+                }
             };
-            if key.contains("://") {
-                // A host-carrying key is third-party egress — never cross-tree joined, never
-                // `unprovidedConsumes`.
-                external_consumes.push(TaggedConsume {
-                    source: source.clone(),
-                    consume: c.clone(),
-                });
-                continue;
-            }
+            let key: &str = &key;
             // Machine-pinned bucket invariant (class sweep 2026-07-14): everything past the
             // external gate reports under a scheme-free key, and the bucket CLONE must agree with
             // the join key — the near-miss family consumes these buckets and must never see a
@@ -146,7 +151,19 @@ pub fn link_cross_layer_io(trees: &[SourceIo], opts: &LinkOptions) -> CrossLayer
             };
             let k = id_key(&c.kind, key);
             let Some(providers) = providers_by_key.get(&k) else {
-                unprovided_consumes.push(TaggedConsume {
+                // Route-identity gate (module doc). A key whose every path segment is `{}` names no
+                // route, so its MISS proves nothing about the contract space — only that the extractor
+                // lost the target. Calling that `unprovidedConsumes` INVENTS a missing internal route;
+                // `unresolvedConsumes` states the truth (blind here) and is what
+                // `cross-layer/unresolved-consume-ratio` counts, so the added silence is disclosed
+                // rather than hidden. A HIT above is untouched: joining a declared catch-all provide is
+                // a join, not a guess.
+                let bucket = if key_carries_route_identity(key) {
+                    &mut unprovided_consumes
+                } else {
+                    &mut unresolved_consumes
+                };
+                bucket.push(TaggedConsume {
                     source: source.clone(),
                     consume: bucket_consume(),
                 });
@@ -177,7 +194,7 @@ pub fn link_cross_layer_io(trees: &[SourceIo], opts: &LinkOptions) -> CrossLayer
             for p in providers {
                 edges.push(CrossLayerEdge {
                     kind: c.kind.clone(),
-                    key: key.clone(),
+                    key: key.to_string(),
                     from: EdgeFrom {
                         source: source.clone(),
                         file: c.file.clone(),
@@ -246,42 +263,6 @@ pub fn link_cross_layer_io(trees: &[SourceIo], opts: &LinkOptions) -> CrossLayer
         ambiguous_consumes,
         host_rekey_counts,
     }
-}
-
-/// Attempts to re-key an absolute-URL consume key (`"METHOD http(s)://authority/rest..."`) against
-/// `internal_hosts` — see [`LinkOptions::internal_hosts`]'s doc for the exact matching rule. Returns
-/// `Some((rekeyed_key, matched_host))` on a hit (`matched_host` is the literal entry from
-/// `internal_hosts` that matched, for [`CrossLayerResult::host_rekey_counts`] bookkeeping); `None` when
-/// the key isn't a `"METHOD scheme://..."` shape, the scheme isn't `http`/`https`, or the authority
-/// matches no declared host — the caller falls through to the ordinary external-egress gate untouched.
-fn rekey_if_internal_host(key: &str, internal_hosts: &[String]) -> Option<(String, String)> {
-    let (method, rest) = key.split_once(' ')?;
-    let scheme_end = rest.find("://")?;
-    let scheme = &rest[..scheme_end];
-    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
-        return None; // ws/wss (and anything else) stay external in v1
-    }
-    let after_scheme = &rest[scheme_end + 3..];
-    let (authority, path) = match after_scheme.find('/') {
-        Some(idx) => (&after_scheme[..idx], &after_scheme[idx..]),
-        None => (after_scheme, "/"),
-    };
-    let authority_host = authority.split(':').next().unwrap_or(authority);
-    for declared in internal_hosts {
-        let matched = match declared.split_once(':') {
-            // Declared host carries an explicit port — the consume must match host:port exactly.
-            Some((decl_host, decl_port)) => match authority.split_once(':') {
-                Some((host, port)) => host.eq_ignore_ascii_case(decl_host) && port == decl_port,
-                None => false,
-            },
-            // Declared host carries no port — the consume side's port (if any) is ignored.
-            None => authority_host.eq_ignore_ascii_case(declared),
-        };
-        if matched {
-            return Some((http_consume_interface_key(method, path), declared.clone()));
-        }
-    }
-    None
 }
 
 fn id_key(kind: &str, key: &str) -> String {

@@ -237,6 +237,42 @@ fn zzops_own_report_and_cache_dirs_are_not_rescanned_as_source() {
     assert_eq!(out.file_count, 1, "{walked:?}");
 }
 
+/// The CURRENT default cache directory (`zzop_cache::DEFAULT_CACHE_DIR` = `.zzop/cache`), end to end.
+/// Unlike the legacy names above this one fires on real runs: the config front-end defaults `cacheDir`
+/// there, so the very first zero-config run leaves entries in `.zzop/cache/{ir,findings}/` — and the
+/// SECOND run would walk them as source without the `DEFAULT_SKIP_DIRS` entry. No `.gitignore` in this
+/// fixture, deliberately: the walker runs `hidden(false)`, so the dot in `.zzop` protects nothing, and
+/// a user analyzing a non-git tree (or one that never listed `/.zzop/`) gets no help from git either.
+///
+/// The user-authored sibling `zzop/` is in the same fixture as the negative half: one character apart,
+/// and it MUST still be analyzed.
+#[test]
+fn the_default_cache_dir_is_not_rescanned_as_source_but_the_authored_zzop_dir_is() {
+    let dir = TempDir::new("zzop-gi-selfscan-default");
+    let cache_dir = zzop_cache::DEFAULT_CACHE_DIR;
+    dir.write(&format!("{cache_dir}/ir/deadbeef.json"), "{}");
+    dir.write(&format!("{cache_dir}/findings/deadbeef.json"), "{}");
+    dir.write(&format!("{}/schema_version", zzop_cache::TOOL_DIR), "x");
+    dir.write("zzop/rules/custom/custom.ts", "export const pack = 1;\n");
+    dir.write("src/app.ts", "export function app() { return 1; }\n");
+
+    let out = scan(&dir);
+    let walked = walked_files(&out);
+
+    assert!(
+        !walked
+            .iter()
+            .any(|f| f.starts_with(&format!("{}/", zzop_cache::TOOL_DIR))),
+        "zzop's own default cache dir must not be rescanned as source: {walked:?}"
+    );
+    assert!(walked.contains("src/app.ts"), "{walked:?}");
+    assert!(
+        walked.contains("zzop/rules/custom/custom.ts"),
+        "the user-authored zzop/ dir is source, not tool output: {walked:?}"
+    );
+    assert_eq!(out.file_count, 2, "{walked:?}");
+}
+
 // --- 5. ancestor .gitignore: root BELOW the git toplevel still honors the toplevel's .gitignore ---
 //
 // A monorepo where the analysis root (e.g. `repo/apps`) is a subdirectory of the git toplevel

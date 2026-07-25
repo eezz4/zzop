@@ -36,7 +36,7 @@ pub(crate) fn zero_packs_warning(config: &EngineConfig) -> Option<String> {
     }
     let mut registry = zzop_core::RuleRegistry::new();
     crate::register_all_native(&mut registry);
-    let native_count = registry.metas().len();
+    let native_count = registry.ids().len();
     Some(format!(
         "no DSL rule packs loaded: only the {native_count} built-in native analyses ran. If you expected the bundled packs, reinstall/check the package (the bundled packs directory may be missing); to add your own, set `packs: {{ extraDirs: [...] }}` in zzop.config.jsonc (embedders: `packsDir`)."
     ))
@@ -93,6 +93,13 @@ pub(crate) struct DslScope {
     pub(crate) files_in_scope_by_pack: Vec<usize>,
     /// True when any loaded rule's `file_pattern` matches any analyzed file.
     any_rule_applies: bool,
+    /// Every analyzed rel matching >=1 rule `file_pattern` of ANY loaded pack — the per-file union of
+    /// the per-pack masks above, i.e. "a DSL rule would have run on this file". Kept as a rel set rather
+    /// than a positional mask because the caller's rel list comes out of a `HashMap` (unordered), and it
+    /// is the SAME census the per-pack counts are derived from, so no second scope predicate can drift
+    /// away from this one. Its consumer is `minified_files_warning`: a minified file that no rule would
+    /// have matched anyway lost no DSL coverage, so reporting it as "skipped" would be a false claim.
+    pub(crate) in_scope_rels: std::collections::BTreeSet<String>,
 }
 
 /// Builds the [`DslScope`] census. `packs` is `config.packs` (the LOADED set, before `disabled_rules`
@@ -113,6 +120,8 @@ pub(crate) fn compute_dsl_scope(
         std::collections::HashMap::new();
     let mut files_in_scope_by_pack = Vec::with_capacity(packs.len());
     let mut any_rule_applies = false;
+    // Per-file union across every pack, accumulated from the same masks the per-pack counts use.
+    let mut in_scope_mask = vec![false; analyzed_rels.len()];
     for pack in packs {
         let mut pack_mask = vec![false; analyzed_rels.len()];
         for rule in &pack.rules {
@@ -135,11 +144,21 @@ pub(crate) fn compute_dsl_scope(
         }
         let count = pack_mask.iter().filter(|b| **b).count();
         any_rule_applies |= count > 0;
+        for (slot, matched) in in_scope_mask.iter_mut().zip(pack_mask.iter()) {
+            *slot |= matched;
+        }
         files_in_scope_by_pack.push(count);
     }
+    let in_scope_rels = analyzed_rels
+        .iter()
+        .zip(in_scope_mask.iter())
+        .filter(|(_, matched)| **matched)
+        .map(|(rel, _)| (*rel).to_string())
+        .collect();
     DslScope {
         files_in_scope_by_pack,
         any_rule_applies,
+        in_scope_rels,
     }
 }
 
@@ -181,10 +200,21 @@ pub(crate) fn no_applicable_dsl_rule_warning(
 /// with no sort needed here. No-extension files (README, Dockerfile) are deliberately excluded from
 /// `unparsed` altogether by the collection site, not here — see that site's own doc for why (ambiguous by
 /// construction: often config/docs, no reliable language signal).
+///
+/// ## One fact line per extension, ONE guidance line per run
+/// The adapter on-ramp ([`adapter_on_ramp_note`]) is emitted ONCE, as the last entry, instead of being
+/// repeated inside every per-extension line. A field run on a repo with `.env.development`/`.env.example`/
+/// `.env.production`/`.sh` printed the entire four-sentence prescriptive tail four times over — the same
+/// remedy restated until it read as noise, which is how a genuine capability gap loses the reader. The
+/// per-extension entries keep only their own facts (count, extension, sample paths); the funnel is not
+/// weakened, only de-duplicated — see [`adapter_on_ramp_note`] for the reachability contract it carries.
 pub(in crate::analyze) fn unparsed_extension_warning(
     unparsed: &BTreeMap<String, (usize, Vec<String>)>,
 ) -> Vec<String> {
-    unparsed
+    if unparsed.is_empty() {
+        return Vec::new();
+    }
+    let mut out: Vec<String> = unparsed
         .iter()
         .map(|(ext, (count, sample_rels))| {
             let mut sample_str = sample_rels.join(", ");
@@ -193,17 +223,52 @@ pub(in crate::analyze) fn unparsed_extension_warning(
             }
             format!(
                 "{count} file(s) with extension .{ext} have no native parser — no io/symbol facts were \
-                 extracted from them: {sample_str}. If this language matters for the analysis, provide a \
-                 Mode B adapter overlay via `overlays: [...]` in zzop.config.jsonc (embedders: \
-                 `adapterOverlays`) — a partial overlay covering just the missing channel/files is \
-                 enough to start (a tens-of-lines script; see the examples/ adapters in the repo \
-                 (embedded: `zzop contract adapter-guide`), or `zzop contract example-envelope` \
-                 for a complete sample). The contract ships inside the binary: `zzop contract \
-                 envelope-guide` / MCP resource `zzop://contract/envelope-guide` (machine-checkable \
-                 schema: `zzop contract envelope-schema`); repo users, see docs/NORMALIZED_AST.md. \
-                 (Mode A full-envelope analysis: `zzop analyze-envelope <file>` / MCP tool \
-                 `analyze_envelope`.)"
+                 extracted from them: {sample_str}."
             )
         })
-        .collect()
+        .collect();
+    out.push(adapter_on_ramp_note(unparsed));
+    out
+}
+
+/// Extensions named inline in the single on-ramp note before it collapses to a `+N more` count — the note
+/// points at the per-extension entries above it, so it never needs the full list.
+const ON_RAMP_EXT_SAMPLE: usize = 5;
+
+/// The gap-to-creation funnel, stated once per run (`output-philosophy`, §2 capability gaps): a gap must
+/// not end at disclosure — it chains the reader to BUILDING an adapter, and the default on-ramp is a
+/// minimal Mode B overlay, never a full parser. Every named surface must be one a reader can actually
+/// reach, in BOTH dialects (a binary-only MCP user has no `examples/` or `docs/` checkout, so each repo
+/// path carries an embedded-contract twin): the guide (`contract envelope-guide`), the checker
+/// (`validate_envelope` / `zzop validate-envelope`), and a runnable example (`contract example-envelope`).
+/// Dropping one is a partial-claim regression; naming an unreachable one is the same regression in the
+/// other direction (the removed napi `analyzeEnvelope` binding is deliberately absent). Pinned by
+/// `unparsed_extension_tests`.
+fn adapter_on_ramp_note(unparsed: &BTreeMap<String, (usize, Vec<String>)>) -> String {
+    let named: Vec<String> = unparsed
+        .keys()
+        .take(ON_RAMP_EXT_SAMPLE)
+        .map(|ext| format!(".{ext}"))
+        .collect();
+    let more = unparsed.len() - named.len();
+    let more_note = if more > 0 {
+        format!(", +{more} more")
+    } else {
+        String::new()
+    };
+    format!(
+        "No native parser exists for {} extension(s) in this tree ({}{more_note}) — one entry above per \
+         extension with its own count and sample paths. If any of those languages matter for the analysis, \
+         provide a Mode B adapter overlay via `overlays: [...]` in zzop.config.jsonc (embedders: \
+         `adapterOverlays`) — a partial overlay covering just the missing channel/files is enough to \
+         start (a tens-of-lines script; see the examples/ adapters in the repo (embedded: `zzop contract \
+         adapter-guide`), or `zzop contract example-envelope` for a complete sample). The contract ships \
+         inside the binary: `zzop contract envelope-guide` / MCP resource \
+         `zzop://contract/envelope-guide` (machine-checkable schema: `zzop contract envelope-schema`; \
+         check your overlay against it with `zzop validate-envelope <file>` / MCP tool \
+         `validate_envelope` before wiring it in); repo users, see docs/NORMALIZED_AST.md. (Mode A \
+         full-envelope analysis: `zzop analyze-envelope <file>` / MCP tool `analyze_envelope`.)",
+        unparsed.len(),
+        named.join(", ")
+    )
 }

@@ -171,6 +171,15 @@ fn declared_host_with_a_port_requires_an_exact_match() {
                     2,
                     None,
                 ),
+                // Same host, WRONG port -> also no match. `port == decl_port` is an exact string
+                // compare, not a "has a port" test.
+                consume(
+                    "http",
+                    Some("GET https://api.foo.com:9090/orders"),
+                    "C.tsx",
+                    3,
+                    None,
+                ),
             ],
         },
     };
@@ -191,10 +200,14 @@ fn declared_host_with_a_port_requires_an_exact_match() {
     let r = link_cross_layer_io(&[fe, be], &opts);
     assert_eq!(r.edges.len(), 1, "{:?}", r.edges);
     assert_eq!(r.edges[0].key, "GET /users");
-    assert_eq!(r.external_consumes.len(), 1);
+    assert_eq!(r.external_consumes.len(), 2, "{:?}", r.external_consumes);
     assert_eq!(
         r.external_consumes[0].consume.key.as_deref(),
         Some("GET https://api.foo.com/orders")
+    );
+    assert_eq!(
+        r.external_consumes[1].consume.key.as_deref(),
+        Some("GET https://api.foo.com:9090/orders")
     );
     assert_eq!(
         r.host_rekey_counts,

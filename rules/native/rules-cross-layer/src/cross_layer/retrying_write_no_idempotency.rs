@@ -57,6 +57,36 @@ pub type RetrySite = (String, String, u32);
 /// vocabulary, never the kernel's — the store is queried by key, agnostic to what it means.
 pub const IDEMPOTENCY_GUARDED_ATTR: &str = "idempotency-guarded";
 
+/// The MARKUP-FREE claim this rule's finding must publish, pinned against `docs/rules/catalog.md` and
+/// `site/rules.html` by `tests::the_retry_sightline_is_identical_in_the_finding_and_the_docs`.
+///
+/// Names the PRODUCER, not an extension list: `IoConsume::retry_configured` has exactly one producer
+/// (`zzop_parser_typescript`'s egress collector), so there is no list to keep in step.
+pub(crate) fn retry_sightline_claim() -> &'static str {
+    "an automatic retry is witnessed only by the parser-typescript egress recognizer"
+}
+
+/// The sightline sentence the finding appends.
+///
+/// Why this rule needs one at all, more than most: its TRIGGER is a fact only one producer emits, so the
+/// rule is structurally silent everywhere else — and unlike the veto side (whose language limits the
+/// message already spells out at length), nothing in the finding says so, because a finding only exists
+/// where the trigger fired. The silence is doubly narrow: three SIBLING TypeScript consume producers
+/// (hono-client, tRPC, the engine's intra-file fetch-wrapper synthesis) also leave `retry_configured`
+/// unset, so even a TypeScript caller can be dark — see `zzop_core::io::IoConsume::retry_configured`'s
+/// own doc, which calls that the "increment-2 gap".
+fn retry_sightline() -> String {
+    format!(
+        "LANGUAGE SIGHTLINE: {claim} (an `axios-retry`-wired file, or a `pRetry(...)`/`backOff(...)` \
+         wrapper) — no Python (`tenacity`, `urllib3` Retry), Java (Spring Retry, Resilience4j), Go, \
+         Rust or C# retry policy is recognized, and within TypeScript the hono-client, tRPC and \
+         fetch-wrapper consume paths leave the tag unset too. Since that tag is this rule's only \
+         trigger, ZERO findings of this rule means the retry side was NOT ANALYZED there, never \"no \
+         replayed write\".",
+        claim = retry_sightline_claim()
+    )
+}
+
 /// Flags every `http` edge whose consumer side is a retry-configured write (`retry_sites` membership) AND
 /// whose provider side carries no witnessed [`IDEMPOTENCY_GUARDED_ATTR`] veto. The verb is re-derived from
 /// the edge key defensively; `retry_configured` is only ever set on writes, so a non-write here would be a
@@ -117,10 +147,11 @@ pub fn retrying_write_no_idempotency_findings(
              (timeout, dropped response, 5xx) the request is replayed, and a non-idempotent handler applies \
              the write twice (double charge, duplicate order). Make the handler idempotent, or if it already \
              is, inject the attribute on the provider tree (paste-ready stub in this finding's \
-             `data.injectionStub`; contract: `zzop contract envelope-guide`). {}",
+             `data.injectionStub`; contract: MCP resource `zzop://contract/envelope-guide` on MCP hosts, \n             `zzop contract envelope-guide` with the CLI binary). {} {}",
             edge.to.file,
             edge.to.line,
             disable_hint("cross-layer/retrying-write-no-idempotency"),
+            retry_sightline(),
         );
 
         out.push(Finding {

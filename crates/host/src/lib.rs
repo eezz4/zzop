@@ -22,6 +22,10 @@
 //! - `explain`  — `zzop explain <rule-id>`'s read-only lookup over the DSL rule data compiled into this
 //!   binary. CLI-only (MCP already reaches the same data via the `rule-catalog` embedded contract
 //!   resource), so it sits outside `tools`' MCP-mirrored dispatch — see its own module doc.
+//! - `manifest` — `zzop manifest`/`zzop diff`'s structural-drift lane: the contract manifest of a
+//!   cross-layer run and the delta between two of them. CLI-only, like `explain` (no `tools/call`
+//!   twin — see its module doc for the judgment and `docs/contracts/surface-parity.json`'s
+//!   `_cliOnlyLanes` for the recorded contract).
 //! - `embedded` — compile-time embedded contract documents (`zzop://contract/<name>` over MCP,
 //!   `zzop contract [<name>]` from a terminal) — the ONE table both surfaces resolve names through.
 //! - `server`   — `version()` only: `CARGO_PKG_VERSION`, the workspace release SSOT, shared by the
@@ -34,5 +38,6 @@
 
 pub mod embedded;
 pub mod explain;
+pub mod manifest;
 pub mod server;
 pub mod tools;

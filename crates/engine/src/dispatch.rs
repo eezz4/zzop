@@ -56,11 +56,22 @@ pub enum Language {
 
 /// Directory names skipped entirely during the tree walk: common Node-ecosystem build/dependency dirs,
 /// plus this workspace's own build output dir (`target`). `.yarn` covers Yarn Berry's vendored
-/// package-manager bundle, which is not project source. `zzop-reports` and `.zzop-cache` are zzop's OWN
-/// output dir names (the removed JS CLI wrote reports to `<root>/zzop-reports/` and defaulted `cacheDir`
-/// to `.zzop-cache`, both inside the analyzed tree) — without this entry, such a dir sitting inside the
-/// analyzed tree gets walked as source on the NEXT run (self-scan pollution: the reports dir's file count
-/// grows every run, observed live in a blind field test).
+/// package-manager bundle, which is not project source.
+///
+/// The last three are zzop's OWN output dir names, and they are the load-bearing ones. The walker runs
+/// `hidden(false)` (`pipeline::walking`), so a dot directory IS walked; `.gitignore` is honored but only
+/// helps a user who has a git tree AND wrote the rule. Without these entries, output written inside the
+/// analyzed tree gets walked as source on the NEXT run (self-scan pollution: the file count grows every
+/// run, observed live in a blind field test).
+/// - [`zzop_cache::TOOL_DIR`] (`.zzop`) — the CURRENT one, and the one that actually fires: the config
+///   front-end defaults `cacheDir` to `zzop_cache::DEFAULT_CACHE_DIR` (`.zzop/cache`), so a
+///   zero-config run writes there on its very first execution. Referenced as a symbol, not spelled as a
+///   literal — the T1 single definition lives in `zzop-cache` next to the store that writes there.
+/// - `zzop-reports` / `.zzop-cache` — the removed JS CLI's report dir and `cacheDir` template value.
+///   Kept as legacy defense: those directories still sit in trees analyzed before v0.20.0.
+///
+/// The user-authored sibling `zzop/` (no dot — custom rule packs, adapter overlays) is deliberately NOT
+/// here: that is source a human wrote and wants analyzed.
 const DEFAULT_SKIP_DIRS: &[&str] = &[
     "node_modules",
     "dist",
@@ -69,6 +80,7 @@ const DEFAULT_SKIP_DIRS: &[&str] = &[
     ".git",
     "target",
     ".yarn",
+    zzop_cache::TOOL_DIR,
     "zzop-reports",
     ".zzop-cache",
 ];

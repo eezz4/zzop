@@ -18,21 +18,20 @@ pub mod mutating_route_no_auth;
 pub mod route_shadowing;
 pub mod unprovided_consume;
 
-use zzop_core::{register_native_analysis_stub, RuleRegistry, Severity};
+use zzop_core::{register_native_analysis_stub, RuleRegistry};
 
 /// Registers every native analysis id whose implementation lives in this crate (see `rules/README.md`'s
 /// "Adding a rule" section); `zzop_engine::register_all_native` composes this with the other crates' own.
 pub fn register_native_analyses(registry: &mut RuleRegistry) {
-    let analyses: &[(&str, Severity)] = &[
-        ("duplicate-route", Severity::Warning),
-        ("unsafe-read-endpoint", Severity::Warning),
-        ("non-idempotent-write", Severity::Warning),
-        ("route-shadowing", Severity::Warning),
-        ("mutating-route-no-auth", Severity::Info),
-        ("unprovided-consume", Severity::Info),
-    ];
-    for &(id, default_severity) in analyses {
-        register_native_analysis_stub(registry, id, default_severity);
+    for id in [
+        "duplicate-route",
+        "unsafe-read-endpoint",
+        "non-idempotent-write",
+        "route-shadowing",
+        "mutating-route-no-auth",
+        "unprovided-consume",
+    ] {
+        register_native_analysis_stub(registry, id);
     }
 }
 

@@ -276,3 +276,91 @@ fn fe_template_base_carrier_joins_be_manual_dispatch() {
     assert_eq!(edge.to.file, "src/handleRequest.ts");
     assert!(edge.cross_source, "FE and BE are different sources");
 }
+
+// ---- Per-branch `symbol` attribution: the `duplicate-route` consequence -------------------------
+// Since the extractor attributes a single-call dispatch branch to its CALLEE rather than to the
+// enclosing dispatcher, two branches of ONE dispatcher that register the same key now carry
+// DIFFERENT symbols — so `duplicate_route_findings`' same-handler skip (a trailing-slash-tolerance
+// idiom, not a shadow) no longer swallows them. That is correct: two different handlers on one key
+// IS the shadow the rule exists for, and the first branch wins at runtime. Pinned here because it
+// is a deliberate detection INCREASE that must not regress silently in either direction.
+
+/// One dispatcher, `POST /api/groups` registered twice with two DIFFERENT single-call handlers.
+fn shadowed_dispatch_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-pathname-dispatch-shadow");
+    dir.write(
+        "src/handleRequest.ts",
+        concat!(
+            "export async function handleRequest(request: Request, env: Env, url: URL) {\n",
+            "  const { pathname } = url;\n",
+            "  const method = request.method;\n",
+            "  if (pathname === \"/api/groups\" && method === \"POST\") return createGroup(request, env);\n",
+            "  if (pathname === \"/api/groups\" && method === \"POST\") return legacyCreateGroup(request, env);\n",
+            "  return new Response(\"not_found\", { status: 404 });\n",
+            "}\n"
+        ),
+    );
+    dir
+}
+
+/// The control: the same two same-key branches, but with UNATTRIBUTABLE bodies (multi-statement
+/// blocks), so both fall back to the enclosing `handleRequest` — proven-same symbol, skipped as the
+/// same-handler idiom exactly as before this attribution rule existed.
+fn same_handler_dispatch_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-pathname-dispatch-same-handler");
+    dir.write(
+        "src/handleRequest.ts",
+        concat!(
+            "export async function handleRequest(request: Request, env: Env, url: URL) {\n",
+            "  const { pathname } = url;\n",
+            "  const method = request.method;\n",
+            "  if (pathname === \"/api/groups\" && method === \"POST\") {\n",
+            "    const body = await request.json();\n",
+            "    return createGroup(body, env);\n",
+            "  }\n",
+            "  if (pathname === \"/api/groups\" && method === \"POST\") {\n",
+            "    const body = await request.text();\n",
+            "    return legacyCreateGroup(body, env);\n",
+            "  }\n",
+            "  return new Response(\"not_found\", { status: 404 });\n",
+            "}\n"
+        ),
+    );
+    dir
+}
+
+#[test]
+fn two_dispatch_branches_on_one_key_with_different_handlers_are_a_duplicate_route() {
+    let dir = shadowed_dispatch_tree();
+    let out: AnalyzeOutput = analyze_tree(dir.path(), &config("routes-pathname-dispatch-shadow"));
+
+    let dups: Vec<_> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "duplicate-route")
+        .collect();
+    assert_eq!(
+        dups.len(),
+        1,
+        "expected exactly one duplicate-route finding for the shadowed POST /api/groups: {:?}",
+        out.findings
+    );
+    assert_eq!(dups[0].file, "src/handleRequest.ts");
+    assert_eq!(
+        dups[0].line, 5,
+        "the LATER (shadowed) registration is flagged"
+    );
+}
+
+#[test]
+fn two_dispatch_branches_on_one_key_sharing_the_enclosing_symbol_are_not_flagged() {
+    let dir = same_handler_dispatch_tree();
+    let out: AnalyzeOutput =
+        analyze_tree(dir.path(), &config("routes-pathname-dispatch-same-handler"));
+
+    assert!(
+        !out.findings.iter().any(|f| f.rule_id == "duplicate-route"),
+        "both branches fall back to the enclosing `handleRequest`, so the same-handler skip applies: {:?}",
+        out.findings
+    );
+}

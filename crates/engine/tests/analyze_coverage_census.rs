@@ -186,3 +186,63 @@ fn files_field_matches_file_count() {
     let (_, _, output) = &out.trees[0];
     assert_eq!(output.coverage.files, output.file_count);
 }
+
+// --- `source_files`: the parser-claimed subset of the walked total ---
+
+/// A tree whose walk visits far more files than a parser claims — the shape that made a field run's
+/// `fileCount: 4790` read as "this repo has 4,790 code files" when roughly 3,178 carried code.
+fn mixed_source_and_asset_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-cov-mixed");
+    dir.write("src/app.ts", "export function run() { return 1; }\n");
+    dir.write("src/util.ts", "export function helper() { return 2; }\n");
+    dir.write("README.md", "# docs\n\nprose, not code.\n");
+    dir.write("docs/guide.md", "# guide\n");
+    dir.write(
+        "assets/logo.png",
+        "not-really-a-png-but-walked-all-the-same\n",
+    );
+    dir.write("data/fixture.json", "{ \"a\": 1 }\n");
+    dir
+}
+
+#[test]
+fn source_files_counts_only_what_a_parser_claims_while_files_keeps_counting_the_walk() {
+    let dir = mixed_source_and_asset_tree();
+    let trees = vec![(dir.path().to_path_buf(), config("mixed"))];
+    let out = analyze_trees(&trees);
+    let (_, _, tree) = &out.trees[0];
+
+    // `files` is unchanged and still means "files walked" — every file under the root, docs/data/assets
+    // included. Narrowing it would silently redefine a published output field.
+    assert_eq!(tree.coverage.files, 6, "{:?}", tree.coverage);
+    assert_eq!(tree.coverage.files, tree.file_count);
+    // `source_files` is the honest repo-size number: the two `.ts` files, not the md/png/json.
+    assert_eq!(tree.coverage.source_files, 2, "{:?}", tree.coverage);
+}
+
+#[test]
+fn source_files_equals_files_on_an_all_source_tree() {
+    // No breakdown to report when everything walked is code — `files - source_files == 0`.
+    let dir = TempDir::new("zzop-engine-cov-all-source");
+    dir.write("a.ts", "export const a = 1;\n");
+    dir.write("b.ts", "export const b = 2;\n");
+    let trees = vec![(dir.path().to_path_buf(), config("all-source"))];
+    let out = analyze_trees(&trees);
+    let (_, _, tree) = &out.trees[0];
+    assert_eq!(tree.coverage.files, 2);
+    assert_eq!(tree.coverage.source_files, 2);
+}
+
+#[test]
+fn source_files_is_zero_when_the_walk_finds_no_parseable_file_at_all() {
+    // The disclosure that matters most: a tree that looks non-empty (`files > 0`) but where zzop parsed
+    // nothing. Reading `files` alone here is exactly the mis-sizing the breakdown exists to prevent.
+    let dir = TempDir::new("zzop-engine-cov-no-source");
+    dir.write("README.md", "# docs\n");
+    dir.write("data/fixture.json", "{}\n");
+    let trees = vec![(dir.path().to_path_buf(), config("no-source"))];
+    let out = analyze_trees(&trees);
+    let (_, _, tree) = &out.trees[0];
+    assert_eq!(tree.coverage.files, 2);
+    assert_eq!(tree.coverage.source_files, 0);
+}

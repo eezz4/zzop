@@ -12,12 +12,12 @@ whether the rule is common or environment-specific).
 - **Examples**: `rules-graph` (circular, unreachable, dead-candidates, dead-exports), `rules-http`
   (single-tree HTTP/route rules: duplicate-route, route-shadowing, mutating-route-no-auth,
   unprovided-consume, plus the 2 call-graph-BFS scanners unsafe-read-endpoint and non-idempotent-write),
-  `rules-cross-layer` (the 23 multi-tree `cross-layer/*` rules joining HTTP/DB/tRPC IO facts across
+  `rules-cross-layer` (the 25 multi-tree `cross-layer/*` rules joining HTTP/DB/tRPC IO facts across
   trees), and `rules-schema`
   (Prisma structural rules + the usage-aware dead-model/dead-field/schema-churn checks). Seams, criticality,
   scores, health, and recommendations are **not** rules — they're scores computed in `crates/metrics`,
   registered via that crate's own `register_native_analyses` (see "Adding a rule" below), and only ride the
-  same registry toggle/gating machinery as native rules do. Layer-violations/feature-envy are a roadmap item
+  same `RuleConfig` disable/suppress/severity-override id space as native rules do. Layer-violations/feature-envy are a roadmap item
   (see `docs/rules/catalog.md#roadmap`) — no crate exists for them yet; a placeholder `rules-architecture`
   crate was removed since it carried no code, and gets recreated only when that work actually starts.
 
@@ -55,12 +55,13 @@ whether the rule is common or environment-specific).
   (`require_file_all`, `exclude_pattern`, `absent`, `file_exclude_pattern`, ...) added as
   real packs needed them. Full field-by-field semantics: [`docs/rules/dsl-reference.md`](../docs/rules/dsl-reference.md).
 - Roadmap: a `graph` matcher for structural/whole-IR queries the current scanners can't express.
-- Rules the DSL cannot express -> `rules/native/`, or (once built) a JS/TS quick-custom rule.
+- Rules the DSL cannot express -> `rules/native/`.
 
-> All layers are toggled/gated by a single registry and metadata (`core::registry`) — enabled / severity / appliesTo.
-> "Native" is only where a rule is compiled, not "always runs".
-> A JS/TS quick-custom escape hatch (build-free, arbitrary logic over the IR in a Node host) is reserved in
-> the registry (`RuleKind::Js`) but not yet implemented — no Node host or TS package exists for it today.
+> Both layers share one config surface (`core::registry`'s `RuleConfig`) — `disabled_rules`,
+> `severity_overrides`, `suppressions`, all keyed by the same id space (a native analysis id, a pack id,
+> or a `"<pack>/<rule>"` id).
+> "Native" is only where a rule is compiled, not "always runs": a native analysis is disabled by id just
+> like a pack rule is.
 
 ## Adding a rule touches only `rules/`
 
@@ -74,8 +75,9 @@ orchestration logic:
 
 - **A native rule**: implement the body in its owning crate (`rules/native/rules-graph`,
   `rules/native/rules-http`, `rules/native/rules-cross-layer`, or `rules/native/rules-schema` — or a new
-  sibling crate for a new rule family), add its id/severity to that
-  crate's own `register_native_analyses` function, and add tests in the same crate. `zzop_engine::register_all_native`
+  sibling crate for a new rule family), add its id to that
+  crate's own `register_native_analyses` function (id only — the finding's severity is set where the
+  finding is built, so there is no second copy to drift), and add tests in the same crate. `zzop_engine::register_all_native`
   (`crates/engine/src/lib.rs`) composes every owning crate's `register_native_analyses` — it already
   depends on all of them, so a new crate only needs one line added there. `docs/rules/catalog.md`'s totals
   and per-id table need updating too (machine-checked by the `rule_contracts` meta-test's catalog-sync tests).

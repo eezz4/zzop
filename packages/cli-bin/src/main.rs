@@ -10,26 +10,34 @@
 //!   zzop cross <path>...             — analyze 2+ trees and print the cross-layer join (zzop's headline).
 //!   zzop endpoint <pattern> <path>... — definitive "is io key X provided/consumed/joined?" query.
 //!   zzop endpoint <pattern> --config <path> — same query, trees defined by a zzop.config.jsonc.
+//!   zzop manifest <path>...          — the run's structural contract manifest (identity only) — commit it, diff a later run against it.
+//!   zzop diff <a.json> <b.json>      — the delta between two manifests: bucket transitions first.
 //!   zzop contract [<name>]           — list the embedded authoring contracts / print one to stdout.
 //!   zzop explain <rule-id>           — print one bundled DSL rule's compiled-in data to stdout.
 //!   zzop version | --version         — print this binary's version (equals the MCP serverInfo.version).
 //!   zzop help | --help | -h          — print the usage line plus one elaboration per subcommand (exit 0).
 //!
 //! See `zzop_host`'s own `lib.rs` for the shared module map and the mcp-distribution decision doc for
-//! the host design. `cli.rs` (this crate) carries only this binary's own argv-parsing/usage helpers.
+//! the host design. `cli.rs` (this crate) carries only this binary's own argv-parsing/usage helpers —
+//! including the usage line and the `help` elaboration, which sit next to the parsers that print them.
 
 mod cli;
 
 /// The one usage line — printed to stdout by `--help` (exit 0) and to stderr by every malformed
-/// invocation (exit 2), so the two surfaces can never drift apart.
-const USAGE: &str = "usage: zzop <analyze <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path>... | cross --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | contract [<name>] | explain <rule-id> | version>";
+/// invocation (exit 2), so the two surfaces can never drift apart. Stays in THIS file: the `zzop-mcp`
+/// package's `surface_prose` meta-test reads this literal out of `packages/cli-bin/src/main.rs` by
+/// path, to pin that every MCP tool's CLI twin subcommand is named here.
+const USAGE: &str = "usage: zzop <analyze <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path>... | cross --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | manifest <path>... | manifest --config <path> | diff <a.json> <b.json> | contract [<name>] | explain <rule-id> | version>";
 
 /// A one-line pointer at the bare-invocation/unknown-subcommand error path (exit 2): a bare `zzop` gives
 /// no hint that `help` exists, or that MCP is the sibling `zzop-mcp` binary (not a `zzop` subcommand).
 const BARE_INVOCATION_HINT: &str =
     "(run 'zzop help' for details; the MCP server is the 'zzop-mcp' binary)";
 
-use cli::{reject_flag_like_args, run_file_validate, run_lookup};
+use cli::{
+    parse_trees_args, print_help, read_or_exit, reject_flag_like_args, run_diff, run_file_validate,
+    run_lookup,
+};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -49,13 +57,7 @@ fn main() {
                 std::process::exit(2);
             }
             reject_flag_like_args([path.as_str()], "usage: zzop analyze <path>");
-            match zzop_host::tools::analyze(path) {
-                Ok(json) => println!("{json}"),
-                Err(e) => {
-                    eprintln!("zzop: {e}");
-                    std::process::exit(1);
-                }
-            }
+            print_result(zzop_host::tools::analyze(path));
         }
         // Mode A: the file's content REPLACES native parsing entirely for this run (contrast
         // `analyze`, which walks a real tree) — same handler as the `analyze_envelope` MCP tool, so
@@ -76,20 +78,8 @@ fn main() {
                 [path.as_str()],
                 "usage: zzop analyze-envelope <envelope.json>",
             );
-            let envelope_json = match std::fs::read_to_string(path) {
-                Ok(text) => text,
-                Err(e) => {
-                    eprintln!("zzop: failed to read {path}: {e}");
-                    std::process::exit(1);
-                }
-            };
-            match zzop_host::tools::analyze_envelope(&envelope_json) {
-                Ok(json) => println!("{json}"),
-                Err(e) => {
-                    eprintln!("zzop: {e}");
-                    std::process::exit(1);
-                }
-            }
+            let envelope_json = read_or_exit(path);
+            print_result(zzop_host::tools::analyze_envelope(&envelope_json));
         }
         // Offline authoring checks — read a file, print a `{"valid":…,"issues":…}` report, exit by
         // validity. Same `zzop_summary` check the `validate_envelope`/`validate_rule_pack` MCP tools
@@ -104,51 +94,21 @@ fn main() {
             "validate-rule-pack <pack.json>",
             zzop_host::tools::validate_rule_pack,
         ),
+        // `cross --config <path>` = config-first mode (the config's trees define the join);
+        // `cross <path>...` = config-free paths mode. Mirrors the cross_repo tool's two modes.
         Some("cross") => {
-            // `cross --config <path>` = config-first mode (the config's trees define the join);
-            // `cross <path>...` = config-free paths mode. Mirrors the cross_repo tool's two modes.
-            let (paths, config_path) = match args.get(2).map(String::as_str) {
-                Some("--config") => match args.get(3) {
-                    Some(cp) => {
-                        // Config mode is fixed-arity: a trailing path after the config file would
-                        // be DROPPED silently (the user believes it joined the analysis) — the
-                        // config's trees alone define the join.
-                        if args.len() > 4 {
-                            eprintln!(
-                                "usage: zzop cross --config <zzop.config.jsonc> (no extra paths — the config's trees define the join)"
-                            );
-                            std::process::exit(2);
-                        }
-                        (Vec::new(), Some(cp.as_str()))
-                    }
-                    None => {
-                        eprintln!("usage: zzop cross --config <zzop.config.jsonc>");
-                        std::process::exit(2);
-                    }
-                },
-                _ => (args[2..].to_vec(), None),
-            };
-            // Paths mode needs 2+ paths — fewer is an arg-shape mistake (usage error, exit 2, same
-            // as every other malformed invocation here), not a runtime failure. The handler keeps
-            // its own "at least 2 paths" error for the MCP tool path, where exit codes don't exist.
-            if config_path.is_none() && paths.len() < 2 {
-                eprintln!("usage: zzop cross <path> <path>... (2+ paths) | cross --config <zzop.config.jsonc>");
-                std::process::exit(2);
-            }
-            // Only the leading `--config` above is a recognized flag — a dash-shaped path (or a
-            // misplaced `--config` inside the path list) is a usage error, never a path.
-            reject_flag_like_args(
-                paths.iter().map(String::as_str).chain(config_path),
-                "usage: zzop cross <path> <path>... (2+ paths) | cross --config <zzop.config.jsonc>",
-            );
-            match zzop_host::tools::cross_repo(&paths, config_path) {
-                Ok(json) => println!("{json}"),
-                Err(e) => {
-                    eprintln!("zzop: {e}");
-                    std::process::exit(1);
-                }
-            }
+            let (paths, config_path) = parse_trees_args(&args, "cross");
+            print_result(zzop_host::tools::cross_repo(&paths, config_path));
         }
+        // The structural-drift lane: the SAME two source modes as `cross` (one shared argv parser),
+        // projecting the same analysis into identity rows instead of a capped summary. CLI-only —
+        // no MCP tool twin (see `zzop_host::manifest`'s module doc for the judgment).
+        Some("manifest") => {
+            let (paths, config_path) = parse_trees_args(&args, "manifest");
+            print_result(zzop_host::manifest::manifest(&paths, config_path));
+        }
+        // Pure post-processing over two already-produced manifests — no analysis, no tree walk.
+        Some("diff") => run_diff(&args),
         Some("endpoint") => {
             // `endpoint <pattern> <path>...` — one path = single-tree mode (the check_endpoint
             // tool's `path` argument), 2+ = config-free paths mode (`paths`);
@@ -195,13 +155,7 @@ fn main() {
                 (None, 1) => zzop_host::tools::check_endpoint(pattern, Some(&rest[0]), &[], None),
                 (None, _) => zzop_host::tools::check_endpoint(pattern, None, rest, None),
             };
-            match result {
-                Ok(json) => println!("{json}"),
-                Err(e) => {
-                    eprintln!("zzop: {e}");
-                    std::process::exit(1);
-                }
-            }
+            print_result(result);
         }
         // The embedded authoring contracts from a terminal — the same documents MCP `resources/read`
         // serves via the same `embedded::find` lookup (no drift). No name lists them; a name prints that
@@ -251,40 +205,24 @@ fn main() {
         Some("version") | Some("--version") => {
             println!("zzop {}", zzop_host::server::version());
         }
-        // The polite lane: an explicit help REQUEST prints the usage line + one elaboration per
-        // subcommand to stdout, exit 0. The exit-2 stderr lane below stays a bare usage line +
-        // `BARE_INVOCATION_HINT` — an error is a pointer AT `help`, not a tutorial.
-        Some("help") | Some("--help") | Some("-h") => {
-            println!("{USAGE}");
-            println!("  analyze <path> — analyze ONE repo/tree, print a JSON findings summary");
-            println!(
-                "  analyze-envelope <envelope.json> — Mode A: a Normalized-AST envelope file REPLACES native parsing, print the same JSON findings summary"
-            );
-            println!(
-                "  validate-envelope <envelope.json> — offline: is this envelope well-formed? print {{valid,issues}}, exit 0 valid / 1 invalid"
-            );
-            println!(
-                "  validate-rule-pack <pack.json> — offline: does this DSL rule pack load, and can every rule in it actually fire? print {{valid,issues}}, exit 0/1"
-            );
-            println!("  cross <path>... | cross --config <path> — analyze 2+ trees, print the cross-layer join");
-            println!(
-                "  endpoint <pattern> <path>... | endpoint <pattern> --config <path> — definitive \"is io key X provided/consumed/joined?\" query"
-            );
-            println!(
-                "  contract [<name>] — no args lists the embedded doc resources; `contract <name>` prints one"
-            );
-            println!(
-                "  explain <rule-id> — print one bundled DSL rule's compiled-in data (full <pack>/<rule> id or an unambiguous bare id)"
-            );
-            println!("  version — print this binary's version (equals the MCP serverInfo.version)");
-            println!(
-                "  (the MCP server is the sibling 'zzop-mcp' binary — it speaks JSON-RPC over stdio, not a 'zzop' subcommand)"
-            );
-        }
+        Some("help") | Some("--help") | Some("-h") => print_help(),
         _ => {
             eprintln!("{USAGE}");
             eprintln!("{BARE_INVOCATION_HINT}");
             std::process::exit(2);
+        }
+    }
+}
+
+/// Every handler's terminal step: `Ok` to stdout, `Err` as `zzop: <message>` to stderr + exit 1.
+/// (`cli.rs`'s own `print_or_exit` is the diverging-return twin for the `run_*` helpers, which never
+/// return to this match at all.)
+fn print_result(result: Result<String, String>) {
+    match result {
+        Ok(json) => println!("{json}"),
+        Err(e) => {
+            eprintln!("zzop: {e}");
+            std::process::exit(1);
         }
     }
 }

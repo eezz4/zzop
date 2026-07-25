@@ -53,7 +53,8 @@ fn core_rs_files_excluding_mechanism_files() -> Vec<PathBuf> {
 /// contain an id as a substring without naming it as rule vocabulary (e.g. the function name
 /// `circular_from_dep`, the `#[allow(unreachable_patterns)]` attribute, a `"GET /health"` test fixture, a
 /// doc example `"graph/circular"`) — none of those are the quoted 1:1 id literal `"circular"`/
-/// `"unreachable"`/`"health"` a `Finding::rule_id` or `RuleMeta::id` assignment would actually use.
+/// `"unreachable"`/`"health"` a `Finding::rule_id` or a `register_native_analysis_stub` call would
+/// actually use.
 ///
 /// `registry.rs` and `dsl.rs` are exempt: `registry.rs` hosts `register_native_analysis_stub` itself (whose
 /// own doc/tests legitimately use synthetic example ids, and whose PRE-EXISTING `is_enabled`/
@@ -74,7 +75,7 @@ fn core_rs_files_excluding_mechanism_files() -> Vec<PathBuf> {
 fn kernel_core_carries_no_native_analysis_id_string_literal() {
     let mut registry = RuleRegistry::new();
     register_all_native(&mut registry);
-    let ids: Vec<String> = registry.metas().into_iter().map(|m| m.id.clone()).collect();
+    let ids: Vec<String> = registry.ids().to_vec();
     assert!(
         !ids.is_empty(),
         "sanity: register_all_native registered no ids at all"

@@ -285,3 +285,20 @@ fn idempotency_regen_ok_marker_directly_above_the_regenerated_key_line_suppresse
         out.findings
     );
 }
+
+// ORDER-GATE pin: seals the `after: read` gate — a `.create(` that PRECEDES the only read is not the
+// check-then-act shape the id names ("find THEN create"). Before the gate, plain co-occurrence fired.
+#[test]
+fn a_create_that_precedes_the_only_find_is_not_flagged() {
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function createThenAudit(email: string) {\n  await prisma.user.create({ data: { email } });\n  const existing = await prisma.user.findFirst({ where: { email } });\n  return existing;\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "find-then-create-no-unique").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}

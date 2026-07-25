@@ -34,6 +34,7 @@
 //! (suppress-marker/require-file helpers), and one module per matcher family (`line_scan`,
 //! `method_scan`, `ir_scan`). Every public item stays importable at `crate::dsl::X`.
 
+mod attr_gate;
 mod def;
 mod diagnostics;
 mod eval;
@@ -65,8 +66,13 @@ mod tests_markers;
 #[cfg(test)]
 mod tests_method_scan;
 #[cfg(test)]
+mod tests_method_scan_after;
+#[cfg(test)]
+mod tests_method_scan_same_fn;
+#[cfg(test)]
 mod tests_trigger_in_loop;
 
+pub use attr_gate::apply_attr_gates;
 pub use def::{
     IoDirection, IoScan, LabeledPattern, LineScan, Matcher, MethodScan, RuleDef, RulePackDef,
     SymbolScan,
@@ -74,4 +80,5 @@ pub use def::{
 pub use eval::{eval_pack, eval_pack_into, eval_pack_profiled, eval_pack_profiled_into};
 pub use fragments::FragmentError;
 pub use ir_scan::{eval_pack_io_scan, eval_pack_io_scan_into, IoScanTreeContext};
+pub use markers::NEAR_MISS_MARKER_TOKEN_PATTERN;
 pub use source::{is_minified_or_generated, RuleContext, RuleTiming, SourceFile};

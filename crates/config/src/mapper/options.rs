@@ -1,7 +1,9 @@
 // ---------------------------------------------------------------------------------------------------
 // Shared per-config options — the rule/pack/git/cache knobs that are global to the config (not
 // per-tree), merged into every tree request. Only fields actually set are returned, so an omitted
-// config key falls through to the facade/engine default.
+// config key falls through to the facade/engine default — with ONE deliberate exception, `cacheDir`,
+// which this layer defaults (see its own block below for why the default belongs to the product
+// front-end rather than to the engine).
 // ---------------------------------------------------------------------------------------------------
 
 use std::path::Path;
@@ -170,17 +172,48 @@ pub(super) fn build_shared_options(
         }
     }
 
-    // --- pass-through knobs. `cacheDir` is resolved against `base_dir` like `root`/`packsDir` (the
-    // documented deviation); `git`/`sizeCap` pass through untouched (no path-shaped content). ---
+    // --- pass-through knobs. `git`/`sizeCap` pass through untouched (no path-shaped content). ---
     if let Some(git_val) = config.get("git") {
         shared.insert("git".to_string(), git_val.clone());
     }
-    if let Some(cache_dir_val) = config.get("cacheDir") {
-        let resolved = match cache_dir_val.as_str() {
-            Some(s) => Value::String(path_to_string(&resolve_path(base_dir, s))),
-            None => cache_dir_val.clone(),
-        };
-        shared.insert("cacheDir".to_string(), resolved);
+
+    // --- `cacheDir` — a `withDefaults`-class default, the same shape as the `git: {}` injection at the
+    // end of `config_to_request`: the PRODUCT front-end supplies it, the engine/facade libraries keep
+    // their "no directory named, no cache" contract so an embedder never gets a directory created in its
+    // repo unasked. Three cases, and the middle one is the one this default made necessary:
+    //   absent      -> `zzop_cache::DEFAULT_CACHE_DIR` (`.zzop/cache`), resolved against `base_dir`.
+    //                  Before this default a zero-config run was UNCONDITIONALLY cold — the total-by-
+    //                  default principle (bundled packs, `git: {}`) simply had not been applied to the
+    //                  cache axis.
+    //   JSON-falsy  -> OFF: no `cacheDir` key is emitted at all, which is byte-for-byte the request an
+    //                  omitted `cacheDir` produced before this default existed. `null` is the canonical
+    //                  spelling; `false`/`""`/`0` are accepted as the same intent rather than taken
+    //                  literally — `""` in particular would otherwise resolve to `base_dir` ITSELF and
+    //                  scatter cache entries across the user's repo root, which is never what someone
+    //                  reaching for "turn this off" meant. (Same `is_json_falsy` JS-truthiness helper
+    //                  `packs`/`rules` use, so "falsy means absent" reads one way across this mapper.)
+    //   a string    -> that directory, resolved against `base_dir` like `root`/`packsDir` (the one
+    //                  documented deviation from JS cwd semantics).
+    // A non-string, non-falsy value (a number, an object) still passes through verbatim, unchanged from
+    // the pre-default behavior — this mapper does not type-gate it, the facade's deserializer does.
+    match config.get("cacheDir") {
+        None => {
+            shared.insert(
+                "cacheDir".to_string(),
+                Value::String(path_to_string(&resolve_path(
+                    base_dir,
+                    zzop_cache::DEFAULT_CACHE_DIR,
+                ))),
+            );
+        }
+        Some(v) if is_json_falsy(v) => {}
+        Some(v) => {
+            let resolved = match v.as_str() {
+                Some(s) => Value::String(path_to_string(&resolve_path(base_dir, s))),
+                None => v.clone(),
+            };
+            shared.insert("cacheDir".to_string(), resolved);
+        }
     }
     if let Some(size_cap_val) = config.get("sizeCap") {
         shared.insert("sizeCap".to_string(), size_cap_val.clone());

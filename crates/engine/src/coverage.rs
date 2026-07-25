@@ -14,8 +14,25 @@ use zzop_core::CommonIr;
 /// Vocab-free per-tree channel-fill census. All counts are kind-agnostic (every io kind, not just http).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CoverageCensus {
-    /// Files the walk visited (== `AnalyzeOutput::file_count`).
+    /// Files the walk visited (== `AnalyzeOutput::file_count`). The walk applies no extension filter, so
+    /// this counts EVERY file under the root that survived gitignore/skip-dir pruning — docs, data,
+    /// lockfiles and binary assets included. Use [`source_files`](Self::source_files) to size the code.
     pub files: usize,
+    /// The subset of `files` a parser actually claims: a native frontend dispatched on it
+    /// (`dispatch::dispatch` returned a language) or an APPLIED adapter overlay covers it. This is the
+    /// honest "how much code is in this tree" number.
+    ///
+    /// Added because `files` alone was being misread as the repo's code size: a field run reported
+    /// `fileCount: 4790` on a tree with roughly 3,178 code files, and an agent sizing the repo from that
+    /// number over-estimates by half. `files` was NOT redefined — it is documented as "files walked" and
+    /// is honest at that job (renaming or narrowing it would silently change a published output field, and
+    /// several internal gates key off it, e.g. `join_contribution_zero`'s `files > 0`). The fix is the
+    /// breakdown, not a redefinition: keep the walked total, publish the source subset beside it, and let
+    /// `files - source_files` name the docs/data/asset remainder.
+    ///
+    /// Mode A/B envelope ingest sets this equal to `files`: an envelope carries only files its adapter
+    /// declared, so every one of them is parsed source by construction.
+    pub source_files: usize,
     /// Symbols extracted across the tree.
     pub symbols: usize,
     /// Resolved dep-graph edges (sum of out-degrees).
@@ -48,9 +65,15 @@ pub struct CoverageCensus {
 }
 
 impl CoverageCensus {
-    /// Compute the census from the assembled `ir`, the visited `file_count`, and the degraded-file count.
+    /// Compute the census from the assembled `ir`, the visited `file_count`, the parser-claimed
+    /// `source_file_count` (see [`source_files`](Self::source_files)), and the degraded-file count.
     /// Reads only `ir.ir.{dep, symbols, io}` — no re-parse, no vocabulary.
-    pub fn compute(file_count: usize, ir: &CommonIr, degraded: usize) -> CoverageCensus {
+    pub fn compute(
+        file_count: usize,
+        source_file_count: usize,
+        ir: &CommonIr,
+        degraded: usize,
+    ) -> CoverageCensus {
         let import_edges = ir.ir.dep.values().map(|targets| targets.len()).sum();
         let symbols = ir.ir.symbols.len();
 
@@ -71,6 +94,7 @@ impl CoverageCensus {
 
         CoverageCensus {
             files: file_count,
+            source_files: source_file_count,
             symbols,
             import_edges,
             io_provides,

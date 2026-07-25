@@ -21,9 +21,14 @@ use crate::analyze::record_native_timing;
 mod io_scan;
 
 /// Runs every whole-graph/call-graph-BFS native analysis in the same order (and under the same
-/// `is_enabled` gates) the pre-split monolithic `assemble` did, then the whole-tree `io_scan` sub-phase,
-/// returning the combined `global_findings` — merged with `per_file_findings` (the fused per-file DSL
-/// pass's own output) back in `super::assemble`.
+/// `is_enabled` gates) the pre-split monolithic `assemble` did, then the two whole-tree DSL sub-phases —
+/// [`io_scan`] (which PRODUCES findings) and [`gate_file_findings`] (which FILTERS the per-file pass's,
+/// in place through `per_file_findings`, and pushes any §0 disclosure into `warnings`). Returns the
+/// combined `global_findings`, merged with `per_file_findings` back in `super::assemble`.
+///
+/// The two `&mut` tails are the only outputs that are not the return value, and both are here for the
+/// same reason the sub-phases are: they need the assembled `AttributeStore`, which does not exist before
+/// this phase.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run(
     root: &std::path::Path,
@@ -37,7 +42,10 @@ pub(super) fn run(
     ts_import_pairs: &[(String, ImportMap)],
     java_rels: &[String],
     all_symbols: &[zzop_core::ir::SourceSymbol],
-    used_names_by_file: &std::collections::HashMap<String, Vec<String>>,
+    dead_export_names_by_file: &std::collections::HashMap<
+        String,
+        crate::dead_exports::DeadExportNames,
+    >,
     prisma_rels: &[String],
     attribute_store: &zzop_core::AttributeStore,
     field_usage_tokens: &std::collections::HashSet<String>,
@@ -48,6 +56,8 @@ pub(super) fn run(
     sfc_import_pairs: &[(String, ImportMap)],
     sfc_targets: &std::collections::HashSet<String>,
     asset_targets: &std::collections::HashSet<String>,
+    per_file_findings: &mut Vec<Finding>,
+    warnings: &mut Vec<String>,
 ) -> Vec<Finding> {
     // `profile` mirrors `dsl::eval_pack_impl`'s no-op-sink convention: `Instant::now()` is only ever called
     // when profiling is on, so a non-profiled `analyze_tree` call pays zero cost for the wrapping below.
@@ -131,7 +141,7 @@ pub(super) fn run(
             ts_paths,
             ts_import_pairs,
             all_symbols,
-            used_names_by_file,
+            dead_export_names_by_file,
             &pkg_scan.workspace_pkgs,
             tsconfigs,
             sfc_import_pairs,
@@ -183,10 +193,14 @@ pub(super) fn run(
 
     // Native fullstack rule: a resolved `http` consume with no matching provide anywhere in this tree,
     // gated on this tree itself having at least one `http` provide (see
-    // `zzop_rules_http::unprovided_consume`'s module doc for the zero-provides veto).
+    // `zzop_rules_http::unprovided_consume`'s module doc for the zero-provides veto). `config.hosts` is
+    // threaded in so an absolute-URL consume to a host this tree DECLARES it owns is re-keyed internal
+    // before the rule's `://` veto — the same transform `link_cross_layer_io` runs before its own gate,
+    // without which this single-tree surface vetoes a call the multi-tree join reports.
     if is_enabled(&config.rule_config, "unprovided-consume") {
         let t0 = profile.then(Instant::now);
-        let found = zzop_rules_http::unprovided_consume_findings(io_provides, io_consumes);
+        let found =
+            zzop_rules_http::unprovided_consume_findings(io_provides, io_consumes, &config.hosts);
         record_native_timing(rule_time, t0, "unprovided-consume", found.len());
         global_findings.extend(found);
     }
@@ -222,5 +236,35 @@ pub(super) fn run(
         rule_time,
     ));
 
+    gate_file_findings(config, attribute_store, per_file_findings, warnings);
+
     global_findings
+}
+
+/// The `line-scan` counterpart of the [`io_scan`] sub-phase: applies every enabled `line-scan` rule's
+/// `attr_present`/`attr_absent`/`require_attr_declared` gates to the FUSED PER-FILE pass's own findings,
+/// in place, and pushes the §0 disclosure for any rule an undeclared key silenced.
+///
+/// Runs LAST in [`run`], so it lands after every native pass and before `super::assemble`'s
+/// `merge_findings` — a gated-away finding is therefore never a severity-override or suppression input.
+///
+/// WHY IT IS A POST-FILTER AND NOT A CHECK INSIDE THE PER-FILE PASS: a per-file finding is cached under
+/// `(content_hash, parser_fingerprint, scope, ruleset_fingerprint)` and the attribute set is none of
+/// those, so gating inside the cached unit would freeze a declaration into entries that outlive it —
+/// edit `zzop.config.jsonc` and warm files would keep serving findings judged against the old one. The
+/// cache stores UNGATED findings and this recomputes every run, the same placement
+/// `severity_overrides`/`suppressions` already use. Full reasoning, and what the placement costs a pack
+/// author, in `zzop_core::dsl::apply_attr_gates`' module doc.
+fn gate_file_findings(
+    config: &EngineConfig,
+    attribute_store: &zzop_core::AttributeStore,
+    per_file_findings: &mut Vec<Finding>,
+    warnings: &mut Vec<String>,
+) {
+    warnings.extend(zzop_core::apply_attr_gates(
+        &config.packs,
+        &config.rule_config,
+        attribute_store,
+        per_file_findings,
+    ));
 }

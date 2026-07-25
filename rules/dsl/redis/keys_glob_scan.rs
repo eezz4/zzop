@@ -135,3 +135,20 @@ fn bare_no_arg_keys_call_on_a_plain_object_is_not_flagged() {
         out.findings
     );
 }
+
+#[test]
+fn a_string_denylist_naming_the_keys_command_is_not_flagged() {
+    // Same token-as-data class as `flushall-in-code`, swept across this sibling rule: a config that
+    // names `KEYS` as a forbidden command is data. The `.keys(` CALL form is unaffected by the gate.
+    let dir = TempDir::new("zzop-redis");
+    dir.write(
+        "src/lint/forbiddenCommands.ts",
+        "export const FORBIDDEN = new Set([\"KEYS\", \"FLUSHALL\", \"SCAN\"]);\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "keys-glob-scan").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}

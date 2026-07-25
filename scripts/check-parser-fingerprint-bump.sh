@@ -57,9 +57,22 @@ fi
 
 range="${FINGERPRINT_DIFF_RANGE:-origin/main...HEAD}"
 
-# Pull the left side out of "A...B" or "A..B" so we can check it resolves before trusting the range.
+# Pull both ends out of "A...B" / "A..B" so we can check they resolve before trusting the range, and
+# so the commit-message scan below can be pinned to the SAME commit set `git diff` looks at.
 base_ref="${range%%...*}"
 base_ref="${base_ref%%..*}"
+if [ "$range" = "${range/.../}" ]; then
+  three_dot=0
+  head_ref="${range#*..}"
+else
+  three_dot=1
+  head_ref="${range#*...}"
+fi
+# "A.." (and a bare single ref, which leaves the expansion unchanged) mean HEAD on the right, same
+# as git's own default.
+if [ -z "$head_ref" ] || [ "$head_ref" = "$range" ]; then
+  head_ref=HEAD
+fi
 
 if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
   echo "check-parser-fingerprint-bump: notice — '$base_ref' does not resolve locally (no fetched origin/main?); skipping."
@@ -73,9 +86,25 @@ if ! changed_files="$(git diff --name-only "$range" -- 2>&1)"; then
   exit 0
 fi
 
+# `left_ref` is the range's true starting commit: the merge-base for `A...B`, plain `A` for `A..B`.
+# Everything downstream (the marker scan, the const-value comparison) is anchored on it, so all of
+# them judge exactly the commits `git diff` judged.
+if [ "$three_dot" -eq 0 ]; then
+  left_ref="$base_ref"
+else
+  left_ref="$(git merge-base "$base_ref" "$head_ref" 2>/dev/null || echo "$base_ref")"
+fi
+
 # Every commit message in the range, one line per line, with surrounding whitespace stripped — so
 # the own-line marker test is a plain whole-line literal compare and indentation cannot defeat it.
-marker_scan="$(git log --format=%B "$range" -- 2>/dev/null | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' || true)"
+#
+# TWO dots, never three, and never the raw `$range`. Bit for real 2026-07-25: `git diff A...B` shows
+# merge-base(A,B)..B — the BRANCH side only — but `git log A...B` is the SYMMETRIC DIFFERENCE, so it
+# also reads commits that landed on A after the branch point. `changed_files` and this scan then
+# judged different commit sets: a branch that changed a parser without bumping its fingerprint went
+# GREEN because an unrelated commit merged into main carried `[no-projection-change: core]`. The
+# escape hatch is only ever the branch author's to pull.
+marker_scan="$(git log --format=%B "${left_ref}..${head_ref}" -- 2>/dev/null | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' || true)"
 
 # True only when some line in the range IS the marker for scope $1 ("parser-java" / "core" / "dsl" /
 # "rules-schema") and nothing else — see the header for why a mid-sentence mention must not count.
@@ -87,6 +116,72 @@ marker_scan="$(git log --format=%B "$range" -- 2>/dev/null | sed -e 's/^[[:space
 #      the marker being present.
 has_skip_marker() {
   grep -qxF "[no-projection-change: $1]" <<< "$marker_scan"
+}
+
+# --- Version-token comparison (replaces per-line diff matching) ---------------------------------
+# Bit for real 2026-07-25: every check below used to grep the range's diff for a changed line
+# STARTING with `pub const <NAME>`. rustfmt breaks that. Once a value grows past the line limit the
+# declaration wraps —
+#     pub const PARSER_FINGERPRINT: &str =
+#         "typescript/swc_core-71.0.5/0.22.0+...+dispatch-branch-symbol-v1";
+# — so a correct bump changes ONLY the value line and matches nothing. parser-typescript crossed
+# that width in 2026-07-25's batch and the guard went red on a commit that HAD bumped correctly.
+# A guard that cries wolf is one someone silences with the escape hatch, which would then assert
+# something false and disable the lane for good. So: compare the VALUE the const actually holds at
+# each end of the range. Layout-independent by construction — wrapping, indentation and comment
+# rewrites cannot affect it, and only a real value change reads as a bump.
+
+# First string literal of `const <NAME>` in the blob on stdin; empty when the const is absent.
+# Newlines are folded first so a wrapped declaration reads as one statement.
+const_value() {
+  tr '\n' ' ' \
+    | grep -oE "const[[:space:]]+$1[^;]*;" \
+    | head -n1 \
+    | grep -oE '"[^"]*"' \
+    | head -n1 \
+    || true
+}
+
+# Path of the file that declared `<const $1>` anywhere under pathspec `<$2>` at $left_ref — empty
+# when the const did not exist in that scope at all. PATH-INDEPENDENT ON PURPOSE: the const's file
+# is not a stable identity. The 300-line ratchet routinely relocates a const into a freshly split
+# module, and a `git mv` must read as neither a bump nor a failure.
+const_file_at_left() {
+  git grep -lE "^[[:space:]]*(pub[[:space:]]+)?const $1" "$left_ref" -- "$2" 2>/dev/null \
+    | head -n1 \
+    | cut -d: -f2- \
+    || true
+}
+
+# Did `<const $2>` — looked up under pathspec `<$3>` at the range start, read from `<file $1>` now —
+# hold a different value at the start of the range than it does today? The "now" side reads the
+# WORKING TREE, so an uncommitted bump counts as bumped: the pre-commit hook must be able to bless
+# the change it is about to commit.
+#
+# Exit: 0 = value changed (bumped)  |  1 = value identical (not bumped)  |  2 = UNRESOLVABLE.
+# Bit for real 2026-07-25: this used to read `git show "$left_ref:$fixed_path"` and let a failure
+# fall through as `before=""`, which compares unequal to any real value and so read as A BUMP. A
+# plain `git mv` of the file holding the const — exactly what the 300-line ratchet keeps prompting —
+# turned a missing bump GREEN. "The const could not be read at the range start" and "the value
+# changed" are different events and must not share a verdict; scope-resolving the left side removes
+# the rename case entirely, and whatever is left is reported as its own failure rather than a pass.
+const_value_changed() {
+  local file="$1" name="$2" scope="$3" left_file before after
+  left_file="$(const_file_at_left "$name" "$scope")"
+  after="$(const_value "$name" < "$file" 2>/dev/null || true)"
+  if [ -z "$left_file" ]; then
+    # The const did not exist anywhere in this scope at the range start: the crate/surface is new in
+    # this range, so no cache entry keyed on an older value can exist. Nothing to compare — pass.
+    return 0
+  fi
+  before="$(git show "$left_ref:$left_file" 2>/dev/null | const_value "$name")"
+  if [ -z "$before" ] || [ -z "$after" ]; then
+    echo "check-parser-fingerprint-bump: $name — could not read its value at $(if [ -z "$before" ]; then echo "the range start ($left_ref:$left_file)"; else echo "HEAD ($file)"; fi)." >&2
+    echo "  The declaration must be a plain string literal ('const $name ... = \"...\";') for this guard to" >&2
+    echo "  compare the two ends of the range. An unreadable value is reported as a failure, never as a bump." >&2
+    return 2
+  fi
+  [ "$before" != "$after" ]
 }
 
 fail=0
@@ -111,8 +206,11 @@ for crate_dir in parser/*/; do
     continue
   fi
 
-  fp_diff="$(git diff -U0 "$range" -- "$fp_file" 2>/dev/null | grep -E '^[+-][[:space:]]*pub const PARSER_FINGERPRINT' || true)"
-  if [ -z "$fp_diff" ]; then
+  fp_rc=0
+  const_value_changed "$fp_file" PARSER_FINGERPRINT "$crate/src" || fp_rc=$?
+  if [ "$fp_rc" -eq 2 ]; then
+    fail=1   # unresolvable — const_value_changed already said why
+  elif [ "$fp_rc" -ne 0 ]; then
     echo "check-parser-fingerprint-bump: $crate_name — src/** changed in $range but PARSER_FINGERPRINT (in $fp_file) was not bumped." >&2
     echo "  Stale-cache risk: zzop-cache keys cached analysis results by this fingerprint; an unbumped fingerprint" >&2
     echo "  means a change to what/how this crate extracts could keep being served from a stale cache entry." >&2
@@ -167,8 +265,11 @@ if [ -n "$core_changed" ]; then
       printf '    %s\n' $schema_files >&2
       fail=1
     else
-      schema_diff="$(git diff -U0 "$range" -- "$schema_file" 2>/dev/null | grep -E '^[+-][[:space:]]*pub const CACHE_SCHEMA_VERSION' || true)"
-      if [ -z "$schema_diff" ]; then
+      core_rc=0
+      const_value_changed "$schema_file" CACHE_SCHEMA_VERSION crates || core_rc=$?
+      if [ "$core_rc" -eq 2 ]; then
+        fail=1   # unresolvable — const_value_changed already said why
+      elif [ "$core_rc" -ne 0 ]; then
         echo "check-parser-fingerprint-bump: core shared-type surface changed in $range but CACHE_SCHEMA_VERSION (in $schema_file) was not bumped:" >&2
         printf '    %s\n' $core_changed >&2
         echo "  Cache-poisoning risk: every parser bakes these shared types into its cached per-file artifacts; an" >&2
@@ -218,9 +319,15 @@ if [ -n "$dsl_changed" ]; then
       echo "check-parser-fingerprint-bump: dsl — could not uniquely resolve CACHE_SCHEMA_VERSION under crates/*/src (found $schema_count); cannot check the escape valve." >&2
       fail=1
     else
-      dsl_fp_diff="$(git diff -U0 "$range" -- "$dsl_fp_file" 2>/dev/null | grep -E '^[+-][[:space:]]*(pub[[:space:]]+)?const DSL_INTERPRETER_FINGERPRINT' || true)"
-      schema_diff="$(git diff -U0 "$range" -- "$schema_file" 2>/dev/null | grep -E '^[+-][[:space:]]*pub const CACHE_SCHEMA_VERSION' || true)"
-      if [ -z "$dsl_fp_diff" ] && [ -z "$schema_diff" ]; then
+      dsl_rc=0
+      const_value_changed "$dsl_fp_file" DSL_INTERPRETER_FINGERPRINT crates || dsl_rc=$?
+      schema_rc=0
+      const_value_changed "$schema_file" CACHE_SCHEMA_VERSION crates || schema_rc=$?
+      if [ "$dsl_rc" -eq 0 ] || [ "$schema_rc" -eq 0 ]; then
+        : # one of the two invalidators moved — covered
+      elif [ "$dsl_rc" -eq 2 ] || [ "$schema_rc" -eq 2 ]; then
+        fail=1   # unresolvable — const_value_changed already said why
+      else
         echo "check-parser-fingerprint-bump: crates/core/src/dsl/** changed in $range but neither DSL_INTERPRETER_FINGERPRINT (in $dsl_fp_file) nor CACHE_SCHEMA_VERSION (in $schema_file) was bumped:" >&2
         printf '    %s\n' $dsl_changed >&2
         echo "  Stale-cache risk: the DSL interpreter's own semantics are not covered by any pack's content hash or any parser's" >&2
@@ -267,9 +374,15 @@ if [ -n "$schema_src_changed" ]; then
       echo "check-parser-fingerprint-bump: rules-schema — could not uniquely resolve CACHE_SCHEMA_VERSION under crates/*/src (found $schema_count); cannot check the escape valve." >&2
       fail=1
     else
-      struct_fp_diff="$(git diff -U0 "$range" -- "$struct_fp_file" 2>/dev/null | grep -E '^[+-][[:space:]]*pub const STRUCTURAL_RULES_VERSION' || true)"
-      schema_diff="$(git diff -U0 "$range" -- "$schema_file" 2>/dev/null | grep -E '^[+-][[:space:]]*pub const CACHE_SCHEMA_VERSION' || true)"
-      if [ -z "$struct_fp_diff" ] && [ -z "$schema_diff" ]; then
+      struct_rc=0
+      const_value_changed "$struct_fp_file" STRUCTURAL_RULES_VERSION rules/native || struct_rc=$?
+      schema_rc=0
+      const_value_changed "$schema_file" CACHE_SCHEMA_VERSION crates || schema_rc=$?
+      if [ "$struct_rc" -eq 0 ] || [ "$schema_rc" -eq 0 ]; then
+        : # one of the two invalidators moved — covered
+      elif [ "$struct_rc" -eq 2 ] || [ "$schema_rc" -eq 2 ]; then
+        fail=1   # unresolvable — const_value_changed already said why
+      else
         echo "check-parser-fingerprint-bump: rules/native/rules-schema/src/** changed in $range but neither STRUCTURAL_RULES_VERSION (in $struct_fp_file) nor CACHE_SCHEMA_VERSION (in $schema_file) was bumped:" >&2
         printf '    %s\n' $schema_src_changed >&2
         echo "  Stale-cache risk: zzop-cache folds STRUCTURAL_RULES_VERSION into the ruleset fingerprint for every" >&2

@@ -153,6 +153,23 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
         status: DisclosureStatus::Partial,
     },
     BlindnessClass {
+        id: "rule-evidence-language-gap",
+        group: ANALYSIS_DARK,
+        summary: "A rule's verdict is only as wide as the STRUCTURAL FACT it reads, and per-fact language \
+                  coverage is uneven — several facts have exactly one producer while the rules consuming \
+                  them apply no language filter of their own. Where that fact is absent the rule is \
+                  structurally silent (a zero that reads as an all-clear) or, when the fact is liveness \
+                  evidence, asserts from an empty channel (a finding that reads as a verdict). Neither is \
+                  measured per run: no output field lists which rules had an empty evidence channel for \
+                  the languages actually present in a tree. The affected rules instead publish a language \
+                  sightline in their own finding message and catalog entry — which by construction the \
+                  silent case never renders, since a message ships only ON a finding. Read a native rule's \
+                  zero as a claim about its evidence channel, not about the code: the per-fact producer \
+                  matrix is in `crates/cache/src/ir_slice.rs`'s module doc and each rule's row in \
+                  `docs/rules/catalog.md`.",
+        status: DisclosureStatus::NotYetDetected,
+    },
+    BlindnessClass {
         id: "capability-absent-vs-empty",
         group: ANALYSIS_DARK,
         summary: "An optional capability that was not run (git history, DSL packs) emits a self-report so \
@@ -210,6 +227,27 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
                   overlay's structural shape is checked (envelope validation, `source` mismatch, \
                   synthetic-path census, zero-fact coverage — each already a warning); a \
                   well-formed-but-false fact is indistinguishable from a true one.",
+        status: DisclosureStatus::NotYetDetected,
+    },
+    BlindnessClass {
+        id: "join-bucket-unfiltered",
+        group: TRUST_CALIBRATION,
+        summary: "A cross-layer join bucket (`crossLayer.unprovidedConsumes` and its siblings, plus the \
+                  `bucketKeys`/`bucketKeySites` lists derived from them) is the STRUCTURAL residue of the \
+                  (kind, key) join, not a findings list. The only filters applied at that layer are ones \
+                  readable from the key or the file itself — an unresolvable key, an absolute-URL \
+                  (external-egress) key, a test-classified file, provider absence or ambiguity. No \
+                  DOMAIN-VOCABULARY filter runs there by design (the linker is kind-agnostic and holds no \
+                  rule vocabulary), so entries a rule layer vetoes as not-really-API — static-asset \
+                  fetches and the like — still sit in the bucket. Reading bucket counts or keys as \
+                  findings therefore OVER-counts relative to the rules reporting the same class, which \
+                  apply those extra vetoes on top: findings are the filtered view, buckets are the raw \
+                  join fact, and the two disagreeing on one key is the contract working, not drift. Not \
+                  detected: no per-key marker says WHICH bucket entries a rule layer would veto, so the \
+                  over-count is disclosed as a contract rather than measured per run.",
+        // `NotYetDetected`, not `Partial`: nothing here is detected in the common cases and missed in the
+        // rest — the over-count is never measured per run at all. `zzop explain` prints this token
+        // verbatim, so a `Partial` here would promise a per-run signal the class explicitly does not have.
         status: DisclosureStatus::NotYetDetected,
     },
 ];

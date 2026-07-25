@@ -67,6 +67,14 @@ pub struct EngineConfig {
     /// ruleset fingerprint already has a cached IR *and* findings entry skips parsing and rule
     /// evaluation entirely. `None` (the default) never touches a cache directory. A cache directory that
     /// fails to open degrades to "cache off" for that call plus a `warnings` entry — never a panic.
+    ///
+    /// **The `None` default is deliberate and must stay** — do not "fix" it by defaulting a path here.
+    /// This is a library knob: an embedder that names no directory gets no directory created inside its
+    /// repository. Shipped RUNS do get a default, supplied one layer up by the config front-end
+    /// (`zzop-config` maps an omitted `cacheDir` to `zzop_cache::DEFAULT_CACHE_DIR`), which is also the
+    /// only layer that knows what to resolve a relative path against. Defaulting here would additionally
+    /// be inert: `zzop-facade` assigns this field from the request unconditionally, so a default set in
+    /// `EngineConfig::default()` is overwritten before `analyze_tree` ever sees it.
     pub cache_dir: Option<PathBuf>,
     /// Rule profiling — the ESLint `TIMING=1` / oxlint rule-timing equivalent. `false` (the default)
     /// leaves `AnalyzeOutput::rule_timings` at `None` with zero added cost. `true` times each DSL rule

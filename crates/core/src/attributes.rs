@@ -36,8 +36,15 @@ pub enum EntityRef {
     /// A join key — the same `(kind, key)` coordinate the cross-layer join uses (e.g. kind `"http"`,
     /// key `"POST /api/users"`).
     IoKey { kind: String, key: String },
-    /// A path-prefix scope — applies to every http route whose path is under `prefix` (longest match
-    /// wins), the shape a router-level middleware guards.
+    /// A path-prefix scope — everything under `prefix`, longest match wins. TWO lookup surfaces read
+    /// it, and which one applies is decided by the CONSUMER, never by this type: [`AttributeStore::route_attr`]
+    /// reads it as an http ROUTE path prefix (`"/admin"` — the shape a router-level middleware guards),
+    /// [`AttributeStore::path_attr`] as a repo-relative FILE path prefix (`"src/config"` — the shape a
+    /// declared config/generated/vendored directory has). The two namespaces do not collide in practice
+    /// because a route path always starts with `/` and a repo-relative file path never does, but nothing
+    /// here enforces that: a producer that writes `"/src/config"` declares a route scope that no file
+    /// lookup will ever match, and the store reports no error — same never-guess posture as every other
+    /// field in this module.
     PathScope { prefix: String },
 }
 
@@ -129,13 +136,56 @@ impl AttributeStore {
         })
     }
 
-    /// Look up `attr_key` for a file by repo-relative forward-slash `path`. Matches an `EntityRef::File`
-    /// whose `path` equals `path`. Returns the first match's value. VOCAB-FREE.
-    pub fn file_attr(&self, path: &str, attr_key: &str) -> Option<&serde_json::Value> {
-        self.attrs.iter().find_map(|a| match &a.target {
-            EntityRef::File { path: p } if p == path && a.key == attr_key => Some(&a.value),
-            _ => None,
-        })
+    /// Whether ANY attribute in this store carries `attr_key` — regardless of target shape, and
+    /// regardless of whether its value is truthy. "Was this vocabulary DECLARED at all", not "does it
+    /// hold here": an explicit falsy declaration is still a declaration (the producer said something
+    /// about this key), so it counts.
+    ///
+    /// The distinction exists because a NEGATED gate over an empty declaration set is not a gate. A rule
+    /// shaped "flag every X outside the declared Y" degrades, with nothing declared, into "flag every X"
+    /// — i.e. back to guessing the environment fact it was supposed to consume. `LineScan::require_attr_declared`
+    /// is the consumer; see that field's doc for the silence-plus-disclosure contract built on this.
+    /// VOCAB-FREE: `attr_key` is the caller's.
+    pub fn declares(&self, attr_key: &str) -> bool {
+        self.attrs.iter().any(|a| a.key == attr_key)
+    }
+
+    /// Look up `attr_key` for a FILE by repo-relative forward-slash `path`. An exact [`EntityRef::File`]
+    /// target wins outright (file-level override); else the longest [`EntityRef::PathScope`] whose prefix
+    /// covers `path` on segment boundaries (`"src/config"` covers `"src/config/db.ts"`, not
+    /// `"src/configuration.ts"`). Returns the raw value if present. VOCAB-FREE.
+    ///
+    /// The file-path twin of [`Self::route_attr`], resolving by the SAME specificity rule (exact target
+    /// beats covering scope, longest scope beats shorter) against the SAME [`path_under`] segment test —
+    /// one resolution semantics for both surfaces, so a producer learns the scoping rule once. It
+    /// replaced a `file_attr` that matched `EntityRef::File` ONLY: that method had no production consumer
+    /// (tests alone), and a declaration channel where a user must enumerate every file rather than name a
+    /// directory is not one anyone would use.
+    ///
+    /// One asymmetry inherited from [`path_under`], stated rather than papered over: `PathScope { prefix: "" }`
+    /// covers every ROUTE (they all start with `/`) but NO file (a repo-relative path never does). There is
+    /// deliberately no whole-tree file scope spelling — a rule gated on "everything is declared" is a rule
+    /// with no gate.
+    pub fn path_attr(&self, path: &str, attr_key: &str) -> Option<&serde_json::Value> {
+        let mut best: Option<(usize, &serde_json::Value)> = None; // (matched prefix len, value)
+        for a in &self.attrs {
+            if a.key != attr_key {
+                continue;
+            }
+            match &a.target {
+                EntityRef::File { path: p } if p == path => {
+                    return Some(&a.value); // exact file match is most specific — wins outright
+                }
+                EntityRef::PathScope { prefix } if path_under(path, prefix) => {
+                    let len = prefix.trim_end_matches('/').len();
+                    if best.is_none_or(|(l, _)| len > l) {
+                        best = Some((len, &a.value));
+                    }
+                }
+                _ => {}
+            }
+        }
+        best.map(|(_, v)| v)
     }
 
     /// Look up `attr_key` for an http-style route identified by `(kind, key)` where `key` is

@@ -234,8 +234,8 @@ pub(crate) fn apply_adapter_overlays(
 /// (`merge_projection_onto_artifact` does not touch the field and `synthetic_artifact_from_projection`
 /// sets it empty), so counting it would call a file "covered" for data the engine silently drops — a
 /// symbols-only overlay must instead trip the zero-fact census and keep the "no native parser"
-/// disclosure alive. `used_names` and `loop_spans` are excluded for the same reason: neither is read by
-/// either merge branch in a way that reaches an actual consumer today.
+/// disclosure alive. `used_names`, `loop_spans`, and `function_spans` are excluded for the same reason:
+/// none is read by either merge branch in a way that reaches an actual consumer today.
 ///
 /// Called from exactly one place — [`apply_adapter_overlays`]'s per-projection loop — where its verdict
 /// feeds BOTH the per-overlay zero-fact census (G8b) and the returned covered-path set `analyze::assemble`

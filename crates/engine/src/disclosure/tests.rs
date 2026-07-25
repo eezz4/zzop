@@ -16,11 +16,16 @@ const EXPECTED: &[(&str, &str)] = &[
     ("consume-side-unextracted", "asserted"),
     ("generated-client-unrecognized", "partial"),
     ("input-scope-error", "partial"),
+    ("join-bucket-unfiltered", "notYetDetected"),
     ("key-mismatch-drift", "partial"),
     ("language-unparsed", "partial"),
     ("overlay-facts-unverified", "notYetDetected"),
     ("provide-side-unextracted", "partial"),
     ("resolution-gap", "asserted"),
+    // `notYetDetected` on purpose: the sightlines the affected rules publish are PROSE on a finding and
+    // in the catalog, and the silent case emits no finding — so nothing asserts this per run. Promote
+    // only once a run actually reports which rules had an empty evidence channel for the tree's languages.
+    ("rule-evidence-language-gap", "notYetDetected"),
     ("silent-truncation", "partial"),
     ("stale-cache", "partial"),
 ];

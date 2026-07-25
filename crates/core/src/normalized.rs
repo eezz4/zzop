@@ -52,7 +52,12 @@ pub struct NormalizedEnvelope {
 /// tsconfig/workspace-alias resolution to fragments. Adapter OVERLAYS (Mode B) compose alongside the
 /// native tree and inherit its alias-aware resolver — a superset; producers should rely only on the
 /// exact/relative contract above so the same envelope behaves identically in both modes.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `Default` is derived purely so a producer/test can build a PARTIAL projection with `..Default::default()`
+/// instead of restating all eighteen fields (a partial envelope carrying only `attributes`, or only `io`, is
+/// the normal Mode-B shape). It changes nothing on the wire: serde consults `Default` only where a
+/// `#[serde(default)]` says to, and `path`/`loc` carry none — both stay mandatory in JSON.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FileProjection {
     /// Relative, forward-slash path.
     pub path: String,
@@ -114,6 +119,15 @@ pub struct FileProjection {
     /// does not apply here; `loopSpans` is still tolerated on INPUT for camelCase emitters.
     #[serde(default, alias = "loopSpans")]
     pub loop_spans: Vec<(u32, u32)>,
+    /// Per-file function line spans (1-based, inclusive) with promise-continuation callbacks merged into
+    /// their call site — external-parser counterpart of `zzop_core::dsl::SourceFile::function_spans` (see
+    /// that field's doc for the exact span contract and the merge rule). OPTIONAL (`#[serde(default)]`;
+    /// absent = empty = `MethodScan::after_in_same_function` degrades to a NO-OP for this file, so a rule
+    /// using it keeps its coarser pre-gate behavior rather than going silent — the opposite degrade
+    /// direction from `loop_spans`/`trigger_in_loop`). Same snake_case-with-camelCase-input-alias
+    /// convention as `loop_spans` above.
+    #[serde(default, alias = "functionSpans")]
+    pub function_spans: Vec<(u32, u32)>,
     /// The parser could not fully process this file (size cap, syntax failure) — `loc` must still be
     /// present regardless.
     #[serde(default)]

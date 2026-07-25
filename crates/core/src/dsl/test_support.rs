@@ -27,6 +27,7 @@ pub(super) fn pack() -> RulePackDef {
 pub(super) fn scan(src: &str, rel: &str) -> Vec<Finding> {
     let files = vec![SourceFile {
         loop_spans: Vec::new(),
+        function_spans: Vec::new(),
         rel: rel.into(),
         text: src.into(),
         symbols: vec![],
@@ -59,6 +60,7 @@ pub(super) fn method(name: &str, body_start: u32, body_end: u32) -> SourceSymbol
 pub(super) fn scan_methods(src: &str, symbols: Vec<SourceSymbol>) -> Vec<Finding> {
     let files = vec![SourceFile {
         loop_spans: Vec::new(),
+        function_spans: Vec::new(),
         rel: "C.java".into(),
         text: src.into(),
         symbols,
@@ -119,6 +121,7 @@ pub(super) fn scan_symbols(
 ) -> Vec<Finding> {
     let files = vec![SourceFile {
         loop_spans: Vec::new(),
+        function_spans: Vec::new(),
         rel: rel.into(),
         text: String::new(),
         symbols,
@@ -212,6 +215,7 @@ pub(super) fn scan_pack(
 ) -> Vec<Finding> {
     let files = vec![SourceFile {
         loop_spans: Vec::new(),
+        function_spans: Vec::new(),
         rel: rel.into(),
         text: src.into(),
         symbols,
@@ -235,6 +239,33 @@ pub(super) fn scan_pack_loops(
 ) -> Vec<Finding> {
     let files = vec![SourceFile {
         loop_spans,
+        function_spans: Vec::new(),
+        rel: rel.into(),
+        text: src.into(),
+        symbols,
+        io: None,
+    }];
+    let ctx = RuleContext {
+        files: &files,
+        ir: None,
+    };
+    eval_pack(pack, &ctx)
+}
+
+/// `scan_pack`'s counterpart for `SourceFile::function_spans` — the substrate of
+/// `MethodScan::after_in_same_function`. Kept separate from `scan_pack_loops` for the same reason that
+/// one is separate from `scan_pack`: no other caller has a use for a non-empty vec, and threading both
+/// through one signature would make every unrelated call site carry two placeholder arguments.
+pub(super) fn scan_pack_fns(
+    pack: &RulePackDef,
+    rel: &str,
+    src: &str,
+    symbols: Vec<SourceSymbol>,
+    function_spans: Vec<(u32, u32)>,
+) -> Vec<Finding> {
+    let files = vec![SourceFile {
+        loop_spans: Vec::new(),
+        function_spans,
         rel: rel.into(),
         text: src.into(),
         symbols,

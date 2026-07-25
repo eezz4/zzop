@@ -14,6 +14,7 @@ use super::consts::build_const_map;
 use super::correlation::method_url_pairs;
 use super::generated_client::match_generated_client_call;
 use super::keying::consume_key_for;
+use super::local_consts::LocalConsts;
 use super::matchers::match_http_call;
 use super::react_query::{imports_react_query, match_react_query_call};
 use super::retry::{file_wires_retry, is_retry_wrapper_call, is_write_verb};
@@ -31,10 +32,15 @@ pub fn extract_http_egress(files: &[(String, String)]) -> Vec<IoConsume> {
         let angular_receivers = angular_http_client_receivers(&module);
         let react_query_file = imports_react_query(&module);
         let retry_file = file_wires_retry(&module);
+        // Rebuilt per file, never folded across files: the whole point of these maps is that they are
+        // scope-checked against ONE file's AST (`same-file-const-prepend-v1`,
+        // `same-file-url-binding-v1`).
+        let locals = LocalConsts::build(&module, &consts, cm_ref);
         let mut c = EgressCollector {
             cm: cm_ref,
             file: rel,
             consts: &consts,
+            locals: &locals,
             angular_receivers: &angular_receivers,
             react_query_file,
             retry_file,
@@ -51,6 +57,10 @@ struct EgressCollector<'a> {
     cm: &'a SourceMap,
     file: &'a str,
     consts: &'a HashMap<String, String>,
+    /// THIS file's gated bare-identifier URL knowledge — read at a URL's leading slot
+    /// (`same-file-const-prepend-v1`) and at the whole-argument position (`same-file-url-binding-v1`).
+    /// See [`super::local_consts`].
+    locals: &'a LocalConsts,
     angular_receivers: &'a HashSet<String>,
     react_query_file: bool,
     /// File imports `axios-retry` — its write egress calls run under transparent retry (`egress-retry-v1`).
@@ -77,7 +87,7 @@ impl Visit for EgressCollector<'_> {
             // method/URL variant a given emitted IoConsume ends up carrying — computed once and cloned
             // into every emit point below (resolved/unresolved/vetoed alike), per `body-shape-v1`.
             let body = witnessed_body_shape(call, &hc);
-            let url_variants = resolve_url_variants(hc.arg, self.consts, self.cm);
+            let url_variants = resolve_url_variants(hc.arg, self.consts, self.locals, self.cm);
             let line = crate::line_of(self.cm, call.span.lo);
             // Retry-exposed (write verbs only, tagged below): inside a retry wrapper (any client), or an
             // `axios-retry`-wired file — but the file gate only patches AXIOS, so a `fetch()` write in the

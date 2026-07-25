@@ -108,7 +108,7 @@
     {
       "id": "find-then-create-no-unique",
       "severity": "warning",
-      "message": "A `findFirst`/`findOne`/`findUnique` read and a `.create(` call both appear in the same function with no `connectOrCreate` or `upsert` — this is a co-occurrence heuristic, not proof the read precedes the create, but when it's a check-then-act shape: two concurrent requests can both pass the check and both create a duplicate row. Add a unique constraint and replace the check-then-act with an upsert/`connectOrCreate`; wrapping the read+write in a `$transaction` alone does NOT close this race at the database's default READ COMMITTED isolation level — two concurrent transactions can both read empty and both insert. Suppress a vetted case with `// find-then-create-no-unique-ok`.",
+      "message": "A `.create(` call appears LEXICALLY AFTER a `findFirst`/`findOne`/`findUnique` read in the same function, with no `connectOrCreate` or `upsert` anywhere in it — the reported line is the first create that actually follows a read, and \"same function\" means the NEAREST enclosing function, so a read in a sibling closure does not pair. A trigger line that sits inside NO parser-projected function span (a class-property initializer, a top-level statement) is read as ungated, and the pairing there widens back to the whole scanned symbol span. This is a TEXTUAL ORDER claim, not a dataflow one: it does not prove the create writes the row the read looked for, nor that both run on the same control-flow path. When it is the check-then-act shape it names, two concurrent requests can both pass the check and both create a duplicate row. Add a unique constraint and replace the check-then-act with an upsert/`connectOrCreate`; wrapping the read+write in a `$transaction` alone does NOT close this race at the database's default READ COMMITTED isolation level — two concurrent transactions can both read empty and both insert. Suppress a vetted case with `// find-then-create-no-unique-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -119,6 +119,8 @@
           { "pattern": "\\.create\\s*\\(", "label": "create" }
         ],
         "trigger": "create",
+        "after": "read",
+        "after_in_same_function": true,
         "absent": [
           { "pattern": "connectOrCreate|\\.upsert\\s*\\(|(?i)ON\\s+CONFLICT|(?i)ON\\s+DUPLICATE\\s+KEY", "label": "safe" }
         ],
@@ -183,7 +185,7 @@
     {
       "id": "non-atomic-counter-update",
       "severity": "warning",
-      "message": "A read (`findUnique`/`findFirst`/`findOne`/`findById`) and an update that recomputes a field as `<ident> + 1`/`<ident> - 1` both appear in the same function — this is a co-occurrence heuristic, not proof of order, but when the update genuinely follows the read: read-then-arithmetic-update is not atomic, and two concurrent requests can both read the same starting value and both write the same incremented result, silently losing one of the two increments. Any `field: value + 1`-shaped object entry in the same function trips it, even one unrelated to the read (e.g. a `take: cursor + 1` pagination bound). Use the ORM's atomic increment/decrement (e.g. Prisma's `{ increment: 1 }`/`{ decrement: 1 }`), a DB-side `$inc`, or a `SELECT ... FOR UPDATE` row lock instead of read-then-write arithmetic. Suppress a vetted case with `// non-atomic-counter-update-ok`.",
+      "message": "An update that recomputes a field as `<ident> + 1`/`<ident> - 1` appears LEXICALLY AFTER a read (`findUnique`/`findFirst`/`findOne`/`findById`) in the same function — the reported line is the first such arithmetic entry that actually follows a read, and \"same function\" means the NEAREST enclosing function, so a read in a sibling closure does not pair. A trigger line that sits inside NO parser-projected function span (a class-property initializer, a top-level statement) is read as ungated, and the pairing there widens back to the whole scanned symbol span. This is a TEXTUAL ORDER claim, not a dataflow one: it does not prove the arithmetic recomputes the field the read returned. Any `field: value + 1`-shaped object entry that follows the read trips it, even one unrelated to it (e.g. a `take: cursor + 1` pagination bound). When it is the shape it names, read-then-arithmetic-update is not atomic, and two concurrent requests can both read the same starting value and both write the same incremented result, silently losing one of the two increments. Use the ORM's atomic increment/decrement (e.g. Prisma's `{ increment: 1 }`/`{ decrement: 1 }`), a DB-side `$inc`, or a `SELECT ... FOR UPDATE` row lock instead of read-then-write arithmetic. Suppress a vetted case with `// non-atomic-counter-update-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -194,6 +196,8 @@
           { "pattern": "\\b[A-Za-z_$][\\w$]*\\s*:\\s*[\\w.]+\\s*[+\\-]\\s*1\\b", "label": "arith-update" }
         ],
         "trigger": "arith-update",
+        "after": "read",
+        "after_in_same_function": true,
         "absent": [
           { "pattern": "\\bincrement\\s*:", "label": "atomic-increment" },
           { "pattern": "\\bdecrement\\s*:", "label": "atomic-decrement" },
@@ -267,7 +271,7 @@
     {
       "id": "check-then-act-in-loop",
       "severity": "warning",
-      "message": "A `.create(`/`.insert(` call whose own line is verified to sit inside a loop body (via the parser's projected loop spans) co-occurs in the same function with a `findFirst`/`findUnique`/`findOne`/`exists` read, and no `connectOrCreate`/`upsert`/`ON CONFLICT`/`ON DUPLICATE KEY` guard appears anywhere in the function. The create is loop-proven; the read is a whole-function co-occurrence (not itself proven to sit in the loop). This is the batch get-or-create shape: two concurrent workers (or an overlapping retry) can both observe \"absent\" for the same key on an iteration and both insert a duplicate row. It sharpens `find-then-create-no-unique` (a whole-function co-occurrence heuristic) by additionally loop-proving the create, and can fire alongside it on the overlapping shape. Add a unique constraint and replace the check-then-act with `upsert`/`connectOrCreate`; a `$transaction` wrap alone does not close this race at the database's default READ COMMITTED isolation level. Suppress a vetted case with `// check-then-act-in-loop-ok`.",
+      "message": "A `.create(`/`.insert(` call whose own line is verified to sit inside a loop body (via the parser's projected loop spans) appears LEXICALLY AFTER a `findFirst`/`findUnique`/`findOne`/`exists` read in the NEAREST enclosing function, and no `connectOrCreate`/`upsert`/`ON CONFLICT`/`ON DUPLICATE KEY` guard appears anywhere in that function. A trigger line that sits inside NO parser-projected function span (a class-property initializer, a top-level statement) is read as ungated, and the pairing there widens back to the whole scanned symbol span. The create is loop-proven and order-proven relative to the read; the read is NOT itself proven to sit in the loop, and the order is textual, not dataflow (nothing proves the create writes the row the read looked for). This is the batch get-or-create shape: two concurrent workers (or an overlapping retry) can both observe \"absent\" for the same key on an iteration and both insert a duplicate row. It sharpens `find-then-create-no-unique` (a whole-function co-occurrence heuristic) by additionally loop-proving the create, and can fire alongside it on the overlapping shape. Add a unique constraint and replace the check-then-act with `upsert`/`connectOrCreate`; a `$transaction` wrap alone does not close this race at the database's default READ COMMITTED isolation level. Suppress a vetted case with `// check-then-act-in-loop-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -279,6 +283,8 @@
         ],
         "trigger": "create",
         "trigger_in_loop": true,
+        "after": "read",
+        "after_in_same_function": true,
         "absent": [
           { "pattern": "connectOrCreate|\\.upsert\\s*\\(|(?i)ON\\s+CONFLICT|(?i)ON\\s+DUPLICATE\\s+KEY", "label": "safe" }
         ],

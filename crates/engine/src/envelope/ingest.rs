@@ -167,8 +167,7 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     warnings.extend(crate::analyze::unmatched_global_exclude_warnings(
         config, &rels,
     ));
-    // One census, two consumers — same seam as `analyze::assemble`'s (see `compute_dsl_scope`'s doc):
-    // the zero-applicability warning below and `packs_loaded`'s per-pack `files_in_scope` count.
+    // One census, two consumers (see `compute_dsl_scope`): the warning below and `packs_loaded`'s counts.
     let dsl_scope = crate::analyze::compute_dsl_scope(&config.packs, &rels);
     if let Some(w) = crate::analyze::no_applicable_dsl_rule_warning(&config.packs, &dsl_scope) {
         warnings.push(w);
@@ -260,7 +259,8 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         },
     };
 
-    let coverage = crate::CoverageCensus::compute(file_count, &ir, degraded.len());
+    // `source_files == file_count`: every envelope file is adapter-declared source (see that field's doc).
+    let coverage = crate::CoverageCensus::compute(file_count, file_count, &ir, degraded.len());
 
     let package_imports = package_import_files
         .into_iter()

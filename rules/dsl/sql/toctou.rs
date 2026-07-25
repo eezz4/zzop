@@ -12,9 +12,11 @@ fn toggle_pattern_findone_then_delete_else_create_is_flagged() {
     let out = scan(&dir);
     let hits = hits(&out, "race-condition-toctou");
     assert_eq!(hits.len(), 1, "{:?}", out.findings);
-    // The finding's line is the READ declaration's line (3), not the write call's line (7) — `trigger` is
-    // `read`, so the reported line marks where the race window opens.
-    assert_eq!(hits[0].line, 3, "{:?}", out.findings);
+    // The finding's line is the WRITE call's line (7), not the read declaration's (3) — `trigger` is
+    // `write` gated by `after: read`, so the reported line marks the racing action, and it is
+    // specifically the first write that LEXICALLY FOLLOWS a read. The `.delete(` on line 5 is not in
+    // the `write` pattern's create/upsert/insert set, so line 7 is the first candidate either way.
+    assert_eq!(hits[0].line, 7, "{:?}", out.findings);
 }
 
 #[test]
@@ -117,12 +119,32 @@ fn select_for_update_locked_toggle_is_not_flagged() {
 }
 
 #[test]
-fn toctou_ok_marker_directly_above_the_read_line_suppresses_the_finding() {
-    // The marker sits directly above the READ declaration line; since `trigger` is `read`, that IS the reported line.
+fn toctou_ok_marker_directly_above_the_write_line_suppresses_the_finding() {
+    // Suppression is anchored on the TRIGGER line (`method_scan`'s `marker_suppresses`), and `trigger`
+    // is now `write` — so the marker belongs directly above the `.create(` call, not above the read.
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "api/createMarkedHandlers.ts",
-        "declare const likeStore: any;\nexport async function toggle() {\n  // race-condition-toctou-ok: intentional single-writer admin path\n  const existing = await likeStore.findOne((l: any) => l.id === \"x\");\n  if (existing) {\n    await likeStore.delete(existing.id);\n  } else {\n    await likeStore.create({ id: \"y\" });\n  }\n}\n",
+        "declare const likeStore: any;\nexport async function toggle() {\n  const existing = await likeStore.findOne((l: any) => l.id === \"x\");\n  if (existing) {\n    await likeStore.delete(existing.id);\n  } else {\n    // race-condition-toctou-ok: intentional single-writer admin path\n    await likeStore.create({ id: \"y\" });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "race-condition-toctou").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// ORDER-GATE pin: seals the `after: read` gate's whole contribution — a write that PRECEDES the only
+// read is not a check-then-act race, and the id ("time-of-check-time-of-use") asserts that order. Before
+// the gate this fired on the read line; if the gate is ever removed, this goes red instead of the
+// message quietly becoming false again.
+#[test]
+fn a_write_that_precedes_the_only_read_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "api/createAuditHandlers.ts",
+        "declare const auditStore: any;\ndeclare const likeStore: any;\nexport async function logThenLookUp() {\n  await auditStore.create({ id: \"a\" });\n  const existing = await likeStore.findOne((l: any) => l.id === \"x\");\n  return existing;\n}\n",
     );
     let out = scan(&dir);
     assert!(

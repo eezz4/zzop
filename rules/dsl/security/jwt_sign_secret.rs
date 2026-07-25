@@ -135,6 +135,44 @@ fn jwt_sign_literal_secret_in_a_test_fixture_path_is_still_flagged() {
 }
 
 #[test]
+fn this_rules_value_shape_veto_is_deliberately_narrower_than_hardcoded_secrets() {
+    // T3 DIVERGENCE PIN (policy-value inventory, rule-quality.md §6). `hardcoded-secret` folded its two
+    // casing-specific identifier arms into one casing-AGNOSTIC arm after seven measured false positives
+    // landed on it. This rule kept the old narrow pair (all-lowercase snake / all-lowercase kebab)
+    // ON PURPOSE: no measurement has arrived for the positional `jwt.sign` form, and widening a veto with
+    // zero measurement buys silence, not signal — on a CRITICAL rule whose finding means "anyone can forge
+    // a token". The same value therefore gets two different verdicts, which is the divergence made
+    // visible: `apiKey: "Mantine_DatePicker_Input"` is silenced by hardcoded-secret's folded arm, while
+    // the identical literal handed to `jwt.sign` still fires here (correctly — an identifier-shaped
+    // signing key IS a forgeable signing key). If a measurement later says to fold this arm too, update
+    // the inventory row in the same change.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        concat!(
+            "declare const jwt: any;\n",
+            "declare const payload: any;\n",
+            "export const cfg = { apiKey: \"Mantine_DatePicker_Input\" };\n",
+            "export function issue() {\n",
+            "  return jwt.sign(payload, \"Mantine_DatePicker_Input\");\n",
+            "}\n",
+        ),
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "jwt-sign-literal-secret").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+    assert!(
+        hits(&out, "hardcoded-secret").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
 fn jwt_secret_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(

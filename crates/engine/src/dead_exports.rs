@@ -3,11 +3,24 @@
 //! companion to the file-level `"dead-candidates"` analysis. See `zzop_rules_graph::dead_exports`'s
 //! module doc for what counts as a "use" and which files/exports are exempted.
 //!
-//! `FileArtifact` carries `symbols`/`imports`/`used_names` but not re-exports or dynamic imports, both
-//! needed for complete coverage (barrel chains, entry-re-export live roots, dynamic-import
-//! wildcarding). So this function runs a second, uncached pass: when `"dead-exports"` is enabled, it
-//! re-reads and re-parses every dispatched TypeScript file directly off disk rather than extending the
-//! cached fused pass — it never consults `zzop_cache::AnalysisCache`.
+//! `FileArtifact` carries `symbols`/`imports`/`used_names` but not re-exports, dynamic imports, or
+//! local export aliases, all three needed for complete coverage (barrel chains, entry-re-export live
+//! roots, dynamic-import wildcarding, `export { X as Y }` renames). So this function runs a second,
+//! uncached pass: when `"dead-exports"` is enabled, it re-reads and re-parses every dispatched
+//! TypeScript file directly off disk rather than extending the cached fused pass — it never consults
+//! `zzop_cache::AnalysisCache`.
+//!
+//! **What that costs, stated plainly**: ONE `parse_module` call per dispatched TypeScript file — but
+//! the cost is still paid in FULL on every run, cache hit or not, since this pass never consults the
+//! cache: a 100%-cache-hit run still re-reads and re-parses the whole TypeScript tree. It used to be
+//! THREE parses per file (`parse_re_exports`, `parse_dynamic_imports` and a since-deleted standalone
+//! export-alias entrypoint, each parsing the same `&str` independently); `parse_dead_export_facts` now
+//! parses once and runs those same three walks over ONE `Module`, returning the three fact lists
+//! together. That bundling is possible precisely because no swc type crosses the crate boundary — the
+//! bundle is `Vec<ReExport>` + `Vec<String>` + `Vec<(String, String)>`, exactly what the three calls
+//! already returned, so `parse_module` stays `pub(crate)` in `zzop-parser-typescript`. The two
+//! individual entrypoints that still have other callers remain; the bundle composes their walks rather
+//! than restating them, so the two paths cannot answer differently (pinned in that module's own tests).
 //!
 //! The algorithm and Finding-shaping live in `zzop-rules-graph`; this module keeps only the filesystem +
 //! parser-crate orchestration that rule crates (which depend on `zzop-core` only) deliberately stay
@@ -41,6 +54,19 @@ pub(crate) fn is_ts_source_ext(rel: &str) -> bool {
     )
 }
 
+/// One file's name evidence for `dead-exports`. Two sets, one carrier: they are collected together,
+/// travel together, and are consumed by exactly one rule — and pairing them keeps the difference
+/// between them impossible to miss. `used` is FLAT and position-blind (an identifier occurs
+/// somewhere in the file); `signature` is position-AWARE (a name occurs in some exported
+/// declaration's public signature). The public-signature exemption needs exactly that difference,
+/// which is why `used` alone could never express it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DeadExportNames {
+    pub(crate) used: Vec<String>,
+    /// TypeScript-only; empty elsewhere, which simply yields no exemptions.
+    pub(crate) signature: Vec<String>,
+}
+
 /// Runs the whole-tree dead-export computation and converts each result into a `Finding` at its symbol's
 /// declaration line. Returns an empty `Vec` immediately when there are no TypeScript-dispatched files.
 ///
@@ -62,7 +88,7 @@ pub(crate) fn dead_export_findings(
     ts_paths: &HashSet<String>,
     ts_import_pairs: &[(String, ImportMap)],
     all_symbols: &[SourceSymbol],
-    used_names_by_file: &HashMap<String, Vec<String>>,
+    dead_export_names_by_file: &HashMap<String, DeadExportNames>,
     workspace_pkgs: &HashMap<String, WorkspacePkg>,
     tsconfigs: &std::collections::BTreeMap<String, TsconfigPaths>,
     sfc_import_pairs: &[(String, ImportMap)],
@@ -86,18 +112,20 @@ pub(crate) fn dead_export_findings(
         if !is_ts_source_ext(rel) {
             continue; // non-TS overlay participant (e.g. .svelte) — not re-parseable as TypeScript
         }
-        let (re_exports, dynamic_imports, is_generated) = match std::fs::read(root.join(rel)) {
+        // Re-exports, dynamic imports and local `export { X as Y }` renames in one parse — all three
+        // are read off disk rather than from the cache for the same reason: `FileArtifact` does not
+        // carry them, and only this rule needs them.
+        let (facts, is_generated) = match std::fs::read(root.join(rel)) {
             Ok(bytes) => {
                 let text = String::from_utf8_lossy(&bytes).into_owned();
                 (
-                    zzop_parser_typescript::parse_re_exports(rel, &text),
-                    zzop_parser_typescript::parse_dynamic_imports(rel, &text),
+                    zzop_parser_typescript::parse_dead_export_facts(rel, &text),
                     crate::generated_banner::has_generated_banner(&text),
                 )
             }
-            // Unreadable (deleted/permission race) — treat as no re-exports/dynamic-imports rather
-            // than failing the whole analysis.
-            Err(_) => (Vec::new(), Vec::new(), false),
+            // Unreadable (deleted/permission race) — treat as no re-exports/dynamic-imports/
+            // aliases rather than failing the whole analysis.
+            Err(_) => (zzop_parser_typescript::DeadExportFacts::default(), false),
         };
         let exports: Vec<DeadExportCandidate> = symbols_by_file
             .get(rel.as_str())
@@ -110,12 +138,13 @@ pub(crate) fn dead_export_findings(
                 is_default: s.is_default,
             })
             .collect();
-        let used_names: HashSet<String> = used_names_by_file
-            .get(rel)
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
+        let names = dead_export_names_by_file.get(rel);
+        let used_names: HashSet<String> = names
+            .map(|n| n.used.iter().cloned().collect())
+            .unwrap_or_default();
+        let exported_signature_names: HashSet<String> = names
+            .map(|n| n.signature.iter().cloned().collect())
+            .unwrap_or_default();
         files.push(DeadExportInputFile {
             file: rel.clone(),
             exports,
@@ -124,9 +153,11 @@ pub(crate) fn dead_export_findings(
                 .cloned()
                 .cloned()
                 .unwrap_or_default(),
-            re_exports,
-            dynamic_imports,
+            re_exports: facts.re_exports,
+            dynamic_imports: facts.dynamic_imports,
             used_names,
+            exported_signature_names,
+            export_aliases: facts.export_aliases,
             is_generated,
         });
     }
@@ -144,6 +175,8 @@ pub(crate) fn dead_export_findings(
             re_exports: Vec::new(),
             dynamic_imports: Vec::new(),
             used_names: HashSet::new(),
+            exported_signature_names: HashSet::new(),
+            export_aliases: Vec::new(),
             is_generated: false,
         });
     }
@@ -200,5 +233,52 @@ mod call_graph_covered_extensions_pin {
                  not list it — the two hand-kept duplicates have drifted apart: {rule_list:?}"
             );
         }
+    }
+
+    /// The SECOND hand-kept duplicate of the same set, and the narrower one:
+    /// `http_scan::WRITE_SITE_COVERED_EXTENSIONS` names the languages whose parser actually fills
+    /// `SourceSymbol::write_sites`, which is exactly [`is_ts_source_ext`] with NO `"java"` — Java feeds
+    /// the shared call graph but no Java write sites. `unsafe-read-endpoint`/`non-idempotent-write`
+    /// publish that list in their finding messages, so a drift here would publish a false sightline
+    /// (claiming a language is covered when its write-site list is structurally empty) — the exact
+    /// silent-failure the sightline exists to close.
+    #[test]
+    fn write_site_covered_extensions_equals_is_ts_source_ext_with_no_java() {
+        let write_list = zzop_rules_http::http_scan::WRITE_SITE_COVERED_EXTENSIONS;
+        assert!(
+            !write_list.contains(&"java"),
+            "write_sites is produced by the TypeScript parser alone — listing java here would publish \
+             a sightline claiming Java routes are checked when parser-java-21 stubs write_sites: \
+             {write_list:?}"
+        );
+        for ext in write_list {
+            assert!(
+                is_ts_source_ext(&format!("x.{ext}")),
+                "WRITE_SITE_COVERED_EXTENSIONS lists {ext:?}, but is_ts_source_ext does not accept \
+                 it — no TypeScript-dispatched file carries that extension, so the published \
+                 sightline names a language the write-site producer never sees"
+            );
+        }
+        for ext in ["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"] {
+            assert!(
+                write_list.contains(&ext),
+                "is_ts_source_ext accepts {ext:?} (so parser-typescript DOES compute write_sites for \
+                 it), but WRITE_SITE_COVERED_EXTENSIONS omits it — the published sightline \
+                 UNDER-claims and would tell a user their own files are dark: {write_list:?}"
+            );
+        }
+        // The two rule-side lists differ by exactly `"java"` — the difference the sightline prose
+        // calls out ("the sibling rule covers Java, this one does not").
+        let call_graph = zzop_rules_http::mutating_route_no_auth::CALL_GRAPH_COVERED_EXTENSIONS;
+        let only_in_call_graph: Vec<&&str> = call_graph
+            .iter()
+            .filter(|e| !write_list.contains(e))
+            .collect();
+        assert_eq!(
+            only_in_call_graph,
+            vec![&"java"],
+            "the call-graph-covered set must exceed the write-site-covered set by exactly \"java\"; \
+             any other difference means one of the two published sightlines is now wrong"
+        );
     }
 }

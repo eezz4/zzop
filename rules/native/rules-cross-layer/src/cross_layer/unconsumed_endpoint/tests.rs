@@ -1,4 +1,7 @@
 use super::*;
+use crate::cross_layer::unconsumed_mutation_endpoint::{
+    reported_provide_sites, unconsumed_mutation_endpoint_findings,
+};
 
 fn dead(key: &str, source: &str, file: &str, line: u32) -> TaggedProvide {
     TaggedProvide {
@@ -57,6 +60,33 @@ fn trpc_sources(sources: &[&str]) -> BTreeSet<String> {
     sources.iter().map(|s| s.to_string()).collect()
 }
 
+/// The `cross-layer/unconsumed-mutation-endpoint` rule reported nothing this run — either it found no write
+/// route, or the user disabled it. Both cases must leave this rule's coverage complete.
+fn none_reported() -> BTreeSet<(String, String, u32, String)> {
+    BTreeSet::new()
+}
+
+/// The general rule as the engine calls it when the specialization is ENABLED: its real output decides what
+/// is suppressed. Deliberately not a hand-written site set — that would re-introduce the drift this wiring
+/// exists to prevent.
+fn with_mutation_rule_enabled(provides: &[TaggedProvide]) -> (Vec<Finding>, Vec<Finding>) {
+    let specialized = unconsumed_mutation_endpoint_findings(
+        provides,
+        &[],
+        &BTreeSet::new(),
+        &no_near_miss(),
+        &no_trpc(),
+    );
+    let general = unconsumed_endpoint_findings(
+        provides,
+        &[],
+        &no_near_miss(),
+        &no_trpc(),
+        &reported_provide_sites(&specialized),
+    );
+    (general, specialized)
+}
+
 #[test]
 fn dead_http_provide_is_flagged_with_source_and_anchor() {
     let out = unconsumed_endpoint_findings(
@@ -64,6 +94,7 @@ fn dead_http_provide_is_flagged_with_source_and_anchor() {
         &[],
         &no_near_miss(),
         &no_trpc(),
+        &none_reported(),
     );
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].rule_id, "cross-layer/unconsumed-endpoint");
@@ -88,6 +119,7 @@ fn dead_provide_registered_in_a_test_fixture_file_is_skipped() {
         &[],
         &no_near_miss(),
         &no_trpc(),
+        &none_reported(),
     );
     assert!(out.is_empty());
 }
@@ -99,13 +131,17 @@ fn non_http_dead_provide_is_ignored() {
         &[],
         &no_near_miss(),
         &no_trpc(),
+        &none_reported(),
     );
     assert!(out.is_empty());
 }
 
 #[test]
 fn no_unconsumed_provides_is_empty() {
-    assert!(unconsumed_endpoint_findings(&[], &[], &no_near_miss(), &no_trpc()).is_empty());
+    assert!(
+        unconsumed_endpoint_findings(&[], &[], &no_near_miss(), &no_trpc(), &none_reported())
+            .is_empty()
+    );
 }
 
 #[test]
@@ -119,6 +155,7 @@ fn message_states_the_unresolved_http_count_honestly() {
         ],
         &no_near_miss(),
         &no_trpc(),
+        &none_reported(),
     );
     assert_eq!(out.len(), 1);
     assert!(out[0].message.contains("2 unresolved"));
@@ -135,6 +172,7 @@ fn multiple_unconsumed_provides_are_sorted_by_file_then_line() {
         &[],
         &no_near_miss(),
         &no_trpc(),
+        &none_reported(),
     );
     let sites: Vec<(&str, u32)> = out.iter().map(|f| (f.file.as_str(), f.line)).collect();
     assert_eq!(sites, vec![("a.java", 2), ("a.java", 9), ("z.java", 1)]);
@@ -156,6 +194,7 @@ fn near_miss_cross_reference_note_fires_when_the_provide_is_a_near_miss_target()
         &[],
         &targets,
         &no_trpc(),
+        &none_reported(),
     );
     assert_eq!(out.len(), 1);
     assert!(out[0].message.contains("3 unmatched http consume(s)"));
@@ -174,6 +213,7 @@ fn near_miss_cross_reference_note_is_absent_when_the_provide_is_not_a_near_miss_
         &[],
         &no_near_miss(),
         &no_trpc(),
+        &none_reported(),
     );
     assert_eq!(out.len(), 1);
     assert!(!out[0].message.contains("near-miss"));
@@ -197,6 +237,7 @@ fn trpc_mount_route_is_suppressed_when_its_own_tree_has_a_trpc_edge() {
         &[],
         &no_near_miss(),
         &trpc_sources(&["web"]),
+        &none_reported(),
     );
     assert!(out.is_empty());
 }
@@ -213,6 +254,7 @@ fn trpc_mount_route_is_still_reported_when_no_tree_has_a_trpc_edge() {
         &[],
         &no_near_miss(),
         &no_trpc(),
+        &none_reported(),
     );
     assert_eq!(out.len(), 1);
     assert!(out[0].message.contains("GET /api/trpc/{}"));
@@ -233,6 +275,7 @@ fn trpc_mount_route_is_still_reported_when_only_a_different_tree_has_trpc_edges(
         &[],
         &no_near_miss(),
         &trpc_sources(&["api"]),
+        &none_reported(),
     );
     assert_eq!(out.len(), 1);
     assert!(out[0].message.contains("GET /api/trpc/{}"));
@@ -251,6 +294,204 @@ fn a_route_that_merely_contains_but_does_not_carry_a_trpc_segment_is_not_suppres
         &[],
         &no_near_miss(),
         &trpc_sources(&["web"]),
+        &none_reported(),
     );
     assert_eq!(out.len(), 1);
+}
+
+// --- Externally-fetched path veto ---
+
+#[test]
+fn every_externally_fetched_path_token_is_vetoed() {
+    // Each token of the policy vocabulary, pinned individually: "no consumer in this analysis" is not weak
+    // evidence but NO evidence for a path whose requester (monitor, browser, crawler, feed reader) sits
+    // outside every analyzable tree by construction.
+    for path in [
+        "/",
+        "/health",
+        "/healthz",
+        "/healthcheck",
+        "/livez",
+        "/readyz",
+        "/robots.txt",
+        "/sitemap.xml",
+        "/sitemap_index.xml",
+        "/rss.xml",
+        "/feed.xml",
+        "/atom.xml",
+        "/favicon.ico",
+        "/.well-known/security.txt",
+        "/.well-known/acme-challenge/{}",
+    ] {
+        let out = unconsumed_endpoint_findings(
+            &[dead(&format!("GET {path}"), "web", "worker.ts", 4)],
+            &[],
+            &no_near_miss(),
+            &no_trpc(),
+            &none_reported(),
+        );
+        assert!(out.is_empty(), "expected `GET {path}` to be vetoed");
+    }
+}
+
+#[test]
+fn vetoed_paths_are_matched_case_insensitively_and_ignore_a_trailing_slash() {
+    for key in ["GET /Health", "GET /health/", "HEAD /FAVICON.ICO"] {
+        let out = unconsumed_endpoint_findings(
+            &[dead(key, "web", "worker.ts", 4)],
+            &[],
+            &no_near_miss(),
+            &no_trpc(),
+            &none_reported(),
+        );
+        assert!(out.is_empty(), "expected `{key}` to be vetoed");
+    }
+}
+
+#[test]
+fn an_ordinary_route_that_merely_resembles_a_vetoed_path_still_fires() {
+    // The veto is whole-path and exact — an application route that embeds or extends a vetoed token is
+    // ordinary deployed surface and must keep reporting. `/feed`, `/rss`, `/metrics`, `/status` are
+    // deliberately OUT of the vocabulary: each is just as plausibly an in-app route.
+    for key in [
+        "GET /orphan",
+        "GET /api/health",
+        "GET /health-report",
+        "GET /healthy",
+        "GET /feed",
+        "GET /rss",
+        "GET /metrics",
+        "GET /status",
+        "GET /well-known/thing",
+    ] {
+        let out = unconsumed_endpoint_findings(
+            &[dead(key, "be", "Api.java", 12)],
+            &[],
+            &no_near_miss(),
+            &no_trpc(),
+            &none_reported(),
+        );
+        assert_eq!(out.len(), 1, "expected `{key}` to still fire");
+        assert!(out[0].message.contains(key));
+    }
+}
+
+#[test]
+fn a_key_without_the_method_path_shape_is_never_vetoed() {
+    // An unrecognized key shape is not evidence of anything — it must not silently buy silence.
+    let out = unconsumed_endpoint_findings(
+        &[dead("/health", "be", "Api.java", 12)],
+        &[],
+        &no_near_miss(),
+        &no_trpc(),
+        &none_reported(),
+    );
+    assert_eq!(out.len(), 1);
+}
+
+// --- Handoff to `cross-layer/unconsumed-mutation-endpoint` ---
+
+#[test]
+fn a_write_route_yields_exactly_one_finding_when_the_specialization_is_enabled() {
+    // The measured defect: `POST /api/ledger/{}/verify` fired BOTH rules at the identical file:line.
+    let (general, specialized) =
+        with_mutation_rule_enabled(&[dead("POST /api/ledger/{}/verify", "be", "Api.java", 12)]);
+    assert!(general.is_empty());
+    assert_eq!(specialized.len(), 1);
+    assert_eq!(
+        specialized[0].rule_id,
+        "cross-layer/unconsumed-mutation-endpoint"
+    );
+    assert_eq!(specialized[0].line, 12);
+}
+
+#[test]
+fn every_write_verb_is_handed_to_the_specialization_when_it_is_enabled() {
+    for key in [
+        "POST /api/items",
+        "PUT /api/users/{}",
+        "PATCH /api/users/{}",
+        "DELETE /api/users/{}",
+    ] {
+        let (general, specialized) = with_mutation_rule_enabled(&[dead(key, "be", "Api.java", 12)]);
+        assert!(general.is_empty(), "expected `{key}` not to be repeated");
+        assert_eq!(specialized.len(), 1, "expected `{key}` to be specialized");
+    }
+}
+
+#[test]
+fn a_write_route_is_still_reported_here_when_the_specialization_is_disabled() {
+    // Regression guard against "simplifying" the handoff into an unconditional write-verb veto: with the
+    // specialization disabled nothing reported that site, so silence here would be a coverage hole in a rule
+    // the user did NOT disable. `none_reported()` is exactly what the engine passes in that case.
+    let out = unconsumed_endpoint_findings(
+        &[dead("POST /api/ledger/{}/verify", "be", "Api.java", 12)],
+        &[],
+        &no_near_miss(),
+        &no_trpc(),
+        &none_reported(),
+    );
+    assert_eq!(out.len(), 1);
+    assert!(out[0].message.contains("POST /api/ledger/{}/verify"));
+}
+
+#[test]
+fn suppression_is_anchored_per_route_not_per_rule_run() {
+    // A reported write route silences only ITSELF: a different route in the same file still reports, and so
+    // does the same route at the same file:line under a different source tree.
+    let provides = [
+        dead("POST /api/items", "be", "Api.java", 12),
+        dead("GET /api/orphan", "be", "Api.java", 40),
+        dead("POST /api/items", "other", "Api.java", 12),
+    ];
+    let specialized = unconsumed_mutation_endpoint_findings(
+        &provides[..1],
+        &[],
+        &BTreeSet::new(),
+        &no_near_miss(),
+        &no_trpc(),
+    );
+    let general = unconsumed_endpoint_findings(
+        &provides,
+        &[],
+        &no_near_miss(),
+        &no_trpc(),
+        &reported_provide_sites(&specialized),
+    );
+    let sites: Vec<(&str, u32)> = general.iter().map(|f| (f.file.as_str(), f.line)).collect();
+    assert_eq!(sites, vec![("Api.java", 12), ("Api.java", 40)]);
+    assert!(general[0].message.contains("source `other`"));
+}
+
+#[test]
+fn a_co_located_read_route_survives_the_stand_down_of_its_write_siblings() {
+    // A verb-agnostic registration (gin `router.Any`, axum `any(...)`, the TS pathname-dispatch adapter)
+    // emits one provide PER method at ONE `file:line`. Suppression keyed on the anchor alone would let the
+    // reported write verbs silence the co-located `GET /webhook` in BOTH rules — a silent hole. The
+    // suppression key must identify the route, not the line.
+    let provides = [
+        dead("GET /webhook", "be", "handlers.go", 30),
+        dead("POST /webhook", "be", "handlers.go", 30),
+        dead("PUT /webhook", "be", "handlers.go", 30),
+        dead("PATCH /webhook", "be", "handlers.go", 30),
+        dead("DELETE /webhook", "be", "handlers.go", 30),
+    ];
+    let (general, specialized) = with_mutation_rule_enabled(&provides);
+    assert_eq!(specialized.len(), 4, "{:?}", specialized);
+    assert_eq!(general.len(), 1, "{:?}", general);
+    assert!(general[0].message.contains("GET /webhook"));
+    assert_eq!(general[0].line, 30);
+}
+
+#[test]
+fn a_read_route_is_reported_by_this_rule_and_by_it_alone() {
+    // The other half of the partition: neither rule may go silent on a non-write route.
+    let (general, specialized) =
+        with_mutation_rule_enabled(&[dead("GET /api/orphan", "be", "Api.java", 12)]);
+    assert_eq!(general.len(), 1);
+    assert_eq!(general[0].rule_id, "cross-layer/unconsumed-endpoint");
+    assert!(specialized.is_empty());
+    assert!(general[0]
+        .message
+        .contains("cross-layer/unconsumed-mutation-endpoint"));
 }

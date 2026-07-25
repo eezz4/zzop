@@ -11,6 +11,15 @@ use zzop_core::{
 
 use crate::dispatch::Language;
 
+/// The per-file structural SPAN facts a DSL pass needs beyond `symbols`/`io` — grouped rather than
+/// threaded as two more positional `&[(u32, u32)]` parameters, which every call site could silently
+/// transpose (they have identical types and adjacent meanings). Each is empty for a language that does
+/// not project it; see `zzop_core::dsl::SourceFile`'s field docs for the per-fact degrade contract.
+pub(super) struct SpanFacts<'a> {
+    pub loop_spans: &'a [(u32, u32)],
+    pub function_spans: &'a [(u32, u32)],
+}
+
 /// Runs every applicable DSL pack against this one file's slice. `packs` is already
 /// `is_enabled`-filtered by `run_file_pass`; `pack_loader::applies_to` is the remaining per-file,
 /// per-pack pre-filter. Short-circuits before iterating `packs` when the text is minified/generated
@@ -39,14 +48,15 @@ pub(super) fn eval_packs(
     text: &str,
     symbols: &[SourceSymbol],
     io: Option<IoFacts>,
-    loop_spans: &[(u32, u32)],
+    spans: SpanFacts<'_>,
     profile: bool,
 ) -> (Vec<zzop_core::Finding>, Vec<RuleTiming>, bool) {
     if zzop_core::dsl::is_minified_or_generated(text) {
         return (Vec::new(), Vec::new(), true);
     }
     let file = SourceFile {
-        loop_spans: loop_spans.to_vec(),
+        loop_spans: spans.loop_spans.to_vec(),
+        function_spans: spans.function_spans.to_vec(),
         rel: rel.to_string(),
         text: text.to_string(),
         symbols: symbols.to_vec(),

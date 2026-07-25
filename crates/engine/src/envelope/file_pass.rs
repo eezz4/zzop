@@ -214,6 +214,9 @@ pub(super) fn run_file_pass(
             // doc: method-scan rules never run without source text), but this field should carry the
             // real fact rather than a hardcoded placeholder.
             loop_spans: file.loop_spans.clone(),
+            // Same plumbing rationale as `loop_spans` directly above (carry the real fact, never a
+            // hardcoded placeholder), and likewise inert in envelope mode today.
+            function_spans: file.function_spans.clone(),
             rel: file.path.clone(),
             text: String::new(),
             symbols: file.symbols.clone(),

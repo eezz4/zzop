@@ -1,0 +1,125 @@
+//! The fragment-NAME census: every `${NAME}` fragment that ships is listed below, so a new one cannot
+//! appear without a human triage moment against the policy-value inventory — the same moment
+//! `scripts/check-policy-census.sh` forces for a new policy-shaped Rust `const`. A fragment is the
+//! structural TWIN of such a const: it has a stable name, it is referenced BY that name from other
+//! sites, and one edit therefore moves several rules at once. Anonymous single-site pattern fields
+//! (`line_pattern`, `exclude_pattern`, `patterns[].pattern`, …) stay out for the same reason a string
+//! literal spelled inline in an expression is out of the Rust half — see the census script's header for
+//! that boundary, which this module does not restate.
+//!
+//! ## Why this axis lives here and not in the census shell guard (moved 2026-07-25)
+//! It was added to `scripts/check-policy-census.sh` first, as a line-oriented `awk` extractor over
+//! `rules/dsl/**/*.json`, whose header asserted the line orientation "fails LOUD, never silent". That is
+//! false. Measured against the shipped extractor, with inputs that are all VALID JSON and with no JSON
+//! formatter guard anywhere in this repo to prevent them (18 guards, 0 of them format JSON):
+//!
+//! | pack shape | expected | extractor produced |
+//! |---|---|---|
+//! | a second key appended to the line after `"fragments": {` | `alpha,beta,gamma` | `alpha,beta` — silent miss |
+//! | the first key on the same line as the opening `{` | `alpha,beta` | `beta` — silent miss |
+//! | the whole `fragments` map minified onto one line | `alpha,beta` | `rules` — a PHANTOM name, not the promised `removed:` |
+//!
+//! The first shape is the one that matters: a pack author appending `"new-veto": "..."` to an existing
+//! line leaves the census output UNCHANGED, so the guard stays green and the triage moment is bypassed
+//! at zero cost — which is the exact "structural evasion route" the JSON axis was introduced to close.
+//!
+//! ## Rejected: fix the `awk`
+//! A correct extractor has to know where JSON strings begin and end (fragment VALUES are regexes: 4 of
+//! the 9 shipped values already contain a `"`, and 4 contain `{`/`}`), track brace depth, and tell a key
+//! position from a value position — i.e. a hand-rolled JSON tokenizer, in `awk`, untested, ~30 lines
+//! away from a real parser that this crate already runs over the very same files (`raw_packs`,
+//! `fragments::shared_fragments`). Reading JSON with a better regex is still reading JSON with a regex;
+//! the subtraction is to delete the second parser, not to improve it.
+//!
+//! ## Rejected: keep the `awk` and have this module assert its output is complete
+//! That keeps two extractors for one fact and makes the known-wrong one authoritative for
+//! `--update` — the pin would simply be red until the `awk` was fixed anyway, so it buys nothing the
+//! rewrite does not.
+//!
+//! ## Rejected: a committed snapshot file with its own `--update` mode
+//! The Rust half of the census earns its snapshot file: 127 rows, regenerated mechanically. This axis is
+//! 9 rows of deliberately-bounded shared vocabulary. An inline list needs no second update command and
+//! shows up in the diff of the change that adds the fragment, which is where the triage decision is
+//! being made.
+
+use std::collections::BTreeSet;
+
+use super::super::fragments::shared_fragments;
+use super::{raw_packs, repo_rel};
+
+/// Path of the shared bundle, spelled the way the repo does. It lives OUTSIDE `rules/dsl` on purpose
+/// (see `fragments.rs`'s header), so it is not reachable through `raw_packs`.
+const SHARED_BUNDLE: &str = "crates/core/src/dsl/shared_fragments.json";
+
+/// Every `${NAME}` fragment that ships today, as `<path>:<name>`, sorted.
+///
+/// Adding a row here is the triage moment: decide the tier (T1 shared / T2 / T3 / not-policy) and record
+/// it in the policy-value inventory FIRST, then add the row. Removing one is equally deliberate — a
+/// fragment that disappears was referenced by name from somewhere.
+const CENSUSED_FRAGMENTS: &[&str] = &[
+    "crates/core/src/dsl/shared_fragments.json:test-paths",
+    "crates/core/src/dsl/shared_fragments.json:test-paths-stories",
+    "rules/dsl/browser/browser.json:html-sink-sanitized",
+    "rules/dsl/redis/redis.json:string-denylist-literal",
+    "rules/dsl/sql/sql.json:sql-bootstrap-drop-create",
+    "rules/dsl/sql/sql.json:sql-where-veto",
+    "rules/dsl/sql/sql.json:test-paths-migrations",
+];
+
+/// Every fragment name the SHIPPED tree actually defines, read through `serde_json` — the shared bundle
+/// plus every pack's own raw `fragments` map. Never a text scan: that is the whole point of the move.
+fn shipped_fragment_names() -> BTreeSet<String> {
+    let mut out: BTreeSet<String> = shared_fragments()
+        .keys()
+        .map(|name| format!("{SHARED_BUNDLE}:{name}"))
+        .collect();
+    for (path, pack) in raw_packs() {
+        let rel = repo_rel(&path);
+        out.extend(pack.fragments.keys().map(|name| format!("{rel}:{name}")));
+    }
+    out
+}
+
+/// Policy pin: the shipped fragment names and [`CENSUSED_FRAGMENTS`] are the same set, in both
+/// directions. `added` is the triage moment this census exists for; `removed` is the drift signal the
+/// shell census reports under the same name.
+#[test]
+fn every_shipped_fragment_name_is_censused() {
+    let shipped = shipped_fragment_names();
+    let censused: BTreeSet<String> = CENSUSED_FRAGMENTS.iter().map(|s| (*s).to_owned()).collect();
+
+    assert_eq!(
+        CENSUSED_FRAGMENTS.len(),
+        censused.len(),
+        "CENSUSED_FRAGMENTS contains a duplicate row"
+    );
+    assert!(
+        !shipped.is_empty(),
+        "no `${{NAME}}` fragment found in the shared bundle or in rules/dsl/** — this pin would pass \
+         vacuously; if the mechanism really was removed, remove this census with it"
+    );
+
+    let added: Vec<&String> = shipped.difference(&censused).collect();
+    let removed: Vec<&String> = censused.difference(&shipped).collect();
+    assert!(
+        added.is_empty() && removed.is_empty(),
+        "the shipped `${{NAME}}` fragment vocabulary has drifted from CENSUSED_FRAGMENTS.\n  \
+         added:   {added:?}\n  removed: {removed:?}\n\
+         A new named fragment is shared, referenced vocabulary — triage it against the policy-value \
+         inventory (tier T1/T2/T3, or not-policy) and then add its row above. A removed one means a \
+         name other sites referenced is gone."
+    );
+}
+
+/// Pin: [`CENSUSED_FRAGMENTS`] stays sorted, so a new row lands next to its siblings and a diff shows one
+/// added line rather than a reshuffle. Same reason `scripts/policy-census.txt` is `sort -u`'d.
+#[test]
+fn the_censused_fragment_list_is_sorted() {
+    let mut sorted = CENSUSED_FRAGMENTS.to_vec();
+    sorted.sort_unstable();
+    assert_eq!(
+        CENSUSED_FRAGMENTS,
+        &sorted[..],
+        "CENSUSED_FRAGMENTS is not in sorted order"
+    );
+}

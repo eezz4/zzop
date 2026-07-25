@@ -158,6 +158,21 @@ fn no_provide_blind_source_keeps_warning_and_todays_framing() {
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].severity, Severity::Warning);
     assert!(!out[0].message.contains("provider-side blind spot"));
+    // Mirror of the consume-side seal in `unconsumed_mutation_endpoint`'s tests: the no-blind branch must
+    // name the narrow check that did not fire and deny the completeness reading, so warning severity can
+    // never silently mean "the provide side was proven complete" again.
+    assert!(
+        out[0].message.contains("almost no `http` routes tree-wide"),
+        "the warning branch must name the narrow check that did not fire: {}",
+        out[0].message
+    );
+    assert!(
+        out[0]
+            .message
+            .contains("not that the provide side was proven complete"),
+        "the warning branch must deny the completeness reading: {}",
+        out[0].message
+    );
 }
 
 #[test]

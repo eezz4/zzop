@@ -94,3 +94,20 @@ fn blocklist_cache_get_then_set_is_not_a_lock_and_is_not_flagged() {
         out.findings
     );
 }
+
+// ORDER-GATE pin: seals the `after: read` gate — a `.set(` that PRECEDES the only read is a lock
+// RELEASE-then-verify, not the "get then set" acquire race the id names. Before the gate this fired.
+#[test]
+fn a_set_that_precedes_the_only_read_is_not_flagged() {
+    let dir = TempDir::new("zzop-redis");
+    dir.write(
+        "src/release.ts",
+        "import { redis } from \"./redis\";\nexport async function releaseLock() {\n  await redis.set(\"lock:job\", 0);\n  const held = await redis.get(\"lock:job\");\n  return held;\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "lock-get-then-set").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}

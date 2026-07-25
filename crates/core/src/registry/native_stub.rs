@@ -8,44 +8,18 @@
 //! owns; `zzop_engine::register_all_native` composes all five. See `rules/README.md`'s "Adding a rule"
 //! section and `crates/engine/tests/rule_contracts/`'s "kernel is rule-vocabulary-free" contract test.
 
-use crate::{finding::Finding, ir::CommonIr, Severity};
+use super::RuleRegistry;
 
-use super::{RuleDescriptor, RuleKind, RuleMeta, RuleRegistry};
-
-/// A native analysis's registry entry. Whole-graph analyses (circular, unreachable, criticality, scores,
-/// ...) take their own inputs (`DepGraph`, `CouplingMap`, ...), not a single `CommonIr` — they are invoked
-/// directly by the orchestrator, not through `RuleRegistry::run_all`'s per-IR dispatch. This stub exists
-/// SOLELY so the analysis's id participates in the one shared registry for enumeration/gating purposes
-/// (`is_enabled`, `is_suppressed`, `metas`); `run` is a deliberate no-op, never called by the orchestrator
-/// for these ids.
-struct NativeAnalysisStub(RuleMeta);
-
-impl RuleDescriptor for NativeAnalysisStub {
-    fn meta(&self) -> &RuleMeta {
-        &self.0
-    }
-
-    fn run(&self, _ir: &CommonIr) -> Vec<Finding> {
-        Vec::new()
-    }
-}
-
-/// Registers one native whole-graph/whole-repo analysis id as a toggle-only stub under `RuleKind::Native`,
-/// `framework: "any"` (every native analysis is stack-agnostic — operates on the graph / git history /
-/// schema IR / call graph / cross-tree join, never a specific frontend/backend framework), `enabled: true`.
+/// Registers one native whole-graph/whole-repo analysis id into the shared registry. "Stub" because the
+/// registry entry is the id and nothing else: whole-graph analyses (circular, unreachable, criticality,
+/// scores, ...) take their own inputs (`DepGraph`, `CouplingMap`, the cross-tree join, ...) and are
+/// invoked directly by the orchestrator — the registry never runs anything. The entry exists SOLELY so
+/// the id participates in enumeration (`ids`) and in the config id space (`is_enabled`, `is_suppressed`,
+/// `apply_severity_override`); a finding's real severity is set where the finding is built.
+///
 /// This is the ONLY way a native analysis id enters a `RuleRegistry` — every owning rules crate's own
-/// `register_native_analyses` calls this once per id it owns, so the actual id strings/severities live in
-/// that crate, never here. See this module's doc for the full split.
-pub fn register_native_analysis_stub(
-    registry: &mut RuleRegistry,
-    id: &str,
-    default_severity: Severity,
-) {
-    registry.register(Box::new(NativeAnalysisStub(RuleMeta {
-        id: id.to_string(),
-        kind: RuleKind::Native,
-        framework: "any".to_string(),
-        enabled: true,
-        default_severity,
-    })));
+/// `register_native_analyses` calls this once per id it owns, so the actual id strings live in that
+/// crate, never here. See this module's doc for the full split.
+pub fn register_native_analysis_stub(registry: &mut RuleRegistry, id: &str) {
+    registry.ids.push(id.to_string());
 }

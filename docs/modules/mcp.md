@@ -10,8 +10,10 @@ engine with no Node.js runtime at all. These binaries call
   own `.mcp.json`, the Claude Code plugin's `plugin.json` `mcpServers`, and the MCPB manifest all
   register). For MCP clients.
 - **`zzop`** — the **CLI** (`zzop analyze <path>` / `zzop analyze-envelope <envelope.json>` / `zzop cross
-  <path>...` / `zzop endpoint <pattern> <path>...` / `zzop contract` / `zzop explain <rule-id>` / `zzop
-  validate-…`). For direct terminal/CI use, no MCP client required.
+  <path>...` / `zzop endpoint <pattern> <path>...` / `zzop manifest <path>...` / `zzop diff <a.json>
+  <b.json>` / `zzop contract` / `zzop explain <rule-id>` / `zzop validate-…`). For direct terminal/CI use,
+  no MCP client required. Three of those (`manifest`, `diff`, `explain`) are CLI-ONLY lanes with no MCP
+  tool twin — see [CLI-only lanes](#cli-only-lanes-manifest--diff--explain) below for why each has none.
 
 Each is a Cargo package building exactly one thin argv-dispatch binary — `zzop` is package
 `zzop-cli-bin` (`packages/cli-bin`), `zzop-mcp` is package `zzop-mcp` (`packages/mcp`) — over the shared
@@ -22,7 +24,7 @@ MCP `tools/call` against the same path produce the same analysis through the sam
 
 | Location | Responsibility |
 |---|---|
-| `packages/cli-bin/src/main.rs` | The `zzop` CLI entry — thin argument dispatch: `analyze` / `cross` / `endpoint` / `contract` / `explain` / `validate-*` / `version` subcommands over the shared `zzop-host` lib. |
+| `packages/cli-bin/src/main.rs` | The `zzop` CLI entry — thin argument dispatch: `analyze` / `cross` / `endpoint` / `manifest` / `diff` / `contract` / `explain` / `validate-*` / `version` subcommands over the shared `zzop-host` lib. |
 | `packages/cli-bin/src/cli.rs` | The CLI's own argv-parsing/usage/exit-code helpers. |
 | `packages/mcp/src/bin/zzop-mcp.rs` | The `zzop-mcp` server entry — thin: bare / `mcp` serve stdio; `version` / `help` / unknown-arg lanes. |
 | `packages/mcp/src/server.rs` | The stdio JSON-RPC 2.0 loop (`initialize`, `tools/*`, `resources/*`); re-exports `version()` from `crates/host`. |
@@ -30,7 +32,8 @@ MCP `tools/call` against the same path produce the same analysis through the sam
 | `packages/mcp/src/tools/definitions.rs` | MCP tool descriptions + input schemas (`tools/list`). |
 | `packages/mcp/src/resources.rs` | MCP resource handlers (`resources/list`, `resources/read`) over the embedded authoring contracts (from `crates/host::embedded`). |
 | `crates/host/src/tools.rs` | Shared dispatch: the typed `analyze`/`analyze_envelope`/`cross_repo`/`check_endpoint`/`validate_*` functions both the CLI subcommands and the MCP tool dispatch above call into. |
-| `crates/host/src/explain.rs` | `zzop explain <rule-id>`'s read-only lookup over the DSL rule data compiled into this binary (`zzop_config::BUNDLED_PACK_SOURCES`, parsed via `zzop_core::parse_dsl_pack`). CLI-only — MCP already reaches the same data through the `rule-catalog` embedded contract resource, so it has no `tools/call` twin. |
+| `crates/host/src/explain.rs` (+ `explain/render.rs`) | `zzop explain <rule-id>`'s read-only lookup over the DSL rule data compiled into this binary (`zzop_config::BUNDLED_PACK_SOURCES`, parsed via `zzop_core::parse_dsl_pack`), and the rendering half. CLI-only — MCP already reaches the same data through the `rule-catalog` embedded contract resource, so it has no `tools/call` twin. |
+| `crates/host/src/manifest.rs` | `zzop manifest` / `zzop diff` — thin re-exports; both are pure functions living whole in `zzop-summary` (`crates/summary/src/manifest/`). CLI-only, and unlike `explain` it is recorded as a CONTRACT in [contracts/surface-parity.json](../contracts/surface-parity.json)'s `_cliOnlyLanes` so a later batch cannot "restore parity" without re-reading why there is none. |
 | `crates/host/src/embedded.rs` | The embedded contract documents themselves — compiled into both binaries via `include_str!`, the ONE table both surfaces resolve `<name>` through. |
 | `crates/host/src/server.rs` | `version()` only — `CARGO_PKG_VERSION`, shared by both binaries so they can never disagree. |
 
@@ -58,6 +61,9 @@ zzop cross <path>...                 # analyze 2+ trees, print the cross-layer j
 zzop cross --config <zzop.config.jsonc>  # same, but the config's `trees` define the join
 zzop endpoint <pattern> <path>...    # definitive "is io key X provided/consumed/joined?" query
 zzop endpoint <pattern> --config <zzop.config.jsonc>  # same query, the config's `trees` define the join
+zzop manifest <path>...              # the run's structural contract manifest (identity only) — commit it
+zzop manifest --config <zzop.config.jsonc>  # same, but the config's `trees` define the join
+zzop diff <a.json> <b.json> [--allow-tool-drift]  # the delta between two manifests: bucket transitions first
 zzop contract                        # list the embedded authoring contracts (name, mime, description)
 zzop contract <name>                 # print that contract document to stdout (raw bytes, pipe-safe)
 zzop explain <rule-id>                # print one bundled DSL rule's compiled-in data (full <pack>/<rule> or an unambiguous bare id)
@@ -86,9 +92,10 @@ give the identical answer. `contract` with no name lists every embedded authorin
 human-readable line each: name, mime, description); `contract <name>` prints that document's exact
 embedded bytes to stdout (pipe-safe — the same bytes MCP `resources/read` serves for
 `zzop://contract/<name>`, resolved through the same lookup, so the two surfaces cannot drift); an
-unknown name exits `1` with an error naming every valid contract. `version`/`--version` prints
-`zzop-mcp <version>` (exit `0`) — the exact value MCP `initialize` reports as `serverInfo.version`
-(see below), so the two surfaces can never disagree.
+unknown name exits `1` with an error naming every valid contract. `version`/`--version` prints the
+binary's own name followed by the version (`zzop <version>` from the CLI, `zzop-mcp <version>` from the
+server binary), exit `0` — one shared `zzop_host::server::version()` behind both, and the exact value MCP
+`initialize` reports as `serverInfo.version` (see below), so no two surfaces can disagree on the number.
 
 **Windows Git Bash / MSYS caveat**: a leading-slash `endpoint <pattern>` (e.g. `/articles`) run from Git
 Bash/MSYS gets silently path-converted by the shell BEFORE it reaches this binary — `zzop endpoint
@@ -98,6 +105,65 @@ false not-found with no indication the pattern itself was rewritten. This is a s
 than a path. Work around it either by quoting AND setting `MSYS_NO_PATHCONV=1` for the invocation
 (`MSYS_NO_PATHCONV=1 zzop endpoint "/articles" <path>`), or by running the command from PowerShell/
 cmd instead, neither of which path-converts arguments.
+
+### CLI-only lanes: `manifest` / `diff` / `explain`
+
+Three subcommands have no MCP tool twin. `explain` has none because MCP already reaches the same
+compiled-in rule data through the `rule-catalog` resource below. `manifest`/`diff` have none for reasons
+recorded as a contract in [contracts/surface-parity.json](../contracts/surface-parity.json)'s
+`_cliOnlyLanes` — the manifest is deliberately UNCAPPED while every MCP reply here is cap-governed (the
+token-bomb guard in [Output contract](#output-contract) below), so putting it on that wire would force a
+choice between breaking that doctrine and capping the one artifact whose whole reason for existing is
+that the caps make two capped summaries un-diffable; the workflow is file-shaped (commit a manifest, let
+a later run compare against it) rather than conversation-shaped; and an agent that wants either can shell
+out to this same binary for the identical analysis.
+
+`zzop manifest` runs the same two source modes and the same `analyzeTrees` engine path as `cross`, then
+projects the result to IDENTITY ONLY: `provides[] {kind, key, source}`, `edges[] {kind, key, from, to}`,
+`buckets[] {bucket, kind, key, source}` (all sorted and deduped, so the bytes are stable run over run),
+per-source `{sourceId, joinContributionZero, degraded}`, and `tool` — `zzop_facade::version_string()`
+verbatim, i.e. the release version plus every parser fingerprint. It deliberately carries **no file or
+line** (a rename would drown the real signal, and a pure refactor must diff empty), **no root path** (an
+absolute path differs between a laptop and CI, which would make manifests un-diffable across the two
+machines that most need to compare), and **no findings** (v1 is structural contract state only). zzop
+never stores, names, or garbage-collects a snapshot — keeping one is the user's job.
+
+`zzop diff` is pure: two JSON strings in, one out, no engine and no filesystem beyond the two files.
+Its report is RANKED, not symmetric — read `transitions` first. A `+` is common and usually harmless; a
+key whose bucket placement changed (`edges` → `unprovidedConsumes`) means the caller still calls a route
+that is gone. The per-relation `added`/`removed` lists are that reading's raw evidence, not additional
+facts. Two honesty gates, without which the feature would manufacture silent wrongs:
+
+- **Tool identity.** Two manifests from different zzop builds are not comparable — our own parser
+  improvement would read as the other team breaking a contract. The default is REFUSAL (exit `1`, a
+  runtime failure, since both arguments were well-formed); `--allow-tool-drift` compares anyway and the
+  reply then carries a `toolDrift` block naming both builds. Refuse or disclose, never silently compare.
+- **Blindness vs deletion.** A source that got LESS visible between the two runs (more `degraded` files,
+  newly `joinContributionZero`, or absent from the second run entirely) explains its own disappearances.
+  Every removed row attributable to such a source is tagged `blindnessSuspect: true`, and
+  `sources.coverageDropped` names the drop — so "the route vanished" is never reported when "we stopped
+  being able to see it" is the honest reading.
+
+`zzop explain` prints one bundled DSL rule's compiled-in data — id, pack, severity, message, the derived
+suppress marker, matcher kind, and every exclusion field that kind actually carries, with its real value.
+Two answers beyond the happy path are worth knowing about in advance:
+
+- **An io-scan rule's marker is printed with its run-mode condition.** An io-scan marker is read off the
+  finding's anchor line in the source TEXT, and an envelope carries none (`envelope::ingest`, Mode A,
+  supplies a constant-`None` `anchor_line` callback), so every io-scan marker is inert in
+  `analyze-envelope` runs — disable the rule id or exclude the path there instead. Printing the bare
+  token would hand an envelope-fed reader a comment that silently does nothing. (`symbol-scan` answers
+  `none` for the sibling reason: its findings have no line to anchor a comment against.)
+- **It answers for a schema ISSUE LABEL, not just a rule id.** `schema` findings compose their `ruleId`
+  as `schema/<label>` from a per-issue label, and only the two family gates (`schema-structural`,
+  `schema-usage`) are registered ids — so `schema/dead-model`, the exact string a user copies out of real
+  output, used to land in the "unknown rule id" lane: the tool saying it had never heard of its own
+  output. Both `schema/dead-model` and the bare `dead-model` are now recognized and answered by NAMING
+  the family gate that exists and that `disabledRules` / `rules: {"<id>": "off"}` takes. It is still a
+  lookup FAILURE lane — stderr, exit `1` — because there is no DSL rule to render; it is a guided error,
+  not a rendering. The recognized-label set is derived from the real message-authoring function rather
+  than hand-kept, so it cannot drift, and the lane stops being reachable on its own the day a label
+  becomes a registered id of its own.
 
 ## MCP surface
 
@@ -242,9 +308,16 @@ it behaves here specifically:
   config produces the *same request an empty `{}` config would produce* — an MCP tool pointed at any repo
   must still work. This still gets the full default treatment: the bundled DSL rule packs (embedded at
   compile time by `zzop-config`'s `build.rs` and injected as inline `packDefs` — see
-  [Defaults (zero-config = full analysis)](facade.md#defaults-zero-config--full-analysis)'s note on this field) and default `git: {}`
-  collection (30-day recency) both apply, the same defaulting the removed JS wrapper's `withDefaults`
-  used to inject.
+  [Defaults (zero-config = full analysis)](facade.md#defaults-zero-config--full-analysis)'s note on this field), default `git: {}`
+  collection (30-day recency), and a default `cacheDir` of `.zzop/cache` all apply, the same defaulting
+  the removed JS wrapper's `withDefaults` used to inject. That last one is the only default that writes
+  to disk — a first run creates the directory inside the analyzed tree, and `cacheDir: null` opts out;
+  the user-facing statement of that (including the anchored `/.zzop/` gitignore line) is
+  [ARCHITECTURE.md's Caching section](../ARCHITECTURE.md#caching). One thing config-loading cannot default is the tree set: a root that resolves to a single
+  tree cannot run the cross-layer join (which needs 2+). When that root carries a workspace manifest
+  resolving to 2+ packages, `zzop-config` says so as the FIRST `configWarnings` entry — naming the manifest,
+  the exact package count, and the `"trees": "auto"` remedy — whether there was no config file at all or a
+  config that never declared `trees`.
 - **`configPath` / paths-mode disclosure (`cross_repo`).** Config-first mode (`configPath`) loads that
   file directly (or a directory containing `zzop.config.jsonc`) and requires it to declare `trees` (2+,
   or `"auto"`) — a single-tree config there is a guided error pointing at `analyze_repo` instead.
@@ -263,7 +336,8 @@ it behaves here specifically:
 
 Every reply from `analyze_repo`/`cross_repo` carries `config` (the config file path honored, or `null`)
 and `configWarnings` (the config front-end's own non-fatal notes — unknown keys, a skipped/unreadable
-overlay, an `"auto"`-expansion report, the paths-mode disclosure above) as a channel **separate** from
+overlay, an `"auto"`-expansion report, the single-tree-over-a-workspace disclosure, the paths-mode
+disclosure above) as a channel **separate** from
 the engine's own `warnings` — two different honesty channels, never merged into one. `disabledRules`/
 `severityOverrides` entries that match no known rule id (a typo, or a stale id from a different zzop
 version — the "...matching no known rule id..." diagnostics) are a config-authoring mistake, not an
@@ -304,7 +378,11 @@ built to never lie by omission.
   (`{bucket: remainingDistinctCount}`, present only when something was capped) — for the definitive
   per-key answer, follow up with `check_endpoint`. A parallel `bucketKeySites` object mirrors
   `bucketKeys` with each key's first recorded site as `"file:line"` (`null` when the fact carries no
-  location — never guessed), so a listed key is locatable without a follow-up call.
+  location — never guessed), so a listed key is locatable without a follow-up call. These keys are the
+  RAW join residue: no rule vocabulary filters them (see the bucket contract in
+  [facade.md](facade.md#output-data-shapes) and the `join-bucket-unfiltered` disclosure class), so a key
+  listed here may have no corresponding finding — `crossLayerFindings` is the filtered view of the same
+  facts, and is legitimately smaller.
 - **`warnings` (engine) and `configWarnings` (config front-end + engine-side config diagnostics,
   e.g. unknown-rule-id overrides) are never capped** — the honest
   self-report channels outrank brevity, on the theory that a truncated warning list is worse than a long
@@ -328,8 +406,8 @@ built to never lie by omission.
   `cross_repo`'s `sources[]` entries, same as `packsLoaded`, but omitted (not `null`) whenever the
   engine itself omits it (no `disabledRules`/`severityOverrides` requested) — see the
   [`AnalyzeOutputView` table](facade.md#the-zzop-facade-json-contract) for the field shape.
-- **`coverage`** — the engine's per-tree structural coverage census (`files`, `symbols`, `importEdges`,
-  `ioProvides`, `ioConsumesKeyed`, `ioConsumesUnresolved`, `degraded`, `joinContributionZero` — see the
+- **`coverage`** — the engine's per-tree structural coverage census (`files`, `sourceFiles`, `symbols`,
+  `importEdges`, `ioProvides`, `ioConsumesKeyed`, `ioConsumesUnresolved`, `degraded`, `joinContributionZero` — see the
   [`AnalyzeOutputView` table](facade.md#the-zzop-facade-json-contract) for field semantics) rides through whole on every
   `analyze_repo` reply and per-source on `cross_repo`'s `sources[]` entries — a handful of scalars, no
   cap needed. `joinContributionZero` is the engine's own blindness ASSERTION (this tree extracted no

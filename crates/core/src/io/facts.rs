@@ -207,7 +207,14 @@ pub struct CrossLayerResult {
     pub unconsumed_provides: Vec<TaggedProvide>,
     /// A consume whose key nothing provides — drift/bug.
     pub unprovided_consumes: Vec<TaggedConsume>,
-    /// A consume the adapter could not resolve (key=None) — marked, never matched.
+    /// A consume whose target the analysis could not pin down — marked, never matched. Two shapes, both
+    /// "blind here", never "the contract is missing": the adapter resolved no key at all (`key: None`,
+    /// `raw` carries the source text), or it produced a key that names no route because every path
+    /// segment is a `{}` placeholder (`GET /{}` — the head-drop artifact of an unresolved `${BASE}`
+    /// interpolation; `key` is `Some` for these, so a reader can still locate them). The second shape
+    /// used to land in [`unprovided_consumes`](Self::unprovided_consumes), where it asserted a missing
+    /// internal route that was never claimed — see [`key_carries_route_identity`](crate::io::key_carries_route_identity).
+    /// Both shapes count toward `cross-layer/unresolved-consume-ratio`'s disclosed blindness ratio.
     pub unresolved_consumes: Vec<TaggedConsume>,
     /// A consume whose key carries a host (`"://"` present, e.g. `GET https://vendor.com/api/users`) —
     /// third-party egress. Never cross-tree joined and never counted as `unprovidedConsumes`, since an

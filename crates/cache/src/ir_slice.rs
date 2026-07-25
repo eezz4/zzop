@@ -19,7 +19,8 @@
 //! 1. **Cross-tree IR** — `symbols`, `io`, `loc` (the `zzop_core::MinimalIr` channels; `dep` is
 //!    assembled from `imports`). Serialized and joined *across* trees by the cross-layer linker.
 //! 2. **DSL-facing per-file facts** — `symbols` (body spans = method-scan spans), `io` (`IoScan`),
-//!    `loop_spans` (`MethodScan::trigger_in_loop`). Reach `zzop_core::dsl::RuleContext` and are read
+//!    `loop_spans` (`MethodScan::trigger_in_loop`), `function_spans`
+//!    (`MethodScan::after_in_same_function`). Reach `zzop_core::dsl::RuleContext` and are read
 //!    directly by DSL matchers. This set is a *deliberate contract*, not "whatever got threaded":
 //!    adding to it requires a real consuming rule (no speculative generality — an unused fact waits).
 //! 3. **Assemble-time composition fragments** — `procedure_router_fragments`,
@@ -28,7 +29,7 @@
 //!    `query_call_sites`. Composed whole-tree at assemble into cross-layer / schema facts; never read
 //!    by a DSL matcher.
 //! 4. **Dep-graph augmentation** — `imports`, `re_exports`, `dynamic_imports`, `asset_refs`,
-//!    `used_names`. Feed the dependency graph and dead-code fan-in.
+//!    `used_names`, `exported_signature_names`. Feed the dependency graph and dead-code fan-in.
 //! 5. **Native-scanner facts + file flags** — `SourceSymbol::write_sites` (embedded, native-only),
 //!    `loc`, `degraded`, `minified_or_generated`.
 //!
@@ -37,7 +38,8 @@
 //! not a failure), deterministic serialization, and — because this is the *cached* slice — a
 //! `CACHE_SCHEMA_VERSION` bump (or `#[serde(default)]` back-compat) on every add, so a warm run never
 //! serves a slice that silently lost the field. Language coverage is per-fact and uneven (e.g.
-//! `loop_spans` is TypeScript + Go, `write_sites` and `io`'s `IoConsume::retry_configured` tag are
+//! `loop_spans` is TypeScript + Go, `function_spans` is TypeScript only, `write_sites` and `io`'s
+//! `IoConsume::retry_configured` tag are
 //! TypeScript-only, while `symbols` / `io` (structure) span every parser); that unevenness is a
 //! deliberate, documented state, not an oversight.
 
@@ -86,6 +88,15 @@ pub struct FileIrSlice {
     /// distinction; empty for non-TypeScript/degraded files, same convention as `imports`.
     #[serde(default)]
     pub used_names: Vec<String>,
+    /// Names appearing in the PUBLIC SIGNATURE (parameter/return/member type-annotation positions,
+    /// never a body) of some exported declaration in this file, sorted for deterministic
+    /// serialization — mirrors `FileArtifact::exported_signature_names`. Category 4 alongside
+    /// `used_names`, and the position-aware companion that flat set cannot be: it lets
+    /// `dead-exports` exempt a type belonging to an exported value's public API without exempting a
+    /// type used only inside a body. TypeScript-only (a matrix blank elsewhere); empty means "no
+    /// exemptions", which is the pre-existing behavior, so an absent value degrades gracefully.
+    #[serde(default)]
+    pub exported_signature_names: Vec<String>,
     /// Whether this file was classified minified/generated — mirrors `FileArtifact::minified_or_generated`.
     /// A stale entry defaulting to `false` would silently drop the DSL-skip warning, so a
     /// schema-version bump (not `#[serde(default)]`) forces re-parsing — see `CACHE_SCHEMA_VERSION`'s doc.
@@ -147,4 +158,15 @@ pub struct FileIrSlice {
     /// still deserializes, just with an empty vec rather than a hard cache-format break.
     #[serde(default)]
     pub loop_spans: Vec<(u32, u32)>,
+    /// This file's function line spans with promise-continuation callbacks merged into their call site
+    /// (`zzop_parser_typescript::extract_function_spans`) — mirrors `FileArtifact::function_spans` /
+    /// `zzop_core::dsl::SourceFile::function_spans`. Category 2, alongside `loop_spans`. Must round-trip
+    /// through the cache for the same reason: dropping it on a hit would silently starve
+    /// `Matcher::MethodScan::after_in_same_function` of scope evidence, and because the absent-fact
+    /// degrade for THAT gate is "no pairing removed", the loss would restore the exact false positives
+    /// the fact exists to remove — a silent regression, not a silent skip. `#[serde(default)]` keeps a
+    /// pre-existing entry deserializable; the `CACHE_SCHEMA_VERSION` bump is what actually prevents one
+    /// from being served (see that constant's doc).
+    #[serde(default)]
+    pub function_spans: Vec<(u32, u32)>,
 }

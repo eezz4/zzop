@@ -134,7 +134,7 @@
     {
       "id": "date-pitfalls",
       "severity": "info",
-      "message": "A timezone/epoch pitfall in `Date` handling: a date-only ISO string (`new Date('2024-01-15')`) parses as UTC midnight while the slash form (`new Date('2024/01/15')`) parses in local time — the two disagree by a day near timezone boundaries; a 10-digit literal passed to `new Date(...)` is a UNIX-SECONDS timestamp, but `Date` expects milliseconds and silently yields a 1970 date; and adding `86400000`ms (or `24*60*60*1000`) to a `Date`/`getTime()`/`.now()` value assumes every day is exactly 24 hours, which breaks across DST transitions (23/25-hour days). All three are correct in UTC-only systems — use a date library's `addDays`, or UTC-only arithmetic, when they aren't. Suppress a vetted case with `// date-pitfalls-ok`.",
+      "message": "A timezone/epoch pitfall in `Date` handling: a date-only ISO string (`new Date('2024-01-15')`) parses as UTC midnight while the slash form (`new Date('2024/01/15')`) parses in local time — the two disagree by a day near timezone boundaries; a 10-digit literal passed to `new Date(...)` is a UNIX-SECONDS timestamp, but `Date` expects milliseconds and silently yields a 1970 date; and a day-length constant (`86400000`, `24*60*60*1000`) appearing as the RIGHT-hand operand of a `+`/`-` inside `new Date(...)` — the shape `new Date(<expr> + 86400000)` — shifts that value by exactly 24 hours, which is not a calendar day across DST transitions (23/25-hour days), and is an outright `Date`-to-string coercion bug when `<expr>` is itself a `Date`. The epoch veto is STRUCTURAL, not a token blocklist: no closing paren may appear between `new Date(` and the operator, so an operand that is a call result (`Date.now()`, `.getTime()`, `Date.parse(...)`, `Date.UTC(...)`, `.valueOf()`, `Number(...)`) or a parenthesized subexpression (`new Date((a + b) + 86400000)`) cannot match at all. Also out of scope: the mirrored operand order (`86400000 + d`), a multiplicative days-to-ms conversion (`* 86400000`), and any day arithmetic with no `new Date(` head (`Date.now() - 7 * 86400000`) — epoch/UTC milliseconds are DST-safe by construction, and all six measured findings of the earlier, wider form were exactly those shapes. Two residuals, stated honestly: a bare identifier that happens to hold epoch ms (`new Date(startMs + 86400000)`) is file-locally indistinguishable from a `Date`-valued one; and the unary-coercion form `new Date(+d + 86400000)` carries no closing paren, so it still fires even though `+d` is epoch ms exactly as `.getTime()` is. Use a date library's `addDays`, or keep the whole computation in epoch/UTC space. Suppress a vetted case with `// date-pitfalls-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
@@ -143,7 +143,7 @@
         "any": [
           { "pattern": "new\\s+Date\\s*\\(\\s*['\"]\\d{4}-\\d{2}-\\d{2}['\"]\\s*\\)", "label": "date-only-iso" },
           { "pattern": "new\\s+Date\\s*\\(\\s*1[0-9]{9}\\s*\\)", "label": "seconds-epoch" },
-          { "pattern": "(?:86400000|86_400_000|24\\s*\\*\\s*60\\s*\\*\\s*60\\s*\\*\\s*1000).*(?:Date|getTime|now\\s*\\()|(?:Date|getTime|now\\s*\\().*(?:86400000|86_400_000|24\\s*\\*\\s*60\\s*\\*\\s*60\\s*\\*\\s*1000)", "label": "day-ms-arithmetic" }
+          { "pattern": "new\\s+Date\\s*\\([^)]*[A-Za-z0-9_$]\\s*[-+]\\s*(?:86400000|86_400_000|24\\s*\\*\\s*60\\s*\\*\\s*60\\s*\\*\\s*1000)", "label": "day-ms-arithmetic" }
         ],
         "snippet_max": 160
       }

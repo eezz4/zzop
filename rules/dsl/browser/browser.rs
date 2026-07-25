@@ -16,7 +16,13 @@
 //! `unsafe-html-sink` flags a non-literal `.innerHTML`/`.outerHTML` assignment (`innerhtml-assign`), a
 //! backtick template assignment that interpolates (`innerhtml-template`), `insertAdjacentHTML(...)` whose
 //! html argument isn't a plain literal (`insert-adjacent`), or JSX `dangerouslySetInnerHTML={{ __html: ... }}`
-//! whose value isn't a plain literal (`dangerously-set`); `// unsafe-html-sink-ok` suppresses it. Both rules are
+//! whose value isn't a plain literal (`dangerously-set`); `// unsafe-html-sink-ok` suppresses it. It also
+//! carries a SANITIZER-PASSAGE veto (`html-sink-sanitized`): a finding is dropped only when a
+//! sanitizer-shaped call — `escape*`/`sanitize*`/`validate*`/`purify*`, optionally method-qualified, or a
+//! `*Safe`/`*Sanitized`/`*Escaped`/`*Purified` wrapper — is the ENTIRE value. The veto consumes the call's
+//! argument list and requires the value to end right after it, so a concat, ternary, or method chain around
+//! the sanitizer still fires; `JSON.stringify` is deliberately absent (it escapes neither `<` nor `>`).
+//! `unsafe_html.rs` holds one fixture per vetoed and per still-firing shape. Both rules are
 //! source-free (unlike `security/taint-flow`, which needs a request-derived source in the same function and
 //! only looks at `.ts`/`.tsx`) and cover `.js`/`.jsx` too.
 //!

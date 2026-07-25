@@ -305,3 +305,67 @@ fn warm_cache_rerun_still_reports_the_minified_warning() {
         warm.warnings
     );
 }
+
+// --- The skip report counts only files a DSL rule actually targets ---
+
+/// The measured defect's shape: files that are long-line-dominated but that NO loaded pack's
+/// `file_pattern` targets. A field run reported 118 "minified/generated" skips whose examples were
+/// project-notes `*.md` files and a `*.png` asset — a PNG is not minified source, it was never a DSL
+/// candidate, and calling its exclusion a "skip" claims coverage was lost where none existed.
+fn tree_with_minified_non_candidates() -> TempDir {
+    let dir = TempDir::new("zzop-engine-minified-non-candidates");
+    dir.write("src/bundle/minified.mjs", &minified_line());
+    dir.write("src/normal.mjs", &normal_lines());
+    dir.write("assets/01-client.png", &minified_line());
+    dir.write("context/notes.md", &minified_line());
+    dir
+}
+
+#[test]
+fn the_skip_report_names_only_files_a_loaded_rule_targets() {
+    let dir = tree_with_minified_non_candidates();
+    let out = analyze_tree(dir.path(), &config());
+
+    let skip = out
+        .warnings
+        .iter()
+        .find(|w| w.contains("skipped for ALL DSL rule-pack rules"))
+        .unwrap_or_else(|| panic!("expected a skip warning, got: {:?}", out.warnings));
+
+    assert!(
+        skip.contains("src/bundle/minified.mjs"),
+        "the real candidate must still be reported: {skip}"
+    );
+    for non_candidate in ["assets/01-client.png", "context/notes.md"] {
+        assert!(
+            !skip.contains(non_candidate),
+            "`{non_candidate}` was never a DSL candidate and must not be reported as skipped: {skip}"
+        );
+    }
+    assert!(
+        skip.starts_with("1 file(s) a DSL rule-pack rule targets"),
+        "the count must exclude non-candidates: {skip}"
+    );
+    assert!(
+        skip.contains("were never DSL candidates"),
+        "the report must say why non-candidates are absent: {skip}"
+    );
+}
+
+#[test]
+fn a_tree_whose_only_minified_files_are_non_candidates_reports_no_skip_at_all() {
+    // Nothing was lost, so there is nothing to disclose — silence here is the honest output, not a gap.
+    let dir = TempDir::new("zzop-engine-minified-only-non-candidates");
+    dir.write("src/normal.mjs", &normal_lines());
+    dir.write("assets/01-client.png", &minified_line());
+    dir.write("context/notes.md", &minified_line());
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("skipped for ALL DSL rule-pack rules")),
+        "expected no skip warning when every minified file was a non-candidate, got: {:?}",
+        out.warnings
+    );
+}

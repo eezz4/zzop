@@ -39,8 +39,14 @@ fn file(name: &str, exports: Vec<DeadExportCandidate>) -> DeadExportInputFile {
         re_exports: Vec::new(),
         dynamic_imports: Vec::new(),
         used_names: HashSet::new(),
+        exported_signature_names: HashSet::new(),
+        export_aliases: Vec::new(),
         is_generated: false,
     }
+}
+
+fn alias(local: &str, public: &str) -> (String, String) {
+    (local.to_string(), public.to_string())
 }
 
 fn import_of(specifier: &str, original: &str) -> ImportMap {
@@ -684,4 +690,274 @@ fn finding_message_is_byte_identical_to_the_pre_sweep_text() {
              invisible to this in-repo import graph."
         )
     );
+}
+
+// ---- Public-signature exemption (module doc "Public-signature exemption") --------------------
+// The measured shape: `export interface XState {…}` + `export function useX(): XState`. The type
+// has no in-repo importer, so it used to report as `InFileOnly` ("un-export me") even though it is
+// part of `useX`'s public API. The two TRUE positives below share every signal the old rule could
+// see and must keep firing — which is the whole reason `exported_signature_names` is a separate,
+// position-aware fact rather than a heuristic over `used_names`.
+
+#[test]
+fn type_in_an_exported_signature_is_exempt() {
+    let files = vec![DeadExportInputFile {
+        used_names: HashSet::from(["XState".to_string()]),
+        exported_signature_names: HashSet::from(["XState".to_string()]),
+        ..file(
+            "hook.ts",
+            vec![export("XState", SourceSymbolKind::Interface)],
+        )
+    }];
+    assert!(
+        find_dead_exports(&files, resolve).is_empty(),
+        "a type named in an exported declaration's signature is public API"
+    );
+}
+
+#[test]
+fn type_alias_in_an_exported_signature_is_exempt() {
+    let files = vec![DeadExportInputFile {
+        used_names: HashSet::from(["Result".to_string()]),
+        exported_signature_names: HashSet::from(["Result".to_string()]),
+        ..file("api.ts", vec![export("Result", SourceSymbolKind::Type)])
+    }];
+    assert!(find_dead_exports(&files, resolve).is_empty());
+}
+
+#[test]
+fn body_only_type_still_reports_in_file_only() {
+    // TRUE POSITIVE 1: used only as an internal `useState<T>` generic in a hook with no annotated
+    // return type. `used_names` sees it (identical to the exempt case above); the parser's
+    // signature set does NOT — that difference is the entire point of the new fact.
+    let files = vec![DeadExportInputFile {
+        used_names: HashSet::from(["XState".to_string()]),
+        exported_signature_names: HashSet::new(),
+        ..file(
+            "hook.ts",
+            vec![export("XState", SourceSymbolKind::Interface)],
+        )
+    }];
+    assert_eq!(
+        find_dead_exports(&files, resolve),
+        vec![DeadExport {
+            file: "hook.ts".to_string(),
+            name: "XState".to_string(),
+            kind: SourceSymbolKind::Interface,
+            reason: DeadExportReason::InFileOnly,
+        }]
+    );
+}
+
+#[test]
+fn type_annotating_only_an_unexported_declaration_still_reports() {
+    // TRUE POSITIVE 2: only annotates an UNEXPORTED `Props` field. The parser never walks an
+    // unexported declaration, so the name never reaches the signature set.
+    let files = vec![DeadExportInputFile {
+        used_names: HashSet::from(["XThing".to_string()]),
+        exported_signature_names: HashSet::from(["Props".to_string()]),
+        ..file(
+            "card.tsx",
+            vec![export("XThing", SourceSymbolKind::Interface)],
+        )
+    }];
+    assert_eq!(
+        find_dead_exports(&files, resolve)
+            .iter()
+            .map(|d| d.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["XThing"]
+    );
+}
+
+#[test]
+fn exemption_does_not_apply_to_value_kinds() {
+    // A VALUE's name reaching a type position would need `typeof`, which this evidence does not
+    // model — so a same-named const/function/class is never exempted by it.
+    for kind in [
+        SourceSymbolKind::Const,
+        SourceSymbolKind::Function,
+        SourceSymbolKind::Class,
+    ] {
+        let files = vec![DeadExportInputFile {
+            used_names: HashSet::from(["Thing".to_string()]),
+            exported_signature_names: HashSet::from(["Thing".to_string()]),
+            ..file("a.ts", vec![export("Thing", kind)])
+        }];
+        assert_eq!(
+            find_dead_exports(&files, resolve).len(),
+            1,
+            "value kind {kind:?} must not be exempted"
+        );
+    }
+}
+
+#[test]
+fn exemption_also_covers_a_never_referenced_type() {
+    // `Unused` (not even in `used_names`) but present in an exported signature: an exported type
+    // that annotates a re-exported wrapper's return without being mentioned elsewhere. Still public.
+    let files = vec![DeadExportInputFile {
+        used_names: HashSet::new(),
+        exported_signature_names: HashSet::from(["XState".to_string()]),
+        ..file(
+            "hook.ts",
+            vec![export("XState", SourceSymbolKind::Interface)],
+        )
+    }];
+    assert!(find_dead_exports(&files, resolve).is_empty());
+}
+
+#[test]
+fn empty_signature_set_preserves_pre_existing_behavior() {
+    // Graceful degrade: a non-TypeScript parser (or a degraded file) produces no signature names,
+    // which must yield exactly the findings the rule produced before this fact existed.
+    let files = vec![DeadExportInputFile {
+        used_names: HashSet::from(["Helper".to_string()]),
+        exported_signature_names: HashSet::new(),
+        ..file(
+            "a.go",
+            vec![
+                export("Helper", SourceSymbolKind::Interface),
+                export("Other", SourceSymbolKind::Type),
+            ],
+        )
+    }];
+    assert_eq!(
+        find_dead_exports(&files, resolve)
+            .iter()
+            .map(|d| (d.name.as_str(), d.reason))
+            .collect::<Vec<_>>(),
+        vec![
+            ("Helper", DeadExportReason::InFileOnly),
+            ("Other", DeadExportReason::Unused),
+        ]
+    );
+}
+
+// ---- Local export renames (module doc "Local renames") ---------------------------------------
+// `export { X as Y }` with no from-clause: the candidate is named `X` (its declaration), every
+// importer's key is `{file}#Y`. This is an extra KEY, never an exemption — the negative fixtures
+// below are the guard that a renamed-but-unimported export stays dead.
+
+#[test]
+fn local_rename_imported_under_its_public_name_is_alive() {
+    // The measured mono-hub shape: `interface State` + `export type { State as MortgageState }`,
+    // imported as `MortgageState` by four files. Before `export_aliases`, `State` reported
+    // `in-file-only` because `a.ts#MortgageState` never met the candidate named `State`.
+    let files = vec![
+        DeadExportInputFile {
+            used_names: HashSet::from(["State".to_string()]),
+            export_aliases: vec![alias("State", "MortgageState")],
+            ..file("a.ts", vec![export("State", SourceSymbolKind::Interface)])
+        },
+        DeadExportInputFile {
+            imports: import_of("./a.ts", "MortgageState"),
+            ..file("b.ts", vec![])
+        },
+    ];
+    assert!(find_dead_exports(&files, resolve).is_empty());
+}
+
+#[test]
+fn local_rename_that_nobody_imports_is_still_dead() {
+    // NEGATIVE FIXTURE: the whole risk of tracking renames is resurrecting genuinely dead exports.
+    // A rename is a public NAME, not evidence of a consumer — with no importer this must still fire.
+    let files = vec![DeadExportInputFile {
+        used_names: HashSet::from(["State".to_string()]),
+        export_aliases: vec![alias("State", "MortgageState")],
+        ..file("a.ts", vec![export("State", SourceSymbolKind::Interface)])
+    }];
+    assert_eq!(
+        find_dead_exports(&files, resolve),
+        vec![DeadExport {
+            file: "a.ts".to_string(),
+            name: "State".to_string(),
+            kind: SourceSymbolKind::Interface,
+            reason: DeadExportReason::InFileOnly,
+        }]
+    );
+}
+
+#[test]
+fn a_renames_public_name_does_not_keep_a_different_export_alive() {
+    // NEGATIVE FIXTURE: the mapping is per-declaration. `Other` shares the file with a live rename
+    // but has no importer of its own, so it must still report.
+    let files = vec![
+        DeadExportInputFile {
+            export_aliases: vec![alias("State", "MortgageState")],
+            ..file(
+                "a.ts",
+                vec![
+                    export("State", SourceSymbolKind::Interface),
+                    export("Other", SourceSymbolKind::Interface),
+                ],
+            )
+        },
+        DeadExportInputFile {
+            imports: import_of("./a.ts", "MortgageState"),
+            ..file("b.ts", vec![])
+        },
+    ];
+    assert_eq!(
+        find_dead_exports(&files, resolve)
+            .iter()
+            .map(|d| d.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Other"]
+    );
+}
+
+#[test]
+fn importing_a_public_name_no_declaration_carries_keeps_nothing_alive() {
+    // NEGATIVE FIXTURE: an unrelated `{file}#Y` key must not spill onto a candidate just because the
+    // file happens to rename something else.
+    let files = vec![
+        DeadExportInputFile {
+            export_aliases: vec![alias("State", "MortgageState")],
+            ..file("a.ts", vec![export("State", SourceSymbolKind::Interface)])
+        },
+        DeadExportInputFile {
+            imports: import_of("./a.ts", "SomethingElse"),
+            ..file("b.ts", vec![])
+        },
+    ];
+    assert_eq!(find_dead_exports(&files, resolve).len(), 1);
+}
+
+#[test]
+fn local_rename_reaches_through_a_barrel_re_export_chain() {
+    // The barrel re-exports the PUBLIC name; chain propagation seeds `a.ts#MortgageState`, which the
+    // alias map then connects to the declaration named `State`.
+    let files = vec![
+        DeadExportInputFile {
+            export_aliases: vec![alias("State", "MortgageState")],
+            ..file("a.ts", vec![export("State", SourceSymbolKind::Interface)])
+        },
+        DeadExportInputFile {
+            re_exports: vec![reexport("./a.ts", "MortgageState", "MortgageState")],
+            ..file("barrel/index.ts", vec![])
+        },
+        DeadExportInputFile {
+            imports: import_of("./barrel/index.ts", "MortgageState"),
+            ..file("consumer.ts", vec![])
+        },
+    ];
+    assert!(find_dead_exports(&files, resolve).is_empty());
+}
+
+#[test]
+fn rename_to_default_is_alive_via_a_default_import() {
+    // `export { Foo as default }` — the parser's alias map spells `default` explicitly, so the link
+    // holds even for a candidate whose `is_default` flag was never set.
+    let files = vec![
+        DeadExportInputFile {
+            export_aliases: vec![alias("Foo", "default")],
+            ..file("a.ts", vec![export("Foo", SourceSymbolKind::Function)])
+        },
+        DeadExportInputFile {
+            imports: import_of("./a.ts", "default"),
+            ..file("b.ts", vec![])
+        },
+    ];
+    assert!(find_dead_exports(&files, resolve).is_empty());
 }

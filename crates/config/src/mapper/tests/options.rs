@@ -74,6 +74,74 @@ fn cache_dir_resolves_against_base_dir() {
     );
 }
 
+/// The zero-config write contract: a config that never mentions `cacheDir` still gets one, so a
+/// zero-config run warms instead of being cold forever. Seals the DEFAULT ITSELF (an accidental revert
+/// to "no key" is exactly the silent regression this default was introduced to remove) and that it is
+/// `base_dir`-relative like every other path this mapper emits — an unresolved `.zzop/cache` would
+/// land wherever the host process happened to be launched from.
+#[test]
+fn cache_dir_defaults_under_the_base_dir_when_the_key_is_absent() {
+    let mapped = config_to_request(&json!({"roots": ["."]}), Path::new("/base")).unwrap();
+    let req = analyze_request(&mapped.request);
+    assert_eq!(
+        req["cacheDir"],
+        path_to_string(&resolve_path(
+            Path::new("/base"),
+            zzop_cache::DEFAULT_CACHE_DIR
+        ))
+    );
+}
+
+/// Every tree of a multi-tree request gets the default too — a monorepo join must not have half its
+/// trees warm. (They share ONE directory, which is safe by construction: `CacheKey` carries the tree's
+/// `sourceId` in its `scope`, so the path is not a key ingredient.)
+#[test]
+fn the_cache_dir_default_reaches_every_tree_of_a_multi_tree_request() {
+    let mapped = config_to_request(&json!({"roots": ["./a", "./b"]}), Path::new("/base")).unwrap();
+    let expected = path_to_string(&resolve_path(
+        Path::new("/base"),
+        zzop_cache::DEFAULT_CACHE_DIR,
+    ));
+    for tree in mapped.request["trees"].as_array().unwrap() {
+        assert_eq!(tree["cacheDir"], expected);
+    }
+}
+
+/// The opt-out. Now that omitting the key means "default on", SOMETHING has to mean "off" — this pins
+/// what. A falsy value emits no `cacheDir` at all, i.e. byte-for-byte the request an omitted key
+/// produced before the default existed, which is what makes the engine run uncached.
+///
+/// `""` is in this set on purpose and is the reason the check is falsiness rather than `null`-only: it
+/// would otherwise resolve to `base_dir` ITSELF and scatter cache entries through the user's repo root.
+#[test]
+fn a_falsy_cache_dir_turns_the_cache_off_instead_of_naming_a_directory() {
+    for off in [json!(null), json!(false), json!(""), json!(0)] {
+        let mapped = config_to_request(
+            &json!({"roots": ["."], "cacheDir": off}),
+            Path::new("/base"),
+        )
+        .unwrap();
+        assert!(
+            analyze_request(&mapped.request).get("cacheDir").is_none(),
+            "cacheDir: {off} must emit no cacheDir key"
+        );
+    }
+}
+
+/// The opt-out must not cost the author anything else: turning the cache off is not a way to
+/// accidentally turn the bundled packs or git collection off too.
+#[test]
+fn turning_the_cache_off_leaves_the_other_defaults_alone() {
+    let mapped = config_to_request(
+        &json!({"roots": ["."], "cacheDir": null}),
+        Path::new("/base"),
+    )
+    .unwrap();
+    let req = analyze_request(&mapped.request);
+    assert_eq!(req["git"], json!({}));
+    assert_eq!(req["packDefs"].as_array().unwrap().len(), 12);
+}
+
 #[test]
 fn size_cap_passes_through_unchanged() {
     let mapped =

@@ -45,6 +45,57 @@ pub struct SourceFile {
     /// support / falls back lexically — structural rules silently skip such files (graceful degrade,
     /// same policy as `symbols`).
     pub loop_spans: Vec<(u32, u32)>,
+    /// Per-file FUNCTION line spans (1-based, inclusive), projected alongside `symbols`: every
+    /// function-like node (declaration/expression/arrow/method/constructor/accessor), with one merge —
+    /// a function-shaped ARGUMENT of a `.then(...)`/`.catch(...)`/`.finally(...)` member call has its
+    /// span START pulled up to that call's PROPERTY-token line, so a promise continuation and the
+    /// boundary token scheduling it share ONE span. Nested functions overlap freely; consumers resolve
+    /// the INNERMOST containing span ([`SourceFile::innermost_function_start`]).
+    ///
+    /// Distinct from `symbols`' body spans, which cover only DECLARED symbols (a component function,
+    /// not the anonymous closures inside it) — that coarseness is exactly what this fact refines.
+    /// Consumed by `MethodScan::after_in_same_function`. Empty when the parser has no support / falls
+    /// back lexically — the gate then degrades to a no-op (every line resolves to `None`, so all lines
+    /// count as "the same function"), NOT to silence: a rule using it keeps its pre-gate behavior on
+    /// such a file. Same graceful-degrade family as `symbols`/`io`/`loop_spans`, but note the direction
+    /// differs from `loop_spans` (whose absence silences `trigger_in_loop` entirely).
+    pub function_spans: Vec<(u32, u32)>,
+}
+
+impl SourceFile {
+    /// START line of the INNERMOST [`SourceFile::function_spans`] entry containing `line`, or `None`
+    /// when no span does (module top level — or a file with no projected spans at all, which is what
+    /// makes the gate that consumes this a no-op under graceful degrade).
+    ///
+    /// "Innermost" = the greatest start line; ties broken by the smallest end line. The start-first
+    /// order matters for a chained continuation (`p.then(cb).catch(cb2)`), where the `.then` callback's
+    /// closing line is also the `.catch` callback's opening line: neither span contains the other, and
+    /// the shared line belongs to the later link.
+    ///
+    /// The START is what callers need, not the span identity: `MethodScan::after_in_same_function` asks
+    /// "is an earlier line still INSIDE the function that encloses this one?", which — since the earlier
+    /// line is by construction at or before the trigger, and the trigger is inside the span — reduces to
+    /// "is it at or after this start?". Comparing span IDENTITY instead would be wrong for a line that
+    /// belongs to two nested spans at once: `await import(m).then((x) => x.f());` has a merged
+    /// continuation span covering only that line, so identity-matching would hide the `await` from the
+    /// enclosing async function whose continuation genuinely resumes on the next line (measured on
+    /// mono-hub: a real true positive lost that way).
+    pub fn innermost_function_start(&self, line: u32) -> Option<u32> {
+        let mut best: Option<(u32, u32)> = None;
+        for &(start, end) in &self.function_spans {
+            if start > line || line > end {
+                continue;
+            }
+            let better = match best {
+                None => true,
+                Some((bs, be)) => start > bs || (start == bs && end < be),
+            };
+            if better {
+                best = Some((start, end));
+            }
+        }
+        best.map(|(start, _)| start)
+    }
 }
 
 /// A file is "minified/generated" iff EITHER prong holds:

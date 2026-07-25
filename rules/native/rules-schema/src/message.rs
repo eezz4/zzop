@@ -5,6 +5,14 @@ use crate::join::JoinIssue;
 use crate::structural::SchemaIssue;
 use zzop_core::disable_hint;
 
+mod sightline;
+
+use sightline::{field_usage_sightline, query_call_site_sightline};
+// The two pinned CLAIM fragments are used only by this module's seal tests (`tests.rs` reaches them
+// through its `use super::*`), never by the message bodies — those splice the full sentences above.
+#[cfg(test)]
+use sightline::{field_usage_sightline_claim, query_call_site_sightline_claim};
+
 /// `disable_hint`'s own fragment minus its leading `"Disable "` word — every message in this file that
 /// embeds the disable hint mid-sentence (rather than as its own "Disable via config ..." sentence, the
 /// shape most other native rules use) splices this in after its own lead-in verb instead of hand-writing
@@ -160,12 +168,14 @@ pub fn schema_issue_message(issue: &SchemaIssue) -> String {
             issue.model
         ),
         "dead-model" => format!(
-            "Model {} is not bound to any store/repository in code — it may be dead schema.",
-            issue.model
+            "Model {} is not bound to any store/repository in code — it may be dead schema. {}",
+            issue.model,
+            field_usage_sightline()
         ),
         "dead-field" => format!(
-            "Model {} field {field} never appears as an identifier in source — it may be dead schema.",
-            issue.model
+            "Model {} field {field} never appears as an identifier in source — it may be dead schema. {}",
+            issue.model,
+            field_usage_sightline()
         ),
         "schema-churn" => format!(
             "Model {} accumulated {} migration change(s) — the design may be unstable.",
@@ -198,20 +208,23 @@ pub fn join_issue_message(issue: &JoinIssue) -> String {
              filter in its arguments — it may return soft-deleted rows. Add `{field}: null` (or your app's \
              not-deleted convention) to the `where` clause. Note: a Prisma middleware (`$use`) or `$extends` \
              client extension that injects this filter globally is invisible to this static check — if your \
-             app relies on one, this rule will false-positive on every call site for the model; disable it \
+             app relies on one, this rule will false-positive on every call site for the model. {} \
+             To silence that, disable it \
              {} (this rule \
              has no inline suppression marker).",
             issue.model,
+            query_call_site_sightline(),
             disable_hint_tail("soft-delete-bypass")
         ),
         "orderby-unindexed" => format!(
             "Model {} is ordered by `{field}` in this {method}() call, but {field} has no @id/@unique of its \
              own and is not the leading column of any @@index/@@unique — this sort likely forces a full \
              table scan or filesort as the table grows. Add `@@index([{field}])` to the schema (or make \
-             {field} the leading column of an existing composite index). If this is intentional (e.g. a \
+             {field} the leading column of an existing composite index). {} If this is intentional (e.g. a \
              small, bounded table), disable this finding {} \
              (this rule has no inline suppression marker).",
             issue.model,
+            query_call_site_sightline(),
             disable_hint_tail("orderby-unindexed")
         ),
         "enum-string-drift" => {
@@ -234,10 +247,11 @@ pub fn join_issue_message(issue: &JoinIssue) -> String {
                  members instead (the generated Prisma client's TS types would catch this at compile time, \
                  but a raw string literal — or a plain-JS caller — bypasses that check). Precision note: only \
                  a direct `{field}: '...'` literal-object site is checked; a literal inside an `in: [...]` \
-                 array, a variable, or a computed expression is not. If this literal is intentional, disable \
+                 array, a variable, or a computed expression is not. {} If this literal is intentional, disable \
                  this finding {} \
                  (this rule has no inline suppression marker).",
                 issue.model,
+                query_call_site_sightline(),
                 disable_hint_tail("enum-string-drift")
             )
         }

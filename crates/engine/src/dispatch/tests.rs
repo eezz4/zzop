@@ -120,15 +120,29 @@ fn default_skip_dirs_cover_common_build_and_vcs_output() {
     assert!(!is_skip_dir("src", &config));
 }
 
-/// `zzop-reports` (the JS CLI's default report output dir) and `.zzop-cache` (its default `cacheDir`
-/// template value) must be self-scan-excluded by default — a run that writes its own reports/cache inside
-/// the analyzed tree must not have the NEXT run walk that output as source (regression pin for the
-/// self-scan-pollution fix, blind field test round 3).
+/// zzop's own output dirs must be self-scan-excluded by default — a run that writes its own
+/// reports/cache inside the analyzed tree must not have the NEXT run walk that output as source
+/// (regression pin for the self-scan-pollution fix, blind field test round 3).
+///
+/// `.zzop` is the LIVE one: the config front-end defaults `cacheDir` to `zzop_cache::DEFAULT_CACHE_DIR`,
+/// so every zero-config run writes there. It is asserted through the shared constant rather than as a
+/// literal, so moving the default cache directory can never leave the skip list behind.
+/// `zzop-reports`/`.zzop-cache` are the removed JS CLI's names, kept as legacy defense.
 #[test]
 fn default_skip_dirs_exclude_zzops_own_report_and_cache_output_dirs() {
     let config = cfg();
+    assert!(is_skip_dir(zzop_cache::TOOL_DIR, &config));
     assert!(is_skip_dir("zzop-reports", &config));
     assert!(is_skip_dir(".zzop-cache", &config));
+}
+
+/// The counterpart of the pin above, and the reason `zzop/` is NOT in the skip list: a user-authored
+/// `zzop/rules/` pack (the no-dot half of the on-disk layout dichotomy) is source a human wrote and
+/// wants analyzed. One character separates it from the tool-owned `.zzop/`; only one of them is skipped.
+#[test]
+fn the_user_authored_zzop_dir_is_not_skipped() {
+    let config = cfg();
+    assert!(!is_skip_dir("zzop", &config));
 }
 
 /// T2 policy pin: the exact `NON_SOURCE_EXTENSIONS` contents. Any edit to this list changes which

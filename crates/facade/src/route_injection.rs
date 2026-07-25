@@ -88,6 +88,7 @@ pub(crate) fn routes_overlay(
         io,
         attributes: Vec::new(),
         loop_spans: Vec::new(),
+        function_spans: Vec::new(),
         degraded: false,
         is_entry: false,
     };

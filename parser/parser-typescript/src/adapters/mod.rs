@@ -19,6 +19,7 @@ pub mod hono_client;
 pub mod nest_middleware;
 pub mod next_pages_api;
 pub mod pathname_dispatch;
+pub mod raw_sql;
 pub mod router_mounts;
 pub mod trpc_consume;
 pub mod trpc_router;

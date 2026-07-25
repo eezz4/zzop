@@ -1,10 +1,20 @@
-//! Rule registry — unifies the three layers (native / DSL / JS) under a single registry and metadata.
-//! "Native" is only where a rule is compiled, not "always runs" — every rule is toggled/gated via metadata
-//! (enabled / severity / appliesTo).
+//! Rule registry — the set of native analysis ids, plus the config-driven gating every rule id
+//! (native analysis, DSL pack, or `"<pack>/<rule>"`) is toggled through.
+//! "Native" is only where a rule is compiled, not "always runs": a native analysis id lands in the same
+//! `RuleConfig` id space as a DSL pack rule, so it can be disabled / severity-overridden / suppressed
+//! exactly like one.
+//!
+//! ## What this registry is NOT
+//! It does not dispatch rules. DSL packs are interpreted straight from `RulePackDef` by
+//! `zzop_engine::pipeline` (gated by `gate_pack_rules` + `is_enabled`), and each native analysis is
+//! invoked directly by the orchestrator with its own inputs (`DepGraph`, `CouplingMap`, the cross-tree
+//! join, ...), never through here. What the registry answers is one question — "which native analysis
+//! ids exist" — for enumeration (`zzop explain`'s "this id is native, not missing" lane, the
+//! coverage/capability diagnostics) and for cross-checking a config id against reality.
 //!
 //! ## Config-driven gating
-//! `RuleConfig` is the one user-facing shape all three rule layers (and native analyses) are gated through:
-//! `disabled_rules` (a pack/analysis skipped entirely), `suppressions` (finding-level accept-list),
+//! `RuleConfig` is the one user-facing shape every rule id is gated through:
+//! `disabled_rules` (a pack/rule/analysis skipped entirely), `suppressions` (finding-level accept-list),
 //! `severity_overrides` (per-rule severity remap — see `apply_severity_override` doc for why this exists).
 //! A resolve-with-defaults spread that composes a "default config" for `disabled_rules`/`suppressions` is
 //! intentionally NOT implemented here: this crate has no such notion yet (that lives with whatever loads
@@ -12,7 +22,7 @@
 //!
 //! Split across submodules (paths under `crate::registry::` are unchanged): `config` (the `RuleConfig`
 //! gating surface), `merge` (the deterministic finding merge/sort), `native_stub` (the vocabulary-free
-//! native-analysis registration mechanism). The core registry types stay in this root file.
+//! native-analysis registration mechanism). The registry type itself stays in this root file.
 
 mod config;
 mod merge;
@@ -27,51 +37,12 @@ pub use config::{
 pub use merge::merge_findings;
 pub use native_stub::register_native_analysis_stub;
 
-use crate::{finding::Finding, ir::CommonIr, Severity};
-
-/// Where a rule executes — the toggle experience is identical, only the dispatch path differs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuleKind {
-    /// Native rule statically linked into core (whole-graph). rules/native/*.
-    Native,
-    /// Declarative DSL rule pack (language/environment). rules/dsl/*.json — interpreted natively by the engine, shipped as data.
-    Dsl,
-    /// A build-free JS/TS quick-custom rule running over the IR in the Node host (escape hatch for arbitrary logic).
-    Js,
-}
-
-/// A single toggle/gating metadata shared by all three layers. Overridable via config.
-#[derive(Debug, Clone)]
-pub struct RuleMeta {
-    pub id: String,
-    pub kind: RuleKind,
-    /// Applicable framework ("any" | "react" | "prisma" | ...). Gates on the target environment.
-    pub framework: String,
-    /// on/off — even a native analysis can be turned off (e.g. disable circular).
-    pub enabled: bool,
-    /// Default severity (overridable via config).
-    pub default_severity: Severity,
-}
-
-impl RuleMeta {
-    /// Target gating — false skips this rule for the target.
-    pub fn applies_to(&self, _target: &str) -> bool {
-        self.enabled
-    }
-}
-
-/// The trait a native rule implements. DSL packs / JS rules are adapted into this shape by the loader.
-/// oxlint-style optimization: the engine traverses the IR once and dispatches to subscribed rules (no per-rule re-walk).
-pub trait RuleDescriptor {
-    fn meta(&self) -> &RuleMeta;
-    /// Run against one tree's Common IR -> findings.
-    fn run(&self, ir: &CommonIr) -> Vec<Finding>;
-}
-
-/// Native rules register dynamically at boot; DSL packs are added by the loader.
-#[derive(Default)]
+/// The native analysis ids registered at boot — every owning rules crate's `register_native_analyses`
+/// plugs its own ids in via `register_native_analysis_stub`, and `zzop_engine::register_all_native`
+/// composes them all into one of these.
+#[derive(Debug, Default)]
 pub struct RuleRegistry {
-    rules: Vec<Box<dyn RuleDescriptor>>,
+    ids: Vec<String>,
 }
 
 impl RuleRegistry {
@@ -79,24 +50,10 @@ impl RuleRegistry {
         Self::default()
     }
 
-    pub fn register(&mut self, rule: Box<dyn RuleDescriptor>) {
-        self.rules.push(rule);
-    }
-
-    /// Run only the rules that apply to the target and are enabled (gating).
-    /// TODO(Phase 4): replace with a single-traversal + node-kind subscription dispatch (currently per-rule run).
-    pub fn run_all(&self, ir: &CommonIr, target: &str) -> Vec<Finding> {
-        self.rules
-            .iter()
-            .filter(|r| r.meta().applies_to(target))
-            .flat_map(|r| r.run(ir))
-            .collect()
-    }
-
-    /// Every registered rule's metadata — the enumeration a `--list`/`--rulepacks`-style command or the
-    /// config-vs-registry cross-check (an unknown `disabled_rules` id) would read. Registration order
-    /// (native analyses first via `register_native_analyses`, then whatever the caller adds after).
-    pub fn metas(&self) -> Vec<&RuleMeta> {
-        self.rules.iter().map(|r| r.meta()).collect()
+    /// Every registered native analysis id — the enumeration a `--list`/`--rulepacks`-style command or
+    /// the config-vs-registry cross-check (an unknown `disabled_rules` id) would read. Registration
+    /// order (`register_all_native`'s crate order, then each crate's own table order).
+    pub fn ids(&self) -> &[String] {
+        &self.ids
     }
 }

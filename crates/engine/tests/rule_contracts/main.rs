@@ -80,11 +80,18 @@
 //!     (`parser/parser-go/src/lang/loop_spans.rs`, `go/goroutine-in-loop`). MINIMAL-EXISTENCE scope only
 //!     — see that file's own module doc for the full claim boundary before reading a green run here as
 //!     anything more than "the wiring exists" / "the wiring is definitely absent".
+//! 13. **Kebab-case LABEL hygiene** (`dsl_pattern_labels_are_kebab_case`) — the second name layer packs
+//!     declare. Contract 10 enumerates rule IDS and therefore structurally cannot see a
+//!     `LabeledPattern::label`, yet `LineScan::any[].label` ships to users verbatim as
+//!     `Finding.data.label` and is the only stable "which arm fired" key a multi-arm rule has. Three
+//!     shipped labels had drifted into English sentences on that wire (`"ECB mode (no diffusion)"` and
+//!     two siblings in `security/weak-crypto`). Same regex as contract 10, deliberately WITHOUT its
+//!     uniqueness leg — label scope is rule-local and a user never types one. See that test's own doc.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use zzop_core::{load_dsl_packs, RuleMeta, RulePackDef, RuleRegistry};
+use zzop_core::{load_dsl_packs, RulePackDef, RuleRegistry};
 use zzop_engine::register_all_native;
 
 mod bare_words;
@@ -127,12 +134,12 @@ fn load_all_packs() -> Vec<RulePackDef> {
     result.packs.into_iter().map(|(_, pack)| pack).collect()
 }
 
-/// Every registered native analysis's metadata, owned (not borrowed from a local `RuleRegistry`) so
-/// callers can use it without threading a registry lifetime through every test.
-fn native_metas() -> Vec<RuleMeta> {
+/// Every registered native analysis id, owned (not borrowed from a local `RuleRegistry`) so callers can
+/// use it without threading a registry lifetime through every test.
+fn native_ids() -> Vec<String> {
     let mut registry = RuleRegistry::new();
     register_all_native(&mut registry);
-    registry.metas().into_iter().cloned().collect()
+    registry.ids().to_vec()
 }
 
 fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {

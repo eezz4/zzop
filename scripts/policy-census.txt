@@ -1,6 +1,7 @@
 crates/core/src/dsl/markers.rs:MARKER_LOOKBACK_LINES
 crates/core/src/dsl/source.rs:BLOB_LINE
 crates/core/src/dsl/source.rs:LONG_LINE
+crates/core/src/dsl/tests_fragments/name_census.rs:CENSUSED_FRAGMENTS
 crates/core/src/file_nodes.rs:HOTSPOT_MIN_CHANGES
 crates/core/src/io/key.rs:HTTP_KEY_VERBS
 crates/core/src/node.rs:DEFAULT_RECENT_THRESHOLD_DAYS
@@ -11,6 +12,7 @@ crates/engine/src/analyze/assemble/helpers.rs:RUST_STD_CRATE_FAMILY
 crates/engine/src/analyze/assemble/helpers/csharp.rs:CSHARP_STD_IMPORT_HEADS
 crates/engine/src/analyze/assemble/helpers/java.rs:JAVA_STD_IMPORT_HEADS
 crates/engine/src/analyze/diagnostics.rs:SAMPLE
+crates/engine/src/analyze/diagnostics/capability.rs:ON_RAMP_EXT_SAMPLE
 crates/engine/src/disclosure/tests.rs:EXPECTED
 crates/engine/src/dispatch.rs:DEFAULT_SKIP_DIRS
 crates/engine/src/dispatch.rs:NON_SOURCE_EXTENSIONS
@@ -35,6 +37,7 @@ crates/engine/src/lib.rs:DEFAULT_SIZE_CAP
 crates/engine/src/pipeline/rust_workspace.rs:TARGET_SECTIONS
 crates/engine/src/trees/parallel_impl.rs:MIN_PARALLEL_IMPL_SIGNALS
 crates/summary/src/analyze/tests.rs:RAW_FACADE_ONLY_FIELDS
+crates/summary/src/manifest/mod.rs:RELATIONS
 crates/summary/src/output/bucket_keys.rs:DEFAULT_BUCKET_KEYS_LIMIT
 crates/summary/src/output/bucket_keys.rs:KEY_BUCKETS
 crates/summary/src/output/mod.rs:DEFAULT_DEGRADED_LIMIT
@@ -97,6 +100,7 @@ parser/parser-typescript/src/lang/write_site.rs:DEFAULT_WRITE_METHODS
 parser/parser-typescript/src/lang/write_site.rs:UPDATE_METHODS
 parser/parser-typescript/src/lang/write_site.rs:WRITE_LABEL_TOKEN_COUNT
 parser/parser-typescript/src/lib.rs:ARRAY_ITERATION_METHODS
+parser/parser-typescript/src/lib.rs:PROMISE_CONTINUATION_METHODS
 rules/native/rules-cross-layer/src/cross_layer/ambiguous_consume.rs:MAX_CANDIDATES
 rules/native/rules-cross-layer/src/cross_layer/external_host_fanout.rs:FANOUT_MIN_FILES
 rules/native/rules-cross-layer/src/cross_layer/external_secret_in_url.rs:SECRET_PARAM_NAMES
@@ -104,18 +108,25 @@ rules/native/rules-cross-layer/src/cross_layer/mod.rs:MIN_TOTAL_CONSUMES
 rules/native/rules-cross-layer/src/cross_layer/prefix_drift.rs:MIN_PREFIX_DRIFT_GROUP
 rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs:MIN_OPAQUE_CLIENT_IMPORTING_FILES
 rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs:MIN_SDK_IMPORTING_FILES
+rules/native/rules-cross-layer/src/cross_layer/unconsumed_endpoint.rs:EXTERNALLY_FETCHED_PATHS
 rules/native/rules-graph/src/dead_candidates.rs:DEAD_MAX_CHANGES
+rules/native/rules-http/src/http_scan.rs:OK_MARKER_LOOKBACK_ABOVE
 rules/native/rules-http/src/http_scan.rs:OK_MARKER_LOOKBACK_LINES
 rules/native/rules-http/src/http_scan.rs:SAFE_METHODS
 rules/native/rules-http/src/http_scan.rs:WRITE_HTTP_METHODS
+rules/native/rules-http/src/http_scan.rs:WRITE_SITE_COVERED_EXTENSIONS
+rules/native/rules-http/src/http_scan/tests.rs:MARKER_WINDOW_PROSE_PAGES
+rules/native/rules-http/src/http_scan/tests.rs:SIGHTLINE_PROSE_PAGES
 rules/native/rules-http/src/mutating_route_no_auth.rs:CALL_GRAPH_COVERED_EXTENSIONS
 rules/native/rules-http/src/mutating_route_no_auth/qualifier.rs:QUALIFIER_GUARD_TOKENS
 rules/native/rules-http/src/route_shadowing.rs:FIRST_MATCH_ROUTER_EXTENSIONS
 rules/native/rules-http/src/unprovided_consume.rs:MIN_FOREIGN_UNPROVIDED_GROUP
+rules/native/rules-schema/src/message/tests.rs:SIGHTLINE_PROSE_PAGES
 rules/native/rules-schema/src/structural.rs:GOD_THRESHOLD
 rules/native/rules-schema/src/structural.rs:LOOKUP_FIELD_MAX
 rules/native/rules-schema/src/structural.rs:MONEY_TOKENS
 rules/native/rules-schema/src/usage.rs:CHURN_CRITICAL_THRESHOLD
 rules/native/rules-schema/src/usage.rs:CHURN_WARNING_THRESHOLD
+rules/native/rules-schema/src/usage.rs:FIELD_USAGE_SCAN_EXTENSIONS
 rules/native/rules-schema/src/usage.rs:MIN_FIELD_NAME_LEN
 rules/native/rules-schema/src/usage.rs:SKIP_FIELD_NAMES

@@ -146,9 +146,16 @@ fn unsafe_read_endpoint_message_is_byte_identical_to_the_pre_sweep_text() {
         "GET /touch writes directly (prisma.ping.create) — GET/HEAD must be safe & idempotent. Move \
          the write behind a mutating method (POST/PUT/PATCH/DELETE), or make this endpoint genuinely \
          read-only. If the write is deliberate and safe to repeat (e.g. a fire-and-forget audit log), \
-         mark it with `// idempotent-ok: <reason>` on the line above the handler, or disable via \
+         mark it with `// idempotent-ok: <reason>` on the body-start line or up to 3 lines above, or disable via \
          config `rules: { \"unsafe-read-endpoint\": \"off\" }` (embedders: `disabled_rules`) if this \
-         applies more broadly."
+         applies more broadly. LANGUAGE SIGHTLINE: this check needs store-write evidence that only the \
+         TypeScript parser produces (ts/tsx/js/jsx/mjs/cjs/mts/cts) — `SourceSymbol::write_sites`, \
+         which parser-python-3/go/rust/csharp/java-21 all leave empty, so a handler in those languages \
+         has no write site the call-graph BFS could reach and this rule cannot fire there at all. \
+         Easiest to misread: the sibling `mutating-route-no-auth` rule DOES walk Java, so a Java repo \
+         can show that rule's findings while this rule stayed dark on the very same routes. ZERO \
+         findings of this rule outside ts/tsx/js/jsx/mjs/cjs/mts/cts therefore means NOT ANALYZED, \
+         never \"no risky write on these routes\"."
     );
 }
 
@@ -248,6 +255,136 @@ fn idempotent_ok_marker_above_the_handler_suppresses_the_finding() {
     assert!(out.is_empty());
 }
 
+// ---------------------------------------------------------------------------------------------
+// `idempotent-ok` near-miss disclosure (see `with_ok_marker_near_miss`). The DSL interpreter got the
+// same disclosure; this hand-authored native marker had none, so a misspelled marker failed silently.
+// ---------------------------------------------------------------------------------------------
+
+/// One GET endpoint whose handler writes, with `comment` on the line above the handler.
+fn unsafe_read_with_comment(comment: &str) -> Vec<zzop_core::Finding> {
+    let files = files(&[(
+        "api/h.ts",
+        &format!(
+            "{comment}\nexport function touch(c: any) {{ return prisma.ping.create({{ data: {{}} }}); }}\n"
+        ),
+    )]);
+    let symbols = with_write_sites(&files, vec![sym("api/h.ts", "touch", 2)]);
+    scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
+        api_endpoints: &[endpoint("GET", "/touch", "touch")],
+        symbols: &symbols,
+        symbol_graph: &Vec::new(),
+        files: &files,
+    })
+}
+
+#[test]
+fn a_misspelled_ok_marker_is_disclosed_instead_of_failing_silently() {
+    for comment in [
+        "// idempotent-okay:",
+        "// non-idempotent-write-ok",
+        "// unsafe-read-endpoint-ok: intentional",
+    ] {
+        let out = unsafe_read_with_comment(comment);
+        assert_eq!(out.len(), 1, "{comment} must not suppress: {out:?}");
+        let m = &out[0].message;
+        assert!(m.contains("does not suppress this rule"), "{m}");
+        assert!(
+            m.contains("`// idempotent-ok: <reason>`"),
+            "the honored spelling must be named: {m}"
+        );
+        assert!(m.contains("the trailing colon is required"), "{m}");
+    }
+}
+
+#[test]
+fn the_honored_marker_without_its_required_colon_is_disclosed() {
+    // The native regex is `//\s*idempotent-ok:` — a bare `// idempotent-ok` does NOT suppress. The DSL
+    // sibling honors both spellings, so this trap is unique to this surface and must be disclosed.
+    let out = unsafe_read_with_comment("// idempotent-ok");
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert!(
+        out[0].message.contains("reads `idempotent-ok`"),
+        "{}",
+        out[0].message
+    );
+    assert!(out[0].message.contains("the trailing colon is required"));
+}
+
+#[test]
+fn the_honored_marker_suppresses_and_never_accuses_itself() {
+    // Negative control: the correct spelling suppresses, so the disclosure path is never reached.
+    assert!(unsafe_read_with_comment("// idempotent-ok: audit log").is_empty());
+}
+
+#[test]
+fn ordinary_prose_above_a_handler_is_never_accused() {
+    // Mirrors the DSL near-miss shape's own prose guarantees: a `-ok` word inside a sentence, a
+    // capitalized one, or one preceded by another word never matches the marker shape.
+    for comment in [
+        "// half-ok for now, revisit",
+        "// NOT-ok:",
+        "// TODO: not-ok",
+        "// plain comment",
+    ] {
+        let out = unsafe_read_with_comment(comment);
+        assert_eq!(out.len(), 1, "{comment}: {out:?}");
+        assert!(
+            !out[0].message.contains("does not suppress this rule"),
+            "{comment} must not be accused: {}",
+            out[0].message
+        );
+    }
+}
+
+#[test]
+fn the_disclosure_also_reaches_non_idempotent_write_and_stays_in_sync_with_data_hint() {
+    let files = files(&[(
+        "api/h.ts",
+        "// idempotent-okay: typo\nexport function put(c: any) { return prisma.thing.create({ data: { id: c.id } }); }\n",
+    )]);
+    let symbols = with_write_sites(&files, vec![sym("api/h.ts", "put", 2)]);
+    let out = scan_non_idempotent_write(&ScanNonIdempotentWriteInput {
+        api_endpoints: &[endpoint("PUT", "/thing", "put")],
+        symbols: &symbols,
+        symbol_graph: &Vec::new(),
+        files: &files,
+    });
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert!(
+        out[0].message.contains("reads `idempotent-okay`"),
+        "{}",
+        out[0].message
+    );
+    assert_eq!(
+        out[0].data.as_ref().unwrap()["hint"].as_str(),
+        Some(out[0].message.as_str()),
+        "data.hint must carry the same string as the message, disclosure included"
+    );
+}
+
+#[test]
+fn a_marker_shaped_comment_outside_the_lookback_window_is_not_disclosed() {
+    // The disclosure window is exactly the suppression window — a comment too far above could never
+    // have suppressed, so it must not be blamed for failing to.
+    let files = files(&[(
+        "api/h.ts",
+        "// idempotent-okay: typo\n\n\n\n\nexport function touch(c: any) { return prisma.ping.create({ data: {} }); }\n",
+    )]);
+    let symbols = with_write_sites(&files, vec![sym("api/h.ts", "touch", 6)]);
+    let out = scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
+        api_endpoints: &[endpoint("GET", "/touch", "touch")],
+        symbols: &symbols,
+        symbol_graph: &Vec::new(),
+        files: &files,
+    });
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert!(
+        !out[0].message.contains("does not suppress this rule"),
+        "{}",
+        out[0].message
+    );
+}
+
 #[test]
 fn ambiguous_handler_name_defined_in_two_files_is_skipped() {
     let files = files(&[
@@ -325,9 +462,17 @@ fn non_idempotent_write_message_is_byte_identical_to_the_pre_sweep_text() {
         out[0].message,
         "PUT /things/:id reaches prisma.thing.create directly (create) — a retry inserts a duplicate \
          row; PUT must be idempotent. Add an idempotency key or a dedup/uniqueness check before the \
-         write, or mark it with `// idempotent-ok: <reason>` above the handler if a retry is \
+         write, or mark it with `// idempotent-ok: <reason>` on the body-start line or up to 3 lines above if a retry is \
          genuinely safe here. Disable via config `rules: { \"non-idempotent-write\": \"off\" }` \
-         (embedders: `disabled_rules`) if this applies more broadly."
+         (embedders: `disabled_rules`) if this applies more broadly. LANGUAGE SIGHTLINE: this check \
+         needs store-write evidence that only the TypeScript parser produces \
+         (ts/tsx/js/jsx/mjs/cjs/mts/cts) — `SourceSymbol::write_sites`, which \
+         parser-python-3/go/rust/csharp/java-21 all leave empty, so a handler in those languages has \
+         no write site the call-graph BFS could reach and this rule cannot fire there at all. Easiest \
+         to misread: the sibling `mutating-route-no-auth` rule DOES walk Java, so a Java repo can show \
+         that rule's findings while this rule stayed dark on the very same routes. ZERO findings of \
+         this rule outside ts/tsx/js/jsx/mjs/cjs/mts/cts therefore means NOT ANALYZED, never \"no \
+         risky write on these routes\"."
     );
 }
 
@@ -480,4 +625,144 @@ fn idempotent_ok_marker_suppresses_non_idempotent_write_finding() {
         files: &files,
     });
     assert!(out.is_empty());
+}
+
+// ---------------------------------------------------------------------------------------------
+// Policy pin (T2): the marker window is a Rust constant HERE and hand-written English prose in three
+// published pages. Neither side can reference the other, so the relationship is sealed instead.
+// ---------------------------------------------------------------------------------------------
+
+/// Every published surface that spells the `idempotent-ok` window out in prose. Relative to this crate's
+/// manifest dir; a path that stops existing fails this test loudly rather than silently pinning nothing.
+const MARKER_WINDOW_PROSE_PAGES: [&str; 3] = [
+    "../../../docs/getting-started.md",
+    "../../../site/rules.html",
+    "../../../site/usage.html",
+];
+
+/// Policy pin (T2 — the boundary admits no shared symbol): `OK_MARKER_LOOKBACK_ABOVE` and the window
+/// sentence in `docs/getting-started.md` / `site/rules.html` / `site/usage.html` are ONE policy — "how far
+/// above the handler may an author put the marker" — spelled twice only because a Markdown or HTML page
+/// cannot reference a Rust constant.
+///
+/// Why it needs a pin at all: this window was ALREADY wrong once. The near-miss disclosure promised "the 4
+/// lines above this handler" while `scan_marker_window` reads the body-start line plus 3 above, so a marker
+/// placed exactly where the message invited it landed outside the window and did nothing — the silent
+/// failure the disclosure exists to prevent, reproduced by the disclosure itself. Nothing was red: the
+/// scanner's own tests assert suppression behavior, never the sentence describing it, and the docs are
+/// prose no test read.
+///
+/// Both sides are read from what actually ships — the message from a real finding, the prose from the
+/// pages' bytes — so this file holds no third copy to drift. A PHRASE is pinned rather than the bare
+/// number because `3` occurs in unrelated prose all over these pages, and a bare-number pin would pass on
+/// a sentence about something else entirely.
+#[test]
+fn the_marker_window_phrase_is_identical_in_the_finding_and_the_published_docs() {
+    let phrase = marker_window_phrase();
+
+    let out = unsafe_read_with_comment("// idempotent-okay:");
+    let message = &out[0].message;
+    assert!(
+        message.contains(&phrase),
+        "the near-miss disclosure no longer renders the shared window phrase `{phrase}` — it reads: \
+         {message}"
+    );
+
+    for rel in MARKER_WINDOW_PROSE_PAGES {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read published page {}: {e}", path.display()));
+        assert!(
+            text.contains(&phrase),
+            "{rel} no longer says `{phrase}` — the marker window and the page that documents it have \
+             forked, so an author following the page would place the marker outside the window \
+             `scan_marker_window` actually reads (see this test's own doc: that exact defect already \
+             shipped once)"
+        );
+    }
+}
+
+/// The three published pages that must carry this module's LANGUAGE SIGHTLINE, in the same shape as
+/// [`MARKER_WINDOW_PROSE_PAGES`] above. `docs/rules/catalog.md` is additionally embedded in the shipped
+/// binary (`crates/host/src/embedded.rs`'s `rule-catalog` resource), so its copy is what an MCP client
+/// reads without a source checkout.
+const SIGHTLINE_PROSE_PAGES: [&str; 3] = [
+    "../../../docs/rules/catalog.md",
+    "../../../site/rules.html",
+    "../../../docs/getting-started.md",
+];
+
+/// Policy pin (T2 — a Markdown/HTML page cannot reference a Rust constant): `WRITE_SITE_COVERED_EXTENSIONS`
+/// and the sightline sentence on the three published pages are ONE policy — "which languages can these two
+/// rules see a write in at all" — spelled four times only because three of the surfaces are prose.
+///
+/// Why it needs a pin: both rules are structurally silent outside those extensions (`write_sites` is
+/// TypeScript-only), and a message only ships ON a finding — so in exactly the repos the sightline is
+/// about, the message never renders and the PAGES are the only surface a user can reach. A page that
+/// forgets the sightline, or keeps a stale extension list after the write-site producer grows a language,
+/// sells the false assurance this whole disclosure exists to stop. Nothing else is red when that happens:
+/// the scanners' own tests assert firing behavior, never the sentence describing where they can fire.
+///
+/// Both sides are read from what actually ships — the claim from a REAL finding's message, the prose from
+/// the pages' own bytes — so this file holds no third copy to drift. The pinned fragment is markup-free
+/// (see `write_site_sightline_claim`'s doc) and carries the whole extension list, so an unrelated sentence
+/// cannot satisfy it by accident the way a bare-token pin could.
+#[test]
+fn the_write_site_sightline_is_identical_in_the_finding_and_the_published_docs() {
+    let claim = write_site_sightline_claim();
+
+    // A real finding from each of the two rules — not a call to the formatter, which would only prove
+    // the formatter agrees with itself.
+    let unsafe_read = unsafe_read_with_comment("// unrelated");
+    assert_eq!(unsafe_read.len(), 1);
+    let files = files(&[(
+        "api/h.ts",
+        "export function putThing(c: any) { return prisma.thing.create({ data: { id: c.id } }); }\n",
+    )]);
+    let symbols = with_write_sites(&files, vec![sym("api/h.ts", "putThing", 1)]);
+    let non_idempotent = scan_non_idempotent_write(&ScanNonIdempotentWriteInput {
+        api_endpoints: &[endpoint("PUT", "/things/:id", "putThing")],
+        symbols: &symbols,
+        symbol_graph: &Vec::new(),
+        files: &files,
+    });
+    assert_eq!(non_idempotent.len(), 1);
+    for (rule, out) in [
+        ("unsafe-read-endpoint", &unsafe_read),
+        ("non-idempotent-write", &non_idempotent),
+    ] {
+        let message = &out[0].message;
+        assert!(
+            message.contains(&claim),
+            "{rule}'s finding no longer renders the shared sightline claim `{claim}` — it reads: \
+             {message}"
+        );
+        // `data.hint` and `message` are the same string by contract; pin that here too so a future
+        // splice cannot disclose on one and stay silent on the other.
+        assert_eq!(
+            out[0].data.as_ref().unwrap()["hint"].as_str().unwrap(),
+            message,
+            "{rule}'s data.hint drifted from its message"
+        );
+    }
+
+    // Whitespace is collapsed before comparing: Markdown and HTML both treat a newline inside a
+    // paragraph as a space, so a page that wraps this sentence at its column limit is byte-different
+    // but reader-identical. Collapsing compares the WORDS (which is the policy) instead of forcing
+    // three prose files to keep one 88-character line unwrapped (which is not).
+    let collapse = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let claim = collapse(&claim);
+    for rel in SIGHTLINE_PROSE_PAGES {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
+        let text = collapse(
+            &std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("cannot read published page {}: {e}", path.display())),
+        );
+        assert!(
+            text.contains(&claim),
+            "{rel} no longer says `{claim}` — the page and the rules have forked, so a reader whose \
+             repo is Python/Go/Rust/C#/Java is told nothing about why these two rules report zero \
+             there, which is the false assurance this sightline exists to prevent"
+        );
+    }
 }

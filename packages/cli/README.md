@@ -7,8 +7,8 @@ contract`, `zzop explain`, …). This package carries **no logic of its own** �
 resolves the right platform binary and passes every argument straight through
 (`spawnSync(binaryPath, process.argv.slice(2), { stdio: 'inherit' })`), exiting with the child's own
 status code. For the full command/flag reference, config file format, and output contract, see the repo
-docs: [docs/modules/mcp.md](../../docs/modules/mcp.md) (the CLI and `zzop-mcp` share one binary crate and
-one analysis path) and [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
+docs: [docs/modules/mcp.md](../../docs/modules/mcp.md) (the CLI and `zzop-mcp` are separate binaries over
+one shared library crate and one analysis path) and [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
 
 Programmatic/JS use: run this CLI with its JSON output (`zzop analyze . | jq ...`, or `spawnSync`/`execFile`
 it from Node) rather than importing an SDK — there is no separate Node binding to install; the JSON

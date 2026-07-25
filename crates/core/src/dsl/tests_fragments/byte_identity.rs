@@ -3,15 +3,10 @@
 //! an intended whole-value reference, that the whole tree resolves cleanly, and that the migration left
 //! two non-`sql` packs' loaded `RulePackDef` byte-identical to their pre-migration form.
 
-use std::path::{Path, PathBuf};
-
 use super::super::def::{Matcher, RuleDef, RulePackDef};
 use super::super::fragments::fragment_ref_name;
+use super::{raw_packs, real_dsl_dir};
 use crate::{load_dsl_packs, parse_dsl_pack};
-
-fn real_dsl_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/dsl")
-}
 
 /// Every field `expand_fragments` treats as a `${NAME}`-eligible pattern — the EXACT same field set, so
 /// this guard can never drift from what the mechanism actually resolves. Deliberately narrower than "every
@@ -86,8 +81,8 @@ fn pattern_bearing_field_values(rule: &RuleDef) -> Vec<(&'static str, &str)> {
 }
 
 /// Part 1, guard #4: no shipped `rules/dsl/**` pattern-bearing field contains the `${...}` sentinel shape
-/// except as an intended, total, whole-value fragment reference. Loads every real pack's RAW (pre-
-/// expansion) text — a plain `serde_json::from_str`, deliberately NOT `parse_dsl_pack`, so a sentinel is
+/// except as an intended, total, whole-value fragment reference. Reads every real pack's RAW (pre-
+/// expansion) form via `raw_packs` — deliberately NOT `parse_dsl_pack`, so a sentinel is
 /// still visible for this check to see — and asserts every `pattern_bearing_field_values` entry containing
 /// the substring `"${"` is EXACTLY a whole-value `${NAME}` reference (`fragment_ref_name` returns `Some`),
 /// never a partial/substring occurrence. `message`/`id`/`label` are out of scope (see
@@ -98,46 +93,23 @@ fn pattern_bearing_field_values(rule: &RuleDef) -> Vec<(&'static str, &str)> {
 /// unambiguous, per this guard's own charter.
 #[test]
 fn no_shipped_pattern_contains_the_sentinel_except_as_an_intended_whole_value_ref() {
-    let dir = real_dsl_dir();
     let mut total_refs = 0usize;
     let mut offenders = Vec::new();
 
-    for entry in std::fs::read_dir(&dir).expect("rules/dsl must exist") {
-        let entry = entry.expect("dir entry");
-        let path = entry.path();
-        let json_paths: Vec<PathBuf> = if path.is_dir() {
-            std::fs::read_dir(&path)
-                .into_iter()
-                .flatten()
-                .filter_map(Result::ok)
-                .map(|e| e.path())
-                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
-                .collect()
-        } else if path.extension().and_then(|e| e.to_str()) == Some("json") {
-            vec![path]
-        } else {
-            vec![]
-        };
-
-        for json_path in json_paths {
-            let text = std::fs::read_to_string(&json_path)
-                .unwrap_or_else(|e| panic!("failed to read {}: {e}", json_path.display()));
-            let pack: RulePackDef = serde_json::from_str(&text)
-                .unwrap_or_else(|e| panic!("failed to parse {}: {e}", json_path.display()));
-            for rule in &pack.rules {
-                for (field, value) in pattern_bearing_field_values(rule) {
-                    if !value.contains("${") {
-                        continue;
-                    }
-                    if fragment_ref_name(value).is_some() {
-                        total_refs += 1;
-                    } else {
-                        offenders.push(format!(
-                            "{}: rule \"{}\" `{field}`: {value:?}",
-                            json_path.display(),
-                            rule.id
-                        ));
-                    }
+    for (json_path, pack) in raw_packs() {
+        for rule in &pack.rules {
+            for (field, value) in pattern_bearing_field_values(rule) {
+                if !value.contains("${") {
+                    continue;
+                }
+                if fragment_ref_name(value).is_some() {
+                    total_refs += 1;
+                } else {
+                    offenders.push(format!(
+                        "{}: rule \"{}\" `{field}`: {value:?}",
+                        json_path.display(),
+                        rule.id
+                    ));
                 }
             }
         }

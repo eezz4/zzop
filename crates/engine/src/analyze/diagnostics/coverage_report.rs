@@ -94,7 +94,7 @@ fn known_rule_ids(
     let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut registry = zzop_core::RuleRegistry::new();
     crate::register_all_native(&mut registry);
-    known.extend(registry.metas().iter().map(|m| m.id.clone()));
+    known.extend(registry.ids().iter().cloned());
     for pack in &config.packs {
         if include_bare_pack_ids {
             known.insert(pack.id.clone());

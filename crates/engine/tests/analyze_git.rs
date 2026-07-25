@@ -2,16 +2,17 @@
 //! repo (same `git init`/`config`/`commit` pattern as `crates/git/src/lib.rs`'s own
 //! `collect_end_to_end_against_a_real_temp_git_repo` integration test) analyzed with
 //! `EngineConfig::git` set, asserting `nodes` carry real change counts and `scores`/`health`/
-//! `recommendations`/`critical`/`seams` are populated — plus determinism across two runs, and that a
-//! non-git root degrades to a `warnings` entry instead of panicking.
+//! `recommendations`/`critical`/`seams` are populated — plus determinism across two runs, that a
+//! non-git root degrades to a `warnings` entry instead of panicking, and that `disabledRules` really
+//! gates the five `zzop_metrics` native-analysis ids (see this file's `disabledRules` section).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use zzop_core::RulePackDef;
-use zzop_engine::{analyze_tree, EngineConfig, GitOptions};
+use zzop_core::{RuleConfig, RulePackDef};
+use zzop_engine::{analyze_tree, AnalyzeOutput, EngineConfig, GitOptions};
 use zzop_metrics::RecId;
 
 struct TempDir(PathBuf);
@@ -229,6 +230,141 @@ fn git_disabled_by_default_keeps_scores_and_friends_empty() {
     );
     // `nodes` itself is still populated (dep-graph + LOC signal) even with git disabled.
     assert!(out.nodes.iter().any(|n| n.path == "a.ts"));
+}
+
+// ---------------------------------------------------------------------------------------------
+// `disabledRules` gating of the five `zzop_metrics::register_native_analyses` ids
+//
+// `seams`/`criticality`/`scores`/`health`/`recommendations` are registered native analysis ids, so
+// `disabledRules` accepts them WITHOUT a `configWarnings` entry (they are known ids) and reports them
+// back under `ruleOverridesApplied.disabled` as "applied". `assemble/metrics.rs` once carried zero
+// `is_enabled` calls, which made that positive confirmation a lie: the analyses kept running and kept
+// emitting. These tests pin the gate so the confirmation stays true.
+//
+// The assertions ride `rule_timings` (`profile_rules`) rather than the output fields alone: on this
+// 2-file fixture `critical`/`seams`/`recommendations` are legitimately EMPTY even when enabled (the
+// min-blast-radius / min-files / ROI gates never fire that small), so an empty-vs-empty field
+// comparison would pass vacuously and could not tell "gated off" from "ran and found nothing". A
+// timing entry exists if and only if the analysis actually ran, which is precisely what the gate
+// controls.
+// ---------------------------------------------------------------------------------------------
+
+const METRIC_IDS: [&str; 5] = [
+    "scores",
+    "health",
+    "recommendations",
+    "criticality",
+    "seams",
+];
+
+fn config_git_profiled(disabled: &[&str]) -> EngineConfig {
+    EngineConfig {
+        source_id: "fixture".to_string(),
+        git: Some(GitOptions::default()),
+        profile_rules: true,
+        rule_config: RuleConfig {
+            disabled_rules: disabled.iter().map(|s| (*s).to_string()).collect(),
+            ..RuleConfig::default()
+        },
+        ..EngineConfig::default()
+    }
+}
+
+/// True when `id` recorded a timing entry this run — i.e. the analysis actually executed.
+fn ran(out: &AnalyzeOutput, id: &str) -> bool {
+    out.rule_timings
+        .as_ref()
+        .expect("profile_rules is set, so rule_timings must be Some")
+        .iter()
+        .any(|t| t.rule_id == id)
+}
+
+/// Baseline that makes the disable tests below non-vacuous: with nothing disabled, all five ids run.
+#[test]
+fn all_five_metrics_ids_run_when_nothing_is_disabled() {
+    if !git_available() {
+        eprintln!("skipping all_five_metrics_ids_run_when_nothing_is_disabled: git not on PATH");
+        return;
+    }
+    let dir = git_fixture_repo();
+    let out = analyze_tree(dir.path(), &config_git_profiled(&[]));
+    for id in METRIC_IDS {
+        assert!(
+            ran(&out, id),
+            "expected `{id}` to run with nothing disabled"
+        );
+    }
+}
+
+#[test]
+fn disabling_all_five_metrics_ids_actually_stops_them() {
+    if !git_available() {
+        eprintln!("skipping disabling_all_five_metrics_ids_actually_stops_them: git not on PATH");
+        return;
+    }
+    let dir = git_fixture_repo();
+    let out = analyze_tree(dir.path(), &config_git_profiled(&METRIC_IDS));
+
+    for id in METRIC_IDS {
+        assert!(!ran(&out, id), "`{id}` was disabled but still ran");
+    }
+    // A disabled id yields the SAME shape the git-inactive branch yields — no new output state.
+    assert!(out.scores.is_none());
+    assert!(out.health.is_none());
+    assert!(out.recommendations.is_empty());
+    assert!(out.critical.is_empty());
+    assert!(out.seams.is_empty());
+    // Git itself still ran: this is a metrics gate, not a git gate.
+    let a = out
+        .nodes
+        .iter()
+        .find(|n| n.path == "a.ts")
+        .expect("expected a node for a.ts");
+    assert_eq!(a.change_count, 3);
+}
+
+/// `health` is computed FROM `scores`, so disabling `scores` alone suppresses the `scores` FIELD but
+/// cannot skip the computation while `health` still needs it — and the run reports that honestly, still
+/// recording a `scores` timing entry because the work did happen.
+#[test]
+fn disabling_scores_alone_suppresses_the_field_but_keeps_health() {
+    if !git_available() {
+        eprintln!(
+            "skipping disabling_scores_alone_suppresses_the_field_but_keeps_health: git not on PATH"
+        );
+        return;
+    }
+    let dir = git_fixture_repo();
+    let out = analyze_tree(dir.path(), &config_git_profiled(&["scores"]));
+
+    assert!(out.scores.is_none(), "`scores` field should be suppressed");
+    assert!(
+        out.health.is_some(),
+        "disabling `scores` must not cascade onto `health`"
+    );
+    assert!(
+        ran(&out, "scores"),
+        "`scores` still ran for `health`'s sake — the timing map must not hide that"
+    );
+}
+
+/// The converse: disabling `health` never suppresses `scores`, and `health` genuinely does not run.
+#[test]
+fn disabling_health_alone_leaves_scores_intact() {
+    if !git_available() {
+        eprintln!("skipping disabling_health_alone_leaves_scores_intact: git not on PATH");
+        return;
+    }
+    let dir = git_fixture_repo();
+    let out = analyze_tree(dir.path(), &config_git_profiled(&["health"]));
+
+    assert!(out.health.is_none(), "`health` field should be suppressed");
+    assert!(!ran(&out, "health"), "`health` was disabled but still ran");
+    assert!(
+        out.scores.is_some(),
+        "disabling `health` must not cascade onto `scores`"
+    );
+    assert!(ran(&out, "scores"));
 }
 
 fn minimal_pack() -> RulePackDef {

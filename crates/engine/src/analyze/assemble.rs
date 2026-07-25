@@ -3,9 +3,8 @@
 //! [`provides`] compose whole-tree PROVIDE/CONSUME facts from them, [`dep_graph`] build the dependency
 //! graph + run git-history-dependent collection, [`rules`] run every whole-graph/call-graph-BFS native
 //! analysis (plus its own whole-tree `Matcher::IoScan` DSL sub-phase), [`warnings`] run the
-//! framework-silence coverage self-report, [`metrics`] compute git-history-dependent
-//! scores/health/recommendations/critical/seams. Glue only — no composition or analysis logic of its
-//! own beyond wiring each phase's output into the final `AnalyzeOutput`.
+//! framework-silence self-report, [`metrics`] compute git-history-dependent scores/health/critical/seams.
+//! Glue only — no analysis logic of its own beyond wiring each phase into the final `AnalyzeOutput`.
 
 use zzop_core::{merge_findings, CommonIr, IoFacts, MinimalIr};
 
@@ -39,7 +38,8 @@ pub(crate) fn assemble(
 ) -> AnalyzeOutput {
     let collect::Collected {
         file_count,
-        per_file_findings,
+        source_files,
+        mut per_file_findings,
         all_symbols,
         loc_by_path,
         ts_import_pairs,
@@ -51,7 +51,7 @@ pub(crate) fn assemble(
         mut minified,
         io_provides,
         io_consumes,
-        used_names_by_file,
+        dead_export_names_by_file,
         prisma_rels,
         java_rels,
         csharp_rels,
@@ -143,7 +143,7 @@ pub(crate) fn assemble(
         &ts_import_pairs,
         &java_rels,
         &all_symbols,
-        &used_names_by_file,
+        &dead_export_names_by_file,
         &prisma_rels,
         &attribute_store,
         &field_usage_tokens,
@@ -154,6 +154,8 @@ pub(crate) fn assemble(
         &sfc_import_pairs,
         &sfc_targets,
         &asset_targets,
+        &mut per_file_findings,
+        &mut warnings,
     );
 
     let findings = merge_findings(
@@ -163,15 +165,15 @@ pub(crate) fn assemble(
 
     degraded.sort();
     minified.sort();
-    if let Some(w) = minified_files_warning(&minified) {
+    let rels: Vec<&str> = loc_by_path.keys().map(String::as_str).collect();
+    // One census, three consumers: both warnings below and `packs_loaded`'s `files_in_scope` count.
+    let dsl_scope = compute_dsl_scope(&config.packs, &rels);
+    if let Some(w) = minified_files_warning(&minified, &dsl_scope.in_scope_rels) {
         warnings.push(w);
     }
     warnings.extend(unparsed_extension_warning(&unparsed_extensions));
-    let rels: Vec<&str> = loc_by_path.keys().map(String::as_str).collect();
     warnings.extend(unmatched_suppression_warnings(config, &rels));
     warnings.extend(unmatched_global_exclude_warnings(config, &rels));
-    // One census, two consumers: the warning below and `packs_loaded`'s `files_in_scope` count.
-    let dsl_scope = compute_dsl_scope(&config.packs, &rels);
     if let Some(w) = no_applicable_dsl_rule_warning(&config.packs, &dsl_scope) {
         warnings.push(w);
     }
@@ -221,11 +223,9 @@ pub(crate) fn assemble(
     warnings.extend(diagnostics_report.warnings);
     let config_warnings = diagnostics_report.config_warnings;
 
-    // `root.is_dir()` gates this so it doesn't duplicate `analyze_tree`'s more specific "root does not
-    // exist / is not a directory" self-report (`lib.rs`'s `scope_warnings`), which already states the cause
-    // when the root itself is invalid; every invalid-root failure funnels through `file_count == 0` too. A
-    // root that DOES exist but matched no analyzable files gets no such self-report (`lib.rs`'s "0 source
-    // files found under root" covers that from a different angle), so this generic line still earns its keep.
+    // `root.is_dir()` gates this so it doesn't duplicate `analyze_tree`'s more specific "root does not exist
+    // / is not a directory" self-report (`lib.rs`'s `scope_warnings`), which states the cause when the root
+    // itself is invalid; a root that exists but matched no analyzable files gets no such self-report.
     if file_count == 0 && root.is_dir() {
         warnings.push(
             "root produced 0 analyzable files — check the path exists and contains supported source files".to_string(),
@@ -250,7 +250,7 @@ pub(crate) fn assemble(
         },
     };
 
-    let coverage = crate::CoverageCensus::compute(file_count, &ir, degraded.len());
+    let coverage = crate::CoverageCensus::compute(file_count, source_files, &ir, degraded.len());
 
     // Gated exactly like `scores`/`health`/`critical`/`seams`: `Some` only when git collection actually
     // ran, so a consumer never sees a window echoed for numbers that stayed empty.

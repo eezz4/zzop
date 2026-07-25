@@ -5,7 +5,7 @@
     {
       "id": "hardcoded-secret",
       "severity": "warning",
-      "message": "Hardcoded secret-shaped literal (an API-key/password/token assignment, or a known cloud-key prefix) — a credential committed to source is exposed to every reader/fork/clone and cannot be rotated without a code change. Move it to an environment variable or a secrets manager (e.g. `process.env.API_KEY`) — but that only stops the NEXT leak: this value is already exposed via git history and any forks/clones that pulled it, so rotate/revoke the actual credential too. Suppress a vetted case with `// hardcoded-secret-ok`.",
+      "message": "Hardcoded secret-shaped literal (an API-key/password/token assignment, or a known cloud-key prefix) — a credential committed to source is exposed to every reader/fork/clone and cannot be rotated without a code change. Move it to an environment variable or a secrets manager (e.g. `process.env.API_KEY`) — but that only stops the NEXT leak: this value is already exposed via git history and any forks/clones that pulled it, so rotate/revoke the actual credential too. The match is NOT on the property name alone — a VALUE-SHAPE gate rejects identifier-shaped values: any literal built from letter-only words joined by `-`/`_` (`\"mantine-DatePickerInput-input\"`, `\"refresh-token\"`, `\"MY_API_KEY\"`) is a CSS class / selector / constant name, not a credential, and is dropped in any casing. That CASING-AGNOSTIC arm belongs to THIS rule only: the sibling CRITICAL rule `security/jwt-sign-literal-secret` keeps just the all-lowercase `snake_case`/`kebab-case` arms (the `UPPER_SNAKE` and `PascalCase` shapes are dropped by both), so a MIXED-CASE identifier-shaped value is silent here and still fires there — `apiKey: \"Mantine_DatePicker_Input\"` reports nothing while `jwt.sign(payload, \"Mantine_DatePicker_Input\")` on the next line reports a critical. That split is deliberate, not drift: the false positives that widened this veto were all measured on the `key: value` assignment shape, none on the positional `jwt.sign` shape, and widening a CRITICAL rule's veto with no measurement behind it buys silence, not signal. Measured on the corpus that motivated the gate (all seven findings came from one `ALLOW` table in a lint script): SIX of the seven are dropped by it. The seventh, `token: \"adsbygoogle\"`, is a separator-free single word and DELIBERATELY still fires — no shape test tells it apart from a weak literal password like `token: \"letmeinplease\"`, and silencing the one would silence the other. A value whose segments carry digits keeps firing (`\"sk-a1B2c3D4e5F6g7H8i9J0\"`), as does a separator-free word (`\"Changemeplease\"`), so weak literal passwords are not silenced. Blind spot, measured rather than guessed: this is a SHAPE test, not entropy, so a passphrase-style credential built from dictionary words (`\"correct-horse-battery-staple\"`, `\"trombone_ravine_wallet_ember\"`) is ALWAYS silenced, and a random base64url token is silenced whenever it happens to draw no digits — about 0.9% of 24-char, 0.26% of 32-char and 0.04% of 43-char tokens (200k samples each). Nothing is lost for base64-standard, hex or alphanumeric values (0%, those alphabets carry no `-`/`_`), and every common vendor prefix keeps firing (AWS `AKIA…`, `sk_live_…`, `ghp_…`, `xoxb-…`). The honest fix needs a string-literal-with-binding-name IR node the matcher does not have, so shape is the ceiling here. Suppress a vetted case with `// hardcoded-secret-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|java)$",
@@ -20,7 +20,7 @@
             "label": "known-prefix"
           }
         ],
-        "exclude_pattern": "process\\.env|(?i:(^|[-_\"'`])(mock|test|fake|dummy|sample|placeholder|example|wrong|invalid|valid)([-_\"'`]|\\d|(?-i:[A-Z])|$))|[\"'][A-Z][A-Z0-9]*(_[A-Z0-9]+)+[\"']|[\"'][a-z]+(_[a-z]+)+[\"']|[\"'][a-z]+(-[a-z]+)+[\"']|[\"'][A-Z][a-z]+(?:[A-Z][a-z]+)+[\"']",
+        "exclude_pattern": "process\\.env|(?i:(^|[-_\"'`])(mock|test|fake|dummy|sample|placeholder|example|wrong|invalid|valid)([-_\"'`]|\\d|(?-i:[A-Z])|$))|[\"'][A-Z][A-Z0-9]*(_[A-Z0-9]+)+[\"']|[\"'][A-Za-z]+(?:[-_][A-Za-z]+)+[\"']|[\"'][A-Z][a-z]+(?:[A-Z][a-z]+)+[\"']",
         "snippet_max": 160
       }
     },
@@ -156,7 +156,7 @@
     {
       "id": "jwt-sign-literal-secret",
       "severity": "critical",
-      "message": "`jwt.sign(payload, \"...\")` is called with a positional string-literal signing secret — anyone who reads this line can forge a validly-signed token for any payload they want. This is a distinct shape from `hardcoded-secret`: that rule's `assignment` pattern needs a `key: value`/`key = value` shape, so a positional literal passed straight as `jwt.sign`'s second argument is uncovered by it — this rule closes that gap. Move the signing secret into an environment variable or secrets manager, and rotate the exposed key (it's already leaked via git history and any forks/clones that pulled it). Suppress a vetted case with `// jwt-sign-literal-secret-ok`.",
+      "message": "`jwt.sign(payload, \"...\")` is called with a positional string-literal signing secret — anyone who reads this line can forge a validly-signed token for any payload they want. This is a distinct shape from `hardcoded-secret`: that rule's `assignment` pattern needs a `key: value`/`key = value` shape, so a positional literal passed straight as `jwt.sign`'s second argument is uncovered by it — this rule closes that gap. Their identifier-shaped-VALUE vetoes diverge too, and this one is deliberately NARROWER: this rule drops only all-lowercase `snake_case`/`kebab-case` values (plus the `UPPER_SNAKE`/`PascalCase` shapes both rules drop), while `hardcoded-secret` drops letter-only words joined by `-`/`_` in ANY casing. So a mixed-case value such as `\"Mantine_DatePicker_Input\"` is silenced as a CSS-class/constant name there and still fires here — on purpose: the false positives that widened the sibling's veto were all measured on the `key: value` shape, no measurement has arrived for this positional form, and an identifier-shaped signing key is still a forgeable signing key. Move the signing secret into an environment variable or secrets manager, and rotate the exposed key (it's already leaked via git history and any forks/clones that pulled it). Suppress a vetted case with `// jwt-sign-literal-secret-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -637,19 +637,19 @@
         "any": [
           {
             "pattern": "(?i)\\bMessageDigest\\.getInstance\\(\\s*\"(?:MD5|MD2|SHA-?1)\"",
-            "label": "weak hash (MD5/SHA-1)"
+            "label": "weak-hash"
           },
           {
             "pattern": "(?i)\\bDigestUtils\\.(?:md5|md2|sha1)\\w*",
-            "label": "weak hash (MD5/SHA-1)"
+            "label": "weak-hash"
           },
           {
             "pattern": "(?i)\\bCipher\\.getInstance\\(\\s*\"(?:DES|RC4|RC2)(?:[\"/])",
-            "label": "weak cipher (DES/RC4/RC2)"
+            "label": "weak-cipher"
           },
           {
             "pattern": "(?i)\\bCipher\\.getInstance\\(\\s*\"[^\"]*/ECB/",
-            "label": "ECB mode (no diffusion)"
+            "label": "ecb-mode"
           }
         ],
         "snippet_max": 160

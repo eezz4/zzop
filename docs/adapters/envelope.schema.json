@@ -91,6 +91,21 @@
           },
           "description": "Per-file loop-body line spans (1-based, inclusive) — external-parser counterpart of zzop_core::dsl::SourceFile::loop_spans; each Rust (u32, u32) tuple serializes as a 2-element JSON array. Absent = empty = MethodScan::trigger_in_loop silently skips this file (graceful degrade, same as symbols/io). Canonical wire name is snake_case loop_spans (FileProjection has no rename_all); the frozen camelCase spelling loopSpans is accepted as an input-only alias (#[serde(alias = \"loopSpans\")]) — never emitted, so a serialized envelope only ever carries loop_spans."
         },
+        "function_spans": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "array",
+            "items": [
+              { "type": "integer", "minimum": 0, "description": "1-based start line, inclusive." },
+              { "type": "integer", "minimum": 0, "description": "1-based end line, inclusive." }
+            ],
+            "minItems": 2,
+            "maxItems": 2,
+            "additionalItems": false
+          },
+          "description": "Per-file FUNCTION line spans (1-based, inclusive) with promise-continuation callbacks merged into their call site — external-parser counterpart of zzop_core::dsl::SourceFile::function_spans; each Rust (u32, u32) tuple serializes as a 2-element JSON array. One span per function-like node (declaration/expression/arrow/method/constructor/accessor), nested spans overlap freely, and a function-shaped argument of a .then()/.catch()/.finally() member call has its START pulled up to that call's property-token line so a promise continuation shares one span with the boundary that schedules it. Absent = empty = MethodScan::after_in_same_function degrades to a NO-OP for this file (the rule keeps its coarser symbol-span behavior; it does NOT go silent — the opposite direction from loop_spans). A PARTIAL list degrades the same way but per LINE: any line your spans do not cover reads as \"no gate on this line\" (pre-gate scope), never as \"no pair\" — so omitting spans can only leave the coarser over-report in place, never silence a finding. Canonical wire name is snake_case function_spans; camelCase functionSpans is accepted as an input-only alias."
+        },
         "degraded": {
           "type": "boolean",
           "default": false,

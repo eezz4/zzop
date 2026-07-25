@@ -30,4 +30,12 @@ zzop-config = { path = "../config" }
 # crates directly; every other handler in this crate stays a thin `zzop-summary` re-export.
 zzop-core = { path = "../core" }
 zzop-engine = { path = "../engine" }
+# Same "only for `explain.rs`" rationale: its issue-label lane derives the `schema/<label>` label set from
+# `zzop_rules_schema::schema_issue_message` (the one place a label's family membership is authored) rather
+# than hand-keeping a copy of it here.
+zzop-rules-schema = { path = "../../rules/native/rules-schema" }
+# Same "only for `explain.rs`" rationale once more: its output-id lane (`explain/output_ids.rs`) asks
+# serde whether a string deserializes into `zzop_metrics::roi::RecId` instead of hand-keeping a copy of
+# the recommendation ids that `architecture.topRecommendation.id` prints.
+zzop-metrics = { path = "../metrics" }
 serde_json = { workspace = true }

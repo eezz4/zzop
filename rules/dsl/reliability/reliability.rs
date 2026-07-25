@@ -87,6 +87,72 @@ fn scan(dir: &TempDir) -> AnalyzeOutput {
     analyze_tree(dir.path(), &config())
 }
 
+/// `scan` with one Mode-B adapter overlay attached — the channel a `zzop.config.jsonc` author reaches
+/// through the `overlays` key, and the only way a declaration-gated rule (`env-outside-config`) can be
+/// exercised in its ENABLED state. Kept beside `scan` rather than inside the one test file that needs it:
+/// the gate is a general line-scan capability, so the next rule to use one starts here.
+fn scan_with(dir: &TempDir, overlay: zzop_core::NormalizedEnvelope) -> AnalyzeOutput {
+    let mut cfg = config();
+    cfg.adapter_overlays = vec![overlay];
+    analyze_tree(dir.path(), &cfg)
+}
+
+/// An attributes-only overlay declaring each entry of `prefixes` an `env-config-module`. A path that
+/// names a directory is a covering `pathScope`; the same call is used for an exact file path, which
+/// resolves as the more specific `pathScope` of that exact string — `deny_env_config_for_file` is what
+/// adds a genuine exact-`file` target.
+///
+/// The envelope carries a single synthetic file entry, because `AttributeStore::from_parts` flattens
+/// `files[].attributes` tree-wide and never cares which file emitted them — the same shape
+/// `examples/auth-overlay-adapter` emits.
+fn env_config_overlay(prefixes: &[&str]) -> zzop_core::NormalizedEnvelope {
+    overlay_with_attributes(
+        prefixes
+            .iter()
+            .map(|p| zzop_core::Attribute {
+                target: zzop_core::EntityRef::PathScope {
+                    prefix: (*p).to_string(),
+                },
+                key: "env-config-module".to_string(),
+                value: serde_json::Value::Bool(true),
+            })
+            .collect(),
+    )
+}
+
+/// Appends an exact-`file` `env-config-module: false` to `overlay` — the carve-out spelling: an exact
+/// target beats every covering scope, so this un-declares one file inside a declared directory.
+fn deny_env_config_for_file(overlay: &mut zzop_core::NormalizedEnvelope, path: &str) {
+    overlay.files[0].attributes.push(zzop_core::Attribute {
+        target: zzop_core::EntityRef::File {
+            path: path.to_string(),
+        },
+        key: "env-config-module".to_string(),
+        value: serde_json::Value::Bool(false),
+    });
+}
+
+fn overlay_with_attributes(attributes: Vec<zzop_core::Attribute>) -> zzop_core::NormalizedEnvelope {
+    zzop_core::NormalizedEnvelope {
+        format: zzop_core::NORMALIZED_AST_FORMAT.to_string(),
+        version: 1,
+        parser: "reliability-fixture-declarations/1".to_string(),
+        source: String::new(),
+        files: vec![zzop_core::FileProjection {
+            path: "zzop-attributes.json".to_string(),
+            loc: 1,
+            attributes,
+            ..Default::default()
+        }],
+    }
+}
+
+/// Every `AnalyzeOutput::warnings` entry mentioning `needle` — the disclosure channel a silenced rule
+/// reports through.
+fn warnings_matching<'a>(out: &'a AnalyzeOutput, needle: &str) -> Vec<&'a String> {
+    out.warnings.iter().filter(|w| w.contains(needle)).collect()
+}
+
 fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {
     out.findings
         .iter()

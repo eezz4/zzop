@@ -104,6 +104,9 @@ impl<'a> From<&'a GitWindow> for GitWindowView<'a> {
 #[serde(rename_all = "camelCase")]
 pub(super) struct CoverageCensusView {
     files: usize,
+    /// The parser-claimed subset of `files` — see `zzop_engine::CoverageCensus::source_files`. `files`
+    /// counts every file walked (docs/data/assets included) and was being misread as the repo's code size.
+    source_files: usize,
     symbols: usize,
     import_edges: usize,
     io_provides: usize,
@@ -117,6 +120,7 @@ impl From<&zzop_engine::CoverageCensus> for CoverageCensusView {
     fn from(c: &zzop_engine::CoverageCensus) -> Self {
         CoverageCensusView {
             files: c.files,
+            source_files: c.source_files,
             symbols: c.symbols,
             import_edges: c.import_edges,
             io_provides: c.io_provides,

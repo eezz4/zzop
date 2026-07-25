@@ -98,6 +98,31 @@ fn single_segment_path_is_never_flagged_even_with_two_hosts() {
     assert!(external_base_url_drift_findings(&external).is_empty());
 }
 
+/// The count gate alone lets an all-slot path through (`/{}/{}` has 2 segments) even though it carries
+/// no literal evidence to group two hosts BY. Sealed by the crate-shared contentless-path gate
+/// (2026-07-25); without it the grouping key would be an extraction artifact.
+#[test]
+fn an_all_slot_path_clears_the_segment_count_but_is_still_not_flagged() {
+    let external = vec![
+        consume(Some("GET https://a.vendor.com/{}/{}"), "fe", "A.tsx", 1),
+        consume(Some("GET https://b.vendor.com/{}/{}"), "be", "B.java", 2),
+    ];
+    assert!(external_base_url_drift_findings(&external).is_empty());
+}
+
+/// Contrast pin for the gate above: one literal segment alongside a slot is still real evidence, so a
+/// mixed path must keep firing — the contentless gate is "zero literals", never "contains a slot".
+#[test]
+fn a_path_mixing_a_literal_and_a_slot_still_fires() {
+    let external = vec![
+        consume(Some("GET https://a.vendor.com/users/{}"), "fe", "A.tsx", 1),
+        consume(Some("GET https://b.vendor.com/users/{}"), "be", "B.java", 2),
+    ];
+    let out = external_base_url_drift_findings(&external);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].data.as_ref().unwrap()["path"], "/users/{}");
+}
+
 #[test]
 fn port_only_difference_between_hosts_is_flagged() {
     let external = vec![

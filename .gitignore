@@ -10,9 +10,21 @@
 #   corpus/*.json*    — local e2e configs/overlays
 /corpus
 
-# zzop report output (runtime artifact; --out / report.dir)
-zzop-report.*/
-/zzop-reports/
+# zzop's own derived artifacts inside an analyzed tree — today `.zzop/cache/` (the default `cacheDir`,
+# `zzop_cache::DEFAULT_CACHE_DIR`), created on the first run of any zero-config analysis, this repo's
+# own dogfooding included. Pure derived state: safe to delete, regenerated next run.
+#
+# ANCHORED, and never a `zzop*` glob: the user-authored `zzop/` (custom rule packs, adapter overlays) is
+# ONE character away and must stay committed. This one line replaces the removed JS CLI's
+# `zzop-report.*/` + `/zzop-reports/` pair — that CLI is gone and nothing writes those names any more.
+/.zzop/
+
+# Working scratch: measurement harness + per-agent task files + `runs/<label>/` outputs.
+# Local-only by the same rule as /corpus — never shipped. Listed explicitly because a bare
+# `git add -A` at commit time otherwise sweeps agent task files into a public commit
+# (`git check-ignore` is NOT a reliable check here — it reports a match against a blank
+# .gitignore line for this path; `git add -A -n` is the one that tells the truth).
+/scratchpad
 
 # OS / editor
 .DS_Store

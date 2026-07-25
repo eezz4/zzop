@@ -1,5 +1,5 @@
 //! Cross-layer IO — joins what one tree CONSUMES to what another tree PROVIDES, on a normalized contract key.
-//! Not AST matching: a `(kind, key)` exact join, with three integrity gates layered on top of the raw join
+//! Not AST matching: a `(kind, key)` exact join, with four integrity gates layered on top of the raw join
 //! (each verified against real false-positive vectors, not speculative):
 //! - **Ambiguity**: a consume whose key is provided by 2+ DISTINCT source trees is not auto-linked — it goes
 //!   to [`CrossLayerResult::ambiguous_consumes`] with every candidate listed, rather than emitting a many-to-many
@@ -10,7 +10,17 @@
 //!   `unprovidedConsumes`, since it is third-party egress, not drift. An absolute-URL consume whose
 //!   authority matches a declared [`LinkOptions::internal_hosts`] entry is re-keyed to its path and
 //!   exempted from this gate FIRST — deployment topology (a tree calling its own gateway host by its
-//!   public name) is a same-deployment call, not egress.
+//!   public name) is a same-deployment call, not egress. That re-key, this gate, and the no-key check in
+//!   front of both are ONE function, [`classify_consume_join`], because their ORDER is as much of the
+//!   contract as the gates themselves — shared verbatim with the single-tree `http/unprovided-consume`
+//!   rule, which used to hand-copy the gate without the transform.
+//! - **Route identity**: a consume key that names no route — every path segment is a `{}` placeholder
+//!   (`GET /{}`, the head-drop artifact of an unresolved `${BASE}` interpolation) — carries zero joinable
+//!   evidence, so a MISS on it is not evidence that a contract is missing. It goes to
+//!   [`CrossLayerResult::unresolved_consumes`] (a disclosed blind spot) instead of `unprovidedConsumes`
+//!   (asserted drift). Predicate: [`key_carries_route_identity`], shared with the single-tree
+//!   `http/unprovided-consume` rule and the engine's blindness caveat. A HIT is unaffected — a key that
+//!   actually joins a declared catch-all provide is a join, not a guess.
 //! - **Low confidence**: an edge whose key matches an injected pattern (generic paths like `/health` that many
 //!   unrelated services legitimately share) is still emitted, but tagged with
 //!   [`CrossLayerEdge::low_confidence_reason`] so a consumer can discount it. The pattern table itself is
@@ -25,7 +35,9 @@
 //! - [`facts`](self) — the serde wire types ([`IoFacts`], provides/consumes, cross-layer result buckets).
 //! - [`key`](self) — pinned HTTP interface-key normalization ([`http_interface_key`] and friends) and the
 //!   `db-table` channel's shared casing transform ([`key::db_table_channel_casing`]).
-//! - [`link`](self) — [`link_cross_layer_io`] and its [`LinkOptions`].
+//! - [`link`](self) — [`link_cross_layer_io`], its [`LinkOptions`], and the structural consume-side gate
+//!   sequence both axes share ([`classify_consume_join`] / [`ConsumeJoin`]; its internal-host re-key
+//!   transform is reachable only through it, never on its own).
 
 mod facts;
 mod key;
@@ -37,7 +49,8 @@ pub use facts::{
     TaggedConsume, TaggedProvide,
 };
 pub use key::{
-    db_table_channel_casing, http_consume_interface_key, http_interface_key, normalize_http_path,
-    unknown_verb_route_path, HTTP_KEY_VERBS, UNKNOWN_VERB,
+    db_table_channel_casing, http_consume_interface_key, http_interface_key,
+    key_carries_route_identity, normalize_http_path, unknown_verb_route_path, HTTP_KEY_VERBS,
+    UNKNOWN_VERB,
 };
-pub use link::{link_cross_layer_io, LinkOptions};
+pub use link::{classify_consume_join, link_cross_layer_io, ConsumeJoin, LinkOptions};

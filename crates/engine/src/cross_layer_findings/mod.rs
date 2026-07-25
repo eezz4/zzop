@@ -3,6 +3,7 @@
 mod blindness_caveat;
 mod merge_config;
 mod partition;
+mod unconsumed_family;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -114,16 +115,20 @@ pub(crate) fn compute_cross_layer_findings(
         .map(|r| r.targets.clone())
         .unwrap_or_default();
 
-    if zzop_core::is_enabled(&gate, "cross-layer/unconsumed-endpoint") {
-        let mut findings = zzop_rules_cross_layer::unconsumed_endpoint_findings(
-            &unconsumed_provides,
-            &cross_layer.unresolved_consumes,
-            &near_miss_targets,
-            trpc_participating_sources,
-        );
-        blindness_caveat::append(&mut findings, &extraction_blindness_caveat);
-        sources.push(findings);
-    }
+    // The `unconsumed-endpoint`/`unconsumed-mutation-endpoint` pair is computed together, ahead of its
+    // `sources` positions, because the general rule must see what the specialization reported before it can
+    // stand down there — see `unconsumed_family`'s doc. Each half is still gated on its own id, and each is
+    // pushed at its established position below.
+    let (unconsumed_findings, mutation_findings) = unconsumed_family::compute(
+        &gate,
+        &unconsumed_provides,
+        &cross_layer.unresolved_consumes,
+        &http_consume_totals,
+        &near_miss_targets,
+        trpc_participating_sources,
+        &extraction_blindness_caveat,
+    );
+    sources.push(unconsumed_findings);
     if zzop_core::is_enabled(&gate, "cross-layer/method-mismatch") {
         sources.push(zzop_rules_cross_layer::method_mismatch_findings(
             &unprovided_filtered,
@@ -215,24 +220,8 @@ pub(crate) fn compute_cross_layer_findings(
             &cross_layer.ambiguous_consumes,
         ));
     }
-    if zzop_core::is_enabled(&gate, "cross-layer/unconsumed-mutation-endpoint") {
-        // Same blindness predicate `cross-layer/unresolved-consume-ratio` self-reports with, via the shared
-        // helper so the two rules never drift on what counts BLIND (a confident "unconsumed" verdict needs
-        // a resolved consume side).
-        let blind_sources = zzop_rules_cross_layer::majority_unresolved_http_sources(
-            &cross_layer.unresolved_consumes,
-            &http_consume_totals,
-        );
-        let mut findings = zzop_rules_cross_layer::unconsumed_mutation_endpoint_findings(
-            &unconsumed_provides,
-            &cross_layer.unresolved_consumes,
-            &blind_sources,
-            &near_miss_targets,
-            trpc_participating_sources,
-        );
-        blindness_caveat::append(&mut findings, &extraction_blindness_caveat);
-        sources.push(findings);
-    }
+    // Computed above (its output gates the general rule); pushed here to keep the `sources` order stable.
+    sources.push(mutation_findings);
     if zzop_core::is_enabled(&gate, "cross-layer/unprovided-mutation-call") {
         // Provide-side blindness gate — mirror of `unconsumed-mutation-endpoint`'s consume-blind gate: a
         // "no provider anywhere" verdict is untrusted when a framework-bearing tree extracted almost no

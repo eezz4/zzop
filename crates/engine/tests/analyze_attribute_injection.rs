@@ -97,6 +97,7 @@ fn projection(path: &str, loc: u32) -> FileProjection {
         is_entry: false,
         attributes: Vec::new(),
         loop_spans: Vec::new(),
+        function_spans: Vec::new(),
     }
 }
 

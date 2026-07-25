@@ -3,8 +3,8 @@
 These packaging lanes (MCPB + Claude Code plugin) ship the native `zzop-mcp` server binary specifically
 (no Node runtime, no per-server Node tax) — the same binary, packaged two ways. (zzop also ships a
 second native binary, the `zzop` CLI, distributed separately via GitHub Releases and npm; see the repo
-root [`README.md`](../README.md).) Discovery + version updates are handled by each host's own
-mechanism — there is **no custom version-check hook** and no npm.
+root [`README.md`](../../README.md).) Neither lane updates itself: Desktop cannot (see below), and the
+Code plugin deliberately reports a newer release rather than applying it. No npm is involved in either.
 
 ## Claude Desktop — MCPB bundle (`mcpb/manifest.json`)
 
@@ -40,17 +40,21 @@ Attach the `.mcpb` files to the GitHub release alongside the bare binaries.
 
 ## Claude Code — plugin (`.claude-plugin/`, `mcpServers` in `plugin.json`)
 
-Claude Code installs plugins from a marketplace (zzop's own `.claude-plugin/marketplace.json`).
-`${CLAUDE_PLUGIN_ROOT}` resolves in `plugin.json`'s `mcpServers` server `command` (verified — distinct
-from the SessionStart-hook `CLAUDE_PLUGIN_ROOT` gap), and `/reload-plugins` swaps to a new version on
-update, so the marketplace handles versioning with no custom hook.
+Claude Code installs plugins from a marketplace (zzop's own `.claude-plugin/marketplace.json`). Unlike
+the Desktop lane there is no bundle: `plugin.json`'s `mcpServers` command is
+`${CLAUDE_PLUGIN_DATA}/zzop-mcp`, and a `SessionStart` hook (`.claude-plugin/hooks/bootstrap.sh`) puts
+that file there by downloading the release asset for the running platform. Nothing goes on `PATH`.
+The user-facing steps and the update policy are not restated here — they live in
+[`crates/host/README.md`](../../crates/host/README.md#install-as-a-claude-code-plugin). This section
+covers only why the packaging has that shape.
 
-**Install model — PATH binary (deliberately not one-click).** Code plugins have no `platform_overrides`
-equivalent, so a single `mcpServers` `command` can't select a per-OS binary from a bundle. A one-click
-selection hook (bundle all binaries + a hook that copies the right one into place) was considered and
-**dropped as over-engineering**: it carries real cross-platform-shell + hook-timing risk for a
-convenience, and the subtraction philosophy favors removing it. Instead the user installs the single
-static `zzop-mcp` binary for their platform from GitHub Releases onto `PATH` (documented in
-`marketplace.json`), and `plugin.json`'s `mcpServers` invokes bare `zzop-mcp` — Node-free, works on every
-platform, no fragile hook. Desktop's MCPB gives the one-click path for the less-technical audience; Code
-users are developers who can drop a binary on `PATH`.
+**Why a hook rather than a bundle.** Code plugins have no `platform_overrides` equivalent, so one
+`mcpServers` command string cannot select a per-OS binary out of a bundle — the choice is a hook that
+fetches the right asset, or asking the user to place one by hand. Hand placement shipped first and
+failed in real use (a stale binary on `PATH` against much newer manifests, with nothing anywhere
+pointing at the fix), which is what bought the hook. Its cost is accepted rather than hidden: it is a
+POSIX shell script, so on Windows it needs Git Bash — Claude Code's documented shell for command
+hooks — and under the PowerShell fallback it does not run. That failure is visible and names the exact
+path to drop a binary at, and a plugin marketplace is a git clone anyway, so a Windows user who has
+this plugin almost always has Git for Windows' bash. Desktop's MCPB remains the one-click path for the
+less-technical audience.

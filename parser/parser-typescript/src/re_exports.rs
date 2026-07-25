@@ -1,6 +1,8 @@
 //! Static re-export (`export ... from`) and dynamic `import("literal")` specifier extraction.
 
-use swc_core::ecma::ast::{CallExpr, Callee, ExportSpecifier, Expr, Lit, ModuleDecl, ModuleItem};
+use swc_core::ecma::ast::{
+    CallExpr, Callee, ExportSpecifier, Expr, Lit, Module, ModuleDecl, ModuleItem,
+};
 use swc_core::ecma::visit::{Visit, VisitWith};
 use zzop_core::ReExport;
 
@@ -17,10 +19,16 @@ use crate::parse_module;
 /// exclusion set so it is never treated as a circular-dependency edge — the same treatment a type-only
 /// import binding gets.
 pub fn parse_re_exports(file: &str, source: &str) -> Vec<ReExport> {
-    let mut out = Vec::new();
     let Some(module) = parse_module(file, source) else {
-        return out;
+        return Vec::new();
     };
+    re_exports_from_module(&module)
+}
+
+/// The walk behind [`parse_re_exports`], over an already-parsed `Module` — so a caller that needs
+/// several facts from the same file can pay for ONE parse (see `crate::dead_export_facts`).
+pub(crate) fn re_exports_from_module(module: &Module) -> Vec<ReExport> {
+    let mut out = Vec::new();
     for item in &module.body {
         let ModuleItem::ModuleDecl(decl) = item else {
             continue;
@@ -75,6 +83,12 @@ pub fn parse_dynamic_imports(file: &str, source: &str) -> Vec<String> {
     let Some(module) = parse_module(file, source) else {
         return Vec::new();
     };
+    dynamic_imports_from_module(&module)
+}
+
+/// The walk behind [`parse_dynamic_imports`], over an already-parsed `Module` — same one-parse
+/// rationale as [`re_exports_from_module`].
+pub(crate) fn dynamic_imports_from_module(module: &Module) -> Vec<String> {
     let mut collector = DynImportCollector { out: Vec::new() };
     module.visit_with(&mut collector);
     collector.out

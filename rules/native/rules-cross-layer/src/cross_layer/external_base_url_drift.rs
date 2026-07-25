@@ -2,6 +2,10 @@
 //! hosts that plausibly belong to ONE logical service (see the registrable-domain guard below). Host
 //! strings include port (a port-only difference also counts as drift), and is narrowed to paths with 2+
 //! non-empty segments — a single-segment path like `/api` is too generic to attribute to one service.
+//! Segment COUNT alone is not enough, though: an all-slot path like `/{}/{}` clears the count while
+//! carrying no literal evidence at all, so [`super::is_all_slot_path`] (this crate's shared
+//! contentless-path gate) drops it as well. The two conditions are not redundant — the count gate
+//! rejects the too-generic `/api`, the contentless gate rejects the says-nothing `/{}/{}`.
 //!
 //! ## Registrable-domain guard
 //! Grouping by path alone is not enough: vendors converge on conventional path shapes (`/oauth/token` is
@@ -17,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use zzop_core::io::TaggedConsume;
 use zzop_core::{disable_hint, Finding, Severity};
 
-use super::{path_segments, split_external_key};
+use super::{is_all_slot_path, path_segments, split_external_key};
 
 struct Site<'a> {
     host: &'a str,
@@ -61,7 +65,8 @@ pub fn external_base_url_drift_findings(external_consumes: &[TaggedConsume]) -> 
         let Some(url) = split_external_key(key) else {
             continue;
         };
-        if path_segments(url.path).len() < 2 {
+        let segments = path_segments(url.path);
+        if segments.len() < 2 || is_all_slot_path(&segments) {
             continue;
         }
         by_path.entry(url.path).or_default().push(Site {

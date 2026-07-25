@@ -10,7 +10,7 @@ use crate::cache::CacheCounters;
 use crate::dispatch;
 use crate::EngineConfig;
 
-use super::findings::{eval_packs, schema_findings, schema_findings_eligible};
+use super::findings::{eval_packs, schema_findings, schema_findings_eligible, SpanFacts};
 use super::fresh::compute_fresh_artifact;
 use super::FileArtifact;
 
@@ -49,6 +49,7 @@ pub(super) fn process_file(
                 io: None,
                 rule_timings: Vec::new(),
                 used_names: Vec::new(),
+                exported_signature_names: Vec::new(),
                 const_map_fragment: std::collections::HashMap::new(),
                 procedure_router_fragments: Vec::new(),
                 router_mount_fragments: Vec::new(),
@@ -59,6 +60,7 @@ pub(super) fn process_file(
                 query_call_sites: Vec::new(),
                 field_usage_tokens: Vec::new(),
                 loop_spans: Vec::new(),
+                function_spans: Vec::new(),
             };
         }
     };
@@ -94,7 +96,10 @@ pub(super) fn process_file(
                 &text,
                 &ir.symbols,
                 ir.io.clone(),
-                &ir.loop_spans,
+                SpanFacts {
+                    loop_spans: &ir.loop_spans,
+                    function_spans: &ir.function_spans,
+                },
                 config.profile_rules,
             );
             if schema_findings_eligible(language, ir.degraded) {
@@ -127,6 +132,7 @@ pub(super) fn process_file(
             degraded: artifact.degraded,
             io: artifact.io.clone(),
             used_names: artifact.used_names.clone(),
+            exported_signature_names: artifact.exported_signature_names.clone(),
             minified_or_generated: artifact.minified_or_generated,
             const_map_fragment: artifact.const_map_fragment.clone(),
             procedure_router_fragments: artifact.procedure_router_fragments.clone(),
@@ -138,6 +144,7 @@ pub(super) fn process_file(
             query_call_sites: artifact.query_call_sites.clone(),
             field_usage_tokens: artifact.field_usage_tokens.clone(),
             loop_spans: artifact.loop_spans.clone(),
+            function_spans: artifact.function_spans.clone(),
         };
         let _ = cache.put_ir(key, &ir_slice);
         let _ = cache.put_findings(key, &artifact.findings);
@@ -169,6 +176,7 @@ fn artifact_from_ir(
         io: ir.io,
         rule_timings,
         used_names: ir.used_names,
+        exported_signature_names: ir.exported_signature_names,
         const_map_fragment: ir.const_map_fragment,
         procedure_router_fragments: ir.procedure_router_fragments,
         router_mount_fragments: ir.router_mount_fragments,
@@ -179,5 +187,6 @@ fn artifact_from_ir(
         query_call_sites: ir.query_call_sites,
         field_usage_tokens: ir.field_usage_tokens,
         loop_spans: ir.loop_spans,
+        function_spans: ir.function_spans,
     }
 }

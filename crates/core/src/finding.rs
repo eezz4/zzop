@@ -1,5 +1,5 @@
 //! Finding / Severity / RuleExplain — rule output contract.
-//! Whether a finding comes from a native rule, a DSL pack, or a JS quick-rule, it is normalized and merged here.
+//! Whether a finding comes from a native rule or a DSL pack, it is normalized and merged here.
 
 use serde::{Deserialize, Serialize};
 

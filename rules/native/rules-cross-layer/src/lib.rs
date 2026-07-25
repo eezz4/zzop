@@ -8,49 +8,41 @@
 
 pub mod cross_layer;
 
-use zzop_core::{register_native_analysis_stub, RuleRegistry, Severity};
+use zzop_core::{register_native_analysis_stub, RuleRegistry};
 
 /// Registers every native analysis id whose implementation lives in this crate (see `rules/README.md`'s
 /// "Adding a rule" section); `zzop_engine::register_all_native` composes this with the other crates' own.
+/// Ids only — a finding's severity is set where the finding is built (`cross_layer::*`), so there is no
+/// second copy here to drift from it.
 pub fn register_native_analyses(registry: &mut RuleRegistry) {
-    let analyses: &[(&str, Severity)] = &[
-        ("cross-layer/unconsumed-endpoint", Severity::Info),
-        ("cross-layer/method-mismatch", Severity::Warning),
-        ("cross-layer/version-skew", Severity::Warning),
-        ("cross-layer/path-near-miss", Severity::Info),
-        ("cross-layer/route-near-miss", Severity::Info),
-        ("cross-layer/prefix-drift", Severity::Info),
-        ("cross-layer/shared-db-table", Severity::Warning),
-        ("cross-layer/duplicate-route", Severity::Warning),
-        ("cross-layer/external-shadow-internal", Severity::Warning),
-        ("cross-layer/external-secret-in-url", Severity::Warning),
-        (
-            "cross-layer/external-duplicated-integration",
-            Severity::Warning,
-        ),
-        ("cross-layer/external-host-fanout", Severity::Info),
-        ("cross-layer/external-base-url-drift", Severity::Info),
-        ("cross-layer/external-version-inconsistent", Severity::Info),
-        ("cross-layer/external-ip-literal", Severity::Warning),
-        ("cross-layer/ambiguous-consume", Severity::Warning),
-        (
-            "cross-layer/unconsumed-mutation-endpoint",
-            Severity::Warning,
-        ),
-        ("cross-layer/unprovided-mutation-call", Severity::Warning),
-        ("cross-layer/route-shadowing", Severity::Warning),
-        ("cross-layer/unresolved-consume-ratio", Severity::Info),
-        ("cross-layer/sdk-import-no-visible-consume", Severity::Info),
-        ("cross-layer/unconsumed-procedure", Severity::Info),
-        ("cross-layer/body-field-drift", Severity::Warning),
-        (
-            "cross-layer/retrying-write-no-idempotency",
-            Severity::Warning,
-        ),
-        ("cross-layer/unknown-verb-route", Severity::Info),
-    ];
-    for &(id, default_severity) in analyses {
-        register_native_analysis_stub(registry, id, default_severity);
+    for id in [
+        "cross-layer/unconsumed-endpoint",
+        "cross-layer/method-mismatch",
+        "cross-layer/version-skew",
+        "cross-layer/path-near-miss",
+        "cross-layer/route-near-miss",
+        "cross-layer/prefix-drift",
+        "cross-layer/shared-db-table",
+        "cross-layer/duplicate-route",
+        "cross-layer/external-shadow-internal",
+        "cross-layer/external-secret-in-url",
+        "cross-layer/external-duplicated-integration",
+        "cross-layer/external-host-fanout",
+        "cross-layer/external-base-url-drift",
+        "cross-layer/external-version-inconsistent",
+        "cross-layer/external-ip-literal",
+        "cross-layer/ambiguous-consume",
+        "cross-layer/unconsumed-mutation-endpoint",
+        "cross-layer/unprovided-mutation-call",
+        "cross-layer/route-shadowing",
+        "cross-layer/unresolved-consume-ratio",
+        "cross-layer/sdk-import-no-visible-consume",
+        "cross-layer/unconsumed-procedure",
+        "cross-layer/body-field-drift",
+        "cross-layer/retrying-write-no-idempotency",
+        "cross-layer/unknown-verb-route",
+    ] {
+        register_native_analysis_stub(registry, id);
     }
 }
 

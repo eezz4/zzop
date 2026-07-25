@@ -286,3 +286,21 @@ fn fs_check_use_ok_marker_above_the_write_suppresses_the_finding() {
         out.findings
     );
 }
+
+// ORDER-GATE pin: seals the `after: check` gate — a write that PRECEDES the only existence check is a
+// write-then-verify, the reverse of the CWE-367 check-then-use window the id names. Before the gate,
+// plain co-occurrence in the same function fired.
+#[test]
+fn an_fs_write_that_precedes_the_only_check_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/writeThenVerify.ts",
+        "import fs from \"fs\";\n\nexport function writeThenVerify(p: string, data: string) {\n  fs.writeFileSync(p, data);\n  return fs.existsSync(p);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "fs-check-then-use").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}

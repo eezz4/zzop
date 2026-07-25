@@ -238,10 +238,9 @@ through before it ships:
    already used before the sweep unified every other deployed-surface DSL rule onto it. If a rule already
    has a `file_exclude_pattern` for an unrelated reason (e.g. `reliability/process-exit-in-lib` excludes
    `scripts?/tools/bin` as CLI-entrypoint dirs), leave that alone rather than conflating two different
-   exclude reasons into one regex. (`reliability/env-outside-config` is a deliberate exception: it
-   excludes config-file basenames AND folds in the canonical test-path/`scripts/` exclusion, documented
-   in its own `message` — see that rule for the reasoning.)
-
+   exclude reasons into one regex. (`reliability/env-outside-config` used to fold a config-basename guess
+   into the same field; it now carries only the shared test-path fragment and gets its real exemption from
+   a declared attribute — see item 3.)
    Adversarial review on a large real monorepo closed three more gaps in the canonical string: NestJS
    `*.e2e-spec.ts` files (the old `\.(test|spec)\.` alternative requires a literal `.spec.`, which an
    `-spec.` hyphen separator doesn't produce), `packages/testing/` helper directories, and `vite.config.*`
@@ -250,18 +249,32 @@ through before it ships:
    ```
    "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)"
    ```
-3. **Does the message carry problem + fix + suppress?** Every DSL rule's `message` must explain what's wrong,
+   (That exact string ships as the shared `${test-paths-stories}` fragment — reference it rather than
+   pasting a copy, so the next gap closed there closes for every rule at once.)
+3. **Does this rule rest on a fact the source cannot state?** "Which directory is the config module",
+   "which tree is generated", "which paths are vendored" are facts about the *project*, not about the
+   code — and a basename regex or a whole-file shape heuristic that infers one is a guess, which this
+   engine's soundness floor rules out. Gate on a declaration instead: `attr_absent`/`attr_present` read
+   an attribute the project injects through an overlay, and `require_attr_declared` makes the rule stand
+   down — loudly, in `warnings` — when nobody has declared one. See
+   [dsl-reference: Attribute gates](dsl-reference.md#attribute-gates-consuming-a-declaration). The trade
+   has to be made deliberately: a zero-config user then gets silence plus a disclosure instead of a
+   partly-right answer, so this is right only where a wrong answer is worse than none.
+   `reliability/env-outside-config` is the shipped example — it previously guessed the config module from
+   its basename and from two whole-file syntax shapes, and its own message admitted the decisive gap
+   ("a whole-tree fact no file-local matcher can establish").
+4. **Does the message carry problem + fix + suppress?** Every DSL rule's `message` must explain what's wrong,
    how to fix it, and name its own derived marker `<id>-ok` — already machine-enforced by the "Message triple" check
    above, but worth checking by eye while drafting: a reviewer should never have to guess how to vet a
    false positive.
-4. **Does the message make a claim about what the matcher does or doesn't flag?** If the message
+5. **Does the message make a claim about what the matcher does or doesn't flag?** If the message
    says "plain `as X` is not flagged", "only literal query strings are kept", "a bare `$transaction`
    still fires" — that claim is a testable contract, and an unpinned claim WILL drift (shipped
    examples: `as-cast`'s pattern matched a lone `as unknown` its message promised to skip;
    `race-condition-toctou`'s message called `$transaction` insufficient while its matcher still
    vetoed on it). Add a fixture to the pack's `.rs` test that asserts the claimed behavior — one
    positive or negative per claim, named after the claim.
-5. **Is this pattern an English word that could appear in prose?** Comments are already excluded by item 1,
+6. **Is this pattern an English word that could appear in prose?** Comments are already excluded by item 1,
    but a string literal isn't — a keyword pattern that happens to be an ordinary English word (`do`, `for`,
    `while`, `update`, `delete`, `select`, etc.) will also match that same word sitting inside prose text
    (`"logged in to do this"` matches a bare `\bdo\b`; `"waiting for ${x}"` matches a bare `\bfor\b`). Require
@@ -271,7 +284,7 @@ through before it ships:
    `dangerous_bare_words_are_syntax_anchored_not_bare_prose_matches` test (see that test's own doc comment
    for the curated word list and exactly what the check can/cannot prove) — this is the fix that shipped for
    `perf/api-in-loop` (bare `\bdo\b`) and `security/sql-taint` (bare `UPDATE`).
-6. **What is the nearest benign lookalike, and is it pinned as a negative fixture?** Before shipping,
+7. **What is the nearest benign lookalike, and is it pinned as a negative fixture?** Before shipping,
    name the most common INNOCENT code that matches the same surface shape the rule keys on, and pin it
    as a negative test in the pack's `.rs` — not a synthetic near-miss, but the real-world idiom a scan
    of an ordinary repo will actually hit. Field-audit examples of rules that shipped without this and
@@ -282,7 +295,7 @@ through before it ships:
    `perf/api-in-loop` (a request-per-iteration loop vs the universal single-fetch-then-`.map()`
    response transform). A positive fixture proves the rule CAN fire; only the benign-lookalike negative
    proves it knows when NOT to.
-7. **Does the claim need structure the matcher doesn't have?** `line-scan`/`method-scan` see text
+8. **Does the claim need structure the matcher doesn't have?** `line-scan`/`method-scan` see text
    co-occurrence within a span — they cannot see containment (X *inside* a loop), order (X *then* Y), or
    dataflow (X *flows into* Y). If the rule's value depends on such a relation, either (a) use a
    structural fact the parser projects (e.g. `MethodScan::trigger_in_loop` over `loop_spans`, the fix

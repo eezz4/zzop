@@ -117,6 +117,30 @@ fn bare_root_path_is_dropped_from_the_versionless_side() {
     assert!(external_version_inconsistent_findings(&external).is_empty());
 }
 
+/// The same argument as the root, one shape wider: an unresolved interpolation leaves an all-slot path
+/// that pins no version either, so it must not manufacture the versionless side of the split. Sealed
+/// when the crate-shared contentless-path gate replaced the root-only spelling (2026-07-25).
+#[test]
+fn an_all_slot_path_is_dropped_from_the_versionless_side_too() {
+    let external = vec![
+        consume(
+            "http",
+            Some("GET https://api.vendor.com/v1/users"),
+            "fe",
+            "Users.ts",
+            40,
+        ),
+        consume(
+            "http",
+            Some("GET https://api.vendor.com/{}"),
+            "fe",
+            "Dynamic.ts",
+            1,
+        ),
+    ];
+    assert!(external_version_inconsistent_findings(&external).is_empty());
+}
+
 #[test]
 fn each_host_is_classified_independently() {
     // host A: versioned only, host B: versionless only — neither alone qualifies.

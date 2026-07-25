@@ -183,10 +183,10 @@ fn symbol_attr_wrong_key_misses() {
     assert_eq!(s.symbol_attr("User", None, "model-churn"), None);
 }
 
-// --- file_attr ---
+// --- path_attr ---
 
 #[test]
-fn file_attr_match() {
+fn path_attr_match() {
     let s = store(vec![Attribute {
         target: EntityRef::File {
             path: "src/index.ts".into(),
@@ -194,11 +194,11 @@ fn file_attr_match() {
         key: "is-entry".into(),
         value: json!(true),
     }]);
-    assert_eq!(s.file_attr("src/index.ts", "is-entry"), Some(&json!(true)));
+    assert_eq!(s.path_attr("src/index.ts", "is-entry"), Some(&json!(true)));
 }
 
 #[test]
-fn file_attr_miss_on_different_path_or_key() {
+fn path_attr_miss_on_different_path_or_key() {
     let s = store(vec![Attribute {
         target: EntityRef::File {
             path: "src/index.ts".into(),
@@ -206,8 +206,112 @@ fn file_attr_miss_on_different_path_or_key() {
         key: "is-entry".into(),
         value: json!(true),
     }]);
-    assert_eq!(s.file_attr("src/other.ts", "is-entry"), None);
-    assert_eq!(s.file_attr("src/index.ts", "other-key"), None);
+    assert_eq!(s.path_attr("src/other.ts", "is-entry"), None);
+    assert_eq!(s.path_attr("src/index.ts", "other-key"), None);
+}
+
+#[test]
+fn path_attr_pathscope_covers_files_under_prefix_on_segment_boundaries() {
+    // The contract that makes a declaration channel usable at all: a user names a DIRECTORY, not every
+    // file in it. Segment-boundary matching is what keeps `src/config` from claiming
+    // `src/configuration.ts` — the same test `route_attr` applies to route paths.
+    let s = store(vec![Attribute {
+        target: EntityRef::PathScope {
+            prefix: "src/config".into(),
+        },
+        key: "env-config-module".into(),
+        value: json!(true),
+    }]);
+    assert_eq!(
+        s.path_attr("src/config/db.ts", "env-config-module"),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        s.path_attr("src/config", "env-config-module"),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        s.path_attr("src/configuration.ts", "env-config-module"),
+        None
+    );
+    assert_eq!(s.path_attr("src/app/page.tsx", "env-config-module"), None);
+}
+
+#[test]
+fn path_attr_exact_file_beats_a_covering_scope_and_longest_scope_wins() {
+    // Specificity, not insertion order — the same rule `route_attr` documents. The falsy exact entry is
+    // the shape a user needs to carve ONE file out of a directory they declared wholesale.
+    let s = store(vec![
+        Attribute {
+            target: EntityRef::PathScope {
+                prefix: "src".into(),
+            },
+            key: "env-config-module".into(),
+            value: json!(true),
+        },
+        Attribute {
+            target: EntityRef::PathScope {
+                prefix: "src/app".into(),
+            },
+            key: "env-config-module".into(),
+            value: json!(false),
+        },
+        Attribute {
+            target: EntityRef::File {
+                path: "src/app/page.tsx".into(),
+            },
+            key: "env-config-module".into(),
+            value: json!(true),
+        },
+    ]);
+    assert_eq!(
+        s.path_attr("src/app/page.tsx", "env-config-module"),
+        Some(&json!(true)),
+        "an exact File target must beat every covering PathScope"
+    );
+    assert_eq!(
+        s.path_attr("src/app/other.tsx", "env-config-module"),
+        Some(&json!(false)),
+        "the LONGEST covering scope wins, so a narrower falsy scope overrides a broader truthy one"
+    );
+    assert_eq!(
+        s.path_attr("src/lib/x.ts", "env-config-module"),
+        Some(&json!(true))
+    );
+}
+
+#[test]
+fn an_empty_pathscope_prefix_covers_no_file() {
+    // Pins the documented asymmetry rather than leaving it to be rediscovered: `prefix: ""` is a
+    // whole-ROUTE wildcard (every route starts with `/`) and covers NOTHING on the file surface.
+    let s = store(vec![Attribute {
+        target: EntityRef::PathScope { prefix: "".into() },
+        key: "env-config-module".into(),
+        value: json!(true),
+    }]);
+    assert_eq!(s.path_attr("src/anything.ts", "env-config-module"), None);
+    assert_eq!(
+        s.route_attr("http", "GET /anything", "env-config-module"),
+        Some(&json!(true))
+    );
+}
+
+// --- declares ---
+
+#[test]
+fn declares_reports_vocabulary_presence_independently_of_truthiness() {
+    // The gate `require_attr_declared` needs: an explicit `false` IS a declaration (the producer spoke
+    // about this key), so a rule whose premise is "the user told me where Y is" must stay enabled.
+    let s = store(vec![Attribute {
+        target: EntityRef::PathScope {
+            prefix: "src/config".into(),
+        },
+        key: "env-config-module".into(),
+        value: json!(false),
+    }]);
+    assert!(s.declares("env-config-module"));
+    assert!(!s.declares("some-other-key"));
+    assert!(!AttributeStore::default().declares("env-config-module"));
 }
 
 // --- from_parts ---
@@ -235,6 +339,7 @@ fn overlay_with_attrs(attrs: Vec<Attribute>) -> crate::NormalizedEnvelope {
             is_entry: false,
             attributes: attrs,
             loop_spans: Vec::new(),
+            function_spans: Vec::new(),
         }],
     }
 }
@@ -260,7 +365,7 @@ fn from_parts_merges_native_and_overlay_attributes() {
         s.route_attr("http", "POST /admin/x", "auth-guarded"),
         Some(&json!(true))
     );
-    assert_eq!(s.file_attr("src/index.ts", "is-entry"), Some(&json!(true)));
+    assert_eq!(s.path_attr("src/index.ts", "is-entry"), Some(&json!(true)));
 }
 
 #[test]

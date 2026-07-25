@@ -8,13 +8,37 @@
 //!
 //! Consume sites in test-path files (`zzop_core::is_test_file`) are skipped — a test mocking a
 //! vendor/own API is not deployed egress.
+//!
+//! ## Contentless-path gate (why a third-party root URL is not a shadow)
+//! The match is made on the HOST-STRIPPED path, so the rule's evidence is only as strong as the path.
+//! When the path carries no literal segment ([`super::is_all_slot_path`] — the bare root `/`, or an
+//! all-slot `/{}` head-drop artifact) the comparison decides NOTHING: every third-party root URL
+//! projects onto `GET /`, so `https://v2ex.com/?tab=hot` "matches" any worker/root handler in the
+//! analysis exactly as well as a genuinely misrouted internal URL would. Such consumes are skipped.
+//!
+//! Measured: mono-hub `community-hub-fe/src/lib/sources/V2EX_HOT.ts:14` (`GET https://www.v2ex.com/?tab=hot`,
+//! query dropped by [`split_external_key`]) was reported as shadowing `@base/utils-all`'s `GET /`
+//! worker root handler (2026-07-25) — nothing about `v2ex.com` is internal. The corpus reproduces it
+//! only once same-file URL-binding resolution puts that call in the `external_consumes` bucket at all,
+//! which is why the pin below carries the corpus key verbatim rather than relying on a corpus run.
+//!
+//! **Documented residual (a real shadow this gate silences)**: a hardcoded INTERNAL host whose path is
+//! the root — `fetch('https://app.internal.example.com/')` against an internal `GET /`. That call is a
+//! genuine environment-host bake-in, and it now stays silent. Accepted because the matcher cannot tell
+//! it from the third-party case: both produce byte-identical evidence (`GET /` == `GET /`), so firing
+//! on it was correct only by coincidence. Pinned as an explicit false negative below so widening the
+//! rule back requires new evidence — a host axis (which hosts are OURS) this analysis does not have —
+//! rather than deleting a line. The other two path-comparing external-egress rules each already carried
+//! a narrower hand-written version of this gate — `external_base_url_drift` (2+ path segments) and
+//! `external_version_inconsistent` ("a root call pins no version") — and now share the predicate; this
+//! rule was the one family member that had none.
 
 use std::collections::BTreeMap;
 
 use zzop_core::io::TaggedConsume;
 use zzop_core::{disable_hint, http_interface_key, Finding, Severity};
 
-use super::{split_external_key, HttpProvideSite};
+use super::{is_all_slot_path, path_segments, split_external_key, HttpProvideSite};
 
 pub fn external_shadow_internal_findings(
     external_consumes: &[TaggedConsume],
@@ -44,6 +68,11 @@ pub fn external_shadow_internal_findings(
         let Some(url) = split_external_key(key) else {
             continue;
         };
+        // The host is this key's identity and the match throws it away — so a path carrying no
+        // literal segment leaves nothing to match ON (see the module doc's contentless-path gate).
+        if is_all_slot_path(&path_segments(url.path)) {
+            continue;
+        }
         let normalized = http_interface_key(url.method, url.path);
         let Some(sites) = by_key.get(normalized.as_str()) else {
             continue;
@@ -90,139 +119,4 @@ pub fn external_shadow_internal_findings(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn consume(key: Option<&str>, source: &str, file: &str, line: u32) -> TaggedConsume {
-        TaggedConsume {
-            source: source.to_string(),
-            consume: zzop_core::IoConsume {
-                client: None,
-                body: None,
-                kind: "http".to_string(),
-                key: key.map(str::to_string),
-                file: file.to_string(),
-                line,
-                raw: None,
-                method: None,
-                retry_configured: None,
-            },
-        }
-    }
-
-    fn provide(key: &str, source: &str, file: &str, line: u32) -> HttpProvideSite {
-        HttpProvideSite {
-            source: source.to_string(),
-            key: key.to_string(),
-            file: file.to_string(),
-            line,
-        }
-    }
-
-    #[test]
-    fn absolute_url_matching_an_internal_route_is_flagged_anchored_at_the_consume() {
-        let external = vec![consume(
-            Some("GET https://app.internal.example.com/api/users"),
-            "fe",
-            "Ctx.tsx",
-            10,
-        )];
-        let provides = vec![provide("GET /api/users", "be", "Api.java", 20)];
-        let out = external_shadow_internal_findings(&external, &provides);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].rule_id, "cross-layer/external-shadow-internal");
-        assert_eq!(out[0].severity, Severity::Warning);
-        assert_eq!(out[0].file, "Ctx.tsx");
-        assert_eq!(out[0].line, 10);
-        assert!(out[0].message.contains("app.internal.example.com"));
-        assert!(out[0].message.contains("Api.java:20"));
-        assert!(out[0].message.contains("disabled_rules"));
-        let data = out[0].data.as_ref().unwrap();
-        assert_eq!(data["host"], "app.internal.example.com");
-        assert_eq!(data["normalizedKey"], "GET /api/users");
-        assert_eq!(data["otherProvideCount"], 0);
-    }
-
-    #[test]
-    fn unprovided_path_is_not_flagged() {
-        let external = vec![consume(
-            Some("GET https://api.vendor.com/v1/widgets"),
-            "fe",
-            "Ctx.tsx",
-            10,
-        )];
-        let provides = vec![provide("GET /api/users", "be", "Api.java", 20)];
-        assert!(external_shadow_internal_findings(&external, &provides).is_empty());
-    }
-
-    #[test]
-    fn non_http_external_consume_is_ignored() {
-        let mut c = consume(
-            Some("GET https://app.internal.example.com/api/users"),
-            "fe",
-            "Ctx.tsx",
-            10,
-        );
-        c.consume.kind = "queue".to_string();
-        let provides = vec![provide("GET /api/users", "be", "Api.java", 20)];
-        assert!(external_shadow_internal_findings(&[c], &provides).is_empty());
-    }
-
-    #[test]
-    fn multiple_matching_provides_report_first_sorted_and_other_count() {
-        let external = vec![consume(
-            Some("GET https://app.internal.example.com/api/users"),
-            "fe",
-            "Ctx.tsx",
-            10,
-        )];
-        let provides = vec![
-            provide("GET /api/users", "be2", "Z.java", 1),
-            provide("GET /api/users", "be1", "A.java", 5),
-        ];
-        let out = external_shadow_internal_findings(&external, &provides);
-        assert_eq!(out.len(), 1);
-        let data = out[0].data.as_ref().unwrap();
-        assert_eq!(data["matchedProvide"]["source"], "be1");
-        assert_eq!(data["matchedProvide"]["file"], "A.java");
-        assert_eq!(data["otherProvideCount"], 1);
-    }
-
-    #[test]
-    fn consume_in_a_test_fixture_file_is_skipped() {
-        let external = vec![consume(
-            Some("GET https://app.internal.example.com/api/users"),
-            "fe",
-            "src/__tests__/Ctx.test.tsx",
-            10,
-        )];
-        let provides = vec![provide("GET /api/users", "be", "Api.java", 20)];
-        assert!(external_shadow_internal_findings(&external, &provides).is_empty());
-    }
-
-    #[test]
-    fn determinism_multiple_findings_sorted_by_file_then_line() {
-        let external = vec![
-            consume(
-                Some("GET https://app.internal.example.com/api/orders"),
-                "fe",
-                "Z.tsx",
-                1,
-            ),
-            consume(
-                Some("GET https://app.internal.example.com/api/users"),
-                "fe",
-                "A.tsx",
-                5,
-            ),
-        ];
-        let provides = vec![
-            provide("GET /api/orders", "be", "Api.java", 1),
-            provide("GET /api/users", "be", "Api.java", 2),
-        ];
-        let out = external_shadow_internal_findings(&external, &provides);
-        assert_eq!(out.len(), 2);
-        assert_eq!(out[0].file, "A.tsx");
-        assert_eq!(out[1].file, "Z.tsx");
-    }
-}
+mod tests;

@@ -94,7 +94,28 @@ fn ten_digit_seconds_epoch_is_flagged() {
 }
 
 #[test]
-fn day_ms_literal_alongside_gettime_is_flagged() {
+fn day_ms_added_to_a_non_epoch_date_value_is_flagged() {
+    // Positive pin for the narrowed `day-ms-arithmetic` alternative: the operand is a plain
+    // identifier (no call result, so no epoch-ms evidence), shifted by exactly 24h inside
+    // `new Date(...)` — a DST-unsafe calendar shift, and a `Date`-to-string coercion bug outright
+    // when the identifier holds a `Date`.
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "export function tomorrow(startOfLocalDay: Date) {\n  return new Date(startOfLocalDay + 86400000);\n}\n",
+        )],
+        "date-pitfalls",
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn day_ms_added_to_a_gettime_call_is_not_flagged() {
+    // Calibration pin (6/6 corpus FPs before the fix, this being class #1): `.getTime()` yields epoch
+    // milliseconds, and epoch arithmetic is DST-safe BY CONSTRUCTION. This exact fixture used to be
+    // this rule's positive pin; the measurement says it was never a defect. The narrowed pattern's
+    // operand class (`[^)]*`) cannot cross the call's closing paren, which is what vetoes it.
     let f = rule_findings(
         &[(
             "v.ts",
@@ -102,8 +123,104 @@ fn day_ms_literal_alongside_gettime_is_flagged() {
         )],
         "date-pitfalls",
     );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn unary_coerced_epoch_operand_still_fires_as_the_documented_residual() {
+    // Honest residual pin, asserted by the rule message: `+d` is epoch ms exactly as `.getTime()` is,
+    // but it carries no closing paren, so the structural veto cannot see it. Pinned so the message's
+    // claim stays true and a future operand-aware matcher flips it deliberately.
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "export function tomorrow(d: Date) {\n  return new Date(+d + 86400000);\n}\n",
+        )],
+        "date-pitfalls",
+    );
     assert_eq!(f.len(), 1, "{f:?}");
-    assert_eq!(f[0].line, 2);
+}
+
+#[test]
+fn mirrored_operand_order_is_not_flagged() {
+    // Scope pin for the message's "the mirrored operand order is out of scope" claim: the day
+    // constant must be the RIGHT-hand operand.
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "export function tomorrow(d: number) {\n  return new Date(86400000 + d);\n}\n",
+        )],
+        "date-pitfalls",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn parenthesized_subexpression_before_the_day_ms_operator_is_not_flagged() {
+    // Scope pin for the message's "no closing paren may appear between `new Date(` and the operator"
+    // claim — the veto is structural, so a parenthesized subexpression vetoes just like a call does.
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "export function shift(a: number, b: number) {\n  return new Date((a + b) + 86400000);\n}\n",
+        )],
+        "date-pitfalls",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn epoch_now_day_ms_subtraction_is_not_flagged() {
+    // FP class #2: a retention cutoff computed in epoch space. No `new Date(` head at all.
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "export const cutoff = Date.now() - 30 * 86400000;\n",
+        )],
+        "date-pitfalls",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn gettime_difference_divided_by_day_ms_is_not_flagged() {
+    // FP class #3: a day COUNT between two instants — division by the day constant, not a shift.
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "export function daysBetween(a: Date, b: Date) {\n  return (a.getTime() - b.getTime()) / 86400000;\n}\n",
+        )],
+        "date-pitfalls",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn date_utc_anchored_day_ms_arithmetic_is_not_flagged() {
+    // FP class #4: ISO-week math anchored on `Date.UTC(...)` — literally the UTC-only construction
+    // this rule's own message recommends as the fix, so flagging it was self-contradictory.
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "export function isoWeekStart(y: number, m: number, d: number) {\n  return new Date(Date.UTC(y, m, d) + 86400000);\n}\n",
+        )],
+        "date-pitfalls",
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn julian_day_to_epoch_ms_conversion_is_not_flagged() {
+    // FP class #5: a days-to-milliseconds unit CONVERSION (`* 86400000`). The day constant is a
+    // multiplicative factor here, never an additive shift of a date value.
+    let f = rule_findings(
+        &[(
+            "v.ts",
+            "export function fromJulian(jd: number) {\n  return new Date((jd - 2440587.5) * 86400000);\n}\n",
+        )],
+        "date-pitfalls",
+    );
+    assert!(f.is_empty(), "{f:?}");
 }
 
 #[test]

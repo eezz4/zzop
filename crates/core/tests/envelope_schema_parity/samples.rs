@@ -205,6 +205,7 @@ pub(crate) fn sample_file_projection() -> FileProjection {
             consumes: vec![sample_io_consume()],
         },
         loop_spans: vec![(10, 20)],
+        function_spans: vec![(5, 30)],
         degraded: true,
         is_entry: true,
         attributes: Vec::new(),

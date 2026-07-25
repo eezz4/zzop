@@ -237,6 +237,78 @@ fn suppress_marker_recognizes_the_python_hash_comment_leader() {
     );
 }
 
+// --- near-miss disclosure: a marker-SHAPED anchor comment this rule does not honor ---
+
+#[test]
+fn a_marker_shaped_anchor_comment_that_is_not_this_rules_marker_is_named_in_the_message() {
+    // The measured defect on the io-scan side: `// system-dialog-ok:` next to a `no-system-dialogs`
+    // finding. It suppresses nothing, so the finding must SAY so instead of firing mutely.
+    let provides = vec![io_provide("http", "GET /legacy", 5)];
+    let attrs = AttributeStore::from_attrs(Vec::new());
+    let pack = rule_pack(
+        r#"{"id":"legacy","severity":"info","message":"m","matcher":{"type":"io-scan","file_pattern":"\\.ts$","direction":"provides"}}"#,
+    );
+    let mut out = Vec::new();
+    let ctx = IoScanTreeContext {
+        provides: &provides,
+        consumes: &[],
+        attrs: &attrs,
+        anchor_line: &|file, line| {
+            (file == "f.ts" && line == 5)
+                .then(|| "router.get('/legacy'); // legacy-route-ok: kept".to_string())
+        },
+    };
+    eval_pack_io_scan(&pack, &ctx, &mut out);
+    assert_eq!(out.len(), 1, "disclosure never changes which findings fire");
+    assert_eq!(
+        out[0].message,
+        "m Note: a comment on this line (or the line directly above it) reads `legacy-route-ok`, which \
+         does not suppress this rule — the marker this rule honors is `legacy-ok`, so this finding still \
+         fires."
+    );
+}
+
+#[test]
+fn a_python_hash_near_miss_is_disclosed_and_ordinary_anchor_prose_is_not() {
+    // `#` is a comment leader for io-scan anchors (Python), so a `#`-form near miss is disclosed there;
+    // an ordinary `-ok` word mid-sentence is prose and must stay unaccused.
+    let attrs = AttributeStore::from_attrs(Vec::new());
+    let pack = rule_pack(
+        r#"{"id":"legacy","severity":"info","message":"m","matcher":{"type":"io-scan","file_pattern":"\\.py$","direction":"provides"}}"#,
+    );
+    let provides = vec![IoProvide {
+        kind: "http".into(),
+        key: "GET /legacy".into(),
+        file: "app.py".into(),
+        line: 5,
+        symbol: None,
+        body: None,
+    }];
+    let disclose = |text: &'static str| {
+        let mut out = Vec::new();
+        let ctx = IoScanTreeContext {
+            provides: &provides,
+            consumes: &[],
+            attrs: &attrs,
+            anchor_line: &move |file, line| {
+                (file == "app.py" && line == 5).then(|| text.to_string())
+            },
+        };
+        eval_pack_io_scan(&pack, &ctx, &mut out);
+        assert_eq!(out.len(), 1, "{out:?}");
+        out[0].message.clone()
+    };
+    assert!(
+        disclose("@app.get('/legacy')  # deprecated-ok: kept").contains("reads `deprecated-ok`"),
+        "a `#`-comment near miss must be disclosed"
+    );
+    assert_eq!(
+        disclose("@app.get('/legacy')  # mostly-ok as long as auth stays on"),
+        "m",
+        "prose must not be accused"
+    );
+}
+
 // --- determinism ---
 
 #[test]

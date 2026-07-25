@@ -27,6 +27,7 @@ fn eval(rule_json: &str, files: Vec<SourceFile>) -> (Vec<Finding>, Vec<String>) 
 fn file(rel: &str, text: &str, symbols: Vec<SourceSymbol>) -> SourceFile {
     SourceFile {
         loop_spans: Vec::new(),
+        function_spans: Vec::new(),
         rel: rel.into(),
         text: text.into(),
         symbols,

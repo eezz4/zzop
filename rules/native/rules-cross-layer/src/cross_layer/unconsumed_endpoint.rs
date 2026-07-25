@@ -1,29 +1,41 @@
-//! `cross-layer/unconsumed-endpoint` (info) — one finding per `CrossLayerResult::unconsumed_provides` entry of
-//! kind `"http"`: an endpoint no source in this `analyzeTrees` run calls. Severity starts at info (not
-//! warning) because "no consumer WITHIN this analysis" is weaker evidence than "no consumer at all" — see
-//! the message's own caveat.
+//! `cross-layer/unconsumed-endpoint` (info) — one finding per `CrossLayerResult::unconsumed_provides` entry
+//! of kind `"http"` that no source in this `analyzeTrees` run calls AND that the write-verb specialization
+//! below does not already report. Severity starts at info (not warning) because "no consumer WITHIN this
+//! analysis" is weaker evidence than "no consumer at all" — see the message's own caveat.
 //!
 //! Provider sites in test-path files (`zzop_core::is_test_file`) are skipped — a route registered
 //! in a test fixture is not deployed surface. A dead route provided by 2+ trees ALSO fires one warning
 //! `cross-layer/duplicate-route` finding for the same key — intentional overlap, different questions.
 //!
-//! ## Near-miss cross-reference
-//! When a provide here is ALSO the chosen near-miss target of an unmatched `cross-layer/route-near-miss`
-//! consume (`near_miss_targets`, sourced from `route_near_miss::route_near_miss_results`), the message gains
-//! a cross-reference note: dogfood round 8 found this to be the common case, not the exception — a
-//! disconnected FE/BE pair with a drifted base prefix produces one `unconsumed-endpoint` finding PER route
-//! plus one `route-near-miss` finding per drifted consume, describing the same underlying drift from two
-//! sides without ever pointing at each other.
+//! ## Routes `unconsumed-mutation-endpoint` already reported are not repeated here
+//! A write route IS an endpoint, so `cross-layer/unconsumed-mutation-endpoint` is a strict specialization of
+//! this rule: for a while both fired at the identical `file:line` (dogfood measured `POST /api/ledger/{}/verify`
+//! reported twice), which is one route billed as two problems. `already_reported_sites` — the
+//! `(source, file, line, key)` tuples the specialization ACTUALLY emitted this run, produced by
+//! [`unconsumed_mutation_endpoint::reported_provide_sites`] at the `zzop_engine::cross_layer_findings` call
+//! site — makes this rule stand down on exactly those ROUTES. Keyed on real output, never on a local copy of
+//! the sibling's write-verb predicate: a second copy would drift the moment either rule's exclusions change,
+//! re-opening the double report (or worse, a silent gap) without any test noticing.
 //!
-//! ## tRPC mount-route suppression
-//! A provide [`super::is_trpc_mount_route_key`] identifies as a tRPC mount route (a literal `trpc` path
-//! segment, e.g. `/api/trpc/{}`) is excluded here when ITS OWN source tree is in `trpc_participating_sources`
-//! (a tree with 1+ `trpc`-kind edge on either side): dogfood round 9 found a fully-joined tRPC starter's
-//! only findings were its own GET/POST mount routes — the mount route IS the transport the `trpc`-kind
-//! edges flow through, so "unconsumed" is tone noise, not signal. Per-tree, not run-global: a route in a
-//! tree with zero tRPC edges of its own is never suppressed, even when some OTHER tree in the run has
-//! tRPC edges. The suppression is never silent — `super::trpc_mount_route_suppression_notes` (called by
-//! `zzop_engine::analyze_trees`) discloses it on the owning tree's `warnings` channel instead.
+//! The interface key is part of that tuple on purpose. One `file:line` is routinely several routes — a
+//! verb-agnostic registration (gin `router.Any`, axum `any(...)`, the TS pathname-dispatch adapter emitting
+//! every verb it scanned at the path test's line) yields one provide per method at a single anchor. Standing
+//! down on the ANCHOR would mean an unconsumed `POST /webhook` also silenced the co-located `GET /webhook`,
+//! in neither rule: precisely the silent hole this handoff exists to prevent.
+//!
+//! The resulting contract, which the tests pin from both ends: with the specialization ENABLED a write route
+//! is reported exactly once (by it); with it DISABLED nothing is suppressed and this rule reports those write
+//! routes itself — turning one rule off must never punch a silent hole in a rule the user did not disable.
+//! Per the repo's cross-reference doctrine the handoff is disclosed on both sides: this rule's message names
+//! the sibling as the place write routes are reported, and the sibling's message says this rule stands down.
+//!
+//! ## Externally-fetched paths are vetoed, not reported
+//! [`EXTERNALLY_FETCHED_PATHS`] is a small policy vocabulary of paths whose requester is, by construction,
+//! outside every analyzed tree: monitors, browsers, crawlers and feed readers. For those, "no consumer in this
+//! analysis" is not weak evidence of deadness — it is NO evidence, since the caller could never have been in
+//! the analyzed source to begin with (dogfood measured 3 of 4 `unconsumed-endpoint` hits to be exactly this:
+//! `GET /health`, `GET /` and `GET /feed.xml`). Deliberately NOT a general "probably external" heuristic —
+//! only tokens whose external requester is defined by a protocol or a browser behavior qualify.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -31,12 +43,71 @@ use zzop_core::io::{TaggedConsume, TaggedProvide};
 use zzop_core::{disable_hint, Finding, Severity};
 
 use super::route_near_miss::NearMissTargetRef;
+use super::split_key;
+
+/// Exact route paths fetched from outside any analyzable source tree by definition. Each token earns its
+/// place from a protocol or a browser/monitor behavior, never from "feels infra":
+/// - `/` — the site root every browser, uptime monitor and crawler requests first.
+/// - `/health`, `/healthz`, `/healthcheck`, `/livez`, `/readyz` — liveness/readiness probe paths, called by
+///   an orchestrator or an uptime monitor (Kubernetes `livenessProbe`/`readinessProbe`, load balancers),
+///   never by application code.
+/// - `/robots.txt` — Robots Exclusion Protocol (RFC 9309); fetched by crawlers.
+/// - `/sitemap.xml`, `/sitemap_index.xml` — the sitemaps.org protocol's fixed entry points; fetched by
+///   crawlers.
+/// - `/rss.xml`, `/feed.xml`, `/atom.xml` — feed endpoints polled by RSS/Atom readers.
+/// - `/favicon.ico` — requested by browsers with no markup reference at all.
+///
+/// Extension-bearing feed paths ONLY: a bare `/feed` or `/rss` is just as likely an in-app page route, and
+/// vetoing it would hide a genuinely dead page. Likewise absent on purpose: `/metrics`, `/status`, `/ping`,
+/// `/login`, `/logout`, `/version` — common, but each is also a plausible application resource, so silence
+/// there would cost real signal.
+const EXTERNALLY_FETCHED_PATHS: &[&str] = &[
+    "/",
+    "/health",
+    "/healthz",
+    "/healthcheck",
+    "/livez",
+    "/readyz",
+    "/robots.txt",
+    "/sitemap.xml",
+    "/sitemap_index.xml",
+    "/rss.xml",
+    "/feed.xml",
+    "/atom.xml",
+    "/favicon.ico",
+];
+
+/// RFC 8615's well-known URI registry: everything under it exists precisely so an external agent (ACME
+/// validator, security researcher, OIDC client, mobile OS deep-link verifier) can fetch it at a fixed path.
+/// A prefix, not a token list, because the registry is open-ended.
+const WELL_KNOWN_PREFIX: &str = "/.well-known/";
+
+/// True when the path is one an external, non-analyzable requester fetches by definition — see
+/// [`EXTERNALLY_FETCHED_PATHS`]. Compared case-insensitively and with a trailing slash trimmed (`/health/`
+/// and `/Health` are the same route), against the whole path, so `/api/health` and `/health-report` — which
+/// are ordinary application routes — never match.
+fn is_externally_fetched_path(path: &str) -> bool {
+    let lowered = path.to_ascii_lowercase();
+    if lowered.starts_with(WELL_KNOWN_PREFIX) {
+        return true;
+    }
+    let trimmed = lowered.trim_end_matches('/');
+    let trimmed = if trimmed.is_empty() { "/" } else { trimmed };
+    EXTERNALLY_FETCHED_PATHS.contains(&trimmed)
+}
+
+/// True when this provide's key carries an externally-fetched path. Keys that do not split into the
+/// `"METHOD /path"` shape are never vetoed — an unrecognized key shape is not evidence of anything.
+fn is_externally_fetched_provide(p: &TaggedProvide) -> bool {
+    split_key(&p.provide.key).is_some_and(|(_, path)| is_externally_fetched_path(path))
+}
 
 pub fn unconsumed_endpoint_findings(
     unconsumed_provides: &[TaggedProvide],
     unresolved_consumes: &[TaggedConsume],
     near_miss_targets: &BTreeMap<(String, String, u32), NearMissTargetRef>,
     trpc_participating_sources: &BTreeSet<String>,
+    already_reported_sites: &BTreeSet<(String, String, u32, String)>,
 ) -> Vec<Finding> {
     let unresolved_http = unresolved_consumes
         .iter()
@@ -50,6 +121,18 @@ pub fn unconsumed_endpoint_findings(
             !(trpc_participating_sources.contains(&p.source)
                 && super::is_trpc_mount_route_key(&p.provide.key))
         })
+        // What the specialization really emitted this run — never a local re-derivation of its predicate,
+        // and empty when it is disabled, so this rule then covers those routes itself (see the module doc).
+        // Matched per ROUTE (the key is in the tuple), not per anchor: one line can register several verbs.
+        .filter(|p| {
+            !already_reported_sites.contains(&(
+                p.source.clone(),
+                p.provide.file.clone(),
+                p.provide.line,
+                p.provide.key.clone(),
+            ))
+        })
+        .filter(|p| !is_externally_fetched_provide(p))
         .map(|p| {
             let key = &p.provide.key;
             let near_miss = near_miss_targets.get(&(
@@ -73,8 +156,14 @@ pub fn unconsumed_endpoint_findings(
                  repo not included in this `analyzeTrees` run, a mobile/native/third-party client, or one of \
                  the {unresolved_http} unresolved dynamic-URL http consume(s) this run could not statically \
                  match to a key (see `crossLayer.unresolvedConsumes`). Confirm with real traffic/access logs before \
-                 removing the route.{near_miss_note} {} if provider-only endpoints (webhook targets, health probes, \
-                 endpoints consumed only outside this analysis) are expected in your stack.",
+                 removing the route.{near_miss_note} Two exclusions apply here: a write route already reported \
+                 by `cross-layer/unconsumed-mutation-endpoint` (this rule's write-verb specialization) is not \
+                 repeated, so one route is never billed twice — disable that rule and such routes appear here \
+                 instead; and a fixed list of paths fetched by external agents by definition (`/`, `/health`, \
+                 `/healthz`, `/healthcheck`, `/livez`, `/readyz`, `/robots.txt`, `/sitemap.xml`, \
+                 `/sitemap_index.xml`, `/rss.xml`, `/feed.xml`, `/atom.xml`, `/favicon.ico`, and anything \
+                 under `/.well-known/`) is never reported at all. {} if provider-only endpoints (webhook \
+                 targets, endpoints consumed only outside this analysis) are expected in your stack.",
                 p.source,
                 disable_hint("cross-layer/unconsumed-endpoint")
             );

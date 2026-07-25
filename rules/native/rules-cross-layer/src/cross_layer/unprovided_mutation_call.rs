@@ -16,11 +16,19 @@
 //! (`zzop_engine::framework_silence::provide_blind_sources`, the provide-side analog of
 //! `super::majority_unresolved_http_sources`) is non-empty for this run, "unprovided" cannot be trusted as a
 //! confident zero — this rule de-escalates to `Severity::Info` and names the blind source(s) in the message
-//! instead of silently keeping Warning. With zero blind sources, severity and message keep today's
-//! Warning framing unchanged. This is a de-escalation to match confidence, NOT suppression — the finding
-//! still fires either way (`output-philosophy.md` §0: total by default). The sealed class: a confident
-//! cross-layer zero (unconsumed / unprovided) must never fire at warning severity without gating on the
-//! resolution completeness of the OTHER side.
+//! instead of silently keeping Warning. This is a de-escalation to match confidence, NOT suppression — the
+//! finding still fires either way (`output-philosophy.md` §0: total by default). The sealed class: a
+//! confident cross-layer zero (unconsumed / unprovided) must never fire at warning severity without gating
+//! on the resolution completeness of the OTHER side.
+//!
+//! ## The NO-downgrade branch speaks too (severity-gate framing, `output-philosophy.md` §0)
+//! Mirror of the same section in `unconsumed_mutation_endpoint` — read it for the full rationale. The
+//! zero-blind-sources branch used to emit an EMPTY note, so warning severity had to be read as "zzop
+//! checked and the provide side was complete". `provide_blind_sources` is a single narrow predicate (a
+//! source that imports a server framework yet extracted almost no `http` routes tree-wide); a provider in
+//! a source with no recognized framework import, or registered in a route shape this extraction does not
+//! model, is invisible to it. The empty branch now says so. Framing only — gate, severity and finding
+//! count unchanged.
 
 use std::collections::BTreeSet;
 
@@ -41,8 +49,14 @@ pub fn unprovided_mutation_call_findings(
     } else {
         Severity::Info
     };
-    let downgrade_note = if provide_blind_sources.is_empty() {
-        String::new()
+    // Both branches speak — see this module's doc, "The NO-downgrade branch speaks too". Mirror of the
+    // consume-side wording in `unconsumed_mutation_endpoint`; the two must stay symmetric.
+    let confidence_note = if provide_blind_sources.is_empty() {
+        " Severity is warning because no source in this run tripped the provide-side blindness check — \
+         that check only asks whether a source imports a server framework yet extracted almost no `http` \
+         routes tree-wide, so its not firing means no blindness was WITNESSED, not that the provide side \
+         was proven complete."
+            .to_string()
     } else {
         let named: Vec<String> = provide_blind_sources
             .iter()
@@ -90,7 +104,7 @@ pub fn unprovided_mutation_call_findings(
                  under a non-literal base path (an enum/constant `@Controller(...)` argument, or a \
                  file-routing/dispatch-table framework) this extractor could not resolve — check the provider \
                  source directly before concluding the route is missing. If it exists but is unseen, inject it \
-                 on the SERVING tree's `routes` field (`{injection_stub}`).{downgrade_note} {} if the provider \
+                 on the SERVING tree's `routes` field (`{injection_stub}`).{confidence_note} {} if the provider \
                  is known to live outside this analysis (a repo not included in this run, a third-party \
                  service, ...).",
                 c.source,

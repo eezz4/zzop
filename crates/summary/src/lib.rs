@@ -25,6 +25,10 @@
 //!   minimal `"{}"` config drives the same facade call), sharing the tree-mode path's post-facade
 //!   shaper.
 //! - `cross`    — `cross_summary`: multi-tree cross-layer join summary.
+//! - `manifest` — `manifest_json`/`diff_manifests_json`: the structural CONTRACT MANIFEST of a
+//!   cross-layer run and the delta between two of them (`zzop manifest` / `zzop diff`). Identity
+//!   only, uncapped, sorted — the surface that stays readable ABOVE this module's caps, where two
+//!   capped summaries agree on the counts and cannot say which route left the join.
 //! - `endpoint` — `endpoint_summary`: the `check_endpoint` query core (tree resolution + facade query +
 //!   suggestion fallback).
 //!
@@ -39,6 +43,7 @@ mod cross;
 #[cfg(test)]
 mod cross_test;
 mod endpoint;
+mod manifest;
 pub mod output;
 mod paths;
 mod siblings;
@@ -48,5 +53,6 @@ mod trees;
 pub use analyze::{analyze_envelope_summary, analyze_summary};
 pub use cross::cross_summary;
 pub use endpoint::endpoint_summary;
+pub use manifest::{diff_manifests_json, manifest_json};
 pub use output::FindingFilters;
 pub use zzop_facade::{validate_envelope_only_json, validate_rule_pack_json};

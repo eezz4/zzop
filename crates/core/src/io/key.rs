@@ -69,6 +69,38 @@ pub fn http_consume_interface_key(method: &str, raw_url: &str) -> String {
     http_interface_key(method, path)
 }
 
+/// Does this consume key name a route at all — the shared minimum-information gate.
+///
+/// False for a `"VERB /path"` key whose path segments are ALL `{}` placeholders (`GET /{}`,
+/// `POST /{}/{}`): that is the head-drop artifact of an interpolation the extractor could not resolve
+/// (`` fetch(`${BASE}/${id}`) `` with `BASE` unresolved), so it picks out no particular endpoint and
+/// carries ZERO joinable evidence. True otherwise, including two shapes that look adjacent but are not:
+/// - a root key (`GET /`, zero segments) — the path IS fully known, it just has no segments;
+/// - a key with no `"VERB /path"` shape at all (`table:users`, a topic, an env key) — the `{}`
+///   placeholder vocabulary is [`normalize_http_path`]'s alone, so this gate has nothing to say there
+///   and an unrecognized shape is never treated as evidence of anything.
+///
+/// Single definition for every surface that must answer this ONE question identically: the linker's
+/// route-identity gate ([`link_cross_layer_io`](crate::io::link_cross_layer_io) — a miss on such a key
+/// goes to `unresolvedConsumes`, not `unprovidedConsumes`), the single-tree `http/unprovided-consume`
+/// rule's matching veto, and the engine's extraction-blindness caveat (such a key is not visibility
+/// evidence). Those three used to answer it in three hand-written copies with three slightly different
+/// edge cases; sharing it makes the drift a compile-time impossibility.
+///
+/// NOT the same question as the near-miss rules' `is_all_slot_path` (rules-cross-layer), which also
+/// treats a SEGMENTLESS path as vacuous — it asks "is a suggestion computed from this key meaningless",
+/// where `GET /` genuinely resembles nothing. Deliberately kept apart.
+pub fn key_carries_route_identity(key: &str) -> bool {
+    let Some((_verb, path)) = key.split_once(' ') else {
+        return true; // not a "VERB /path" key — out of this gate's vocabulary
+    };
+    let mut segments = path.split('/').filter(|s| !s.is_empty()).peekable();
+    if segments.peek().is_none() {
+        return true; // "VERB /" — a real root route, not a lost target
+    }
+    segments.any(|s| s != "{}")
+}
+
 /// The `db-table` PROVIDE channel's canonical casing: the FIRST character lowercased, everything else
 /// unchanged (e.g. `Article` -> `article`, `UserProfile` -> `userProfile`). PINNED shared transform for
 /// two independent extractors that must agree byte-for-byte so a `CREATE TABLE "Article"` DDL name and a
@@ -148,6 +180,27 @@ mod tests {
         // Query-only URL degrades to the root path (the egress extractor vetoes this shape
         // earlier — see `base_relative_path` — so it only arises from an explicit `/?x=1`).
         assert_eq!(http_consume_interface_key("get", "/?page=2"), "GET /");
+    }
+
+    #[test]
+    fn key_carries_route_identity_rejects_only_all_placeholder_paths() {
+        // The head-drop artifact this gate exists for: an unresolved `${BASE}` prefix leaves a key
+        // that names no endpoint (mono-hub `joke-generator/fetchJoke.ts`, 2026-07-25).
+        assert!(!key_carries_route_identity("GET /{}"));
+        assert!(!key_carries_route_identity("POST /{}/{}"));
+        assert!(!key_carries_route_identity("GET /{}/{}/{}"));
+        // One literal segment anywhere is enough — the key can still be joined/compared.
+        assert!(key_carries_route_identity("GET /api/{}"));
+        assert!(key_carries_route_identity("GET /{}/users"));
+        assert!(key_carries_route_identity("DELETE /users/{}"));
+        // A root route is fully known, not a lost target.
+        assert!(key_carries_route_identity("GET /"));
+        // Non-"VERB /path" shapes are outside the `{}` vocabulary and always pass.
+        assert!(key_carries_route_identity("table:users"));
+        assert!(key_carries_route_identity("{}"));
+        // Absolute-URL keys never reach this gate in the linker (the `://` egress gate fires first),
+        // but the predicate is total: a host makes the key non-all-placeholder anyway.
+        assert!(key_carries_route_identity("GET https://api.example.com/{}"));
     }
 
     #[test]

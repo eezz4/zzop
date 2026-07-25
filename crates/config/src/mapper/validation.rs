@@ -242,9 +242,11 @@ pub(super) fn validate_routes_array(
 }
 
 /// A JSON value is "falsy" exactly like JS's `||` operator would treat it: `null`, `false`, `0`
-/// (any numeric zero), or `""`. Used ONLY where the JS source itself relies on `x || defaultValue`
-/// (today: `config.rules`) — every other field in this module is presence-gated with `!== undefined`,
-/// which `serde_json::Value::get` (`Option::is_some`) already matches directly.
+/// (any numeric zero), or `""`. Used where a key's absence and a written-out "nothing" must mean the
+/// same thing: the JS-inherited `x || defaultValue` sites (`config.packs`, `config.rules`), and
+/// `cacheDir`, where it is the OPT-OUT spelling (`"cacheDir": null` = run uncached — see
+/// `options::build_shared_options`). Every other field in this module is presence-gated with
+/// `!== undefined`, which `serde_json::Value::get` (`Option::is_some`) already matches directly.
 pub(super) fn is_json_falsy(v: &serde_json::Value) -> bool {
     match v {
         serde_json::Value::Null => true,

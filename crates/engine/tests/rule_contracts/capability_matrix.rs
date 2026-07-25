@@ -90,6 +90,22 @@
 //!
 //! `lexical-fallback` has no parser crate (it is `dispatch`'s `None` arm, not `Language::*`) — it is a
 //! synthetic 9th row, excluded from the parser-crate SSOT pin below.
+//!
+//! ## `function_spans` is deliberately NOT a sixth column (2026-07-25)
+//!
+//! `MethodScan::after_in_same_function`'s substrate (`FileProjection::function_spans`,
+//! `pipeline::fresh`'s fourth per-language match arm) is **TypeScript only** — every other environment,
+//! Go included, is a blank. That asymmetry is published in `docs/NORMALIZED_AST.md`, `docs/rules/
+//! dsl-reference.md`, and `crates/cache/src/ir_slice.rs`'s module doc, but it is NOT pinned here, and the
+//! reason is a property of the channel rather than laziness: this one's absent-fact degrade is a
+//! **no-op**, not silence. A `trigger_in_loop` rule cannot fire without `loop_spans`, which is exactly
+//! what makes the `loop-scan-probe` below a clean two-sided canary; an `after_in_same_function` rule
+//! fires the SAME as an ungated one without `function_spans`, so any probe would have to be INVERTED
+//! ("declared present ⇒ probe must NOT fire") and would additionally need every fixture to carry two
+//! sibling closures inside one symbol body — a shape half these languages express differently and two
+//! (Prisma, SQL) cannot express at all. The inverted, fixture-heavy probe was judged to cost more
+//! confusion than the drift it would catch. **If a second language ever learns `function_spans`, revisit
+//! this**: at two producers the column earns its fixtures.
 
 use std::fs;
 use std::path::{Path, PathBuf};

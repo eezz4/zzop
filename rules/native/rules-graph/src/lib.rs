@@ -16,19 +16,13 @@ pub mod dead_candidates;
 pub mod dead_exports;
 pub mod unreachable;
 
-use zzop_core::{register_native_analysis_stub, RuleRegistry, Severity};
+use zzop_core::{register_native_analysis_stub, RuleRegistry};
 
 /// Registers every native analysis id whose implementation lives in this crate (see `rules/README.md`'s
 /// "Adding a rule" section); `zzop_engine::register_all_native` composes this with the other crates' own.
 pub fn register_native_analyses(registry: &mut RuleRegistry) {
-    let analyses: &[(&str, Severity)] = &[
-        ("circular", Severity::Warning),
-        ("unreachable", Severity::Info),
-        ("dead-candidates", Severity::Info),
-        ("dead-exports", Severity::Info),
-    ];
-    for &(id, default_severity) in analyses {
-        register_native_analysis_stub(registry, id, default_severity);
+    for id in ["circular", "unreachable", "dead-candidates", "dead-exports"] {
+        register_native_analysis_stub(registry, id);
     }
 }
 

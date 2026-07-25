@@ -47,6 +47,7 @@ the linker is an exact join on normalized keys, never AST matching).
   "degraded": false,
   "is_entry": false,
   "loop_spans": [[10, 14]],
+  "function_spans": [[4, 20], [9, 12]],
   "attributes": [ <Attribute> ]
 }
 ```
@@ -106,6 +107,16 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     supplied directly and `dtoRef` omitted. Feeds `cross-layer/body-field-drift`; see
     `crates/core/src/io.rs`'s `ConsumeBodyShape`/`ProvideBodyShape` for the normative semantics
     (evidence-only: anything not statically witnessed is omitted, never approximated).
+  - OPTIONAL handler provenance: an `IoProvide` may carry `symbol`, the name of the function that handles
+    **this** route. Three native rules start a call-graph BFS from it (`mutating-route-no-auth`,
+    `unsafe-read-endpoint`, `non-idempotent-write`) and `duplicate-route` compares it for equality, so a
+    dispatch-style router that emits ONE shared symbol for N routes makes all N share their reachability:
+    one route's auth guard silences the others, one route's write makes every sibling look mutating.
+    **Emit the per-route handler when you can name it unambiguously; omit it (or `null`) rather than emit a
+    shared enclosing-function name** — an absent symbol makes the BFS rules skip the route, which is honest,
+    while a shared one is silently wrong in both directions. (The in-repo TypeScript adapter learned this the
+    hard way: see `parser/parser-typescript/src/adapters/pathname_dispatch.rs` for the exact predicate it
+    uses to decide when a dispatch branch is attributable.)
 - `const_map_fragment`, `procedure_router_fragments`, `router_mount_fragments`, `class_shape_fragments` —
   all four are OPTIONAL
   (`#[serde(default)]`; absent = empty; a projection with none of them is still fully valid and
@@ -200,6 +211,59 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
   span (`.map`/`.forEach`/`.filter`/... — the callback only, never the whole call). Feeds
   `MethodScan::trigger_in_loop`; absent means no structural loop facts for this file, and that matcher
   silently skips it (graceful degrade, same convention as `symbols`' `body_start`/`body_end`).
+- `function_spans` — OPTIONAL (`#[serde(default)]`; camelCase `functionSpans` also accepted on input).
+  `[[startLine, endLine], ...]`, 1-based and inclusive: one pair per function-like node — `function`
+  declarations and expressions, arrows, class and object-literal methods, constructors, accessors.
+  Nested functions overlap freely (an outer function's span contains its closures'); consumers resolve
+  the INNERMOST containing span. Order is node source order, NOT sorted by start line.
+
+  **The merge rule.** A function-shaped ARGUMENT of a `.then(...)`/`.catch(...)`/`.finally(...)` member
+  call has its span START pulled up to the line of that call's property token, so a promise
+  continuation and the boundary that schedules it share one span. This changes the span ONLY when the
+  callback opens on a LATER line than the `.then` token — the shape a printer produces once the
+  argument list breaks:
+
+  ```ts
+  loadRates().then(    // line 1  <- the property token, and the merged span's START
+    (d) => {           // line 2  <- the callback's own start line
+      setRates(d);     // line 3
+    },
+  );                   // line 5
+  ```
+  A producer must emit `[1, 5]` for that callback, not `[2, 5]`. In the far commoner one-line spelling
+  (`loadRates().then((d) => {`) the token and the callback already share a line, so the merge is a
+  no-op and a naive emitter happens to be correct — which is exactly why the broken-argument-list case
+  is easy to miss. Only the callback's start moves; the RECEIVER is never swept in, so a multi-line
+  receiver (`loadRates()` on its own line above `.then(`) stays outside. Only those three method names,
+  only as a member-call property — `.map`, `setTimeout`, `useEffect`, an aliased `const t = p.then`, or
+  a bare `then(cb)` are all left unmerged. That narrowness is deliberate: a wider merge would re-join
+  the sibling closures this fact exists to separate.
+
+  **Why it exists / what a producer that omits it loses.** It is the substrate of
+  `MethodScan::after_in_same_function`, which requires a rule's ordering match (`after`) and its trigger
+  match to sit in the SAME innermost function rather than merely in the same declared symbol's body —
+  the difference between "this component `await`s somewhere and sets state somewhere" and "this
+  continuation sets state after ITS OWN boundary".
+
+  **Absent-field behavior differs from `loop_spans`, deliberately.** With no spans every line resolves
+  to "no enclosing function", so all lines count as the same function and the gate becomes a NO-OP: a
+  rule using it keeps its coarser whole-symbol behavior and stays as loud as it was. It does NOT go
+  silent the way `trigger_in_loop` does on a file without `loop_spans`. The reason is directional: this
+  gate only ever REMOVES pairings, so degrading to "remove nothing" preserves coverage, whereas
+  degrading to "skip the file" would delete it. An adapter author who omits this field therefore loses
+  precision (the false positives the gate removes come back), never recall.
+
+  **A PARTIAL list degrades identically, per LINE.** The resolution is per trigger line, so a line your
+  spans happen not to cover reads as "no gate on this line" — pre-gate scope — and never as "no pair".
+  Emitting a subset is therefore safe in the same direction as emitting none: you can leave the coarser
+  over-report standing, you can never silence a finding. The native TypeScript parser hits this too (a
+  class-body top-level line, e.g. a property initializer, is inside no function span), so it is a real
+  line-level state and not an adapter-only edge case.
+
+  **Language coverage today: TypeScript only** among zzop's native parsers — Go produces `loop_spans`
+  but not `function_spans`, and no other native parser produces either. That asymmetry is published
+  here rather than left implicit; see `crates/cache/src/ir_slice.rs`'s module doc for the full per-fact
+  coverage note.
 
 ## Delivery
 
@@ -228,8 +292,19 @@ one code path every host drives) seeds the bundled packs as inline `packDefs` un
 an explicit `packsDir: null` — they appear in the output's `packsLoaded` (`source: "inline"`; the
 removed JS wrapper's bundled packs used to report `"dir"` instead, since its on-disk bundled copy won
 the id collision), and since only
-`symbol-scan`/`io-scan` rules can fire without source text and every current bundled rule is
-`line-scan`/`method-scan`, the default currently adds pack-load confirmation, not findings. A
+`symbol-scan`/`io-scan` rules can fire without source text, what the default actually contributes is the
+two bundled `io-scan` rules — `http/auth-gates` and `http/route-exposure` — plus pack-load confirmation
+for every other bundled rule (no bundled rule uses `symbol-scan` today). Those two do fire in Mode A,
+with one documented deviation from the same rules on a native tree: `analyze_envelope` supplies an
+anchor-line lookup that always returns `None`, because an envelope carries no source text to look one up
+in. Every channel that reads the anchor line is therefore inert here — the derived `<rule-id>-ok`
+suppress marker, its near-miss disclosure, and `route-exposure`'s `anchor_exclude_pattern` guard-hint
+carve-out. All of them fail toward FIRING, never toward silence: a matching route reports even when its
+registration line would have carried a marker or a guard-hint argument, rather than the engine guessing
+at line text it does not have. Clear a vetted route in Mode A by injecting the attribute the rule reads
+(`auth-guarded` for `auth-gates`) or by disabling the rule in config. Mode B overlays are unaffected —
+they merge onto a natively-parsed tree whose source text is readable off disk, so both channels stay
+live there even for a language with no native parser. A
 caller-supplied pack reusing a bundled id keeps the existing collision semantics (a later inline def,
 or any directory pack, wins whole). See `docs/modules/facade.md`'s "Defaults" section for the full
 contract. `examples/jsp-envelope.example.json` is a hand-written,
@@ -247,9 +322,9 @@ Casing is not uniform across the envelope, and which part you get wrong changes 
 - **`FileProjection` top-level fields are snake_case** (`re_exports`, `dynamic_imports`,
   `const_map_fragment`, `procedure_router_fragments`, `router_mount_fragments`, `class_shape_fragments`,
   `is_entry`, ...) — this struct carries no `#[serde(rename_all = ...)]` (`crates/core/src/
-  normalized.rs`). The one exception is `loop_spans`, which additionally accepts camelCase
-  `loopSpans` on input (`#[serde(alias = "loopSpans")]`). A camelCase spelling of any OTHER
-  `FileProjection` field (e.g. `reExports`) matches no struct field, so serde treats it as an
+  normalized.rs`). The two exceptions are `loop_spans` and `function_spans`, which additionally accept
+  camelCase `loopSpans`/`functionSpans` on input (`#[serde(alias = ...)]`). A camelCase spelling of any
+  OTHER `FileProjection` field (e.g. `reExports`) matches no struct field, so serde treats it as an
   unrecognized key.
 - **`SourceSymbol` (the `symbols` array) outputs camelCase, but accepts snake_case input for exactly
   three fields**: `is_default`, `body_start`, and `body_end` each carry a `#[serde(alias = ...)]` back

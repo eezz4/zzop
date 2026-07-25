@@ -380,6 +380,7 @@ fn envelope_projection(path: &str, provide_key: &str, attrs: Vec<Attribute>) -> 
         is_entry: false,
         attributes: attrs,
         loop_spans: Vec::new(),
+        function_spans: Vec::new(),
     }
 }
 

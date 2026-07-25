@@ -163,6 +163,95 @@ fn sql_destructive_migration_unrelated_dash_dash_marker_text_does_not_suppress()
 }
 
 #[test]
+fn bootstrap_drop_if_exists_followed_by_create_table_is_not_flagged() {
+    // Calibration pin (7/7 corpus FPs before the fix): an idempotent bootstrap preamble in the very
+    // first migration — every `DROP TABLE IF EXISTS x;` is immediately followed by `CREATE TABLE x`
+    // in the SAME file, so re-running the file destroys nothing that the file does not recreate.
+    // The veto keys on that in-file DROP-then-CREATE evidence, NOT on the `0001_` filename ordinal.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/0001_initial.sql",
+        "DROP TABLE IF EXISTS users;\nCREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);\nDROP TABLE IF EXISTS sessions;\nCREATE TABLE sessions (id INTEGER PRIMARY KEY, user_id INTEGER);\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "destructive-migration").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn drop_if_exists_with_no_create_in_the_file_still_fires() {
+    // Positive pin for the same narrowing: `IF EXISTS` on its own is NOT the exemption — a defensive
+    // drop in a later migration with nothing recreating anything is exactly the destructive change
+    // this rule discloses at review.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/0042_drop_legacy.sql",
+        "DROP TABLE IF EXISTS legacy_orders;\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "destructive-migration");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].severity, zzop_core::Severity::Info);
+}
+
+#[test]
+fn a_dash_dash_comment_between_the_drop_and_the_create_still_counts_as_bootstrap() {
+    // Scope pin for the message's "nothing between them but whitespace and `--` comments" wording —
+    // real bootstrap files annotate each table, so "immediately followed by" would have been a lie.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/0001_annotated.sql",
+        "DROP TABLE IF EXISTS users;\n-- users: one row per account\nCREATE TABLE users (id INTEGER PRIMARY KEY);\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "destructive-migration").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn a_plain_drop_table_above_a_create_table_is_not_bootstrap_and_still_fires() {
+    // Scope pin for the message's "`IF EXISTS` is required" claim: without it the statement is not a
+    // re-runnable bootstrap, so a rename-style drop-then-create is still disclosed.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/0003_rename.sql",
+        "DROP TABLE customer_invoices;\nCREATE TABLE invoices (id INTEGER PRIMARY KEY);\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "destructive-migration").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn a_drop_that_shares_a_file_with_a_bootstrap_preamble_is_the_documented_residual() {
+    // Honest residual pin: the veto is whole-FILE (line-scan cannot correlate the DROP's table name
+    // with the CREATE's — the regex engine has no backreferences), so a genuinely destructive drop
+    // sharing a file with a bootstrap preamble is missed. Pinned so the limitation is a KNOWN,
+    // reviewed cost rather than a surprise, and so a future name-correlating matcher flips it.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/0002_mixed.sql",
+        "DROP TABLE IF EXISTS cache_entries;\nCREATE TABLE cache_entries (id INTEGER PRIMARY KEY);\nDROP TABLE customer_invoices;\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "destructive-migration").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
 fn where_scoped_delete_in_a_migration_is_not_flagged() {
     // The absorbed DELETE/UPDATE alternatives carry the same never-guess discipline as the critical
     // rules: a WHERE-scoped statement is a filtered subset, not a whole-table write, and stays silent.

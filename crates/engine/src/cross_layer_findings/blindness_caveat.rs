@@ -64,20 +64,15 @@ warnings) — this can be extraction blindness rather than a dead endpoint."
     ))
 }
 
-/// Does this keyed consume evidence real extraction visibility? A verb-path http key whose path
-/// segments are ALL `{}` placeholders carries no route identity — it cannot pick out any particular
-/// endpoint, so it is not visibility evidence (a root `VERB /` key, zero segments, still counts:
-/// that IS a real route identity). Non-http-shaped keys (`table:users`, env keys, topics — no
-/// "VERB /path" shape) always count.
+/// Does this keyed consume evidence real extraction visibility? Exactly the kernel's route-identity
+/// gate: a verb-path http key whose path segments are ALL `{}` placeholders picks out no particular
+/// endpoint, so it is not visibility evidence; a root `VERB /` key and any non-"VERB /path" key
+/// (`table:users`, env keys, topics) do count. A local re-implementation used to live here — it now
+/// CALLS [`zzop_core::key_carries_route_identity`], the same predicate the linker's
+/// unprovided-vs-unresolved bucketing and the single-tree `http/unprovided-consume` veto use, so the
+/// three surfaces can never disagree about which keys are junk.
 fn evidences_visibility(key: &str) -> bool {
-    let Some((_verb, path)) = key.split_once(' ') else {
-        return true;
-    };
-    let mut segments = path.split('/').filter(|s| !s.is_empty()).peekable();
-    if segments.peek().is_none() {
-        return true; // "VERB /" — a real root route.
-    }
-    segments.any(|s| s != "{}")
+    zzop_core::key_carries_route_identity(key)
 }
 
 /// Appends `caveat` (when `Some`) to every finding's message, in place — the shared tail

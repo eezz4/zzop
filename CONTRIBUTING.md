@@ -6,6 +6,9 @@ workflow, CI gates, and conventions for PRs.
 ## Prerequisites
 
 - Rust (stable toolchain)
+- Node 18+ — **only** for the local measurement harness under `scripts/measure/` (see
+  [Re-measuring before you commit](#re-measuring-before-you-commit)). Nothing that ships needs it:
+  both binaries are plain Rust.
 
 ## Build & test
 
@@ -85,7 +88,10 @@ A PR must pass every job in [`.github/workflows/ci.yml`](.github/workflows/ci.ym
   bumping its `PARSER_FINGERPRINT` const; a parser crate with a `src/` but no such const at all
   fails outright; a change to `crates/core`'s shared projected-type surface without a
   `CACHE_SCHEMA_VERSION` bump also fails — see the script's core section) and a policy-value
-  census guard (a new policy-shaped constant must be triaged into `scripts/policy-census.txt`).
+  census guard (a new policy-shaped constant must be triaged into `scripts/policy-census.txt`). The
+  sibling axis — a new named `${...}` fragment in a DSL rule pack — is censused by `cargo test`
+  instead, in `crates/core/src/dsl/tests_fragments/name_census.rs`, because reading it needs a real
+  JSON parser rather than a line scan.
 - **test** — `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
   `cargo test --workspace`.
 
@@ -110,6 +116,59 @@ clone (plain git, no husky or npm dependency):
 ```sh
 git config core.hooksPath .githooks
 ```
+
+## Re-measuring before you commit
+
+`cargo test` proves you did what you intended. It does not prove the change did what you expected to
+**real code** — fixtures are the shape you imagined, a corpus is the shape that exists. So if your
+change can move which findings fire, run the analyzer over a real multi-tree corpus **before and
+after**, and read the difference. The harness for that lives in `scripts/measure/`:
+
+```sh
+cargo build -p zzop-mcp --release
+
+# 1. snapshot the baseline (e.g. a worktree at the commit you branched from)
+node scripts/measure/snapshot.mjs --label base-<commit> \
+     --bin /path/to/baseline/target/release/zzop-mcp --config /path/to/corpus/zzop.config.jsonc
+
+# 2. snapshot your working tree
+node scripts/measure/snapshot.mjs --label mine-<what-changed> \
+     --bin ./target/release/zzop-mcp --config /path/to/corpus/zzop.config.jsonc
+
+# 3. read the difference
+node scripts/measure/diff.mjs base-<commit> mine-<what-changed>
+```
+
+**Read the anchor difference, not the count table.** `diff.mjs` prints, as its primary output, which
+`(tree, rule, file, line)` anchors disappeared and which appeared. A per-rule count delta cannot tell
+you which of those happened: a rule going 6 → 2 has already been measured here to mean "three old
+findings gone and one new true positive found", which is neither "4 fixed" nor a regression. If your
+count moved, say which anchors moved, and check the ones that appeared as carefully as the ones that
+left.
+
+**Both axes always run.** `snapshot.mjs` calls `analyze_repo` once per tree *and* `cross_repo` once
+over the whole config, because `cross-layer/*` findings exist only in the multi-tree join reply — a
+re-measurement done with single-tree analysis alone cannot observe those rules at all, and will
+report "no change" for a rule it never ran.
+
+**The harness aborts instead of reporting a zero.** It fails loudly on a non-zero exit, an empty
+stdout, a reply that contains only the MCP `initialize` frame, a JSON-RPC or tool-level error, a
+missing payload key, and on *any* truncated list — a capped findings list silently shrinks the set
+difference, and a shrunken set difference reads as "identical". It also refuses to reuse an existing
+run label, so a re-run can never overwrite a baseline someone else is still comparing against. If it
+aborts, nothing was measured; do not read the previous snapshot as the answer.
+
+This is why the harness drives the `zzop-mcp` binary rather than the `zzop` CLI: the CLI has no
+`--limit` flag, so it is pinned to the default findings cap and quietly clips any tree above it.
+
+Two honest limitations:
+
+- **CI does not run any of this**, and it is not wired to — every corpus this repo measures against
+  is gitignored or lives outside the tree, so there would be nothing for CI to point at. These are
+  developer tools, deliberately kept out of `scripts/check-*.sh` (where every file *is* CI-wired).
+- **Bring your own corpus.** Any repository, or set of repositories, with a `zzop.config.jsonc`
+  declaring 2+ trees works. A synthetic labeled corpus can additionally be scored for
+  recall/precision against a ground-truth file with `scripts/measure/benchmark.mjs`.
 
 ## Conventions
 

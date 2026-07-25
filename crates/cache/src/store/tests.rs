@@ -54,6 +54,7 @@ fn sample_ir(loc: u32) -> FileIrSlice {
         degraded: false,
         io: None,
         used_names: Vec::new(),
+        exported_signature_names: Vec::new(),
         minified_or_generated: false,
         const_map_fragment: std::collections::HashMap::new(),
         procedure_router_fragments: Vec::new(),
@@ -65,6 +66,7 @@ fn sample_ir(loc: u32) -> FileIrSlice {
         query_call_sites: Vec::new(),
         field_usage_tokens: Vec::new(),
         loop_spans: Vec::new(),
+        function_spans: Vec::new(),
     }
 }
 
@@ -136,6 +138,27 @@ fn roundtrip_preserves_loop_spans() {
         got.loop_spans,
         vec![(2, 4), (7, 7)],
         "loop_spans must round-trip exactly"
+    );
+}
+
+#[test]
+fn roundtrip_preserves_function_spans() {
+    // `FileIrSlice::function_spans` — same isolation as `roundtrip_preserves_loop_spans` above, and it
+    // matters more here: the absent-fact degrade for `MethodScan::after_in_same_function` is "remove no
+    // pairings", so a dropped field on a warm run does not go silent, it silently RESTORES the false
+    // positives the gate exists to remove.
+    let dir = scratch_dir("roundtrip-function-spans");
+    let cache = AnalysisCache::open(&dir, "v1").unwrap();
+    let k = key("content", "ts+swc1+logic1", "pack@1");
+    let mut ir = sample_ir(10);
+    ir.function_spans = vec![(1, 9), (3, 5)];
+
+    cache.put_ir(&k, &ir).unwrap();
+    let got = cache.get_ir(&k).expect("expected IR hit after put");
+    assert_eq!(
+        got.function_spans,
+        vec![(1, 9), (3, 5)],
+        "function_spans must round-trip exactly"
     );
 }
 

@@ -6,6 +6,20 @@
 //!
 //! `http_consume_totals` is threaded in from the engine rather than recomputed here, since `crates/core`
 //! stays rule-vocabulary-free.
+//!
+//! **Threshold re-measured against the linker's route-identity gate** (2026-07-25, 22-tree mono-hub).
+//! That gate moves an all-`{}` consume key from `unprovidedConsumes` into `unresolvedConsumes`, which
+//! raises this disclosure's NUMERATOR while `http_consume_totals` (engine-side, computed off
+//! `source_ios[].io.consumes` before any bucketing) stays fixed — so the gate can only ever ADD firings,
+//! never remove one, and "a tree that used to be quiet starts reporting" was the real risk to check.
+//! Measured, gate off vs on, same working tree and one flipped condition: the firing SET is UNCHANGED
+//! (the same four sources, same anchors; every `cross-layer/*` anchor across the whole run is
+//! byte-identical, as are all 22 per-tree `analyze_repo` outputs). Only two ratios moved —
+//! `life-hub-fe` 62%→68% (10→11 of 16), `tool-hub-fe` 66%→100% (6→9 of 9). Cause: exactly 4 consumes
+//! corpus-wide were demoted (`unprovidedConsumes` 5→1, `unresolvedConsumes` 52→56) and all 4 landed in
+//! trees ALREADY over the majority line, so no source crossed it. The `MIN_TOTAL_CONSUMES` floor and the
+//! majority predicate therefore stand as-is; the new distribution makes two already-blind trees report
+//! their blindness more accurately, which is the point of the rule.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -139,6 +153,28 @@ mod tests {
         assert_eq!(data["source"], "fe");
         assert_eq!(data["unresolvedCount"], 3);
         assert_eq!(data["totalHttpConsumes"], 5);
+        assert_eq!(data["ratioPercent"], 60);
+    }
+
+    /// Disclosure pin for the linker's route-identity gate: a consume the linker DEMOTED into
+    /// `unresolved_consumes` because its key names no route (`GET /{}`) arrives here with `key: Some`,
+    /// not `key: None`. This rule must count it — that gate deliberately trades an over-claiming
+    /// `unprovidedConsumes` entry for extra silence, and the trade is only honest if the silence shows
+    /// up in this ratio. Filtering on `kind` alone (never on `key.is_none()`) is what makes it show up.
+    #[test]
+    fn a_demoted_identity_less_keyed_consume_still_counts_toward_the_ratio() {
+        let mut demoted = unresolved("fe", "fetchJoke.ts", 6, Some("`${BASE}/${category}`"));
+        demoted.consume.key = Some("GET /{}".to_string());
+        let unresolved_list = vec![
+            demoted,
+            unresolved("fe", "b.ts", 1, None),
+            unresolved("fe", "c.ts", 3, None),
+        ];
+        let totals = vec![("fe".to_string(), 5usize)];
+        let out = unresolved_consume_ratio_findings(&unresolved_list, &totals);
+        assert_eq!(out.len(), 1, "{out:?}");
+        let data = out[0].data.as_ref().unwrap();
+        assert_eq!(data["unresolvedCount"], 3);
         assert_eq!(data["ratioPercent"], 60);
     }
 

@@ -80,7 +80,7 @@ fn flags_digestutils_md5() {
         "C.java",
     );
     assert_eq!(f.len(), 1);
-    assert!(label(&f[0]).contains("weak hash"));
+    assert_eq!(label(&f[0]), "weak-hash");
 }
 
 #[test]
@@ -102,9 +102,9 @@ fn flags_messagedigest_md5_and_sha1() {
 #[test]
 fn flags_weak_ciphers_and_ecb() {
     let des = scan(r#"Cipher.getInstance("DES/CBC/PKCS5Padding");"#, "C.java");
-    assert!(label(&des[0]).contains("weak cipher"));
+    assert_eq!(label(&des[0]), "weak-cipher");
     let ecb = scan(r#"Cipher.getInstance("AES/ECB/PKCS5Padding");"#, "C.java");
-    assert!(label(&ecb[0]).contains("ECB"));
+    assert_eq!(label(&ecb[0]), "ecb-mode");
 }
 
 #[test]

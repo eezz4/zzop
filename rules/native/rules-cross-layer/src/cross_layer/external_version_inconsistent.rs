@@ -1,6 +1,9 @@
 //! `cross-layer/external-version-inconsistent` (info) — one external host consumed through BOTH
-//! version-shaped paths (`/v1/...`, `/v2/...`) and versionless paths (`/users`, ...). A bare root pins no
-//! version, so it's dropped from the versionless side first. Classification uses the shared
+//! version-shaped paths (`/v1/...`, `/v2/...`) and versionless paths (`/users`, ...). A path with no
+//! literal segment pins no version, so it's dropped from the versionless side first — the bare root `/`
+//! and, by the same argument, an all-slot `/{}` head-drop artifact ([`super::is_all_slot_path`], this
+//! crate's shared contentless-path gate; the root-only spelling this check used to carry was the
+//! narrower half of one predicate). Classification uses the shared
 //! [`super::VERSION_SEGMENT_PATTERN`] (same pattern `version_skew` uses); findings are anchored at the
 //! first versionless consume site, sorted by `(file, line)`.
 //!
@@ -19,7 +22,7 @@ use regex::Regex;
 use zzop_core::io::TaggedConsume;
 use zzop_core::{disable_hint, Finding, Severity};
 
-use super::{path_segments, split_external_key, VERSION_SEGMENT_PATTERN};
+use super::{is_all_slot_path, path_segments, split_external_key, VERSION_SEGMENT_PATTERN};
 
 pub fn external_version_inconsistent_findings(external_consumes: &[TaggedConsume]) -> Vec<Finding> {
     let version_re = Regex::new(VERSION_SEGMENT_PATTERN).unwrap();
@@ -47,12 +50,13 @@ pub fn external_version_inconsistent_findings(external_consumes: &[TaggedConsume
         let mut versionless: BTreeSet<&str> = BTreeSet::new();
         for entry in entries {
             let path = entry.0.as_str();
-            if path == "/" {
-                continue; // a root call pins no version — drop it from the versionless side.
+            let segments = path_segments(path);
+            if is_all_slot_path(&segments) {
+                // A path with no literal segment pins no version (`/`, `/{}`) — drop it from the
+                // versionless side rather than let it manufacture the split this rule reports.
+                continue;
             }
-            let is_versioned = path_segments(path)
-                .into_iter()
-                .any(|seg| version_re.is_match(seg));
+            let is_versioned = segments.iter().any(|seg| version_re.is_match(seg));
             if is_versioned {
                 versioned.insert(path);
             } else {

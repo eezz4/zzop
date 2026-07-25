@@ -28,7 +28,7 @@ request/response shapes.
 | `sourceId` | `String` (default `""`) | Free-form label carried through into cross-tree output. |
 | `packsDir` | `Option<String \| String[]>` | Directory (or directories) of `*.json` DSL rule packs to load — see [rules/authoring-guide.md](../rules/authoring-guide.md). Multiple directories are loaded and MERGED (see [Defaults](#defaults-zero-config--full-analysis) below for the collision rule). A bad/missing directory is a non-fatal `warnings` entry, not a failure — other directories in the list still load. |
 | `packDefs` | `RulePackDef[]` (default `[]`) | Inline rule-pack definitions handed to the engine as data instead of a filesystem directory — the self-contained-binary alternative to `packsDir` (`zzop-mcp`'s bundled packs, embedded at compile time). Loaded BEFORE `packsDir` directories, so a directory pack with the same id wins the collision. A same-id collision among `packDefs` entries themselves: the later array entry wins whole. Also accepted on `analyzeEnvelope`'s config — `EnvelopeAnalyzeRequest` carries the same field with the identical contract. |
-| `cacheDir` | `Option<String>` | See [Caching](../ARCHITECTURE.md#caching). Omit to run uncached. |
+| `cacheDir` | `Option<String>` | See [Caching](../ARCHITECTURE.md#caching). Omit to run uncached — **this is the facade-wire answer**, and it is the one place the two dialects differ: the facade injects nothing, so an embedder that names no directory gets no cache and no directory created in its tree. A `zzop`/`zzop-mcp`/`zzop.config.jsonc` run reaches this field through `zzop-config`, which defaults it to `.zzop/cache` (see [Defaults](#defaults-zero-config--full-analysis) below). |
 | `git` | `Option<{ since: Option<String>, recentDays: Option<u32>, commitTypePatterns: Option<Array<{ pattern: String, tag: String }>> }>` | Enables git-derived scores/health/recommendations/criticality/seams. `recentDays` default is 30. `commitTypePatterns` is an ARRAY of `{ pattern, tag }` objects (NOT a map) — e.g. `[{ "pattern": "^hotfix:", "tag": "FIX" }]` — and, when present and non-empty, REPLACES the default FIX/FEAT/REVERT/... classifier table entirely (match order = array order, mirroring the default table's REVERT-first rationale); an entry whose `pattern` fails to compile as a regex is skipped (matches nothing) and reported as a `warnings` entry, never a failure. |
 | `sizeCap` | `Option<usize>` | Default 1,500,000 bytes (~1.5MB) — see [degraded files](../ARCHITECTURE.md#degraded-files). |
 | `disabledRules` | `Vec<String>` | Rule/analysis ids to turn off — see [rules/catalog.md](../rules/catalog.md) for the id list. |
@@ -61,6 +61,14 @@ silently degrading to native-analyses-only:
 - `git` — when the key is absent, defaults to `git: {}` (the engine applies its own `recentDays: 30`
   default). An explicit value wins; `git: null` disables git collection. If `root` is not a git
   repository, the engine degrades gracefully with a "git collection skipped" warning.
+- `cacheDir` — when the key is absent, defaults to `.zzop/cache`, resolved against the config file's
+  directory (or the analyzed root, with no config file). This is the one default that WRITES: a first
+  run creates that directory inside the analyzed tree, which is why the fact is spelled out for users in
+  [ARCHITECTURE.md](../ARCHITECTURE.md#caching) (including the anchored `/.zzop/` gitignore line) rather
+  than only here. A JSON-falsy value (`null` canonically) turns caching off and emits no `cacheDir` at
+  all — byte-identical to the request an omitted key produced before this default existed. Note this
+  bullet describes the front end only: the `AnalyzeRequest` field itself still means "omit to run
+  uncached", per its row above.
 
 `analyzeEnvelope`'s config gets only the pack default — envelope mode has no `root`/git — and gets it
 at a single layer: the engine facade itself (`zzop_facade::analyze_envelope_json`) seeds the bundled
@@ -73,10 +81,16 @@ whole over both — so a raw facade/binary caller with no explicit `packsDir` se
 `source: "inline"`. An explicit `packsDir: null` disables the bundled seed and all pack directories —
 caller-supplied `packDefs` are still honored, per the standing "packDefs always load" contract — the
 facade distinguishes an absent key from an explicit `null` for exactly this opt-out. Note only
-`symbol-scan`/`io-scan` rules can fire in envelope mode (no source text); every current bundled rule is
-`line-scan`/`method-scan`, so today the bundled default changes `packsLoaded` (and removes the spurious
-zero-packs warning), not findings. To turn off individual rules rather than a whole channel, use
-`disabledRules` (see [rules/catalog.md](../rules/catalog.md)).
+`symbol-scan`/`io-scan` rules can fire in envelope mode (no source text) — and the bundled packs do
+ship two `io-scan` rules (`http/auth-gates`, `http/route-exposure`), so the bundled default changes
+**findings** too, not just `packsLoaded` and the spurious zero-packs warning. What those two lose in
+`analyze_envelope` (Mode A) is not the firing but three ANCHOR-LINE-derived channels: inline
+suppress markers, the `anchor_exclude_pattern` guard-hint exception, and the near-miss marker
+disclosure all go quiet, because Mode A has no source text to locate a finding's line in
+(`crates/engine/src/envelope/ingest.rs` passes an `anchor_line` callback that always answers `None` —
+"no info available", never a guess). `apply_adapter_overlays` (Mode B) is unaffected: an overlay is
+merged BEFORE assemble, so its facts keep real anchor lines. To turn off individual rules rather than
+a whole channel, use `disabledRules` (see [rules/catalog.md](../rules/catalog.md)).
 
 Whenever the engine can see less than a caller would assume — a narrowed scope from an explicit
 opt-out, a non-host consumer calling the Rust engine directly, or simply a tree the loaded packs and
@@ -173,6 +187,72 @@ from which join buckets contain a match: `edges` → `"linked"`, `unconsumedProv
 Exactly one class matching yields its token; two or more yield `"mixed"` (the `counts`
 disambiguate); zero yield `"not-found"`.
 
+## Structural drift: `zzop manifest` / `zzop diff`
+
+Two pure JSON transformations over an `analyzeTrees` run, in the same "post-processing, one shared
+core" class as `queryIo` above — but a layer out: they live in the shared `zzop-summary` crate
+(`crates/summary/src/manifest/`), not in `zzop-facade`, and they are **CLI-only** (no MCP tool twin —
+the reasons are recorded in [`docs/contracts/surface-parity.json`](../contracts/surface-parity.json)'s
+`_cliOnlyLanes`). zzop produces manifests; **keeping** one is yours (commit it next to the code, the
+same model as `scripts/max-file-lines-baseline.txt`) — no snapshot is ever stored, named or cleaned up
+by zzop.
+
+**Why they exist.** "Just diff two runs yourself" holds only *below* the caps. What a host ships is
+not raw output, it is a capped summary (`crossLayer.edges` ≤ 200, `bucketKeys` ≤ 20, findings ≤ 50,
+`degraded` ≤ 50). Above a cap, two runs' texts still agree on the *counts* while saying nothing about
+*which* route left the join. A manifest stays structurally readable there because it carries identity
+and nothing else.
+
+`zzop manifest <path>... | zzop manifest --config <zzop.config.jsonc>` — same two source modes and the
+same analysis as `cross`, projected differently:
+
+| Field | Shape | Why |
+|---|---|---|
+| `tool` | `version()`'s string (release version + every parser fingerprint) | Honesty gate 1's key — see `diff` below. |
+| `sources[]` | `{sourceId, joinContributionZero, degraded}` | Honesty gate 2's key. Deliberately **no `root`**: an absolute path differs between a laptop and CI, which would make the two machines that most need to compare unable to. |
+| `provides[]` | `{kind, key, source}` | The API surface each tree exposes (from `ir.io.provides`, the one place the full list lives). |
+| `edges[]` | `{kind, key, from, to}` | Which tree calls which, by source id only. |
+| `buckets[]` | `{bucket, kind, key, source}` | Membership in each of the five non-edge buckets. An unresolved consume has no key, so its `raw` expression is its identity (the same fallback `bucketKeys` uses) — never guessed, never silently dropped. |
+
+Every array is sorted and deduped, so the same analysis produces byte-identical bytes, and a pure
+refactor (files moved, lines shifted, a route declared in a second place) produces an **empty** diff.
+Not carried, by design: file/line (one rename would drown the real signal), `findings` (finding
+identity drifts with line numbers, and severity totals already ride uncapped counts — v1 is structural
+contract state only), and no schema-version field (a schema change ships in a zzop release, which the
+`tool` gate already refuses to compare across).
+
+`zzop diff <a.json> <b.json> [--allow-tool-drift]` — two manifests in, one delta out. Read
+`transitions` first: a `+` is common and usually harmless, but a key moving from `edges` to
+`unprovidedConsumes` means the caller still calls it and the route is gone. (Reply keys are ordered
+alphabetically, not by rank — every reply in that crate serializes through a `BTreeMap`, which is part
+of what makes them byte-identical run over run.)
+
+| Field | Meaning |
+|---|---|
+| `transitions` | Keys present in BOTH runs whose bucket placement changed: `{kind, key, from[], to[]}`. Placement is a *set* (a key can sit in two buckets at once — e.g. provided by two trees, consumed from one), so a transition is a set change. |
+| `sources` | `{added, removed, coverageDropped}` — `coverageDropped` names each source whose `degraded` rose or that became `joinContributionZero`. |
+| `provides` / `edges` / `buckets` | `{added, removed}` — the raw evidence under the ranking. A transition's own rows also appear here; the transition entry is the *reading* of them, not an extra fact. |
+| `blindnessSuspect` | Present (`true`) on any removed row — or transition — attributable to a source that lost coverage or vanished from the second run. Absent otherwise; it is never a claim that other removals are trustworthy. |
+
+Two honesty gates, because without them this feature manufactures exactly the silent wrongs zzop's
+`disclosure` registry exists to name:
+
+1. **Tool identity.** Two manifests from different zzop builds are not comparable — our own parser
+   improvement can move keys between buckets with no change to the analyzed code, and would read as
+   the other team breaking a contract. `diff` **refuses** by default (exit 1) and names the escape
+   hatch; `--allow-tool-drift` compares anyway and the reply then carries a `toolDrift` block naming
+   both builds. Refuse or disclose, never silently compare.
+2. **Blindness vs deletion.** A tree that got *less visible* explains disappearances by itself, so
+   `blindnessSuspect` + `sources.coverageDropped` keep "the route vanished" from being reported when
+   "we stopped being able to see it" is the honest reading.
+
+Exit codes follow every other subcommand: 0 on success, 2 for an argument-shape mistake, 1 for a
+runtime failure — which includes the gate-1 refusal, and a file that is not a manifest at all (a named
+error naming *which* argument, never two empty relation sets read as "nothing changed"). `diff` does
+**not** exit non-zero on a detected transition: a CI gate reads the JSON (e.g.
+`jq -e '.transitions | length == 0'`), so "the contract broke" can never be confused with "the diff
+itself failed".
+
 `AnalyzeOutputView` (`camelCase`, a zero-copy borrowing view) is the shape every successful `analyze`/
 `analyzeEnvelope` call returns:
 
@@ -204,7 +284,8 @@ none", not "not run"):
 
 | Field | Type | Meaning |
 |---|---|---|
-| `files` | `number` | Files walked (same as `fileCount`). |
+| `files` | `number` | Files walked (same as `fileCount`) — every file under the root, including docs, data and assets; the walk applies no extension filter. See `sourceFiles` for the code subset. |
+| `sourceFiles` | `number` | The subset of `files` a native frontend dispatched on, or that an applied overlay covers. Dispatch is by extension, so a file that hit the size cap and fell back to a lexical count, or that failed to parse, still counts here — this is "analysis had a frontend for it", not "analysis extracted structure from it". `degraded` reports the parse failures separately. `files - sourceFiles` is the docs/data/asset remainder, which is why a repo can report thousands of walked files and far fewer analyzed ones. Caveat: Mode A/B envelope ingest sets this equal to `files`, so `files == sourceFiles` on an injected run is an identity of construction, not a coverage signal. |
 | `symbols` | `number` | `SourceSymbol` entries extracted (`ir.symbols[]` length). |
 | `importEdges` | `number` | Resolved import-graph edges — sum of `ir.dep` out-degrees (edge count, not source-file count). |
 | `ioProvides` | `number` | `ir.io.provides` entries. |
@@ -250,7 +331,13 @@ join result across six buckets (camelCase like everything else), plus a per-edge
 - `edges` — a consume matched to a provide across sources.
 - `unconsumedProvides` — a provide no analyzed source consumes.
 - `unprovidedConsumes` — a consume no analyzed source provides.
-- `unresolvedConsumes` — a consume whose URL/key could not be statically determined.
+- `unresolvedConsumes` — a consume whose target could not be statically determined: either no key was
+  resolved at all (`key: null`, the source text in `raw`), or the resolved key names no route because
+  every path segment is a `{}` placeholder (`GET /{}` — an unresolved `${BASE}` interpolation dropped the
+  host; `key` is present for these, so they stay locatable in `bucketKeys`). Both are "the analysis is
+  blind here", never "the route is missing", and both count toward
+  `cross-layer/unresolved-consume-ratio`. Such a key only lands here on a MISS: if some tree really does
+  provide a catch-all `GET /{}` route, the consume joins it as an ordinary edge.
 - `externalConsumes` — a consume targeting an absolute external host URL (e.g.
   `GET https://vendor.com/api/users`): third-party egress, not joined, not treated as drift.
 - `ambiguousConsumes` — a consume matching provides in 2+ distinct source trees: not
@@ -258,6 +345,16 @@ join result across six buckets (camelCase like everything else), plus a per-edge
 - `edges[].lowConfidenceReason` (string, omitted when not set) — the edge's key matched a generic-path
   pattern (health checks, `/login`, etc.) that many unrelated services could share, so the match is lower
   confidence than a distinctively-named route; the edge is still emitted.
+
+**The buckets are the raw join fact, not a findings list.** The only filters applied when building them
+are ones readable from the key or the file itself — an unresolvable key, an absolute-URL key, a
+test-classified file, provider absence or ambiguity. The linker is kind-agnostic and holds no rule
+vocabulary, so no domain filter (static assets, health routes, ...) runs at this layer: a consume that a
+rule vetoes as not-really-API still sits in `unprovidedConsumes`. Rules that report the same class apply
+extra vetoes on top, so `crossLayerFindings` is a filtered *view* of these buckets and will legitimately
+be smaller — the two disagreeing on one key is the contract working, not drift. Disclosed per run as the
+`join-bucket-unfiltered` entry in the [`disclosure`](#disclosure--silent-failure-class-registry-run-global)
+registry.
 
 `crossLayer` also carries `hostRekeyCounts`, an additional field present only when at least one tree in
 the request declares topology `hosts` — one `[host, rekeyedConsumeCount]` pair (a plain 2-element JSON

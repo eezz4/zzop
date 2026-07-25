@@ -18,41 +18,75 @@
 //! tiers. [`ALWAYS_VETO_EXTENSION_PATTERN`] vetoes static-asset-shaped extensions unconditionally, anchored
 //! to end-of-path. [`ASSET_DIR_GATED_EXTENSION_PATTERN`] (`json`/`xml`) also legitimately names a real API
 //! shape (`GET /api/users.json`), so it's gated on an API-ish path segment ([`API_SEGMENT_PATTERN`]) instead
-//! of an asset-directory allowlist, since some frameworks strip the `public/` prefix from served asset URLs.
-//! Tradeoff: an API route living outside any `/api`-ish segment is missed by this veto too.
+//! of an asset-directory allowlist, since some frameworks strip the `public/` prefix from served asset URLs
+//! (a Next.js `public/i18n/*.json` fetch keyed `GET /i18n/{}.json` is vetoed by the ABSENT API segment).
+//! Tradeoff: an API route living outside any `/api`-ish segment is missed here too.
 //!
-//! A related residual gap: raw-Worker manual dispatch (`export default { fetch }` comparing
-//! `url.pathname` against literals) IS extracted by the parser's evidence-gated `pathname_dispatch`
-//! adapter, but shapes outside its never-guess gate (dynamic/`startsWith` paths, const-indirected
-//! literals, functions without Request evidence) remain invisible on the provide side. Severity
-//! starts at [`Severity::Info`] to absorb both this residue and the extension-veto tradeoff above.
+//! A related residual gap: raw-Worker manual dispatch (`export default { fetch }` comparing `url.pathname`
+//! against literals) IS extracted by the evidence-gated `pathname_dispatch` adapter, but shapes outside its
+//! never-guess gate (dynamic/`startsWith` paths, const-indirected literals, functions without Request evidence)
+//! stay invisible on the provide side. [`Severity::Info`] absorbs both this residue and the tradeoff above.
 //!
-//! ## Localhost absolute-URL veto
-//! An absolute-URL `fetch()` call to `localhost`/`127.0.0.1` (a dev-mode self-reference to this app) is
-//! extracted with a host-carrying key that can never string-match an internal, extension-free
-//! `provided_keys` entry like `"GET /api/users"` — so without [`LOCALHOST_HOST_PATTERN`] every such call is
-//! wrongly flagged. This is a deliberate SKIP rather than a fabricated join, since stripping the host risks
-//! a false negative masking a real mismatch. A non-localhost absolute URL goes through existing logic as usual.
+//! ## Structural gates — one shared sequence, not local copies
+//! Everything decidable from the KEY or the FILE alone belongs to the STRUCTURAL layer, whose single
+//! definition is the linker's, and this rule CALLS it rather than restating it: a structural gate must
+//! exist on BOTH axes, built once in core and called — never hand-copied.
+//!
+//! - **No key / declared-host re-key / absolute-URL egress** — [`zzop_core::classify_consume_join`], the
+//!   linker's own sequence *including its order*. The order is the contract: the re-key runs BEFORE the
+//!   `://` gate, so a tree that declares `hosts` gets its own gateway calls re-keyed to internal paths
+//!   and matched instead of vetoed as egress. Copying the linker's PREDICATE without that preceding
+//!   TRANSFORM is exactly how this rule once regenerated the defect class the predicate fix had just
+//!   closed; one function carrying both makes that misuse unexpressible. A key that still carries a
+//!   scheme afterwards is third-party egress by the linker's written contract
+//!   (`zzop_core::CrossLayerResult::external_consumes`: "never counted as `unprovidedConsumes`, since an
+//!   unmatched absolute-URL consume is expected ... not drift") and could never string-match an
+//!   extension-free `provided_keys` entry anyway — which ended the field-measured contradiction
+//!   (`GET https://api.sunrise-sunset.org/json` read as drift here, `externalConsumes` there). A
+//!   localhost/loopback dev self-reference is a strict SUBSET, carrying no vocabulary of its own;
+//!   host-stripping to force a join stays rejected — a fabricated join can mask a real mismatch. On a
+//!   re-key the finding reports the internal join key and keeps the absolute spelling in `data.rawKey`,
+//!   mirroring the linker's own bucket invariant; declaring no hosts leaves behavior byte-identical.
+//! - **Route identity** — [`zzop_core::key_carries_route_identity`], asked on BOTH axes only of a key
+//!   that matched nothing (hence not part of the sequence above: a key with no route identity that
+//!   actually HITS a provide is a join, not a guess). An all-`{}` key (`GET /{}`) names no route — the
+//!   head-drop artifact of an interpolation the extractor could not resolve (`` fetch(`${BASE}/${id}`) ``)
+//!   — so its failure to match proves nothing about this tree's routes, and reporting it would fabricate
+//!   an internal contract out of an extraction gap. The multi-tree linker buckets the same key as
+//!   `unresolvedConsumes`; this rule has nowhere to move it, so it vetoes.
+//! - **Test-file classification** — `zzop_core::is_test_file`, the same predicate the cross-tree join's
+//!   input filter (`filter_join_io`, D11) applies; see the consume loop's own comment.
+//!
+//! What stays local is exactly what the layer split says must: the VOCABULARY vetoes (static assets, API
+//! segments) and the single-tree utterance shaping (zero-provides veto, foreign fold) below.
 //!
 //! ## Foreign-vs-overlapping fold (partial-provider trees)
-//! Field measurement (a monorepo analyzed as ONE tree): one app in the tree contributed a handful of `http`
-//! provides, which opened the zero-provides veto above, and a batch of keyed consumes from SIBLING apps —
-//! served outside this analysis's scope, none matching any provided key — each fired an individual
-//! [`Severity::Info`] finding. That's tone noise, not signal: this tree is only a *partial* provider, so a
-//! wall of independently-worded "no route provides this" findings reads as N broken routes when it's really
-//! one root cause (a monorepo where only one app's routes are visible to this analysis).
+//! Field measurement (a monorepo analyzed as ONE tree): one app contributed a handful of `http` provides,
+//! which opened the zero-provides veto above, while keyed consumes from SIBLING apps — served outside this
+//! analysis's scope, matching no provided key — each fired an individual [`Severity::Info`] finding. That's
+//! tone noise, not signal: this tree is only a *partial* provider, so a wall of independently-worded "no
+//! route provides this" findings reads as N broken routes when it's really one root cause.
 //!
-//! [`unprovided_consume_findings`] splits unmatched consumes by FIRST PATH SEGMENT overlap with the tree's
-//! own provided key space ([`first_path_segment`]): an unmatched consume whose first segment IS one of the
-//! tree's own provided first segments ("overlapping") keeps today's individual finding unchanged — it's
-//! still plausibly a typo'd or removed route under a family this tree actually serves. An unmatched consume
-//! whose first segment is NOT in that space ("foreign") is folded into ONE aggregate finding once
-//! [`MIN_FOREIGN_UNPROVIDED_GROUP`] or more foreign consumes accumulate, following the same
-//! replace-not-silently-suppress contract as `cross-layer/prefix-drift`
-//! (`rules/native/rules-cross-layer/src/cross_layer/prefix_drift.rs`): the aggregate enumerates every folded
-//! key in `data.routes` and the message body, so no information is lost, only N findings replaced by one.
-//! Below the fold threshold, foreign consumes still get today's individual findings — 1-2 foreign consumes
-//! could be coincidence, not a partial-provider pattern.
+//! [`unprovided_consume_findings`] therefore splits unmatched consumes by FIRST PATH SEGMENT overlap with
+//! the tree's own provided key space ([`first_path_segment`]). "Overlapping" (first segment IS one of the
+//! tree's own provided first segments) keeps today's individual finding unchanged — still plausibly a typo'd
+//! or removed route under a family this tree actually serves. "Foreign" (first segment is NOT in that space)
+//! folds into ONE aggregate finding once [`MIN_FOREIGN_UNPROVIDED_GROUP`] or more accumulate, under the same
+//! replace-not-silently-suppress contract as `cross-layer/prefix-drift` (that rule's own module): the
+//! aggregate enumerates every folded key in `data.routes` and the message body, so nothing is lost, only N
+//! findings replaced by one. Below the
+//! fold threshold, foreign consumes stay individual — 1-2 could be coincidence, not a pattern.
+//!
+//! ### A veto can RAISE the finding count (fold interaction)
+//! Every veto above is applied BEFORE this split, so the threshold counts surviving consumes. Dropping one
+//! sibling can therefore take a foreign group from 3 to 2 and replace ONE aggregate finding with TWO
+//! individual ones — at anchors the aggregate never used, since it anchored at a single file:line. So
+//! "vetoes only remove" is true of KEYS REPORTED and false of FINDING COUNT and ANCHORS; a run comparing
+//! counts across a veto change must expect that. Deliberately not "fixed" by deciding the fold on the
+//! PRE-veto population: a vetoed consume (vendor egress, a static asset) is not evidence that this tree is
+//! a partial provider, so letting it push a 2-key group into an aggregate would fire the fold on exactly
+//! the evidence the vetoes just judged irrelevant, and would make an aggregate claim a threshold its own
+//! enumerated keys contradict. Disclosed in the individual finding's message instead.
 //!
 //! [`Severity::Info`]: zzop_core::Severity::Info
 
@@ -60,10 +94,15 @@ use std::collections::{BTreeSet, HashSet};
 
 use regex::Regex;
 
+mod message;
+use message::individual_finding;
+
 /// Always-veto extension vocabulary — see module doc "Static-asset veto". Anchored to end-of-path
 /// (optionally followed by a query string or fragment), not merely appearing anywhere in the key.
+/// Members complete the families already present (images/fonts/scripts) rather than opening a new class —
+/// none of them can name an API route shape (unlike `json`/`xml`, gated below).
 const ALWAYS_VETO_EXTENSION_PATTERN: &str =
-    r"(?i)\.(svg|png|jpe?g|gif|ico|css|txt|webp|woff2?|map|js)([?#]|$)";
+    r"(?i)\.(svg|png|jpe?g|gif|ico|bmp|avif|css|txt|webp|woff2?|ttf|otf|eot|map|[mc]?js)([?#]|$)";
 
 /// API-segment-gated extension vocabulary — see module doc "Static-asset veto". Vetoed unless
 /// [`API_SEGMENT_PATTERN`] also matches (inverted gate: absence of an API-ish segment is the veto signal).
@@ -73,77 +112,37 @@ const ASSET_DIR_GATED_EXTENSION_PATTERN: &str = r"(?i)\.(json|xml)([?#]|$)";
 /// whole path segment, not a bare substring (e.g. `/apiary/` does not match `/api/`).
 const API_SEGMENT_PATTERN: &str = r"(?i)/(api|graphql|rpc|v[0-9]+)(/|$)";
 
-/// Localhost/loopback absolute-URL host vocabulary — see module doc "Localhost absolute-URL veto". Anchored
-/// so `localhost`/`127.0.0.1` must be the URL's host, not merely a substring elsewhere in the key.
-const LOCALHOST_HOST_PATTERN: &str = r"(?i)^\S+\s+https?://(localhost|127\.0\.0\.1)(:\d+)?(/|$)";
-
-/// Fold threshold for "foreign" unprovided consumes (first path segment
-/// outside the tree's provided key space). Same rationale as
-/// `MIN_PREFIX_DRIFT_GROUP` in the cross-layer crate: 2 can be coincidence,
-/// 3+ is a pattern (here: a partial-provider tree, e.g. a monorepo where only
-/// one app's routes are extracted). Crate boundary prevents symbol sharing —
-/// the relationship is pinned by an equality test in the engine crate.
+/// Fold threshold for "foreign" unprovided consumes (first path segment outside the tree's provided key
+/// space). Same rationale as `MIN_PREFIX_DRIFT_GROUP` in the cross-layer crate: 2 can be coincidence, 3+ is
+/// a pattern (here: a partial-provider tree, e.g. a monorepo where only one app's routes are extracted).
+/// Crate boundary prevents symbol sharing — the relationship is pinned by an equality test in the engine.
 pub const MIN_FOREIGN_UNPROVIDED_GROUP: usize = 3;
 
-/// First `/`-delimited non-empty path segment of a `"METHOD /path"` (or `"METHOD <absolute-url>"`) key —
-/// the unit "foreign-vs-overlapping" grouping compares (module doc). Returns `None` when the path carries
-/// no segment at all (`"GET /"`), which the caller treats as foreign (nothing to overlap with).
+/// First `/`-delimited non-empty path segment of a `"METHOD /path"` key — the unit "foreign-vs-overlapping"
+/// grouping compares (module doc). `None` when the path carries no segment (`"GET /"`), which the caller
+/// treats as foreign (nothing to overlap with).
 fn first_path_segment(key: &str) -> Option<&str> {
     let path = key.split_once(' ').map(|(_, p)| p).unwrap_or(key);
     path.split('/').find(|segment| !segment.is_empty())
 }
 
-/// Builds today's individual `unprovided-consume` finding for one unmatched consume — shared by both the
-/// "overlapping" leg (always individual) and the "foreign, below fold threshold" leg (module doc).
-fn individual_finding(key: &str, file: &str, line: u32) -> zzop_core::Finding {
-    // Paste-ready `routes` stub (single-tree, so the serving tree is this one — no cross-tree ambiguity).
-    let injection_stub = format!("routes: [{{ \"key\": \"{key}\", \"role\": \"provide\" }}]");
-    zzop_core::Finding {
-        rule_id: "unprovided-consume".to_string(),
-        severity: zzop_core::Severity::Info,
-        file: file.to_string(),
-        line,
-        message: format!(
-            "This call consumes `{key}` but no HTTP route anywhere in this analysis provides that \
-             key — likely a typo'd path, a renamed/removed backend route, or a route defined in a \
-             file this analysis didn't parse. Verify the route still exists at that path and method; if it does, inject it with `{injection_stub}`. \
-             Veto: consumes whose key path ends in a static-asset extension (.js, .css, .svg, .png, .jpg/.jpeg, .gif, .ico, .txt, .webp, .woff/.woff2, .map) are never flagged. \
-             Consumes ending in .json or .xml are vetoed by default UNLESS the path contains an \
-             API-ish segment (/api/, /graphql/, /rpc/, or a version segment like /v1/) — e.g. \
-             `GET /i18n/ko.json` and `GET /public/recipes.json` are vetoed, but \
-             `GET /api/users.json` is real API consumption (Rails-style format-suffixed routes) \
-             and stays flaggable. Tradeoff: a Rails-style .json/.xml API route living outside any \
-             /api-ish path segment will also be missed by this veto. An absolute-URL consume whose \
-             host is localhost or 127.0.0.1 (with or without a port) is treated as a same-app \
-             dev self-reference and is never flagged — a deliberate skip rather than a fabricated \
-             host-stripped path join. Note: this only fires because this same source ALSO provides at \
-             least one HTTP route itself — a source with \
-             zero HTTP provides is assumed to be consuming a remote backend outside this analysis's \
-             scope and is never flagged by this rule (that veto avoids a systematic false-positive \
-             class for pure front-end sources). If you're analyzing a split FE/BE repo pair, prefer \
-             the multi-source `analyze_trees` cross-layer join \
-             (`MultiAnalyzeOutput::cross_layer.unprovided_consumes`), which matches consumes against every \
-             source's provides, not just this one. This finding starts at Info severity: provide \
-             extraction is evidence-gated, so route shapes it cannot prove (dynamic or \
-             `startsWith` path matching, const-indirected path literals, raw-Worker dispatch \
-             outside the `pathname_dispatch` adapter's Request-evidence gate) remain a \
-             structural false-positive source. {} if intentional (this rule has no inline suppression marker).",
-            zzop_core::disable_hint("unprovided-consume")
-        ),
-        data: Some(serde_json::json!({ "key": key, "injectionStub": injection_stub })),
-    }
-}
-
 /// One unmatched (post-veto, no provided-key match) consume, carried through the foreign/overlapping split.
+/// `key` is the JOIN key: for a declared-host absolute URL that is the re-keyed internal path, with the
+/// original spelling kept in `raw` (module doc "Structural gates"), mirroring the linker's own
+/// bucket invariant that nothing past the re-key ever carries a scheme.
 struct UnmatchedConsume<'a> {
-    key: &'a str,
+    key: std::borrow::Cow<'a, str>,
+    raw: Option<&'a str>,
     file: &'a str,
     line: u32,
 }
 
+/// `internal_hosts`: hosts this tree declares it owns (`EngineConfig::hosts`), threaded in from
+/// `analyze::assemble` — see module doc "Structural gates". Pass `&[]` for no declared hosts.
 pub fn unprovided_consume_findings(
     io_provides: &[zzop_core::IoProvide],
     io_consumes: &[zzop_core::IoConsume],
+    internal_hosts: &[String],
 ) -> Vec<zzop_core::Finding> {
     let has_http_provide = io_provides.iter().any(|p| p.kind == "http");
     if !has_http_provide {
@@ -170,46 +169,55 @@ pub fn unprovided_consume_findings(
     let always_veto_re = Regex::new(ALWAYS_VETO_EXTENSION_PATTERN).unwrap();
     let asset_dir_gated_re = Regex::new(ASSET_DIR_GATED_EXTENSION_PATTERN).unwrap();
     let api_segment_re = Regex::new(API_SEGMENT_PATTERN).unwrap();
-    let localhost_host_re = Regex::new(LOCALHOST_HOST_PATTERN).unwrap();
 
     let mut overlapping: Vec<UnmatchedConsume> = Vec::new();
     let mut foreign: Vec<UnmatchedConsume> = Vec::new();
 
     // Test-file consumes are not deployed surface — a `test_*.py`/`*.spec.ts` call to a route (often a
-    // deliberately-wrong path exercising a 404, or an httpx/requests client fixture) is test scaffolding,
-    // not app egress that should be matched against the app's routes. Skipping them mirrors the cross-tree
-    // join's own `filter_join_io` test-drop (D11): the multi-tree path already excludes test-classified io
-    // before matching, and this intra-app rule now agrees. Filtering only CONSUMES (not provides) is the
-    // safe direction — it removes noise without ever creating a finding (a test-only provide still counts
-    // as a provider, which can only suppress).
+    // deliberately-wrong path exercising a 404, or an httpx/requests client fixture) is test scaffolding, not
+    // app egress that should be matched against the app's routes. Skipping them mirrors the cross-tree join's
+    // own `filter_join_io` test-drop (D11): the multi-tree path already excludes test-classified io before
+    // matching, and this intra-app rule now agrees. Filtering only CONSUMES (not provides) is the safe
+    // direction — it removes noise without creating a finding (a test-only provide can only suppress).
     for c in io_consumes
         .iter()
         .filter(|c| c.kind == "http" && !zzop_core::is_test_file(&c.file))
     {
-        let Some(key) = c.key.as_deref() else {
+        // The linker's whole STRUCTURAL gate sequence in one call — no-key, declared-host re-key, and
+        // the `://` egress gate that must follow it — so neither the gates nor their ORDER can drift
+        // from the multi-tree join (module doc "Structural gates"). Only `Joinable` reaches this rule's
+        // own layer; `Unresolved`/`External` are the linker's non-drift buckets and are skipped here.
+        let zzop_core::ConsumeJoin::Joinable { key, rekeyed_host } =
+            zzop_core::classify_consume_join(c.key.as_deref(), internal_hosts)
+        else {
             continue;
         };
-        if provided_keys.contains(key) {
+        // The matched-host half is the linker's `host_rekey_counts` bookkeeping; this rule has no such
+        // disclosure surface and uses it only to decide whether to carry the absolute spelling.
+        let raw: Option<&str> = rekeyed_host.and(c.key.as_deref());
+        let key_str: &str = &key;
+        if provided_keys.contains(key_str) {
             continue;
         }
-        if localhost_host_re.is_match(key) {
-            continue; // localhost/127.0.0.1 absolute-URL dev self-reference — see module doc
+        if !zzop_core::key_carries_route_identity(key_str) {
+            continue; // all-`{}` path names no route — the linker's own gate, same predicate; module doc
         }
-        if always_veto_re.is_match(key) {
+        if always_veto_re.is_match(key_str) {
             continue; // static-asset fetch, not API consumption — see module doc
         }
-        if asset_dir_gated_re.is_match(key) && !api_segment_re.is_match(key) {
+        if asset_dir_gated_re.is_match(key_str) && !api_segment_re.is_match(key_str) {
             continue; // json/xml with no API-ish path segment — vetoed by default, see module doc
         }
 
-        let item = UnmatchedConsume {
-            key,
-            file: c.file.as_str(),
-            line: c.line,
-        };
-        let is_foreign = match first_path_segment(key) {
+        let is_foreign = match first_path_segment(key_str) {
             Some(segment) => !provide_first_segments.contains(segment),
             None => true, // no path segment at all — nothing to overlap with, see module doc
+        };
+        let item = UnmatchedConsume {
+            key,
+            raw,
+            file: c.file.as_str(),
+            line: c.line,
         };
         if is_foreign {
             foreign.push(item);
@@ -220,7 +228,7 @@ pub fn unprovided_consume_findings(
 
     let mut findings: Vec<zzop_core::Finding> = overlapping
         .iter()
-        .map(|u| individual_finding(u.key, u.file, u.line))
+        .map(|u| individual_finding(&u.key, u.raw, u.file, u.line))
         .collect();
 
     if foreign.len() >= MIN_FOREIGN_UNPROVIDED_GROUP {
@@ -229,30 +237,35 @@ pub fn unprovided_consume_findings(
             a.file
                 .cmp(b.file)
                 .then(a.line.cmp(&b.line))
-                .then(a.key.cmp(b.key))
+                .then(a.key.cmp(&b.key))
         });
         let anchor = anchor_order[0];
 
-        let mut routes: Vec<&str> = foreign.iter().map(|u| u.key).collect();
+        let mut routes: Vec<&str> = foreign.iter().map(|u| u.key.as_ref()).collect();
         routes.sort_unstable();
         routes.dedup();
+        // A folded entry is enumerated under its JOIN key, so a declared-host consume shows an internal
+        // path the author cannot grep for. Carry the absolute spellings alongside, present only when a
+        // re-key actually happened (module doc "Structural gates").
+        let mut raws: Vec<&str> = foreign.iter().filter_map(|u| u.raw).collect();
+        raws.sort_unstable();
+        raws.dedup();
 
         let n = foreign.len();
         let m = contributing_provide_count;
         let example_segments: Vec<&str> = provide_first_segments.iter().copied().take(3).collect();
-        // Only the first 3 provided first-segments are rendered inline; when more exist, append an
-        // ellipsis so the message doesn't imply the tree provides only these 3 path families.
+        // Only the first 3 provided first-segments are rendered inline; when more exist, append an ellipsis
+        // so the message doesn't imply the tree provides only these 3 path families.
         let example_segments_str = if provide_first_segments.len() > 3 {
             format!("{}, …", example_segments.join(", "))
         } else {
             example_segments.join(", ")
         };
-        // Edge case: a tree whose only http provides are root-path (e.g.
-        // `GET /`) contributes zero first-segments (`first_path_segment` returns `None` for `/` — see
-        // this fn's own doc), so `example_segments_str` is empty and `m` is 0. Rendering the normal
-        // "{m} provide(s) under {segments}" clause in that case would dangle a trailing "under" with
-        // nothing after it. Reword just that clause when there are no segments to show; the normal,
-        // test-pinned wording below is unchanged whenever at least one segment exists.
+        // Edge case: a tree whose only http provides are root-path (`GET /`) contributes zero
+        // first-segments (`first_path_segment` returns `None` for `/` — see this fn's own doc), so
+        // `example_segments_str` is empty and `m` is 0. The normal "{m} provide(s) under {segments}"
+        // clause would then dangle a trailing "under" with nothing after it. Reword just that clause when
+        // there are no segments; the test-pinned wording below is unchanged whenever a segment exists.
         let path_space_clause = if provide_first_segments.is_empty() {
             "provides at least one route, but none under a named path prefix (e.g. only `GET /`)"
                 .to_string()
@@ -260,35 +273,20 @@ pub fn unprovided_consume_findings(
             format!("{m} provide(s) under {example_segments_str}")
         };
 
-        let message = format!(
-            "{n} calls in this tree consume HTTP keys that no route in this analysis provides, and none \
-             of them fall under this tree's own provided path space ({path_space_clause}) — this tree \
-             looks like a partial provider (e.g. a monorepo where only one app's routes are visible), so \
-             these calls are most likely served by something outside this analysis rather than being {n} \
-             independent broken routes. Affected keys: {}. This replaces {n} individual \
-             `unprovided-consume` findings. If these should have local providers, each key above is a real \
-             gap. {} if intentional (this rule has no inline suppression marker).",
-            routes.join(", "),
-            zzop_core::disable_hint("unprovided-consume"),
-        );
-
-        findings.push(zzop_core::Finding {
-            rule_id: "unprovided-consume".to_string(),
-            severity: zzop_core::Severity::Info,
-            file: anchor.file.to_string(),
+        findings.push(message::aggregate_finding(message::Aggregate {
+            call_count: n,
+            routes: &routes,
+            raws: &raws,
+            path_space_clause: &path_space_clause,
+            provide_first_segments: &provide_first_segments,
+            file: anchor.file,
             line: anchor.line,
-            message,
-            data: Some(serde_json::json!({
-                "callCount": n,
-                "routes": routes,
-                "provideFirstSegments": provide_first_segments.iter().collect::<Vec<_>>(),
-            })),
-        });
+        }));
     } else {
         findings.extend(
             foreign
                 .iter()
-                .map(|u| individual_finding(u.key, u.file, u.line)),
+                .map(|u| individual_finding(&u.key, u.raw, u.file, u.line)),
         );
     }
 

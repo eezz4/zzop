@@ -4,6 +4,7 @@
   "schema_version": 1,
   "fragments": {
     "sql-where-veto": "(?i)\\bWHERE\\b|\\$\\{|\\+\\s*[\"'`]|[\"'`]\\s*\\+",
+    "sql-bootstrap-drop-create": "(?is)\\bDROP\\s+TABLE\\s+IF\\s+EXISTS\\b[^;]*;\\s*(?:--[^\\n]*\\n\\s*)*CREATE\\s+TABLE\\b",
     "test-paths-migrations": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|(^|/)(migrations?|migrate|db/migrations?)/)"
   },
   "rules": [
@@ -121,7 +122,7 @@
     {
       "id": "race-condition-toctou",
       "severity": "warning",
-      "message": "A read (`findOne`/`findById`/`findUnique`) and a `create`/`upsert`/`insert` write both appear in the same function — this is a co-occurrence heuristic, not proof the read feeds a branch that reaches the write, but when it's a get-or-create/toggle shape: concurrent requests can both pass the check and both write (duplicate row / unique-constraint violation) — a TOCTOU race. Add a unique constraint and replace the check-then-act with an upsert; wrapping it in a `$transaction` alone does NOT close this race at the database's default READ COMMITTED isolation level — two concurrent transactions can both read empty and both insert. If you must keep the read+write shape, use `SELECT ... FOR UPDATE` or serializable isolation instead. Suppress a vetted case with `// race-condition-toctou-ok`.",
+      "message": "A `create`/`upsert`/`insert` write appears LEXICALLY AFTER an awaited `findOne`/`findById`/`findUnique` read in the NEAREST enclosing function — the reported line is the WRITE (the racing action), specifically the first one that actually follows a read. A trigger line that sits inside NO parser-projected function span (a class-property initializer, a top-level statement) is read as ungated, and the pairing there widens back to the whole scanned symbol span. The order is TEXTUAL, not dataflow: it does not prove the read feeds a branch that reaches the write, nor that the two touch the same row (a read of one table followed by an insert into another still fires). When it is the get-or-create/toggle shape it names, concurrent requests can both pass the check and both write (duplicate row / unique-constraint violation) — a TOCTOU race. Add a unique constraint and replace the check-then-act with an upsert; wrapping it in a `$transaction` alone does NOT close this race at the database's default READ COMMITTED isolation level — two concurrent transactions can both read empty and both insert. If you must keep the read+write shape, use `SELECT ... FOR UPDATE` or serializable isolation instead. Suppress a vetted case with `// race-condition-toctou-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)(?:(?:^|/)api/.*\\.tsx?$|.*/routes/.*\\.tsx?$|.*/controllers/.*\\.tsx?$|.*handler\\.tsx?$|.*controller\\.tsx?$)",
@@ -138,7 +139,9 @@
             "label": "write"
           }
         ],
-        "trigger": "read",
+        "trigger": "write",
+        "after": "read",
+        "after_in_same_function": true,
         "absent": [
           {
             "pattern": "\\btry\\s*\\{",
@@ -203,11 +206,12 @@
     {
       "id": "destructive-migration",
       "severity": "info",
-      "message": "A destructive statement in a migration file: `DROP TABLE`/`DROP COLUMN`/`TRUNCATE [TABLE]`, or a closed-string-literal whole-table `DELETE FROM <table>` / `UPDATE <table> SET` with no WHERE (the same complete-literal shapes `sql/delete-no-where`/`sql/update-no-where` flag in app code — in a migration they are a deliberate one-time backfill, so they surface here at disclosure severity instead). Committed destructive migrations are usually deliberate, so this is info-level review-time disclosure, not a CI gate — its value is attention on NEW migrations at review, not archaeology of old ones. Verify the object name against the PR/ticket, back the data up first, and prefer a two-phase pattern (deprecate/stop-reading in one release, drop in a later one) over a same-release drop when the table might still be read. Suppress a vetted, reviewed migration with `// destructive-migration-ok` (or `-- destructive-migration-ok` in a `.sql` file).",
+      "message": "A destructive statement in a migration file: `DROP TABLE`/`DROP COLUMN`/`TRUNCATE [TABLE]`, or a closed-string-literal whole-table `DELETE FROM <table>` / `UPDATE <table> SET` with no WHERE (the same complete-literal shapes `sql/delete-no-where`/`sql/update-no-where` flag in app code — in a migration they are a deliberate one-time backfill, so they surface here at disclosure severity instead). An idempotent BOOTSTRAP preamble is excluded: a file that contains a `DROP TABLE IF EXISTS <x>;` followed by a `CREATE TABLE` with nothing between them but whitespace and `--` comments is a re-runnable schema bootstrap, which cannot destroy data, and every one of the seven measured findings of the earlier form was exactly that. ONE such adjacency anywhere in the file is enough, so the usual `0001_initial.sql` layout that lists every DROP first and every CREATE after is covered too (matched via its last DROP). `IF EXISTS` is required — a plain `DROP TABLE <x>` never qualifies, even directly above a `CREATE TABLE`. Residual limitation, stated honestly: line-scan tests one line at a time and the regex engine has no backreferences, so the DROP and the CREATE cannot be correlated BY TABLE NAME — the exclusion therefore silences the WHOLE file, meaning a genuinely destructive statement that shares a file with a bootstrap DROP-then-CREATE preamble is missed. Committed destructive migrations are usually deliberate, so this is info-level review-time disclosure, not a CI gate — its value is attention on NEW migrations at review, not archaeology of old ones. Verify the object name against the PR/ticket, back the data up first, and prefer a two-phase pattern (deprecate/stop-reading in one release, drop in a later one) over a same-release drop when the table might still be read. Suppress a vetted, reviewed migration with `// destructive-migration-ok` (or `-- destructive-migration-ok` in a `.sql` file).",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)(^|/)(migrations?|migrate)/.*\\.(sql|ts|js|mjs)$",
         "require_file": "(?i)(DROP|TRUNCATE|DELETE\\s+FROM|UPDATE\\s+[\\w\"`.]+\\s+SET)",
+        "require_file_absent": ["${sql-bootstrap-drop-create}"],
         "skip_comment_lines": true,
         "any": [
           {

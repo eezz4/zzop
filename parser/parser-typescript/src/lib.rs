@@ -14,7 +14,10 @@ pub mod adapters;
 mod asset_refs;
 mod cjs_exports;
 mod cjs_require;
+mod dead_export_facts;
+mod export_aliases;
 mod factory;
+mod function_spans;
 mod ident_refs;
 mod imports;
 pub mod lang;
@@ -23,6 +26,7 @@ mod parse;
 mod project;
 mod re_exports;
 mod sfc_imports;
+mod signature_refs;
 mod symbol_shapes;
 mod symbols;
 #[cfg(test)]
@@ -49,6 +53,7 @@ pub use adapters::hono_client::extract_hono_client_consumes;
 pub use adapters::nest_middleware::{extract_nest_forroutes_guarded, ForRoutesPattern};
 pub use adapters::next_pages_api::{scan_pages_api_handler, PagesApiHandlerScan};
 pub use adapters::pathname_dispatch::extract_pathname_dispatch_provides;
+pub use adapters::raw_sql::extract_raw_sql_db_table_consumes;
 pub use adapters::router_mounts::extract_router_mount_fragments;
 pub use adapters::trpc_consume::extract_trpc_consumes;
 pub use adapters::trpc_router::extract_procedure_router_fragments;
@@ -64,6 +69,8 @@ pub use lang::write_site::{
 };
 
 pub use asset_refs::parse_asset_refs;
+pub use dead_export_facts::{parse_dead_export_facts, DeadExportFacts};
+pub use function_spans::extract_function_spans;
 pub use ident_refs::parse_local_identifier_refs;
 pub use imports::parse_imports;
 pub use loop_spans::extract_loop_spans;
@@ -72,6 +79,7 @@ pub(crate) use parse::{line_of, parse_module, parse_with_cm};
 pub use project::{build_common_ir, count_loc};
 pub use re_exports::{parse_dynamic_imports, parse_re_exports};
 pub use sfc_imports::extract_sfc_script_imports;
+pub use signature_refs::parse_exported_signature_names;
 pub use symbols::parse_symbols;
 
 /// Cache-bust token for `zzop-cache`: `parser-id/pinned-toolchain/last-change-version`. The
@@ -80,7 +88,25 @@ pub use symbols::parse_symbols;
 /// projected IR shape changes; an unchanged release keeps the old value so warm TS caches survive the
 /// upgrade (2026-07-22 version reform — the "what changed" narrative lives in git, not this string).
 pub const PARSER_FINGERPRINT: &str =
-    "typescript/swc_core-71.0.5/0.22.0+resource-query-v1+trpc-leaf-procedure-v1";
+    "typescript/swc_core-71.0.5/0.22.0+resource-query-v1+trpc-leaf-procedure-v1+dispatch-branch-symbol-v1+exported-signature-names-v1+function-spans-v1+same-file-const-prepend-v1+raw-sql-db-table-v1+same-file-url-binding-v1";
+
+/// POLICY VOCABULARY — `Promise.prototype` continuation methods whose function-shaped arguments run on
+/// the RESUMED continuation of an async boundary, not inline at the call. Consumed by
+/// [`extract_function_spans`] to merge such a callback's span into its call site's line, so a matcher
+/// scoping on "nearest function" still sees the boundary token that schedules the callback. Deliberately
+/// a plain identifier-property vocabulary (no receiver-type proof, no alias tracking — see
+/// [`extract_function_spans`]'s doc for the full narrowness contract).
+///
+/// **Do not edit this list alone.** `rules/dsl/react/react.json`'s `setstate-after-await-unmounted` spells
+/// the same three methods again as the `.(?:then|catch|finally)(` arm of its `async-boundary` pattern — one
+/// policy, two spellings, because a JSON pack cannot reference a Rust constant. Narrowing this list while
+/// the rule keeps the token silently DELETES findings (the callback is no longer merged into the
+/// scheduling call's line, so `after_in_same_function` rejects the pairing) with nothing turning red. The
+/// pin that makes that fail loudly is
+/// `the_promise_continuation_vocabulary_is_identical_in_the_parser_and_the_react_pack`
+/// (`crates/engine/tests/rule_contracts/policy_pins.rs`), which reads the rule's arm out of the shipped
+/// pack rather than restating it.
+pub const PROMISE_CONTINUATION_METHODS: &[&str] = &["then", "catch", "finally"];
 
 /// POLICY VOCABULARY — array-iteration callback methods whose first function-shaped argument runs once
 /// per element (`Array.prototype` iteration methods only; `Map`/`Set`/`for...in` etc. are out of scope).

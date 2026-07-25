@@ -41,10 +41,31 @@ fn truncation_is_disclosed_never_silent() {
     assert_eq!(shaped["shown"].as_array().unwrap().len(), 2);
     assert_eq!(shaped["truncated"]["shown"], 2);
     assert_eq!(shaped["truncated"]["totalMatching"], 5);
+    // `shape_findings` is the ONE surface where `severity`/`rule`/`limit` genuinely move the cap, so
+    // naming `limit` here is a remedy that works — see the `shape_list` pin below for why the other
+    // capped lists must not copy this wording.
     assert!(shaped["truncated"]["hint"]
         .as_str()
         .unwrap()
         .contains("limit"));
+}
+
+/// Seals the seam that made an inert remedy possible: `shape_list` used to hardcode
+/// `shape_findings`' hint, so `edgesTruncated`/`degradedTruncated` told callers to "raise limit"
+/// when no tool argument moves either cap. The hint is now the CALLER's, echoed verbatim — a shared
+/// default cannot come back without deleting this pin.
+#[test]
+fn shape_list_echoes_the_callers_hint_verbatim_instead_of_a_shared_default() {
+    let items: Vec<serde_json::Value> = (0..5).map(|i| serde_json::json!({ "i": i })).collect();
+    let hint = "`buckets.edges` carries the full, uncapped count";
+    let (shown, truncated) = shape_list(&items, 2, hint);
+    assert_eq!(shown.len(), 2);
+    let truncated = truncated.expect("a capped list always discloses");
+    assert_eq!(truncated["shown"], 2);
+    assert_eq!(truncated["totalMatching"], 5);
+    assert_eq!(truncated["hint"], hint);
+    // A list that fits is not "truncated" — disclosure only when something was actually dropped.
+    assert!(shape_list(&items, 5, hint).1.is_none());
 }
 
 #[test]

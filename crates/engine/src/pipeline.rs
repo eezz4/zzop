@@ -104,6 +104,11 @@ pub(crate) struct FileArtifact {
     /// Identifiers referenced anywhere in this file, sorted — feeds `dead-exports`' per-file "used
     /// names" (in-file-only liveness, never cross-file).
     pub used_names: Vec<String>,
+    /// Names appearing in the PUBLIC SIGNATURE of some exported declaration in this file, sorted —
+    /// the position-aware companion `used_names` cannot be (it is a flat, position-blind set). Lets
+    /// `dead-exports` exempt a type that is part of an exported value's public API. TypeScript-only;
+    /// empty elsewhere, and an empty value simply means "no exemptions" (graceful degrade).
+    pub exported_signature_names: Vec<String>,
     /// Constant-map fragment (same parse, no second pass) — `analyze::assemble` merges every file's
     /// fragment into one project-wide map to re-resolve consumes left unresolved.
     pub const_map_fragment: std::collections::HashMap<String, String>,
@@ -144,6 +149,13 @@ pub(crate) struct FileArtifact {
     /// real spans only for a well-formed, non-degraded TypeScript/Go file; empty for every other
     /// language, degraded, oversized, or dispatch-`None` files (graceful degrade, never guessed).
     pub loop_spans: Vec<(u32, u32)>,
+    /// Per-file function line spans with promise-continuation callbacks merged into their call site
+    /// (`zzop_parser_typescript::extract_function_spans`) — feeds
+    /// `zzop_core::dsl::SourceFile::function_spans`, `Matcher::MethodScan::after_in_same_function`'s
+    /// substrate. Same AST-derived convention as `loop_spans` above, but TypeScript ONLY (no Go
+    /// counterpart yet — the coverage asymmetry is published in `docs/NORMALIZED_AST.md` and
+    /// `FileIrSlice`'s module doc, not hidden).
+    pub function_spans: Vec<(u32, u32)>,
 }
 
 /// Runs the fused per-file pass over every file under `root` (skipping `config.dispatch.skip_dirs`) and

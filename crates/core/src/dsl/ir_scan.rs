@@ -15,7 +15,9 @@ use crate::io::{IoConsume, IoProvide};
 
 use super::def::{IoDirection, IoScan, Matcher, RuleDef, RulePackDef, SymbolScan};
 use super::diagnostics::RuleDiag;
-use super::markers::{compile_marker_line_comment, marker_suppresses};
+use super::markers::{
+    compile_marker_line_comment, marker_suppresses, message_with_near_miss, Leaders,
+};
 use super::source::RuleContext;
 
 pub(super) fn eval_symbol_scan(
@@ -108,8 +110,10 @@ pub struct IoScanTreeContext<'a> {
 ///    an entry with no resolved key has nothing to look up (fails `attr_present`, satisfies `attr_absent`).
 /// 7. `anchor_exclude_pattern` — regex against `ctx.anchor_line(entry.file, entry.line)`; a `None` callback
 ///    result means the exclusion does not apply.
-/// 8. Suppress-marker: `rule.suppress_marker()` (derived `<id>-ok`), checked against the anchor line's own text and the line
-///    directly above it (the same one-line lookback `line_scan`/`method_scan` use), via `ctx.anchor_line`.
+/// 8. Suppress-marker: `rule.suppress_marker()` (derived `<id>-ok`), checked via `ctx.anchor_line` against
+///    the anchor line's own text and the line directly above it (the one-line lookback `line_scan`/
+///    `method_scan` share). A marker-SHAPED token there that is NOT this rule's marker suppresses nothing
+///    and is disclosed in the emitted message — see `markers::message_with_near_miss`.
 pub fn eval_pack_io_scan(pack: &RulePackDef, ctx: &IoScanTreeContext, out: &mut Vec<Finding>) {
     eval_pack_io_scan_into(pack, ctx, out, &mut Vec::new());
 }
@@ -178,7 +182,8 @@ fn eval_io_scan_rule(
     // Line-comment-NEUTRAL marker (`//` or `#`) — io-scan anchor lines span every provide-producing
     // language, Python included, unlike the `//`-only per-file line/method-scan marker. Built from the
     // rule id (escaped), so a failure is structural rather than an author's bad pattern.
-    let Some(marker_re) = compile_marker_line_comment(&rule.suppress_marker()) else {
+    let marker = rule.suppress_marker();
+    let Some(marker_re) = compile_marker_line_comment(&marker) else {
         diag.malformed("its derived suppress marker does not compile as a regex");
         return;
     };
@@ -276,16 +281,19 @@ fn eval_io_scan_rule(
         // absent line simply never suppresses, same "honestly absent" treatment as `anchor_exclude_pattern`.
         let above_text = (ctx.anchor_line)(e.file, e.line.saturating_sub(1)).unwrap_or_default();
         let current_text = anchor_text.unwrap_or_default();
-        if marker_suppresses(&marker_re, &[above_text.as_str(), current_text.as_str()], 1) {
+        let window = [above_text.as_str(), current_text.as_str()];
+        if marker_suppresses(&marker_re, &window, 1) {
             continue;
         }
+        let message =
+            message_with_near_miss(Leaders::SlashOrHash, &marker, &window, 1, &rule.message);
         let snippet = e.key.unwrap_or("<unresolved>").to_string();
         out.push(Finding {
             rule_id: rule_id.clone(),
             severity: rule.severity,
             file: e.file.to_string(),
             line: e.line,
-            message: rule.message.clone(),
+            message,
             data: Some(serde_json::json!({ "snippet": snippet, "kind": e.kind })),
         });
     }

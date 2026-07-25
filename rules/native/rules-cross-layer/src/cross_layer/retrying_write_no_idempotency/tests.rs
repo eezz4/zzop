@@ -251,3 +251,41 @@ fn truthy_attr_targeting_a_different_route_key_does_not_veto() {
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].severity, Severity::Critical);
 }
+
+/// Policy pin (T2 — a Markdown/HTML page cannot reference a Rust symbol): this rule's TRIGGER is a fact
+/// exactly one producer emits (`IoConsume::retry_configured`, parser-typescript's egress collector), so
+/// the rule is structurally silent for every other language AND for three sibling TypeScript consume
+/// paths. That is the same silent-failure class `mutating-route-no-auth` closed, at `critical` severity.
+/// Both sides are read from what ships — the claim from a REAL finding, the prose from the pages' bytes —
+/// so this file holds no third copy to drift. Whitespace is collapsed before comparing because Markdown
+/// and HTML both render an in-paragraph newline as a space.
+#[test]
+fn the_retry_sightline_is_identical_in_the_finding_and_the_docs() {
+    let edges = vec![edge(
+        "POST /api/orders",
+        ("fe", "src/checkout.ts", 42),
+        ("be", "src/orders.controller.ts", 10),
+        true,
+    )];
+    let retry: BTreeSet<RetrySite> = [site("fe", "src/checkout.ts", 42)].into();
+    let f = retrying_write_no_idempotency_findings(&edges, &retry, &no_attrs());
+    assert_eq!(f.len(), 1);
+    let claim = super::retry_sightline_claim();
+    assert!(
+        f[0].message.contains(claim),
+        "the finding no longer renders the shared sightline claim `{claim}`: {}",
+        f[0].message
+    );
+
+    let collapse = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    for rel in ["../../../docs/rules/catalog.md", "../../../site/rules.html"] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read published page {}: {e}", path.display()));
+        assert!(
+            collapse(&text).contains(&collapse(claim)),
+            "{rel} no longer says `{claim}` — a reader whose retry policy is tenacity/Resilience4j is \
+             told nothing about why this critical rule never fires for them"
+        );
+    }
+}

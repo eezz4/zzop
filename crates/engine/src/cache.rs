@@ -67,7 +67,7 @@ use crate::{CacheStats, EngineConfig};
 /// instead. "Bump" (2026-07-22 version reform) = set this to the current workspace `CARGO_PKG_VERSION`
 /// whenever `FileIrSlice` (or the cached findings shape) gains, renames, or removes a field; an unchanged
 /// release keeps the old value so warm caches survive the upgrade (see the cache decision doc).
-pub const CACHE_SCHEMA_VERSION: &str = "0.21.0";
+pub const CACHE_SCHEMA_VERSION: &str = "0.23.0";
 
 /// Fingerprint for files that never reach a structural parser crate in the fused pass: no `Language` match
 /// (`dispatch::dispatch` returned `None` — unrecognized extension), or the size-cap lexical fallback
@@ -96,7 +96,7 @@ fn schema_structural_fingerprint() -> String {
 /// window, ...) alters findings for byte-identical source AND identical pack content — invisible to the
 /// key without this token. Restamp with the current `CARGO_PKG_VERSION` on any such change (2026-07-22
 /// version reform: cache-bust tokens are package-version stamps).
-const DSL_INTERPRETER_FINGERPRINT: &str = "dsl/0.22.0";
+const DSL_INTERPRETER_FINGERPRINT: &str = "dsl/0.23.0+near-miss-marker-v1";
 
 /// Opens the on-disk cache at `config.cache_dir`, if set. Never panics: an open failure (bad permissions,
 /// path collides with a plain file, disk full while writing the schema-version marker, ...) degrades to

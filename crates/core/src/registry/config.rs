@@ -14,8 +14,8 @@ use crate::{finding::Finding, Severity};
 /// (a shell-style glob) — see `is_suppressed` for precedence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Suppression {
-    /// The finding's stable rule id (a DSL pack rule id `"<pack>/<rule>"`, a native analysis id, or a JS
-    /// quick-rule id) — matched for exact equality.
+    /// The finding's stable rule id (a DSL pack rule id `"<pack>/<rule>"` or a native analysis id) —
+    /// matched for exact equality.
     pub rule: String,
     /// Optional path filter. Absent = suppress `rule` everywhere; present = suppress only findings whose
     /// file contains this string (case-sensitive substring containment). Kept alongside `glob` because a
@@ -50,19 +50,21 @@ pub struct GlobalExclude {
     pub glob: Option<String>,
 }
 
-/// The one user-facing config shape every rule layer (native / DSL / JS) and every native analysis is
-/// gated through. Covers the enabled/severity/disabled/suppressions surface — deliberately NOT
-/// vocabulary/threshold plumbing (out of scope here; see module doc).
+/// The one user-facing config shape both rule layers (native analyses and DSL packs) are gated through.
+/// Covers the enabled/severity/disabled/suppressions surface — deliberately NOT vocabulary/threshold
+/// plumbing (out of scope here; see module doc).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RuleConfig {
     /// Rule/pack/native-analysis ids to skip entirely. Exact string match against a rule's full id — no
     /// prefix/glob semantics.
     pub disabled_rules: Vec<String>,
-    /// Per-rule severity remap, keyed by the same id space as `disabled_rules`. Exists because one unified
-    /// registry spans native + DSL + JS and a user may want to promote/demote a specific id without forking
-    /// the pack. `BTreeMap` (not `HashMap`) so config round-trips (serialize/compare/hash) are
-    /// deterministic.
+    /// Per-rule severity remap, keyed by the same id space as `disabled_rules`. Exists because that id
+    /// space spans both layers — native analyses and DSL pack rules — and a user may want to
+    /// promote/demote a specific id without forking the pack (a DSL rule's severity otherwise comes from
+    /// the pack JSON's own `severity` field, a native one from wherever the finding is built). Applied in
+    /// `apply_severity_override`, on the finding — not through the registry. `BTreeMap` (not `HashMap`)
+    /// so config round-trips (serialize/compare/hash) are deterministic.
     pub severity_overrides: BTreeMap<String, Severity>,
     /// Finding-level accept-list. See `is_suppressed`.
     pub suppressions: Vec<Suppression>,
@@ -212,12 +214,12 @@ fn glob_to_regex(glob: &str) -> String {
 }
 
 /// True if `rule_id` is NOT in `config.disabled_rules` — exact string match, no prefix/glob semantics (see
-/// `disabled_rules`'s own doc). Applies uniformly to a bare native-analysis/JS-quick-rule id, a whole DSL
-/// pack id, or a full `"<pack>/<rule>"` id — the registry does not distinguish kinds here, it only compares
-/// strings. All three id shapes are honored end to end: pack ids and `"<pack>/<rule>"` ids are both enforced
+/// `disabled_rules`'s own doc). Applies uniformly to a bare native-analysis id, a whole DSL pack id, or a
+/// full `"<pack>/<rule>"` id — this function does not distinguish layers, it only compares strings. All
+/// three id shapes are honored end to end: pack ids and `"<pack>/<rule>"` ids are both enforced
 /// by `zzop_engine::pipeline::run_file_pass` before a pack ever reaches per-file evaluation (a disabled pack
 /// id drops the whole pack; a disabled `"<pack>/<rule>"` id drops just that rule, via `gate_pack_rules`),
-/// while bare native/JS ids are enforced at their own call sites (e.g. `register_native_analyses`'s ids
+/// while bare native ids are enforced at their own call sites (e.g. `register_native_analyses`'s ids
 /// checked directly against `is_enabled` before the corresponding analysis runs).
 pub fn is_enabled(config: &RuleConfig, rule_id: &str) -> bool {
     !config.disabled_rules.iter().any(|d| d == rule_id)

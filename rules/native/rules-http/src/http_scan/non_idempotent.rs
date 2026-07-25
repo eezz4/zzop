@@ -7,7 +7,10 @@ use zzop_core::{
     disable_hint, ApiEndpoint, Finding, NonIdempotentKind, Severity, SourceSymbol, WriteSite,
 };
 
-use super::{build_name_index, is_whitelisted, resolve_handler, WRITE_HTTP_METHODS};
+use super::{
+    build_name_index, is_whitelisted, resolve_handler, with_ok_marker_near_miss,
+    write_site_sightline, WRITE_HTTP_METHODS,
+};
 
 /// Input for [`scan_non_idempotent_write`].
 pub struct ScanNonIdempotentWriteInput<'a> {
@@ -83,7 +86,14 @@ pub fn scan_non_idempotent_write(input: &ScanNonIdempotentWriteInput) -> Vec<Fin
             .cloned()
             .expect("predicate true implies a matching site exists");
 
-        let hint = hint_for(&method, &e.path, &site, depth);
+        // Near-miss disclosure is appended AFTER the rule's own message so `data.hint` and `message`
+        // stay the same string (both are `hint` below).
+        let hint = with_ok_marker_near_miss(
+            hint_for(&method, &e.path, &site, depth),
+            &handler_symbol,
+            input.symbols,
+            input.files,
+        );
         out.push(Finding {
             rule_id: "non-idempotent-write".to_string(),
             severity: Severity::Warning,
@@ -131,10 +141,12 @@ fn hint_for(method: &str, path: &str, site: &WriteSite, depth: u32) -> String {
     };
     format!(
         "{method} {path} reaches {} {where_} ({}) — {why}; {contract}. Add an idempotency key or a \
-         dedup/uniqueness check before the write, or mark it with `// idempotent-ok: <reason>` above the \
-         handler if a retry is genuinely safe here. {} if this applies more broadly.",
+         dedup/uniqueness check before the write, or mark it with `// idempotent-ok: <reason>` on the \
+         {} if a retry is genuinely safe here. {} if this applies more broadly. {}",
         site.sink,
         kind.as_str(),
-        disable_hint("non-idempotent-write")
+        super::marker_window_phrase(),
+        disable_hint("non-idempotent-write"),
+        write_site_sightline()
     )
 }

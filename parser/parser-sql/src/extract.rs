@@ -94,13 +94,15 @@ fn line_of(text: &str, pos: usize) -> u32 {
 /// channel canonical — module doc "Casing"; the same shared transform `zzop_parser_prisma::analysis::
 /// accessor_casing` calls, so the two independent extractors cannot drift). `None` when the last segment
 /// is empty (a malformed trailing dot, e.g. `public.`) — skipped rather than guessed (see module doc).
+/// [`crate::consume`] calls this for its DML table names too, so a `db-table` CONSUME key and the DDL
+/// PROVIDE key for the same physical table are produced by ONE transform.
 ///
 /// The dot-split is quote-aware: a `.` INSIDE a `"..."`/`` `...` ``/`[...]` quote pair does not split
 /// (same "quoted identifier is opaque" rule [`SEGMENT`] already applies at the regex level) — so a quoted
 /// identifier that happens to literally contain a dot, e.g. `"my.table"`, is one whole segment named
 /// `my.table`, NOT split into a fake schema-qualifier `my` + bare name `table`. Only a `.` outside any
 /// quote pair (schema-qualification, e.g. `public.users` / `"public"."users"`) splits.
-fn bare_table_name(raw: &str) -> Option<String> {
+pub(crate) fn bare_table_name(raw: &str) -> Option<String> {
     let mut last_start = 0usize;
     let mut quote_close: Option<u8> = None;
     for (i, &b) in raw.as_bytes().iter().enumerate() {
@@ -148,8 +150,10 @@ fn strip_quotes(s: &str) -> String {
 }
 
 /// One identifier segment: a quoted form (double-quote / backtick / bracket) or a plain
-/// `[A-Za-z_$][\w$]*` identifier. Shared by the two repetitions inside [`create_table_re`]'s pattern.
-const SEGMENT: &str = r#"(?:"[^"]*"|`[^`]*`|\[[^\]]*\]|[A-Za-z_$][\w$]*)"#;
+/// `[A-Za-z_$][\w$]*` identifier. Shared by the two repetitions inside [`create_table_re`]'s pattern,
+/// and by [`crate::consume`]'s DML patterns — one definition so the two sides cannot recognize
+/// different identifier shapes for the same physical table.
+pub(crate) const SEGMENT: &str = r#"(?:"[^"]*"|`[^`]*`|\[[^\]]*\]|[A-Za-z_$][\w$]*)"#;
 
 /// `CREATE [modifier...] TABLE [IF NOT EXISTS] <name>` — `<name>` (group 1) is one or more [`SEGMENT`]s
 /// joined by `.` (schema-qualification), captured as one whole string; [`bare_table_name`] trims it to

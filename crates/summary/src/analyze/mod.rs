@@ -143,8 +143,14 @@ fn shape_analyze_output(
         .as_array()
         .cloned()
         .unwrap_or_default();
-    let (degraded_shown, degraded_truncated) =
-        output::shape_list(&degraded, output::DEFAULT_DEGRADED_LIMIT);
+    let (degraded_shown, degraded_truncated) = output::shape_list(
+        &degraded,
+        output::DEFAULT_DEGRADED_LIMIT,
+        // No tool argument moves this cap (`limit` filters findings only), so the hint names the field
+        // that DOES answer the question instead of a knob that would silently do nothing.
+        "this list has a fixed cap and no tool argument raises it — `coverage.degraded` carries the \
+         full, uncapped count",
+    );
     // Config-loader warnings first, then the facade-level `configWarnings` entries riding the tree
     // output (engine-side config diagnostics, e.g. unknown-rule-id overrides) — merged into the one
     // config-honesty channel so the moved diagnostics are not silently dropped at this layer (see

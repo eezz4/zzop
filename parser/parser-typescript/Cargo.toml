@@ -7,4 +7,7 @@ publish = false
 [dependencies]
 swc_core = { version = "71.0.5", features = ["ecma_parser", "ecma_ast", "ecma_visit", "common"] }
 zzop-core = { path = "../../crates/core" }
+# The SQL statement vocabulary (statement-shape gate, table extraction, db-table key casing) lives in
+# ONE crate for both directions of the channel; `adapters/raw_sql` hands it strings, never regexes.
+zzop-parser-sql = { path = "../parser-sql" }
 regex = { workspace = true }

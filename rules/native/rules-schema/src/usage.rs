@@ -56,6 +56,16 @@ pub fn field_usage_tokens(rel: &str, text: &str) -> HashSet<String> {
         .collect()
 }
 
+/// The ONE list of extensions [`field_usage_tokens`] will scan at all — the whole evidence channel behind
+/// `dead-model`/`dead-field`. `pub` and quoted (never re-spelled) by
+/// [`crate::message::field_usage_sightline`], so the sightline the findings publish cannot drift from the
+/// scan itself; the published pages are pinned against that same rendering.
+///
+/// POLICY VALUE, T2: also spelled by hand, in English prose, in `docs/rules/catalog.md` and
+/// `site/rules.html` (a Markdown/HTML page cannot reference a Rust constant) — pinned by
+/// `crate::message::tests::the_field_usage_sightline_is_identical_in_the_finding_and_the_published_docs`.
+pub const FIELD_USAGE_SCAN_EXTENSIONS: &[&str] = &["ts", "tsx"];
+
 /// `.ts`/`.tsx` only, excluding `.d.ts` declaration files — mirrors the removed `walk_ts_files`'s own
 /// per-file filename filter. The old walk also hard-excluded `node_modules`/`dist`/`data` directories;
 /// that exclusion isn't reproduced here since the fused per-file pass this now runs inside already skips
@@ -69,7 +79,9 @@ fn is_field_usage_scan_file(rel: &str) -> bool {
     if rel.ends_with(".d.ts") {
         return false;
     }
-    rel.ends_with(".ts") || rel.ends_with(".tsx")
+    FIELD_USAGE_SCAN_EXTENSIONS
+        .iter()
+        .any(|ext| rel.ends_with(&format!(".{ext}")))
 }
 
 fn strip_comments_and_strings(src: &str) -> String {

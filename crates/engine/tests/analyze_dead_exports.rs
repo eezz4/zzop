@@ -145,3 +145,147 @@ fn disabling_dead_exports_removes_the_finding() {
     let out = analyze_tree(dir.path(), &cfg);
     assert!(!out.findings.iter().any(|f| f.rule_id == "dead-exports"));
 }
+
+// ---- Public-signature exemption, end to end -------------------------------------------------
+// The unit halves (parser `parse_exported_signature_names`, rule `find_dead_exports`) are pinned in
+// their own crates. These drive the WHOLE seam — parse -> FileArtifact -> FileIrSlice -> assemble ->
+// rule — because the failure mode this fact exists to prevent is a false ACCUSATION, and a broken
+// thread anywhere in that chain silently restores it.
+
+#[test]
+fn type_in_an_exported_signature_is_not_reported() {
+    let dir = TempDir::new("zzop-engine-dead-exports-signature");
+    // The measured shape: no in-repo importer for XState, but it IS `useX`'s public return type.
+    dir.write(
+        "lib/useX.ts",
+        concat!(
+            "export interface XState { count: number }\n",
+            "export function useX(): XState {\n",
+            "  return { count: 0 };\n",
+            "}\n"
+        ),
+    );
+    let out = analyze_tree(dir.path(), &config());
+    assert!(
+        !out.findings.iter().any(|f| {
+            f.rule_id == "dead-exports" && f.data.as_ref().is_some_and(|d| d["name"] == "XState")
+        }),
+        "XState is part of useX's public API and must not be reported: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn type_used_only_inside_a_body_is_still_reported() {
+    let dir = TempDir::new("zzop-engine-dead-exports-body-only");
+    // TRUE POSITIVE: `useX` has NO annotated return type, so XState is genuinely private.
+    dir.write(
+        "lib/useY.ts",
+        concat!(
+            "export interface XState { count: number }\n",
+            "export function useX() {\n",
+            "  const s: XState = { count: 0 };\n",
+            "  return s.count;\n",
+            "}\n"
+        ),
+    );
+    let out = analyze_tree(dir.path(), &config());
+    let hit = out.findings.iter().find(|f| {
+        f.rule_id == "dead-exports" && f.data.as_ref().is_some_and(|d| d["name"] == "XState")
+    });
+    assert!(
+        hit.is_some(),
+        "a body-only type must still be an un-export candidate: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn type_annotating_only_an_unexported_declaration_is_still_reported() {
+    let dir = TempDir::new("zzop-engine-dead-exports-unexported-props");
+    // TRUE POSITIVE: `Props` is NOT exported, so XThing never reaches the public surface.
+    dir.write(
+        "lib/Card.ts",
+        concat!(
+            "export interface XThing { id: string }\n",
+            "interface Props { thing: XThing }\n",
+            "export function render(p: Props) { return p.thing.id; }\n"
+        ),
+    );
+    let out = analyze_tree(dir.path(), &config());
+    assert!(
+        out.findings.iter().any(|f| {
+            f.rule_id == "dead-exports" && f.data.as_ref().is_some_and(|d| d["name"] == "XThing")
+        }),
+        "XThing only annotates an unexported declaration and must still report: {:?}",
+        out.findings
+    );
+}
+
+// ---- Local export renames, end to end -------------------------------------------------------
+// `export { X as Y }` (no from-clause) publishes the declaration `X` under `Y`. The parser half
+// (`parse_dead_export_facts`' `export_aliases` field) and the rule half are pinned in their own
+// crates; these drive the whole seam, because the fix's own risk — resurrecting a genuinely dead
+// export — is only observable once real source flows through real symbol/import extraction.
+
+#[test]
+fn declaration_re_exported_under_an_alias_and_imported_by_that_alias_is_not_reported() {
+    let dir = TempDir::new("zzop-engine-dead-exports-alias-live");
+    // The measured mono-hub shape (`ui/MortgageInputs.tsx`): the declaration is `State`, the public
+    // name is `MortgageState`, and every consumer writes the public name.
+    dir.write(
+        "ui/Inputs.tsx",
+        // `State` deliberately reaches only an UNEXPORTED `Props` field, so the public-signature
+        // exemption cannot fire — the alias link is the only thing under test here.
+        concat!(
+            "interface State { principal: number }\n",
+            "export type { State as MortgageState };\n",
+            "interface Props { state: State }\n",
+            "export function Inputs(p: Props) { return p.state.principal; }\n"
+        ),
+    );
+    dir.write(
+        "Calculator.tsx",
+        concat!(
+            "import type { MortgageState } from './ui/Inputs';\n",
+            "export const INITIAL: MortgageState = { principal: 1 };\n"
+        ),
+    );
+    let out = analyze_tree(dir.path(), &config());
+    assert!(
+        !out.findings.iter().any(|f| {
+            f.rule_id == "dead-exports" && f.data.as_ref().is_some_and(|d| d["name"] == "State")
+        }),
+        "State is published as MortgageState and imported under that name: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn declaration_re_exported_under_an_alias_nobody_imports_is_still_reported() {
+    // NEGATIVE FIXTURE, end to end: tracking the rename must not turn "has a public name" into
+    // "has a consumer". With no importer anywhere, this stays an un-export candidate.
+    let dir = TempDir::new("zzop-engine-dead-exports-alias-dead");
+    dir.write(
+        "ui/Inputs.tsx",
+        // `State` deliberately reaches only an UNEXPORTED `Props` field, so the public-signature
+        // exemption cannot fire — the alias link is the only thing under test here.
+        concat!(
+            "interface State { principal: number }\n",
+            "export type { State as MortgageState };\n",
+            "interface Props { state: State }\n",
+            "export function Inputs(p: Props) { return p.state.principal; }\n"
+        ),
+    );
+    let hit = analyze_tree(dir.path(), &config())
+        .findings
+        .into_iter()
+        .find(|f| {
+            f.rule_id == "dead-exports" && f.data.as_ref().is_some_and(|d| d["name"] == "State")
+        });
+    assert!(
+        hit.is_some(),
+        "an alias with zero importers must not resurrect a dead export"
+    );
+    assert_eq!(hit.unwrap().line, 1); // `interface State`'s declaration line, not the export clause
+}

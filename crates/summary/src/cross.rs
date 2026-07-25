@@ -11,36 +11,10 @@ pub fn cross_summary(
     config_path: Option<&str>,
     filters: &FindingFilters,
 ) -> Result<String, String> {
-    // Source-mode exclusivity is enforced HERE, not (only) in the hosts — the same centralization
-    // `endpoint_summary` gets from `resolve_trees_request`. Without this, a future host passing
-    // both would get a silently-narrowed join (config wins, paths ignored) — exactly the
-    // per-host-drift class this crate exists to close.
-    if config_path.is_some() && !paths.is_empty() {
-        return Err(
-            "cross_repo takes either `paths` or `configPath`, not both — pass exactly one source"
-                .to_string(),
-        );
-    }
-    let loaded = match config_path {
-        Some(cp) => {
-            // Absolutized like every path argument (see `crate::paths`), so a relative `--config` works
-            // from any cwd and the config's own directory resolves absolute for the mapper.
-            let loaded = zzop_config::load_config_file(&crate::paths::absolutize(cp))
-                .map_err(|e| e.to_string())?;
-            if loaded.method != zzop_config::Method::AnalyzeTrees {
-                return Err(format!(
-                    "the config at {} defines a single tree — use analyze_repo for it, or declare `trees` (2+, or \"auto\") for a cross-layer join",
-                    loaded
-                        .config_path
-                        .as_deref()
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_else(|| cp.to_string())
-                ));
-            }
-            loaded
-        }
-        None => crate::trees::zero_config_trees("cross_repo", paths)?,
-    };
+    // Source-mode exclusivity + config-method gating are enforced in `crate::trees` (shared verbatim
+    // with `manifest_json`), not (only) in the hosts — the same centralization `endpoint_summary` gets
+    // from `resolve_trees_request`.
+    let loaded = crate::trees::load_trees_request("cross_repo", paths, config_path)?;
     let out = zzop_facade::analyze_trees_json(&loaded.request.to_string())?;
     let v = serde_json::from_str::<serde_json::Value>(&out).map_err(|e| e.to_string())?;
 
@@ -93,7 +67,15 @@ pub fn cross_summary(
     let cl = &v["crossLayer"];
     let bucket_len = |key: &str| cl[key].as_array().map(Vec::len).unwrap_or(0);
     let edges = cl["edges"].as_array().cloned().unwrap_or_default();
-    let (edges_shown, edges_truncated) = output::shape_list(&edges, output::DEFAULT_EDGES_LIMIT);
+    let (edges_shown, edges_truncated) = output::shape_list(
+        &edges,
+        output::DEFAULT_EDGES_LIMIT,
+        // No tool argument moves this cap (`limit` filters findings only) — the hint names the field
+        // that carries the full count and the surfaces that can answer per-edge, never a knob that
+        // would silently do nothing here.
+        "this list has a fixed cap and no tool argument raises it — `buckets.edges` carries the full, \
+         uncapped count; drill into a specific route with check_endpoint",
+    );
     let cl_findings = v["crossLayerFindings"]
         .as_array()
         .cloned()

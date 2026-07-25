@@ -14,3 +14,8 @@ build = "build.rs"
 
 [dependencies]
 serde_json = { workspace = true }
+# For `zzop_cache::DEFAULT_CACHE_DIR` only — the mapper's `cacheDir` default. A path this front-end
+# emits and the cache store writes to is ONE policy value, so it gets ONE definition, in the crate that
+# owns the store, rather than a matching literal in each. No cache code runs here; this front-end still
+# only ever produces request JSON.
+zzop-cache = { path = "../cache" }

@@ -51,9 +51,11 @@ pub(super) fn collect(
     let mut ts_paths: HashSet<String> = HashSet::new();
     let mut degraded: Vec<String> = Vec::new();
     let mut minified: Vec<String> = Vec::new();
+    let mut source_files: usize = 0;
     let mut io_provides: Vec<IoProvide> = Vec::new();
     let mut io_consumes: Vec<IoConsume> = Vec::new();
-    let mut used_names_by_file: HashMap<String, Vec<String>> = HashMap::new();
+    let mut dead_export_names_by_file: HashMap<String, crate::dead_exports::DeadExportNames> =
+        HashMap::new();
     let mut prisma_rels: Vec<String> = Vec::new();
     let mut java_rels: Vec<String> = Vec::new();
     let mut csharp_rels: Vec<String> = Vec::new();
@@ -111,6 +113,12 @@ pub(super) fn collect(
         // match, so caching it in a local is a free correctness-neutral simplification, not a behavior
         // change.
         let dispatch_lang = crate::dispatch::dispatch(&artifact.rel, &config.dispatch);
+        // `CoverageCensus::source_files` — the parser-claimed subset of the walked total, so a consumer
+        // can size the CODE without mistaking docs/data/assets for it. Free here: `dispatch_lang` is
+        // already in hand, and an overlay-covered file is parsed source too (by its adapter).
+        if dispatch_lang.is_some() || overlay_covered_paths.contains(&artifact.rel) {
+            source_files += 1;
+        }
         if artifact.degraded {
             degraded.push(artifact.rel.clone());
         } else if dispatch_lang == Some(crate::dispatch::Language::Prisma) {
@@ -169,7 +177,13 @@ pub(super) fn collect(
                 ts_asset_ref_pairs.push((artifact.rel.clone(), artifact.asset_refs));
             }
             ts_import_pairs.push((artifact.rel.clone(), imports));
-            used_names_by_file.insert(artifact.rel.clone(), artifact.used_names.clone());
+            dead_export_names_by_file.insert(
+                artifact.rel.clone(),
+                crate::dead_exports::DeadExportNames {
+                    used: artifact.used_names.clone(),
+                    signature: artifact.exported_signature_names.clone(),
+                },
+            );
         }
         if let Some(io) = artifact.io {
             io_provides.extend(io.provides);
@@ -245,6 +259,7 @@ pub(super) fn collect(
 
     Collected {
         file_count,
+        source_files,
         per_file_findings,
         all_symbols,
         loc_by_path,
@@ -257,7 +272,7 @@ pub(super) fn collect(
         minified,
         io_provides,
         io_consumes,
-        used_names_by_file,
+        dead_export_names_by_file,
         prisma_rels,
         java_rels,
         csharp_rels,

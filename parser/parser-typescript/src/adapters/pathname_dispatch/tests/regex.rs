@@ -21,7 +21,11 @@ fn bound_match_single_param() {
     );
     let out = extract_pathname_dispatch_provides("handleRequest.ts", src);
     assert_eq!(keys(&out), vec!["POST /api/ledger/{}/verify"]);
-    assert!(out.iter().all(|p| p.symbol.as_deref() == Some("dispatch")));
+    // Single-call branch body -> the branch TARGET, not the enclosing `dispatch` (module doc
+    // "`symbol` — per-BRANCH, two cases", case 1).
+    assert!(out
+        .iter()
+        .all(|p| p.symbol.as_deref() == Some("verifyCode")));
 }
 
 // -- Full mono-hub settle-hub-be dispatch: 2 literal routes + 6 regex routes, all native now --

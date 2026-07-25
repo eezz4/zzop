@@ -26,22 +26,21 @@ pub mod message;
 pub mod structural;
 pub mod usage;
 
-use zzop_core::{register_native_analysis_stub, RuleRegistry, Severity};
+use zzop_core::{register_native_analysis_stub, RuleRegistry};
 
 /// Registers every native analysis id implemented in this crate — the schema half of the extensibility
 /// contract's per-crate registration (see `zzop_engine::register_all_native`, which composes this with
 /// `zzop_rules_graph`'s, `zzop_rules_http`'s, `zzop_rules_cross_layer`'s, and `zzop_metrics`'s own
 /// `register_native_analyses`).
 pub fn register_native_analyses(registry: &mut RuleRegistry) {
-    let analyses: &[(&str, Severity)] = &[
-        ("schema-structural", Severity::Warning),
-        ("schema-usage", Severity::Warning),
-        ("soft-delete-bypass", Severity::Warning),
-        ("orderby-unindexed", Severity::Warning),
-        ("enum-string-drift", Severity::Warning),
-    ];
-    for &(id, default_severity) in analyses {
-        register_native_analysis_stub(registry, id, default_severity);
+    for id in [
+        "schema-structural",
+        "schema-usage",
+        "soft-delete-bypass",
+        "orderby-unindexed",
+        "enum-string-drift",
+    ] {
+        register_native_analysis_stub(registry, id);
     }
 }
 

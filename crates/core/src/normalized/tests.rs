@@ -124,6 +124,7 @@ fn fragment_channels_round_trip_when_present() {
             is_entry: false,
             attributes: Vec::new(),
             loop_spans: vec![],
+            function_spans: vec![],
         }],
     };
     let json = serde_json::to_string(&envelope).unwrap();
@@ -203,6 +204,7 @@ fn rejects_duplicate_paths() {
                 is_entry: false,
                 attributes: Vec::new(),
                 loop_spans: vec![],
+                function_spans: vec![],
             },
             FileProjection {
                 class_shape_fragments: Vec::new(),
@@ -221,6 +223,7 @@ fn rejects_duplicate_paths() {
                 is_entry: false,
                 attributes: Vec::new(),
                 loop_spans: vec![],
+                function_spans: vec![],
             },
         ],
     };

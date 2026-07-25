@@ -1,5 +1,8 @@
 //! URL-argument resolution: literal / const-indirection / template-literal / top-level-ternary
-//! variants (`cond-literal-fanout-v1`), plus the shared [`TplPiece`] vocabulary and text helpers.
+//! variants (`cond-literal-fanout-v1`) and the same-file constant rules
+//! (`same-file-const-prepend-v1` at the head, `same-file-url-binding-v1` at the whole argument — gates in
+//! [`super::local_consts`]), plus the shared [`TplPiece`] vocabulary and text helpers.
+//! Tests live in the sibling `url_resolve_tests.rs` (300-line file budget).
 
 use std::collections::{HashMap, HashSet};
 
@@ -7,6 +10,7 @@ use swc_core::common::{SourceMap, SourceMapper, Spanned};
 use swc_core::ecma::ast::{Expr, Lit, MemberProp, Tpl};
 
 use super::concat::resolve_concat_variants;
+use super::local_consts::{quasi_text, tpl_starts_with_interpolation, LocalConsts};
 
 /// Resolve a URL argument to every syntactically-possible path string ("variants"); an empty vec means
 /// dynamic/unresolvable, same meaning as the old `None`. A plain literal or const indirection yields
@@ -16,9 +20,16 @@ use super::concat::resolve_concat_variants;
 /// See [`resolve_template_variants`] for the template
 /// literal case, which fans out per-interpolation with its own cap, and [`resolve_concat_variants`] for
 /// the binary `+` string-concatenation case (`str-concat-url-v1`).
+///
+/// `locals` is THIS file's same-file URL knowledge ([`super::local_consts`]), read at exactly two
+/// positions: a URL's leading slot (`same-file-const-prepend-v1`) and a bare identifier standing alone as
+/// the WHOLE url argument (`axios.get(BASE)` — `same-file-url-binding-v1`). The project-wide dotted
+/// `consts` map is consulted FIRST at the identifier/member arm, so nothing this file says can displace a
+/// dotted constant that already resolved.
 pub(super) fn resolve_url_variants(
     arg: &Expr,
     consts: &HashMap<String, String>,
+    locals: &LocalConsts,
     cm: &SourceMap,
 ) -> Vec<String> {
     match arg {
@@ -27,13 +38,12 @@ pub(super) fn resolve_url_variants(
             (Some(cons), Some(alt)) => dedup_preserve_order(vec![cons, alt]),
             _ => Vec::new(),
         },
-        Expr::Tpl(t) => resolve_template_variants(t),
-        Expr::Ident(_) | Expr::Member(_) => consts
-            .get(&expr_text(arg, cm))
-            .cloned()
-            .into_iter()
-            .collect(),
-        Expr::Bin(_) => resolve_concat_variants(arg, consts, cm),
+        Expr::Tpl(t) => resolve_template_variants(t, locals),
+        Expr::Ident(_) | Expr::Member(_) => match consts.get(&expr_text(arg, cm)) {
+            Some(v) => vec![v.clone()],
+            None => locals.whole_url_for(arg).unwrap_or_default().to_vec(),
+        },
+        Expr::Bin(_) => resolve_concat_variants(arg, consts, locals, cm),
         _ => Vec::new(),
     }
 }
@@ -50,10 +60,15 @@ pub(super) enum TplPiece {
 /// EXACTLY ONE variant (`` `/${slug}` `` -> `"/{}"`, `` `/x` `` -> `"/x"`) — a template that itself fans
 /// out (a nested ternary) would multiply the outer 2-arm slot beyond its bound, so it falls through to the
 /// fixed `{}` placeholder. This lets a slash INSIDE a branch (`` slug ? `/${slug}` : '' ``) survive.
+/// A template nested inside a ternary arm is resolved with NO locals map. A leading-interpolation arm DOES
+/// reach here — both `axios.get(c ? `${B}/x` : '/y')` and `` `${c ? `${B}/x` : '/y'}/z` `` are real shapes —
+/// so this is a deliberate refusal, not an unreachable branch: a fan-out arm's own head has no measured
+/// case behind it, and withholding the map keeps every arm resolving exactly as it did before
+/// `same-file-const-prepend-v1`. The arm falls back to `{}`, i.e. silence, never a wrong value.
 pub(super) fn resolve_cond_arm(e: &Expr) -> Option<String> {
     match e {
         Expr::Lit(Lit::Str(s)) => Some(s.value.as_str().unwrap_or_default().to_string()),
-        Expr::Tpl(t) => match resolve_template_variants(t).as_slice() {
+        Expr::Tpl(t) => match resolve_template_variants(t, &LocalConsts::default()).as_slice() {
             [one] => Some(one.clone()),
             _ => None,
         },
@@ -70,10 +85,31 @@ pub(super) fn resolve_cond_arm(e: &Expr) -> Option<String> {
 /// kept). Multiple slots cartesian-product together, capped at 2 slots (<=4 variants); a 3rd+ slot forces
 /// EVERY slot in this template back to the old fixed `{}` behavior, keeping output bounded and
 /// deterministic. Variants are deduped preserving first-seen order.
-fn resolve_template_variants(t: &Tpl) -> Vec<String> {
+///
+/// (`same-file-const-prepend-v1`): when the template STARTS with its first interpolation and that
+/// expression is a bare identifier bound to a same-file top-level string literal that clears all four
+/// gates in [`super::local_consts`], the head piece is that literal instead of `{}` — the base is read
+/// rather than dropped. The SECOND quasi is handed to [`head_literal_for`] as the shape gate: an empty one
+/// means a `{}` would be glued straight onto the head, which it refuses. Head only; see that function's
+/// doc for why a mid-path slot must stay `{}` and which harms survive the substitution.
+fn resolve_template_variants(t: &Tpl, locals: &LocalConsts) -> Vec<String> {
     let mut pieces: Vec<TplPiece> = Vec::with_capacity(t.exprs.len());
     let mut slot_count = 0usize;
-    for e in t.exprs.iter() {
+    let head_literal = tpl_starts_with_interpolation(t)
+        .then(|| {
+            t.exprs
+                .first()
+                .and_then(|e| locals.head_literal_for(e, quasi_text(t, 1)))
+        })
+        .flatten()
+        .map(str::to_string);
+    for (i, e) in t.exprs.iter().enumerate() {
+        if i == 0 {
+            if let Some(v) = &head_literal {
+                pieces.push(TplPiece::Fixed(v.clone()));
+                continue;
+            }
+        }
         if let Expr::Cond(c) = &**e {
             if let (Some(cons), Some(alt)) = (resolve_cond_arm(&c.cons), resolve_cond_arm(&c.alt)) {
                 slot_count += 1;
@@ -149,152 +185,5 @@ pub(super) fn expr_text(node: &Expr, cm: &SourceMap) -> String {
             }
         }
         _ => cm.span_to_snippet(node.span()).unwrap_or_default(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::adapters::egress::{extract_http_egress, files, keys};
-
-    // --- conditional-literal fan-out (`cond-literal-fanout-v1`) ---
-
-    #[test]
-    fn template_conditional_literal_interpolation_fans_out_the_url() {
-        let out = extract_http_egress(&files(&[(
-            "conduit.ts",
-            "axios.post(`/users${isRegister ? '' : '/login'}`, body);",
-        )]));
-        assert_eq!(
-            keys(&out),
-            vec![
-                Some("POST /users".to_string()),
-                Some("POST /users/login".to_string()),
-            ]
-        );
-        assert!(out.iter().all(|c| c.raw.is_none() && c.method.is_none()));
-    }
-
-    #[test]
-    fn top_level_ternary_url_argument_fans_out() {
-        let out = extract_http_egress(&files(&[("a.ts", "axios.get(cond ? '/a' : '/b');")]));
-        assert_eq!(
-            keys(&out),
-            vec![Some("GET /a".to_string()), Some("GET /b".to_string())]
-        );
-    }
-
-    #[test]
-    fn template_ternary_with_a_template_arm_keeps_the_in_branch_slash() {
-        // fe-vite Editor.jsx shape: the slash lives INSIDE the cons branch (`` `/${slug}` ``). It used to
-        // collapse to a malformed `/articles{}`; now the template arm resolves to `/{}` and fans out,
-        // keeping the slash — `/articles/{}` (has-slug) and `/articles` (no-slug).
-        let out = extract_http_egress(&files(&[(
-            "a.jsx",
-            "axios.put(`/articles${slug ? `/${slug}` : ''}`);",
-        )]));
-        assert_eq!(
-            keys(&out),
-            vec![
-                Some("PUT /articles/{}".to_string()),
-                Some("PUT /articles".to_string()),
-            ]
-        );
-    }
-
-    #[test]
-    fn correlated_verb_and_url_ternaries_pair_instead_of_cross_producting() {
-        // fe-vite Editor.jsx: the verb ternary and the url ternary share the SAME guard `slug`, so only
-        // the two reachable branches exist — PUT /articles/{} (slug truthy) and POST /articles (falsy).
-        // The two cross combos (POST /articles/{}, PUT /articles) are unreachable and must NOT be emitted
-        // (they used to cascade into spurious method-mismatch findings).
-        let out = extract_http_egress(&files(&[(
-            "Editor.jsx",
-            "axios[slug ? 'put' : 'post'](`/articles${slug ? `/${slug}` : ''}`, { article });",
-        )]));
-        assert_eq!(
-            keys(&out),
-            vec![
-                Some("PUT /articles/{}".to_string()),
-                Some("POST /articles".to_string()),
-            ]
-        );
-    }
-
-    #[test]
-    fn independent_verb_and_url_ternaries_still_cross_product() {
-        // DIFFERENT guards (`a` vs `b`) are genuinely independent — the full Cartesian product is the
-        // correct over-approximation, unchanged by the correlation special-case.
-        let out = extract_http_egress(&files(&[(
-            "a.ts",
-            "axios[a ? 'put' : 'post'](`/x${b ? '/1' : '/2'}`);",
-        )]));
-        assert_eq!(out.len(), 4);
-    }
-
-    #[test]
-    fn top_level_ternary_with_a_template_arm_fans_out() {
-        let out = extract_http_egress(&files(&[("a.ts", "axios.get(cond ? `/a/${x}` : '/b');")]));
-        assert_eq!(
-            keys(&out),
-            vec![Some("GET /a/{}".to_string()), Some("GET /b".to_string())]
-        );
-    }
-
-    #[test]
-    fn template_ternary_interpolation_with_one_non_literal_arm_keeps_the_old_placeholder() {
-        let out = extract_http_egress(&files(&[("a.ts", "axios.get(`/x${cond ? a : 'b'}`);")]));
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].key.as_deref(), Some("GET /x{}"));
-    }
-
-    #[test]
-    fn more_than_two_conditional_literal_interpolations_falls_back_to_placeholders_for_all() {
-        let out = extract_http_egress(&files(&[(
-            "a.ts",
-            "axios.get(`/x${a ? '1' : '2'}/y${b ? '3' : '4'}/z${c ? '5' : '6'}`);",
-        )]));
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].key.as_deref(), Some("GET /x{}/y{}/z{}"));
-    }
-
-    #[test]
-    fn top_level_ternary_with_identical_arms_dedups_to_one_consume() {
-        let out = extract_http_egress(&files(&[("a.ts", "axios.get(cond ? '/same' : '/same');")]));
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].key.as_deref(), Some("GET /same"));
-    }
-
-    #[test]
-    fn ternary_with_one_keying_and_one_vetoed_arm_emits_the_key_plus_an_unresolved_consume() {
-        // Mixed partial-veto: '/feed' keys, '?public' veto-lists out of every bucket (query-only URL
-        // names no path). The keyed variant is emitted AND the vetoed variant falls back to the
-        // unresolved shape (raw = the whole ternary's source text, method carried) — strictly additive
-        // over the pre-fanout behavior, which emitted only the unresolved consume.
-        let out = extract_http_egress(&files(&[(
-            "a.ts",
-            "axios.get(cond ? '/feed' : '?public');",
-        )]));
-        assert_eq!(out.len(), 2);
-        assert_eq!(out[0].key.as_deref(), Some("GET /feed"));
-        assert!(out[0].raw.is_none());
-        assert!(out[1].key.is_none());
-        assert_eq!(out[1].raw.as_deref(), Some("cond ? '/feed' : '?public'"));
-        assert_eq!(out[1].method.as_deref(), Some("GET"));
-    }
-
-    // --- generated-SDK receivers are not recognized (decision: generated SDKs are injection
-    // adapters, not engine vocab — the former oazapfts-specific recognition lived here) ---
-
-    #[test]
-    fn former_qs_suffix_special_case_is_gone_trailing_interpolation_is_a_plain_placeholder() {
-        // A trailing `${QS.query(...)}`-shaped interpolation used to be dropped entirely as
-        // oazapfts-codegen's query-string suffix. That special case is gone: it now keys like any other
-        // trailing interpolation, as an ordinary `{}` placeholder.
-        let out = extract_http_egress(&files(&[(
-            "activity.ts",
-            r#"axios.get(`/activities${QS.query(QS.explode({ albumId }))}`);"#,
-        )]));
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].key.as_deref(), Some("GET /activities{}"));
     }
 }

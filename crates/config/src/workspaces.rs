@@ -16,7 +16,11 @@
 //!   cross-layer join needs 2+).
 //!
 //! Manifest readers live in `workspaces/manifest.rs`, the glob expansion + matching engine in
-//! `workspaces/glob.rs`; this root keeps the census-pinned constants and the single public entry point.
+//! `workspaces/glob.rs`; this root keeps the census-pinned constants and the public entry points:
+//! `expand_auto_trees` (the expansion itself) and `single_tree_workspace_warning` (the same manifest
+//! detection read for its honesty value whenever a run resolved ONE tree over a multi-package
+//! workspace root, so a monorepo never silently degrades to a single tree — and thus no cross-layer
+//! join — without saying so).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -63,12 +67,8 @@ pub fn expand_auto_trees(
         _ => unreachable!("trees_is_auto implies config is a JSON object"),
     };
 
-    let (patterns, source): (Vec<String>, &str) = if let Some(p) =
-        read_pnpm_workspace_packages(base_dir)
-    {
-        (p, "pnpm-workspace.yaml")
-    } else if let Some(p) = read_npm_workspace_packages(base_dir) {
-        (p, "package.json \"workspaces\"")
+    let (patterns, source) = if let Some(found) = read_workspace_manifest(base_dir) {
+        found
     } else {
         return Err(ConfigError(format!(
             "trees: \"auto\" found no workspace manifest in {} — expected a pnpm-workspace.yaml with a \"packages:\" list, or a package.json with a \"workspaces\" field. Write an explicit \"trees\": [{{ \"root\": ..., \"sourceId\": ... }}] array instead, or run zzop from the workspace root.",
@@ -144,4 +144,88 @@ pub fn expand_auto_trees(
     map.insert("trees".to_string(), Value::Array(trees_json));
 
     Ok((Value::Object(map), warnings))
+}
+
+/// The manifest precedence shared by [`expand_auto_trees`] and [`single_tree_workspace_warning`]:
+/// `pnpm-workspace.yaml` first (a present file wins outright, even when its `packages:` list is
+/// empty — pnpm's own precedence), else `package.json`'s `workspaces` field. Returns the glob
+/// patterns plus the label every message about them uses, so the two callers can never disagree
+/// about which manifest a repo "has".
+fn read_workspace_manifest(base_dir: &Path) -> Option<(Vec<String>, &'static str)> {
+    if let Some(patterns) = read_pnpm_workspace_packages(base_dir) {
+        return Some((patterns, "pnpm-workspace.yaml"));
+    }
+    read_npm_workspace_packages(base_dir).map(|patterns| (patterns, "package.json \"workspaces\""))
+}
+
+/// Single-tree-over-a-monorepo disclosure: the run resolved exactly ONE tree, yet `base_dir` (the
+/// analyzed root, or the config file's own directory) carries a workspace manifest naming 2+
+/// packages. Without this, the run is silent about the biggest thing it did not do — the cross-layer
+/// join (zzop's headline capability) needs >= 2 trees, so it never even ran, while the reply reads
+/// exactly like a complete analysis (measured on a 22-package pnpm monorepo: `config = null,
+/// configWarnings = []`).
+///
+/// `config_path` selects which of the two ways into that trap the caller hit, and only changes the
+/// opener and the remedy — never the shared middle, so the two variants read as one message:
+/// - `None` — no `zzop.config.jsonc` at all (remedy: create one with `{"trees": "auto"}`).
+/// - `Some(p)` — a config EXISTS at `p` and declares no `trees` (remedy: add `"trees": "auto"` to
+///   it). This second case is why the trigger is the resolved tree count rather than config absence:
+///   a config carrying only `{"rules": {...}}` lands in the identical trap while its author
+///   reasonably believes having a config means the analysis was configured, and — unlike
+///   `trees: "auto"` — there is no expansion, hence no expansion report, hence pure silence.
+///
+/// DELIBERATELY SILENT for an explicit `trees: [...]` (the caller passes `Method::AnalyzeTrees`, so
+/// this is never called): naming the tree set IS the author's answer to "which trees?", and zzop
+/// must not second-guess a stated decision — a one-entry `trees` array is a legitimate choice
+/// (analyze just this package), not an oversight. That case is not left unattended either: the
+/// `trees: "auto"` path emits its own "resolved only one workspace package" warning above, which is
+/// the only single-entry shape zzop itself produced rather than the author.
+///
+/// Every claim here is a structural fact this function actually observed, never a guess (the repo's
+/// never-guess doctrine): the manifest label is the file that was really read, and the package count
+/// is the output of the SAME `resolve_workspace_dirs` expansion `trees: "auto"` would perform, so
+/// the number is exact and the suggested remedy is known to produce it.
+///
+/// Silent (returns `None`) when there is no manifest at all — an ordinary single-package repo must
+/// never be nagged — and equally when the manifest resolves to fewer than 2 packages, because then
+/// `{"trees": "auto"}` could not deliver the join either and the advice would be false.
+pub fn single_tree_workspace_warning(
+    base_dir: &Path,
+    config_path: Option<&Path>,
+) -> Option<String> {
+    let (patterns, source) = read_workspace_manifest(base_dir)?;
+    if patterns.is_empty() {
+        return None;
+    }
+    let package_count = resolve_workspace_dirs(base_dir, &patterns).len();
+    if package_count < 2 {
+        return None;
+    }
+    let config_filename = crate::DEFAULT_CONFIG_FILENAME;
+    let (opener, remedy) = match config_path {
+        None => (
+            format!(
+                "no {config_filename} at {} — {source} is present there and resolves to \
+                 {package_count} workspace packages, but this run analyzed the root as a SINGLE \
+                 tree",
+                base_dir.display()
+            ),
+            format!("Create a {config_filename} at that root containing {{\"trees\": \"auto\"}}"),
+        ),
+        // `base_dir` is named separately from the config path here: a config may point `roots` at a
+        // subdirectory, so the analyzed tree is not necessarily the directory holding the manifest.
+        Some(path) => (
+            format!(
+                "the config at {} declares no \"trees\" — {source} at {} resolves to \
+                 {package_count} workspace packages, but this run analyzed a SINGLE tree",
+                path.display(),
+                base_dir.display()
+            ),
+            "Add \"trees\": \"auto\" to that config".to_string(),
+        ),
+    };
+    Some(format!(
+        "{opener}: the cross-layer join needs >= 2 trees with distinct sourceIds to fire, so it did \
+         not run. {remedy} to analyze those {package_count} packages as separate trees."
+    ))
 }

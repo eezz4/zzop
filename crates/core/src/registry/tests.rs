@@ -2,6 +2,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
+use crate::{finding::Finding, Severity};
 
 fn finding(rule_id: &str, severity: Severity, file: &str, line: u32) -> Finding {
     Finding {
@@ -382,34 +383,33 @@ fn merge_findings_ties_break_on_file_then_line_then_rule_id() {
     );
 }
 
+/// Seals the registration mechanism's whole contract: one call = one id, in registration order. The
+/// registry holds nothing else, so a future field creeping back in (a `kind`/`enabled` nobody reads)
+/// would have to change this test first.
 #[test]
-fn register_native_analysis_stub_registers_one_native_enabled_toggle_point() {
+fn register_native_analysis_stub_appends_one_id_in_registration_order() {
     let mut registry = RuleRegistry::new();
-    register_native_analysis_stub(&mut registry, "example-analysis", Severity::Warning);
-    let metas = registry.metas();
-    assert_eq!(metas.len(), 1);
-    let meta = metas[0];
-    assert_eq!(meta.id, "example-analysis");
-    assert_eq!(meta.kind, RuleKind::Native);
-    assert_eq!(meta.framework, "any");
-    assert!(meta.enabled);
-    assert_eq!(meta.default_severity, Severity::Warning);
+    register_native_analysis_stub(&mut registry, "example-analysis");
+    register_native_analysis_stub(&mut registry, "other-analysis");
+    assert_eq!(registry.ids(), ["example-analysis", "other-analysis"]);
 }
 
+/// Seals the live contract the registry exists for: a registered native analysis id shares the
+/// `RuleConfig` id space with DSL pack rules, so `disabled_rules` turns one off by exact id.
 #[test]
 fn gating_config_toggles_a_native_analysis_stub_id() {
     let mut registry = RuleRegistry::new();
-    register_native_analysis_stub(&mut registry, "example-analysis", Severity::Warning);
-    register_native_analysis_stub(&mut registry, "other-analysis", Severity::Info);
+    register_native_analysis_stub(&mut registry, "example-analysis");
+    register_native_analysis_stub(&mut registry, "other-analysis");
     let config = RuleConfig {
         disabled_rules: vec!["example-analysis".to_string()],
         ..Default::default()
     };
     let enabled_ids: Vec<&str> = registry
-        .metas()
+        .ids()
         .iter()
-        .filter(|m| is_enabled(&config, &m.id))
-        .map(|m| m.id.as_str())
+        .filter(|id| is_enabled(&config, id))
+        .map(String::as_str)
         .collect();
     assert!(!enabled_ids.contains(&"example-analysis"));
     assert!(enabled_ids.contains(&"other-analysis"));

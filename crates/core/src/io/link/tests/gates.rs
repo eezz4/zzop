@@ -1,5 +1,6 @@
 //! Integrity gates on the raw join: cross-tree ambiguity (never auto-linked), external egress
-//! (`"://"` keys never join), and low-confidence key patterns (edge emitted, but tagged).
+//! (`"://"` keys never join), route identity (an all-`{}` key's miss is unresolved, not unprovided),
+//! and low-confidence key patterns (edge emitted, but tagged).
 
 use super::{consume, provide};
 use crate::io::{link_cross_layer_io, IoFacts, LinkOptions, SourceIo};
@@ -145,6 +146,104 @@ fn host_carrying_consume_key_is_external_never_dangling_even_with_a_matching_int
     // The internal BE provide is untouched — nothing consumed it, so it's dead, unrelated to external.
     assert_eq!(r.unconsumed_provides.len(), 1);
     assert_eq!(r.unconsumed_provides[0].provide.key, "GET /api/users");
+}
+
+#[test]
+fn all_placeholder_consume_key_misses_into_unresolved_not_unprovided() {
+    // mono-hub `joke-generator/fetchJoke.ts` (2026-07-25): `const BASE = "https://v2.jokeapi.dev/joke"`
+    // is unresolved, the host is lost, and the consume keys as `GET /{}`. That key names no route, so
+    // calling it `unprovidedConsumes` asserts "this app calls its own route and that route is missing"
+    // — a contract nobody ever claimed. It must land in `unresolvedConsumes` (a disclosed blind spot,
+    // counted by `cross-layer/unresolved-consume-ratio`) instead.
+    let fe = SourceIo {
+        source: "fe".into(),
+        io: IoFacts {
+            provides: vec![],
+            consumes: vec![
+                consume("http", Some("GET /{}"), "fetchJoke.ts", 10, None),
+                consume("http", Some("POST /{}/{}"), "fetchJoke.ts", 20, None),
+                // One literal segment is enough evidence to keep asserting drift.
+                consume("http", Some("GET /api/{}"), "client.ts", 3, None),
+                // A root consume IS resolved — zero segments, but the path is fully known.
+                consume("http", Some("GET /"), "client.ts", 4, None),
+            ],
+        },
+    };
+    let be = SourceIo {
+        source: "be".into(),
+        io: IoFacts {
+            provides: vec![provide("http", "GET /health", "Api.java", 5, None)],
+            consumes: vec![],
+        },
+    };
+    let r = link_cross_layer_io(&[fe, be], &LinkOptions::default());
+
+    let unresolved: Vec<Option<&str>> = r
+        .unresolved_consumes
+        .iter()
+        .map(|c| c.consume.key.as_deref())
+        .collect();
+    assert_eq!(unresolved, vec![Some("GET /{}"), Some("POST /{}/{}")]);
+    // The demoted records keep their key (locatable in `bucketKeys`), unlike a `key: None` entry.
+    assert!(r.unresolved_consumes.iter().all(|c| c.source == "fe"));
+
+    let unprovided: Vec<&str> = r
+        .unprovided_consumes
+        .iter()
+        .filter_map(|c| c.consume.key.as_deref())
+        .collect();
+    assert_eq!(unprovided, vec!["GET /api/{}", "GET /"]);
+    assert!(r.edges.is_empty());
+}
+
+#[test]
+fn an_all_placeholder_key_that_actually_joins_a_catch_all_provide_still_edges() {
+    // The gate redirects a MISS only. A declared catch-all route (`app.get('/:page')` -> `GET /{}`) is a
+    // real provide, so a consume that lands on it is a join, not a guess — demoting it would delete a
+    // fact the analysis actually has.
+    let fe = SourceIo {
+        source: "fe".into(),
+        io: IoFacts {
+            provides: vec![],
+            consumes: vec![consume("http", Some("GET /{}"), "client.ts", 1, None)],
+        },
+    };
+    let be = SourceIo {
+        source: "be".into(),
+        io: IoFacts {
+            provides: vec![provide("http", "GET /{}", "routes.ts", 8, None)],
+            consumes: vec![],
+        },
+    };
+    let r = link_cross_layer_io(&[fe, be], &LinkOptions::default());
+    assert_eq!(r.edges.len(), 1);
+    assert_eq!(r.edges[0].key, "GET /{}");
+    assert!(r.unresolved_consumes.is_empty());
+    assert!(r.unprovided_consumes.is_empty());
+}
+
+#[test]
+fn an_all_placeholder_key_under_a_declared_host_is_still_external_not_unresolved() {
+    // Gate ORDER: the `://` egress gate fires first, so a vendor absolute URL whose path happens to be
+    // all-placeholder stays third-party egress — the host IS route identity of a kind, and reclassifying
+    // it as "we are blind" would lose the one fact the key carries.
+    let fe = SourceIo {
+        source: "fe".into(),
+        io: IoFacts {
+            provides: vec![],
+            consumes: vec![consume(
+                "http",
+                Some("GET https://v2.jokeapi.dev/{}"),
+                "fetchJoke.ts",
+                10,
+                None,
+            )],
+        },
+    };
+    let r = link_cross_layer_io(&[fe], &LinkOptions::default());
+    assert_eq!(r.external_consumes.len(), 1);
+    assert!(r.unresolved_consumes.is_empty());
+    assert!(r.unprovided_consumes.is_empty());
 }
 
 #[test]

@@ -2,8 +2,51 @@
 //! `check_endpoint` (`paths` argument / trailing CLI paths). Because this helper is shared, any error text it produces must take the calling
 //! tool's own name as a parameter rather than hardcoding one sibling's name (a live-fire misfire:
 //! `check_endpoint` with a single `paths` entry reported "cross_repo needs at least 2 paths").
+//!
+//! [`load_trees_request`] is the layer above: the whole "exactly one source (paths XOR config), then
+//! build the `analyzeTrees` request" step, shared verbatim by `cross_summary` and `manifest_json` so
+//! the two multi-tree entry points cannot drift on source-mode exclusivity or config-method gating.
 
 use crate::paths;
+
+/// The multi-tree request loader: config-first mode (`config_path` — the config's `trees` define the
+/// join) or config-free paths mode ([`zero_config_trees`]). Source-mode exclusivity is enforced HERE,
+/// not (only) in the hosts — without it a future host passing both would get a silently-narrowed join
+/// (config wins, paths ignored), exactly the per-host-drift class this crate exists to close.
+///
+/// `tool_name` names the CALLER in both error messages, for the same reason `zero_config_trees` takes
+/// it (see the module doc's misattribution incident).
+pub(crate) fn load_trees_request(
+    tool_name: &str,
+    paths: &[String],
+    config_path: Option<&str>,
+) -> Result<zzop_config::LoadedRequest, String> {
+    if config_path.is_some() && !paths.is_empty() {
+        return Err(format!(
+            "{tool_name} takes either `paths` or `configPath`, not both — pass exactly one source"
+        ));
+    }
+    match config_path {
+        Some(cp) => {
+            // Absolutized like every path argument (see `crate::paths`), so a relative `--config` works
+            // from any cwd and the config's own directory resolves absolute for the mapper.
+            let loaded = zzop_config::load_config_file(&self::paths::absolutize(cp))
+                .map_err(|e| e.to_string())?;
+            if loaded.method != zzop_config::Method::AnalyzeTrees {
+                return Err(format!(
+                    "the config at {} defines a single tree — use analyze_repo for it, or declare `trees` (2+, or \"auto\") for a cross-layer join",
+                    loaded
+                        .config_path
+                        .as_deref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| cp.to_string())
+                ));
+            }
+            Ok(loaded)
+        }
+        None => zero_config_trees(tool_name, paths),
+    }
+}
 
 /// Paths mode: one zero-config tree request per path (an empty `{}` config mapped against that root —
 /// bundled `packDefs` + default `git` ride along), `sourceId` = the directory name. A

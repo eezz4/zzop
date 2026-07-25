@@ -7,18 +7,66 @@
 //!
 //! Accepted id forms: the full `<pack>/<rule>` id every finding's `ruleId` already carries, and a bare
 //! `<rule>` id when it is unambiguous across every bundled pack (checked in that order — a full-form
-//! match is authoritative even when the bare id alone would also be ambiguous). Three further cases are
+//! match is authoritative even when the bare id alone would also be ambiguous). Four further cases are
 //! lookup FAILURES, each with its own message so the caller is never left guessing which kind of
 //! "not explainable" they hit:
 //! - the id names a whole PACK, not a rule within one (its rule ids are printed as a hint);
 //! - the id is a native analysis id (`circular`, `duplicate-route`, `cross-layer/*`, ... — compiled into
 //!   `zzop-engine`, never a bundled DSL pack) — real, just not data this lookup reads;
+//! - the id is an ISSUE LABEL inside a native analysis family (`schema/dead-model`, ...) — see below;
+//! - the id is an OUTPUT ID that is not a rule id at all — a coverage-disclosure class or group
+//!   (`disclosure[].id` / `.group`) or a recommendation id (`architecture.topRecommendation.id`), all
+//!   three printed under a field literally named `id`/`group` in every analyze reply (see
+//!   [`output_ids`]);
 //! - the id is unknown outright — pointed at `zzop contract rule-catalog` for the full prose list.
+//!
+//! ## The issue-label lane (`schema/<label>`)
+//! `schema` findings do not carry a registered rule id: `schema_issue_to_finding`
+//! (`crates/engine/src/pipeline/findings.rs`) COMPOSES `ruleId` as `format!("schema/{}", issue.rule)`
+//! from a per-issue label, and only the two family gates (`schema-structural`, `schema-usage`) are
+//! registered ids. So the exact string a user copies out of real output — `schema/dead-model` — used to
+//! land in the WORST lane ("unknown rule id", exit 1) while its sibling `schema-usage` got a tailored
+//! one: the tool answered "never heard of it" about its own output. This lane answers what the label
+//! actually is and which id disables it.
+//!
+//! It deliberately does NOT pre-empt the separate, larger question of whether those labels should become
+//! registered ids of their own: nothing here renames a label or claims one is registered — the message
+//! says the opposite, and stops being reachable on its own the day a label IS registered (the native-id
+//! lane above would answer first).
+//!
+//! The recognized-label set is DERIVED, never copied: [`schema_issue_label_gate`] asks the real message
+//! authoring function (`zzop_rules_schema::schema_issue_message`, the single place a label's family
+//! membership is written down) and reads the family gate id back out of the disable hint it splices in.
+//! A hand-kept list of the 12 labels here is exactly the drift this batch keeps finding.
+//!
+//! ## Scope, censused rather than assumed
+//! Every identifier a user can read out of real output was enumerated and fed to this lookup: the 12 DSL
+//! pack ids, their 136 rules in both the full and the bare form, the 45 registered native analysis ids,
+//! the 12 `schema` issue labels in both forms, the 8 recommendation ids, the 17 disclosure classes and
+//! their 4 groups, and the 186 distinct matcher `label`s the DSL packs declare — 568 distinct strings.
+//! After the lanes above, everything printed under an `id`/`ruleId`/`group` field is answered.
+//!
+//! What deliberately still answers "unknown rule id" is one class: the sub-labels that ride a finding's
+//! `data` under an id that is ALREADY registered and already explainable — a line-scan match's
+//! `data.label` (`sink`, `write`, `guard`, ...), `dead-exports`' `data.reason` (`unused`/`in-file-only`),
+//! and `cross-layer/route-near-miss`' `data.dimension` (`case`/`prefix`). None of them is an id: they are
+//! fields of an explainable finding, the finding names its own `ruleId` one line away, and 183 of the 186
+//! matcher labels are ordinary English words (`read`, `set`, `body`, `timeout`) that would turn `explain`
+//! into a dictionary of vocabulary that does not exist as a rule id anywhere.
 
+mod output_ids;
+mod render;
 #[cfg(test)]
 mod tests;
 
-use zzop_core::{Matcher, RuleDef, RulePackDef, RuleRegistry, Severity};
+use render::render;
+use zzop_core::{RuleDef, RulePackDef, RuleRegistry, Severity};
+
+/// The namespace a schema issue label wears inside a finding's `ruleId`, mirroring
+/// `schema_issue_to_finding`'s `format!("schema/{}", issue.rule)`
+/// (`crates/engine/src/pipeline/findings.rs`). The single literal this lane copies from that
+/// composition — the LABEL SET is derived instead (see [`schema_issue_label_gate`]).
+const SCHEMA_ISSUE_NAMESPACE: &str = "schema/";
 
 /// `zzop explain <rule-id>` — `Ok` is the rendered rule text (print to stdout, exit 0), `Err` is a
 /// caller-facing message for one of the three lookup-failure lanes described in the module doc (print
@@ -50,7 +98,38 @@ fn bundled_packs() -> Vec<RulePackDef> {
 fn native_analysis_ids() -> Vec<String> {
     let mut registry = RuleRegistry::new();
     zzop_engine::register_all_native(&mut registry);
-    registry.metas().iter().map(|m| m.id.clone()).collect()
+    registry.ids().to_vec()
+}
+
+/// `Some(gate_id)` when `label` is a real `schema` issue label, where `gate_id` is the registered native
+/// analysis id that gates its whole family (`schema-structural` or `schema-usage`); `None` when it is not
+/// a label at all. See this module's doc for why this lane exists.
+///
+/// DERIVED, not copied — the whole point. `zzop_rules_schema::schema_issue_message` is the one place a
+/// label's family membership is written down (it appends `family_disable_hint(<gate id>)` to every
+/// recognized label's message and appends NOTHING to its unrecognized-label fallback), so probing it with
+/// a synthetic issue answers both questions at once: recognized-ness and which family. The gate id is then
+/// read back by matching `zzop_core::disable_hint`'s own rendering against the message — `disable_hint` is
+/// the shared SSOT for that fragment, so this cannot drift from the hint's wording either. Candidates come
+/// from the live registry (`native_ids`), so a family gate that is renamed or added is picked up with no
+/// edit here.
+fn schema_issue_label_gate(native_ids: &[String], label: &str) -> Option<String> {
+    let message = zzop_rules_schema::schema_issue_message(&zzop_rules_schema::SchemaIssue {
+        rule: label.to_string(),
+        severity: Severity::Info,
+        model: String::new(),
+        field: None,
+        params: None,
+    });
+    native_ids
+        .iter()
+        .find(|id| {
+            let hint = zzop_core::disable_hint(id);
+            // `family_disable_hint` splices the hint minus its leading verb into a longer sentence.
+            let fragment = hint.strip_prefix("Disable ").unwrap_or(hint.as_str());
+            message.contains(fragment)
+        })
+        .cloned()
 }
 
 /// The pure lookup, parameterized on its two data sources so it is testable against a fabricated pack
@@ -119,67 +198,28 @@ fn explain_over(
         ));
     }
 
+    // An issue label inside a native analysis family — accepted in both the form real output spells
+    // (`schema/dead-model`) and bare (`dead-model`), matching the two forms every other lane accepts.
+    let label = query.strip_prefix(SCHEMA_ISSUE_NAMESPACE).unwrap_or(query);
+    if let Some(gate) = schema_issue_label_gate(native_ids, label) {
+        return Err(format!(
+            "{query:?} is an issue label reported BY the native analysis {gate:?}, not a rule id of its \
+             own — findings spell it `{SCHEMA_ISSUE_NAMESPACE}{label}` in `ruleId`, but {gate:?} is the \
+             id that exists, and it gates the whole family (it is what `disabledRules` / `rules: {{ \
+             \"<id>\": \"off\" }}` takes; to drop just one finding use an `exclude` on its file path). \
+             `zzop explain` only reads the compiled-in DSL pack data — see `zzop contract rule-catalog` \
+             for the family's prose entry."
+        ));
+    }
+
+    // An OUTPUT ID that is not a rule id at all — a disclosure class/group or a recommendation id. Last
+    // of the tailored lanes: every id-shaped lane above names something the rule surface owns, this one
+    // names something only the OUTPUT owns (`explain`'s own module doc, "Scope, censused").
+    if let Some(message) = output_ids::output_id_lane(query) {
+        return Err(message);
+    }
+
     Err(format!(
         "unknown rule id {query:?} — see `zzop contract rule-catalog` for the full list of rule ids."
     ))
-}
-
-/// The stable-order, human-readable rendering: full id, pack, severity, message, the DERIVED suppress
-/// marker (`RuleDef::suppress_marker()` — never stored, see its own doc), matcher kind, and whether the
-/// rule carries a line-scan `exclude_pattern`.
-fn render(pack: &RulePackDef, rule: &RuleDef) -> String {
-    [
-        format!("id: {}/{}", pack.id, rule.id),
-        format!("pack: {}", pack.id),
-        format!("severity: {}", severity_str(rule.severity)),
-        format!("message: {}", rule.message),
-        format!("suppress marker: {}", suppress_marker_str(rule)),
-        format!("matcher: {}", matcher_kind(&rule.matcher)),
-        format!("exclude_pattern: {}", has_exclude_pattern(&rule.matcher)),
-    ]
-    .join("\n")
-}
-
-fn severity_str(severity: Severity) -> &'static str {
-    match severity {
-        Severity::Critical => "critical",
-        Severity::Warning => "warning",
-        Severity::Info => "info",
-    }
-}
-
-/// One of the four matcher shapes `docs/rules/dsl-reference.md` documents — the serde tag names
-/// themselves (`Matcher`'s `#[serde(tag = "type", rename_all = "kebab-case")]`), so this can never drift
-/// from what a pack's own `"type"` field spells.
-fn matcher_kind(matcher: &Matcher) -> &'static str {
-    match matcher {
-        Matcher::LineScan(_) => "line-scan",
-        Matcher::MethodScan(_) => "method-scan",
-        Matcher::SymbolScan(_) => "symbol-scan",
-        Matcher::IoScan(_) => "io-scan",
-    }
-}
-
-/// The derived marker, but only for the matcher kinds that actually honor one: `symbol-scan` findings have
-/// no source line to anchor a comment against, so no marker can ever suppress them
-/// (`docs/rules/dsl-reference.md`'s "Suppress-marker semantics"). Printing `<id>-ok` there would hand the
-/// reader a comment that silently does nothing. Latent today — no bundled pack uses `symbol-scan` — which is
-/// exactly why it is worth answering honestly before the first one ships.
-fn suppress_marker_str(rule: &RuleDef) -> String {
-    match rule.matcher {
-        Matcher::SymbolScan(_) => {
-            "none (symbol-scan findings have no line to anchor a marker)".to_string()
-        }
-        _ => rule.suppress_marker(),
-    }
-}
-
-/// Only `LineScan` carries an `exclude_pattern` field at all (`MethodScan` has `absent` instead;
-/// `SymbolScan`/`IoScan` have neither) — every other matcher kind answers `no` here, honestly, not
-/// "not applicable".
-fn has_exclude_pattern(matcher: &Matcher) -> &'static str {
-    match matcher {
-        Matcher::LineScan(m) if m.exclude_pattern.is_some() => "yes",
-        _ => "no",
-    }
 }

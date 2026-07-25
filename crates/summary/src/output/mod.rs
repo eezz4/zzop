@@ -22,8 +22,8 @@ mod bucket_keys;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use bucket_keys::bucket_keys;
 pub use bucket_keys::DEFAULT_BUCKET_KEYS_LIMIT;
+pub(crate) use bucket_keys::{bucket_keys, KEY_BUCKETS};
 
 /// Caller-facing filters for a findings list, straight from tool arguments.
 #[derive(Debug)]
@@ -162,7 +162,13 @@ pub(crate) fn shape_findings(
         "shown": shown,
     });
     if total_matching > limit {
-        out["truncated"] = truncation(limit, total_matching);
+        // The one surface where all three tool arguments really do move the cap — `shape_list`'s
+        // callers must NOT reuse this hint (see `shape_list`).
+        out["truncated"] = truncation(
+            limit,
+            total_matching,
+            "narrow with the severity/rule tool arguments or raise limit",
+        );
     }
     // Zero-match rule-filter disclosure: `shown: []` from a real rule with zero findings this run is
     // indistinguishable from `shown: []` from a TYPO'd/nonexistent rule id — both look identical on the
@@ -183,19 +189,27 @@ pub(crate) fn shape_findings(
 }
 
 /// Shapes a plain list (edges, ...) into `(shown, truncated?)` with the same disclosure contract.
+///
+/// The caller passes the `hint`, and it must name a remedy that ACTUALLY works on this list. The
+/// shared `severity`/`rule`/`limit` tool arguments reach `shape_findings` and nothing else — every
+/// `shape_list` cap is a fixed constant no tool argument can move — so telling a caller here to "raise
+/// limit" is advice that silently does nothing. A disclosure whose remedy is inert is worse than a
+/// bare count: it reads as actionable and burns a round-trip proving otherwise (the same class as a
+/// suppression marker documented at a line the scanner does not read).
 pub(crate) fn shape_list(
     items: &[serde_json::Value],
     limit: usize,
+    hint: &str,
 ) -> (Vec<serde_json::Value>, Option<serde_json::Value>) {
     let shown: Vec<serde_json::Value> = items.iter().take(limit).cloned().collect();
-    let truncated = (items.len() > limit).then(|| truncation(limit, items.len()));
+    let truncated = (items.len() > limit).then(|| truncation(limit, items.len(), hint));
     (shown, truncated)
 }
 
-fn truncation(shown: usize, total_matching: usize) -> serde_json::Value {
+fn truncation(shown: usize, total_matching: usize, hint: &str) -> serde_json::Value {
     serde_json::json!({
         "shown": shown,
         "totalMatching": total_matching,
-        "hint": "narrow with the severity/rule tool arguments or raise limit",
+        "hint": hint,
     })
 }

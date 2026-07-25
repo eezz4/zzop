@@ -40,7 +40,8 @@ Node.js, no npm, nothing to compile. Get them one of four ways:
 - **Claude Desktop.** One-click `.mcpb` bundle (drag-and-drop install) — see
   [packages/mcpb/README.md](packages/mcpb/README.md).
 - **npm.** `npm i -g @zzop/cli` installs the exact same `zzop` binary above, fetched for your platform
-  as an npm dependency — same subcommands (`analyze`/`cross`/`endpoint`/`contract`/`explain`/`validate-*`),
+  as an npm dependency — same subcommands (`analyze`/`cross`/`endpoint`/`manifest`/`diff`/`contract`/
+  `explain`/`validate-*`),
   same output, no Node runtime involved beyond a tiny launcher script and no separate JS implementation
   that could drift from the native binary. Convenient when a project already manages its toolchain
   through npm. See [packages/cli/README.md](packages/cli/README.md).
@@ -51,6 +52,20 @@ Write a `zzop.config.jsonc` and run it, ESLint-style:
 zzop analyze .                          # analyze one repo/tree -> JSON findings summary
 zzop cross --config zzop.config.jsonc   # cross-layer join, driven by that config
 ```
+
+To track contract drift over time rather than at one instant, commit a **structural manifest** and diff
+a later run against it — the same shape a lint baseline file has, kept by you, not by zzop:
+
+```sh
+zzop manifest ./api ./web > contracts.json   # identity only: provides/edges/bucket membership
+zzop diff contracts.json contracts.new.json  # read `transitions` first — a key that left `edges`
+                                             # for `unprovidedConsumes` is a broken contract
+```
+
+The manifest is deliberately uncapped and carries no file or line, so a pure refactor diffs empty while
+a route leaving the join cannot hide above a summary's caps. `diff` refuses two manifests from different
+zzop builds unless you pass `--allow-tool-drift` (which then discloses the drift), and tags a removal
+attributable to a source that lost coverage as `blindnessSuspect` rather than calling it a deletion.
 
 See [crates/host/README.md](crates/host/README.md) for the full CLI and config reference.
 
@@ -69,7 +84,9 @@ let report: serde_json::Value =
 
 1. `/plugin marketplace add eezz4/zzop` — then `/plugin install zzop@zzop` (two separate steps).
 2. Start a new session. The plugin downloads the binary for your platform on first run; nothing goes
-   on `PATH`. Once installed, a newer release is reported to you, never installed behind your back.
+   on `PATH`. **That first session does not list the zzop tools yet** — the tool list is settled
+   before the download finishes — so restart Claude Code once and they appear (the hook says so on
+   stdout too). Once installed, a newer release is reported to you, never installed behind your back.
 
 See [crates/host/README.md](crates/host/README.md) for the full install/build reference.
 
@@ -102,18 +119,20 @@ route joins — which has no single-tree equivalent.
 
 | Language | Support |
 |---|---|
-| TypeScript / JavaScript (`.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts`) | Native, full AST (swc): symbols, imports, calls, HTTP routes/egress |
+| TypeScript / JavaScript (`.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts`) | Native, full AST (swc): symbols, imports, calls, HTTP routes/egress, `db-table` consumes from ORM accessors AND from raw SQL statement strings |
 | Python (`.py, .pyi`) | Native, full AST (ruff, Python 3 — Python-2-only syntax falls back to lexical): symbols, imports, FastAPI route provides, `requests`/`httpx` consumes (module-level calls plus `Session`/`Client`/`AsyncClient` instances) — v1 scope |
 | Rust (`.rs`) | Native, full AST (syn 2): symbols, imports/`mod` tree (incl. same-workspace crate resolution), axum route provides, `reqwest` consumes — v1 scope |
 | Go (`.go`) | Native, full CST (tree-sitter-go 0.25): symbols, imports/dep graph (`go.mod` module resolution, package-directory-wide edges), gin + `net/http` route provides (cross-file mount composition — a function-parameter router mounted from another file's call site — incl. Go 1.22 `"METHOD /path"` mux syntax), `net/http` literal egress consumes (package free functions plus bound `http.Client` values) — v1 scope |
 | Java (`.java`) | Native, full CST (tree-sitter-java 0.23.5, Java 21 grammar): symbols (incl. nested types, dot-qualified method names, real visibility), imports/dep graph (`(package, type)`-indexed resolution, glob package-directory-wide edges), Spring MVC route provides (cross-file `extends`-chain + constant-prefix resolution) — v1 scope |
 | C# (`.cs`) | Native, full CST (tree-sitter-c-sharp 0.23.5): symbols (incl. nested types, dot-qualified method names, `public` visibility), imports/dep graph (namespace→files index, `using` package-directory-wide edges), ASP.NET Core route provides (attribute controllers with `[Route("api/[controller]")]` + `[HttpGet]`/… composition, plus same-file Minimal-API `app.MapGet`/`MapGroup`), `HttpClient` literal egress consumes — v1 scope |
 | Prisma schema (`.prisma`) | Native, lexical schema: models/fields (structural + usage-aware schema rules) + `db-table` provides joining the client-side consumes |
-| SQL DDL (`.sql`) | Native, lexical DDL: `CREATE TABLE` → `db-table` provides (migration files light up the db-table channel for MyBatis/JDBC-style stacks) |
+| SQL (`.sql`) | Native, lexical: `CREATE TABLE` → `db-table` provides (migration files light up the db-table channel for MyBatis/JDBC-style stacks). The crate also owns the channel's consume-side statement reader, which other parsers call on the SQL strings they hold |
 | Anything else (Ruby, JSP, ...) | Lexical fallback in-tree (line count + `line-scan` rules only), or first-class support via an external parser adapter conforming to the [Normalized AST protocol](docs/NORMALIZED_AST.md) |
 
 Full precision-tier breakdown — exactly what each native parser extracts, Python's v1 scope note, and
-each parser's `zzop version` fingerprint — in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#language-support).
+each parser's fingerprint — in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#language-support). (Those
+fingerprints are not in `zzop version`'s output, which prints the bare release number; the surface that
+carries them is `zzop manifest`'s `tool` field.)
 
 A normal-sized file whose extension has no native parser also self-reports in the output's `warnings`
 — naming the extension, a file count, and a path sample — instead of vanishing silently; point it at an

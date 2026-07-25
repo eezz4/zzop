@@ -173,6 +173,76 @@ fn handler_identifier_containing_node_env_hint_passes_route_exposure() {
     );
 }
 
+// --- message <-> matcher agreement (the `anchor_exclude_pattern` carve-out's exact edges) ---
+//
+// The clearing regex is `(?i),[^,"']*(?:dev|debug|internal|env|guard|isProduction|isLocal|NODE_ENV)`:
+// the keyword must be reachable from SOME comma on the line without crossing another comma or a quote —
+// i.e. it must sit in a later, UNQUOTED call argument. The message once said only "no guard-hint keyword
+// on its registration line", which promised a far wider clear than the matcher performs; the three pins
+// below fix both edges of the real carve-out and the message wording that now states it.
+
+#[test]
+fn a_guard_hint_before_the_first_comma_does_not_clear_the_finding() {
+    // An `if (isDev)` gate IS on the registration line, but ahead of every comma — no comma precedes it,
+    // so the carve-out cannot reach it. The old message claimed this line was cleared; it is not.
+    let dir = TempDir::new("zzop-http");
+    dir.write(
+        "src/routes/apiRoutes.ts",
+        "declare const apiRoutes: any;\ndeclare const api: any;\ndeclare const isDev: boolean;\nif (isDev) apiRoutes.get(\"/api/dev/config\", api.configHandler);\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(hits(&out, "route-exposure").len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn a_guard_hint_inside_a_quoted_later_argument_does_not_clear_the_finding() {
+    // `"devOnly"` follows a comma, but a quote stands between that comma and the keyword, so `[^,"']*`
+    // cannot span it. A string literal is not evidence of a guard — this is the edge the quote exclusion
+    // exists for, and the message now says "unquoted" rather than "on its registration line".
+    let dir = TempDir::new("zzop-http");
+    dir.write(
+        "src/routes/apiRoutes.ts",
+        "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/dev/config\", \"devOnly\", api.configHandler);\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(hits(&out, "route-exposure").len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn the_emitted_message_states_the_carve_outs_real_shape_not_a_wider_one() {
+    let dir = TempDir::new("zzop-http");
+    dir.write(
+        "src/routes/apiRoutes.ts",
+        "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/dev/config\", api.configHandler);\n",
+    );
+    let out = scan(&dir);
+    let finding = hits(&out, "route-exposure")
+        .into_iter()
+        .next()
+        .expect("the fixture above must fire once");
+    assert!(
+        finding
+            .message
+            .contains("as a later, unquoted call argument"),
+        "message must state WHERE a guard hint has to sit: {}",
+        finding.message
+    );
+    assert!(
+        finding
+            .message
+            .contains("anywhere before the line's first comma, does not clear this"),
+        "message must state the two positions that do NOT clear: {}",
+        finding.message
+    );
+    assert!(
+        !finding
+            .message
+            .contains("keyword (dev/debug/internal/env/guard/isProduction/isLocal/NODE_ENV) on its registration line"),
+        "the pre-fix wording promised a line-wide keyword search the matcher never performs: {}",
+        finding.message
+    );
+}
+
 #[test]
 fn route_exposure_ok_marker_on_the_same_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-http");

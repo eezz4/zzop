@@ -34,9 +34,9 @@ pub use fragments::{
 pub use schema::{FieldAttr, SchemaEnum, SchemaField, SchemaModel, SchemaUsage};
 
 pub use dsl::{
-    eval_pack, eval_pack_io_scan, FragmentError, IoDirection, IoScan, IoScanTreeContext,
-    LabeledPattern, LineScan, Matcher, MethodScan, RuleContext, RuleDef, RulePackDef, SourceFile,
-    SymbolScan,
+    apply_attr_gates, eval_pack, eval_pack_io_scan, FragmentError, IoDirection, IoScan,
+    IoScanTreeContext, LabeledPattern, LineScan, Matcher, MethodScan, RuleContext, RuleDef,
+    RulePackDef, SourceFile, SymbolScan, NEAR_MISS_MARKER_TOKEN_PATTERN,
 };
 
 pub use finding::{disable_hint, Finding, RuleExplain, Severity};
@@ -45,10 +45,11 @@ pub use graph::{
     ComponentEdge, ConnectedComponentsResult,
 };
 pub use io::{
-    db_table_channel_casing, http_consume_interface_key, http_interface_key, link_cross_layer_io,
-    normalize_http_path, unknown_verb_route_path, AmbiguousConsume, ConsumeBodyShape,
-    CrossLayerEdge, CrossLayerResult, IoConsume, IoFacts, IoKind, IoProvide, LinkOptions,
-    ProvideBodyField, ProvideBodyShape, SourceIo, HTTP_KEY_VERBS, UNKNOWN_VERB,
+    classify_consume_join, db_table_channel_casing, http_consume_interface_key, http_interface_key,
+    key_carries_route_identity, link_cross_layer_io, normalize_http_path, unknown_verb_route_path,
+    AmbiguousConsume, ConsumeBodyShape, ConsumeJoin, CrossLayerEdge, CrossLayerResult, IoConsume,
+    IoFacts, IoKind, IoProvide, LinkOptions, ProvideBodyField, ProvideBodyShape, SourceIo,
+    HTTP_KEY_VERBS, UNKNOWN_VERB,
 };
 pub use ir::{
     ApiEndpoint, CommonIr, DepGraph, ImportBinding, ImportMap, MinimalIr, NonIdempotentKind,
@@ -70,7 +71,7 @@ pub use paths::is_test_file;
 pub use registry::{
     apply_severity_override, global_exclude_matches_path, is_enabled, is_suppressed,
     merge_findings, register_native_analysis_stub, suppression_matches_path, GlobalExclude,
-    RuleConfig, RuleDescriptor, RuleKind, RuleMeta, RuleRegistry, Suppression,
+    RuleConfig, RuleRegistry, Suppression,
 };
 
 pub use file_nodes::{

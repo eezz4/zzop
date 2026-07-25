@@ -128,6 +128,10 @@ pub(super) fn synthetic_artifact_from_projection(
         io,
         rule_timings: Vec::new(),
         used_names: Vec::new(),
+        // An external projection carries no signature evidence (the envelope has no such channel),
+        // so an overlay-only file simply gets no `dead-exports` exemptions — same graceful degrade
+        // as `used_names` directly above.
+        exported_signature_names: Vec::new(),
         const_map_fragment: projection.const_map_fragment.clone(),
         procedure_router_fragments: projection.procedure_router_fragments.clone(),
         router_mount_fragments: projection.router_mount_fragments.clone(),
@@ -150,5 +154,6 @@ pub(super) fn synthetic_artifact_from_projection(
         // placeholder" reasoning as the Mode A `SourceFile` in `file_pass`, even though no DSL rule pass
         // runs over a synthetic overlay artifact today (`findings: Vec::new()` above).
         loop_spans: projection.loop_spans.clone(),
+        function_spans: projection.function_spans.clone(),
     }
 }

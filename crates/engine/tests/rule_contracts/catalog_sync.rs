@@ -4,7 +4,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{load_all_packs, native_metas};
+use crate::{load_all_packs, native_ids};
 
 fn catalog_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/rules/catalog.md")
@@ -41,7 +41,7 @@ fn catalog_totals_match_loaded_rule_and_analysis_counts() {
 
     let packs = load_all_packs();
     let actual_rules: usize = packs.iter().map(|p| p.rules.len()).sum();
-    let actual_natives = native_metas().len();
+    let actual_natives = native_ids().len();
 
     assert_eq!(
         stated_packs,
@@ -63,9 +63,8 @@ fn catalog_totals_match_loaded_rule_and_analysis_counts() {
 #[test]
 fn catalog_mentions_every_native_analysis_id() {
     let text = catalog_text();
-    let missing: Vec<String> = native_metas()
+    let missing: Vec<String> = native_ids()
         .into_iter()
-        .map(|m| m.id)
         .filter(|id| !text.contains(id.as_str()))
         .collect();
     assert!(

@@ -1,4 +1,14 @@
-//! zzop-parser-sql — SQL DDL frontend. Line/regex-level extraction of `CREATE TABLE` statements from
+//! zzop-parser-sql — SQL frontend, both directions of the `db-table` channel.
+//!
+//! **PROVIDE side** ([`extract_db_table_provides`], `extract`): line/regex-level extraction of
+//! `CREATE TABLE` statements from `.sql` files.
+//! **CONSUME side** ([`extract_statement_table_refs`], `consume`): the table names ONE SQL statement
+//! string reads or writes. Input is a string another parser already holds — a TypeScript string
+//! literal, say — so an ORM-less stack (Cloudflare D1, `better-sqlite3`, `pg`, `mysql2`) projects
+//! db-table consumes without any rule re-lexing source text. SQL vocabulary lives here and only here;
+//! the calling parser passes text and gets back canonical keys.
+//!
+//! Line/regex-level extraction of `CREATE TABLE` statements from
 //! `.sql` files into `db-table` io PROVIDEs, so the core cross-layer linker can surface
 //! `cross-layer/shared-db-table` (a table declared by a DDL migration and touched by application code
 //! elsewhere) and dead-provide detection (`cross-layer/unconsumed-endpoint`-style) for a declared table
@@ -22,8 +32,12 @@
 //!   a quote pair, e.g. `"my.table"`, no longer wrongly splits into a fake schema qualifier), and
 //!   `create_table_re` now recognizes a `GLOBAL`/`LOCAL`/`TEMP`/`TEMPORARY`/`UNLOGGED` modifier between
 //!   `CREATE` and `TABLE`.
-pub const PARSER_FINGERPRINT: &str = "sql/0.21.0";
+//! - `+dml-table-refs-v1`: the `consume` module is new — `extract_statement_table_refs` projects the
+//!   CONSUME side of the channel from a SQL statement string.
+pub const PARSER_FINGERPRINT: &str = "sql/0.21.0+dml-table-refs-v1";
 
+mod consume;
 mod extract;
 
+pub use consume::extract_statement_table_refs;
 pub use extract::extract_db_table_provides;

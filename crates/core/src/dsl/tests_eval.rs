@@ -12,6 +12,7 @@ fn prefilter_matches_unoptimized_findings_across_the_moved_java_rules() {
     let files = vec![
         SourceFile {
             loop_spans: Vec::new(),
+            function_spans: Vec::new(),
             rel: "C.java".into(),
             text: r#"Query q = em.createQuery("SELECT u FROM User u WHERE u.login = '" + login + "'");"#
                 .into(),
@@ -20,6 +21,7 @@ fn prefilter_matches_unoptimized_findings_across_the_moved_java_rules() {
         },
         SourceFile {
             loop_spans: Vec::new(),
+            function_spans: Vec::new(),
             rel: "D.java".into(),
             text: "MessageDigest md = MessageDigest.getInstance(\"MD5\");\nCipher.getInstance(\"DES/CBC/PKCS5Padding\");\n// legacy DigestUtils.md5DigestAsHex\n".into(),
             symbols: vec![],
@@ -27,6 +29,7 @@ fn prefilter_matches_unoptimized_findings_across_the_moved_java_rules() {
         },
         SourceFile {
             loop_spans: Vec::new(),
+            function_spans: Vec::new(),
             rel: "E.java".into(),
             text: "public class E { void noop() { System.out.println(\"nothing interesting\"); } }".into(),
             symbols: vec![],
@@ -34,6 +37,7 @@ fn prefilter_matches_unoptimized_findings_across_the_moved_java_rules() {
         },
         SourceFile {
             loop_spans: Vec::new(),
+            function_spans: Vec::new(),
             rel: "F.java".into(),
             text: "public class F {\n  void run() {\n    String[] cmd = { \"sh\", \"-c\", \"ping \" + host };\n    Runtime.getRuntime().exec(cmd);\n  }\n}".into(),
             symbols: vec![method("run", 2, 5)],
@@ -77,6 +81,7 @@ fn prefilter_respects_require_file_cheap_skip_semantics_unchanged() {
         // RegexSet candidate (contains "foo") but require_file ("NEEDLE") is absent -> must stay skipped.
         SourceFile {
             loop_spans: Vec::new(),
+            function_spans: Vec::new(),
             rel: "a.txt".into(),
             text: "foo bar".into(),
             symbols: vec![],
@@ -85,6 +90,7 @@ fn prefilter_respects_require_file_cheap_skip_semantics_unchanged() {
         // RegexSet candidate AND require_file present -> must be flagged.
         SourceFile {
             loop_spans: Vec::new(),
+            function_spans: Vec::new(),
             rel: "b.txt".into(),
             text: "foo NEEDLE".into(),
             symbols: vec![],
@@ -109,6 +115,7 @@ fn eval_pack_profiled_findings_match_eval_pack_exactly() {
     let files = vec![
         SourceFile {
             loop_spans: Vec::new(),
+            function_spans: Vec::new(),
             rel: "C.java".into(),
             text: r#"Query q = em.createQuery("SELECT u FROM User u WHERE u.login = '" + login + "'");"#
                 .into(),
@@ -117,6 +124,7 @@ fn eval_pack_profiled_findings_match_eval_pack_exactly() {
         },
         SourceFile {
             loop_spans: Vec::new(),
+            function_spans: Vec::new(),
             rel: "D.java".into(),
             text: "MessageDigest.getInstance(\"MD5\");\n".into(),
             symbols: vec![],

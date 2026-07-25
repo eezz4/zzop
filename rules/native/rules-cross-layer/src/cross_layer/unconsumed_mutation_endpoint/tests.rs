@@ -372,6 +372,149 @@ fn no_blind_source_keeps_warning_and_todays_attack_surface_framing() {
     assert_eq!(out[0].severity, Severity::Warning);
     assert!(out[0].message.contains("standing attack surface"));
     assert!(!out[0].message.contains("severity here is reduced"));
+    // Seals the severity-gate FRAMING (see the module doc's "The NO-downgrade branch speaks too"): the
+    // no-blind branch must never go back to an empty note, which would leave warning severity readable as
+    // a proof that the caller set was complete. Both halves are pinned — the narrow check that did not
+    // fire is NAMED, and the non-claim it licenses is stated.
+    assert!(
+        out[0].message.contains("majority-unresolved"),
+        "the warning branch must name the narrow check that did not fire: {}",
+        out[0].message
+    );
+    assert!(
+        out[0]
+            .message
+            .contains("not that the caller set was proven complete"),
+        "the warning branch must deny the completeness reading: {}",
+        out[0].message
+    );
+}
+
+#[test]
+fn the_downgrade_note_leads_the_message_instead_of_trailing_it() {
+    // A field reviewer read the Warning/Info difference between two run modes as a bug because the sentence
+    // explaining it sat at the end of a long message. Pinned by position, not just presence.
+    let out = unconsumed_mutation_endpoint_findings(
+        &[unconsumed_provide(
+            "http",
+            "POST /api/group",
+            "be",
+            "Api.java",
+            12,
+            None,
+        )],
+        &[],
+        &blind(&["fe"]),
+        &no_near_miss(),
+        &no_trpc(),
+    );
+    let message = &out[0].message;
+    let note = message.find("consume side is partly blind").unwrap();
+    let risk = message.find("standing attack surface").unwrap();
+    assert!(note < risk, "{message}");
+}
+
+// --- Site handoff to `cross-layer/unconsumed-endpoint` ---
+
+#[test]
+fn reported_provide_sites_reads_back_the_anchors_of_this_rules_own_findings() {
+    let out = unconsumed_mutation_endpoint_findings(
+        &[
+            unconsumed_provide("http", "POST /a", "be", "Api.java", 12, None),
+            unconsumed_provide("http", "DELETE /b", "web", "route.ts", 3, None),
+            unconsumed_provide("http", "GET /c", "be", "Api.java", 40, None),
+        ],
+        &[],
+        &no_blind(),
+        &no_near_miss(),
+        &no_trpc(),
+    );
+    let sites = reported_provide_sites(&out);
+    assert_eq!(
+        sites,
+        [
+            (
+                "be".to_string(),
+                "Api.java".to_string(),
+                12,
+                "POST /a".to_string()
+            ),
+            (
+                "web".to_string(),
+                "route.ts".to_string(),
+                3,
+                "DELETE /b".to_string()
+            ),
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+    );
+}
+
+#[test]
+fn reported_provide_sites_distinguishes_routes_sharing_one_anchor() {
+    // A verb-agnostic registration puts every method on ONE `file:line`. The handoff key must separate them,
+    // or `unconsumed-endpoint` would stand down on the whole line instead of on the reported routes.
+    let out = unconsumed_mutation_endpoint_findings(
+        &[
+            unconsumed_provide("http", "POST /webhook", "be", "handlers.go", 30, None),
+            unconsumed_provide("http", "DELETE /webhook", "be", "handlers.go", 30, None),
+            unconsumed_provide("http", "GET /webhook", "be", "handlers.go", 30, None),
+        ],
+        &[],
+        &no_blind(),
+        &no_near_miss(),
+        &no_trpc(),
+    );
+    let sites = reported_provide_sites(&out);
+    assert_eq!(sites.len(), 2);
+    assert!(sites.contains(&(
+        "be".to_string(),
+        "handlers.go".to_string(),
+        30,
+        "POST /webhook".to_string()
+    )));
+    assert!(!sites.iter().any(|(_, _, _, key)| key == "GET /webhook"));
+}
+
+#[test]
+fn reported_provide_sites_ignores_findings_from_other_rules() {
+    // The engine hands over a slice this rule produced, but the reader must stay id-anchored so a future
+    // caller cannot accidentally silence `unconsumed-endpoint` with some other rule's anchors.
+    let foreign = Finding {
+        rule_id: "cross-layer/unconsumed-endpoint".to_string(),
+        severity: Severity::Info,
+        file: "Api.java".to_string(),
+        line: 12,
+        message: String::new(),
+        data: Some(serde_json::json!({ "source": "be", "key": "POST /a" })),
+    };
+    assert!(reported_provide_sites(&[foreign]).is_empty());
+}
+
+#[test]
+fn the_message_discloses_that_the_general_rule_stands_down_here() {
+    let out = unconsumed_mutation_endpoint_findings(
+        &[unconsumed_provide(
+            "http",
+            "POST /api/ledger/{}/verify",
+            "be",
+            "Api.java",
+            12,
+            None,
+        )],
+        &[],
+        &no_blind(),
+        &no_near_miss(),
+        &no_trpc(),
+    );
+    assert!(
+        out[0]
+            .message
+            .contains("stays silent on this route by design"),
+        "{}",
+        out[0].message
+    );
 }
 
 #[test]

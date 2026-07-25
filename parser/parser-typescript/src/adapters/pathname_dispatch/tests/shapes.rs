@@ -81,7 +81,9 @@ fn shape_d_object_literal_workers_entry_fallback_verbs() {
     got.sort();
     // No method comparison -> one UNKNOWN_VERB sentinel provide, not fabricated GET+POST.
     assert_eq!(got, vec!["? /webhook"]);
-    assert!(out.iter().all(|p| p.symbol.as_deref() == Some("fetch")));
+    // The branch body is a single `return handle(request, env);` -> the callee is the symbol, not
+    // the enclosing `fetch` (module doc "`symbol` — per-BRANCH, two cases", case 1).
+    assert!(out.iter().all(|p| p.symbol.as_deref() == Some("handle")));
 }
 
 // -- switch (url.pathname): method-if case, no-method case, fallthrough-grouped DELETE case --

@@ -16,7 +16,7 @@ fn severity_rank(s: Severity) -> u8 {
     }
 }
 
-/// Merges findings from every rule source (native analyses, DSL packs, JS quick-rules) into one
+/// Merges findings from every rule source (native analyses, DSL packs) into one
 /// deterministically ordered list: drops suppressed findings (`is_suppressed`), applies severity overrides
 /// (`apply_severity_override`), then sorts by severity (critical < warning < info), then file, then line,
 /// then rule id (see `severity_rank` doc for the sort's provenance/design-call note). Pure — no I/O, no

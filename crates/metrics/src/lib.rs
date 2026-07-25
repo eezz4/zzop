@@ -19,7 +19,7 @@ pub mod scores;
 pub mod seams;
 pub mod trend;
 
-use zzop_core::{register_native_analysis_stub, RuleRegistry, Severity};
+use zzop_core::{register_native_analysis_stub, RuleRegistry};
 
 /// Registers every native analysis id whose implementation lives in THIS crate — the metrics half of the
 /// extensibility contract's per-crate registration (see `rules/README.md`'s "Adding a rule" section and
@@ -27,19 +27,17 @@ use zzop_core::{register_native_analysis_stub, RuleRegistry, Severity};
 /// `zzop_rules_cross_layer`'s, and `zzop_rules_schema`'s own `register_native_analyses`). These 5 ids are
 /// not findings-producing rules — they gate SCORE
 /// computations (`compute_seams`/`compute_criticality`/`compute_scores`/`compute_health_index`/
-/// `build_recommendations`) that only ride the same enabled/severity/suppression toggle surface as native
-/// rules do (see this crate's module doc). Ids/severities moved verbatim from the old
-/// `zzop_core::register_native_analyses` table.
+/// `build_recommendations`) that only ride the same `RuleConfig` disable/suppress/severity-override id
+/// space as native rules do (see this crate's module doc).
 pub fn register_native_analyses(registry: &mut RuleRegistry) {
-    let analyses: &[(&str, Severity)] = &[
-        ("seams", Severity::Info),
-        ("criticality", Severity::Warning),
-        ("scores", Severity::Info),
-        ("health", Severity::Info),
-        ("recommendations", Severity::Info),
-    ];
-    for &(id, default_severity) in analyses {
-        register_native_analysis_stub(registry, id, default_severity);
+    for id in [
+        "seams",
+        "criticality",
+        "scores",
+        "health",
+        "recommendations",
+    ] {
+        register_native_analysis_stub(registry, id);
     }
 }
 

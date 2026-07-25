@@ -89,6 +89,7 @@ fn projection_with_attrs(path: &str, loc: u32, attrs: Vec<Attribute>) -> FilePro
         is_entry: false,
         attributes: attrs,
         loop_spans: Vec::new(),
+        function_spans: Vec::new(),
     }
 }
 

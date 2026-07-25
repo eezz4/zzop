@@ -8,9 +8,46 @@
 //! re-export chain carries a live root down through barrels; or the re-export originates from an
 //! **entry file** (`is_entry_file`) — an `index.ts` re-exporting `impl` seeds it as live with zero
 //! in-repo importers, since the entry exposes it as public API. `default` exports match the synthetic
-//! `file#default` key. Separately, `reason` is same-file-only: `InFileOnly` when the name appears in the
+//! `file#default` key, and a LOCAL RENAME (`export { X as Y }`, no from-clause — see `export_aliases`)
+//! matches the `file#Y` key its importers actually write. Separately, `reason` is same-file-only: `InFileOnly` when the name appears in the
 //! file's own `used_names`, `Unused` otherwise — `used_names` comes from the parser's
 //! `parse_local_identifier_refs` alone; import/re-export data drives liveness only.
+//!
+//! ## Local renames (`export { X as Y }`)
+//! An export candidate is named by its DECLARATION, but a from-less `export { X as Y }` publishes it
+//! under `Y` — so every importer writes `{file}#Y` while the candidate is `X`, and the two never met.
+//! `export_aliases` carries that mapping. It is an extra KEY to look up, not an exemption: a renamed
+//! export that nobody imports still reports, so this cannot resurrect a genuinely dead export.
+//! The sibling shapes need no such mapping — `export { X as Y } from "./z"` is a re-export (its
+//! `local_alias`/`original` pair already rides the chain), `export * as ns from "./z"` wildcards the
+//! whole target file, and `import { A as B } from "./a"; export { B }` republishes someone else's
+//! declaration, so this file offers no candidate for it at all. Language coverage: TypeScript only —
+//! `dead-exports` itself only ever runs on TypeScript-dispatched files, so no other language is
+//! affected either way.
+//!
+//! ## Public-signature exemption (type exports)
+//! A `Type`/`Interface` export whose name appears in `exported_signature_names` — the parser's set of
+//! names occurring in the PUBLIC SIGNATURE (parameter / return / member type-annotation positions) of
+//! some exported declaration in the same file — is not reported at all. The measured shape, by far the
+//! largest single noise source this rule had: `export interface XState {…}` immediately followed by
+//! `export function useX(): XState`. `XState` has no in-repo importer, so the rule called it
+//! `in-file-only` and advised un-exporting it — but it is part of `useX`'s public API, and
+//! un-exporting it degrades every consumer that needs to name the returned type.
+//!
+//! **What this evidence is, precisely.** `used_names` alone CANNOT express this exemption: it is a
+//! flat, position-blind set, so a type in an exported return type and a type used only as an internal
+//! `useState<T>` generic look identical to it. `exported_signature_names` is a separate, position-aware
+//! fact produced at parse time (`zzop_parser_typescript::parse_exported_signature_names`) precisely
+//! because that distinction cannot be recovered downstream. This rule does not know WHERE a name
+//! appeared — it knows only that the parser classified it as signature-reachable, and trusts that
+//! classification.
+//!
+//! **Deliberately still reported** (the parser collects only exported declarations, and within them
+//! only type-annotation positions, never a body): a type used solely inside a function body, including
+//! as a generic argument in a hook with no annotated return type; and a type that only annotates an
+//! UNEXPORTED declaration's field. Both are genuinely private and remain un-export candidates.
+//! Language coverage: TypeScript only. Every other parser leaves the set empty, which yields no
+//! exemptions — identical to the pre-existing behavior, never an error.
 //!
 //! ## Exemptions
 //! Entry/index/framework-convention files, test/story/ambient-declaration files, `.storybook/` config
@@ -35,10 +72,13 @@
 
 mod findings;
 mod patterns;
+mod propagate;
 #[cfg(test)]
 mod tests;
 
 pub use findings::dead_export_findings;
+
+use propagate::propagate_re_exports;
 
 use std::collections::{HashMap, HashSet};
 
@@ -72,6 +112,17 @@ pub struct DeadExportInputFile {
     pub dynamic_imports: Vec<String>,
     /// Identifier names referenced anywhere in the file (see module doc's `used_names` paragraph).
     pub used_names: HashSet<String>,
+    /// Names appearing in the PUBLIC SIGNATURE of some exported declaration in this file — the
+    /// position-aware companion `used_names` cannot be. Drives the public-signature exemption (see
+    /// module doc). Empty for a parser that does not produce it, which simply means no exemptions.
+    pub exported_signature_names: HashSet<String>,
+    /// Local export RENAMES — `(local declaration name, public export name)` for every from-less
+    /// `export { X as Y }` in this file (`zzop_parser_typescript::parse_dead_export_facts`). An
+    /// export candidate is named by its DECLARATION (`X`), but an importer's key is the PUBLIC name
+    /// (`Y`); this is the only place those two meet. NOT a liveness grant on its own — a rename
+    /// nobody imports leaves the export dead, exactly as before (see `find_dead_exports`).
+    /// Empty for a parser that does not produce it, which simply restores the pre-existing behavior.
+    pub export_aliases: Vec<(String, String)>,
     /// The engine detected an author-declared `@generated`/"DO NOT EDIT" banner in this file's head.
     /// When set, the file's exports are skipped whole (its imports still count) — see module doc.
     pub is_generated: bool,
@@ -167,6 +218,14 @@ where
             if exp.is_default && imported_keys.contains(&format!("{}#default", f.file)) {
                 continue;
             }
+            // A local rename (`export { X as Y }`) publishes this declaration under `Y`, so every
+            // importer's key is `{file}#Y` and never `{file}#X`. Deliberately still an IMPORT check,
+            // not a blanket exemption: an export renamed but imported by nobody stays dead.
+            if f.export_aliases.iter().any(|(local, public)| {
+                local == &exp.name && imported_keys.contains(&format!("{}#{public}", f.file))
+            }) {
+                continue;
+            }
             // Framework-contract export names are consumed by the framework via convention, not import.
             if is_framework_contract_export(&exp.name) {
                 continue;
@@ -177,6 +236,17 @@ where
             // `config` symbol in any other file still reports.
             if matches!(exp.name.as_str(), "middleware" | "config")
                 && is_middleware_convention_file(&f.file)
+            {
+                continue;
+            }
+            // Public-signature exemption: a TYPE named in an exported declaration's signature is
+            // public API — un-exporting it would break any consumer that needs to name the type.
+            // Scoped to type-shaped kinds: a VALUE's name reaching a type position would need
+            // `typeof`, which this evidence deliberately does not model.
+            if matches!(
+                exp.kind,
+                SourceSymbolKind::Type | SourceSymbolKind::Interface
+            ) && f.exported_signature_names.contains(&exp.name)
             {
                 continue;
             }
@@ -195,54 +265,4 @@ where
     }
     dead.sort_by(|a, b| a.file.cmp(&b.file).then_with(|| a.name.cmp(&b.name)));
     dead
-}
-
-/// When `barrel#X` is imported, the source it re-exports is alive too — a fixpoint loop resolves multi-hop chains.
-fn propagate_re_exports(
-    imported_keys: &mut HashSet<String>,
-    wildcard_files: &mut HashSet<String>,
-    chain: &HashMap<String, Vec<(String, String, String)>>,
-) {
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut queue: Vec<String> = imported_keys.iter().cloned().collect();
-    while let Some(key) = queue.pop() {
-        if !visited.insert(key.clone()) {
-            continue;
-        }
-        let Some(hash_idx) = key.rfind('#') else {
-            continue;
-        };
-        let file = &key[..hash_idx];
-        let name = &key[hash_idx + 1..];
-        let Some(edges) = chain.get(file) else {
-            continue;
-        };
-        for (local_alias, target_file, original_name) in edges {
-            if local_alias != name {
-                continue;
-            }
-            let next_key = format!("{target_file}#{original_name}");
-            if imported_keys.contains(&next_key) {
-                continue;
-            }
-            imported_keys.insert(next_key.clone());
-            queue.push(next_key);
-        }
-    }
-    // wildcard_files propagate through the chain too, via the same fixpoint, to reach further hops.
-    let mut changed = true;
-    while changed {
-        changed = false;
-        let current: Vec<String> = wildcard_files.iter().cloned().collect();
-        for file in current {
-            let Some(edges) = chain.get(&file) else {
-                continue;
-            };
-            for (_, target_file, _) in edges {
-                if wildcard_files.insert(target_file.clone()) {
-                    changed = true;
-                }
-            }
-        }
-    }
 }

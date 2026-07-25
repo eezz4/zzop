@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{collect_rs_files, load_all_packs, native_dir, native_metas};
+use crate::{collect_rs_files, load_all_packs, native_dir, native_ids};
 
 /// Every `rules/native/*/src/**/*.rs` file, recursively (native rule crates nest modules, e.g.
 /// `rules-graph/src/cross_layer/*.rs` — a non-recursive `*/src/*.rs` glob would miss those).
@@ -54,7 +54,7 @@ fn native_rs_files() -> Vec<PathBuf> {
 /// - That a rule id built dynamically (a variable, a format! expansion, a shared constructor in a
 ///   different file) is caught at all — only the literal token `rule_id: "` is detected, so a native rule
 ///   authored in an unusual shape can slip past this test silently.
-/// - Anything about DSL packs or JS quick-rules — out of scope here; contract 2 above covers DSL directly,
+/// - Anything about DSL packs — out of scope here; contract 2 above covers DSL directly,
 ///   since DSL `message` IS declarative data this crate can inspect precisely.
 ///
 /// A failure here is a strong, actionable signal (the flagged file almost certainly ships a finding with no
@@ -110,7 +110,7 @@ fn disable_hint_literal_args_are_known_ids_matching_the_files_own_findings() {
         out
     }
 
-    let mut known: BTreeSet<String> = native_metas().iter().map(|m| m.id.clone()).collect();
+    let mut known: BTreeSet<String> = native_ids().into_iter().collect();
     for pack in load_all_packs() {
         for rule in &pack.rules {
             known.insert(format!("{}/{}", pack.id, rule.id));

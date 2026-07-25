@@ -10,17 +10,28 @@
 //! 2. mapping — pure config→request mapping with its fail-fast validation gates; unknown keys warn
 //!    (never reject) using the shared vocabulary in `config-surface.json` (embedded here).
 //! 3. default-injection (`withDefaults`) — the easy-to-miss third layer that injects the bundled rule
-//!    packs and a default `git: {}` (30-day recency collection) right before the engine call. Skipping
-//!    it means 0 DSL rules and 0 git signals with no crash — the worst kind of drift. Here the bundled
-//!    packs are injected as inline `packDefs` (embedded at compile time by `build.rs`) instead of a
-//!    bundled directory path, so the binary needs no sidecar files.
+//!    packs, a default `git: {}` (30-day recency collection), and a default `cacheDir`
+//!    ([`zzop_cache::DEFAULT_CACHE_DIR`], `.zzop/cache`) right before the engine call. Skipping it means
+//!    0 DSL rules, 0 git signals and a permanently cold cache with no crash — the worst kind of drift.
+//!    Here the bundled packs are injected as inline `packDefs` (embedded at compile time by `build.rs`)
+//!    instead of a bundled directory path, so the binary needs no sidecar files.
 //!
 //! Path resolution: `root`/`cacheDir`/`packsDir` are resolved against the config file's OWN directory
 //! (a server host's process cwd is meaningless). Overlay paths are tree-root-relative.
 //!
+//! One consequence worth stating plainly, because it is the only place this crate causes a WRITE: with
+//! the `cacheDir` default in place, an otherwise read-only analysis creates `.zzop/cache/` inside the
+//! analyzed tree on its first run. `"cacheDir": null` opts out (see `mapper::options`); any other
+//! directory can be named instead. Ignore it with an ANCHORED `/.zzop/` — never a `zzop*` glob, which
+//! would also swallow the user-authored `zzop/` one character away.
+//!
 //! Non-fatal by design (do not "fix" with `?`): unreadable/invalid overlay files, duplicate
 //! `sourceId`s from `trees: "auto"`, and unknown config keys are all WARNINGS, never errors — the
-//! pipeline threads a warnings collector instead of failing.
+//! pipeline threads a warnings collector instead of failing. The same channel carries this crate's
+//! one PROACTIVE disclosure — `workspaces::single_tree_workspace_warning`, emitted whenever a run
+//! resolves ONE tree over a root whose workspace manifest names 2+ packages (no config file, or a
+//! config that never declares `trees`), so a monorepo never degrades to a single tree — and thus no
+//! cross-layer join — in silence.
 
 use std::path::{Path, PathBuf};
 
@@ -81,7 +92,8 @@ pub enum Method {
 /// One fully-mapped analysis request, ready for `zzop-facade`: `request` is the `AnalyzeRequest`
 /// (for `Method::Analyze`) or `AnalyzeTreesRequest` (`{trees: [...]}`) JSON value, with the bundled
 /// `packDefs` and default `git: {}` already injected. `warnings` carries every non-fatal note
-/// (unknown keys, skipped overlays, auto-expansion reports) for the caller's warnings channel.
+/// (unknown keys, skipped overlays, auto-expansion reports, and the single-tree-over-a-workspace
+/// disclosure) for the caller's warnings channel.
 #[derive(Debug)]
 pub struct LoadedRequest {
     pub method: Method,
@@ -95,7 +107,10 @@ pub struct LoadedRequest {
 /// (mapping it relative to `root`), else produces the zero-config default request for `root`
 /// (bundled packs + default git collection still injected — zero-config must not silently lose
 /// them). Errors only on caller-fixable config problems (`ConfigError`), never on overlay/pack
-/// content issues (those become warnings).
+/// content issues (those become warnings). When the result is a single tree over a root whose
+/// workspace manifest names 2+ packages, the leading disclosure warning from
+/// [`disclose_single_tree_over_workspace`] is prepended — the request stays byte-identical either
+/// way, the run just stops being silent about the join it could not attempt.
 pub fn load_for_root(root: &Path) -> Result<LoadedRequest, ConfigError> {
     let candidate = root.join(DEFAULT_CONFIG_FILENAME);
     if candidate.is_file() {
@@ -109,6 +124,7 @@ pub fn load_for_root(root: &Path) -> Result<LoadedRequest, ConfigError> {
     let (config, mut warnings) = maybe_expand_auto_trees(empty_config, root)?;
     let mapped = mapper::config_to_request(&config, root)?;
     warnings.extend(mapped.warnings);
+    disclose_single_tree_over_workspace(mapped.method, root, None, &mut warnings);
     Ok(LoadedRequest {
         method: mapped.method,
         request: mapped.request,
@@ -125,6 +141,11 @@ pub fn load_for_root(root: &Path) -> Result<LoadedRequest, ConfigError> {
 /// may also name a DIRECTORY containing `zzop.config.jsonc` — a Rust-host convenience with no JS
 /// counterpart (the JS CLI never receives a bare directory; `bin/zzop.js` always resolves `--config`
 /// or the default filename before calling `loadConfig`).
+///
+/// A config that never declares `trees` still resolves to ONE tree, so it gets the same leading
+/// [`disclose_single_tree_over_workspace`] disclosure the config-less path gets (worded for the
+/// "add it to your existing config" remedy) — having a config file is not evidence that the tree
+/// set was chosen.
 pub fn load_config_file(path: &Path) -> Result<LoadedRequest, ConfigError> {
     let candidate = if path.is_dir() {
         path.join(DEFAULT_CONFIG_FILENAME)
@@ -166,12 +187,43 @@ pub fn load_config_file(path: &Path) -> Result<LoadedRequest, ConfigError> {
     let (config, mut warnings) = maybe_expand_auto_trees(parsed, &base_dir)?;
     let mapped = mapper::config_to_request(&config, &base_dir)?;
     warnings.extend(mapped.warnings);
+    disclose_single_tree_over_workspace(mapped.method, &base_dir, Some(&candidate), &mut warnings);
     Ok(LoadedRequest {
         method: mapped.method,
         request: mapped.request,
         warnings,
         config_path: Some(candidate),
     })
+}
+
+/// Prepends `workspaces::single_tree_workspace_warning` (when it fires) to `warnings` — the ONE
+/// place both loaders disclose "this run is a single tree over a monorepo, so the cross-layer join
+/// never ran", so the two entry points cannot drift.
+///
+/// Gated on `Method::Analyze`, which is exactly the structural fact worth warning about: by this
+/// enum's own contract it means one tree resulted AND `trees` was never declared. Keying on that
+/// (rather than on "no config file was found") is what makes a config carrying only
+/// `{"rules": {...}}` — a real monorepo trap, since no `trees` means no expansion and therefore no
+/// expansion report to speak in its place — disclose exactly like the config-less case, while an
+/// author who DID declare `trees` (any explicit array, or `"auto"`) is never second-guessed: those
+/// take the `AnalyzeTrees` branch and never reach here. See that function's doc for the rest of the
+/// silence contract.
+///
+/// Position: `insert(0, ..)`, never `push` — this is a leading disclosure, and pinning the index
+/// keeps the warning list byte- AND order-deterministic no matter how many mapping notes precede it.
+/// Purely additive: the request, method and tree set are untouched.
+fn disclose_single_tree_over_workspace(
+    method: Method,
+    base_dir: &Path,
+    config_path: Option<&Path>,
+    warnings: &mut Vec<String>,
+) {
+    if method != Method::Analyze {
+        return;
+    }
+    if let Some(warning) = workspaces::single_tree_workspace_warning(base_dir, config_path) {
+        warnings.insert(0, warning);
+    }
 }
 
 /// Thin `workspaces::expand_auto_trees` gate: that function is a documented no-op for any config

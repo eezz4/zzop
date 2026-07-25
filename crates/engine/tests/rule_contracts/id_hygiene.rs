@@ -1,8 +1,11 @@
-//! Contracts 4 and 10: id uniqueness/collision hygiene and the kebab-case id convention.
+//! Contracts 4, 10 and 13: id uniqueness/collision hygiene, the kebab-case id convention, and the
+//! kebab-case convention for the SECOND name layer DSL packs declare — `LabeledPattern::label`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{load_all_packs, native_metas};
+use zzop_core::Matcher;
+
+use crate::{load_all_packs, native_ids};
 
 // ---------------------------------------------------------------------------------------------
 // 4. Id hygiene
@@ -54,7 +57,7 @@ fn dsl_rule_ids_are_unique_within_each_pack() {
 #[test]
 fn no_dsl_id_collides_with_a_native_analysis_id() {
     let packs = load_all_packs();
-    let native_ids: BTreeSet<String> = native_metas().into_iter().map(|m| m.id).collect();
+    let native_ids: BTreeSet<String> = native_ids().into_iter().collect();
     let mut offenders = Vec::new();
     for pack in &packs {
         if native_ids.contains(&pack.id) {
@@ -119,12 +122,11 @@ fn rule_ids_are_kebab_case() {
         }
     }
 
-    for meta in native_metas() {
-        let bare = strip_cross_layer_prefix(&meta.id);
+    for id in native_ids() {
+        let bare = strip_cross_layer_prefix(&id);
         if !kebab.is_match(bare) {
             offenders.push(format!(
-                "native analysis id `{}` (checked as `{bare}`) is not kebab-case",
-                meta.id
+                "native analysis id `{id}` (checked as `{bare}`) is not kebab-case"
             ));
         }
     }
@@ -134,6 +136,83 @@ fn rule_ids_are_kebab_case() {
         "rule ids must match ^[a-z0-9]+(-[a-z0-9]+)*$ after stripping an optional leading `cross-layer/` \
          prefix (lowercase, single hyphens between groups, no camelCase/snake_case/uppercase) — a hit here \
          means the cross-layer vocabulary-unification rename's kebab-case convention broke again: \
+         {offenders:#?}"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// 13. Kebab-case label hygiene — the second name layer, which contract 10 structurally cannot see
+// ---------------------------------------------------------------------------------------------
+
+/// Every `LabeledPattern::label` a shipped pack declares, tagged with the matcher field it came from.
+/// `SymbolScan`/`IoScan` carry no `LabeledPattern` at all, so the two matcher arms below are the whole
+/// population — see the test doc.
+fn labeled_pattern_sites(rule: &zzop_core::RuleDef) -> Vec<(&'static str, &str)> {
+    let mut out = Vec::new();
+    match &rule.matcher {
+        Matcher::LineScan(m) => {
+            for lp in m.any.iter().flatten() {
+                out.push(("any[].label", lp.label.as_str()));
+            }
+        }
+        Matcher::MethodScan(m) => {
+            for lp in &m.patterns {
+                out.push(("patterns[].label", lp.label.as_str()));
+            }
+            for lp in &m.absent {
+                out.push(("absent[].label", lp.label.as_str()));
+            }
+        }
+        Matcher::SymbolScan(_) | Matcher::IoScan(_) => {}
+    }
+    out
+}
+
+/// Contract #13 — every `LabeledPattern::label` in every shipped pack matches the SAME
+/// `^[a-z0-9]+(-[a-z0-9]+)*$` shape contract 10 demands of ids. Same form, different namespace, and two
+/// different reasons for the same form — one per bullet below:
+///
+/// - `LineScan::any[].label` is a WIRE key. It is the only value that reaches a user as
+///   `Finding.data.label` (`crates/core/src/dsl/line_scan.rs`'s `json!({ "snippet": …, "label": label })`),
+///   and for a multi-arm rule it is the only stable answer to "which arm fired" — `snippet` is verbatim
+///   source text and cannot serve as a key. A consumer groups/filters on it, so it must be greppable and
+///   quote-free. This is the layer contract 10 cannot reach: it walks rule IDS, and no id enumeration ever
+///   visits a label. The defect that motivated this test was three labels that were English SENTENCES
+///   (`"ECB mode (no diffusion)"` and two siblings, all in `security/weak-crypto`) going out on the wire.
+/// - `MethodScan::patterns[].label`/`absent[].label` never reach the wire (that matcher emits
+///   `{"snippet", "method"}`), but `trigger`/`after` REFERENCE `patterns[].label` by exact string, so those
+///   labels are identifiers and get identifier hygiene for the ordinary reason.
+///
+/// What this deliberately does NOT assert, unlike contract 10: uniqueness, global or otherwise. Label
+/// scope is rule-local — a user never types one (no config key, no `<id>-ok` marker, no `zzop explain`
+/// argument), so the same word means unrelated things in unrelated rules by design (`read` appears in
+/// several) and a cross-rule collision is not a defect here.
+///
+/// Why this lives here and not in `docs/contracts/rule-pack.schema.json` as a `pattern`: that schema is
+/// also THIRD-PARTY packs' contract, and a house naming convention must not make an outside pack fail to
+/// load or fail `validate-rule-pack`. This test walks `load_all_packs()` — our packs only — which is
+/// exactly the scope the convention claims.
+#[test]
+fn dsl_pattern_labels_are_kebab_case() {
+    let kebab = regex::Regex::new(r"^[a-z0-9]+(-[a-z0-9]+)*$").expect("static regex");
+    let mut offenders = Vec::new();
+    for pack in &load_all_packs() {
+        for rule in &pack.rules {
+            for (site, label) in labeled_pattern_sites(rule) {
+                if !kebab.is_match(label) {
+                    offenders.push(format!(
+                        "`{}/{}` {site} = {label:?} is not kebab-case",
+                        pack.id, rule.id
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "DSL pattern labels must match ^[a-z0-9]+(-[a-z0-9]+)*$ — a label is an identification tag, not a \
+         description: prose belongs in the rule's `message`, which already says it and would then rot in \
+         two places. `any[].label` additionally ships to users verbatim as `Finding.data.label`: \
          {offenders:#?}"
     );
 }
