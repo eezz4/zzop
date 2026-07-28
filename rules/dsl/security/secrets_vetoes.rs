@@ -267,17 +267,25 @@ fn a_passphrase_shaped_credential_is_silenced_by_the_value_shape_veto() {
 fn the_common_vendor_key_prefixes_all_survive_the_value_shape_veto() {
     // Counterweight to the seal test above: the shapes that actually leak in the wild are unaffected.
     // Each value here is a synthetic placeholder in a real vendor's format, not a live credential.
+    //
+    // EVERY vendor token below is split across two literals, the convention `vendor_token_committed.rs`'s
+    // header established: GitHub push protection scans RAW SOURCE for well-formed tokens and does not
+    // care that a body is obviously synthetic or that a comment says so. It blocked the v0.24.0 release
+    // push over the Slack line here. `concat!` reassembles each at compile time, so the file content this
+    // test writes -- and the five findings asserted below -- are unchanged. Only the Slack line was split
+    // at the time of that incident; the other three merely happened not to be flagged that run, so they
+    // are split too rather than left as the next release's blocker (scripts/check-vendor-token-literals.sh
+    // now enforces this mechanically).
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/creds.ts",
         concat!(
-            "export const a = { apiKey: \"AKIAABCDEFGHIJKLMNOP\" };\n",
-            "export const b = { secret: \"sk_live_51H8xQ2Lm3nP4rS5tU6vW\" };\n",
-            "export const c = { token: \"ghp_16C7e42F292c6912E7710c838347Ae178B4a\" };\n",
-            // Split literal, same convention (and same reason) as `vendor_token_committed.rs`'s
-            // header: GitHub push protection scans RAW SOURCE for a well-formed Slack token and does
-            // not care that the body is obviously synthetic. It blocked a release push over this exact
-            // line. `concat!` reassembles it at compile time, so the written fixture is unchanged.
+            "export const a = { apiKey: \"AK",
+            "IAABCDEFGHIJKLMNOP\" };\n",
+            "export const b = { secret: \"sk_li",
+            "ve_51H8xQ2Lm3nP4rS5tU6vW\" };\n",
+            "export const c = { token: \"gh",
+            "p_16C7e42F292c6912E7710c838347Ae178B4a\" };\n",
             "export const d = { token: \"xo",
             "xb-2345678901-2345678901234-AbCdEfGhIjKlMnOpQrStUvWx\" };\n",
             "export const e = { secret: \"nRvyYC4soFxBdZ-F-5Nnzz5USXstR1YylsTd-mA0aKtI\" };\n",

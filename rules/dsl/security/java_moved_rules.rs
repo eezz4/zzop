@@ -78,7 +78,7 @@ fn process_builder_plus_concatenation_is_flagged() {
     assert_eq!(hits(&out, "cmd-injection").len(), 1, "{:?}", out.findings);
 }
 
-// --- sql-taint / weak-crypto (Java line-scan rules, moved here from the dissolved java-security pack) ---
+// --- sql-string-concat / weak-crypto (Java line-scan rules, moved here from the dissolved java-security pack) ---
 
 #[test]
 fn sql_taint_still_fires_on_string_concatenated_query() {
@@ -88,7 +88,12 @@ fn sql_taint_still_fires_on_string_concatenated_query() {
         "public class C {\n  void run(String login) {\n    Query q = em.createQuery(\"SELECT u FROM User u WHERE u.login = '\" + login + \"'\");\n  }\n}\n",
     );
     let out = scan(&dir);
-    assert_eq!(hits(&out, "sql-taint").len(), 1, "{:?}", out.findings);
+    assert_eq!(
+        hits(&out, "sql-string-concat").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
 }
 
 #[test]
@@ -101,7 +106,12 @@ fn sql_taint_fires_on_an_update_whose_set_clause_is_a_separate_concatenated_lite
         "public class C {\n  void run(String tableName) {\n    String q = \"UPDATE \" + tableName + \" SET col = 1\";\n  }\n}\n",
     );
     let out = scan(&dir);
-    assert_eq!(hits(&out, "sql-taint").len(), 1, "{:?}", out.findings);
+    assert_eq!(
+        hits(&out, "sql-string-concat").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
 }
 
 #[test]
@@ -114,7 +124,12 @@ fn prose_strings_containing_the_word_update_are_not_sql_taint() {
         "public class P {\n  void run(String entityName, String version, String date, String field) {\n    String a = \"Failed to update \" + entityName;\n    String b = \"Checking for update \" + version;\n    String c = \"Last update: \" + date;\n    String d = \"Please update your \" + field + \" now\";\n  }\n}\n",
     );
     let out = scan(&dir);
-    assert_eq!(hits(&out, "sql-taint").len(), 0, "{:?}", out.findings);
+    assert_eq!(
+        hits(&out, "sql-string-concat").len(),
+        0,
+        "{:?}",
+        out.findings
+    );
 }
 
 #[test]
@@ -135,10 +150,14 @@ fn sql_taint_ok_marker_on_the_same_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "C.java",
-        "public class C {\n  void run(String login) {\n    Query q = em.createQuery(\"SELECT u FROM User u WHERE u.login = '\" + login + \"'\"); // sql-taint-ok: login is server-generated, never user input\n  }\n}\n",
+        "public class C {\n  void run(String login) {\n    Query q = em.createQuery(\"SELECT u FROM User u WHERE u.login = '\" + login + \"'\"); // zzop-sql-string-concat-ok: login is server-generated, never user input\n  }\n}\n",
     );
     let out = scan(&dir);
-    assert!(hits(&out, "sql-taint").is_empty(), "{:?}", out.findings);
+    assert!(
+        hits(&out, "sql-string-concat").is_empty(),
+        "{:?}",
+        out.findings
+    );
 }
 
 #[test]
@@ -146,7 +165,7 @@ fn weak_crypto_ok_marker_on_the_same_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "D.java",
-        "MessageDigest md = MessageDigest.getInstance(\"MD5\"); // weak-crypto-ok: non-security checksum only\n",
+        "MessageDigest md = MessageDigest.getInstance(\"MD5\"); // zzop-weak-crypto-ok: non-security checksum only\n",
     );
     let out = scan(&dir);
     assert!(hits(&out, "weak-crypto").is_empty(), "{:?}", out.findings);
@@ -157,7 +176,7 @@ fn cmd_injection_ok_marker_directly_above_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "PingAction.java",
-        "public class C {\n  private void run() {\n    // cmd-injection-ok: getAddress() is validated against an allow-list above\n    String[] cmd = { \"/bin/bash\", \"-c\", \"ping \" + getAddress() };\n    Runtime.getRuntime().exec(cmd);\n  }\n}\n",
+        "public class C {\n  private void run() {\n    // zzop-cmd-injection-ok: getAddress() is validated against an allow-list above\n    String[] cmd = { \"/bin/bash\", \"-c\", \"ping \" + getAddress() };\n    Runtime.getRuntime().exec(cmd);\n  }\n}\n",
     );
     let out = scan(&dir);
     assert!(hits(&out, "cmd-injection").is_empty(), "{:?}", out.findings);
@@ -171,5 +190,9 @@ fn sql_taint_inside_a_test_fixture_path_is_not_flagged() {
         "public class C {\n  void run(String login) {\n    Query q = em.createQuery(\"SELECT u FROM User u WHERE u.login = '\" + login + \"'\");\n  }\n}\n",
     );
     let out = scan(&dir);
-    assert!(hits(&out, "sql-taint").is_empty(), "{:?}", out.findings);
+    assert!(
+        hits(&out, "sql-string-concat").is_empty(),
+        "{:?}",
+        out.findings
+    );
 }

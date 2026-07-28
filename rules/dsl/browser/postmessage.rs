@@ -75,7 +75,7 @@ fn postmessage_target_ok_marker_above_the_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-browser");
     dir.write(
         "bridge5.ts",
-        "export function broadcast(data: unknown) {\n  // postmessage-wildcard-ok: non-sensitive heartbeat ping\n  window.postMessage(data, '*');\n}\n",
+        "export function broadcast(data: unknown) {\n  // zzop-postmessage-wildcard-ok: non-sensitive heartbeat ping\n  window.postMessage(data, '*');\n}\n",
     );
     let out = scan(&dir);
     assert!(

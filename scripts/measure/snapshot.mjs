@@ -1,24 +1,33 @@
 #!/usr/bin/env node
 // snapshot.mjs — take ONE labeled measurement snapshot of a corpus, through the SHIPPED binary.
 //
-// NOT A GUARD, AND NOT RUNNABLE IN CI. Every guard in this repo lives at `scripts/check-*.sh` and is
-// wired into both .githooks/pre-commit and ci.yml (check-guards-wired.sh enforces that, over tracked
-// AND untracked files). This script deliberately sits in a subdirectory under a different name: it
-// needs a local analysis corpus, and every corpus this repo measures against is gitignored
-// (`/corpus`) or lives outside the repo entirely. There is nothing for CI to point it at, so wiring
-// it into CI would buy a green check that proves nothing. It is a developer tool; the discipline it
-// serves is described in CONTRIBUTING.md ("Re-measuring before you commit").
+// NOT ITSELF A GUARD, but it now RUNS IN CI (2026-07-28) as the first half of
+// `scripts/measure/detection-gate.sh` — the `detection-benchmark` job takes a snapshot with this script
+// and hands it to benchmark.mjs, whose exit code is the verdict. Every `scripts/check-*.sh` guard is
+// wired into both .githooks/pre-commit and ci.yml (check-guards-wired.sh enforces that); the gate is
+// deliberately NOT named that way, because a `--release` build per commit is not a hook's budget.
+//
+// Until 2026-07-26 there was nothing for CI to point this at — every corpus was gitignored or lived
+// outside the repo. Committing `cases/` removed that blocker; what remained was one fixture
+// that CANNOT be committed (a contiguous vendor-token literal), and because the analyzer honors
+// .gitignore, scoring the tree in place could never be green. The gate copies the corpus out of the
+// repo and synthesizes that fixture there. The third-party dogfood checkouts (`corpus/oss/`) remain
+// gitignored and bring-your-own — those are somebody else's code and measure a different question
+// (real-world delta, not labeled recall).
 //
 // WHAT IT PRODUCES — <runs>/<label>/ :
 //   cross.json            axis 2: cross_repo (buckets, bucketKeys, edges, crossLayerFindings, sources)
 //   tree-<sourceId>.json  axis 1: analyze_repo, one file per tree (findings.byRule + FULL anchor list)
 //   meta.json             what was measured with (binary identity, config, limit, axes, timings)
 //
-// WHY THE MCP SURFACE AND NOT `zzop analyze`: the CLI has no `--limit` flag, so it is pinned to
-// DEFAULT_FINDINGS_LIMIT (50 — crates/summary/src/output/mod.rs). Any tree over 50 findings comes
-// back silently clipped, and a clipped anchor list compares "identical" against another clipped one.
-// The MCP tools take `limit` (up to the product's MAX_LIMIT of 1000), so the anchor set can be
-// complete — and this script refuses to write a snapshot in which it is not.
+// WHY THE MCP SURFACE AND NOT `zzop analyze` — the original reason EXPIRED on 2026-07-27, recorded
+// here rather than deleted so nobody re-derives it: the CLI had no `--limit` flag, so it was pinned to
+// DEFAULT_FINDINGS_LIMIT (50 — crates/summary/src/output/mod.rs). Any tree over 50 findings came back
+// silently clipped, and a clipped anchor list compares "identical" against another clipped one. The CLI
+// now takes `--severity`/`--rule`/`--limit` through the same shared validator as the MCP tools (same
+// MAX_LIMIT of 1000), so either transport can produce a complete anchor set. What still holds is this
+// script's own contract: it REFUSES to write a snapshot whose anchor list was truncated. The transport
+// is now incidental, not required — switching it is work nobody has needed, not a correctness fix.
 //
 // ## The five contracts this file enforces IN CODE (each one is a real accident, not a hypothesis)
 //

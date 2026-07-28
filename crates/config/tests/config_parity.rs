@@ -44,6 +44,7 @@ fn normalize_tree(
     tree: &mut serde_json::Map<String, Value>,
     config_has_git: bool,
     config_has_cache_dir: bool,
+    config_has_vocabulary: bool,
 ) {
     for key in ["root", "cacheDir"] {
         if let Some(s) = tree.get(key).and_then(Value::as_str) {
@@ -75,6 +76,20 @@ fn normalize_tree(
             git,
             serde_json::json!({}),
             "the injected git default must be exactly the empty object"
+        );
+    }
+    // Convention vocabulary is FORWARDED, never injected (2026-07-27): a config that declares none sends
+    // an empty object, which the engine reads as "these judgments are not made". The key is still always
+    // present — its absence and its emptiness must not be spellable as the same thing on the wire — and
+    // is stripped here so the committed fixture keeps recording the JS-era request shape.
+    if !config_has_vocabulary {
+        let vocabulary = tree.remove("vocabulary").expect(
+            "the Rust mapper must always carry a `vocabulary` key, empty when none is declared",
+        );
+        assert_eq!(
+            vocabulary,
+            serde_json::json!({}),
+            "a config declaring no vocabulary must forward an empty one, never zzop's built-ins"
         );
     }
     if !config_has_cache_dir {
@@ -120,6 +135,7 @@ fn rust_mapper_emits_the_committed_request_json_for_every_fixture_case() {
 
         let config_has_git = config.get("git").is_some();
         let config_has_cache_dir = config.get("cacheDir").is_some();
+        let config_has_vocabulary = config.get("vocabulary").is_some();
         let mut request = mapped.request;
         match &mut request {
             Value::Object(single) if single.contains_key("trees") => {
@@ -129,10 +145,20 @@ fn rust_mapper_emits_the_committed_request_json_for_every_fixture_case() {
                     .expect("trees array")
                 {
                     let tree_obj = tree.as_object_mut().expect("tree object");
-                    normalize_tree(tree_obj, config_has_git, config_has_cache_dir);
+                    normalize_tree(
+                        tree_obj,
+                        config_has_git,
+                        config_has_cache_dir,
+                        config_has_vocabulary,
+                    );
                 }
             }
-            Value::Object(single) => normalize_tree(single, config_has_git, config_has_cache_dir),
+            Value::Object(single) => normalize_tree(
+                single,
+                config_has_git,
+                config_has_cache_dir,
+                config_has_vocabulary,
+            ),
             other => panic!("case {name:?}: request is not an object: {other}"),
         }
 

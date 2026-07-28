@@ -25,7 +25,7 @@ use super::workspace::{resolve_file_with_workspace, WorkspacePkg};
 /// pairs where EVERY edge contributing that target is excludable from cycle detection — a type-only
 /// import/re-export (`import type`/per-specifier `{ type X }`/`export type {X} from`, erased at compile
 /// time) or a dynamic `import()` (async; never a synchronous module-load cycle, and specifically how
-/// people BREAK cycles). The returned `DepGraph` still includes these edges (fan-in/dead-exports/every
+/// people BREAK cycles). The returned `DepGraph` still includes these edges (fan-in/unimported-export/every
 /// other metric legitimately count a type import or a dynamic import as a "use" of the target). A pair
 /// with at least one plain synchronous value edge to the same target is not excluded (a real runtime
 /// cycle edge exists).

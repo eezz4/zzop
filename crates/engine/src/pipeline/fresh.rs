@@ -28,6 +28,7 @@ pub(super) fn compute_fresh_artifact(
     text: &str,
     language: Option<Language>,
     config: &EngineConfig,
+    vocab: &crate::vocabulary::ResolvedVocabulary<'_>,
     packs: &[&RulePackDef],
 ) -> FileArtifact {
     if bytes.len() > config.size_cap {
@@ -80,7 +81,7 @@ pub(super) fn compute_fresh_artifact(
     // match below — so it is carried out of the parse match in this slot and read back there.
     let mut prisma_io: Option<IoFacts> = None;
     let (symbols, imports, loc, degraded, used_names) = match language {
-        Some(Language::TypeScript) => parse_typescript(rel, text),
+        Some(Language::TypeScript) => parse_typescript(rel, text, &vocab.write_site()),
         Some(Language::Prisma) => {
             let (symbols, imports, loc, degraded, io) = parse_prisma(&config.source_id, rel, text);
             prisma_io = io;
@@ -96,8 +97,9 @@ pub(super) fn compute_fresh_artifact(
     };
     // Per-file IO projection (route/egress/`db-table` provides + consumes, by language) —
     // `io_projection::project_file_io`'s own doc carries the per-language contract.
-    let io =
-        super::io_projection::project_file_io(language, rel, text, degraded, config, prisma_io);
+    let io = super::io_projection::project_file_io(
+        language, rel, text, degraded, config, vocab, prisma_io,
+    );
     // The next projections are all TypeScript-only, reusing `text` already in hand (no second file read): const-map fragment (feeds
     // `analyze::assemble`'s merge + late consume re-resolution), tRPC router fragment (`analyze::compose_trpc_provides`), router-mount
     // fragment (Hono builders/cross-file mounts, for `analyze::compose_router_mount_provides`), wrapper def/call fragments (assemble-time wrapper-consume join, defs indexed by `(file, name)`), controller-prefix route fragment (assemble-time controller-prefix composer, against the same const map), and query-call-site facts (`run_schema_join_rules` substrate).
@@ -117,7 +119,12 @@ pub(super) fn compute_fresh_artifact(
         Some(Language::TypeScript) if !degraded => {
             let router_names: Vec<&str> =
                 config.io.router_names.iter().map(String::as_str).collect();
-            zzop_parser_typescript::extract_router_mount_fragments(rel, text, &router_names)
+            zzop_parser_typescript::extract_router_mount_fragments_with_vocab(
+                rel,
+                text,
+                &router_names,
+                &vocab.router_mounts(),
+            )
         }
         // FastAPI receivers AND Django `urlpatterns` project the SAME router-mount-fragment shape (`adapters::fastapi`/`::django_routes`), both composed by the identical `compose_router_mount_provides` pass below — merged here (the two never coexist in one Python file).
         Some(Language::Python) if !degraded => {
@@ -159,7 +166,7 @@ pub(super) fn compute_fresh_artifact(
     // Public-signature type names: the position-aware companion to `used_names`, which rides the
     // language-neutral parse tuple above. Deliberately on THIS TS-only lane instead — widening that
     // tuple for a TypeScript-only fact would touch six parser fns and every non-TS arm to thread a
-    // value they can never produce. Empty for non-TS/degraded = no `dead-exports` exemptions = the
+    // value they can never produce. Empty for non-TS/degraded = no `unimported-export` exemptions = the
     // pre-existing behavior. Cost: one more independent swc parse per fresh TS file (the same
     // known tradeoff `parsers.rs`'s own doc records for `used_names`), paid only on a cache MISS —
     // `FileIrSlice::exported_signature_names` carries it on every warm run.
@@ -189,9 +196,10 @@ pub(super) fn compute_fresh_artifact(
         }
         _ => Vec::new(),
     };
+    let getter = vocab.prisma_client_getter;
     let query_call_sites = match language {
         Some(Language::TypeScript) if !degraded => {
-            zzop_parser_typescript::extract_query_call_sites(rel, text)
+            zzop_parser_typescript::extract_query_call_sites_with_vocab(rel, text, getter)
         }
         _ => Vec::new(),
     };
@@ -228,7 +236,12 @@ pub(super) fn compute_fresh_artifact(
         config.profile_rules,
     );
     if schema_findings_eligible(language, degraded) {
-        findings.extend(schema_findings(&config.rule_config, rel, text));
+        findings.extend(schema_findings(
+            &config.rule_config,
+            rel,
+            text,
+            &vocab.money_tokens,
+        ));
     }
     FileArtifact {
         rel: rel.to_string(),

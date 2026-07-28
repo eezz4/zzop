@@ -93,14 +93,14 @@ factored out the duplication, it never changed which files any rule scans.
 | `message` | string | — | Human-facing cause/fix-hint, copied verbatim into every finding — but NOT the whole of what ships: the engine auto-appends a disable hint at runtime (see the note right below this table). |
 | `matcher` | `Matcher` | — | One of the four matcher shapes below (`type` tag, kebab-case). |
 
-There is **no `suppress_marker` field** — the inline ok-marker is DERIVED as `<id>-ok`
+There is **no `suppress_marker` field** — the inline ok-marker is DERIVED as `zzop-<id>-ok`
 (`RuleDef::suppress_marker()`), so it is never authored or stored. See
 [Suppress-marker semantics](#suppress-marker-semantics).
 
 **Do not hand-write a disable hint in `message`.** At runtime the engine appends one more sentence to
 every DSL finding's `message`, after whatever you write: `` Disable via config `rules: { "<pack>/<rule>": "off" }` (embedders: `disabled_rules`) `` (`zzop_core::disable_hint`, appended by
 `crates/engine/src/pipeline/findings.rs::append_disable_hints`) — the exact same fragment native findings
-carry, built from the one shared helper. Write the cause, the fix, and your rule's own derived `<id>-ok`
+carry, built from the one shared helper. Write the cause, the fix, and your rule's own derived `zzop-<id>-ok`
 marker in `message`; a hand-written "disable via config ..." sentence renders TWICE. See
 [authoring-guide.md](authoring-guide.md#the-auto-appended-disable-hint) for the full contract.
 
@@ -298,7 +298,7 @@ gates let a rule read the project's own **declaration** instead.
 
 The declaration channel is the one every cross-cutting fact already uses: an overlay's per-file
 `attributes` (`overlays: [...]` in `zzop.config.jsonc`; `adapterOverlays` for embedders), each entry
-`{"target": ..., "key": "<name>", "value": <json>}`. `examples/auth-overlay-adapter` is a working one.
+`{"target": ..., "key": "<name>", "value": <json>}`. `examples/adapters/auth-overlay-adapter` is a working one.
 
 | Matcher | Gate is looked up against | Resolution |
 |---|---|---|
@@ -339,11 +339,14 @@ the exclusion.
 
 ## Suppress-marker semantics
 
-The inline ok-marker is DERIVED from the rule id — `RuleDef::suppress_marker()` returns `<id>-ok` (rule
-`float-money-compare` → `float-money-compare-ok`). It is not authored or stored, so it can never drift out
-of the `-ok` convention and is always predictable from the RULE id — note that a finding carries the
+The inline ok-marker is DERIVED from the rule id — `RuleDef::suppress_marker()` returns `zzop-<id>-ok` (rule
+`float-money-compare` → `zzop-float-money-compare-ok`). It is not authored or stored, so it can never drift out
+of the `zzop-`…`-ok` convention and is always predictable from the RULE id. The `zzop-` prefix is a TOOL
+prefix, the same shape ESLint (`eslint-disable-*`) and TypeScript (`@ts-ignore`) use: it makes every
+suppression comment in a codebase greppable as one class and tells a reader whose checker it silences.
+Note that a finding carries the
 PACK-QUALIFIED id, and the marker strips that prefix: `security/hardcoded-secret` suppresses on
-`// hardcoded-secret-ok`, never `// security/hardcoded-secret-ok` (the marker regex anchors right after
+`// zzop-hardcoded-secret-ok`, never `// security/zzop-hardcoded-secret-ok` (the marker regex anchors right after
 `//`, so the prefixed form silently matches nothing). It applies to
 `line-scan`, `method-scan`, AND `io-scan` findings (not `symbol-scan`, which still has no source-line
 concept to anchor a comment against):
@@ -372,7 +375,7 @@ concept to anchor a comment against):
   Accepted cost. Two deliberate conservative misses: `// as-ok reason` (no colon) and `// as-ok : reason`
   (detached colon) go unreported — a missed disclosure is recoverable, a false typo accusation is not.
 - Matches `// <marker>` or `// <marker>: <reason>` — the marker text is regex-escaped before compiling
-  (`//\s*{escaped-marker}\b`). Derived markers are always `<kebab-id>-ok` (no regex metacharacters), so the
+  (`//\s*{escaped-marker}\b`). Derived markers are always `zzop-<kebab-id>-ok` (no regex metacharacters), so the
   escaping is defensive; it stays correct even if an id ever carried a regex-special character.
 - For a file whose extension is `.sql` (case-insensitive), a `--`-comment naming the marker suppresses
   identically (`-- <marker>` or `-- <marker>: <reason>`), same lookback window and escaping rules. This is
@@ -423,4 +426,4 @@ Every matcher emits `zzop_core::finding::Finding`:
 | `file` | The matched file's relative path. |
 | `line` | 1-based line: the matching line (line-scan), the trigger match's absolute line (method-scan), the symbol's declaration line (symbol-scan), or the IO entry's own line (io-scan). |
 | `message` | The rule's `message`, verbatim. |
-| `data` | Matcher-specific JSON: `{"snippet"}` or `{"snippet","label"}` (line-scan); `{"snippet","method"}` (method-scan, `method` = the enclosing symbol's name); `{"snippet"}` = the symbol name (symbol-scan); `{"snippet","kind"}` (io-scan). |
+| `data` | Matcher-specific JSON: `{"snippet"}` or `{"snippet","label"}` (line-scan); `{"snippet","method","triggerLines"}` (method-scan, `method` = the enclosing symbol's name, `triggerLines` = how many lines in that method body carry a qualifying trigger match — one finding per method either way, so this is the only way to tell a one-off from a repeated idiom); `{"snippet"}` = the symbol name (symbol-scan); `{"snippet","kind"}` (io-scan). |

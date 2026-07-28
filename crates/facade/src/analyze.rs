@@ -16,14 +16,14 @@ use crate::request::{AnalyzeRequest, AnalyzeTreesRequest};
 /// basename (lossy `to_str` fallback: the given root string, e.g. a bare drive root). An explicit
 /// non-empty `sourceId` is never overridden.
 ///
-/// Hoisted HERE — the shared chokepoint every caller funnels through (`zzop-summary`, which the
-/// `zzop-host` crate's bins call in turn, and engine examples via this facade directly) — so one
+/// Hoisted HERE — the shared chokepoint every caller funnels through (`zzop-summary`, which both host
+/// products call in turn, and engine examples via this facade directly) — so one
 /// naming rule holds everywhere (D14, 2026-07-17): before this, a
 /// config-discovered single tree with no explicit `sourceId` reached the engine as `""`, so the
 /// overlay source-mismatch warning said the envelope "declares a different source than the tree
 /// \"\"" while `check_endpoint`'s matched objects showed the directory name for the SAME tree
-/// (historically, the `zzop-mcp` binary — predating the host crate's 2026-07-23 rename to
-/// `zzop-host` — defaulted the name on its endpoint path only). With the default at this chokepoint,
+/// (historically, the `zzop-mcp` binary — before any shared host layer existed at all —
+/// defaulted the name on its endpoint path only). With the default at this chokepoint,
 /// the mismatch warning and query output always agree, and an adapter author can read the right
 /// `source` value off either. Applied AFTER `zzop-config`'s JS-parity mapping, which stays
 /// shape-only (the mapper never invents a single-root `sourceId` — parity fixtures unaffected).
@@ -45,8 +45,8 @@ fn apply_source_id_default(req: &mut AnalyzeRequest) {
     }
 }
 
-/// Shared root-shape gate — the ONE chokepoint the host (the `zzop-mcp` binary's CLI/MCP surface)
-/// funnels through via `analyze_json`/`analyze_trees_json`, so every entry gets the
+/// Shared root-shape gate — the ONE chokepoint BOTH products (the `zzop` CLI and the `zzop-mcp`
+/// server) funnel through via `analyze_json`/`analyze_trees_json`, so every entry gets the
 /// same error for the same mistake. A root that names an EXISTING file (not a directory) used to fall
 /// straight through to `zzop_engine::analyze_tree`'s walk, which treats a file path exactly like an
 /// empty directory: the walk yields that one file as its sole entry, so the output was
@@ -63,7 +63,7 @@ fn reject_non_directory_root(root: &Path) -> Result<(), String> {
     if root.exists() && !root.is_dir() {
         return Err(format!(
             "zzop-facade: root is not a directory: {} — pass the tree's root directory (an envelope \
-             JSON is validate_envelope's input, not an analysis root)",
+             JSON is the envelope validator's input, not an analysis root)",
             root.display()
         ));
     }

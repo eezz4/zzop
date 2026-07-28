@@ -82,15 +82,23 @@ fn no_dsl_id_collides_with_a_native_analysis_id() {
 // 10. Kebab-case id hygiene — every rule id follows one casing convention
 // ---------------------------------------------------------------------------------------------
 
-/// Strips an optional leading `"cross-layer/"` namespace prefix — that prefix marks a cross-layer JOIN
-/// finding's pack namespace, not part of the bare id itself, so the kebab-case check below applies to the
-/// id with it removed.
-fn strip_cross_layer_prefix(id: &str) -> &str {
-    id.strip_prefix("cross-layer/").unwrap_or(id)
+/// Strips an optional leading `"<namespace>/"` prefix — that prefix marks the owning family (the
+/// cross-layer JOIN rules, the `schema` per-issue ids), not part of the bare id itself, so the kebab-case
+/// check below applies to the id with it removed. The NAMESPACE itself is checked too (both halves must
+/// be kebab-case), so this cannot become a hole a non-kebab id hides in.
+fn strip_namespace_prefix(id: &str) -> &str {
+    id.rsplit_once('/').map_or(id, |(_, tail)| tail)
+}
+
+/// The namespace half of an id, when it has one — checked with the same kebab regex as the tail so
+/// `strip_namespace_prefix` above cannot silently exempt anything.
+fn namespace_prefix(id: &str) -> Option<&str> {
+    id.rsplit_once('/').map(|(head, _)| head)
 }
 
 /// Contract #10 — every DSL pack id, every DSL rule id, and every registered native analysis id (after
-/// `strip_cross_layer_prefix`) matches `^[a-z0-9]+(-[a-z0-9]+)*$`: lowercase letters/digits, single hyphens
+/// `strip_namespace_prefix`, whose stripped namespace is checked by the same regex) matches
+/// `^[a-z0-9]+(-[a-z0-9]+)*$`: lowercase letters/digits, single hyphens
 /// between groups, no leading/trailing/double hyphens, no uppercase, no underscore, no camelCase. This is
 /// the machine-enforced regression guard for the cross-layer vocabulary-unification rename underway across
 /// this codebase — rule ids like `unsafeReadEndpoint`/`nonIdempotentWrite`/`fe-consumes-unprovided`/
@@ -104,7 +112,7 @@ fn rule_ids_are_kebab_case() {
 
     let packs = load_all_packs();
     for pack in &packs {
-        let bare = strip_cross_layer_prefix(&pack.id);
+        let bare = strip_namespace_prefix(&pack.id);
         if !kebab.is_match(bare) {
             offenders.push(format!(
                 "DSL pack id `{}` (checked as `{bare}`) is not kebab-case",
@@ -112,7 +120,7 @@ fn rule_ids_are_kebab_case() {
             ));
         }
         for rule in &pack.rules {
-            let bare = strip_cross_layer_prefix(&rule.id);
+            let bare = strip_namespace_prefix(&rule.id);
             if !kebab.is_match(bare) {
                 offenders.push(format!(
                     "DSL rule id `{}/{}` (checked as `{bare}`) is not kebab-case",
@@ -123,18 +131,25 @@ fn rule_ids_are_kebab_case() {
     }
 
     for id in native_ids() {
-        let bare = strip_cross_layer_prefix(&id);
+        let bare = strip_namespace_prefix(&id);
         if !kebab.is_match(bare) {
             offenders.push(format!(
                 "native analysis id `{id}` (checked as `{bare}`) is not kebab-case"
             ));
         }
+        if let Some(ns) = namespace_prefix(&id) {
+            if !kebab.is_match(ns) {
+                offenders.push(format!(
+                    "native analysis id `{id}`'s namespace `{ns}` is not kebab-case"
+                ));
+            }
+        }
     }
 
     assert!(
         offenders.is_empty(),
-        "rule ids must match ^[a-z0-9]+(-[a-z0-9]+)*$ after stripping an optional leading `cross-layer/` \
-         prefix (lowercase, single hyphens between groups, no camelCase/snake_case/uppercase) — a hit here \
+        "rule ids must match ^[a-z0-9]+(-[a-z0-9]+)*$ on each side of an optional `<namespace>/` prefix \
+         (lowercase, single hyphens between groups, no camelCase/snake_case/uppercase) — a hit here \
          means the cross-layer vocabulary-unification rename's kebab-case convention broke again: \
          {offenders:#?}"
     );
@@ -180,11 +195,11 @@ fn labeled_pattern_sites(rule: &zzop_core::RuleDef) -> Vec<(&'static str, &str)>
 ///   visits a label. The defect that motivated this test was three labels that were English SENTENCES
 ///   (`"ECB mode (no diffusion)"` and two siblings, all in `security/weak-crypto`) going out on the wire.
 /// - `MethodScan::patterns[].label`/`absent[].label` never reach the wire (that matcher emits
-///   `{"snippet", "method"}`), but `trigger`/`after` REFERENCE `patterns[].label` by exact string, so those
+///   `{"snippet", "method", "triggerLines"}`), but `trigger`/`after` REFERENCE `patterns[].label` by exact string, so those
 ///   labels are identifiers and get identifier hygiene for the ordinary reason.
 ///
 /// What this deliberately does NOT assert, unlike contract 10: uniqueness, global or otherwise. Label
-/// scope is rule-local — a user never types one (no config key, no `<id>-ok` marker, no `zzop explain`
+/// scope is rule-local — a user never types one (no config key, no `zzop-<id>-ok` marker, no `zzop explain`
 /// argument), so the same word means unrelated things in unrelated rules by design (`read` appears in
 /// several) and a cross-rule collision is not a defect here.
 ///

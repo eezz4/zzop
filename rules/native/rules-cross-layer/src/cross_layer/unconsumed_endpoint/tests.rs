@@ -83,6 +83,7 @@ fn with_mutation_rule_enabled(provides: &[TaggedProvide]) -> (Vec<Finding>, Vec<
         &no_near_miss(),
         &no_trpc(),
         &reported_provide_sites(&specialized),
+        EXTERNALLY_FETCHED_PATHS,
     );
     (general, specialized)
 }
@@ -95,6 +96,7 @@ fn dead_http_provide_is_flagged_with_source_and_anchor() {
         &no_near_miss(),
         &no_trpc(),
         &none_reported(),
+        EXTERNALLY_FETCHED_PATHS,
     );
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].rule_id, "cross-layer/unconsumed-endpoint");
@@ -120,6 +122,7 @@ fn dead_provide_registered_in_a_test_fixture_file_is_skipped() {
         &no_near_miss(),
         &no_trpc(),
         &none_reported(),
+        EXTERNALLY_FETCHED_PATHS,
     );
     assert!(out.is_empty());
 }
@@ -132,16 +135,22 @@ fn non_http_dead_provide_is_ignored() {
         &no_near_miss(),
         &no_trpc(),
         &none_reported(),
+        EXTERNALLY_FETCHED_PATHS,
     );
     assert!(out.is_empty());
 }
 
 #[test]
 fn no_unconsumed_provides_is_empty() {
-    assert!(
-        unconsumed_endpoint_findings(&[], &[], &no_near_miss(), &no_trpc(), &none_reported())
-            .is_empty()
-    );
+    assert!(unconsumed_endpoint_findings(
+        &[],
+        &[],
+        &no_near_miss(),
+        &no_trpc(),
+        &none_reported(),
+        EXTERNALLY_FETCHED_PATHS
+    )
+    .is_empty());
 }
 
 #[test]
@@ -156,6 +165,7 @@ fn message_states_the_unresolved_http_count_honestly() {
         &no_near_miss(),
         &no_trpc(),
         &none_reported(),
+        EXTERNALLY_FETCHED_PATHS,
     );
     assert_eq!(out.len(), 1);
     assert!(out[0].message.contains("2 unresolved"));
@@ -173,6 +183,7 @@ fn multiple_unconsumed_provides_are_sorted_by_file_then_line() {
         &no_near_miss(),
         &no_trpc(),
         &none_reported(),
+        EXTERNALLY_FETCHED_PATHS,
     );
     let sites: Vec<(&str, u32)> = out.iter().map(|f| (f.file.as_str(), f.line)).collect();
     assert_eq!(sites, vec![("a.java", 2), ("a.java", 9), ("z.java", 1)]);
@@ -195,6 +206,7 @@ fn near_miss_cross_reference_note_fires_when_the_provide_is_a_near_miss_target()
         &targets,
         &no_trpc(),
         &none_reported(),
+        EXTERNALLY_FETCHED_PATHS,
     );
     assert_eq!(out.len(), 1);
     assert!(out[0].message.contains("3 unmatched http consume(s)"));
@@ -214,6 +226,7 @@ fn near_miss_cross_reference_note_is_absent_when_the_provide_is_not_a_near_miss_
         &no_near_miss(),
         &no_trpc(),
         &none_reported(),
+        EXTERNALLY_FETCHED_PATHS,
     );
     assert_eq!(out.len(), 1);
     assert!(!out[0].message.contains("near-miss"));
@@ -238,6 +251,7 @@ fn trpc_mount_route_is_suppressed_when_its_own_tree_has_a_trpc_edge() {
         &no_near_miss(),
         &trpc_sources(&["web"]),
         &none_reported(),
+        EXTERNALLY_FETCHED_PATHS,
     );
     assert!(out.is_empty());
 }
@@ -255,6 +269,7 @@ fn trpc_mount_route_is_still_reported_when_no_tree_has_a_trpc_edge() {
         &no_near_miss(),
         &no_trpc(),
         &none_reported(),
+        EXTERNALLY_FETCHED_PATHS,
     );
     assert_eq!(out.len(), 1);
     assert!(out[0].message.contains("GET /api/trpc/{}"));
@@ -276,6 +291,7 @@ fn trpc_mount_route_is_still_reported_when_only_a_different_tree_has_trpc_edges(
         &no_near_miss(),
         &trpc_sources(&["api"]),
         &none_reported(),
+        EXTERNALLY_FETCHED_PATHS,
     );
     assert_eq!(out.len(), 1);
     assert!(out[0].message.contains("GET /api/trpc/{}"));
@@ -295,6 +311,7 @@ fn a_route_that_merely_contains_but_does_not_carry_a_trpc_segment_is_not_suppres
         &no_near_miss(),
         &trpc_sources(&["web"]),
         &none_reported(),
+        EXTERNALLY_FETCHED_PATHS,
     );
     assert_eq!(out.len(), 1);
 }
@@ -329,6 +346,7 @@ fn every_externally_fetched_path_token_is_vetoed() {
             &no_near_miss(),
             &no_trpc(),
             &none_reported(),
+            EXTERNALLY_FETCHED_PATHS,
         );
         assert!(out.is_empty(), "expected `GET {path}` to be vetoed");
     }
@@ -343,6 +361,7 @@ fn vetoed_paths_are_matched_case_insensitively_and_ignore_a_trailing_slash() {
             &no_near_miss(),
             &no_trpc(),
             &none_reported(),
+            EXTERNALLY_FETCHED_PATHS,
         );
         assert!(out.is_empty(), "expected `{key}` to be vetoed");
     }
@@ -370,6 +389,7 @@ fn an_ordinary_route_that_merely_resembles_a_vetoed_path_still_fires() {
             &no_near_miss(),
             &no_trpc(),
             &none_reported(),
+            EXTERNALLY_FETCHED_PATHS,
         );
         assert_eq!(out.len(), 1, "expected `{key}` to still fire");
         assert!(out[0].message.contains(key));
@@ -385,6 +405,7 @@ fn a_key_without_the_method_path_shape_is_never_vetoed() {
         &no_near_miss(),
         &no_trpc(),
         &none_reported(),
+        EXTERNALLY_FETCHED_PATHS,
     );
     assert_eq!(out.len(), 1);
 }
@@ -430,6 +451,7 @@ fn a_write_route_is_still_reported_here_when_the_specialization_is_disabled() {
         &no_near_miss(),
         &no_trpc(),
         &none_reported(),
+        EXTERNALLY_FETCHED_PATHS,
     );
     assert_eq!(out.len(), 1);
     assert!(out[0].message.contains("POST /api/ledger/{}/verify"));
@@ -457,6 +479,7 @@ fn suppression_is_anchored_per_route_not_per_rule_run() {
         &no_near_miss(),
         &no_trpc(),
         &reported_provide_sites(&specialized),
+        EXTERNALLY_FETCHED_PATHS,
     );
     let sites: Vec<(&str, u32)> = general.iter().map(|f| (f.file.as_str(), f.line)).collect();
     assert_eq!(sites, vec![("Api.java", 12), ("Api.java", 40)]);
@@ -494,4 +517,103 @@ fn a_read_route_is_reported_by_this_rule_and_by_it_alone() {
     assert!(general[0]
         .message
         .contains("cross-layer/unconsumed-mutation-endpoint"));
+}
+
+// --- per-source volume fold (`MAX_LISTED_PER_SOURCE`) ---
+
+/// `n` dead GET routes in one source, one per file so the anchors are distinct and sortable.
+fn many_dead(n: u32, source: &str) -> Vec<TaggedProvide> {
+    (0..n)
+        .map(|i| {
+            dead(
+                &format!("GET /api/r{i:03}"),
+                source,
+                &format!("r{i:03}.ts"),
+                1,
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_source_at_the_cap_is_listed_in_full_with_no_fold() {
+    let provides = many_dead(MAX_LISTED_PER_SOURCE as u32, "be");
+    let f = unconsumed_endpoint_findings(
+        &provides,
+        &[],
+        &no_near_miss(),
+        &no_trpc(),
+        &none_reported(),
+        EXTERNALLY_FETCHED_PATHS,
+    );
+    assert_eq!(f.len(), MAX_LISTED_PER_SOURCE, "{f:?}");
+    assert!(
+        f.iter()
+            .all(|x| x.data.as_ref().unwrap()["key"] != serde_json::Value::Null),
+        "no fold finding may appear at or below the cap"
+    );
+}
+
+#[test]
+fn a_public_api_tree_folds_the_tail_into_one_disclosed_finding() {
+    let provides = many_dead(503, "medusa");
+    let f = unconsumed_endpoint_findings(
+        &provides,
+        &[],
+        &no_near_miss(),
+        &no_trpc(),
+        &none_reported(),
+        EXTERNALLY_FETCHED_PATHS,
+    );
+    assert_eq!(
+        f.len(),
+        MAX_LISTED_PER_SOURCE + 1,
+        "the tail collapses to exactly one finding: {}",
+        f.len()
+    );
+    let fold = f
+        .iter()
+        .find(|x| {
+            x.data
+                .as_ref()
+                .unwrap()
+                .get("foldedEndpointCount")
+                .is_some()
+        })
+        .expect("a fold finding must exist");
+    assert_eq!(fold.rule_id, "cross-layer/unconsumed-endpoint");
+    assert_eq!(
+        fold.data.as_ref().unwrap()["foldedEndpointCount"],
+        503 - MAX_LISTED_PER_SOURCE
+    );
+    assert!(
+        fold.message.contains("crossLayer.unconsumedProvides"),
+        "the fold must say where the uncapped list is: {}",
+        fold.message
+    );
+}
+
+#[test]
+fn the_fold_is_per_source_so_a_small_tree_beside_a_huge_one_is_untouched() {
+    let mut provides = many_dead(503, "medusa");
+    provides.extend(many_dead(2, "web"));
+    let f = unconsumed_endpoint_findings(
+        &provides,
+        &[],
+        &no_near_miss(),
+        &no_trpc(),
+        &none_reported(),
+        EXTERNALLY_FETCHED_PATHS,
+    );
+    let web: Vec<_> = f
+        .iter()
+        .filter(|x| x.data.as_ref().unwrap()["source"] == "web")
+        .collect();
+    assert_eq!(web.len(), 2, "{web:?}");
+    assert!(web.iter().all(|x| x
+        .data
+        .as_ref()
+        .unwrap()
+        .get("foldedEndpointCount")
+        .is_none()));
 }

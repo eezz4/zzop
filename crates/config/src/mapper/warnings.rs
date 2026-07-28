@@ -6,6 +6,44 @@
 // with either about what a valid config key is.
 // ---------------------------------------------------------------------------------------------------
 
+/// Keys the recognized surface used to carry and deliberately no longer does, each paired with the
+/// sentence a reader needs INSTEAD of the generic "typo, or a different zzop version" guess below.
+///
+/// All three were the same defect: accepted by this front end, forwarded into no request, consumed by
+/// no binary — so setting one produced no warning, no error, and no effect. (The JS CLI that once read
+/// them was removed 2026-07-20; nothing replaced it.) Keeping them "recognized" bought silence for the
+/// author who believed they had configured something, which is strictly more expensive than the
+/// unknown-key warning they get now. Retiring them from `config-surface.json` is what makes that
+/// warning fire at all; this table is what makes it say WHY.
+///
+/// Keyed by the FULL dotted spelling [`warn_unknown_keys`] composes (`{scope}{key}`) — today every
+/// entry is top-level, because the `report` sub-scope walk went away with the key itself.
+///
+/// Message style note: no backticks anywhere in these strings. `crates/config/src` is inside the
+/// reference-validation contract's CHECK B scan set, which reads every backtick-quoted token near the
+/// word "config" and requires it to name a REAL knob — a retirement notice necessarily names knobs that
+/// no longer exist, so it quotes them the way the surrounding warning already does, with `"`.
+const RETIRED_KEYS: &[(&str, &str)] = &[
+    (
+        "failOn",
+        "it was accepted as a severity threshold for a CI gate, but no zzop binary has ever exited \
+         non-zero on findings, so setting it gated nothing. Delete it — the run is unchanged — and \
+         gate a build by reading the severities out of the JSON output yourself.",
+    ),
+    (
+        "format",
+        "it was accepted as an output-format selector, but every zzop binary emits JSON and only \
+         JSON, so setting it selected nothing. Delete it — the output is unchanged.",
+    ),
+    (
+        "report",
+        "it was accepted as a report-file destination (its dir/formats/enabled sub-keys included), \
+         but no zzop binary writes report files at all — the CLI that did was removed 2026-07-20 and \
+         nothing replaced it, so setting it wrote nothing anywhere. Delete it and read the JSON \
+         output instead.",
+    ),
+];
+
 pub(super) fn collect_config_warnings(config: &serde_json::Value) -> Vec<String> {
     let mut warnings = Vec::new();
     if !config.is_object() {
@@ -30,12 +68,9 @@ pub(super) fn collect_config_warnings(config: &serde_json::Value) -> Vec<String>
         &mut warnings,
     );
     warn_unknown_keys(config.get("git"), &known("git"), "git.", &mut warnings);
-    warn_unknown_keys(
-        config.get("report"),
-        &known("report"),
-        "report.",
-        &mut warnings,
-    );
+    // No `report` scope walk: `report` itself is retired (see `RETIRED_KEYS`), so it is caught by the
+    // top-level pass above with the retirement notice. Walking INTO it would bury that one honest
+    // sentence under three "unknown config key report.dir" lines whose known-keys list is empty.
 
     if let Some(trees) = config.get("trees").and_then(serde_json::Value::as_array) {
         let known_tree = known("tree");
@@ -48,15 +83,28 @@ pub(super) fn collect_config_warnings(config: &serde_json::Value) -> Vec<String>
                 &format!("trees[{i}]."),
                 &mut warnings,
             );
-            if let Some(mounts) = tree.get("mounts").and_then(serde_json::Value::as_array) {
-                for (j, entry) in mounts.iter().enumerate() {
-                    if entry.is_object() {
-                        warn_unknown_keys(
-                            Some(entry),
-                            &known_mount,
-                            &format!("trees[{i}].mounts[{j}]."),
-                            &mut warnings,
-                        );
+            // Deployment topology moved under its own object on 2026-07-28, so the walk descends one
+            // level further. `topology` itself is walked for unknown keys too — without that, a typo
+            // like `topology.mountAt` would be silently dropped by a mapper that only looks up the
+            // three names it knows.
+            if let Some(topology) = tree.get("topology") {
+                let known_topology = known("topology");
+                warn_unknown_keys(
+                    Some(topology),
+                    &known_topology,
+                    &format!("trees[{i}].topology."),
+                    &mut warnings,
+                );
+                if let Some(mounts) = topology.get("mounts").and_then(serde_json::Value::as_array) {
+                    for (j, entry) in mounts.iter().enumerate() {
+                        if entry.is_object() {
+                            warn_unknown_keys(
+                                Some(entry),
+                                &known_mount,
+                                &format!("trees[{i}].topology.mounts[{j}]."),
+                                &mut warnings,
+                            );
+                        }
                     }
                 }
             }
@@ -97,6 +145,12 @@ pub(super) fn collect_config_warnings(config: &serde_json::Value) -> Vec<String>
 /// full dotted key, the scope, and the known-keys list for that scope — verbatim text match with the
 /// JS source, including its `${scope}${key}` composition and the `scope.replace(/\.$/, '')` trim
 /// (`scope` here always carries at most one trailing `.`, so `trim_end_matches('.')` is equivalent).
+///
+/// One deviation from that source, added 2026-07-26: a key listed in [`RETIRED_KEYS`] keeps the same
+/// `unknown config key "..." (ignored)` opening — so the warning stays greppable and lands in the same
+/// channel — but replaces the "typo, or a different version" guess with why it was REMOVED and what to
+/// do instead. The known-keys list is dropped for those: an author who wrote a key that used to be
+/// valid does not need the surviving vocabulary recited at them, they need to be told it went away.
 fn warn_unknown_keys(
     obj: Option<&serde_json::Value>,
     known: &[&str],
@@ -107,18 +161,27 @@ fn warn_unknown_keys(
         return;
     };
     for key in map.keys() {
-        if !known.contains(&key.as_str()) {
-            let where_ = if scope.is_empty() {
-                "at the top level".to_string()
-            } else {
-                format!("under \"{}\"", scope.trim_end_matches('.'))
-            };
-            warnings.push(format!(
-                "unknown config key \"{scope}{key}\" (ignored) — a typo, or a key from a different zzop \
-                 version. Known keys {where_}: {}.",
-                known.join(", ")
-            ));
+        if known.contains(&key.as_str()) {
+            continue;
         }
+        let dotted = format!("{scope}{key}");
+        if let Some((_, why)) = RETIRED_KEYS.iter().find(|(k, _)| *k == dotted) {
+            warnings.push(format!(
+                "unknown config key \"{dotted}\" (ignored) — REMOVED from zzop's recognized config \
+                 keys: {why}"
+            ));
+            continue;
+        }
+        let where_ = if scope.is_empty() {
+            "at the top level".to_string()
+        } else {
+            format!("under \"{}\"", scope.trim_end_matches('.'))
+        };
+        warnings.push(format!(
+            "unknown config key \"{dotted}\" (ignored) — a typo, or a key from a different zzop \
+             version. Known keys {where_}: {}.",
+            known.join(", ")
+        ));
     }
 }
 

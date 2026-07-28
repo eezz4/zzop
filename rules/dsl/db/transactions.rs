@@ -1,10 +1,10 @@
-//! `external-call-in-tx` + `multi-write-no-tx` + `write-in-loop-no-tx` + `unawaited-transaction` +
-//! `manual-tx-no-rollback` + `tx-swallows-error-commits` + `critical-write-default-isolation` +
-//! `tx-in-loop-long-hold` tests (split from `db.rs`).
+//! `external-call-and-tx` + `multi-write-no-tx` + `write-in-loop-no-tx` + `unawaited-transaction` +
+//! `manual-tx-no-rollback` + `tx-and-empty-catch` + `money-tx-no-isolation-level` +
+//! `tx-and-db-call-in-loop` tests (split from `db.rs`).
 
 use super::*;
 
-// --- external-call-in-tx ---
+// --- external-call-and-tx ---
 
 #[test]
 fn fetch_call_inside_transaction_callback_is_flagged() {
@@ -14,7 +14,7 @@ fn fetch_call_inside_transaction_callback_is_flagged() {
         "declare const prisma: any;\ndeclare function fetch(url: string, init?: any): Promise<any>;\nexport async function checkoutOrder(orderId: string) {\n  await prisma.$transaction(async (tx: any) => {\n    await tx.order.update({ where: { id: orderId }, data: { status: \"paid\" } });\n    await fetch(\"https://payments.example.com/notify\", { method: \"POST\" });\n  });\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "external-call-in-tx");
+    let h = hits(&out, "external-call-and-tx");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 6);
 }
@@ -28,7 +28,7 @@ fn fetch_call_with_no_transaction_in_function_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "external-call-in-tx").is_empty(),
+        hits(&out, "external-call-and-tx").is_empty(),
         "{:?}",
         out.findings
     );
@@ -39,11 +39,11 @@ fn tx_egress_ok_marker_directly_above_the_fetch_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const prisma: any;\ndeclare function fetch(url: string, init?: any): Promise<any>;\nexport async function checkoutOrderMarked(orderId: string) {\n  await prisma.$transaction(async (tx: any) => {\n    await tx.order.update({ where: { id: orderId }, data: { status: \"paid\" } });\n    // external-call-in-tx-ok: payment gateway called via idempotent webhook retry, safe inside tx\n    await fetch(\"https://payments.example.com/notify\", { method: \"POST\" });\n  });\n}\n",
+        "declare const prisma: any;\ndeclare function fetch(url: string, init?: any): Promise<any>;\nexport async function checkoutOrderMarked(orderId: string) {\n  await prisma.$transaction(async (tx: any) => {\n    await tx.order.update({ where: { id: orderId }, data: { status: \"paid\" } });\n    // zzop-external-call-and-tx-ok: payment gateway called via idempotent webhook retry, safe inside tx\n    await fetch(\"https://payments.example.com/notify\", { method: \"POST\" });\n  });\n}\n",
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "external-call-in-tx").is_empty(),
+        hits(&out, "external-call-and-tx").is_empty(),
         "{:?}",
         out.findings
     );
@@ -131,7 +131,7 @@ fn multi_write_tx_ok_marker_directly_above_the_mutate_line_suppresses_the_findin
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const prisma: any;\nexport async function checkoutAndArchiveMarked(id: string) {\n  await prisma.order.create({ data: { id } });\n  // multi-write-no-tx-ok: archive failure is acceptable, the order is already recorded\n  await prisma.order.update({ where: { id }, data: { archived: true } });\n}\n",
+        "declare const prisma: any;\nexport async function checkoutAndArchiveMarked(id: string) {\n  await prisma.order.create({ data: { id } });\n  // zzop-multi-write-no-tx-ok: archive failure is acceptable, the order is already recorded\n  await prisma.order.update({ where: { id }, data: { archived: true } });\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -194,7 +194,7 @@ fn write_in_loop_ok_marker_directly_above_the_write_line_suppresses_the_finding(
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const prisma: any;\ndeclare const users: { id: string }[];\nexport async function activateAllMarked() {\n  for (const u of users) {\n    // write-in-loop-no-tx-ok: idempotent per-row activation flag, safe to autocommit\n    await prisma.account.update({ where: { id: u.id }, data: { active: true } });\n  }\n}\n",
+        "declare const prisma: any;\ndeclare const users: { id: string }[];\nexport async function activateAllMarked() {\n  for (const u of users) {\n    // zzop-write-in-loop-no-tx-ok: idempotent per-row activation flag, safe to autocommit\n    await prisma.account.update({ where: { id: u.id }, data: { active: true } });\n  }\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -271,7 +271,7 @@ fn unawaited_tx_ok_marker_directly_above_the_transaction_line_suppresses_the_fin
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const prisma: any;\ndeclare const op1: any;\ndeclare const op2: any;\nexport async function checkoutBatchMarked() {\n  // unawaited-transaction-ok: fire-and-forget audit transaction, failure acceptable\n  prisma.$transaction([op1, op2]);\n}\n",
+        "declare const prisma: any;\ndeclare const op1: any;\ndeclare const op2: any;\nexport async function checkoutBatchMarked() {\n  // zzop-unawaited-transaction-ok: fire-and-forget audit transaction, failure acceptable\n  prisma.$transaction([op1, op2]);\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -334,7 +334,7 @@ fn manual_tx_ok_marker_directly_above_the_begin_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const client: any;\nexport async function transferFundsMarked(from: string, to: string, amount: number) {\n  // manual-tx-no-rollback-ok: legacy migration script, rollback handled by the caller's outer transaction\n  await client.query(\"BEGIN\");\n  await client.query(\"INSERT INTO ledger (acct, amount) VALUES ($1, $2)\", [from, -amount]);\n  await client.query(\"COMMIT\");\n}\n",
+        "declare const client: any;\nexport async function transferFundsMarked(from: string, to: string, amount: number) {\n  // zzop-manual-tx-no-rollback-ok: legacy migration script, rollback handled by the caller's outer transaction\n  await client.query(\"BEGIN\");\n  await client.query(\"INSERT INTO ledger (acct, amount) VALUES ($1, $2)\", [from, -amount]);\n  await client.query(\"COMMIT\");\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -344,7 +344,7 @@ fn manual_tx_ok_marker_directly_above_the_begin_line_suppresses_the_finding() {
     );
 }
 
-// --- tx-swallows-error-commits ---
+// --- tx-and-empty-catch ---
 
 #[test]
 fn empty_catch_inside_a_transaction_callback_is_flagged() {
@@ -354,7 +354,7 @@ fn empty_catch_inside_a_transaction_callback_is_flagged() {
         "declare const prisma: any;\ndeclare function credit(tx: any, amount: number): Promise<void>;\nexport async function payout(amount: number) {\n  await prisma.$transaction(async (tx: any) => {\n    try {\n      await credit(tx, amount);\n    } catch {}\n  });\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "tx-swallows-error-commits");
+    let h = hits(&out, "tx-and-empty-catch");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 7);
 }
@@ -368,7 +368,7 @@ fn catch_that_rethrows_inside_a_transaction_callback_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "tx-swallows-error-commits").is_empty(),
+        hits(&out, "tx-and-empty-catch").is_empty(),
         "{:?}",
         out.findings
     );
@@ -383,7 +383,7 @@ fn empty_catch_with_no_transaction_anywhere_in_the_function_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "tx-swallows-error-commits").is_empty(),
+        hits(&out, "tx-and-empty-catch").is_empty(),
         "{:?}",
         out.findings
     );
@@ -394,11 +394,11 @@ fn tx_catch_ok_marker_directly_above_the_empty_catch_line_suppresses_the_finding
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const prisma: any;\ndeclare function credit(tx: any, amount: number): Promise<void>;\nexport async function payoutMarked(amount: number) {\n  await prisma.$transaction(async (tx: any) => {\n    try {\n      await credit(tx, amount);\n      // tx-swallows-error-commits-ok: credit failure intentionally ignored, payout already recorded elsewhere\n    } catch {}\n  });\n}\n",
+        "declare const prisma: any;\ndeclare function credit(tx: any, amount: number): Promise<void>;\nexport async function payoutMarked(amount: number) {\n  await prisma.$transaction(async (tx: any) => {\n    try {\n      await credit(tx, amount);\n      // zzop-tx-and-empty-catch-ok: credit failure intentionally ignored, payout already recorded elsewhere\n    } catch {}\n  });\n}\n",
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "tx-swallows-error-commits").is_empty(),
+        hits(&out, "tx-and-empty-catch").is_empty(),
         "{:?}",
         out.findings
     );
@@ -436,7 +436,7 @@ fn awaited_interactive_transaction_callback_form_is_not_flagged() {
     );
 }
 
-// --- critical-write-default-isolation ---
+// --- money-tx-no-isolation-level ---
 
 #[test]
 fn money_tx_with_no_explicit_isolation_is_flagged() {
@@ -446,7 +446,7 @@ fn money_tx_with_no_explicit_isolation_is_flagged() {
         "declare const prisma: any;\ndeclare const amt: number;\nexport async function transferFunds(accountId: string) {\n  await prisma.$transaction(async (tx: any) => {\n    const acct = await tx.account.findUnique({ where: { id: accountId } });\n    await tx.account.update({ where: { id: accountId }, data: { balance: acct.balance - amt } });\n  });\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "critical-write-default-isolation");
+    let h = hits(&out, "money-tx-no-isolation-level");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 4);
 }
@@ -463,7 +463,7 @@ fn money_tx_with_explicit_serializable_isolation_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "critical-write-default-isolation").is_empty(),
+        hits(&out, "money-tx-no-isolation-level").is_empty(),
         "{:?}",
         out.findings
     );
@@ -480,7 +480,7 @@ fn tx_over_non_money_model_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "critical-write-default-isolation").is_empty(),
+        hits(&out, "money-tx-no-isolation-level").is_empty(),
         "{:?}",
         out.findings
     );
@@ -491,17 +491,17 @@ fn tx_isolation_ok_marker_directly_above_the_transaction_line_suppresses_the_fin
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const prisma: any;\ndeclare const amt: number;\nexport async function transferFundsMarked(accountId: string) {\n  // critical-write-default-isolation-ok: single-writer offline batch job, no concurrent access possible\n  await prisma.$transaction(async (tx: any) => {\n    const acct = await tx.account.findUnique({ where: { id: accountId } });\n    await tx.account.update({ where: { id: accountId }, data: { balance: acct.balance - amt } });\n  });\n}\n",
+        "declare const prisma: any;\ndeclare const amt: number;\nexport async function transferFundsMarked(accountId: string) {\n  // zzop-money-tx-no-isolation-level-ok: single-writer offline batch job, no concurrent access possible\n  await prisma.$transaction(async (tx: any) => {\n    const acct = await tx.account.findUnique({ where: { id: accountId } });\n    await tx.account.update({ where: { id: accountId }, data: { balance: acct.balance - amt } });\n  });\n}\n",
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "critical-write-default-isolation").is_empty(),
+        hits(&out, "money-tx-no-isolation-level").is_empty(),
         "{:?}",
         out.findings
     );
 }
 
-// --- tx-in-loop-long-hold ---
+// --- tx-and-db-call-in-loop ---
 
 #[test]
 fn tx_call_inside_for_of_loop_within_a_transaction_is_flagged() {
@@ -514,7 +514,7 @@ fn tx_call_inside_for_of_loop_within_a_transaction_is_flagged() {
         "declare const prisma: any;\ndeclare const users: { id: string }[];\nexport async function activateAllTx() {\n  await prisma.$transaction(async (tx: any) => {\n    for (const u of users) {\n      await tx.account.update({ where: { id: u.id }, data: { active: true } });\n    }\n  });\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "tx-in-loop-long-hold");
+    let h = hits(&out, "tx-and-db-call-in-loop");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 6);
     // Mirror-image assertion: `write-in-loop-no-tx` must NOT fire on this same fixture (the tx-wrap
@@ -539,7 +539,7 @@ fn write_in_loop_with_no_transaction_does_not_flag_tx_in_loop_long_hold() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "tx-in-loop-long-hold").is_empty(),
+        hits(&out, "tx-and-db-call-in-loop").is_empty(),
         "{:?}",
         out.findings
     );
@@ -557,7 +557,7 @@ fn tx_call_outside_any_loop_within_a_transaction_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "tx-in-loop-long-hold").is_empty(),
+        hits(&out, "tx-and-db-call-in-loop").is_empty(),
         "{:?}",
         out.findings
     );
@@ -568,11 +568,11 @@ fn tx_loop_hold_ok_marker_directly_above_the_tx_call_line_suppresses_the_finding
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const prisma: any;\ndeclare const users: { id: string }[];\nexport async function activateAllTxMarked() {\n  await prisma.$transaction(async (tx: any) => {\n    for (const u of users) {\n      // tx-in-loop-long-hold-ok: bounded fixture list, at most 5 rows per invocation\n      await tx.account.update({ where: { id: u.id }, data: { active: true } });\n    }\n  });\n}\n",
+        "declare const prisma: any;\ndeclare const users: { id: string }[];\nexport async function activateAllTxMarked() {\n  await prisma.$transaction(async (tx: any) => {\n    for (const u of users) {\n      // zzop-tx-and-db-call-in-loop-ok: bounded fixture list, at most 5 rows per invocation\n      await tx.account.update({ where: { id: u.id }, data: { active: true } });\n    }\n  });\n}\n",
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "tx-in-loop-long-hold").is_empty(),
+        hits(&out, "tx-and-db-call-in-loop").is_empty(),
         "{:?}",
         out.findings
     );

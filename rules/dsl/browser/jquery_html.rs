@@ -109,7 +109,7 @@ fn jquery_html_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-browser");
     dir.write(
         "vetted-jq.js",
-        "import $ from 'jquery';\nexport function render(userHtml) {\n  // jquery-html-sink-ok: sanitized via DOMPurify above\n  $('#box').html(userHtml);\n}\n",
+        "import $ from 'jquery';\nexport function render(userHtml) {\n  // zzop-jquery-html-sink-ok: sanitized via DOMPurify above\n  $('#box').html(userHtml);\n}\n",
     );
     let out = scan(&dir);
     assert!(

@@ -162,6 +162,44 @@ fn verb_only_or_disjunction_unions_verbs() {
     assert_eq!(got, vec!["DELETE /x", "PUT /x"]);
 }
 
+// -- Verb emission order is sorted, not source-appearance order (both branch kinds) --
+
+/// The `if`-chain verb scan. Source order is `POST, DELETE, GET`; the emitted order must be
+/// alphabetical, so these two disagree and the assertion is about the order itself — `keys` is NOT
+/// sorted here, unlike every other multi-verb test above.
+#[test]
+fn if_chain_emits_verbs_sorted_not_in_source_order() {
+    let src = concat!(
+        "function dispatch(request: Request, url: URL) {\n",
+        "  if (url.pathname === \"/x\") {\n",
+        "    if (request.method === \"POST\") return created();\n",
+        "    if (request.method === \"DELETE\") return gone();\n",
+        "    if (request.method === \"GET\") return ok();\n",
+        "  }\n",
+        "}\n"
+    );
+    let out = extract_pathname_dispatch_provides("worker.ts", src);
+    assert_eq!(keys(&out), vec!["DELETE /x", "GET /x", "POST /x"]);
+}
+
+/// The `switch (url.pathname)` case-body verb scan — a second, independent verb list that needs the
+/// same ordering. Source order is `PUT, GET`.
+#[test]
+fn switch_case_emits_verbs_sorted_not_in_source_order() {
+    let src = concat!(
+        "function dispatch(request: Request, url: URL) {\n",
+        "  switch (url.pathname) {\n",
+        "    case \"/x\":\n",
+        "      if (request.method === \"PUT\") return ok();\n",
+        "      if (request.method === \"GET\") return ok();\n",
+        "      break;\n",
+        "  }\n",
+        "}\n"
+    );
+    let out = extract_pathname_dispatch_provides("worker.ts", src);
+    assert_eq!(keys(&out), vec!["GET /x", "PUT /x"]);
+}
+
 // -- Mixed OR (path || flag) is discarded entirely --
 
 #[test]

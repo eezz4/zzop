@@ -1,7 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-  # Internal engine crates (not published directly; consumed by crates/host below)
+  # Internal library crates (not published directly), grouped by ROLE — this is not a topological order
+  # and nothing should read it as one (`facade` sits above `config` yet is listed first; `engine` above
+  # `git`/`cache` likewise). Cargo resolves the real dependency DAG from each crate's own manifest.
+  # Roles: core/metrics/engine/git/cache are the analysis engine, `facade` is its JSON+meaning contract
+  # layer, `config` owns config and request assembly, and `summary` is the host-shared answer layer BOTH
+  # products below call.
   "crates/core",
   "crates/metrics",
   "crates/engine",
@@ -11,14 +16,10 @@ members = [
   "crates/config",
   "crates/summary",
 
-  # Host crate — lib-only shared dispatch (`tools`) + embedded contract docs (`embedded`) + the shared
-  # `version()` (`server`), consumed by BOTH product crates below. Carries no [[bin]] of its own.
-  "crates/host",
-
   # Product layer: packages/ holds everything that SHIPS, one dir per product. `packages/cli` is a
   # zero-logic npm shim (pure JS, spawns the native `zzop` binary — not a Cargo member); the two below
   # are the native binaries themselves, each its own Cargo package building exactly one [[bin]] over
-  # crates/host + crates/summary. `packages/mcpb` (Desktop manifest) and `packages/cli/npm/*` (platform
+  # crates/summary. `packages/mcpb` (Desktop manifest) and `packages/cli/npm/*` (platform
   # sub-packages) are npm/manifest-only, likewise not Cargo members. The napi addon (`@zzop/native`,
   # formerly `packages/native`) was removed 2026-07-23 — nothing in the distribution used it.
   "packages/cli-bin", # -> zzop[.exe]     (CLI argv dispatch + CLI helpers)
@@ -50,11 +51,15 @@ members = [
 ]
 
 [workspace.package]
-# Version SSOT (2026-07-22 reform): the real release version lives here, bumped per release. CI verifies
-# the pushed `v*` tag, `.claude-plugin/plugin.json`, and the MCPB manifest all match this. `version_string()`
+# Version SSOT (2026-07-22 reform): the real release version lives here, bumped per release. CI's
+# `verify-plugin-version` job (.github/workflows/prebuild.yml) VERIFIES that the release version, this
+# file, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` and `server.json` all agree —
+# a mismatch fails the run before anything is published. The MCPB manifest is NOT in that set: it is
+# STAMPED from this version with `jq` at release time (`packages/mcpb/manifest.json` stays committed as
+# the `0.0.0` placeholder), and a stamp cannot fail the way a verification can. `version_string()`
 # / the binaries report `CARGO_PKG_VERSION` directly (no `ZZOP_RELEASE_VERSION` env). Cache-bust tokens are
 # stamped with this version at their scope's last change — see the cache decision.
-version = "0.24.0"
+version = "0.25.0"
 edition = "2021"
 license = "MIT"
 

@@ -95,40 +95,65 @@ fn bundled_pack_defs(warnings: &mut Vec<String>) -> Vec<zzop_core::RulePackDef> 
     defs
 }
 
-/// A JSON-serializable `{valid, issues}` report — the shared output shape of
-/// [`validate_envelope_only_json`] and [`crate::rule_pack::validate_rule_pack_json`].
+/// A JSON-serializable `{valid, issues}` report — the output shape of
+/// [`crate::rule_pack::validate_rule_pack_json`].
+///
+/// The envelope report ([`ValidateEnvelopeReport`]) deliberately does NOT reuse this: it carries a third
+/// field, `hints`, and adding that field here would make every rule-pack reply publish an always-empty
+/// `"hints": []`. That reads as "the hint pass found nothing" when the truth is "rule-pack validation
+/// has no hint pass at all" — a claim this crate must not make on a surface that has no such judgment.
 #[derive(Serialize)]
 pub(crate) struct ValidateReport {
     pub(crate) valid: bool,
     pub(crate) issues: Vec<String>,
 }
 
-/// `validateEnvelopeOnly(envelopeJson)`: runs `zzop_core::validate_envelope` alone — no `configJson`, no
-/// pack loading, no `zzop_engine::analyze_envelope` — and reports the result as a JSON `{"valid": bool,
-/// "issues": ["..."]}`. This is `analyze_envelope_json`'s validation half (see its use of
-/// `zzop_core::validate_envelope` above) split out on its own so an external adapter author gets fast,
-/// offline "is my envelope well-formed" feedback (`zzop validate-envelope <path>`) without needing a full
-/// engine run or even a `configJson` at all.
+/// A JSON-serializable `{valid, issues, hints}` report — [`validate_envelope_only_json`]'s output shape.
+///
+/// `issues` and `hints` are DIFFERENT AXES and the field split is the contract: `issues` are why the
+/// envelope is rejected (they, and only they, decide `valid` and therefore the `zzop validate-envelope`
+/// exit code), while `hints` are shapes that are accepted but almost certainly not what the producer
+/// meant — an absolute `files[].path`, a non-normalized `http` key (see `zzop_core::envelope_hints`).
+/// A hint can never flip `valid`: both fields are read off one `zzop_core::EnvelopeVerdict`, whose
+/// `result` is computed from the structural pass alone.
+#[derive(Serialize)]
+struct ValidateEnvelopeReport {
+    valid: bool,
+    issues: Vec<String>,
+    /// Always present, even when empty — an authoring surface that omitted the field on "nothing to
+    /// say" would be indistinguishable from an older build that had no hint pass.
+    hints: Vec<String>,
+}
+
+/// `validateEnvelopeOnly(envelopeJson)`: runs `zzop_core::validate_envelope_verdict` alone — no
+/// `configJson`, no pack loading, no `zzop_engine::analyze_envelope` — and reports the result as a JSON
+/// `{"valid": bool, "issues": ["..."], "hints": ["..."]}`. This is `analyze_envelope_json`'s validation
+/// half (see its use of `zzop_core::validate_envelope` above) split out on its own so an external adapter
+/// author gets fast, offline "is my envelope well-formed" feedback (`zzop validate-envelope <path>`,
+/// the `validate_envelope` MCP tool) without needing a full engine run or even a `configJson` at all.
+///
+/// `hints` is the ADVISORY axis and never touches `valid` — see [`ValidateEnvelopeReport`]. Both hosts
+/// get it from this one function, so neither can drift into judging envelopes on its own.
 ///
 /// Unlike every other `*_json` function in this crate, this one never fails: an unparseable or
 /// semantically invalid envelope still produces an ordinary `{"valid": false, "issues": [...]}` report,
 /// not an `Err` — a validity CHECK cannot itself be "wrong" the way a malformed request can, so there is
-/// nothing here for `addon.rs`'s `catch` to turn into a JS `Error` except an actual panic.
+/// nothing here for a host's error path to turn into an `Error` except an actual panic.
 pub fn validate_envelope_only_json(envelope_json: &str) -> String {
-    let report = match zzop_core::validate_envelope(envelope_json) {
-        Ok(_) => ValidateReport {
-            valid: true,
-            issues: Vec::new(),
-        },
-        Err(issues) => ValidateReport {
-            valid: false,
-            issues,
-        },
+    let verdict = zzop_core::validate_envelope_verdict(envelope_json);
+    let (valid, issues) = match verdict.result {
+        Ok(_) => (true, Vec::new()),
+        Err(issues) => (false, issues),
+    };
+    let report = ValidateEnvelopeReport {
+        valid,
+        issues,
+        hints: verdict.hints,
     };
 
     serde_json::to_string(&report).unwrap_or_else(|e| {
         format!(
-            r#"{{"valid":false,"issues":["zzop-facade: failed to serialize validate report: {e}"]}}"#
+            r#"{{"valid":false,"issues":["zzop-facade: failed to serialize validate report: {e}"],"hints":[]}}"#
         )
     })
 }

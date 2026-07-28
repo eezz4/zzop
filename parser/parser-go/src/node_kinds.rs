@@ -5,6 +5,14 @@
 //! == "..."` / `match node.kind() { ... }` string literal elsewhere in this crate — a mismatch here
 //! (an entry that's no longer matched anywhere, or a matched kind missing from this list) is a review
 //! smell, not just a test-coverage gap.
+//!
+//! Both directions are now MACHINE-checked, which is why the paragraph above is a rule rather than a
+//! hope: `tests::node_kinds_are_pinned_to_the_grammar` walks this list against the grammar, and
+//! `tests::every_grammar_node_kind_literal_in_this_crate_is_pinned` walks the crate's own source text
+//! back against this list. The reverse direction was added 2026-07-28 and immediately found six kinds
+//! the code matched and this list had never heard of (`comment`, `composite_literal`,
+//! `field_declaration`, `field_declaration_list`, `return_statement`, `unary_expression`) — a list
+//! that only ever validated itself.
 pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     // Root-level hopeless-input gate (crate root `parse_tree`)
     "package_clause",
@@ -16,6 +24,9 @@ pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     "type_alias",
     "struct_type",
     "interface_type",
+    // Struct field walk (`adapters::gorm` — model field discovery)
+    "field_declaration_list",
+    "field_declaration",
     "const_declaration",
     "const_spec",
     "var_declaration",
@@ -44,6 +55,12 @@ pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     "assignment_statement",
     "expression_list",
     "call_expression",
+    "return_statement",
+    // Composite-literal / address-of unwrapping (`adapters::gorm`, `adapters::http_clients::instances`)
+    "composite_literal",
+    "unary_expression",
+    // Trivia skipped when reading a declaration's children (`lang::symbols`)
+    "comment",
     // Loop-body line spans (`lang::loop_spans`) — the single node kind covering every Go loop form
     // (classic/condition-only/infinite/range), per that module's own doc.
     "for_statement",

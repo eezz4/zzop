@@ -82,7 +82,7 @@ fn weak_hash_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/auth.ts",
-        "declare const password: string;\ndeclare function md5(s: string): string;\n// weak-password-hash-ok: legacy checksum for cache-busting, not used for auth\nexport const hash = md5(password);\n",
+        "declare const password: string;\ndeclare function md5(s: string): string;\n// zzop-weak-password-hash-ok: legacy checksum for cache-busting, not used for auth\nexport const hash = md5(password);\n",
     );
     let out = scan(&dir);
     assert!(
@@ -143,7 +143,7 @@ fn weak_random_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/token.ts",
-        "export function makeToken() {\n  // weak-token-random-ok: non-security cache-busting value, not used for auth\n  const token = Math.random().toString(36);\n  return token;\n}\n",
+        "export function makeToken() {\n  // zzop-weak-token-random-ok: non-security cache-busting value, not used for auth\n  const token = Math.random().toString(36);\n  return token;\n}\n",
     );
     let out = scan(&dir);
     assert!(

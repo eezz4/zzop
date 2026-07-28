@@ -15,7 +15,8 @@ it maps to are honored by every host, including the Node-free `zzop-mcp` binary 
 `zzop-facade` embedding. **Mode A (full envelope, `analyze_envelope`)** is reachable from Rust, from a
 direct `zzop-facade` embedding, AND from the Node-free `zzop-mcp` binary — its `analyze_envelope` MCP
 tool and `zzop analyze-envelope <envelope.json>` CLI subcommand run the same facade call path
-(zero-config only; an envelope has no filesystem location for a config file to auto-discover).
+(the one lane needing no config: an envelope has no filesystem location for one to auto-discover, so
+there is none to require either — every OTHER analysis lane refuses a tree without one).
 `zzop-mcp`'s `validate_envelope` tool (and `zzop validate-envelope <file>` subcommand) is a
 separate, structural-validation-only story, distinct from actually running one. To RUN a Mode A
 envelope, use the `zzop-mcp` binary (`zzop analyze-envelope <file>`, or its `analyze_envelope` MCP
@@ -155,12 +156,11 @@ normative merge semantics these warnings are checking.
 
 ## Adapter kit
 
-[`examples/adapter-kit/`](../../examples/adapter-kit/) is a plain-JS, dependency-free package that
-extracts the boilerplate every hand-rolled adapter in `examples/` (openapi-sdk-adapter,
-react-query-adapter, wrapper-adapter, svelte-adapter) re-derives on its own: deterministic file
+[`examples/adapters/adapter-kit/`](../../examples/adapters/adapter-kit/) is a plain-JS, dependency-free package that
+extracts the boilerplate every hand-rolled adapter otherwise re-derives on its own: deterministic file
 walking (`lib/walk.js`), a validating `EnvelopeBuilder` (`lib/envelope.js`) that assembles a
 schema-valid envelope from `addFile`/`addProvide`/`addConsume`/`markEntry` calls, and the byte-exact
 `normalizeProvideKey`/`normalizeConsumeKey` HTTP key normalizers (`lib/keys.js`) — parity-tested
-against this document's own `key-normalization.fixture.json` above. It lives under `examples/`
+against this document's own `key-normalization.fixture.json` above. It lives under `examples/adapters/`
 deliberately (not published to npm); copy it into a new adapter the same way you'd copy any other
 example.

@@ -1,8 +1,8 @@
-//! `client-per-request` + `connection-no-release` tests (split from `db.rs`).
+//! `client-new-in-handler` + `connection-no-release` tests (split from `db.rs`).
 
 use super::*;
 
-// --- client-per-request ---
+// --- client-new-in-handler ---
 
 #[test]
 fn new_prisma_client_inside_request_handler_is_flagged() {
@@ -12,7 +12,7 @@ fn new_prisma_client_inside_request_handler_is_flagged() {
         "declare class PrismaClient { user: any; }\nexport async function handleRequest(req: any, res: any) {\n  const prisma = new PrismaClient();\n  const users = await prisma.user.findMany();\n  res.status(200).json(users);\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "client-per-request");
+    let h = hits(&out, "client-new-in-handler");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 3);
 }
@@ -27,7 +27,7 @@ fn module_top_level_singleton_prisma_client_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "client-per-request").is_empty(),
+        hits(&out, "client-new-in-handler").is_empty(),
         "{:?}",
         out.findings
     );
@@ -38,11 +38,11 @@ fn prisma_client_ok_marker_directly_above_the_new_client_line_suppresses_the_fin
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/handler.ts",
-        "declare class PrismaClient { user: any; }\nexport async function handleAdminRequest(req: any, res: any) {\n  // client-per-request-ok: cold-start admin tool, single-invocation script\n  const prisma = new PrismaClient();\n  const users = await prisma.user.findMany();\n  res.status(200).json(users);\n}\n",
+        "declare class PrismaClient { user: any; }\nexport async function handleAdminRequest(req: any, res: any) {\n  // zzop-client-new-in-handler-ok: cold-start admin tool, single-invocation script\n  const prisma = new PrismaClient();\n  const users = await prisma.user.findMany();\n  res.status(200).json(users);\n}\n",
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "client-per-request").is_empty(),
+        hits(&out, "client-new-in-handler").is_empty(),
         "{:?}",
         out.findings
     );
@@ -62,7 +62,7 @@ fn fetch_response_variable_named_res_is_not_handler_context_evidence() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "client-per-request").is_empty(),
+        hits(&out, "client-new-in-handler").is_empty(),
         "{:?}",
         out.findings
     );
@@ -70,7 +70,7 @@ fn fetch_response_variable_named_res_is_not_handler_context_evidence() {
 
 #[test]
 fn handler_with_only_bare_res_json_evidence_is_now_silent_accepted_false_negative() {
-    // Documented limitation (see db.json's client-per-request message): `res.json(x)` alone no longer
+    // Documented limitation (see db.json's client-new-in-handler message): `res.json(x)` alone no longer
     // counts as handler-context evidence — deliberately excluded because a fetch `Response` also has
     // `.json()`, the same false-positive class the vocabulary swap above fixes. A handler whose ONLY
     // evidence is `res.json(...)` (no `req.`/`request.` member access, no other response-API call) is now an
@@ -82,7 +82,7 @@ fn handler_with_only_bare_res_json_evidence_is_now_silent_accepted_false_negativ
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "client-per-request").is_empty(),
+        hits(&out, "client-new-in-handler").is_empty(),
         "{:?}",
         out.findings
     );
@@ -184,7 +184,7 @@ fn connection_release_ok_marker_directly_above_the_acquire_line_suppresses_the_f
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const pool: any;\nexport async function runQueryMarked(sql: string) {\n  // connection-no-release-ok: pooled test harness connection, released by the test teardown hook\n  const conn = await pool.connect();\n  await conn.query(sql);\n}\n",
+        "declare const pool: any;\nexport async function runQueryMarked(sql: string) {\n  // zzop-connection-no-release-ok: pooled test harness connection, released by the test teardown hook\n  const conn = await pool.connect();\n  await conn.query(sql);\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -232,7 +232,7 @@ fn client_in_loop_ok_marker_directly_above_the_ctor_line_suppresses_the_finding(
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare class PrismaClient { user: any; }\ndeclare const ids: string[];\nexport async function f() {\n  for (const id of ids) {\n    // client-new-in-loop-ok: intentional per-shard client, bounded fixture list\n    const c = new PrismaClient();\n    await c.user.findUnique({ where: { id } });\n  }\n}\n",
+        "declare class PrismaClient { user: any; }\ndeclare const ids: string[];\nexport async function f() {\n  for (const id of ids) {\n    // zzop-client-new-in-loop-ok: intentional per-shard client, bounded fixture list\n    const c = new PrismaClient();\n    await c.user.findUnique({ where: { id } });\n  }\n}\n",
     );
     let out = scan(&dir);
     assert!(

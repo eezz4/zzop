@@ -7,7 +7,7 @@
 //! - `symbols.rs`' deferred-export pass sees the same clause but only flips the LOCAL declaration's
 //!   `exported` flag; a `SourceSymbol` is keyed by its declaration name, so `Y` has nowhere to live.
 //!
-//! Nobody was left holding the local -> public mapping, and `dead-exports` matches an importer's
+//! Nobody was left holding the local -> public mapping, and `unimported-export` matches an importer's
 //! `file#Y` key against a candidate named `X`: the link breaks and a live export reads as dead.
 //! Measured on mono-hub: `interface State` + `export type { State as MortgageState }` with four
 //! importers of `MortgageState`, reported `in-file-only`.

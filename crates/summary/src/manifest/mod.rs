@@ -46,10 +46,10 @@ pub use diff::diff_manifests_json;
 const RELATIONS: [&str; 3] = ["provides", "edges", "buckets"];
 
 /// Builds the structural manifest for a cross-layer run — same two source modes as `cross_summary`
-/// (`paths` XOR `configPath`, both through `crate::trees::load_trees_request`), same single
+/// (`paths` XOR `configPath`, both through `zzop_config::trees::load_trees_request`), same single
 /// `analyzeTrees` engine path, different projection: identity instead of a capped summary.
 pub fn manifest_json(paths: &[String], config_path: Option<&str>) -> Result<String, String> {
-    let loaded = crate::trees::load_trees_request("manifest", paths, config_path)?;
+    let loaded = zzop_config::trees::load_trees_request("manifest", paths, config_path)?;
     let out = zzop_facade::analyze_trees_json(&loaded.request.to_string())?;
     let v = serde_json::from_str::<serde_json::Value>(&out).map_err(|e| e.to_string())?;
     Ok(project(&v))

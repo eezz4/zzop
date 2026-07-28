@@ -142,7 +142,7 @@ fn commented_out_eager_true_line_is_not_flagged() {
 fn eager_relation_ok_marker_above_the_declaration_suppresses_it() {
     let f = eager_scan(
         "photo.entity.ts",
-        "import { Entity, OneToMany } from \"typeorm\";\nimport { Photo } from \"./photo.entity\";\n@Entity()\nexport class User {\n  // eager-relation-declared-ok: tiny fixed lookup table, always read with its parent\n  @OneToMany(() => Photo, (photo) => photo.user, { eager: true })\n  photos: Photo[];\n}\n",
+        "import { Entity, OneToMany } from \"typeorm\";\nimport { Photo } from \"./photo.entity\";\n@Entity()\nexport class User {\n  // zzop-eager-relation-declared-ok: tiny fixed lookup table, always read with its parent\n  @OneToMany(() => Photo, (photo) => photo.user, { eager: true })\n  photos: Photo[];\n}\n",
     );
     assert!(f.is_empty(), "{f:?}");
 }

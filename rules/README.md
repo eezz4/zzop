@@ -9,12 +9,13 @@ whether the rule is common or environment-specific).
   `core` — `core` stays rule-agnostic; see `crates/core/Cargo.toml` vs `crates/engine/Cargo.toml`). Full
   native speed, shares IR memory directly, oxlint-style single traversal.
 - **Distribution**: bundled in the engine's prebuilds (5 platforms). Changing one requires rebuilding.
-- **Examples**: `rules-graph` (circular, unreachable, dead-candidates, dead-exports), `rules-http`
+- **Examples**: `rules-graph` (circular, unreachable, dead-candidates, unimported-export), `rules-http`
   (single-tree HTTP/route rules: duplicate-route, route-shadowing, mutating-route-no-auth,
   unprovided-consume, plus the 2 call-graph-BFS scanners unsafe-read-endpoint and non-idempotent-write),
   `rules-cross-layer` (the 25 multi-tree `cross-layer/*` rules joining HTTP/DB/tRPC IO facts across
   trees), and `rules-schema`
-  (Prisma structural rules + the usage-aware dead-model/dead-field/schema-churn checks). Seams, criticality,
+  (the 9 Prisma structural rules + the 3 usage-aware checks, each a registered `schema/*` id of its own
+  behind the `schema-structural`/`schema-usage` family gates). Seams, criticality,
   scores, health, and recommendations are **not** rules — they're scores computed in `crates/metrics`,
   registered via that crate's own `register_native_analyses` (see "Adding a rule" below), and only ride the
   same `RuleConfig` disable/suppress/severity-override id space as native rules do. Layer-violations/feature-envy are a roadmap item

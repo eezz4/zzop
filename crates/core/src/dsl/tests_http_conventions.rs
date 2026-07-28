@@ -151,10 +151,7 @@ fn http_conventions_flags_exported_handler_with_bad_naming() {
         ],
         io: None,
     }];
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
-    };
+    let ctx = RuleContext { files: &files };
     let f = eval_pack(&http_conventions_pack(), &ctx);
     let hits: Vec<_> = f
         .iter()

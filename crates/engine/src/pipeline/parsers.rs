@@ -19,13 +19,14 @@ pub(super) fn lexical_loc(text: &str) -> u32 {
 /// the lexical fallback; `true` proceeds to `parse_symbols`/`parse_imports`, still `catch_unwind`-wrapped
 /// as defense in depth.
 ///
-/// Also computes `used_names` (`parse_local_identifier_refs`) for `dead-exports`. Known cost: each of
+/// Also computes `used_names` (`parse_local_identifier_refs`) for `unimported-export`. Known cost: each of
 /// the three extraction calls parses independently, so a well-formed file is parsed by swc three times
 /// per pass (four counting `parse_ok`'s probe) — `zzop_cache::FileIrSlice::used_names` caches the result
 /// so a warm run pays this only once per distinct file content.
 pub(super) fn parse_typescript(
     rel: &str,
     text: &str,
+    write_site_vocab: &zzop_parser_typescript::WriteSiteVocab<'_>,
 ) -> (Vec<SourceSymbol>, Option<ImportMap>, u32, bool, Vec<String>) {
     if !zzop_parser_typescript::parse_ok(rel, text) {
         return (
@@ -37,7 +38,7 @@ pub(super) fn parse_typescript(
         );
     }
     let result = std::panic::catch_unwind(|| {
-        let symbols = zzop_parser_typescript::parse_symbols(rel, text);
+        let symbols = zzop_parser_typescript::parse_symbols_with_vocab(rel, text, write_site_vocab);
         let imports = zzop_parser_typescript::parse_imports(rel, text);
         let loc = zzop_parser_typescript::count_loc(text);
         let used_names: Vec<String> =

@@ -57,10 +57,12 @@ fn levenshtein(a: &str, b: &str) -> usize {
 /// or the whole lowercased key). Only keys within half the pattern's length qualify, so a garbage
 /// pattern with no real near-miss still returns `[]` rather than dumping the whole key set. Empty
 /// pattern returns `[]` (nothing meaningful to rank against).
-pub(crate) fn nearest_keys(cross_layer: &Value, pattern: &str) -> Vec<String> {
+///
+/// Returns `(capped list, total that qualified before the cap)` — the caller discloses the difference.
+pub(crate) fn nearest_keys(cross_layer: &Value, pattern: &str) -> (Vec<String>, usize) {
     let needle = pattern.to_lowercase();
     if needle.is_empty() {
-        return Vec::new();
+        return (Vec::new(), 0);
     }
     let threshold = (needle.chars().count() / 2).max(1);
 
@@ -97,8 +99,17 @@ pub(crate) fn nearest_keys(cross_layer: &Value, pattern: &str) -> Vec<String> {
     // Distance first, then lexicographic — deterministic regardless of the buckets' own iteration
     // order (a same-distance tie must not depend on which bucket happened to hold the key).
     ranked.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
+    // Total BEFORE the cap rides back with the list. This lane is the one that most needs it: it runs
+    // only when the facade's substring pass found NOTHING, so the facade's own `suggestionsTruncated`
+    // is always absent here (its total was 0) and this cap would otherwise be the single undisclosed
+    // truncation on the whole reply. A `not-found` verdict plus ten keys that do not include the one
+    // the caller meant reads as "it does not exist".
+    let total = ranked.len();
     ranked.truncate(SUGGESTIONS_LIMIT);
-    ranked.into_iter().map(|(_, k)| k.to_string()).collect()
+    (
+        ranked.into_iter().map(|(_, k)| k.to_string()).collect(),
+        total,
+    )
 }
 
 #[cfg(test)]
@@ -121,7 +132,7 @@ mod tests {
     #[test]
     fn typo_finds_the_near_miss_route() {
         let cl = cross_layer_with_keys(&["GET /api/articles", "GET /api/users"]);
-        let got = nearest_keys(&cl, "atricles");
+        let (got, _) = nearest_keys(&cl, "atricles");
         assert!(
             got.iter().any(|k| k.contains("articles")),
             "expected an articles route among {got:?}"
@@ -131,14 +142,30 @@ mod tests {
     #[test]
     fn garbage_pattern_still_returns_nothing() {
         let cl = cross_layer_with_keys(&["GET /api/articles", "GET /api/users", "DATABASE_URL"]);
-        let got = nearest_keys(&cl, "nonexistent-route-xyz");
+        let (got, _) = nearest_keys(&cl, "nonexistent-route-xyz");
         assert!(got.is_empty(), "garbage must not force a guess: {got:?}");
     }
 
     #[test]
     fn empty_pattern_returns_nothing() {
         let cl = cross_layer_with_keys(&["GET /api/articles"]);
-        assert!(nearest_keys(&cl, "").is_empty());
+        assert_eq!(nearest_keys(&cl, ""), (Vec::<String>::new(), 0));
+    }
+
+    /// Seals the DISCLOSURE half of the cap: the returned total counts everything that qualified, not
+    /// what survived `SUGGESTIONS_LIMIT`. Without it `check_endpoint` shipped ten keys and no sign that
+    /// more existed — on a `not-found` verdict, which reads as "the key does not exist".
+    #[test]
+    fn the_total_counts_qualifying_keys_beyond_the_cap() {
+        let keys: Vec<String> = (0..15).map(|i| format!("GET /api/articles{i}")).collect();
+        let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+        let cl = cross_layer_with_keys(&refs);
+        let (shown, total) = nearest_keys(&cl, "articles");
+        assert_eq!(shown.len(), 10, "the cap still applies: {shown:?}");
+        assert_eq!(
+            total, 15,
+            "but the caller learns how many there really were"
+        );
     }
 
     #[test]
@@ -163,7 +190,7 @@ mod tests {
         // "artacle" is distance 1 from both "article" and "aatacle" would not tie; construct two
         // keys equidistant from the pattern to pin the tie-break rule directly.
         let cl = cross_layer_with_keys(&["GET /api/bxxxxx", "GET /api/axxxxx"]);
-        let got = nearest_keys(&cl, "xxxxx");
+        let (got, _) = nearest_keys(&cl, "xxxxx");
         assert_eq!(
             got,
             vec!["GET /api/axxxxx".to_string(), "GET /api/bxxxxx".to_string()],

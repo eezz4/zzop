@@ -17,7 +17,7 @@ pub(in crate::analyze::assemble) fn is_csharp_source_ext(rel: &str) -> bool {
 /// never a genuinely external (third-party) package. Excluded from the census the same way
 /// `is_java_std_import` excludes `java`/`javax`: `System.*` is the .NET BCL itself, `Microsoft.*` is
 /// Microsoft's own first-party framework surface (ASP.NET Core, EF Core, DI, logging, ...) — neither is a
-/// third-party dependency a `cross-layer/sdk-import-no-visible-consume`-style census should ever flag.
+/// third-party dependency a `cross-layer/untraced-client-import-no-visible-consume`-style census should ever flag.
 const CSHARP_STD_IMPORT_HEADS: &[&str] = &["System", "Microsoft"];
 
 /// True when `specifier`'s FIRST dotted segment is `System` or `Microsoft` — C#'s own BCL/framework

@@ -44,7 +44,9 @@ use zzop_core::{ImportMap, RouterMountEntry, RouterMountFragment};
 
 /// FastAPI's own HTTP-method decorator names — lowercase, UPPERCASE-normalized at emission. A dedicated
 /// vocabulary (not `zzop_core::HTTP_KEY_VERBS`, which is uppercase-spelled): this one names DECORATORS,
-/// that one names KEY-BUILDING verbs; they happen to agree one-for-one for these five.
+/// that one names KEY-BUILDING verbs; they agree one-for-one for these five, and that agreement is
+/// PINNED against core by
+/// `adapters::http_clients::tests::verb_methods_and_fastapi_verb_decorators_are_the_core_verb_set`.
 pub(crate) const VERB_DECORATORS: &[&str] = &["get", "post", "put", "patch", "delete"];
 
 struct ReceiverInfo {
@@ -168,7 +170,7 @@ fn callee_name(func: &Expr) -> Option<&str> {
 /// (`@app.get` -> `["GET"]`), or every string literal in `@app.api_route(..., methods=["GET", "POST"])`'s
 /// `methods=` list. Empty for any other decorator attribute, and for an `api_route` whose `methods=` is
 /// absent or not a literal list (never guessed).
-fn decorator_methods(verb: &str, call: &ruff_python_ast::ExprCall) -> Vec<String> {
+pub(super) fn decorator_methods(verb: &str, call: &ruff_python_ast::ExprCall) -> Vec<String> {
     if VERB_DECORATORS.contains(&verb) {
         return vec![verb.to_ascii_uppercase()];
     }
@@ -194,6 +196,22 @@ fn decorator_methods(verb: &str, call: &ruff_python_ast::ExprCall) -> Vec<String
         }
     }
     methods
+}
+
+/// The LITERAL path a fastapi route decorator registers. Normally positional-0 (`@app.get("/x")`), but
+/// the keyword form `@app.get(path="/x")` is valid FastAPI too — fall back to it rather than dropping the
+/// route. `None` when the path is not a string literal (`@app.get(ROOT)`): the route's URL is then
+/// unknown, so no provide is minted, and `guard::is_route_decorator` shares this function so it mints no
+/// guard line either.
+pub(super) fn decorator_path_literal(call: &ruff_python_ast::ExprCall) -> Option<&str> {
+    let arg = call
+        .arguments
+        .find_positional(0)
+        .or_else(|| call.arguments.find_keyword("path").map(|kw| &kw.value))?;
+    match arg {
+        Expr::StringLiteral(s) => Some(s.value.to_str()),
+        _ => None,
+    }
 }
 
 /// Every verb-decorated route on `f`, keyed by receiver — appended into `entries`.
@@ -229,18 +247,12 @@ fn collect_verb_entries(
         if methods.is_empty() {
             continue;
         }
-        // Path is normally positional-0 (`@app.get("/x")`) but the keyword form `@app.get(path="/x")`
-        // is valid FastAPI too — fall back to it rather than dropping the route.
-        let path_arg = call
-            .arguments
-            .find_positional(0)
-            .or_else(|| call.arguments.find_keyword("path").map(|kw| &kw.value));
-        let Some(Expr::StringLiteral(path_lit)) = path_arg else {
+        let Some(path_lit) = decorator_path_literal(call) else {
             continue;
         };
         let path = match &info.prefix {
-            Some(prefix) => format!("{prefix}{}", path_lit.value.to_str()),
-            None => path_lit.value.to_str().to_string(),
+            Some(prefix) => format!("{prefix}{path_lit}"),
+            None => path_lit.to_string(),
         };
         let line = idx.line_of(dec.range.start());
         let bucket = entries.entry(receiver_name.to_string()).or_default();
@@ -256,6 +268,26 @@ fn collect_verb_entries(
     }
 }
 
+/// Every top-level `FastAPI(...)`/`APIRouter(...)` receiver name in `module` — the receiver gate
+/// `guard::extract_fastapi_guarded_lines` shares with [`extract_fastapi_router_fragments`] above, so a
+/// guard line can only ever be emitted for a decorator this crate would ALSO project as a route.
+/// A `skip_verbs` receiver (non-literal `prefix=`) is excluded here for the same reason it is excluded
+/// there: it projects no verb entries, so there is no provide line to exempt.
+fn route_receiver_names(module: &ruff_python_ast::ModModule) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    for stmt in &module.body {
+        if let Some((name, info)) = match_receiver(stmt) {
+            if info.skip_verbs {
+                out.remove(&name);
+            } else {
+                out.insert(name);
+            }
+        }
+    }
+    out
+}
+
+pub mod guard;
 mod mounts;
 use mounts::match_include_router;
 

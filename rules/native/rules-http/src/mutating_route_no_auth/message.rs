@@ -16,29 +16,50 @@ pub(super) fn missing_auth_hint(
     method: &str,
     path: &str,
     handler_ref: &str,
-    auth_guard_pattern: &str,
+    auth_guard_pattern: Option<&str>,
 ) -> String {
     // Quoted verbatim so the published sightline can never drift from `super::is_call_graph_covered`.
     let covered_exts = CALL_GRAPH_COVERED_EXTENSIONS.join("/");
+    // The two readings of this finding are genuinely different and only this clause separates them: a
+    // declared pattern means "we looked for these names and found none", while no declaration means the
+    // name half of the evidence was never gathered at all. Saying the first when the second is true is
+    // the silent-failure class this rule is otherwise built to avoid.
+    let guard_clause = match auth_guard_pattern {
+        Some(p) => format!("never reaches a call whose name looks like an auth guard ({p})"),
+        // The remedy names a document BOTH audiences can obtain, not a subcommand only one of them has:
+        // this sentence reaches an MCP client with no argv exactly as often as it reaches a terminal, and
+        // the starter config is the same bytes on either side (`packages/cli-bin/src/cli/run.rs`'s
+        // `run_init` — one canon behind `zzop init`, `zzop contract config-template`, and MCP
+        // `resources/read`), so the pair costs nothing and a CLI-only spelling would strand half the readers.
+        None => "declares no `vocabulary.authGuardPattern`, so no call NAME can prove a guard here \
+                 (start from the `config-template` contract document — MCP resource \
+                 `zzop://contract/config-template` on MCP hosts, `zzop init` with the CLI binary — and \
+                 set that key to state how this project spells its guards); the route also reaches no \
+                 decorator/annotation guard"
+            .to_string(),
+    };
     format!(
-        "{method} {path} (handler `{handler_ref}`) never reaches a call whose name looks like an auth \
-         guard ({auth_guard_pattern}) anywhere in its call graph — this mutating route may be missing an \
+        "{method} {path} (handler `{handler_ref}`) {guard_clause} anywhere in its call graph — this \
+         mutating route may be missing an \
          authorization check. Add an explicit, named guard call reachable from the handler (e.g. \
          requireAuth(), verifySession()), or confirm auth is actually enforced. Exemption: routes whose \
          path is itself on the auth-acquisition surface are never checked by this rule, since that \
-         surface cannot require pre-existing auth to reach itself — either a standalone segment \
-         (`/auth/...`, `/login`, `/logout`, `/signin`, `/signup`), or a segment like `/register`, \
-         `/token`, `/refresh`, `/password`, `/otp` PAIRED WITH an auth-family segment elsewhere in the \
-         same path (e.g. `/auth/register` is exempt, but `/devices/register` is NOT — `register` alone \
-         isn't enough). A route registered in a test/fixture file (`__tests__/`, `__test__/`, `tests?/`, \
+         surface cannot require pre-existing auth to reach itself — that surface is whatever this run \
+         declared under `vocabulary.authAcquisitionStandalonePattern` (exempt on its own) and \
+         `vocabulary.authAcquisitionConditionalPattern` (exempt only alongside \
+         `vocabulary.authFamilyPathPattern`, so `/auth/register` is exempt where `/devices/register` is \
+         not); an undeclared tier exempts nothing. A route registered in a test/fixture file \
+         (`__tests__/`, `__test__/`, `tests?/`, \
          `spec/`, `*.test.*`, `*.spec.*`, and similar per-language conventions) is also never checked — \
          a route only ever defined/called from a test is not exposed application surface. LANGUAGE \
          SIGHTLINE, the third pre-BFS exemption and the one easiest to misread as a verdict: only a route \
          whose registration file carries a call-graph-covered extension ({covered_exts}) is checked at \
-         all, because the symbol graph this BFS walks is built from those alone — a Python, Go, Rust or \
-         C# mutating route never enters the BFS, since there \"never reaches a guard\" would be \
-         guaranteed by the empty graph rather than evidence about the route. So ZERO findings of this \
-         rule in a repo outside those extensions means NOT ANALYZED, never \"no missing auth\". \
+         all, because the symbol graph this BFS walks is built from those alone — a mutating route in \
+         any OTHER language (Go, Rust, C#) never enters the BFS, since there \"never reaches a guard\" \
+         would be guaranteed by the empty graph rather than evidence about the route. So ZERO findings \
+         of this rule in a repo outside those extensions means NOT ANALYZED, never \"no missing auth\" — \
+         and a run that saw such routes says so out loud in its own `warnings` (the call-graph coverage \
+         gap self-report names the language and this rule id). \
          Precision limit: this is a call-graph-BFS, vocabulary-based check — route-level middleware (e.g. \
          `apiRoutes.post(\"{path}\", requireAuth, {handler_ref})`, or a router-wide `.use(authMiddleware)`) \
          never appears as a call FROM the handler itself, so it is invisible to this check and WILL \

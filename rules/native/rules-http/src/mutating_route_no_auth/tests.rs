@@ -45,7 +45,11 @@ fn mutating_handler_never_reaching_a_guard_is_flagged() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -72,7 +76,11 @@ fn auth_acquisition_route_is_exempt_even_when_never_guarded() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -87,7 +95,11 @@ fn standalone_exempt_segment_is_exempt_alone_with_no_auth_family_segment_present
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -109,7 +121,11 @@ fn conditional_segment_paired_with_an_auth_family_segment_is_exempt() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -132,7 +148,11 @@ fn conditional_segment_alone_with_no_auth_family_segment_is_not_exempt() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -158,7 +178,11 @@ fn conditional_segment_token_refresh_with_no_auth_family_segment_is_not_exempt()
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -181,7 +205,11 @@ fn a_path_segment_that_only_contains_auth_as_a_substring_is_not_exempt() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -203,7 +231,11 @@ fn handler_reaching_a_guard_call_across_an_edge_is_not_flagged() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &graph,
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -223,7 +255,11 @@ fn handler_named_like_a_guard_itself_clears_at_depth_zero() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -238,7 +274,11 @@ fn safe_methods_are_never_checked() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -253,7 +293,11 @@ fn ambiguous_handler_name_defined_in_two_files_is_skipped() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -274,7 +318,11 @@ fn provide_with_no_symbol_captured_is_skipped() {
         io_provides: &provides,
         symbols: &[],
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -294,7 +342,11 @@ fn route_registered_in_a_test_fixture_file_is_skipped() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -323,7 +375,11 @@ fn ambiguous_handler_name_resolves_to_the_route_file_and_is_flagged() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -344,7 +400,11 @@ fn handler_ambiguous_even_within_the_route_file_stays_unresolved() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -371,7 +431,11 @@ fn handler_reaching_a_require_prefixed_ownership_guard_is_not_flagged() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &graph,
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -403,7 +467,11 @@ fn handler_reaching_only_input_validation_require_helpers_is_still_flagged() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &graph,
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -434,7 +502,11 @@ fn handler_reaching_only_an_env_gate_is_flagged() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &graph,
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -465,7 +537,11 @@ fn require_lowercase_substring_in_an_unrelated_word_does_not_false_clear() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &graph,
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -490,7 +566,11 @@ fn decorator_guarded_line_is_exempt_before_entering_the_bfs() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &decorator_guarded,
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -514,7 +594,11 @@ fn a_provide_whose_line_is_not_in_decorator_guarded_is_still_flagged_normally() 
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &decorator_guarded,
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -540,7 +624,11 @@ fn decorator_guarded_exemption_is_precise_per_route_in_a_shared_controller() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &decorator_guarded,
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -562,7 +650,11 @@ fn non_http_provides_are_ignored() {
         io_provides: &provides,
         symbols: &[sym("routes/handlers.ts", "publish", 1)],
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -588,7 +680,11 @@ fn injected_auth_guarded_attribute_on_the_route_iokey_exempts_it() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &store,
     });
@@ -605,17 +701,29 @@ fn java_route_reaching_an_authorization_service_static_guard_is_not_flagged() {
     // which `is_guard_id`'s two-segment check (module doc "Match granularity") now reaches. This edge
     // shape (`<opaque-specifier>#AuthorizationService.canWriteComment`) is exactly what
     // `run_callgraph_rules`'s Java `resolve_file_fn` produces for a statically-imported guard call.
+    //
+    // The `AuthorizationService` CLASS symbol below is not decoration: the qualifier arm's existence
+    // gate (`qualifier.rs`, Gate 1) requires the receiver name to be declared somewhere in the tree,
+    // and `corpus/oss/be-spring` declares it in `io/spring/core/service/AuthorizationService.java`.
+    // Omitting it — as this fixture originally did — models a tree the guard class does not live in.
     let provides = vec![provide(
         "DELETE /articles/{}/comments/{}",
         "src/main/java/io/spring/api/CommentsApi.java",
         67,
         "deleteComment",
     )];
-    let symbols = vec![sym(
-        "src/main/java/io/spring/api/CommentsApi.java",
-        "CommentsApi.deleteComment",
-        67,
-    )];
+    let symbols = vec![
+        sym(
+            "src/main/java/io/spring/api/CommentsApi.java",
+            "CommentsApi.deleteComment",
+            67,
+        ),
+        sym(
+            "src/main/java/io/spring/core/service/AuthorizationService.java",
+            "AuthorizationService",
+            8,
+        ),
+    ];
     let graph = vec![edge(
         "src/main/java/io/spring/api/CommentsApi.java#CommentsApi.deleteComment",
         "io.spring.core.service.AuthorizationService#AuthorizationService.canWriteComment",
@@ -624,7 +732,11 @@ fn java_route_reaching_an_authorization_service_static_guard_is_not_flagged() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &graph,
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -635,19 +747,28 @@ fn java_route_reaching_an_authorization_service_static_guard_is_not_flagged() {
 fn java_route_reaching_only_a_domain_noun_class_stays_flagged() {
     // The opus-review recall-regression class: a qualifier that merely CONTAINS a guard substring
     // (`AuthorRepository` ⊃ `auth`) must NOT clear the route — exact-token qualifier matching
-    // (`qualifier::qualifier_is_guard`) sees [author, repository], no vocabulary hit, and the
-    // unguarded mutating route stays a finding.
+    // (`qualifier::is_guard`) sees [author, repository], no vocabulary hit, and the unguarded mutating
+    // route stays a finding. `AuthorRepository` is DECLARED below on purpose: that makes the existence
+    // gate (Gate 1) pass, so the exact-token gate is the only thing left keeping this route flagged —
+    // without the declaration this test would go green for the wrong reason.
     let provides = vec![provide(
         "POST /articles",
         "src/main/java/io/spring/api/ArticlesApi.java",
         28,
         "createArticle",
     )];
-    let symbols = vec![sym(
-        "src/main/java/io/spring/api/ArticlesApi.java",
-        "ArticlesApi.createArticle",
-        28,
-    )];
+    let symbols = vec![
+        sym(
+            "src/main/java/io/spring/api/ArticlesApi.java",
+            "ArticlesApi.createArticle",
+            28,
+        ),
+        sym(
+            "src/main/java/io/spring/core/author/AuthorRepository.java",
+            "AuthorRepository",
+            6,
+        ),
+    ];
     let graph = vec![edge(
         "src/main/java/io/spring/api/ArticlesApi.java#ArticlesApi.createArticle",
         "io.spring.core.author.AuthorRepository#AuthorRepository.save",
@@ -656,7 +777,11 @@ fn java_route_reaching_only_a_domain_noun_class_stays_flagged() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &graph,
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -684,7 +809,11 @@ fn java_route_with_no_reachable_guard_is_flagged_now_that_java_is_covered() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
@@ -723,12 +852,234 @@ fn java_handler_unique_in_the_route_file_resolves_past_an_unrelated_collision() 
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
     assert_eq!(out[0].file, "src/main/java/io/spring/api/ArticleApi.java");
+}
+
+#[test]
+fn fastapi_di_alias_receiver_is_not_guard_evidence_and_the_route_still_fires() {
+    // SEALS: a receiver whose "class" NO SYMBOL DECLARES can never clear a mutating route (the
+    // phantom-node false suppression). Shaped on `corpus/oss/be-fastapi-fs` verbatim, including the
+    // import line that MINTS the phantom — `backend/app/api/routes/items.py` line 7 reads
+    //     from app.api.deps import CurrentUser, SessionDep
+    // so `SessionDep` is in that file's ImportMap; `def create_item(*, session: SessionDep, ...)`
+    // types the receiver as `SessionDep`, and `zzop_core::callgraph::resolve_method` mints
+    // `backend/app/api/deps.py#SessionDep.add` WITHOUT checking any symbol answers to `SessionDep`.
+    // It does not: `SessionDep = Annotated[Session, Depends(get_db)]` is a type alias, which
+    // `parser-python-3`'s `const_symbol` (uppercase-literal assignments only) never extracts — hence
+    // the symbol list below, which is exactly what that parser produces for these two files. Its camel
+    // tokens are [Session, Dep], and `session` was in `QUALIFIER_GUARD_TOKENS`, so this route cleared
+    // ITSELF on a symbol that does not exist. Two independent gates now refuse it — the existence gate
+    // (nothing declares `SessionDep`) and the narrowed vocabulary (`session` is an entity noun, gone) —
+    // which is why this test asserts only the OUTCOME; `qualifier.rs`'s own tests isolate each gate.
+    let provides = vec![provide(
+        "POST /items/",
+        "backend/app/api/routes/items.py",
+        61,
+        "create_item",
+    )];
+    let symbols = vec![
+        sym("backend/app/api/routes/items.py", "create_item", 61),
+        // deps.py's REAL symbols — every module-level `def`. `SessionDep`/`TokenDep`/`CurrentUser`
+        // are absent because they are `Annotated[...]` aliases, not declarations this parser emits.
+        sym("backend/app/api/deps.py", "get_db", 21),
+        sym("backend/app/api/deps.py", "get_current_user", 30),
+        sym(
+            "backend/app/api/deps.py",
+            "get_current_active_superuser",
+            51,
+        ),
+    ];
+    let graph = vec![edge(
+        "backend/app/api/routes/items.py#create_item",
+        "backend/app/api/deps.py#SessionDep.add",
+    )];
+    let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+        io_provides: &provides,
+        symbols: &symbols,
+        symbol_graph: &graph,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
+        decorator_guarded: &std::collections::HashSet::new(),
+        route_attr_store: &zzop_core::AttributeStore::default(),
+    });
+    assert_eq!(
+        out.len(),
+        1,
+        "a receiver no symbol declares is not guard evidence: {:?}",
+        out
+    );
+    assert_eq!(out[0].file, "backend/app/api/routes/items.py");
+}
+
+#[test]
+fn a_python_module_receiver_is_not_qualifier_evidence_on_its_own() {
+    // Isolates Gate 1 with a token the narrowed vocabulary KEEPS, so the existence gate is the only
+    // thing that can reject it. Shape is `corpus/oss/be-fastapi` verbatim: `app/api/routes/users.py`
+    // line 16 reads `from app.services import jwt`, which makes `jwt` an ImportMap entry, and a
+    // `jwt.<fn>(...)` call resolves to `app/services/jwt.py#jwt.<fn>`. `jwt` there is a MODULE — a
+    // file — so no `SourceSymbol` is named `jwt`, and `resolve_method` never checked. The tail is
+    // deliberately `encode` (no `DEFAULT_AUTH_GUARD_PATTERN` hit) so the tail arm cannot decide this;
+    // the corpus's real tails DO match it, which is why this narrowing costs the corpus nothing.
+    let provides = vec![provide(
+        "POST /articles",
+        "app/api/routes/articles.py",
+        30,
+        "create_article",
+    )];
+    let symbols = vec![
+        sym("app/api/routes/articles.py", "create_article", 30),
+        sym("app/services/jwt.py", "create_access_token", 12),
+    ];
+    let graph = vec![edge(
+        "app/api/routes/articles.py#create_article",
+        "app/services/jwt.py#jwt.encode",
+    )];
+    let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+        io_provides: &provides,
+        symbols: &symbols,
+        symbol_graph: &graph,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
+        decorator_guarded: &std::collections::HashSet::new(),
+        route_attr_store: &zzop_core::AttributeStore::default(),
+    });
+    assert_eq!(out.len(), 1, "a module receiver is not a class: {:?}", out);
+}
+
+#[test]
+fn a_petclinic_domain_controller_no_longer_clears_its_own_unauthenticated_route() {
+    // SEALS the vocabulary narrowing END TO END, on the exact shape it was measured on:
+    // `corpus/oss/spring-petclinic` has no authentication anywhere, yet `POST /owners/new` was silent
+    // because its handler's OWN depth-0 symbol id carries the qualifier `OwnerController` ([Owner,
+    // Controller]) and `owner` used to be guard vocabulary. `Owner` there is a PET owner — a domain
+    // entity, not an authorization concept. Empty graph: the depth-0 self-match is the whole story.
+    let provides = vec![provide(
+        "POST /owners/new",
+        "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java",
+        84,
+        "processCreationForm",
+    )];
+    // BOTH symbols, and the CLASS one is what makes this test test what its name says. `build_name_index`
+    // keys on the id's last dot-segment, so the method symbol alone registers `processCreationForm` and
+    // nothing named `OwnerController` — Gate 1 (existence) would then reject the qualifier before Gate 2
+    // (vocabulary) is ever consulted, and this test would stay green with `owner` put back in
+    // `QUALIFIER_GUARD_TOKENS`. The real petclinic tree declares the class, so declaring it here is also
+    // the accurate fixture; the sibling two functions above needed the same correction.
+    let symbols = vec![
+        sym(
+            "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java",
+            "OwnerController",
+            30,
+        ),
+        sym(
+            "src/main/java/org/springframework/samples/petclinic/owner/OwnerController.java",
+            "OwnerController.processCreationForm",
+            84,
+        ),
+    ];
+    let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+        io_provides: &provides,
+        symbols: &symbols,
+        symbol_graph: &Vec::new(),
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
+        decorator_guarded: &std::collections::HashSet::new(),
+        route_attr_store: &zzop_core::AttributeStore::default(),
+    });
+    assert_eq!(out.len(), 1, "{:?}", out);
+    assert_eq!(out[0].data.as_ref().unwrap()["path"], "/owners/new");
+}
+
+#[test]
+fn a_declared_python_class_receiver_still_carries_qualifier_evidence() {
+    // The other side of the same gate, so it is a filter and not a Python kill-switch: when the
+    // receiver IS a class the tree declares (`self.check_perm()` inside a Django view, which
+    // `parser-python-3` rewrites to the enclosing class name), the qualifier arm still clears the
+    // route. Only UNDECLARED receiver names lost their vote.
+    let provides = vec![provide(
+        "POST /articles/",
+        "articles/views.py",
+        14,
+        "create",
+    )];
+    let symbols = vec![
+        sym("articles/views.py", "ArticleViewSet.create", 14),
+        sym("articles/views.py", "ArticleViewSet", 9),
+        sym("app/core/guards.py", "SessionGuard", 5),
+    ];
+    // `enforce` is not in `DEFAULT_AUTH_GUARD_PATTERN`, and neither is the handler's own qualifier
+    // (`ArticleViewSet`), so the DECLARED `SessionGuard` receiver is the only possible clearing reason.
+    let graph = vec![edge(
+        "articles/views.py#ArticleViewSet.create",
+        "app/core/guards.py#SessionGuard.enforce",
+    )];
+    let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+        io_provides: &provides,
+        symbols: &symbols,
+        symbol_graph: &graph,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
+        decorator_guarded: &std::collections::HashSet::new(),
+        route_attr_store: &zzop_core::AttributeStore::default(),
+    });
+    assert!(out.is_empty(), "{:?}", out);
+}
+
+#[test]
+fn a_typescript_class_receiver_guard_is_unaffected_by_the_existence_gate() {
+    // TS true-suppression regression: `zzop_parser_typescript` only ever sets `receiver_type` from a
+    // `new X()` initializer or a `: X` annotation, so a TS qualifier is always a real class/interface
+    // name the tree declares — the gate must be a no-op there. `verifyCaller` is deliberately named so
+    // the TAIL arm cannot clear this on its own (no `DEFAULT_AUTH_GUARD_PATTERN` hit would be needed
+    // if it could), leaving the qualifier arm as the only reason the route is silent.
+    let provides = vec![provide(
+        "POST /articles",
+        "src/article/article.controller.ts",
+        22,
+        "create",
+    )];
+    let symbols = vec![
+        sym("src/article/article.controller.ts", "create", 22),
+        sym("src/auth/permission.service.ts", "PermissionService", 4),
+    ];
+    let graph = vec![edge(
+        "src/article/article.controller.ts#create",
+        "src/auth/permission.service.ts#PermissionService.ensureFresh",
+    )];
+    let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+        io_provides: &provides,
+        symbols: &symbols,
+        symbol_graph: &graph,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
+        decorator_guarded: &std::collections::HashSet::new(),
+        route_attr_store: &zzop_core::AttributeStore::default(),
+    });
+    assert!(out.is_empty(), "{:?}", out);
 }
 
 #[test]
@@ -754,7 +1105,11 @@ fn injected_pathscope_auth_guarded_exempts_every_route_under_the_prefix() {
         io_provides: &provides,
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        auth_guard_pattern: DEFAULT_AUTH_GUARD_PATTERN,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &store,
     });

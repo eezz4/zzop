@@ -33,7 +33,7 @@ fn ws_auth_ok_marker_above_the_websocket_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-egress");
     dir.write(
         "src/socket.ts",
-        "export function connect() {\n  // ws-no-auth-ok: public read-only market-data feed, no auth by design\n  return new WebSocket(\"wss://example.com/stream\");\n}\n",
+        "export function connect() {\n  // zzop-ws-no-auth-ok: public read-only market-data feed, no auth by design\n  return new WebSocket(\"wss://example.com/stream\");\n}\n",
     );
     let out = scan(&dir);
     assert!(hits(&out, "ws-no-auth").is_empty(), "{:?}", out.findings);

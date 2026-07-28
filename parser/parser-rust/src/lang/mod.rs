@@ -1,5 +1,7 @@
 //! syn AST -> Common-IR LANGUAGE projection. See the crate root doc for the module map.
 
+pub mod calls;
+pub mod extractor_guards;
 pub mod imports;
 pub mod resolve;
 pub mod symbols;

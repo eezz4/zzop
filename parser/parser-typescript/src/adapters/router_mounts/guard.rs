@@ -15,10 +15,11 @@ use swc_core::ecma::ast::{CallExpr, Callee, Expr};
 
 use super::build::handler_name;
 use super::chain::unwrap_expr;
+use super::RouterMountVocab;
 
 /// Well-known auth middleware factory callees (dotted chain text) judged guard-certain regardless of
 /// the name pattern.
-const MIDDLEWARE_GUARD_CALLEES: &[&str] = &[
+pub(super) const MIDDLEWARE_GUARD_CALLEES: &[&str] = &[
     "passport.authenticate",
     "expressjwt",
     "requiresAuth",
@@ -34,7 +35,7 @@ const MIDDLEWARE_GUARD_CALLEES: &[&str] = &[
 /// `PathScope` guard attribute, silently suppressing a real `mutating-route-no-auth` finding under
 /// that whole subtree. A false guard attribute is strictly worse than a missed one here (see the
 /// precision-first rationale below), so this veto runs unconditionally, first.
-const ROUTER_NAME_VETO_SUFFIXES: &[&str] = &[
+pub(super) const ROUTER_NAME_VETO_SUFFIXES: &[&str] = &[
     "router",
     "routes",
     "route",
@@ -63,14 +64,16 @@ pub(super) const AUTH_GUARDED_ATTR_KEY: &str = "auth-guarded";
 /// caught `nodeEnvOnly(handler)` — an ENV gate — the moment it was tried. See the env veto below for
 /// why that distinction is load-bearing; the missed `adminOnly` is an accepted under-recognition
 /// (the finding still fires) and `requireAdmin`/`ensureAdmin` cover the same intent.
-const WRAPPER_GUARD_PREFIXES: &[&str] = &["require", "ensure", "protect", "restrict"];
+pub(super) const WRAPPER_GUARD_PREFIXES: &[&str] = &["require", "ensure", "protect", "restrict"];
 /// Env-axis vocabulary that VETOES the wrapper judgment. `requireProduction(handler)` /
 /// `ensureLocal(handler)` are rejection verbs, so the prefix rule alone would accept them — but an
-/// env check gates WHERE code runs, not WHO may call it. That axis belongs to `route-exposure`, and
-/// `auth-gates`' own tests pin that an env gate must never clear a missing-auth finding, so letting
+/// env check gates WHERE code runs, not WHO may call it. That axis belongs to `dev-path-no-guard-hint`,
+/// and `protected-path-no-auth-evidence`'s own tests pin that an env gate must never clear a missing-auth
+/// finding, so letting
 /// one mint `auth-guarded` would silently defeat a rule the repo explicitly decided about. Vetoing
 /// costs only recall on names that mix both axes (`requireDeveloperRole`) — the safe direction.
-const ENV_AXIS_VETO_SUBSTRINGS: &[&str] = &["env", "prod", "staging", "local", "dev", "debug"];
+pub(super) const ENV_AXIS_VETO_SUBSTRINGS: &[&str] =
+    &["env", "prod", "staging", "local", "dev", "debug"];
 
 /// Judges whether a lowercased identifier TAIL (the name after the last `.`, already lowercased by
 /// the caller) is a middleware guard name. INTENTIONALLY NARROWER than rules-http's
@@ -132,19 +135,19 @@ fn is_guard_name(tail: &str) -> bool {
 ///   callee's TAIL name is judged the same way a bare ident/member argument is.
 ///
 /// `e` is expected to already be unwrapped (see `unwrap_expr`) by the caller.
-pub(super) fn judge_guard_arg(e: &Expr) -> bool {
+pub(super) fn judge_guard_arg(e: &Expr, vocab: &RouterMountVocab<'_>) -> bool {
     match e {
         Expr::Call(call) => {
             let Some(dotted) = callee_dotted(call) else {
                 return false;
             };
-            if MIDDLEWARE_GUARD_CALLEES.contains(&dotted.as_str()) {
+            if vocab.middleware_guard_callees.contains(&dotted.as_str()) {
                 return true;
             }
-            is_guard_tail(&dotted)
+            is_guard_tail(&dotted, vocab)
         }
         Expr::Ident(_) | Expr::Member(_) => {
-            handler_name(e).is_some_and(|dotted| is_guard_tail(&dotted))
+            handler_name(e).is_some_and(|dotted| is_guard_tail(&dotted, vocab))
         }
         _ => false,
     }
@@ -177,11 +180,11 @@ pub(super) fn judge_guard_arg(e: &Expr) -> bool {
 ///   still cannot see through the wrapper — unchanged by this judgment.
 ///
 /// `e` is expected to already be unwrapped (see `unwrap_expr`) by the caller.
-pub(super) fn judge_guard_wrapper_arg(e: &Expr) -> bool {
+pub(super) fn judge_guard_wrapper_arg(e: &Expr, vocab: &RouterMountVocab<'_>) -> bool {
     let Expr::Call(call) = e else {
         return false;
     };
-    if judge_guard_arg(e) {
+    if judge_guard_arg(e, vocab) {
         return true;
     }
     let Some(dotted) = callee_dotted(call) else {
@@ -189,12 +192,19 @@ pub(super) fn judge_guard_wrapper_arg(e: &Expr) -> bool {
     };
     let tail = name_tail(&dotted);
     // The sub-router/DI veto applies here too: `protectedRoutes(x)` is a router factory, not a gate.
-    if ROUTER_NAME_VETO_SUFFIXES.iter().any(|s| tail.ends_with(s))
-        || ENV_AXIS_VETO_SUBSTRINGS.iter().any(|s| tail.contains(s))
+    if vocab
+        .router_name_veto_suffixes
+        .iter()
+        .any(|s| tail.ends_with(s))
+        || vocab
+            .env_axis_veto_substrings
+            .iter()
+            .any(|s| tail.contains(s))
     {
         return false;
     }
-    WRAPPER_GUARD_PREFIXES
+    vocab
+        .wrapper_guard_prefixes
         .iter()
         .any(|p| tail.len() > p.len() && tail.starts_with(p))
 }
@@ -219,10 +229,14 @@ fn name_tail(dotted: &str) -> String {
         .to_ascii_lowercase()
 }
 
-/// [`is_guard_name`] applied to `dotted`'s tail, vetoed first by [`ROUTER_NAME_VETO_SUFFIXES`].
-fn is_guard_tail(dotted: &str) -> bool {
+/// [`is_guard_name`] applied to `dotted`'s tail, vetoed first by the run's veto-suffix vocabulary.
+fn is_guard_tail(dotted: &str, vocab: &RouterMountVocab<'_>) -> bool {
     let tail = name_tail(dotted);
-    if ROUTER_NAME_VETO_SUFFIXES.iter().any(|s| tail.ends_with(s)) {
+    if vocab
+        .router_name_veto_suffixes
+        .iter()
+        .any(|s| tail.ends_with(s))
+    {
         return false;
     }
     is_guard_name(&tail)

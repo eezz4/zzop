@@ -40,7 +40,11 @@
         "git": {
           "since": "2026-01-01",
           "recentDays": 14,
-          "commitTypePatterns": [{ "pattern": "^fix\\b", "tag": "FIX" }]
+          "commitTypePatterns": [{ "pattern": "^fix\\b", "tag": "FIX" }],
+          "commitSubjectPatterns": [
+            { "pattern": "^Revert\\b", "label": "revert" },
+            { "pattern": "PROJ-\\d+", "label": "ticket" }
+          ]
         },
         "cacheDir": ".zzop-cache",
         "sizeCap": 2000000
@@ -52,7 +56,11 @@
           "git": {
             "since": "2026-01-01",
             "recentDays": 14,
-            "commitTypePatterns": [{ "pattern": "^fix\\b", "tag": "FIX" }]
+            "commitTypePatterns": [{ "pattern": "^fix\\b", "tag": "FIX" }],
+            "commitSubjectPatterns": [
+              { "pattern": "^Revert\\b", "label": "revert" },
+              { "pattern": "PROJ-\\d+", "label": "ticket" }
+            ]
           },
           "cacheDir": ".zzop-cache",
           "sizeCap": 2000000
@@ -66,12 +74,14 @@
           {
             "root": "apps/web",
             "sourceId": "web",
-            "mountedAt": "/app",
-            "hosts": ["api.internal.example.com"]
+            "topology": {
+              "mountedAt": "/app",
+              "hosts": ["api.internal.example.com"]
+            }
           },
           {
             "root": "services/api",
-            "mounts": [{ "dir": "src/admin", "at": "/admin" }]
+            "topology": { "mounts": [{ "dir": "src/admin", "at": "/admin" }] }
           }
         ]
       },

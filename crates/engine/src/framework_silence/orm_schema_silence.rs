@@ -100,7 +100,7 @@ pub fn orm_schema_silence_warning(
 either this engine has no native db-table extractor for this ORM, or it has one but this tree uses a shape \
 the extractor does not recognize (tables defined via migrations or raw SQL rather than declarative model \
 classes, or a model/query idiom outside the extractor's covered set). Its schema/table facts do not reach \
-the cross-layer join (`cross-layer/shared-db-table` and any join finding keyed on a table will be silent \
+the cross-layer join (`cross-layer/db-table-name-in-multiple-sources` and any join finding keyed on a table will be silent \
 for this tree); project this tree's tables with a Mode B overlay adapter (see the adapter examples) to \
 restore visibility: a partial envelope covering just the db-table channel is enough; contract: MCP \
 resource `zzop://contract/envelope-guide` on MCP hosts (`zzop contract envelope-guide` with the CLI \

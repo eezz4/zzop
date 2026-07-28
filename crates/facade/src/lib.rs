@@ -1,15 +1,19 @@
-//! `zzop-facade` — the engine's pure JSON facade: the actual `analyze` / `analyzeTrees` / `version`
-//! logic, kept napi-free (plain `&str -> Result<String, String>` / `-> String`) so it compiles and has
+//! `zzop-facade` — the ANALYSIS-MEANING CONTRACT LAYER: the engine's pure JSON boundary (`analyze` /
+//! `analyzeTrees` / `analyzeEnvelope`) AND the read-only meaning lookups that sit on top of engine and
+//! rule data — `queryIo`'s verdict vocabulary, rule-pack validation, `explain`, version reporting. All
+//! of it napi-free (plain `&str -> Result<String, String>` / `-> String`) so it compiles and has
 //! a normal `#[test]` surface under the workspace's default `gnu` toolchain with no feature flags at
-//! all. Defaults live in the HOST (`zzop-config`'s mapper), not here —
+//! all. The name suggests thinness, but this is NOT the thin layer — the thin things are the two
+//! products in `packages/`. Defaults live in the HOST (`zzop-config`'s mapper), not here —
 //! with exactly one deliberate exception: the envelope bundled-pack seed (`envelope.rs`), because the
 //! envelope path is the one entry point no host config front-end covers. Corollary: `zzop-config` must
 //! never depend on this crate's request types (that edge would be a cycle) — if typed request sharing
 //! is ever wanted, the structs move DOWN (core or a small wire crate), never config -> facade.
 //!
-//! The crate's sole direct consumer today is `zzop-summary`, which the `zzop-host` crate's two
-//! Node-free bins (`zzop`, `zzop-mcp`) call in turn — no napi, no Node process, and `zzop-host` never
-//! depends on this crate directly. (This crate was split off as its own `rlib`-only crate because a
+//! The crate's sole direct consumer is `zzop-summary`, which the two Node-free bins (`zzop` from
+//! `packages/cli-bin`, `zzop-mcp` from `packages/mcp`) call in turn — no napi, no Node process, and
+//! neither product depends on this crate directly (the entry points they use verbatim are re-exported
+//! from `zzop_summary`). (This crate was split off as its own `rlib`-only crate because a
 //! since-removed napi addon crate's `cdylib` half failed to link under the local `gnu` toolchain once
 //! its `#[napi]` surface was compiled in, which would have poisoned any rlib-only dependent. The addon
 //! is gone, but keeping the facade a standalone napi-free `rlib` still gives every consumer a normal
@@ -25,13 +29,19 @@
 //!   already-produced analysis output — the shared core behind `zzop endpoint` and `check_endpoint`).
 //! - `rule_pack` — the `validateRulePackOnly` entry point (pre-load, structure-only DSL rule-pack
 //!   check — the shared core behind `validate_rule_pack` and `zzop validate-rule-pack`).
-//! - `version` — the `version()` entry point.
+//! - `explain` — `zzop explain <rule-id>`'s read-only lookup over the DSL rule data compiled into the
+//!   binary plus the live native-analysis registry. Same KIND of work as `query`'s verdict vocabulary
+//!   and `rule_pack`'s validation — a pure read whose answer is a MEANING — which is why it lives here
+//!   rather than three levels up (2026-07-26 `crates/host` teardown).
+//! - `version` — `version()` and `version_string()`, the single owner of the reported version.
 
 mod analyze;
 mod config;
 mod envelope;
+mod explain;
 mod output;
 mod query;
+mod query_file;
 mod request;
 mod route_injection;
 mod rule_pack;
@@ -57,10 +67,12 @@ mod rule_pack_tests;
 
 pub use analyze::{analyze_json, analyze_trees_json};
 pub use envelope::{analyze_envelope_json, validate_envelope_only_json};
+pub use explain::explain;
 pub use query::query_io_json;
+pub use query_file::{query_file_json, FILE_VERDICTS};
 pub use request::{
-    AnalyzeRequest, AnalyzeTreesRequest, CommitTypePatternRequest, EnvelopeAnalyzeRequest,
-    GitOptionsRequest, MountEntryRequest, PacksDir,
+    AnalyzeRequest, AnalyzeTreesRequest, CommitSubjectPatternRequest, CommitTypePatternRequest,
+    EnvelopeAnalyzeRequest, GitOptionsRequest, MountEntryRequest, PacksDir,
 };
 pub use rule_pack::validate_rule_pack_json;
-pub use version::version_string;
+pub use version::{version, version_string};

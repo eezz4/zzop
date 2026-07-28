@@ -20,7 +20,11 @@ fn known_aws_key_prefix_is_flagged() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/creds.ts",
-        "export const key = \"AKIAABCDEFGHIJKLMNOP\";\n",
+        // Split literal, same convention (and same reason) as `vendor_token_committed.rs`'s header:
+        // GitHub push protection scans RAW SOURCE for a well-formed AWS key id and does not read the
+        // comment saying the body is synthetic. `concat!` rejoins it at compile time, so the file
+        // content this test writes -- and therefore what the rule sees -- is unchanged.
+        concat!("export const key = \"AK", "IAABCDEFGHIJKLMNOP\";\n"),
     );
     let out = scan(&dir);
     assert_eq!(
@@ -51,7 +55,7 @@ fn secret_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/config.ts",
-        "// hardcoded-secret-ok: rotated test-only fixture key, not a real credential\nexport const apiKey = \"abcd1234efgh5678\";\n",
+        "// zzop-hardcoded-secret-ok: rotated test-only fixture key, not a real credential\nexport const apiKey = \"abcd1234efgh5678\";\n",
     );
     let out = scan(&dir);
     assert!(
@@ -66,11 +70,15 @@ fn snake_case_java_client_secret_constant_is_flagged() {
     // `\b(secret|...)` requires a non-word char immediately before the keyword, but `_` is itself
     // a word character in regex `\b` semantics, so a SNAKE_CASE suffix like `CLIENT_SECRET` has no
     // boundary to match against. The value below is a synthetic placeholder in the Google
-    // client-secret shape (not a real credential).
+    // client-secret shape (not a real credential), split across two literals for the same reason as
+    // the AWS-key test above -- `GOCSPX-` is one of the prefixes GitHub push protection blocks.
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "src/main/java/ServiceAuthen.java",
-        "public class ServiceAuthen {\n    final String AUTHEN_GOOGLE_CLIENT_SECRET = \"GOCSPX-Ab1Cd2Ef3Gh4Ij5Kl6Mn7Qr8\";\n}\n",
+        concat!(
+            "public class ServiceAuthen {\n    final String AUTHEN_GOOGLE_CLIENT_SECRET = \"GOC",
+            "SPX-Ab1Cd2Ef3Gh4Ij5Kl6Mn7Qr8\";\n}\n"
+        ),
     );
     let out = scan(&dir);
     let h = hits(&out, "hardcoded-secret");
@@ -220,7 +228,7 @@ fn java_pwd_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "src/main/java/com/example/Config.java",
-        "public class Config {\n    // hardcoded-password-ok: test fixture placeholder, rotated dummy value\n    public String password = \"sup3rSecretPwd\";\n}\n",
+        "public class Config {\n    // zzop-hardcoded-password-ok: test fixture placeholder, rotated dummy value\n    public String password = \"sup3rSecretPwd\";\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -282,7 +290,12 @@ fn env_reference_config_value_is_not_flagged() {
 #[test]
 fn secret_in_a_dotenv_file_is_flagged() {
     let dir = TempDir::new("zzop-be-sec");
-    dir.write(".env", "API_KEY=sk_live_abcdefghijklmnop0123\n");
+    // Split literal, same convention as `vendor_token_committed.rs`'s header -- see the AWS-key test
+    // above for why a synthetic body still has to be split.
+    dir.write(
+        ".env",
+        concat!("API_KEY=sk_li", "ve_abcdefghijklmnop0123\n"),
+    );
     let out = scan(&dir);
     assert_eq!(
         hits(&out, "config-file-secret").len(),

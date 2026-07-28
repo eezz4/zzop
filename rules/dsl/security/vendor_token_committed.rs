@@ -152,7 +152,7 @@ fn vendor_token_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/billing.ts",
-        &format!("// vendor-token-committed-ok: rotated dummy value kept only for a format-parsing regression test\nexport const stripeKey = \"{STRIPE_LIVE}\";\n"),
+        &format!("// zzop-vendor-token-committed-ok: rotated dummy value kept only for a format-parsing regression test\nexport const stripeKey = \"{STRIPE_LIVE}\";\n"),
     );
     let out = scan(&dir);
     assert!(

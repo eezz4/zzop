@@ -11,10 +11,13 @@ pub fn cross_summary(
     config_path: Option<&str>,
     filters: &FindingFilters,
 ) -> Result<String, String> {
-    // Source-mode exclusivity + config-method gating are enforced in `crate::trees` (shared verbatim
+    // Source-mode exclusivity + config-method gating are enforced in `zzop_config::trees` (shared verbatim
     // with `manifest_json`), not (only) in the hosts — the same centralization `endpoint_summary` gets
     // from `resolve_trees_request`.
-    let loaded = crate::trees::load_trees_request("cross_repo", paths, config_path)?;
+    // The operation name rides into the shared loader's error text, so it is the SURFACE-NEUTRAL name of
+    // this analysis, never one host's tool spelling — see `zzop_config::trees`'s WIRE NEUTRALITY note.
+    let loaded =
+        zzop_config::trees::load_trees_request("the cross-layer join", paths, config_path)?;
     let out = zzop_facade::analyze_trees_json(&loaded.request.to_string())?;
     let v = serde_json::from_str::<serde_json::Value>(&out).map_err(|e| e.to_string())?;
 
@@ -70,11 +73,11 @@ pub fn cross_summary(
     let (edges_shown, edges_truncated) = output::shape_list(
         &edges,
         output::DEFAULT_EDGES_LIMIT,
-        // No tool argument moves this cap (`limit` filters findings only) — the hint names the field
-        // that carries the full count and the surfaces that can answer per-edge, never a knob that
-        // would silently do nothing here.
-        "this list has a fixed cap and no tool argument raises it — `buckets.edges` carries the full, \
-         uncapped count; drill into a specific route with check_endpoint",
+        // No caller argument moves this cap (`limit` filters findings only) — the hint names the field
+        // that carries the full count and the QUERY that can answer per-edge, never a knob that would
+        // silently do nothing here. Spelling-free: "check_endpoint" named the MCP tool to CLI users too.
+        "this list has a fixed cap and no argument raises it — `buckets.edges` carries the full, \
+         uncapped count; drill into a specific route with the endpoint query",
     );
     let cl_findings = v["crossLayerFindings"]
         .as_array()

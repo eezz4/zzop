@@ -4,10 +4,10 @@
 //!
 //! Both exist for one reason: a rule's verdict is only as wide as the structural fact it reads, and
 //! neither fact here is produced for every language. Publishing the sightline IN the finding (and
-//! pinning the published pages against it) is what keeps a zero — or, for `dead-model`, a flood —
+//! pinning the published pages against it) is what keeps a zero — or, for `unreferenced-model-name`, a flood —
 //! from reading as a verdict about the code.
 
-/// The MARKUP-FREE claim `dead-model`/`dead-field` must publish, and that `docs/rules/catalog.md` /
+/// The MARKUP-FREE claim `unreferenced-model-name`/`unreferenced-field-name` must publish, and that `docs/rules/catalog.md` /
 /// `site/rules.html` are pinned against (`tests::the_field_usage_sightline_is_identical_in_the_finding_
 /// and_the_published_docs`). Extension list quoted from [`crate::usage::FIELD_USAGE_SCAN_EXTENSIONS`],
 /// so the one part most likely to go stale cannot.
@@ -19,7 +19,7 @@
 /// own multi-tree topology advice recommends, or a Prisma schema consumed by a Python/Go/Rust client)
 /// reports EVERY model dead. Nothing about the finding says which files were searched, so the reader has no
 /// way to tell that verdict from a real one. Measured 2026-07-25: a directory holding one `schema.prisma`
-/// and nothing else yields one `dead-model` per model.
+/// and nothing else yields one `unreferenced-model-name` per model.
 pub(super) fn field_usage_sightline_claim() -> String {
     format!(
         "identifier tokens scanned from this tree's {} files only",

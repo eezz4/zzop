@@ -1,5 +1,5 @@
 //! Exercises `rules/dsl/perf/perf.json`'s `api-in-loop` method-scan rule end-to-end through
-//! `zzop_engine::analyze_tree` against real swc-parsed TypeScript fixtures. A `// api-in-loop-ok` marker on
+//! `zzop_engine::analyze_tree` against real swc-parsed TypeScript fixtures. A `// zzop-api-in-loop-ok` marker on
 //! the finding's own line, or the line directly above, suppresses it via `RuleDef::suppress_marker`. Most
 //! fixtures use a top-level function rather than a class method to avoid double-counting from overlapping
 //! class/method spans; see `overlapping_class_and_method_spans_do_not_double_count` below for that case.
@@ -89,3 +89,4 @@ fn snippet(f: &Finding) -> String {
 mod api_in_loop;
 mod eager_relation_declared;
 mod jpa_eager_fetch;
+mod sqlalchemy_eager_relationship;

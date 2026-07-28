@@ -1,0 +1,105 @@
+// zzop analyzing zzop — the config that makes the dogfooding claim executable rather than aspirational.
+//
+// WHY THIS FILE IS COMMITTED (2026-07-28, D19)
+// Two of this repo's own capabilities only mean something if they can be pointed at this repo:
+//   - the Rust call graph (D18), whose stated anchor argument was "zzop is itself a large real Rust
+//     workspace and we know its answers";
+//   - `cache-lane-file-read` (D19), which audits exactly the invariant this repo broke TWICE — a cached
+//     per-file slice reading something its key does not cover.
+// Without a committed config, "run zzop on zzop" needed a `zzop init` first, and a capability that needs
+// a setup step nobody documents is a capability nobody uses. D15 made config mandatory; this is ours.
+//
+// DELIBERATELY NOT A SHOWCASE. It is tuned for ONE question — is our own cache lane closed? — and the
+// exclusions below say what it therefore does NOT answer.
+{
+  "trees": [{ "root": ".", "sourceId": "zzop" }],
+
+  // `cases/` is a LABELED DEFECT BENCHMARK: every file in it is deliberately wrong, and its correctness
+  // is scored by `scripts/measure/detection-gate.sh` against `cases/EXPECTED.jsonc`, not by this run.
+  // Without this, its ~140 intended findings drown this file's actual question — measured, not assumed:
+  // a run without it reports circular-import and db-rule hits whose top item is
+  // `cases/trees/graph/circularB.ts`, a file that exists to be circular.
+  //
+  // ⚠ `exclude` is a FINDING-level filter, not a walk filter (`zzop_core::registry::config`'s
+  // `GlobalExclude`). These files are still walked, parsed and graphed — `zzop graph --domain dep` on
+  // this config draws them, which is how the distinction was noticed. Only `vocabulary.skipDirs` below
+  // keeps a directory out of the walk entirely. Both are correct here: we want `cases/` in the graph
+  // (it is real code) and out of the findings (its defects are intentional).
+  //
+  // `corpus/**` and `target/**` used to be here and were REMOVED 2026-07-28, because this run told us
+  // they were dead: `exclude "corpus/**" matched no files` / `exclude "target/**" matched no files` in
+  // its own warnings, every run. Neither path ever reaches the finding filter — `target` is in
+  // `vocabulary.skipDirs` below, and `/corpus/oss/` is gitignored, which the walker honours
+  // (`ignore::WalkBuilder`, pinned by `crates/engine/tests/analyze_gitignore.rs`). Verified per-path
+  // rather than inferred: `zzop file corpus/oss/be-axum/src/main.rs` answers `not-found` while
+  // `zzop file site/rules.html` — excluded but NOT gitignored — answers `lexical-only`, which is the
+  // walk/finding distinction the paragraph above describes, observed instead of asserted. A warning
+  // that can only ever fire teaches the reader to skip warnings, so the entries go rather than the
+  // warning.
+  "exclude": ["cases/**", "site/**"],
+
+  // The one question this file exists to ask. `compute_fresh_artifact` is the function that produces one
+  // CACHED per-file `FileArtifact` (`crates/engine/src/pipeline/fresh.rs`); everything reachable from it
+  // must derive only from bytes already in the cache key, or a warm entry silently outlives its input.
+  // The two historical breaches this rule is the machine memory of: convention vocabulary (fixed by
+  // putting it in the key) and the cross-file manifest read.
+  "vocabulary": {
+    "cacheLaneAnchorPattern": "^compute_fresh_artifact$",
+
+    // The SINK half, and it is not optional either — the same trap as `skipDirs` below, met a second time
+    // while writing this file. Declaring only the anchor above left the rule silent on a tree that
+    // genuinely had the defect planted in it, because an undeclared list is an EMPTY list and no callee
+    // name can then prove a read. Both halves or no judgment.
+    "fileReadCallees": ["read","read_to_string","read_to_end","read_dir","read_link","open","metadata","canonicalize","readFile","readFileSync","readdir","readdirSync","existsSync","statSync"],
+
+    // NOT optional, and the first run without it proved why. `vocabulary.*` follows "undeclared = not
+    // judged", so an absent `skipDirs` does not fall back to a sensible list — it means NOTHING is
+    // skipped. Measured: 6,570 walked files with this key missing versus 1,262 with it, the difference
+    // being `target/` and `.git/`. That is the D14 rule working as designed, and it is worth a comment
+    // here because "the safe direction" for a skip list runs opposite to every other key in this block.
+    //
+    // The tool-state directory is the last entry and the one this run could not see without help.
+    // Added 2026-07-28 after an external review measured this analysis walking a git WORKTREE nested
+    // inside it — a full second copy of this repo — reporting 2,528 files where the tree has ~1,264,
+    // with all three `criticalTop` entries pointing into that copy. Nothing defended it: the walker
+    // runs `git_global(false)` on purpose (determinism), so a user-global gitignore is never read, and
+    // the repo `.gitignore` does not list that directory either. Even with no worktree present it was
+    // costing 46 walked files (1,292 -> 1,246, measured).
+    //
+    // Worth stating plainly: this config already found two dead `exclude` entries by reading its own
+    // warnings, and never saw its largest pollutant — a run's census cannot report the same tree being
+    // walked twice, because no disclosure axis asks that question.
+    "skipDirs": ["node_modules", "dist", "build", ".next", ".git", "target", ".yarn", ".zzop", "zzop-reports", ".zzop-cache", ".claude"]
+  },
+
+  // Every OTHER rule is off. Not because they are wrong here, but because a self-audit that also reports
+  // 30 unrelated findings is one nobody reads twice — and because this repo's own gate for "is zzop
+  // healthy" is `cargo test` + `scripts/check-*.sh`, which already run on every commit. Turning one of
+  // these on is a deliberate act, and the run says what it looked at.
+  "rules": {
+    "circular": "off",
+    "unreachable": "off",
+    "dead-candidates": "off",
+    "unimported-export": "off",
+    "duplicate-route": "off",
+    "route-shadowing": "off",
+    "unprovided-consume": "off",
+    "mutating-route-no-auth": "off",
+    "unsafe-read-endpoint": "off",
+    "non-idempotent-write": "off",
+    "schema-structural": "off",
+    "schema-usage": "off",
+    "soft-delete-bypass": "off",
+    "orderby-unindexed": "off",
+    "enum-string-drift": "off"
+  },
+  // Every shipped DSL pack, by its real id (`ls rules/dsl/`). A name that is not a real pack disables
+  // nothing and only earns a config warning — which is how the first draft of this file was caught
+  // naming five packs that do not exist.
+  "packs": {
+    "disabled": [
+      "browser", "db", "egress", "go", "http", "perf",
+      "react", "redis", "reliability", "security", "sql", "typescript"
+    ]
+  }
+}

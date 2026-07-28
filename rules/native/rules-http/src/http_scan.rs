@@ -52,9 +52,13 @@ fn marker_window_phrase() -> String {
 }
 
 const SAFE_METHODS: [&str; 2] = ["GET", "HEAD"];
-/// The crate's single write-verb vocabulary (T1): `mutating_route_no_auth` imports this same
-/// symbol — same meaning ("HTTP methods that mutate"), so no per-rule copy (policy census).
-pub(crate) const WRITE_HTTP_METHODS: [&str; 4] = ["PUT", "DELETE", "POST", "PATCH"];
+/// The write-verb vocabulary this crate gates on, and the OWNER of that set for everything downstream.
+///
+/// `pub(crate)` until 2026-07-28, which is what let four respellings accumulate outside this crate,
+/// each doc claiming to be pinned to it — a claim nothing could honour, since nothing outside could
+/// read the symbol. Downstream now either imports it (T1) or pins equality against it in
+/// `crates/engine/tests/rule_contracts/policy_pins.rs` (T2, and see that test for the measurement).
+pub const WRITE_HTTP_METHODS: [&str; 4] = ["PUT", "DELETE", "POST", "PATCH"];
 
 /// Extensions whose parser actually PRODUCES the `SourceSymbol::write_sites` evidence both scanners in
 /// this module consume — see [`write_site_sightline`] for why this must be published in the findings.
@@ -67,9 +71,12 @@ pub(crate) const WRITE_HTTP_METHODS: [&str; 4] = ["PUT", "DELETE", "POST", "PATC
 /// `tests::the_write_site_sightline_is_identical_in_the_finding_and_the_published_docs` checks the prose.
 ///
 /// Deliberately NARROWER than `mutating_route_no_auth::CALL_GRAPH_COVERED_EXTENSIONS`, which is this list
-/// PLUS `"java"`: Java feeds the shared `SymbolGraph` real call edges, so the auth-guard BFS can walk a
-/// Java handler — but no Java (or Python/Go/Rust/C#) parser fills `write_sites`, so the two scanners here
-/// have no write EVIDENCE to find at the end of that walk. A tree can therefore show
+/// PLUS `"java"`, `"py"`/`"pyi"` and `"rs"`: those parsers feed the shared `SymbolGraph` real call edges,
+/// so the auth-guard BFS can walk their handlers — but no Java (or Python/Go/Rust/C#) parser fills
+/// `write_sites`, so the two scanners here have no write EVIDENCE to find at the end of that walk. That
+/// asymmetry is also what makes the Rust extractor-guard edges (`zzop_parser_rust::
+/// parse_extractor_guards`) inert for these two rules: extra edges out of a Rust handler can only ever
+/// reach the auth vocabulary, never a write site that does not exist. A tree can therefore show
 /// `mutating-route-no-auth` findings while these two are structurally zero on the very same routes.
 pub const WRITE_SITE_COVERED_EXTENSIONS: &[&str] =
     &["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"];

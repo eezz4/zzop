@@ -1,9 +1,9 @@
 //! Contracts 1-2: derived suppress-marker global uniqueness and the message "how to exclude" leg, plus
 //! the published-surface leg (contract 2b) that pins WHICH rules the catalog pages may claim a marker for.
 //!
-//! Markers are no longer stored per rule — `RuleDef::suppress_marker()` DERIVES `<id>-ok` (see its doc).
+//! Markers are no longer stored per rule — `RuleDef::suppress_marker()` DERIVES `zzop-<id>-ok` (see its doc; the `zzop-` TOOL PREFIX landed 2026-07-26 so a suppression comment can be grepped as a class and a reader can tell WHOSE checker it silenced).
 //! That collapses three formerly-hand-guarded invariants into construction guarantees: every rule now has a
-//! non-empty marker (ids are never empty), and every marker ends in `-ok` by definition. What derivation
+//! non-empty marker (ids are never empty), and every marker begins `zzop-` and ends `-ok` by definition. What derivation
 //! does NOT guarantee is cross-pack uniqueness — two rules in different packs sharing an id would derive the
 //! same marker and co-suppress — so that is the one presence/uniqueness invariant still worth a test.
 
@@ -19,9 +19,9 @@ use crate::{load_all_packs, native_ids};
 // ---------------------------------------------------------------------------------------------
 
 /// No two shipped rules — in the same pack OR across packs — may derive the same suppress marker. Since the
-/// marker is `<id>-ok`, this is exactly "rule ids are globally unique". It matters because a `// x-ok`
+/// marker is `zzop-<id>-ok`, this is exactly "rule ids are globally unique". It matters because a `// zzop-x-ok`
 /// comment a reader placed to vet ONE rule's finding would silently also suppress any OTHER rule that
-/// derives `x-ok` wherever their line/lookback windows overlap — the reader never opted into that. The
+/// derives `zzop-x-ok` wherever their line/lookback windows overlap — the reader never opted into that. The
 /// within-pack case was the old contract; deriving from the id widened the blast radius to every pack, so
 /// the guard widens with it.
 #[test]
@@ -51,7 +51,7 @@ fn derived_suppress_markers_are_globally_unique() {
 
 /// Uniqueness above compares markers for EQUALITY, which is not the whole aliasing surface: `compile_marker`
 /// anchors the marker as `//\s*<marker>\b`, and `\b` fires at a word/non-word boundary — so rule `x`'s marker
-/// `x-ok` also matches inside rule `x-ok-y`'s marker `x-ok-y-ok` (the boundary sits between `k` and `-`).
+/// `zzop-x-ok` also matches inside rule `x-ok-y`'s marker `zzop-x-ok-y-ok` (the boundary sits between `k` and `-`).
 /// A reader annotating a `x-ok-y` finding would silently suppress `x` on that line too, having opted into
 /// neither. Zero shipped ids have this shape today (it needs an id containing `-ok-` or ending `-ok`), which
 /// is exactly why it is worth pinning now — nothing else stops the first such id from being authored.
@@ -86,7 +86,7 @@ fn no_derived_marker_is_a_word_boundary_prefix_of_another() {
 // 2. Message triple — problem + fix + exclude (this leg)
 // ---------------------------------------------------------------------------------------------
 
-/// Every DSL rule's `message` names its own derived suppress marker (`<id>-ok`) OR the literal
+/// Every DSL rule's `message` names its own derived suppress marker (`zzop-<id>-ok`) OR the literal
 /// `disabled_rules`/`disabledRules` string somewhere in the text — the "how to exclude" leg of zzop's
 /// finding contract (every finding must tell the reader the problem, the fix, AND how to turn it off; see
 /// docs/rules/authoring-guide.md's quality bar). A rule that legitimately has no per-finding marker still
@@ -146,7 +146,7 @@ fn read_repo_file(rel: &str) -> String {
 /// suppress — read from the same data the engine loads, never a hand-copied list. DSL: every matcher
 /// except `symbol-scan`, whose findings have no source line to anchor a comment against
 /// (`RuleDef::suppress_marker` still derives a string for it, but nothing ever consults the result — see
-/// `crates/host/src/explain.rs`'s `suppress_marker_str`). Native: `NATIVE_MARKER_HONORING_IDS`.
+/// `crates/facade/src/explain/render.rs`'s `suppress_marker_str`). Native: `NATIVE_MARKER_HONORING_IDS`.
 fn marker_honoring_ids() -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
     for pack in &load_all_packs() {
@@ -252,7 +252,7 @@ fn catalog_surfaces_claim_a_suppression_marker_only_for_rules_that_honor_one() {
 }
 
 /// Keeps `NATIVE_MARKER_HONORING_IDS` honest: the hand-authored `// idempotent-ok:` literal it exists for
-/// must still be in the scanner. Retiring it (unifying onto derived `<id>-ok`, or dropping the exception
+/// must still be in the scanner. Retiring it (unifying onto derived `zzop-<id>-ok`, or dropping the exception
 /// entirely) empties the exception and must empty this list in the same commit — otherwise the pages could
 /// keep promising a marker that no longer exists and the test above would still read green.
 #[test]

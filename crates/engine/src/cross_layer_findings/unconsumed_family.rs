@@ -36,6 +36,7 @@ pub(super) fn compute(
     near_miss_targets: &BTreeMap<(String, String, u32), NearMissTargetRef>,
     trpc_participating_sources: &BTreeSet<String>,
     caveat: &Option<String>,
+    externally_fetched_paths: &[&str],
 ) -> (Vec<Finding>, Vec<Finding>) {
     let mutation = if zzop_core::is_enabled(gate, "cross-layer/unconsumed-mutation-endpoint") {
         // Same blindness predicate `cross-layer/unresolved-consume-ratio` self-reports with, via the shared
@@ -65,6 +66,7 @@ pub(super) fn compute(
             near_miss_targets,
             trpc_participating_sources,
             &reported_provide_sites(&mutation),
+            externally_fetched_paths,
         );
         blindness_caveat::append(&mut findings, caveat);
         findings

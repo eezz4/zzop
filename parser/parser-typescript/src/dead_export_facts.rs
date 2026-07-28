@@ -1,4 +1,4 @@
-//! One parse, three walks — the fact bundle the `dead-exports` analysis reads straight off disk.
+//! One parse, three walks — the fact bundle the `unimported-export` analysis reads straight off disk.
 //!
 //! `crates/engine`'s `dead_exports` pass runs OUTSIDE `zzop_cache::AnalysisCache`: `FileArtifact`
 //! carries none of these three facts, so even a 100%-cache-hit run re-reads and re-parses every
@@ -24,7 +24,7 @@ use crate::export_aliases::local_export_aliases_from_module;
 use crate::parse_module;
 use crate::re_exports::{dynamic_imports_from_module, re_exports_from_module};
 
-/// The three per-file facts `dead-exports` needs beyond `FileArtifact`. Field-for-field identical
+/// The three per-file facts `unimported-export` needs beyond `FileArtifact`. Field-for-field identical
 /// to what the three individual entrypoints return, in the same order they produce them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeadExportFacts {
@@ -36,7 +36,7 @@ pub struct DeadExportFacts {
     pub export_aliases: Vec<(String, String)>,
 }
 
-/// Parses `source` ONCE and returns all three `dead-exports` facts. An unparseable file yields the
+/// Parses `source` ONCE and returns all three `unimported-export` facts. An unparseable file yields the
 /// empty bundle — the same graceful degrade each individual entrypoint performs on its own, so the
 /// bundled answer is indistinguishable from three separate calls in that case too.
 pub fn parse_dead_export_facts(file: &str, source: &str) -> DeadExportFacts {

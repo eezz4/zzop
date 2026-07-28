@@ -1,8 +1,8 @@
 # Normalized AST contract (external parser protocol) — v1 freeze
 
 External/custom parsers (Ruby, JSP, anything the engine does not parse natively — see
-`docs/ARCHITECTURE.md`'s "Language support" section for what TypeScript/JavaScript, Python, Java,
-Rust, Go, and Prisma already get natively) join the
+`docs/ARCHITECTURE.md`'s "Language support" section for which languages already have a native parser
+and what each one extracts; that table is the only copy of that list) join the
 analysis by producing this serialized projection per source tree. The engine never sees their real
 AST — it consumes exactly the structures below, projects them into the Common IR, and runs every
 language-neutral analysis (dep graph, dead code, scores, cross-layer join, DSL rules) unchanged.
@@ -76,7 +76,7 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
   [`adapters/key-normalization.fixture.json`](adapters/key-normalization.fixture.json) (see
   [`adapters/README.md`](adapters/README.md) for how to replay it), the machine-checkable shape is
   [`adapters/envelope.schema.json`](adapters/envelope.schema.json), and a ready-made JS implementation
-  of both is [`examples/adapter-kit/`](../examples/adapter-kit/)'s `lib/keys.js`. **Absolute-URL keys
+  of both is [`examples/adapters/adapter-kit/`](../examples/adapters/adapter-kit/)'s `lib/keys.js`. **Absolute-URL keys
   (`"://"` present) are the one case that must NOT go through that normalization at all** — see
   `adapters/README.md`'s "Absolute URLs bypass normalization entirely" section.
   - **Self-calls / loopback.** A service calling ITSELF over HTTP (a smoke-test script, a health-check
@@ -117,6 +117,24 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     while a shared one is silently wrong in both directions. (The in-repo TypeScript adapter learned this the
     hard way: see `parser/parser-typescript/src/adapters/pathname_dispatch.rs` for the exact predicate it
     uses to decide when a dispatch branch is attributable.)
+    **Which of those four your `symbol` actually reaches depends on the language, and for most external
+    producers it is only `duplicate-route`.** That one is an equality compare and is language-neutral. The
+    three BFS rules are not, and the limit is structural rather than a gap someone forgot to close: only
+    some of this workspace's parsers produce `RawCall`s at all — today the TypeScript, Java, Python and
+    Rust ones (`crates/engine/src/analyze/native_rules/callgraph/mod.rs` and the per-language loops it
+    delegates to, `python_guard.rs`/`rust_guard.rs`) — whose calls the engine gathers by re-reading and
+    re-parsing those files off disk. So `mutating-route-no-auth` exempts a
+    route outright — before the BFS, never "no guard found" — unless its file extension is in
+    `CALL_GRAPH_COVERED_EXTENSIONS` (in `rules/native/rules-http/src/mutating_route_no_auth.rs` — that
+    constant is the authoritative covered set, not the language list above; a run
+    that saw routes OUTSIDE it says so in its own `warnings`, naming the language and the silenced rule),
+    and `unsafe-read-endpoint` /
+    `non-idempotent-write` additionally need `writeSites`, which you may emit yourself (it is in the
+    symbol contract below) but which no non-TypeScript parser here fills. A Ruby or JSP route is therefore
+    invisible to all three no matter how carefully you name its handler — emit `symbol` for
+    `duplicate-route`'s sake and for the day a `RawCall` extractor for your language exists, not on the
+    expectation of an auth-reachability verdict. Per-rule language sightlines:
+    [rules/catalog.md](rules/catalog.md).
 - `const_map_fragment`, `procedure_router_fragments`, `router_mount_fragments`, `class_shape_fragments` —
   all four are OPTIONAL
   (`#[serde(default)]`; absent = empty; a projection with none of them is still fully valid and
@@ -202,9 +220,19 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
 - `is_entry` — OPTIONAL (`#[serde(default)]`, default `false`). Marks this file a framework/runtime
   ENTRY loaded by convention rather than imported (a SvelteKit `hooks.*`/`+page`, a `.vue` route, ...),
   so zero in-repo importers is expected, not dead-code signal — the overlay counterpart of a
-  package.json manifest entry. Meaningful in Mode B (adapter overlays, below): every `is_entry: true`
-  file's `path` across all configured overlays is unioned into the `dead-candidates` analysis's exempt
-  set. Mode A (`analyze_envelope`) does not read this field.
+  package.json manifest entry. Read in BOTH modes, for the `dead-candidates` analysis only:
+  - `analyzeEnvelope` (Mode A) builds that analysis's ENTIRE entry set from the envelope's own
+    `is_entry: true` projections — there is no filesystem root, so there are no package.json entries to
+    union with (`crates/engine/src/envelope/ingest.rs`).
+  - Mode B (adapter overlays, below) unions the `is_entry: true` paths of every APPLIED overlay into the
+    native `dead-candidates` entry set. APPLIED, not declared: the paths are recorded inside the apply
+    loop, past the `validate_envelope` gate, so an overlay that was REJECTED exempts nothing
+    (`crates/engine/src/envelope/overlay.rs` → `OverlayApplication::entry_paths` →
+    `crates/engine/src/analyze/assemble/rules.rs`'s `overlay_entry_paths`).
+
+  It does NOT exempt a file from `unreachable`, in either mode: that analysis's entry set is seeded from
+  declared cargo targets plus SFC-only and runtime-asset import targets, and `is_entry` is not among
+  them.
 - `loop_spans` — OPTIONAL (`#[serde(default)]`; camelCase `loopSpans` also accepted on input). `[[startLine,
   endLine], ...]`, 1-based and inclusive. Each pair is either a loop statement's whole span (`for`/
   `for-in`/`for-of`/`while`/`do-while`, header line included) or an array-iteration callback argument's
@@ -293,21 +321,23 @@ an explicit `packsDir: null` — they appear in the output's `packsLoaded` (`sou
 removed JS wrapper's bundled packs used to report `"dir"` instead, since its on-disk bundled copy won
 the id collision), and since only
 `symbol-scan`/`io-scan` rules can fire without source text, what the default actually contributes is the
-two bundled `io-scan` rules — `http/auth-gates` and `http/route-exposure` — plus pack-load confirmation
+two bundled `io-scan` rules — `http/protected-path-no-auth-evidence` and `http/dev-path-no-guard-hint` —
+plus pack-load confirmation
 for every other bundled rule (no bundled rule uses `symbol-scan` today). Those two do fire in Mode A,
 with one documented deviation from the same rules on a native tree: `analyze_envelope` supplies an
 anchor-line lookup that always returns `None`, because an envelope carries no source text to look one up
-in. Every channel that reads the anchor line is therefore inert here — the derived `<rule-id>-ok`
-suppress marker, its near-miss disclosure, and `route-exposure`'s `anchor_exclude_pattern` guard-hint
+in. Every channel that reads the anchor line is therefore inert here — the derived `zzop-<rule-id>-ok`
+suppress marker, its near-miss disclosure, and `dev-path-no-guard-hint`'s `anchor_exclude_pattern` guard-hint
 carve-out. All of them fail toward FIRING, never toward silence: a matching route reports even when its
 registration line would have carried a marker or a guard-hint argument, rather than the engine guessing
 at line text it does not have. Clear a vetted route in Mode A by injecting the attribute the rule reads
-(`auth-guarded` for `auth-gates`) or by disabling the rule in config. Mode B overlays are unaffected —
+(`auth-guarded` for `protected-path-no-auth-evidence`) or by disabling the rule in config. Mode B
+overlays are unaffected —
 they merge onto a natively-parsed tree whose source text is readable off disk, so both channels stay
 live there even for a language with no native parser. A
 caller-supplied pack reusing a bundled id keeps the existing collision semantics (a later inline def,
 or any directory pack, wins whole). See `docs/modules/facade.md`'s "Defaults" section for the full
-contract. `examples/jsp-envelope.example.json` is a hand-written,
+contract. `examples/adapters/jsp-envelope.example.json` is a hand-written,
 crude-parser-shaped fixture (symbols with no body spans, one `http` provide, one `db-table` consume, no
 imports) that validates cleanly against this contract — see `zzop-core`'s `normalized::tests::
 jsp_contract_example_validates` for the fixture-based check. A JSON Schema export for this contract
@@ -391,7 +421,7 @@ output or a rule:
 If your framework has an equivalent concept (a global route prefix, a per-client base URL), fold it into
 the normalized `key` you emit yourself rather than trying to reproduce either native rewrite.
 
-Deployment-topology `mounts`/`mountedAt` (config-declared, not a sentinel kind — see
+Deployment-topology mounts (config-declared as `trees[].topology`, not a sentinel kind — see
 [modules/facade.md](modules/facade.md#functions)'s `mounts`/`mountedAt`/`hosts` `AnalyzeRequest` fields) are
 NOT part of the reserved-kind drop above: they apply uniformly to Mode A envelopes and natively-parsed trees alike, at the structurally
 equivalent seam after fragment composition and before the IO freeze — a config mount rewrites a Mode A
@@ -423,7 +453,7 @@ callers can refer to either unambiguously.
   (`analyze_envelope_json`), AND from the Node-free `zzop-mcp` binary — its `analyze_envelope` MCP tool
   and `zzop analyze-envelope <envelope.json>` CLI subcommand both run the same
   `zzop_summary::analyze_envelope_summary` call path (`crates/summary`, over
-  `zzop_facade::analyze_envelope_json`), zero-config only (an
+  `zzop_facade::analyze_envelope_json`), the one lane that takes no config (an
   envelope carries no filesystem location, so there is no config file to auto-discover). (The
   historical JS implementation of the npm CLI — retired 2026-07-20 — never ran a Mode A envelope
   either: its only envelope-shaped commands were `zzop adapter validate <path>`, structural validation
@@ -449,10 +479,13 @@ callers can refer to either unambiguously.
     would (keeping `dead-candidates` from false-positiving them). `imports` stays absent when the
     projection carries no dep-graph data at all (none of the three fields populated).
 
-  Independently of the merge branch above, every `is_entry: true` `FileProjection`'s `path` across ALL
-  configured overlays is unioned into the `dead-candidates` analysis's exempt set (the overlay
-  counterpart of a package.json manifest entry) — a framework-loaded file an adapter declares reachable
-  by convention is never flagged dead for having zero in-repo importers.
+  Independently of the merge branch above, every `is_entry: true` `FileProjection`'s `path` from an
+  APPLIED overlay is unioned into the `dead-candidates` analysis's exempt set (the overlay counterpart of
+  a package.json manifest entry) — a framework-loaded file an adapter declares reachable by convention is
+  not flagged dead for having zero in-repo importers. APPLIED, not merely configured: the path is
+  recorded inside the apply loop, past the `validate_envelope` gate, so an overlay this seam REJECTED
+  exempts nothing. (`dead-candidates` only — `unreachable` has its own entry seed and does not read
+  `is_entry`.)
 
   **Self-disclosure: `source`, coverage, and synthetic entries.** Three checks run once per ACCEPTED
   overlay, independent of the merge branch each `FileProjection` takes:
@@ -465,11 +498,11 @@ callers can refer to either unambiguously.
     invocation you're using. Two different defaults apply depending on how the tree is invoked, and they
     are NOT the same string: a `zzop.config.jsonc` `trees[]` entry with no explicit `sourceId` defaults
     to that entry's own raw `root` string exactly as written (e.g. `root: "./api"` → `sourceId: "./api"`
-    — see `crates/config/config-surface.json`'s `treeFields` docs); a config-less/bare-path run (no
-    config file, no `trees[]` — e.g. a direct `zzop-facade` embedding calling `analyze()` with `root`
-    only) instead defaults to the analyzed ROOT DIRECTORY's own basename (`apply_source_id_default`,
-    `crates/facade/src/analyze.rs` — the shared chokepoint every host funnels through: the `zzop-mcp`
-    binary's zero-config path, and any embedder driving the facade with no config-file front end). Set an
+    — see `crates/config/config-surface.json`'s `treeFields` docs); a bare-path run (a config with no
+    `trees[]`, or a direct `zzop-facade` embedding calling `analyze()` with `root` only) instead
+    defaults to the analyzed ROOT DIRECTORY's own basename (`apply_source_id_default`,
+    `crates/facade/src/analyze.rs` — the shared chokepoint every host funnels through: both binaries'
+    single-path lanes, and any embedder driving the facade with no config-file front end). Set an
     explicit `sourceId` in your request/config when you want one fixed value regardless of which path
     invokes the tree, rather than relying on either default.
   - A declared `files[].path` matching no file in the tree is still merged in, as a synthetic
@@ -493,7 +526,7 @@ callers can refer to either unambiguously.
 **Start minimal — partial-envelope-first.** You do not need a parser to close a coverage gap: the
 default on-ramp is a Mode B partial envelope covering just the missing channel and files — a
 tens-of-lines script, not an hours-long native parser. Exhibit A:
-[`examples/java-imports-adapter/`](../examples/java-imports-adapter/) filled exactly ONE channel
+[`examples/adapters/java-imports-adapter/`](../examples/adapters/java-imports-adapter/) filled exactly ONE channel
 (dep-graph `imports`) in ~90 lines, back when Java's built-in projector was lexical and extracted
 no imports at all — the native Java parser has since closed that specific gap, but the recipe is
 unchanged for any extension still missing a channel. Iterate against the embedded contract

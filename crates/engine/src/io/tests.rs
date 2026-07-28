@@ -4,9 +4,16 @@ fn opts() -> IoOptions {
     IoOptions::default()
 }
 
+/// `extract_file_io` under the BUILT-IN convention vocabulary — every case below is about extraction
+/// shapes, not about which names a project declared.
+fn extract_file_io_default(rel: &str, text: &str, opts: &IoOptions) -> Option<zzop_core::IoFacts> {
+    let declared = crate::VocabularyConfig::default();
+    extract_file_io(rel, text, opts, &declared.resolve())
+}
+
 #[test]
 fn no_io_in_a_plain_file_is_none() {
-    assert!(extract_file_io("a.ts", "export const a = 1;\n", &opts()).is_none());
+    assert!(extract_file_io_default("a.ts", "export const a = 1;\n", &opts()).is_none());
 }
 
 #[test]
@@ -49,7 +56,7 @@ fn csharp_route_provides_project_when_degraded_but_consumes_are_gated_off() {
 
 #[test]
 fn captures_fe_http_egress_consume() {
-    let io = extract_file_io("Ctx.tsx", r#"axios.get("/authen/getUserInfo");"#, &opts())
+    let io = extract_file_io_default("Ctx.tsx", r#"axios.get("/authen/getUserInfo");"#, &opts())
         .expect("expected io facts");
     assert!(io.provides.is_empty());
     assert_eq!(io.consumes.len(), 1);
@@ -64,7 +71,7 @@ fn captures_fe_http_egress_consume() {
 fn file_local_constant_indirection_still_resolves() {
     let src = r#"const ControlKey = { AUTHEN: { getUserInfo: "/authen/getUserInfo" } };
 axios.get(ControlKey.AUTHEN.getUserInfo);"#;
-    let io = extract_file_io("Ctx.tsx", src, &opts()).expect("expected io facts");
+    let io = extract_file_io_default("Ctx.tsx", src, &opts()).expect("expected io facts");
     assert_eq!(
         io.consumes[0].key.as_deref(),
         Some("GET /authen/getUserInfo")
@@ -76,7 +83,7 @@ fn cross_file_constant_indirection_is_unresolved_at_this_one_file_call_site() {
     // Same indirection shape as egress.rs's own test, but the constant lives in a different file
     // this one-file-slice call never sees — see module doc. `analyze::late_resolve_cross_file_consumes`
     // resolves this shape end to end (see lib.rs's e2e test).
-    let io = extract_file_io(
+    let io = extract_file_io_default(
         "Ctx.tsx",
         "axios.get(ControlKey.AUTHEN.getUserInfo);",
         &opts(),
@@ -96,13 +103,14 @@ fn hono_route_provides_no_longer_come_from_the_per_file_pass() {
     // Router provides now come from the fragment-then-compose pipeline (module doc), not this
     // per-file pass — a Hono file with no egress/Nest facts yields nothing here.
     let src = "const apiRoutes = new Hono();\napiRoutes.get(\"/users\", api.listUsers);\n";
-    assert!(extract_file_io("routes/apiRoutes.ts", src, &opts()).is_none());
+    assert!(extract_file_io_default("routes/apiRoutes.ts", src, &opts()).is_none());
 }
 
 #[test]
 fn captures_nestjs_controller_route_provide_through_the_fused_seam() {
     let src = "@Controller('users')\nclass UsersController {\n  @Get(':id')\n  findOne() {}\n}\n";
-    let io = extract_file_io("users.controller.ts", src, &opts()).expect("expected io facts");
+    let io =
+        extract_file_io_default("users.controller.ts", src, &opts()).expect("expected io facts");
     assert!(io.consumes.is_empty());
     assert_eq!(io.provides.len(), 1);
     assert_eq!(io.provides[0].key, "GET /users/{}");
@@ -113,7 +121,7 @@ fn captures_nestjs_controller_route_provide_through_the_fused_seam() {
 #[test]
 fn captures_nest_global_prefix_marker_through_the_fused_seam() {
     let src = "app.setGlobalPrefix('api');\n";
-    let io = extract_file_io("main.ts", src, &opts()).expect("expected io facts");
+    let io = extract_file_io_default("main.ts", src, &opts()).expect("expected io facts");
     assert!(io.consumes.is_empty());
     assert_eq!(io.provides.len(), 1);
     assert_eq!(io.provides[0].kind, "nest-global-prefix");
@@ -123,7 +131,7 @@ fn captures_nest_global_prefix_marker_through_the_fused_seam() {
 #[test]
 fn captures_hono_client_consume_through_the_fused_seam() {
     let src = "import { hc } from 'hono/client';\nconst client = hc<T>('/api/auth');\nclient.signout.$post();\n";
-    let io = extract_file_io("client.ts", src, &opts()).expect("expected io facts");
+    let io = extract_file_io_default("client.ts", src, &opts()).expect("expected io facts");
     assert!(io.provides.is_empty());
     assert_eq!(io.consumes.len(), 1);
     assert_eq!(io.consumes[0].kind, "http");

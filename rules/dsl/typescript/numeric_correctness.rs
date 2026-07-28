@@ -1,4 +1,4 @@
-//! `float-equality` + `always-false-comparison` + `numeric-string-comparison` tests (split from `typescript.rs`).
+//! `float-equality` + `always-constant-comparison` + `numeric-string-comparison` tests (split from `typescript.rs`).
 
 use super::*;
 
@@ -86,14 +86,14 @@ fn float_eq_ok_marker_suppresses_the_finding() {
     let f = rule_findings(
         &[(
             "calc.ts",
-            "export function isDone(ratio: number) {\n  return ratio === 0.1; // float-equality-ok: tolerance checked elsewhere\n}\n",
+            "export function isDone(ratio: number) {\n  return ratio === 0.1; // zzop-float-equality-ok: tolerance checked elsewhere\n}\n",
         )],
         "float-equality",
     );
     assert!(f.is_empty(), "{f:?}");
 }
 
-// --- always-false-comparison ---
+// --- always-constant-comparison ---
 
 #[test]
 fn nan_strict_equality_is_flagged() {
@@ -102,7 +102,7 @@ fn nan_strict_equality_is_flagged() {
             "v.ts",
             "export function isBad(x: number) {\n  return x === NaN;\n}\n",
         )],
-        "always-false-comparison",
+        "always-constant-comparison",
     );
     assert_eq!(f.len(), 1, "{f:?}");
     assert_eq!(f[0].line, 2);
@@ -115,7 +115,7 @@ fn number_is_nan_call_is_not_flagged() {
             "v.ts",
             "export function isBad(x: number) {\n  return Number.isNaN(x);\n}\n",
         )],
-        "always-false-comparison",
+        "always-constant-comparison",
     );
     assert!(f.is_empty(), "{f:?}");
 }
@@ -127,7 +127,7 @@ fn empty_array_reference_equality_is_flagged() {
             "v.js",
             "export function isEmpty(items) {\n  return items === [];\n}\n",
         )],
-        "always-false-comparison",
+        "always-constant-comparison",
     );
     assert_eq!(f.len(), 1, "{f:?}");
     assert_eq!(f[0].line, 2);
@@ -140,7 +140,7 @@ fn empty_object_reference_equality_reverse_form_is_flagged() {
             "v.js",
             "export function isEmptyConfig(config) {\n  return {} === config;\n}\n",
         )],
-        "always-false-comparison",
+        "always-constant-comparison",
     );
     assert_eq!(f.len(), 1, "{f:?}");
     assert_eq!(f[0].line, 2);
@@ -156,7 +156,7 @@ fn ordinary_function_body_braces_do_not_false_positive_the_empty_object_reverse_
             "v.js",
             "function noop() {}\nexport function check(x) {\n  return x === noop();\n}\n",
         )],
-        "always-false-comparison",
+        "always-constant-comparison",
     );
     assert!(f.is_empty(), "{f:?}");
 }
@@ -168,7 +168,7 @@ fn loose_equality_with_empty_array_is_not_flagged() {
     // `===`/`!==` on the array/object labels. NaN keeps loose coverage (NaN never loose-equals anything).
     let f = rule_findings(
         &[("v.js", "export function check(x) {\n  return x == [];\n}\n")],
-        "always-false-comparison",
+        "always-constant-comparison",
     );
     assert!(f.is_empty(), "{f:?}");
 }
@@ -178,9 +178,9 @@ fn always_false_ok_marker_suppresses_the_finding() {
     let f = rule_findings(
         &[(
             "v.ts",
-            "export function isBad(x: number) {\n  // always-false-comparison-ok: legacy guard, dead code path\n  return x === NaN;\n}\n",
+            "export function isBad(x: number) {\n  // zzop-always-constant-comparison-ok: legacy guard, dead code path\n  return x === NaN;\n}\n",
         )],
-        "always-false-comparison",
+        "always-constant-comparison",
     );
     assert!(f.is_empty(), "{f:?}");
 }
@@ -252,7 +252,7 @@ fn numeric_string_cmp_ok_marker_suppresses_the_finding() {
     let f = rule_findings(
         &[(
             "v.js",
-            "export function cmp(x) {\n  return x < '9'; // numeric-string-comparison-ok: x is itself a formatted string here\n}\n",
+            "export function cmp(x) {\n  return x < '9'; // zzop-numeric-string-comparison-ok: x is itself a formatted string here\n}\n",
         )],
         "numeric-string-comparison",
     );

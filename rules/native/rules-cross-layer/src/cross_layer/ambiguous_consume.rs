@@ -2,7 +2,7 @@
 //! whose kind is not `"db-table"`: a consume whose key is provided by 2+ distinct source trees, so which
 //! provider actually serves the call depends on deploy-time routing (load balancer, service mesh,
 //! feature-flagged rollout, ...) that static analysis cannot see. `"db-table"` sharing is normal/expected
-//! and belongs to `cross-layer/shared-db-table` instead.
+//! and belongs to `cross-layer/db-table-name-in-multiple-sources` instead.
 //!
 //! Anchored at the consume site, not any candidate provider — the ambiguity is a property of the call site:
 //! the caller cannot know, from source alone, which candidate will actually answer.

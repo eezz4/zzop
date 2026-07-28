@@ -41,7 +41,7 @@
 use std::collections::HashMap;
 
 use swc_core::common::SourceMap;
-use swc_core::ecma::ast::{Expr, Lit, Module, Tpl};
+use swc_core::ecma::ast::{Callee, Expr, Lit, Module, Tpl};
 
 use super::binding_census::unambiguous_bindings;
 use super::unwrap_expr;
@@ -49,50 +49,69 @@ use super::url_resolve::resolve_url_variants;
 
 /// One file's same-file URL knowledge. Empty for the overwhelming majority of files; built once per file
 /// by [`super::collector::extract_http_egress`].
+///
+/// Four maps, not two: each of the two POSITIONS above is answered separately for a bare NAME (`BASE`)
+/// and for a zero-argument CALL (`base()`, `same-file-fn-url-v1`). The two namespaces stay apart on
+/// purpose — a value and a function of the same name are different bindings, and one map would let
+/// either answer for the other.
 #[derive(Default)]
 pub(super) struct LocalConsts {
     /// Bare name -> plain string literal, for the LEADING slot only.
     heads: HashMap<String, String>,
     /// Bare name -> the URL variants its initializer resolves to, for the WHOLE-ARGUMENT position.
     urls: HashMap<String, Vec<String>>,
+    /// Zero-argument helper name -> plain string literal it returns, for the LEADING slot only.
+    fn_heads: HashMap<String, String>,
+    /// Zero-argument helper name -> the URL variants its return resolves to, whole-argument position.
+    fn_urls: HashMap<String, Vec<String>>,
 }
 
 impl LocalConsts {
-    /// Build both maps from one file's AST. `consts` is the project-wide DOTTED map, consulted while
+    /// Build all four maps from one file's AST. `consts` is the project-wide DOTTED map, consulted while
     /// resolving an initializer exactly as it is at a call site (so `const u = ControlKey.A.b` resolves).
     pub(super) fn build(module: &Module, consts: &HashMap<String, String>, cm: &SourceMap) -> Self {
         let gated = unambiguous_bindings(module);
-        if gated.is_empty() {
+        if gated.consts.is_empty() && gated.fn_returns.is_empty() {
             return Self::default();
         }
-        let heads: HashMap<String, String> = gated
-            .iter()
-            .filter_map(|(name, init)| match init {
-                Expr::Lit(Lit::Str(s)) => Some((
-                    name.clone(),
-                    s.value.as_str().unwrap_or_default().to_string(),
-                )),
-                _ => None,
-            })
-            .filter(|(_, value)| admits_substitution(value))
-            .collect();
-        // The one-hop bound, structural rather than a counter: initializers are resolved against a map
-        // whose `urls` half is EMPTY, so no candidate can be defined in terms of another candidate's
-        // whole-argument value.
-        let one_hop = Self {
-            heads,
-            urls: HashMap::new(),
+        let literal_map = |xs: &[(String, Expr)]| -> HashMap<String, String> {
+            xs.iter()
+                .filter_map(|(name, init)| match init {
+                    Expr::Lit(Lit::Str(s)) => Some((
+                        name.clone(),
+                        s.value.as_str().unwrap_or_default().to_string(),
+                    )),
+                    _ => None,
+                })
+                .filter(|(_, value)| admits_substitution(value))
+                .collect()
         };
-        let mut urls = HashMap::new();
-        for (name, init) in &gated {
-            let variants = resolve_url_variants(init, consts, &one_hop, cm);
-            if !variants.is_empty() && variants.iter().all(|v| admits_substitution(v)) {
-                urls.insert(name.clone(), variants);
+        // The one-hop bound, structural rather than a counter: initializers and helper returns are both
+        // resolved against a map whose whole-argument halves (`urls`/`fn_urls`) are EMPTY, so no
+        // candidate can be defined in terms of another candidate's whole-argument value.
+        let one_hop = Self {
+            heads: literal_map(&gated.consts),
+            fn_heads: literal_map(&gated.fn_returns),
+            urls: HashMap::new(),
+            fn_urls: HashMap::new(),
+        };
+        let resolve_all = |xs: &[(String, Expr)]| -> HashMap<String, Vec<String>> {
+            let mut out = HashMap::new();
+            for (name, init) in xs {
+                let variants = resolve_url_variants(init, consts, &one_hop, cm);
+                if !variants.is_empty() && variants.iter().all(|v| admits_substitution(v)) {
+                    out.insert(name.clone(), variants);
+                }
             }
-        }
+            out
+        };
+        let urls = resolve_all(&gated.consts);
+        let fn_urls = resolve_all(&gated.fn_returns);
         Self {
             heads: one_hop.heads,
+            fn_heads: one_hop.fn_heads,
             urls,
+            fn_urls,
         }
     }
 
@@ -119,26 +138,56 @@ impl LocalConsts {
     /// joins). Refusing would fall back to head-drop and key `GET /users` — a FALSE INTERNAL claim that can
     /// join a same-named local route. Between a cosmetic double slash and a wrong edge, the double slash is
     /// the lesser harm.
+    ///
+    /// A zero-argument call in this slot (`` `${base()}/charges` ``, `base() + '/charges'`) is answered
+    /// from the helper map instead (`same-file-fn-url-v1`). Same gate, same refusals, same reason: the
+    /// head is the one slot where `{}` is a LOSS rather than a normalization, and a helper returning
+    /// `https://api.vendor.com` left the call filed as the internal route `GET /charges`.
     pub(super) fn head_literal_for(&self, e: &Expr, rest: &str) -> Option<&str> {
         if rest.is_empty() {
             return None;
         }
-        let Expr::Ident(id) = unwrap_expr(e) else {
-            return None;
-        };
-        self.heads.get(id.sym.as_ref()).map(String::as_str)
+        match unwrap_expr(e) {
+            Expr::Ident(id) => self.heads.get(id.sym.as_ref()),
+            other => zero_arg_callee_name(other).and_then(|n| self.fn_heads.get(n)),
+        }
+        .map(String::as_str)
     }
 
     /// The URL variants to substitute for a bare identifier that IS the whole url argument
     /// (`same-file-url-binding-v1`), or `None` to leave the call unresolved.
     ///
-    /// Only a bare identifier: a dotted or computed member (`ENDPOINT[kind]`) is the project-wide map's
-    /// business, and a computed one stays unresolved rather than enumerating a value nobody wrote.
+    /// Only a bare identifier, or a zero-argument call on one (`fetch(chargesUrl())`,
+    /// `same-file-fn-url-v1`): a dotted or computed member (`ENDPOINT[kind]`) is the project-wide map's
+    /// business, and a computed one stays unresolved rather than enumerating a value nobody wrote. A call
+    /// WITH arguments is never answered — the returned string depends on what was passed, which is value
+    /// resolution, not constant reading.
     pub(super) fn whole_url_for(&self, e: &Expr) -> Option<&[String]> {
-        let Expr::Ident(id) = unwrap_expr(e) else {
-            return None;
-        };
-        self.urls.get(id.sym.as_ref()).map(Vec::as_slice)
+        match unwrap_expr(e) {
+            Expr::Ident(id) => self.urls.get(id.sym.as_ref()),
+            other => zero_arg_callee_name(other).and_then(|n| self.fn_urls.get(n)),
+        }
+        .map(Vec::as_slice)
+    }
+}
+
+/// The bare name a ZERO-ARGUMENT call invokes (`base()` -> `"base"`), or `None` for anything else — a
+/// call with arguments, a method call (`api.base()`), or a non-call expression. The single spelling of
+/// `same-file-fn-url-v1`'s call shape, shared by both positions above and by
+/// [`resolve_url_variants`](super::url_resolve)'s call arm.
+pub(super) fn zero_arg_callee_name(e: &Expr) -> Option<&str> {
+    let Expr::Call(c) = unwrap_expr(e) else {
+        return None;
+    };
+    if !c.args.is_empty() {
+        return None;
+    }
+    let Callee::Expr(callee) = &c.callee else {
+        return None;
+    };
+    match unwrap_expr(callee) {
+        Expr::Ident(id) => Some(id.sym.as_ref()),
+        _ => None,
     }
 }
 

@@ -263,13 +263,13 @@ fn symbol_with_no_body_span_is_never_flagged() {
     assert!(validate_envelope(&json).is_ok());
 }
 
-/// `examples/jsp-envelope.example.json` — the JSP contract example `docs/NORMALIZED_AST.md`'s
+/// `docs/contracts/example-envelope.json` — the JSP contract example `docs/NORMALIZED_AST.md`'s
 /// Validation section points at: a hand-written, crude-parser-shaped envelope (symbols with no body
 /// spans, one `http` provide + one `db-table` consume, no imports) that must still validate cleanly
 /// against this exact contract.
 #[test]
 fn jsp_contract_example_validates() {
-    let json = include_str!("../../../../examples/jsp-envelope.example.json");
+    let json = include_str!("../../../../docs/contracts/example-envelope.json");
     let envelope = validate_envelope(json).expect("jsp-envelope.example.json should validate");
     assert_eq!(envelope.parser, "jsp-lexical/1");
     assert_eq!(envelope.files.len(), 1);

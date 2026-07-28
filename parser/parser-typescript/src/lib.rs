@@ -42,8 +42,11 @@ pub use adapters::controller_decorators::{
     extract_controller_provides,
 };
 pub use adapters::db_table_consume::{
-    extract_db_table_consumes, extract_query_call_sites, PRISMA_CLIENT_GETTER,
+    extract_db_table_consumes, extract_db_table_consumes_with_vocab, extract_query_call_sites,
+    extract_query_call_sites_with_vocab, PRISMA_CLIENT_GETTER,
 };
+pub use adapters::egress::collector::extract_http_egress_with_vocab;
+pub use adapters::egress::retry::{RETRY_WRAPPERS, RETRY_WRITE_VERBS};
 pub use adapters::egress::{
     base_relative_path, const_map_fragment, extract_http_egress, is_external_url, resolve_raw_path,
 };
@@ -54,7 +57,9 @@ pub use adapters::nest_middleware::{extract_nest_forroutes_guarded, ForRoutesPat
 pub use adapters::next_pages_api::{scan_pages_api_handler, PagesApiHandlerScan};
 pub use adapters::pathname_dispatch::extract_pathname_dispatch_provides;
 pub use adapters::raw_sql::extract_raw_sql_db_table_consumes;
-pub use adapters::router_mounts::extract_router_mount_fragments;
+pub use adapters::router_mounts::{
+    extract_router_mount_fragments, extract_router_mount_fragments_with_vocab, RouterMountVocab,
+};
 pub use adapters::trpc_consume::extract_trpc_consumes;
 pub use adapters::trpc_router::extract_procedure_router_fragments;
 pub use adapters::typeorm_repository::extract_typeorm_repository_consumes;
@@ -64,8 +69,10 @@ pub use lang::resolve::{
     build_dep, build_dep_with_workspace, resolve_file, resolve_file_with_workspace, try_ext,
     TsconfigPaths, WorkspacePkg, RESOLVE_EXTS,
 };
+pub use lang::write_site::write_sites_for_symbol_with_vocab;
 pub use lang::write_site::{
-    write_sites_for_symbol, DEFAULT_ORM_RECEIVER_PATTERN, DEFAULT_WRITE_METHODS,
+    write_sites_for_symbol, CompiledWriteSiteVocab, WriteSiteVocab, DEFAULT_ORM_RECEIVER_PATTERN,
+    DEFAULT_WRITE_METHODS,
 };
 
 pub use asset_refs::parse_asset_refs;
@@ -80,7 +87,7 @@ pub use project::{build_common_ir, count_loc};
 pub use re_exports::{parse_dynamic_imports, parse_re_exports};
 pub use sfc_imports::extract_sfc_script_imports;
 pub use signature_refs::parse_exported_signature_names;
-pub use symbols::parse_symbols;
+pub use symbols::{parse_symbols, parse_symbols_with_vocab};
 
 /// Cache-bust token for `zzop-cache`: `parser-id/pinned-toolchain/last-change-version`. The
 /// `swc_core-71.0.5` segment must match this crate's `Cargo.toml` pin exactly (an swc upgrade changes
@@ -88,7 +95,7 @@ pub use symbols::parse_symbols;
 /// projected IR shape changes; an unchanged release keeps the old value so warm TS caches survive the
 /// upgrade (2026-07-22 version reform — the "what changed" narrative lives in git, not this string).
 pub const PARSER_FINGERPRINT: &str =
-    "typescript/swc_core-71.0.5/0.22.0+resource-query-v1+trpc-leaf-procedure-v1+dispatch-branch-symbol-v1+exported-signature-names-v1+function-spans-v1+same-file-const-prepend-v1+raw-sql-db-table-v1+same-file-url-binding-v1";
+    "typescript/swc_core-71.0.5/0.22.0+resource-query-v1+trpc-leaf-procedure-v1+dispatch-branch-symbol-v1+exported-signature-names-v1+function-spans-v1+same-file-const-prepend-v1+raw-sql-db-table-v1+same-file-url-binding-v1+same-file-fn-url-v1+retry-wrapper-binding-v1+generated-verb-member-v1+dispatch-verb-order-v1";
 
 /// POLICY VOCABULARY — `Promise.prototype` continuation methods whose function-shaped arguments run on
 /// the RESUMED continuation of an async boundary, not inline at the call. Consumed by
@@ -97,7 +104,7 @@ pub const PARSER_FINGERPRINT: &str =
 /// a plain identifier-property vocabulary (no receiver-type proof, no alias tracking — see
 /// [`extract_function_spans`]'s doc for the full narrowness contract).
 ///
-/// **Do not edit this list alone.** `rules/dsl/react/react.json`'s `setstate-after-await-unmounted` spells
+/// **Do not edit this list alone.** `rules/dsl/react/react.json`'s `setstate-after-async-unguarded` spells
 /// the same three methods again as the `.(?:then|catch|finally)(` arm of its `async-boundary` pattern — one
 /// policy, two spellings, because a JSON pack cannot reference a Rust constant. Narrowing this list while
 /// the rule keeps the token silently DELETES findings (the callback is no longer merged into the

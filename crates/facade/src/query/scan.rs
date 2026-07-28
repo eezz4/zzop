@@ -118,7 +118,9 @@ pub(super) fn all_findings(analysis: &Value) -> Vec<&Value> {
 
 /// `suggestions` (not-found only): distinct keys in engine order whose last path segment equals
 /// the pattern's, falling back to keys containing any single `/`-segment of the pattern.
-pub(super) fn suggestions(cross_layer: &Value, pattern: &str) -> Vec<String> {
+///
+/// Returns `(capped list, total before the cap)` — the caller discloses the difference.
+pub(super) fn suggestions(cross_layer: &Value, pattern: &str) -> (Vec<String>, usize) {
     let mut distinct: Vec<&str> = Vec::new();
     for (bucket, _) in BUCKETS {
         for item in cross_layer[bucket]
@@ -154,6 +156,12 @@ pub(super) fn suggestions(cross_layer: &Value, pattern: &str) -> Vec<String> {
             .map(|k| k.to_string())
             .collect();
     }
+    // The count BEFORE the cap is returned alongside, because a silently shortened suggestion list is
+    // the worst shape this reply can take: `not-found` already tells the caller "no key matched", and
+    // a capped `suggestions` that happens to exclude the key they meant reads as "it does not exist".
+    // Every sibling capped list in this reply discloses (`truncated`, `truncatedFindings`); this one
+    // did not until 2026-07-27.
+    let total = picked.len();
     picked.truncate(QUERY_SUGGESTIONS_LIMIT);
-    picked
+    (picked, total)
 }

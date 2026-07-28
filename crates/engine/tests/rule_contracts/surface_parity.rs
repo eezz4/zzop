@@ -22,54 +22,75 @@
 //! tests — an already-pinned, already-drift-coupled truth source (any facade output field drift breaks
 //! THOSE tests first, in the same crate, before it could ever reach this one silently).
 //!
-//! **Known blind spot of this route** (documented here rather than hidden): `AnalyzeOutputView` has a
-//! 21st possible field, `ruleOverridesApplied`, which is deliberately OMITTED from the JSON entirely (never
-//! an empty `{}`) when a caller's run requested no `disabledRules`/`severityOverrides` — see
-//! `zzop_engine::RuleOverridesApplied`'s own doc. The pinned-literal fixture in `analyze_tests.rs` never
-//! requests an override, so its pinned key-set literal does not include `ruleOverridesApplied` either, and
-//! neither does this registry/test. `ruleOverridesApplied` is consequently NOT covered by this parity
-//! contract today — a real gap in the pragmatic route's completeness, not a claim that the field doesn't
-//! exist or doesn't matter (it is forwarded by the MCP lane, per that source's own doc comments).
+//! **Former blind spot of this route, CLOSED 2026-07-26.** `AnalyzeOutputView` has a 21st possible
+//! field, `ruleOverridesApplied`, deliberately OMITTED from the JSON entirely (never an empty `{}`)
+//! when a caller's run requested no `disabledRules`/`severityOverrides` — see
+//! `zzop_engine::RuleOverridesApplied`'s own doc. The single pinned fixture this route read requested
+//! no override, so its literal could never contain that key, so the registry had no row for it and the
+//! field rode every surface with no parity coupling at all. This file used to disclose that and stop
+//! there; a disclosure is not a guard. `analyze_tests.rs` now carries a SECOND single-tree pin —
+//! `analyze_json_top_level_key_set_with_rule_overrides_is_pinned_exactly`, whose fixture DOES request
+//! an override — and [`facade_pinned_key_sets`] returns the UNION of the two, so TEST 1 demands a
+//! registry row for the 21st field like any other.
+//!
+//! The union is the correct combinator and not a shortcut: each pin is itself an EXACT `assert_eq!` on
+//! its own fixture's key list, so neither can grow a field silently, and their union is exactly "every
+//! key this output can produce". A future third conditional field needs its own pin added there and its
+//! marker added here — the same two-step every field already costs.
+//!
+//! What is still NOT proven for `ruleOverridesApplied` specifically: its registry row is
+//! `carry-conditional`, which TEST 3 exempts by design (see that test's own doc) — the MCP lane's
+//! forwarding is a `.get()`-gated `summary.insert("ruleOverridesApplied".to_string(), ...)`, not a
+//! `json!` key literal, so the literal matcher could not read it either way. That is the same standing
+//! caveat every `carry-conditional` row carries, not a residue of this field's own gap.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
 fn registry_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/contracts/surface-parity.json")
+    workspace_root().join("docs/contracts/surface-parity.json")
 }
 
 fn facade_analyze_tests_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/facade/src/analyze_tests.rs")
 }
 
-fn mcp_src_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../host/src")
-}
-
-/// A parallel worktree agent is moving `crates/host`'s shaping code into a new `crates/summary` crate
-/// (reply SHAPE preserved byte-for-byte, per this task's own brief) — scanned too, defensively, so TEST 3
-/// survives that move with no edits here. Absent today; `concat_rs_sources` simply yields an empty string
-/// for a directory that does not exist yet (`collect_rs_files` already degrades the same way — see its own
-/// doc in `main.rs`).
+/// `crates/summary/src` — the reply-shaping crate the since-deleted host crate's shaping code was split
+/// into (reply SHAPE preserved byte-for-byte across that move). Where `analyze_summary`/`cross_summary`
+/// actually build their JSON today, so it is the primary haystack for TEST 3.
 fn summary_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/summary/src")
 }
 
 /// The 2026-07-23 product-layer split moved the MCP tool dispatch (`tools.rs`, `tools/definitions.rs`,
-/// `server.rs`, `resources.rs`) out of `crates/host/src` into its own `packages/mcp/src` Cargo package
-/// — scanned so TEST 3 keeps seeing every place a reply field literal could be re-emitted on the MCP
-/// wire.
+/// `server.rs`, `resources.rs`) out of the then-shared host crate into its own `packages/mcp/src` Cargo
+/// package — scanned so TEST 3 keeps seeing every place a reply field literal could be re-emitted on the
+/// MCP wire.
 fn mcp_pkg_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/mcp/src")
 }
 
-/// Same split moved the CLI's own argv dispatch (`main.rs`, `cli.rs`) out of `crates/host/src` into
-/// `packages/cli-bin/src` — scanned for the same reason as `mcp_pkg_src_dir`.
+/// Same split moved the CLI's own argv dispatch (`main.rs`, `cli/`) into `packages/cli-bin/src` —
+/// scanned for the same reason as `mcp_pkg_src_dir`.
 fn cli_bin_src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/cli-bin/src")
 }
 
-fn load_registry() -> serde_json::Value {
+/// The three directories TEST 3's haystack is built from, named once so the haystack builder and its
+/// non-emptiness guard can never disagree about the scan set.
+fn mcp_lane_dirs() -> [(&'static str, PathBuf); 3] {
+    [
+        ("crates/summary/src", summary_src_dir()),
+        ("packages/mcp/src", mcp_pkg_src_dir()),
+        ("packages/cli-bin/src", cli_bin_src_dir()),
+    ]
+}
+
+pub(crate) fn load_registry() -> serde_json::Value {
     let path = registry_path();
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
@@ -113,23 +134,39 @@ fn extract_pinned_keys(source: &str, search_from: usize, context: &str) -> BTree
         .collect()
 }
 
-/// Loads `crates/facade/src/analyze_tests.rs` and returns `(single_tree_keys, multi_tree_keys)` — the two
-/// pinned top-level key-set literals (`analyze_json_top_level_key_set_is_pinned_exactly` /
-/// `analyze_trees_json_top_level_key_set_is_pinned_exactly`).
+/// Loads `crates/facade/src/analyze_tests.rs` and returns `(single_tree_keys, multi_tree_keys)`.
+///
+/// `single_tree_keys` is the UNION of the two single-tree pins — the base one
+/// (`analyze_json_top_level_key_set_is_pinned_exactly`, whose fixture requests no override) and the
+/// override one (`analyze_json_top_level_key_set_with_rule_overrides_is_pinned_exactly`) — because the
+/// base fixture structurally cannot see `ruleOverridesApplied`; see this file's module doc.
+/// `multi_tree_keys` comes from `analyze_trees_json_top_level_key_set_is_pinned_exactly`, which has no
+/// conditional field and so needs no second pin.
 fn facade_pinned_key_sets() -> (BTreeSet<String>, BTreeSet<String>) {
     let path = facade_analyze_tests_path();
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
 
-    let single_marker = "fn analyze_json_top_level_key_set_is_pinned_exactly";
+    // `find` returns the FIRST occurrence, and `..._with_rule_overrides_...` does not have
+    // `..._is_pinned_exactly` as a prefix of the base name, so the two markers cannot alias.
+    let single_markers = [
+        "fn analyze_json_top_level_key_set_is_pinned_exactly",
+        "fn analyze_json_top_level_key_set_with_rule_overrides_is_pinned_exactly",
+    ];
     let multi_marker = "fn analyze_trees_json_top_level_key_set_is_pinned_exactly";
 
-    let single_start = text.find(single_marker).unwrap_or_else(|| {
-        panic!(
-            "{single_marker} not found in {} — has it been renamed?",
-            path.display()
-        )
-    });
+    let mut single_keys = BTreeSet::new();
+    for marker in single_markers {
+        let start = text.find(marker).unwrap_or_else(|| {
+            panic!(
+                "{marker} not found in {} — has it been renamed? Every pinned single-tree key-set \
+                 literal must stay findable here; dropping one silently shrinks what this contract \
+                 demands a registry row for",
+                path.display()
+            )
+        });
+        single_keys.extend(extract_pinned_keys(&text, start, marker));
+    }
     let multi_start = text.find(multi_marker).unwrap_or_else(|| {
         panic!(
             "{multi_marker} not found in {} — has it been renamed?",
@@ -137,40 +174,223 @@ fn facade_pinned_key_sets() -> (BTreeSet<String>, BTreeSet<String>) {
         )
     });
 
-    let single_keys = extract_pinned_keys(&text, single_start, single_marker);
     let multi_keys = extract_pinned_keys(&text, multi_start, multi_marker);
     (single_keys, multi_keys)
 }
 
-/// Every `.rs` file's content under `dir`, concatenated with a form-feed separator (an unambiguous
-/// non-code byte that can never straddle a real match) — good enough for the pragmatic substring checks
-/// below, which never need to attribute a match back to a specific file. Yields an empty string when `dir`
-/// does not exist (e.g. `crates/summary/src` before the parallel refactor lands) — `crate::collect_rs_files`
-/// already degrades a missing directory to "nothing collected" (see its own doc in `main.rs`).
-fn concat_rs_sources(dir: &Path) -> String {
-    let mut files = Vec::new();
-    crate::collect_rs_files(dir, &mut files);
-    files
+/// Canonicalized `.rs` paths the registry declares as the implementation of a CLI-only lane
+/// (`_cliOnlyLanes[<lane>].sources`) — the files TEST 3 subtracts from the MCP lane.
+///
+/// This is what turns `_cliOnlyLanes` from pure documentation into the scope boundary of the guard: a
+/// lane that ships without declaring its sources leaves them inside the MCP lane, so a CLI-only
+/// emission of an `omit` field fails the build until someone deliberately records the lane. Both
+/// directions of TEST 3 subtract the same set, and the CARRY direction is the reason it must be both:
+/// a CLI-only lane emits `coverage`/`warnings`/`disclosure` too, so leaving those files in the haystack
+/// would let a CLI-only emission keep a `carry` row green after the MCP reply silently stopped
+/// forwarding it — the registry's founding bug class, reintroduced through the back door.
+///
+/// A declared path that does not resolve is a hard failure, not a silent skip: a moved lane source must
+/// update this registry in the same commit, or the exclusion would quietly widen back.
+pub(crate) fn cli_only_lane_sources(registry: &serde_json::Value) -> BTreeSet<PathBuf> {
+    let lanes = registry["_cliOnlyLanes"]
+        .as_object()
+        .expect("surface-parity.json's `_cliOnlyLanes` must be an object");
+    let mut out = BTreeSet::new();
+    for (lane, entry) in lanes {
+        if lane.starts_with('_') {
+            continue; // `_doc`, the block's own prose — not a lane.
+        }
+        let sources = entry.get("sources").and_then(|v| v.as_array()).unwrap_or_else(|| {
+            panic!(
+                "_cliOnlyLanes[{lane:?}] must declare a `sources` array naming the .rs files that \
+                 implement it — crates/engine/tests/rule_contracts/surface_parity.rs subtracts exactly \
+                 those from the MCP lane it scans"
+            )
+        });
+        for source in sources {
+            let rel = source.as_str().unwrap_or_else(|| {
+                panic!("_cliOnlyLanes[{lane:?}].sources entries must be workspace-relative path strings")
+            });
+            let path = workspace_root().join(rel);
+            let canonical = std::fs::canonicalize(&path).unwrap_or_else(|e| {
+                panic!(
+                    "_cliOnlyLanes[{lane:?}].sources names {rel}, which does not resolve ({e}) — a \
+                     moved or renamed lane source must update this registry in the SAME commit"
+                )
+            });
+            out.insert(canonical);
+        }
+    }
+    out
+}
+
+/// Whether a path is TEST source rather than emission source: any `tests` directory component, or a
+/// file named `tests.rs` / `*_test.rs` / `*_tests.rs`. A fixture that mimics an engine output spells the
+/// engine's own key literals on purpose; counting those as emissions made the guard dictate what a test
+/// may name its own variables, which is not a wire contract.
+fn is_test_source(path: &Path) -> bool {
+    if path.components().any(|c| c.as_os_str() == "tests") {
+        return true;
+    }
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    name == "tests.rs" || name.ends_with("_test.rs") || name.ends_with("_tests.rs")
+}
+
+/// A source file reduced to its (line-)comment-free text. Rust line comments — `//`, `///` and `//!` —
+/// are dropped whole, because prose that MENTIONS a field name is not a place that emits it: a doc
+/// comment reading ``the `"ir":` block`` is documentation, and treating it as a leak is what made the
+/// guard's verdict depend on how carefully a module doc was worded.
+///
+/// Line-granularity, deliberately: stripping a TRAILING `//` comment off a code line would have to
+/// decide whether the `//` is inside a string literal, and a lexer is far more machinery than a
+/// textual-proximity proxy earns. The residual blind spot is a `/* ... */` block comment (this
+/// workspace writes none) and a real emission sharing a line with a trailing comment (this workspace's
+/// `rustfmt` style puts neither on one line).
+fn emission_text(source: &str) -> String {
+    source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// TEST 3's haystack: the emission text of every `.rs` file under `crates/summary/src` (the shaping
+/// logic, and since the 2026-07-26 teardown also the embedded contract table), `packages/mcp/src` (the
+/// MCP tool schemas/dispatch) and `packages/cli-bin/src` (the CLI's own argv dispatch) — MINUS test
+/// sources ([`is_test_source`]) and MINUS the registry-declared CLI-only lane implementations
+/// ([`cli_only_lane_sources`]). What remains is what an `analyze_repo`/`cross_repo` reply can actually
+/// be built from.
+///
+/// A fourth directory, `crates/host/src`, was DROPPED here in that teardown rather than re-pointed. Its
+/// only contribution to this haystack was the shared pass-through dispatch (deleted outright — both
+/// products call `zzop-summary` directly now) and the embedded contract table, which moved into
+/// `crates/summary/src` and is therefore still walked.
+///
+/// `crates/facade/src` is deliberately NOT added in its place — but not for the reason this doc used to
+/// give. It claimed the facade "spells every one of these fields, `omit` rows included", so adding it
+/// would invert the contract into "the producer must never name its own fields". MEASURED 2026-07-26,
+/// and false: the facade serializes through `#[serde(rename_all = "camelCase")]` derives on
+/// `crates/facade/src/output.rs`'s output views, so it writes no wire-key literals at all — all 24
+/// registry field names score ZERO `"<field>":` hits across the 17 non-test `.rs` files under
+/// `crates/facade/src`. Including it would have been INERT, not inverting. It stays out because it would
+/// assert nothing, which is the weaker and true reason.
+///
+/// The property that measurement actually exposes belongs to the MATCHER, not to this directory list:
+/// **it is structurally blind to serde-derived emission**, anywhere — the facade is merely where that
+/// was measured. So the `omit` direction only ever catches a `json!`-style RE-EMISSION under the field's
+/// own name; a handler that forwards a whole struct, or a whole `serde_json::Value`, puts every `omit`
+/// field on the wire at zero literal hits. What that leaves open is narrower than it first sounds,
+/// because the two axes have different owners: field EXISTENCE (inventory) is covered by TEST 1, which
+/// reconciles the registry against the facade's own pinned key sets and therefore cannot miss a field
+/// however it is serialized. The residual gap is DELIVERY SHAPE — whether a field that exists reaches
+/// the MCP wire — and only for the bulk-forward spelling. This haystack is the delivery lane only, and
+/// the check over it is a literal-re-emission proxy within that lane.
+///
+/// Files are joined with a form-feed (an unambiguous non-code byte that can never straddle a real
+/// match) — the checks below never need to attribute a match back to a specific file. A missing
+/// directory yields nothing rather than failing (`crate::collect_rs_files` degrades that way by design),
+/// which is exactly why [`every_haystack_dir_actually_contributes_emission_text`] pins each one as
+/// non-empty: an emptied scan root would otherwise leave every `omit` row trivially green.
+fn mcp_lane_sources() -> String {
+    mcp_lane_files()
         .iter()
-        .map(|f| std::fs::read_to_string(f).unwrap_or_default())
+        .map(|path| emission_text(&std::fs::read_to_string(path).unwrap_or_default()))
         .collect::<Vec<_>>()
         .join("\x0c")
 }
 
-/// The MCP lane's scanned sources for TEST 3: `crates/host/src` (the shared dispatch + embedded
-/// contracts), `crates/summary/src` (the shaping logic — see `summary_src_dir`'s doc), and, since the
-/// 2026-07-23 product-layer split, `packages/mcp/src` (the MCP tool schemas/dispatch) and
-/// `packages/cli-bin/src` (the CLI's own argv dispatch) — every source a reply field literal could be
-/// re-emitted from, across both host products.
-fn mcp_lane_sources() -> String {
-    let mut combined = concat_rs_sources(&mcp_src_dir());
-    combined.push('\x0c');
-    combined.push_str(&concat_rs_sources(&summary_src_dir()));
-    combined.push('\x0c');
-    combined.push_str(&concat_rs_sources(&mcp_pkg_src_dir()));
-    combined.push('\x0c');
-    combined.push_str(&concat_rs_sources(&cli_bin_src_dir()));
-    combined
+/// The FILES TEST 3's haystack is built from — every `.rs` file under [`mcp_lane_dirs`], MINUS test
+/// sources ([`is_test_source`]) and MINUS the registry-declared CLI-only lane implementations
+/// ([`cli_only_lane_sources`]).
+///
+/// Split out from [`mcp_lane_sources`] (which is just this set's emission text) so the non-emptiness
+/// guard can assert membership against the SAME post-subtraction set the test consumes, instead of
+/// re-deriving a raw listing of its own. That is not a stylistic preference: the `contracts.rs` pin
+/// below used to read a raw `collect_rs_files` listing, which meant adding that path to any
+/// `_cliOnlyLanes[*].sources` array subtracted it from the real haystack while the pin stayed green.
+fn mcp_lane_files() -> Vec<PathBuf> {
+    let excluded = cli_only_lane_sources(&load_registry());
+    let mut files = Vec::new();
+    for (_name, dir) in mcp_lane_dirs() {
+        crate::collect_rs_files(&dir, &mut files);
+    }
+    files.retain(|path| !is_test_source(path));
+    files.retain(|path| {
+        !std::fs::canonicalize(path).is_ok_and(|canonical| excluded.contains(&canonical))
+    });
+    files
+}
+
+/// NON-EMPTINESS GUARD for TEST 3's haystack — what makes its `omit` direction mean anything.
+///
+/// TEST 3 already asserts the whole haystack is non-empty, but that is a weak bar: three of the four
+/// former scan roots could empty out and the fourth would still satisfy it, while every `omit` row went
+/// trivially green (nothing to find) and every `carry` row leaned on whichever directory was left. That
+/// is not hypothetical either — the 2026-07-26 `crates/host` teardown left `mcp_src_dir()` pointing at a
+/// deleted directory and the suite stayed green with the root silently contributing nothing.
+///
+/// So each directory is pinned to contribute emission text on its own, and the file the teardown
+/// RELOCATED into this haystack (`contracts.rs`, host -> summary) is pinned by name.
+/// The two failure modes are reported separately (the directory is GONE vs. the directory is there and
+/// matched nothing), because they need different fixes and the verdict cannot tell them apart from an
+/// empty `Vec` alone — a single message asserting "renamed, moved or deleted" was diagnosing a cause it
+/// had not measured.
+#[test]
+fn every_haystack_dir_actually_contributes_emission_text() {
+    for (name, dir) in mcp_lane_dirs() {
+        assert!(
+            dir.is_dir(),
+            "TEST 3 haystack directory {name} DOES NOT EXIST ({}) — it was renamed, moved or deleted, \
+             and `collect_rs_files` degraded silently to zero files. Every `omit` row would go trivially \
+             green over the narrowed haystack. Re-point it in `mcp_lane_dirs`, or drop it deliberately \
+             and say so in `mcp_lane_sources`' doc.",
+            dir.display()
+        );
+        let mut files = Vec::new();
+        crate::collect_rs_files(&dir, &mut files);
+        let non_test: Vec<_> = files.iter().filter(|p| !is_test_source(p)).collect();
+        assert!(
+            !non_test.is_empty(),
+            "TEST 3 haystack directory {name} EXISTS but holds no non-test .rs file ({} .rs files \
+             found in total) — its emission source moved elsewhere, or the whole directory became test- \
+             only. Every `omit` row would go trivially green over the narrowed haystack. Re-point it in \
+             `mcp_lane_dirs`, or drop it deliberately and say so in `mcp_lane_sources`' doc.",
+            files.len()
+        );
+    }
+
+    // The relocated file must be inside the haystack TEST 3 ACTUALLY CONSUMES — asserted against
+    // `mcp_lane_files()` (post-subtraction) and by canonicalized full path. Both halves are corrections:
+    // this pin's first version read a raw `collect_rs_files(&summary_src_dir(), ..)` listing and compared
+    // BASENAMES, so (a) any `contracts.rs` anywhere under that tree satisfied it, and (b) adding this
+    // exact path to any `_cliOnlyLanes[*].sources` array in `docs/contracts/surface-parity.json` would
+    // subtract it from the real haystack while this guard stayed green — a pin that cannot see the
+    // subtraction it exists to survive. Canonicalized rather than string-compared for the reason the
+    // sibling `reference_validation.rs` census pin records: every path here is built by joining `..`
+    // onto `CARGO_MANIFEST_DIR`, so a listing entry literally reads
+    // `crates/engine/../../crates/summary/src/contracts.rs` and a suffix test fails on a present file
+    // (that sibling's first version was measured doing exactly that).
+    let haystack: BTreeSet<PathBuf> = mcp_lane_files()
+        .iter()
+        .filter_map(|p| std::fs::canonicalize(p).ok())
+        .collect();
+    let relocated = summary_src_dir().join("contracts.rs");
+    let expected = std::fs::canonicalize(&relocated).unwrap_or_else(|e| {
+        panic!(
+            "crates/summary/src/contracts.rs does not exist ({e}) — the embedded contract table moved \
+             here in the 2026-07-26 `crates/host` teardown; if it moved again, re-point this pin"
+        )
+    });
+    assert!(
+        haystack.contains(&expected),
+        "crates/summary/src/contracts.rs is not in the haystack TEST 3 consumes — it is the one part of \
+         the deleted host crate's emission text this lane still owns. Either it moved again (re-point \
+         the scan), or it is being SUBTRACTED: check that no `_cliOnlyLanes[*].sources` entry in \
+         docs/contracts/surface-parity.json names it."
+    );
 }
 
 #[test]
@@ -212,10 +432,15 @@ fn row_status<'a>(row: &'a serde_json::Value, surface: &str) -> Option<&'a str> 
 }
 
 // Only one delivery surface remains: the MCP `analyze_repo`/`cross_repo` reply, which is the same
-// shaped summary the `zzop-mcp analyze`/`cross` CLI subcommands print. @zzop/cli is a zero-logic shim
-// that spawns that native binary — it has no render surface of its own (no `jsCliRender`/`mdReport`,
-// which briefly existed here across the npm distribution's removal-then-restoration; see the
-// registry's own `_doc` historical note).
+// shaped summary the `zzop analyze`/`zzop cross` CLI subcommands print — `zzop`, the `packages/cli-bin`
+// binary. NOT `zzop-mcp`, as this comment said until 2026-07-27: that binary takes no analysis
+// subcommand at all (bare invocation and `mcp` both start the stdio server; `version` and `help` are
+// the only others), so the sentence attributed real subcommands to a binary that rejects them. The same
+// false sentence was duplicated into `docs/contracts/surface-parity.json`'s `_doc` — one claim, two
+// copies, both wrong, which is the standing argument for citing the registry rather than restating it.
+// @zzop/cli is a zero-logic shim that spawns the native `zzop` binary — it has no render surface of its
+// own (no `jsCliRender`/`mdReport`, which briefly existed here across the npm distribution's
+// removal-then-restoration; see the registry's own `_doc` historical note).
 const SURFACES: [&str; 1] = ["mcpAnalyzeReply"];
 
 #[test]
@@ -253,18 +478,29 @@ fn every_omit_or_conditional_row_carries_a_non_empty_note() {
 /// notes in the registry for what actually happens).
 ///
 /// **Matcher**: the literal substring `"<field>":` — quote, field name, quote, colon, with no whitespace
-/// between the field name and either quote. This matches this codebase's own `serde_json::json!({ "key":
-/// value })` emission style throughout `crates/host/src` (confirmed by inspection: every forwarded key in
-/// `analyze.rs`/`tools.rs` is written exactly this way, e.g. `"fileCount": output_view["fileCount"]`).
-/// This is deliberately narrower than a bare substring search: a short field name like `ir` would otherwise
-/// false-positive inside unrelated identifiers/prose that merely CONTAIN "ir" as a substring (`circular`,
-/// `directory`, doc-comment mentions of `CommonIr`, ...) — anchoring on the exact `"ir":` shape (a literal
-/// JSON key EMISSION, not just the two letters appearing anywhere) avoids that class of false positive
-/// entirely, the same "textual-proximity proxy with a precise shape gate" spirit as this crate's own
-/// `config_surface.rs` checks.
+/// between the field name and either quote — searched in [`mcp_lane_sources`], i.e. the scanned emission
+/// text with test sources and registry-declared CLI-only lane implementations subtracted. This matches
+/// this codebase's own `serde_json::json!({ "key": value })` emission style throughout the scanned delivery lane
+/// (confirmed by inspection: every forwarded key in `analyze.rs`/`tools.rs` is written exactly this way,
+/// e.g. `"fileCount": output_view["fileCount"]`). It is deliberately narrower than a bare substring
+/// search: a short field name like `ir` would otherwise false-positive inside unrelated identifiers that
+/// merely CONTAIN "ir" (`circular`, `directory`, ...) — anchoring on the exact `"ir":` shape avoids that
+/// class entirely, the same "textual-proximity proxy with a precise shape gate" spirit as this crate's
+/// own `config_surface.rs` checks.
 ///
-/// **What this proves**: a `carry` row's field name is emitted as a JSON key literal somewhere in the MCP
-/// lane's sources, and an `omit` row's field name is not. **What this cannot prove**: a key built
+/// **Scope, corrected 2026-07-26.** The haystack used to be every `.rs` byte under the four directories,
+/// which made this test assert something wider than the contract it names: it could not tell a CLI-only
+/// lane's deliberate emission from an MCP leak, it counted doc comments and test fixtures as emissions,
+/// and — the symptom that exposed it — it therefore dictated the public key name of a new CLI-only
+/// surface, which had to spell its per-tree IR `commonIr` and route its fixture's placeholder through a
+/// `const` to stay green. A guard whose scope forces a product naming decision has the wrong scope. The
+/// three subtractions ([`emission_text`], [`is_test_source`], [`cli_only_lane_sources`]) narrow the
+/// haystack to what an MCP reply can actually be built from, and each has its own doc for what it gives
+/// up. Note the CLI-only subtraction applies to BOTH directions, and is if anything STRICTER for `carry`
+/// — see [`cli_only_lane_sources`].
+///
+/// **What this proves**: a `carry` row's field name is emitted as a JSON key literal somewhere the MCP
+/// reply is built, and an `omit` row's field name is not. **What this cannot prove**: a key built
 /// dynamically (`format!("{field}")` as a key, or a `.get(field)` lookup with no matching literal
 /// re-emission under the same name) is invisible to this scan either way — same "pragmatic proxy, not a
 /// semantics engine" caveat every grep-based contract in this file carries.
@@ -274,8 +510,10 @@ fn mcp_lane_forwards_exactly_the_rows_marked_carry_and_never_forwards_the_rows_m
     let sources = mcp_lane_sources();
     assert!(
         !sources.is_empty(),
-        "found no .rs sources under crates/host/src, crates/summary/src, packages/mcp/src, or \
-         packages/cli-bin/src — path resolution likely broke"
+        "found no MCP-lane .rs emission text under crates/summary/src, \
+         packages/mcp/src, or packages/cli-bin/src — path resolution or the CLI-only-lane subtraction \
+         likely broke (per-directory coverage is pinned by \
+         every_haystack_dir_actually_contributes_emission_text, which fails first and more precisely)"
     );
     let fields = registry["analyzeOutputView"]
         .as_object()
@@ -289,16 +527,21 @@ fn mcp_lane_forwards_exactly_the_rows_marked_carry_and_never_forwards_the_rows_m
             "carry" => assert!(
                 present,
                 "analyzeOutputView.{field} is marked `carry` for mcpAnalyzeReply, but {key_literal:?} does \
-                 not appear as a forwarded JSON key literal anywhere under crates/host/src, \
-                 crates/summary/src, packages/mcp/src, or packages/cli-bin/src — either the registry is \
-                 stale (fix the row) or the MCP lane silently stopped forwarding this field (fix the code)"
+                 not appear as a forwarded JSON key literal anywhere in the MCP lane \
+                 (crates/summary/src, packages/mcp/src, packages/cli-bin/src, minus tests and minus the \
+                 `_cliOnlyLanes` implementations) — either the registry is stale (fix the row) or the MCP \
+                 lane silently stopped forwarding this field (fix the code). A CLI-only lane emitting it \
+                 does NOT count: that is precisely the drift this row guards against"
             ),
             "omit" => assert!(
                 !present,
                 "analyzeOutputView.{field} is marked `omit` for mcpAnalyzeReply, but {key_literal:?} DOES \
-                 appear as a forwarded JSON key literal under crates/host/src, crates/summary/src, \
-                 packages/mcp/src, or packages/cli-bin/src — either the registry is stale (the MCP lane \
-                 now forwards this field — update the row and its note) or this is an unintended new leak"
+                 appear as a forwarded JSON key literal in the MCP lane \
+                 (crates/summary/src, packages/mcp/src, packages/cli-bin/src, minus tests and minus the \
+                 `_cliOnlyLanes` implementations) — either the registry is stale (the MCP lane now \
+                 forwards this field: update the row and its note) or this is an unintended new leak. If \
+                 the emission belongs to a CLI-only lane, declare that lane and its `sources` in the \
+                 registry's `_cliOnlyLanes` instead of renaming the key around this guard"
             ),
             "carry-conditional" => { /* exempt from this strict check — see this test's own doc */ }
             other => panic!("analyzeOutputView.{field}.mcpAnalyzeReply has an unknown status {other:?}"),

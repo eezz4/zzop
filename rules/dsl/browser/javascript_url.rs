@@ -148,7 +148,7 @@ fn javascript_url_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-browser");
     dir.write(
         "vetted-url.ts",
-        "declare const a: HTMLAnchorElement;\nexport function wire() {\n  // javascript-url-ok: intentional no-op affordance\n  a.href = 'javascript:void(0)';\n}\n",
+        "declare const a: HTMLAnchorElement;\nexport function wire() {\n  // zzop-javascript-url-ok: intentional no-op affordance\n  a.href = 'javascript:void(0)';\n}\n",
     );
     let out = scan(&dir);
     assert!(

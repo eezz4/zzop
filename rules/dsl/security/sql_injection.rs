@@ -1,6 +1,6 @@
 use crate::{hits, scan, TempDir};
 
-// --- raw-query-interpolation ---
+// --- raw-query-unsafe-api ---
 
 #[test]
 fn query_raw_unsafe_call_is_flagged() {
@@ -10,7 +10,7 @@ fn query_raw_unsafe_call_is_flagged() {
         "declare const prisma: any;\ndeclare const id: string;\nexport async function f() {\n  return prisma.$queryRawUnsafe(`SELECT * FROM users WHERE id = ${id}`);\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "raw-query-interpolation");
+    let h = hits(&out, "raw-query-unsafe-api");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 4);
 }
@@ -24,7 +24,7 @@ fn execute_raw_unsafe_call_is_flagged() {
     );
     let out = scan(&dir);
     assert_eq!(
-        hits(&out, "raw-query-interpolation").len(),
+        hits(&out, "raw-query-unsafe-api").len(),
         1,
         "{:?}",
         out.findings
@@ -40,7 +40,7 @@ fn parameterized_execute_raw_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "raw-query-interpolation").is_empty(),
+        hits(&out, "raw-query-unsafe-api").is_empty(),
         "{:?}",
         out.findings
     );
@@ -51,11 +51,11 @@ fn raw_sql_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/reports.ts",
-        "declare const prisma: any;\ndeclare const id: string;\nexport async function f() {\n  // raw-query-interpolation-ok: id is a validated internal UUID, never request-derived\n  return prisma.$queryRawUnsafe(`SELECT * FROM users WHERE id = ${id}`);\n}\n",
+        "declare const prisma: any;\ndeclare const id: string;\nexport async function f() {\n  // zzop-raw-query-unsafe-api-ok: id is a validated internal UUID, never request-derived\n  return prisma.$queryRawUnsafe(`SELECT * FROM users WHERE id = ${id}`);\n}\n",
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "raw-query-interpolation").is_empty(),
+        hits(&out, "raw-query-unsafe-api").is_empty(),
         "{:?}",
         out.findings
     );
@@ -96,7 +96,7 @@ fn query_concat_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "src/main/java/com/example/UserRepository.java",
-        "public interface UserRepository {\n    // annotation-sql-concat-ok: name is validated against an internal enum before this call\n    @Query(\"SELECT u FROM User u WHERE u.name = '\" + name + \"'\")\n    User findByName(String name);\n}\n",
+        "public interface UserRepository {\n    // zzop-annotation-sql-concat-ok: name is validated against an internal enum before this call\n    @Query(\"SELECT u FROM User u WHERE u.name = '\" + name + \"'\")\n    User findByName(String name);\n}\n",
     );
     let out = scan(&dir);
     assert!(

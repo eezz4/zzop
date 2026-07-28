@@ -35,7 +35,7 @@ fn env_assert_ok_marker_above_the_assertion_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/config.ts",
-        "// env-nonnull-assert-ok: validated at startup in bootstrap.ts\nexport const key = process.env.API_KEY!;\n",
+        "// zzop-env-nonnull-assert-ok: validated at startup in bootstrap.ts\nexport const key = process.env.API_KEY!;\n",
     );
     let out = scan(&dir);
     assert!(
@@ -112,7 +112,7 @@ fn debug_ok_marker_on_the_same_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/config.ts",
-        "export const config = { debug: true }; // debug-true-committed-ok: local dev override, gated by NODE_ENV below\n",
+        "export const config = { debug: true }; // zzop-debug-true-committed-ok: local dev override, gated by NODE_ENV below\n",
     );
     let out = scan(&dir);
     assert!(
@@ -124,7 +124,7 @@ fn debug_ok_marker_on_the_same_line_suppresses_the_finding() {
 
 #[test]
 fn tls_reject_unauthorized_disabled_in_a_playwright_e2e_helper_is_not_flagged() {
-    // `NODE_TLS_REJECT_UNAUTHORIZED=0` for a local self-signed cert in a Playwright e2e helper is the intended target, not a leaked dev backdoor — same exclusion as this pack's sibling `egress/localhost-egress-committed`.
+    // `NODE_TLS_REJECT_UNAUTHORIZED=0` for a local self-signed cert in a Playwright e2e helper is the intended target, not a leaked dev backdoor — same exclusion as this pack's sibling `egress/localhost-url-literal-committed`.
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "e2e/globalSetup.ts",

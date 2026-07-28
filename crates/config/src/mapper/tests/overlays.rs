@@ -186,14 +186,14 @@ fn unknown_key_warnings_fire_at_top_packs_and_tree_scopes() {
 #[test]
 fn unknown_key_warning_fires_inside_a_mounts_entry() {
     let mapped = config_to_request(
-        &json!({"trees": [{"root": ".", "mounts": [{"dir": "a", "at": "/a", "bogus": 1}]}]}),
+        &json!({"trees": [{"root": ".", "topology": {"mounts": [{"dir": "a", "at": "/a", "bogus": 1}]}}]}),
         Path::new("/base"),
     )
     .unwrap();
     assert!(mapped
         .warnings
         .iter()
-        .any(|w| w.contains("unknown config key \"trees[0].mounts[0].bogus\"")));
+        .any(|w| w.contains("unknown config key \"trees[0].topology.mounts[0].bogus\"")));
 }
 
 #[test]
@@ -227,19 +227,53 @@ fn known_keys_never_warn() {
         .all(|w| !w.contains("unknown config key")));
 }
 
-// --- CLI-presentation keys are known but never forwarded -----------------------------------
+// --- retired keys: still not forwarded, and no longer silent about it ------------------------
 
+/// `failOn`/`format`/`report` were recognized-but-inert for months: accepted here, forwarded into no
+/// request, read by no binary. This pins BOTH halves of the 2026-07-26 retirement — they are still not
+/// forwarded (that never changed), and each one now costs the author a warning that says it was removed
+/// and what to do instead, rather than the silence that let someone believe they had configured a CI
+/// gate. The generic unknown-key wording ("a typo, or a key from a different zzop version") would be a
+/// wrong guess for a key that WAS valid, so its absence is asserted too.
 #[test]
-fn fail_on_format_report_are_known_but_not_forwarded() {
+fn retired_presentation_keys_warn_as_removed_and_stay_unforwarded() {
     let mapped = config_to_request(
         &json!({"roots": ["."], "failOn": "critical", "format": "json", "report": {"dir": "out"}}),
         Path::new("/base"),
     )
     .unwrap();
-    assert!(mapped
-        .warnings
-        .iter()
-        .all(|w| !w.contains("unknown config key")));
+
+    for (key, remedy) in [
+        ("failOn", "gate a build by reading the severities"),
+        ("format", "emits JSON and only JSON"),
+        ("report", "no zzop binary writes report files"),
+    ] {
+        let warning = mapped
+            .warnings
+            .iter()
+            .find(|w| w.contains(&format!("\"{key}\"")))
+            .unwrap_or_else(|| panic!("no warning named {key}; got: {:?}", mapped.warnings));
+        assert!(
+            warning.contains("unknown config key") && warning.contains("REMOVED"),
+            "warning for {key} must open like every other unknown key and then say it was removed: {warning}"
+        );
+        assert!(
+            warning.contains(remedy),
+            "warning for {key} must be actionable, not just a rejection: {warning}"
+        );
+        assert!(
+            !warning.contains("a typo, or a key from a different zzop version"),
+            "a retired key is not a typo — that guess must not appear: {warning}"
+        );
+    }
+
+    // Walking INTO the retired `report` object would bury the one honest sentence under sub-key noise.
+    assert!(
+        !mapped.warnings.iter().any(|w| w.contains("report.dir")),
+        "got: {:?}",
+        mapped.warnings
+    );
+
     let req = analyze_request(&mapped.request);
     assert!(req.get("failOn").is_none());
     assert!(req.get("format").is_none());

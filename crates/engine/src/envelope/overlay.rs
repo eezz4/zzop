@@ -11,6 +11,19 @@ use super::reserved::{
     drop_reserved_io, is_reserved_consume_kind, is_reserved_provide_kind, reserved_drop_warning,
 };
 
+/// What [`apply_adapter_overlays`] ACTUALLY applied, as opposed to what config DECLARED. Both sets are
+/// derived inside the apply loop, after the `validate_envelope` gate, so a REJECTED overlay contributes to
+/// neither — the whole point of returning them instead of letting a consumer re-read
+/// `EngineConfig::adapter_overlays`. `Default` is the honest empty value for a run with no overlays.
+/// `covered_paths` = every applied fact-carrying projection's path (`analyze::assemble`'s exclusion set
+/// for the "no native parser, bring an adapter" disclosure); `entry_paths` = its `is_entry: true` subset,
+/// unioned into `dead_candidate_findings`' `extra_entries` by `analyze::assemble::rules`.
+#[derive(Debug, Default)]
+pub(crate) struct OverlayApplication {
+    pub(crate) covered_paths: HashSet<String>,
+    pub(crate) entry_paths: HashSet<String>,
+}
+
 /// Merges each of `overlays` onto `artifacts` in place — the Mode B counterpart of `analyze_envelope`
 /// (Mode A): a partial envelope (typically just `io` + fragment channels for a handful of files) folded
 /// onto the native per-file artifacts a real `analyze_tree` run already produced, rather than an
@@ -56,14 +69,14 @@ use super::reserved::{
 /// `artifacts` is re-sorted by `rel` before returning — `analyze::assemble` relies on that order for
 /// `ir.ir.symbols`'s determinism.
 ///
-/// RETURNS the set of paths this call ACTUALLY covered: one entry per projection that (a) belonged to an
-/// overlay that passed validation above (a skipped overlay contributes nothing — nothing of it merged) and
-/// (b) carries a real fact post reserved-io-drop ([`overlay_file_carries_facts`]). `analyze::assemble`
-/// consumes it as the exclusion set for the per-extension "no native parser, bring an adapter" disclosure,
-/// so that disclosure is silenced for exactly the files an overlay really did parse — never for a file
-/// behind a REJECTED overlay (which would leave it covered by neither the overlay nor the disclosure) and
-/// never for a zero-fact declaration (G8b). Deriving it here, from the apply loop itself, is what keeps
-/// "declared" and "applied" from drifting: a config-read set cannot see the validation verdict.
+/// RETURNS an [`OverlayApplication`] — the apply loop's own record of what it really did. Both of its
+/// sets take one entry per projection that (a) belonged to an overlay that passed validation above (a
+/// skipped overlay contributes nothing — nothing of it merged) and (b) carries a real fact post
+/// reserved-io-drop ([`overlay_file_carries_facts`]); `entry_paths` additionally requires `is_entry`. So
+/// the "no native parser, bring an adapter" disclosure is silenced, and `dead-candidates` exempted, for
+/// exactly the files an overlay really did parse — never for a file behind a REJECTED overlay (covered by
+/// neither the overlay nor the disclosure) and never for a zero-fact declaration (G8b). Deriving both here
+/// is what keeps "declared" and "applied" from drifting: a config-read set cannot see the verdict.
 ///
 /// Before either merge branch, every reserved engine-internal sentinel `IoProvide`/`IoConsume` (kinds
 /// `nest-global-prefix`/`client-base-prefix`, see [`is_reserved_provide_kind`]/[`is_reserved_consume_kind`])
@@ -81,8 +94,8 @@ pub(crate) fn apply_adapter_overlays(
     overlays: &[NormalizedEnvelope],
     source_id: &str,
     warnings: &mut Vec<String>,
-) -> HashSet<String> {
-    let mut covered_paths: HashSet<String> = HashSet::new();
+) -> OverlayApplication {
+    let mut applied = OverlayApplication::default();
     let mut ordered: Vec<&NormalizedEnvelope> = overlays.iter().collect();
     ordered.sort_by(|a, b| a.parser.cmp(&b.parser));
 
@@ -169,7 +182,14 @@ pub(crate) fn apply_adapter_overlays(
                 // `validate_envelope` gate above — so the returned set is "what applied", not "what was
                 // declared". Both merge branches below land `cleaned.path` in `artifacts` either way, so
                 // one insert here covers merge-onto-native and synthetic alike.
-                covered_paths.insert(cleaned.path.clone());
+                applied.covered_paths.insert(cleaned.path.clone());
+            }
+            // Same "applied, not declared" rule for the dead-candidates exemption, recorded in the same
+            // pass so the two sets cannot disagree about which overlays survived validation. The assert
+            // pins the containment `overlay_file_carries_facts` guarantees (`is_entry` alone is a fact).
+            if cleaned.is_entry {
+                debug_assert!(applied.covered_paths.contains(&cleaned.path));
+                applied.entry_paths.insert(cleaned.path.clone());
             }
             if let Some(artifact) = artifacts.iter_mut().find(|a| a.rel == cleaned.path) {
                 merge_projection_onto_artifact(artifact, &cleaned);
@@ -215,7 +235,7 @@ pub(crate) fn apply_adapter_overlays(
     }
 
     artifacts.sort_by(|a, b| a.rel.cmp(&b.rel));
-    covered_paths
+    applied
 }
 
 /// True iff `file` contributes at least one extraction FACT that an overlay merge actually acts on —

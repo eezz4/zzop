@@ -172,6 +172,9 @@ pub(super) fn eval_method_scan(
             let end_idx = (body_end as usize).min(lines.len()); // exclusive; body_end is 1-based inclusive
             let span = &lines[start_idx..end_idx];
 
+            // LINES (not occurrences) carrying a QUALIFYING trigger match -> `data.triggerLines`: every
+            // gate the anchor cleared is re-run per line, so a rejected line never inflates the count.
+            let mut trigger_lines = 0usize;
             let mut satisfied = vec![false; patterns.len()];
             let mut trigger_hit: Option<(usize, &str)> = None; // (index within span, line text)
             let mut vetoed = false;
@@ -216,7 +219,8 @@ pub(super) fn eval_method_scan(
                     }
                 };
                 for (pi, (re, _)) in patterns.iter().enumerate() {
-                    if !satisfied[pi] && re.is_match(&scan) {
+                    // The trigger alone is re-tested once satisfied, purely to count later lines.
+                    if (!satisfied[pi] || pi == trigger_idx) && re.is_match(&scan) {
                         // Lexical-order gate — see `MethodScan::after`. A trigger that does not follow the
                         // ordering label is not a hit at all: it neither satisfies nor anchors, so a later
                         // trigger that DOES follow becomes the finding's line.
@@ -239,8 +243,9 @@ pub(super) fn eval_method_scan(
                             }
                         }
                         satisfied[pi] = true;
-                        if pi == trigger_idx && trigger_hit.is_none() {
-                            trigger_hit = Some((i, line));
+                        if pi == trigger_idx {
+                            trigger_lines += 1;
+                            trigger_hit = trigger_hit.or(Some((i, line)));
                         }
                     }
                 }
@@ -285,7 +290,9 @@ pub(super) fn eval_method_scan(
                 file: f.rel.clone(),
                 line: body_start + i as u32,
                 message,
-                data: Some(serde_json::json!({ "snippet": snippet, "method": sym.name })),
+                data: Some(
+                    serde_json::json!({ "snippet": snippet, "method": sym.name, "triggerLines": trigger_lines }),
+                ),
             });
         }
     }

@@ -31,7 +31,7 @@ fn consume(kind: &str, key: Option<&str>, file: &str, line: u32) -> zzop_core::I
 fn unmatched_consume_is_flagged_when_the_tree_has_a_provide() {
     let provides = vec![provide("GET /a", "api.ts", 1)];
     let consumes = vec![consume("http", Some("GET /missing"), "client.ts", 3)];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].file, "client.ts");
     assert_eq!(found[0].line, 3);
@@ -55,7 +55,7 @@ fn a_consume_in_a_test_file_is_never_flagged() {
         ),
         consume("http", Some("GET /also-missing"), "src/client.spec.ts", 9),
     ];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert!(
         found.is_empty(),
         "test-file consumes must not be flagged: {found:?}"
@@ -75,7 +75,7 @@ fn a_non_test_consume_alongside_a_test_consume_is_still_flagged() {
         ),
         consume("http", Some("GET /missing"), "src/client.ts", 3),
     ];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0].file, "src/client.ts");
 }
@@ -89,7 +89,10 @@ fn always_veto_static_asset_extension_consume_is_never_flagged() {
         "client.ts",
         3,
     )];
-    assert!(unprovided_consume_findings(&provides, &consumes, &[]).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -101,7 +104,10 @@ fn always_veto_extension_followed_by_a_query_string_is_still_vetoed() {
         "client.ts",
         3,
     )];
-    assert!(unprovided_consume_findings(&provides, &consumes, &[]).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -114,7 +120,10 @@ fn json_in_a_public_asset_directory_is_vetoed() {
         "client.ts",
         3,
     )];
-    assert!(unprovided_consume_findings(&provides, &consumes, &[]).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -126,7 +135,10 @@ fn xml_in_a_static_asset_directory_is_vetoed() {
         "client.ts",
         3,
     )];
-    assert!(unprovided_consume_findings(&provides, &consumes, &[]).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -135,7 +147,10 @@ fn next_js_public_prefix_stripped_json_path_is_vetoed() {
     // asset-directory segment survives in the key, but the API-segment gate still catches this.
     let provides = vec![provide("GET /a", "api.ts", 1)];
     let consumes = vec![consume("http", Some("GET /i18n/ko.json"), "client.ts", 3)];
-    assert!(unprovided_consume_findings(&provides, &consumes, &[]).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -144,7 +159,7 @@ fn rails_style_json_api_route_with_an_api_segment_still_fires() {
     // segment stops the default json/xml veto from applying.
     let provides = vec![provide("GET /a", "api.ts", 1)];
     let consumes = vec![consume("http", Some("GET /api/users.json"), "client.ts", 3)];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{:?}", found);
     assert_eq!(found[0].severity, zzop_core::Severity::Info);
     assert!(found[0].message.contains("GET /api/users.json"));
@@ -154,7 +169,7 @@ fn rails_style_json_api_route_with_an_api_segment_still_fires() {
 fn xml_with_an_api_segment_still_fires() {
     let provides = vec![provide("GET /a", "api.ts", 1)];
     let consumes = vec![consume("http", Some("GET /api/feed.xml"), "client.ts", 3)];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{:?}", found);
 }
 
@@ -162,7 +177,7 @@ fn xml_with_an_api_segment_still_fires() {
 fn versioned_api_segment_json_route_still_fires() {
     let provides = vec![provide("GET /a", "api.ts", 1)];
     let consumes = vec![consume("http", Some("GET /v1/users.json"), "client.ts", 3)];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{:?}", found);
 }
 
@@ -175,7 +190,7 @@ fn graphql_segment_json_route_still_fires() {
         "client.ts",
         3,
     )];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{:?}", found);
 }
 
@@ -190,7 +205,10 @@ fn json_path_with_no_api_segment_is_vetoed_regardless_of_directory_name() {
         "client.ts",
         3,
     )];
-    assert!(unprovided_consume_findings(&provides, &consumes, &[]).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -204,7 +222,10 @@ fn api_segment_match_requires_a_whole_path_segment_not_a_substring() {
         "client.ts",
         3,
     )];
-    assert!(unprovided_consume_findings(&provides, &consumes, &[]).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -216,7 +237,7 @@ fn a_path_that_only_contains_an_asset_extension_mid_segment_is_not_vetoed() {
         "client.ts",
         3,
     )];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{:?}", found);
 }
 
@@ -224,27 +245,36 @@ fn a_path_that_only_contains_an_asset_extension_mid_segment_is_not_vetoed() {
 fn matched_consume_is_never_flagged() {
     let provides = vec![provide("GET /a", "api.ts", 1)];
     let consumes = vec![consume("http", Some("GET /a"), "client.ts", 3)];
-    assert!(unprovided_consume_findings(&provides, &consumes, &[]).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
 }
 
 #[test]
 fn zero_http_provides_vetoes_every_consume_pure_fe_tree() {
     let consumes = vec![consume("http", Some("GET /remote"), "client.ts", 3)];
-    assert!(unprovided_consume_findings(&[], &consumes, &[]).is_empty());
+    assert!(unprovided_consume_findings(&[], &consumes, &[], Some(API_SEGMENT_PATTERN)).is_empty());
 }
 
 #[test]
 fn unresolved_consume_key_none_is_never_flagged() {
     let provides = vec![provide("GET /a", "api.ts", 1)];
     let consumes = vec![consume("http", None, "client.ts", 3)];
-    assert!(unprovided_consume_findings(&provides, &consumes, &[]).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
 }
 
 #[test]
 fn non_http_consume_kind_is_ignored() {
     let provides = vec![provide("GET /a", "api.ts", 1)];
     let consumes = vec![consume("queue", Some("topic:x"), "client.ts", 3)];
-    assert!(unprovided_consume_findings(&provides, &consumes, &[]).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -258,7 +288,10 @@ fn a_non_http_provide_does_not_satisfy_the_zero_provides_gate() {
         symbol: None,
     }];
     let consumes = vec![consume("http", Some("GET /missing"), "client.ts", 3)];
-    assert!(unprovided_consume_findings(&provides, &consumes, &[]).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -273,7 +306,10 @@ fn localhost_absolute_url_consume_is_vetoed() {
         "client.ts",
         3,
     )];
-    assert!(unprovided_consume_findings(&provides, &consumes, &[]).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -285,7 +321,10 @@ fn localhost_with_port_and_path_absolute_url_consume_is_vetoed() {
         "client.ts",
         7,
     )];
-    assert!(unprovided_consume_findings(&provides, &consumes, &[]).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -297,7 +336,10 @@ fn loopback_ip_absolute_url_consume_is_vetoed() {
         "client.ts",
         3,
     )];
-    assert!(unprovided_consume_findings(&provides, &consumes, &[]).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -324,7 +366,8 @@ fn third_party_absolute_url_consume_is_vetoed_as_external_egress() {
         ),
     ];
     assert!(
-        unprovided_consume_findings(&provides, &consumes, &[]).is_empty(),
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty(),
         "absolute-URL consumes are external egress, never drift"
     );
 }
@@ -339,7 +382,10 @@ fn absolute_url_consumes_never_reach_the_foreign_fold() {
         consume("http", Some("GET https://vendor.com/orders/2"), "c.ts", 11),
         consume("http", Some("GET http://vendor.com/orders/3"), "c.ts", 12),
     ];
-    assert!(unprovided_consume_findings(&provides, &consumes, &[]).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -356,7 +402,7 @@ fn a_relative_api_path_is_still_flagged_alongside_a_vetoed_absolute_url() {
         ),
         consume("http", Some("GET /api/missing"), "client.ts", 5),
     ];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{:?}", found);
     assert_eq!(
         found[0].data.as_ref().unwrap()["key"].as_str(),
@@ -370,7 +416,7 @@ fn the_message_states_the_absolute_url_veto_it_actually_applies() {
     // localhost-only skip it used to describe.
     let provides = vec![provide("GET /api/users", "api.ts", 1)];
     let consumes = vec![consume("http", Some("GET /api/missing"), "client.ts", 3)];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     let message = &found[0].message;
     assert!(message.contains("`://`"), "{message}");
     assert!(message.contains("externalConsumes"), "{message}");
@@ -386,7 +432,10 @@ fn placeholder_i18n_json_asset_fetch_is_vetoed() {
     // `GET /i18n/{}.json`. The json/xml tier vetoes it via the ABSENT API segment (module doc).
     let provides = vec![provide("GET /api/users", "api.ts", 1)];
     let consumes = vec![consume("http", Some("GET /i18n/{}.json"), "client.ts", 3)];
-    assert!(unprovided_consume_findings(&provides, &consumes, &[]).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -406,7 +455,8 @@ fn family_completing_static_asset_extensions_are_vetoed() {
     ] {
         let consumes = vec![consume("http", Some(key), "client.ts", 3)];
         assert!(
-            unprovided_consume_findings(&provides, &consumes, &[]).is_empty(),
+            unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN))
+                .is_empty(),
             "expected {key} to be vetoed as a static asset"
         );
     }
@@ -419,7 +469,8 @@ fn an_api_route_whose_path_merely_contains_an_asset_word_still_fires() {
     let provides = vec![provide("GET /api/users", "api.ts", 1)];
     for key in ["GET /api/otf-templates", "GET /api/avif/convert"] {
         let consumes = vec![consume("http", Some(key), "client.ts", 3)];
-        let found = unprovided_consume_findings(&provides, &consumes, &[]);
+        let found =
+            unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
         assert_eq!(found.len(), 1, "expected {key} to fire: {found:?}");
     }
 }
@@ -437,8 +488,8 @@ fn findings_are_deterministic_across_repeated_runs() {
         consume("http", Some("GET /orders/2"), "client.ts", 6),
         consume("http", Some("GET /orders/3"), "client.ts", 7),
     ];
-    let first = unprovided_consume_findings(&provides, &consumes, &[]);
-    let second = unprovided_consume_findings(&provides, &consumes, &[]);
+    let first = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
+    let second = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     let render = |fs: &[zzop_core::Finding]| {
         fs.iter()
             .map(|f| format!("{}:{}:{}", f.file, f.line, f.message))
@@ -471,7 +522,12 @@ fn a_declared_host_absolute_url_is_rekeyed_and_joins_this_trees_provide() {
         "client.ts",
         3,
     )];
-    let found = unprovided_consume_findings(&provides, &consumes, &hosts(&["gw.example.com"]));
+    let found = unprovided_consume_findings(
+        &provides,
+        &consumes,
+        &hosts(&["gw.example.com"]),
+        Some(API_SEGMENT_PATTERN),
+    );
     assert!(
         found.is_empty(),
         "declared host must join, not be vetoed: {found:?}"
@@ -487,7 +543,12 @@ fn a_rekeyed_consume_with_no_provider_is_flagged_under_its_internal_join_key() {
         "client.ts",
         3,
     )];
-    let found = unprovided_consume_findings(&provides, &consumes, &hosts(&["gw.example.com"]));
+    let found = unprovided_consume_findings(
+        &provides,
+        &consumes,
+        &hosts(&["gw.example.com"]),
+        Some(API_SEGMENT_PATTERN),
+    );
     assert_eq!(found.len(), 1, "{found:?}");
     let data = found[0].data.as_ref().unwrap();
     // Bucket invariant parity: the reported key is the scheme-free JOIN key, never the absolute spelling
@@ -516,9 +577,13 @@ fn consume_side_port_is_ignored_when_the_declared_host_carries_none() {
         "client.ts",
         3,
     )];
-    assert!(
-        unprovided_consume_findings(&provides, &consumes, &hosts(&["gw.example.com"])).is_empty()
-    );
+    assert!(unprovided_consume_findings(
+        &provides,
+        &consumes,
+        &hosts(&["gw.example.com"]),
+        Some(API_SEGMENT_PATTERN)
+    )
+    .is_empty());
 }
 
 #[test]
@@ -532,7 +597,10 @@ fn a_declared_host_with_a_port_requires_an_exact_match() {
         "client.ts",
         3,
     )];
-    assert!(unprovided_consume_findings(&provides, &hit, &declared).is_empty());
+    assert!(
+        unprovided_consume_findings(&provides, &hit, &declared, Some(API_SEGMENT_PATTERN))
+            .is_empty()
+    );
     // The miss cases (wrong port, no port at all) are unobservable from this rule — a non-re-keyed
     // absolute URL is vetoed as egress, so both outcomes are "no finding". They are pinned on the
     // transform itself, in `crates/core/src/io/link/tests/hosts.rs`'s same-named test, which can
@@ -548,9 +616,13 @@ fn declared_host_matching_is_ascii_case_insensitive() {
         "client.ts",
         3,
     )];
-    assert!(
-        unprovided_consume_findings(&provides, &consumes, &hosts(&["gw.example.com"])).is_empty()
-    );
+    assert!(unprovided_consume_findings(
+        &provides,
+        &consumes,
+        &hosts(&["gw.example.com"]),
+        Some(API_SEGMENT_PATTERN)
+    )
+    .is_empty());
 }
 
 // A `ws://` key is never re-keyed even when its host is declared (so the absolute-URL veto still
@@ -566,9 +638,13 @@ fn an_undeclared_host_is_still_vetoed_as_egress() {
         "client.ts",
         3,
     )];
-    assert!(
-        unprovided_consume_findings(&provides, &consumes, &hosts(&["gw.example.com"])).is_empty()
-    );
+    assert!(unprovided_consume_findings(
+        &provides,
+        &consumes,
+        &hosts(&["gw.example.com"]),
+        Some(API_SEGMENT_PATTERN)
+    )
+    .is_empty());
 }
 
 #[test]
@@ -584,7 +660,7 @@ fn declaring_no_hosts_leaves_the_absolute_url_veto_byte_identical() {
         ),
         consume("http", Some("GET /api/missing"), "c.ts", 5),
     ];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(
         found[0].data.as_ref().unwrap()["key"].as_str(),
@@ -608,7 +684,12 @@ fn an_aggregate_names_the_absolute_spellings_of_its_rekeyed_entries() {
         consume("http", Some("GET /orders/2"), "c.ts", 11),
         consume("http", Some("GET /orders/3"), "c.ts", 12),
     ];
-    let found = unprovided_consume_findings(&provides, &consumes, &hosts(&["gw.example.com"]));
+    let found = unprovided_consume_findings(
+        &provides,
+        &consumes,
+        &hosts(&["gw.example.com"]),
+        Some(API_SEGMENT_PATTERN),
+    );
     assert_eq!(found.len(), 1, "{found:?}");
     let data = found[0].data.as_ref().unwrap();
     assert_eq!(data["callCount"], 3);
@@ -635,7 +716,7 @@ fn an_aggregate_with_no_rekeyed_entry_carries_no_raw_keys_field() {
         consume("http", Some("GET /orders/2"), "c.ts", 11),
         consume("http", Some("GET /orders/3"), "c.ts", 12),
     ];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{found:?}");
     assert!(found[0].data.as_ref().unwrap().get("rawKeys").is_none());
     assert!(!found[0].message.contains("as written in the source"));
@@ -653,7 +734,8 @@ fn vetoing_one_sibling_turns_one_aggregate_into_two_individual_findings() {
         consume("http", Some("GET /orders/2"), "client.ts", 11),
         consume("http", Some("GET /orders/3"), "client.ts", 12),
     ];
-    let folded = unprovided_consume_findings(&provides, &three_real, &[]);
+    let folded =
+        unprovided_consume_findings(&provides, &three_real, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(folded.len(), 1, "3 foreign consumes fold: {folded:?}");
     assert_eq!(folded[0].data.as_ref().unwrap()["callCount"], 3);
 
@@ -669,7 +751,8 @@ fn vetoing_one_sibling_turns_one_aggregate_into_two_individual_findings() {
             12,
         ),
     ];
-    let unfolded = unprovided_consume_findings(&provides, &one_vetoed, &[]);
+    let unfolded =
+        unprovided_consume_findings(&provides, &one_vetoed, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(
         unfolded.len(),
         2,
@@ -688,7 +771,7 @@ fn vetoing_one_sibling_turns_one_aggregate_into_two_individual_findings() {
 fn the_individual_message_discloses_the_fold_count_inversion() {
     let provides = vec![provide("GET /api/users", "api.ts", 1)];
     let consumes = vec![consume("http", Some("GET /api/missing"), "client.ts", 3)];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     let m = &found[0].message;
     assert!(m.contains("the finding COUNT can rise"), "{m}");
     assert!(m.contains("2 individual findings"), "{m}");
@@ -704,7 +787,7 @@ fn results_sorted_by_file_then_line() {
         consume("http", Some("GET /a/y"), "a.ts", 9),
         consume("http", Some("GET /a/z"), "a.ts", 2),
     ];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 3);
     assert_eq!(
         found
@@ -742,7 +825,7 @@ fn field_case_nine_foreign_unmatched_consumes_fold_into_one_aggregate() {
         consume("http", Some("GET /billing/2"), "client.ts", 17),
         consume("http", Some("GET /billing/3"), "client.ts", 18),
     ];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{:?}", found);
     let f = &found[0];
     assert_eq!(f.rule_id, "unprovided-consume");
@@ -770,7 +853,7 @@ fn overlapping_unmatched_consume_keeps_the_individual_finding_shape() {
     // typo/removed-route signal the fold must not swallow.
     let provides = vec![provide("GET /api/users", "api.ts", 1)];
     let consumes = vec![consume("http", Some("GET /api/missing"), "client.ts", 3)];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{:?}", found);
     assert_eq!(found[0].file, "client.ts");
     assert_eq!(found[0].line, 3);
@@ -798,7 +881,8 @@ fn fires_at_threshold_not_below() {
         consume("http", Some("GET /orders/2"), "client.ts", 11),
         consume("http", Some("GET /orders/3"), "client.ts", 12),
     ];
-    let found = unprovided_consume_findings(&provides, &three_foreign, &[]);
+    let found =
+        unprovided_consume_findings(&provides, &three_foreign, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{:?}", found);
     assert_eq!(found[0].data.as_ref().unwrap()["callCount"], 3);
 
@@ -807,7 +891,8 @@ fn fires_at_threshold_not_below() {
         consume("http", Some("GET /orders/1"), "client.ts", 10),
         consume("http", Some("GET /orders/2"), "client.ts", 11),
     ];
-    let below = unprovided_consume_findings(&provides, &two_foreign, &[]);
+    let below =
+        unprovided_consume_findings(&provides, &two_foreign, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(below.len(), 2, "{:?}", below);
     assert!(below
         .iter()
@@ -824,7 +909,7 @@ fn mixed_overlapping_and_foreign_consumes_split_correctly() {
         consume("http", Some("GET /orders/2"), "client.ts", 11),
         consume("http", Some("GET /orders/3"), "client.ts", 12),
     ];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 2, "{:?}", found);
 
     let individual = found
@@ -856,7 +941,7 @@ fn an_all_slot_consume_key_is_vetoed_and_never_reaches_the_fold() {
         consume("http", Some("GET /orders/2"), "client.ts", 11),
         consume("http", Some("GET /orders/3"), "client.ts", 12),
     ];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 2, "{:?}", found);
     // Checked on `data.key`, not the message: every message now NAMES this veto in its own veto list.
     let keys: Vec<&str> = found
@@ -877,7 +962,7 @@ fn a_multi_slot_consume_key_is_vetoed_but_one_literal_segment_is_enough_to_fire(
         consume("http", Some("POST /{}/{}"), "client.ts", 10),
         consume("http", Some("GET /{}/orders"), "client.ts", 11),
     ];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{:?}", found);
     assert_eq!(found[0].line, 11);
     assert!(found[0].message.contains("GET /{}/orders"));
@@ -890,7 +975,7 @@ fn a_root_path_consume_is_resolved_evidence_and_still_fires() {
     // answers a different question and does treat it as vacuous; see the core predicate's doc).
     let provides = vec![provide("GET /settle/a", "settle.ts", 1)];
     let consumes = vec![consume("http", Some("GET /"), "client.ts", 10)];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{:?}", found);
     assert!(found[0].message.contains("consumes `GET /`"));
 }
@@ -911,7 +996,7 @@ fn aggregate_message_appends_ellipsis_when_more_than_three_provide_segments() {
         consume("http", Some("GET /orders/2"), "client.ts", 11),
         consume("http", Some("GET /orders/3"), "client.ts", 12),
     ];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{:?}", found);
     assert!(
         found[0].message.contains("alpha, beta, delta, …"),
@@ -932,7 +1017,7 @@ fn aggregate_message_does_not_dangle_when_the_only_provides_are_root_path() {
         consume("http", Some("GET /orders/2"), "client.ts", 11),
         consume("http", Some("GET /orders/3"), "client.ts", 12),
     ];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{:?}", found);
     let message = &found[0].message;
     assert!(
@@ -961,7 +1046,7 @@ fn aggregate_message_omits_ellipsis_when_three_or_fewer_provide_segments() {
         consume("http", Some("GET /orders/2"), "client.ts", 11),
         consume("http", Some("GET /orders/3"), "client.ts", 12),
     ];
-    let found = unprovided_consume_findings(&provides, &consumes, &[]);
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
     assert_eq!(found.len(), 1, "{:?}", found);
     assert!(
         found[0].message.contains("alpha, beta, gamma"),

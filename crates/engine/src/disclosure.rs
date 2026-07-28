@@ -159,15 +159,28 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
                   coverage is uneven — several facts have exactly one producer while the rules consuming \
                   them apply no language filter of their own. Where that fact is absent the rule is \
                   structurally silent (a zero that reads as an all-clear) or, when the fact is liveness \
-                  evidence, asserts from an empty channel (a finding that reads as a verdict). Neither is \
-                  measured per run: no output field lists which rules had an empty evidence channel for \
-                  the languages actually present in a tree. The affected rules instead publish a language \
-                  sightline in their own finding message and catalog entry — which by construction the \
-                  silent case never renders, since a message ships only ON a finding. Read a native rule's \
-                  zero as a claim about its evidence channel, not about the code: the per-fact producer \
-                  matrix is in `crates/cache/src/ir_slice.rs`'s module doc and each rule's row in \
-                  `docs/rules/catalog.md`.",
-        status: DisclosureStatus::NotYetDetected,
+                  evidence, asserts from an empty channel (a finding that reads as a verdict). ONE fact \
+                  is now measured per run: a tree that extracted http routes from a language with no \
+                  call-site (call-graph) producer self-reports a warning naming that language, the route \
+                  count, an example path, the RULE ID that goes silent on them, and the three ways to \
+                  open it (adapter-overlay `auth-guarded` injection, the envelope call channel, a parser \
+                  extractor). A SECOND signal joined it on 2026-07-28 and is the same class one axis \
+                  over — the fact missing is not the language but a FIELD: routes extracted with an \
+                  unknown HTTP method are filtered out by every write-gated rule before evaluation, so \
+                  they are out of range rather than clean, and a per-run warning names their count, the \
+                  file extensions carrying them, and the two ways to bring them in range \
+                  (`trees[].routes`, or a Mode B overlay). Every OTHER fact/rule pair is still unmeasured: no output field lists which \
+                  rules had an empty evidence channel for the languages actually present in a tree. Those \
+                  rules instead publish a language sightline in their own finding message and catalog \
+                  entry — which by construction the silent case never renders, since a message ships only \
+                  ON a finding. Read a native rule's zero as a claim about its evidence channel, not \
+                  about the code: the per-fact producer matrix is in `crates/cache/src/ir_slice.rs`'s \
+                  module doc and each rule's row in `docs/rules/catalog.md`.",
+        // `Partial`, not `Asserted`: TWO fact/rule pairs are measured per run (the call graph's language
+        // coverage, and the route method field) out of many uneven facts. Two is not coverage — promoting
+        // would promise a per-run signal for every other uneven fact, which does not exist, and
+        // `zzop explain` prints this token verbatim.
+        status: DisclosureStatus::Partial,
     },
     BlindnessClass {
         id: "capability-absent-vs-empty",

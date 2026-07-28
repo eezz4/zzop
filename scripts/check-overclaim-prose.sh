@@ -24,7 +24,8 @@
 #
 #   1. NEVER a bare word. `guarantee` alone matches four honest sentences in this repo today
 #      (VERSIONING.md's "there are no backward-compatibility guarantees yet", SECURITY.md's "no
-#      guaranteed response time", the `await-in-map` rule's "ordering/completion guarantees are lost",
+#      guaranteed response time", the `map-async-no-promise-all` rule's catalog/site row
+#      "ordering/completion guarantees are lost",
 #      docs/modules/facade.md's internal "the default otherwise guarantees a non-empty pack set").
 #      Only a POSITIVE guarantee OF completeness is a claim: `we guarantee`, `guarantees no/every/all/
 #      complete/zero/100`, `guaranteed to/complete/secure/safe/accurate`. Zero hits today, by design.

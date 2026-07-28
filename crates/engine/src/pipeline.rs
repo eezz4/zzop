@@ -101,12 +101,12 @@ pub(crate) struct FileArtifact {
     /// Per-rule DSL timing; empty when profiling is off or on a full cache hit. `analyze::assemble`
     /// sums these into `AnalyzeOutput::rule_timings`.
     pub rule_timings: Vec<RuleTiming>,
-    /// Identifiers referenced anywhere in this file, sorted — feeds `dead-exports`' per-file "used
+    /// Identifiers referenced anywhere in this file, sorted — feeds `unimported-export`' per-file "used
     /// names" (in-file-only liveness, never cross-file).
     pub used_names: Vec<String>,
     /// Names appearing in the PUBLIC SIGNATURE of some exported declaration in this file, sorted —
     /// the position-aware companion `used_names` cannot be (it is a flat, position-blind set). Lets
-    /// `dead-exports` exempt a type that is part of an exported value's public API. TypeScript-only;
+    /// `unimported-export` exempt a type that is part of an exported value's public API. TypeScript-only;
     /// empty elsewhere, and an empty value simply means "no exemptions" (graceful degrade).
     pub exported_signature_names: Vec<String>,
     /// Constant-map fragment (same parse, no second pass) — `analyze::assemble` merges every file's
@@ -181,6 +181,10 @@ pub(crate) fn run_file_pass(
     // Computed once per call (constant across every file in this pass), not per file. `None` when the
     // cache is off.
     let ruleset_fp = cache.map(|_| crate::cache::ruleset_fingerprint(&enabled_packs, config));
+    // The run's declared convention vocabulary, resolved ONCE per pass rather than per file: several of
+    // its keys reach the per-file projection (write sites, db-table consumes, router-mount guards), and
+    // resolving inside the rayon body would rebuild the same lists for every file.
+    let vocab = config.vocabulary.resolve();
 
     let mut artifacts: Vec<FileArtifact> = files
         .par_iter()
@@ -189,6 +193,7 @@ pub(crate) fn run_file_pass(
                 rel,
                 abs,
                 config,
+                &vocab,
                 &enabled_packs,
                 cache,
                 ruleset_fp.as_deref(),

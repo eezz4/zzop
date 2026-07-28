@@ -23,6 +23,18 @@ use crate::{lang, line_of, parse_with_cm};
 /// Top-level declarations -> `SourceSymbol[]`: function/class/interface/type/const + `export default`
 /// fn/class, factory sub-symbols, binding-pattern consts, and CommonJS exports. Declaration order preserved.
 pub fn parse_symbols(file: &str, source: &str) -> Vec<SourceSymbol> {
+    parse_symbols_with_vocab(file, source, &lang::write_site::WriteSiteVocab::built_in())
+}
+
+/// [`parse_symbols`] with the run's DECLARED write-site vocabulary (`vocabulary.ormReceiverPattern` /
+/// `vocabulary.ormWriteMethods`) instead of the built-ins. Two entry points, ONE implementation: the
+/// no-vocab form above is literally this one applied to `WriteSiteVocab::built_in()`, so there is no
+/// second default to drift.
+pub fn parse_symbols_with_vocab(
+    file: &str,
+    source: &str,
+    write_site_vocab: &lang::write_site::WriteSiteVocab<'_>,
+) -> Vec<SourceSymbol> {
     let Some((cm, module)) = parse_with_cm(file, source) else {
         return Vec::new();
     };
@@ -127,11 +139,13 @@ pub fn parse_symbols(file: &str, source: &str) -> Vec<SourceSymbol> {
             }
         }
     }
-    // Write-site detection is a pure function of (this symbol's own body span, constant vocab), so it
-    // runs as a final pass over the fully-built list rather than being threaded through every symbol
-    // constructor above.
+    // Write-site detection is a pure function of (this symbol's own body span, the declared vocab), so
+    // it runs as a final pass over the fully-built list rather than being threaded through every symbol
+    // constructor above. The vocab is compiled ONCE here, not per symbol.
+    let compiled = lang::write_site::CompiledWriteSiteVocab::compile(write_site_vocab);
     for sym in &mut out {
-        sym.write_sites = lang::write_site::write_sites_for_symbol(sym, source);
+        sym.write_sites =
+            lang::write_site::write_sites_for_symbol_with_vocab(sym, source, &compiled);
     }
     out
 }

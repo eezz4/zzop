@@ -2,7 +2,16 @@
 //! where the request URL and verb are OBJECT PROPERTIES of a request-descriptor argument rather than
 //! positional arguments. Two generator families, both covered:
 //! - swagger-typescript-api: `<recv>.request({ path: "/x", method: "POST", ... })` (descriptor = arg 0);
-//! - openapi-typescript-codegen: `__request(OpenAPI, { url: "/x", method: "GET", ... })` (descriptor = arg 1).
+//! - openapi-typescript-codegen: `__request(OpenAPI, { url: "/x", method: "GET", ... })` (descriptor = arg 1);
+//! - `@hey-api/openapi-ts` (`generated-verb-member-v1`): `<recv>.get({ url: "/x", ... })` — the verb is the
+//!   METHOD NAME, so there is no `method:` property to pair with, and `<recv>` is routinely an expression
+//!   (`(options?.client ?? client)`) rather than a name. See [`verb_named_prop`] / [`url_descriptor`] for
+//!   why this arm's evidence gate is `url:`-only.
+//!
+//! Which module the client is IMPORTED from is irrelevant to all three — the generated client's own source
+//! is in the tree, so its calls are read at their own sites. A relative-path import (`./client`) is
+//! therefore not a blind spot by itself; what blinds the join is a call shape none of the three arms
+//! recognize.
 //!
 //! Sibling to [`super::matchers::match_http_call`]; see this module's own fn doc for the exact evidence gate.
 
@@ -34,6 +43,16 @@ pub(super) fn match_generated_client_call(call: &CallExpr) -> Option<HttpCall<'_
             let MemberProp::Ident(name) = &m.prop else {
                 return None;
             };
+            if let Some(verb) = verb_named_prop(&name.sym) {
+                // `generated-verb-member-v1`, the second generator family shape — see below.
+                let path = call.args.iter().find_map(|a| url_descriptor(&a.expr))?;
+                return Some(HttpCall {
+                    methods: vec![verb],
+                    arg: path,
+                    body_style: BodyStyle::SelfObjectBodyProp,
+                    client: "generated",
+                });
+            }
             if name.sym != "request" || !matches!(&*m.obj, Expr::This(_) | Expr::Ident(_)) {
                 return None;
             }
@@ -59,6 +78,49 @@ pub(super) fn match_generated_client_call(call: &CallExpr) -> Option<HttpCall<'_
 /// `defineRoute`, `addRoute`) whose `{ method, path }` describes a route to REGISTER, not one to CALL.
 fn is_request_ident(name: &str) -> bool {
     name.to_ascii_lowercase().ends_with("request")
+}
+
+/// The upper-cased verb a member-call property names, when it names one — the `generated-verb-member-v1`
+/// arm's first half. `@hey-api/openapi-ts` (what `full-stack-fastapi-template` ships) writes the verb as
+/// the METHOD NAME and the URL as a descriptor property:
+/// `(options?.client ?? client).get({ url: '/api/v1/items', ...options })`. Neither existing arm sees it —
+/// the `request`-named arm wants the prop spelled `request`, and
+/// [`super::matchers::match_http_call`]'s member arm only accepts an `axios`/`ky` receiver, while this
+/// receiver is a `??` expression. Measured before the arm existed: a tree whose whole API surface flows
+/// through such a client extracted ZERO consumes and produced no tripwire warning at all.
+fn verb_named_prop(name: &str) -> Option<String> {
+    let upper = name.to_ascii_uppercase();
+    zzop_core::HTTP_KEY_VERBS
+        .contains(&upper.as_str())
+        .then_some(upper)
+}
+
+/// The `url:` value of an object-literal argument — the `generated-verb-member-v1` arm's evidence gate,
+/// and the whole of it, since the verb already came from the method name.
+///
+/// `url:` ONLY, never `path:`, unlike [`descriptor_from_object`]. That arm can afford `path` because it
+/// additionally requires a `method:` verb LITERAL, which a route-builder DSL's `{ method, path }` also has
+/// but whose bare callee it rejects by name. Here the callee is a verb-named member, which a server-side
+/// router (`router.get({ path, handler })`) matches exactly — so the discriminator has to be the key
+/// spelling, and `url` is what the generators write. Accepted residual: a non-HTTP `.get({ url })` on some
+/// unrelated receiver would be claimed; a call passing a `url` to a verb-named method is HTTP in every
+/// shape measured, and the alternative (a receiver-name vocabulary) is the guess this module avoids.
+fn url_descriptor(arg: &Expr) -> Option<&Expr> {
+    let Expr::Object(obj) = unwrap_expr(arg) else {
+        return None;
+    };
+    obj.props.iter().find_map(|prop| {
+        let PropOrSpread::Prop(p) = prop else {
+            return None;
+        };
+        let Prop::KeyValue(kv) = &**p else {
+            return None;
+        };
+        let PropName::Ident(key) = &kv.key else {
+            return None;
+        };
+        (key.sym == "url").then_some(&*kv.value)
+    })
 }
 
 /// Reads a request descriptor `(VERB, path-expr)` out of `arg` when it is an object literal carrying BOTH
@@ -96,97 +158,4 @@ fn descriptor_from_object(arg: &Expr) -> Option<(String, &Expr)> {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::adapters::egress::{clients, extract_http_egress, files, keys};
-
-    #[test]
-    fn generated_request_object_static_path_is_recognized() {
-        let out = extract_http_egress(&files(&[(
-            "api.ts",
-            "class Api { login() { return this.request({ path: `/users/login`, method: \"POST\", body: data }); } }",
-        )]));
-        assert_eq!(keys(&out), vec![Some("POST /users/login".to_string())]);
-        assert_eq!(clients(&out), vec![Some("generated".to_string())]);
-    }
-
-    #[test]
-    fn generated_request_object_template_path_normalizes() {
-        let out = extract_http_egress(&files(&[(
-            "api.ts",
-            "class Api { del(slug) { return this.request({ path: `/articles/${slug}`, method: \"DELETE\" }); } }",
-        )]));
-        assert_eq!(keys(&out), vec![Some("DELETE /articles/{}".to_string())]);
-    }
-
-    #[test]
-    fn generated_request_object_url_key_alias_is_recognized() {
-        // openapi-generator variants key the path as `url` rather than `path`.
-        let out = extract_http_egress(&files(&[(
-            "api.ts",
-            "const api = { go() { return http.request({ url: \"/tags\", method: \"GET\" }); } };",
-        )]));
-        assert_eq!(keys(&out), vec![Some("GET /tags".to_string())]);
-    }
-
-    #[test]
-    fn openapi_codegen_free_function_request_with_descriptor_as_second_arg() {
-        // openapi-typescript-codegen: `__request(OpenAPI, { method, url })` — free-function callee, the
-        // request descriptor is the SECOND argument.
-        let out = extract_http_egress(&files(&[(
-            "sdk.gen.ts",
-            "import { request as __request } from './core/request';\nexport const readItems = () => __request(OpenAPI, { method: \"GET\", url: `/api/v1/items` });",
-        )]));
-        assert_eq!(keys(&out), vec![Some("GET /api/v1/items".to_string())]);
-        assert_eq!(clients(&out), vec![Some("generated".to_string())]);
-    }
-
-    #[test]
-    fn free_function_call_without_a_descriptor_object_is_ignored() {
-        // A bare free-function call with no `{method, url}` object arg is not an HTTP call — left alone.
-        let out = extract_http_egress(&files(&[(
-            "a.ts",
-            "function f() { return compute(a, b); }",
-        )]));
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn server_side_route_builder_dsl_with_the_same_shape_is_not_egress() {
-        // `createRoute({ method, path })` (hono zod-openapi and friends) has the exact verb+path object
-        // shape, but a bare non-`request` callee names a route DEFINITION to register, not a client call.
-        let out = extract_http_egress(&files(&[(
-            "routes.ts",
-            "export const r = createRoute({ method: \"get\", path: \"/users\", responses: {} });",
-        )]));
-        assert!(out.is_empty(), "{:?}", out);
-    }
-
-    #[test]
-    fn request_object_without_a_method_verb_is_not_http() {
-        // A GraphQL/RPC `.request({ query })` has no HTTP verb literal + path pairing — left alone.
-        let out = extract_http_egress(&files(&[(
-            "a.ts",
-            "class C { run() { return this.request({ query: `{ me }`, variables: v }); } }",
-        )]));
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn request_object_with_non_verb_method_string_is_rejected() {
-        let out = extract_http_egress(&files(&[(
-            "a.ts",
-            "class C { run() { return this.request({ path: \"/x\", method: \"SUBSCRIBE\" }); } }",
-        )]));
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn generated_request_post_body_object_literal_is_witnessed() {
-        let out = extract_http_egress(&files(&[(
-            "api.ts",
-            "class Api { create() { return this.request({ path: \"/articles\", method: \"POST\", body: { title } }); } }",
-        )]));
-        let body = out[0].body.as_ref().unwrap();
-        assert_eq!(body.keys, vec!["title".to_string()]);
-    }
-}
+mod tests;

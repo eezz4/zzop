@@ -57,7 +57,7 @@ fn find_create_ok_marker_directly_above_the_create_line_suppresses_the_finding()
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const prisma: any;\nexport async function ensureUserMarked(email: string) {\n  const existing = await prisma.user.findFirst({ where: { email } });\n  if (!existing) {\n    // find-then-create-no-unique-ok: low-traffic admin-only path, race window accepted\n    await prisma.user.create({ data: { email } });\n  }\n}\n",
+        "declare const prisma: any;\nexport async function ensureUserMarked(email: string) {\n  const existing = await prisma.user.findFirst({ where: { email } });\n  if (!existing) {\n    // zzop-find-then-create-no-unique-ok: low-traffic admin-only path, race window accepted\n    await prisma.user.create({ data: { email } });\n  }\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -150,7 +150,7 @@ fn atomic_counter_ok_marker_directly_above_the_arithmetic_line_suppresses_the_fi
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const prisma: any;\nexport async function incrementViewsMarked(id: string) {\n  const post = await prisma.post.findUnique({ where: { id } });\n  // non-atomic-counter-update-ok: single-writer batch job, no concurrent access possible\n  await prisma.post.update({ where: { id }, data: { views: post.views + 1 } });\n}\n",
+        "declare const prisma: any;\nexport async function incrementViewsMarked(id: string) {\n  const post = await prisma.post.findUnique({ where: { id } });\n  // zzop-non-atomic-counter-update-ok: single-writer batch job, no concurrent access possible\n  await prisma.post.update({ where: { id }, data: { views: post.views + 1 } });\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -211,7 +211,7 @@ fn check_act_loop_ok_marker_directly_above_the_create_line_suppresses_the_findin
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const prisma: any;\ndeclare const rows: { key: string }[];\nexport async function ensureAllMarked() {\n  for (const r of rows) {\n    const e = await prisma.item.findFirst({ where: { key: r.key } });\n    if (!e) {\n      // check-then-act-in-loop-ok: single-threaded seed script, no concurrent workers\n      await prisma.item.create({ data: r });\n    }\n  }\n}\n",
+        "declare const prisma: any;\ndeclare const rows: { key: string }[];\nexport async function ensureAllMarked() {\n  for (const r of rows) {\n    const e = await prisma.item.findFirst({ where: { key: r.key } });\n    if (!e) {\n      // zzop-check-then-act-in-loop-ok: single-threaded seed script, no concurrent workers\n      await prisma.item.create({ data: r });\n    }\n  }\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -221,7 +221,7 @@ fn check_act_loop_ok_marker_directly_above_the_create_line_suppresses_the_findin
     );
 }
 
-// --- idempotency-key-regenerated-per-retry ---
+// --- idempotency-key-regenerated-in-loop ---
 
 #[test]
 fn idempotency_key_regenerated_via_random_uuid_inside_retry_loop_is_flagged() {
@@ -231,7 +231,7 @@ fn idempotency_key_regenerated_via_random_uuid_inside_retry_loop_is_flagged() {
         "declare const attempts: number[];\ndeclare const body: any;\ndeclare const api: any;\ndeclare function randomUUID(): string;\nexport async function chargeWithRetries() {\n  for (const attempt of attempts) {\n    const idempotencyKey = randomUUID();\n    await api.post(\"/charge\", body, { headers: { \"Idempotency-Key\": idempotencyKey } });\n  }\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "idempotency-key-regenerated-per-retry");
+    let h = hits(&out, "idempotency-key-regenerated-in-loop");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 7);
 }
@@ -248,7 +248,7 @@ fn idempotency_key_generated_once_before_loop_and_reused_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "idempotency-key-regenerated-per-retry").is_empty(),
+        hits(&out, "idempotency-key-regenerated-in-loop").is_empty(),
         "{:?}",
         out.findings
     );
@@ -265,7 +265,7 @@ fn idempotency_key_derived_deterministically_inside_loop_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "idempotency-key-regenerated-per-retry").is_empty(),
+        hits(&out, "idempotency-key-regenerated-in-loop").is_empty(),
         "{:?}",
         out.findings
     );
@@ -276,11 +276,11 @@ fn idempotency_regen_ok_marker_directly_above_the_regenerated_key_line_suppresse
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/payments.ts",
-        "declare const attempts: number[];\ndeclare const body: any;\ndeclare const api: any;\ndeclare function randomUUID(): string;\nexport async function chargeWithRetriesMarked() {\n  for (const attempt of attempts) {\n    // idempotency-key-regenerated-per-retry-ok: sandbox test harness, retries treated as new charges intentionally\n    const idempotencyKey = randomUUID();\n    await api.post(\"/charge\", body, { headers: { \"Idempotency-Key\": idempotencyKey } });\n  }\n}\n",
+        "declare const attempts: number[];\ndeclare const body: any;\ndeclare const api: any;\ndeclare function randomUUID(): string;\nexport async function chargeWithRetriesMarked() {\n  for (const attempt of attempts) {\n    // zzop-idempotency-key-regenerated-in-loop-ok: sandbox test harness, retries treated as new charges intentionally\n    const idempotencyKey = randomUUID();\n    await api.post(\"/charge\", body, { headers: { \"Idempotency-Key\": idempotencyKey } });\n  }\n}\n",
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "idempotency-key-regenerated-per-retry").is_empty(),
+        hits(&out, "idempotency-key-regenerated-in-loop").is_empty(),
         "{:?}",
         out.findings
     );

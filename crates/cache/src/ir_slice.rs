@@ -84,7 +84,7 @@ pub struct FileIrSlice {
     #[serde(default)]
     pub io: Option<IoFacts>,
     /// Identifier names referenced anywhere in this file, sorted for deterministic serialization —
-    /// mirrors `FileArtifact::used_names`. Feeds the dead-exports analysis's in-file-only-vs-unused
+    /// mirrors `FileArtifact::used_names`. Feeds the unimported-export analysis's in-file-only-vs-unused
     /// distinction; empty for non-TypeScript/degraded files, same convention as `imports`.
     #[serde(default)]
     pub used_names: Vec<String>,
@@ -92,7 +92,7 @@ pub struct FileIrSlice {
     /// never a body) of some exported declaration in this file, sorted for deterministic
     /// serialization — mirrors `FileArtifact::exported_signature_names`. Category 4 alongside
     /// `used_names`, and the position-aware companion that flat set cannot be: it lets
-    /// `dead-exports` exempt a type belonging to an exported value's public API without exempting a
+    /// `unimported-export` exempt a type belonging to an exported value's public API without exempting a
     /// type used only inside a body. TypeScript-only (a matrix blank elsewhere); empty means "no
     /// exemptions", which is the pre-existing behavior, so an absent value degrades gracefully.
     #[serde(default)]
@@ -145,7 +145,7 @@ pub struct FileIrSlice {
     pub query_call_sites: Vec<QueryCallSite>,
     /// This file's comment/string-stripped identifier tokens (`zzop_rules_schema::field_usage_tokens`) —
     /// mirrors `FileArtifact::field_usage_tokens`. Must round-trip through the cache: dropping it on a
-    /// hit would silently starve the `schema-usage` native rule's `dead-field` check of this file's
+    /// hit would silently starve the `schema-usage` native rule's `unreferenced-field-name` check of this file's
     /// usage evidence, same reasoning as `query_call_sites` above.
     #[serde(default)]
     pub field_usage_tokens: Vec<String>,

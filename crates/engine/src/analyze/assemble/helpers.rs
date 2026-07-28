@@ -44,7 +44,7 @@ pub(super) fn sort_io_consumes(consumes: &mut [zzop_core::IoConsume]) {
 /// `crate::dead_exports::is_ts_source_ext`'s own "extension-based and duplicated rather than threading
 /// the dispatch config" convention (see that function's doc): both `resolve_python_import`'s callers here
 /// only ever see `ts_paths` members, whose extension already pins their dispatched language.
-pub(super) fn is_python_source_ext(rel: &str) -> bool {
+pub(in crate::analyze) fn is_python_source_ext(rel: &str) -> bool {
     rel.ends_with(".py") || rel.ends_with(".pyi")
 }
 
@@ -63,7 +63,7 @@ pub(super) fn is_python_source_ext(rel: &str) -> bool {
 /// run right after `build_dep_with_workspace` returns) and the `compose_router_mount_provides` resolver
 /// closure in `super::provides` (cross-file `include_router` mount composition) — both need the identical
 /// specifier -> file resolution, just called with a different `original` per call site's own data shape.
-pub(super) fn resolve_python_import(
+pub(in crate::analyze) fn resolve_python_import(
     specifier: &str,
     original: Option<&str>,
     from_file: &str,
@@ -76,7 +76,7 @@ pub(super) fn resolve_python_import(
 
 /// True for the extension the dispatch table routes to `Language::Rust` — same "duplicated rather than
 /// threading the dispatch config" convention `is_python_source_ext` documents.
-pub(super) fn is_rust_source_ext(rel: &str) -> bool {
+pub(in crate::analyze) fn is_rust_source_ext(rel: &str) -> bool {
     rel.ends_with(".rs")
 }
 
@@ -118,7 +118,7 @@ pub(super) fn rust_head(specifier: &str) -> &str {
 /// Called from BOTH [`super::dep_graph::merge_rust_dep_edges`] (dep-graph edges) and the router-mount
 /// compose resolver closure in `super::provides` (cross-file `.nest()`/`.merge()` mounts) — same dual-call
 /// shape `resolve_python_import`'s own doc describes for its two call sites.
-pub(super) fn resolve_rust_import(
+pub(in crate::analyze) fn resolve_rust_import(
     specifier: &str,
     from_file: &str,
     all_paths: &HashSet<String>,

@@ -1,7 +1,8 @@
 //! `mutating-route-no-auth` — flags a POST/PUT/PATCH/DELETE `IoProvide` (an HTTP route) whose handler
 //! symbol, walked via call-graph BFS (`zzop_core::callgraph::bfs_reachable` over the whole-repo
 //! `SymbolGraph`), never reaches a callee whose NAME looks like an auth guard — unlike the DSL
-//! `http/auth-gates` rule (registration-line handler-identifier text only), this follows actual calls.
+//! `http/protected-path-no-auth-evidence` rule (registration-line handler-identifier text only), this
+//! follows actual calls.
 //!
 //! ## Guard vocabulary
 //! [`DEFAULT_AUTH_GUARD_PATTERN`] is matched against (name-segment shape below — see "Match granularity")
@@ -23,21 +24,31 @@
 //! clears a self-describing handler name on its own.
 //!
 //! ## Call-graph language coverage (the OTHER half of the decidable subset)
-//! `symbol_graph` is built from re-parsed TypeScript/JavaScript source AND (as of
-//! `java21/tree-sitter-java-0.23.5/v2`) re-parsed Java source (`run_callgraph_rules`, which loops
-//! `ts_paths`/`java_rels` — see that function's own module doc). No OTHER language parser in this
+//! `symbol_graph` is built from re-parsed TypeScript/JavaScript, Java, Python AND Rust source
+//! (`run_callgraph_rules`, which loops `ts_paths`/`java_rels` plus the Python- and Rust-dispatched
+//! members of `ts_paths` — see that function's own module doc). No OTHER language parser in this
 //! workspace produces the `RawCall` sites `bfs_reachable` walks, so for a handler outside
 //! [`CALL_GRAPH_COVERED_EXTENSIONS`], `symbol_graph` restricted to that ecosystem is provably EMPTY — the
 //! BFS can never find a guard there. [`is_call_graph_covered`] makes this explicit and load-bearing: a
 //! mutating provide outside the covered set is exempt from the BFS entirely, same "do not guess" spirit
-//! as the unresolved/ambiguous-handler skip above — recall for an uncovered ecosystem is zero until real
-//! coverage exists, honest given the mechanism has no evidence for it.
+//! as the unresolved/ambiguous-handler skip above — recall there is zero until real coverage exists.
 //! Lifting the exemption for a language needs two additions outside this crate: (1) a `RawCall`-producing
 //! extractor (`RawCall`'s own doc, `crates/core/src/callgraph.rs`); (2) engine wiring in
-//! `run_callgraph_rules` to gather that language's calls. Java is the first to have done both: its
-//! extractor is `zzop_parser_java_21::lang::calls::parse_calls`; its `resolve_file` is an opaque-specifier
-//! stand-in, not real package resolution (see `run_callgraph_rules`'s doc). Neither addition is this crate's
-//! call to make (`rules/**` cannot depend on parser/engine internals) — see its dependency boundary.
+//! `run_callgraph_rules` to gather that language's calls; neither is this crate's to make (`rules/**`
+//! cannot depend on parser/engine internals). Java did both first, with an opaque-specifier `resolve_file`
+//! stand-in rather than real package resolution; Python followed with a REAL module resolver
+//! (`python_import_candidates` against the tree's own path set); Rust is the fourth and the ONE case
+//! where the guard half needed no side-channel — its extractor evidence
+//! (`zzop_parser_rust::parse_extractor_guards`) is an edge out of the handler, so the vocabulary below
+//! matches it unchanged, and its resolver is real and crate-aware. Rust residual, mainstream rather
+//! than marginal: a route guarded ONLY by `.route_layer(..)`/`.wrap(..)` fires — `framework_silence::
+//! rust_router_layer` discloses that range per run.
+//!
+//! **A lift is only honest WITH the guard-vocabulary half** (see "Decorator/annotation auth exemption").
+//! A language's guards are usually applied as framework metadata, not as calls the handler body makes
+//! (FastAPI `Depends`, Spring `@PreAuthorize`, Nest `@UseGuards`): covering a language's call graph
+//! without its guard evidence turns every guarded mutating route into a false positive, while shipping
+//! only the guard evidence leaves every route in that language exempt and the rule silent.
 //!
 //! ## Precision limit (and its injection completion)
 //! This is a vocabulary-based reachability check over the CALL graph only. Route-level middleware —
@@ -56,25 +67,18 @@
 //! injected evidence COMPOSE (either clears the route), one consumer of a general channel.
 //!
 //! ## Match granularity: tail name PLUS the immediate qualifier
-//! [`is_guard_id`] checks TWO trailing segments of a visited id (`<file>#<Receiver>.<method>`), with
+//! [`is_guard_id`] checks TWO trailing segments of a visited id (`<file>#<Receiver>.<method>`) with
 //! deliberately DIFFERENT matchers: the tail (method name) keeps the substring
-//! [`DEFAULT_AUTH_GUARD_PATTERN`] (verb-shaped names); the qualifier (class name) uses exact
-//! camel-token matching against [`qualifier::QUALIFIER_GUARD_TOKENS`] — this is what makes a Java
-//! static-utility guard visible (`AuthorizationService.canWriteComment`: `auth` lives only in the
-//! qualifier) WITHOUT substring's domain-noun false-clears (`AuthorRepository` ⊃ `auth` — see
-//! `qualifier.rs`). A BARE call id's qualifier is its file-extension token — harmless either way.
+//! [`DEFAULT_AUTH_GUARD_PATTERN`] (verb-shaped names); the qualifier (class name) needs an exact
+//! camel-token hit AND a symbol this tree actually DECLARES under that name, since the resolver mints
+//! receiver ids it never verified. `qualifier.rs` owns both gates and why each is needed (Java
+//! static-utility guards stay visible; domain-noun substrings and phantom receivers do not).
 //!
 //! ## Auth-acquisition exemption
 //! A provide whose PATH sits on the auth-acquisition surface is exempt entirely, never entering the BFS —
 //! that surface IS how a caller gets credentials, so it cannot require pre-existing auth to reach itself.
-//! Two tiers, since some acquisition-shaped words also legitimately name unrelated mutating routes (e.g.
-//! `POST /devices/register`):
-//! - **Standalone tier** ([`AUTH_ACQUISITION_STANDALONE_PATTERN`]): exempt unconditionally — these segments
-//!   ARE the auth surface regardless of what else is in the path.
-//! - **Conditional tier** ([`AUTH_ACQUISITION_CONDITIONAL_PATTERN`]): exempt only when an auth-family
-//!   segment ([`AUTH_FAMILY_PATH_PATTERN`]) also appears in the same path — e.g. `/auth/register` is
-//!   exempt, but `/devices/register` is not. Every segment list is matched `/`-delimited on whole path
-//!   segments only, never as a bare substring — `/author/profile` does not match `auth`.
+//! Two tiers (some acquisition-shaped words also name unrelated mutating routes, `POST /devices/register`)
+//! — the tiers, their vocabularies and the whole-segment matching rule live in [`vocab`].
 //!
 //! ## Test-fixture exemption
 //! A provide registered in a test/fixture file (`is_test_file` — the same predicate `unreachable`'s
@@ -86,10 +90,16 @@
 //! entirely: such auth runs BEFORE the handler regardless of what its body calls, so the BFS assumption
 //! (the guard must be REACHABLE FROM the handler) doesn't apply — its application is metadata, not a call
 //! edge (the same blind spot as route-level middleware). The exemption is a framework-neutral side-channel
-//! `HashSet<(file, line)>` ([`ScanMutatingRouteNoAuthInput::decorator_guarded`]); four producers feed it:
+//! `HashSet<(file, line)>` ([`ScanMutatingRouteNoAuthInput::decorator_guarded`]); its producers:
 //! - **NestJS `@UseGuards(...)`** (class/method) — `zzop_parser_typescript::extract_controller_guarded_lines`.
 //! - **Spring method security** `@PreAuthorize`/`@PostAuthorize`/`@Secured`/`@RolesAllowed` (class/method, SpEL
 //!   never interpreted) — `zzop_parser_java_21::extract_spring_guarded_lines` (the route method's anchor line).
+//! - **FastAPI `Depends(...)`** (route-decorator `dependencies=[...]`, a parameter default, an
+//!   `Annotated[..., Depends(...)]` parameter, or a tree-resolved `Annotated` alias) —
+//!   `zzop_parser_python_3::extract_fastapi_guarded_lines` (the route decorator's own anchor line).
+//! - **Django REST Framework `permission_classes`** — `zzop_parser_python_3::
+//!   extract_django_view_guard_classes` returns per-VIEW-CLASS verdicts (the evidence lives in
+//!   `views.py`, the route anchor in `urls.py`), which the engine joins to a provide by its `symbol`.
 //! - **NestJS route-scoped middleware** — an auth-named `consumer.apply(AuthX).forRoutes({path, method})`
 //!   (`extract_nest_forroutes_guarded`); engine matches each (method,path) pattern (exact, prefix-anchored).
 //! - **Spring global `SecurityFilterChain`** — a secure-by-default `authorizeRequests()...anyRequest()
@@ -101,7 +111,6 @@
 
 use std::collections::HashMap;
 
-use regex::Regex;
 use zzop_core::callgraph::{bfs_reachable, SymbolGraph};
 use zzop_core::{Finding, Severity, SourceSymbol};
 
@@ -120,29 +129,32 @@ pub const DEFAULT_AUTH_GUARD_PATTERN: &str = r"(?i)(auth|guard|verify|session|to
 /// RULE vocabulary, never the kernel's — the store is queried by key, agnostic to what it means.
 pub const AUTH_GUARDED_ATTR: &str = "auth-guarded";
 
-/// Auth-acquisition exemption, standalone tier — see module doc "Auth-acquisition exemption".
-const AUTH_ACQUISITION_STANDALONE_PATTERN: &str = r"(?i)/(auth|login|logout|signin|signup)(/|$)";
-
-/// Auth-acquisition exemption, conditional tier — exempt only alongside [`AUTH_FAMILY_PATH_PATTERN`]. See
-/// module doc.
-const AUTH_ACQUISITION_CONDITIONAL_PATTERN: &str =
-    r"(?i)/(register|token|refresh|password|otp)(/|$)";
-
-/// Auth-family gate for the conditional exemption tier — see module doc.
-const AUTH_FAMILY_PATH_PATTERN: &str = r"(?i)/(auth|login|signin|signup|session|oauth)(/|$)";
+use vocab::vocab_re;
+pub use vocab::{
+    AUTH_ACQUISITION_CONDITIONAL_PATTERN, AUTH_ACQUISITION_STANDALONE_PATTERN,
+    AUTH_FAMILY_PATH_PATTERN,
+};
 
 use crate::http_scan::WRITE_HTTP_METHODS;
 
 /// Extensions the whole-repo call-graph BFS actually has `RawCall` edges for — module doc "Call-graph
 /// language coverage". Duplicated from `zzop_engine`'s `dead_exports::is_ts_source_ext` list plus
-/// `"java"` rather than shared (this crate depends on `zzop_core` only). Adding `"java"` here is the
-/// wiring-completion step this constant's own doc predicted: `zzop_parser_java_21::lang::calls::
-/// parse_calls` now feeds `symbol_graph` real Java call-site edges. `pub`: pinned against `is_ts_source_ext`.
-pub const CALL_GRAPH_COVERED_EXTENSIONS: &[&str] =
-    &["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "java"];
+/// `"java"`, `"py"`/`"pyi"` and `"rs"` rather than shared (this crate depends on `zzop_core` only). Each
+/// addition is the wiring-completion step this constant's own doc predicts — the `lang::calls::
+/// parse_calls` of `zzop_parser_java_21`/`zzop_parser_python_3`/`zzop_parser_rust` feed `symbol_graph`
+/// real call-site edges. `py`/`pyi` are BOTH listed because they are exactly what
+/// `zzop_engine`'s dispatch routes to the Python parser (`is_python_source_ext`) and therefore exactly
+/// what the engine's Python re-parse loop walks — a route provide never comes from a `.pyi` stub, so
+/// listing it claims nothing extra. `"rs"` is the newest lift and the one whose guard half looks least
+/// like the others: a Rust guard is a TYPE in the handler's signature, projected as an ordinary edge by
+/// `zzop_parser_rust::parse_extractor_guards`, so it needs no `decorator_guarded` entry at all.
+/// `pub`: pinned against `is_ts_source_ext`.
+pub const CALL_GRAPH_COVERED_EXTENSIONS: &[&str] = &[
+    "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "java", "py", "pyi", "rs",
+];
 
 /// True when `file`'s extension is one the call-graph BFS has evidence for — module doc "Call-graph
-/// language coverage". A file outside this set (Python, Go, Rust, ...) is exempt: `symbol_graph`
+/// language coverage". A file outside this set (Go, C#, ...) is exempt: `symbol_graph`
 /// restricted to its ecosystem is provably empty, so "never reaches a guard" is guaranteed, not evidence.
 fn is_call_graph_covered(file: &str) -> bool {
     std::path::Path::new(file)
@@ -160,7 +172,18 @@ pub struct ScanMutatingRouteNoAuthInput<'a> {
     pub io_provides: &'a [zzop_core::IoProvide],
     pub symbols: &'a [SourceSymbol],
     pub symbol_graph: &'a SymbolGraph,
-    pub auth_guard_pattern: &'a str,
+    /// How the project spells its guard functions. `None` — undeclared — means no call NAME can prove a
+    /// guard, so this half of the evidence is simply absent and every mutating route depends on the
+    /// structural exemptions (decorator/annotation, injected attribute) alone.
+    pub auth_guard_pattern: Option<&'a str>,
+    /// Camel tokens proving a receiver-CLASS name is a guard — the qualifier half of the two-segment
+    /// match (module doc "Match granularity"). Empty means that half is not judged.
+    pub qualifier_guard_tokens: &'a [&'a str],
+    /// The three auth-acquisition path vocabularies — see [`vocab`] for the tiers. `None` means that tier
+    /// exempts nothing; an undeclared vocabulary is never silently replaced with ours.
+    pub auth_acquisition_standalone_pattern: Option<&'a str>,
+    pub auth_acquisition_conditional_pattern: Option<&'a str>,
+    pub auth_family_path_pattern: Option<&'a str>,
     /// Framework-neutral decorator/annotation-based auth coverage — see module doc "Decorator/annotation
     /// auth exemption". `(file, line)` pairs matching an `IoProvide`'s own `file`/`line` are exempt from the
     /// BFS entirely (like the test-fixture / auth-acquisition exemptions): this IS how the route is guarded,
@@ -176,13 +199,7 @@ pub struct ScanMutatingRouteNoAuthInput<'a> {
 }
 
 pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<Finding> {
-    let standalone_re = Regex::new(AUTH_ACQUISITION_STANDALONE_PATTERN).unwrap();
-    let conditional_re = Regex::new(AUTH_ACQUISITION_CONDITIONAL_PATTERN).unwrap();
-    let auth_family_re = Regex::new(AUTH_FAMILY_PATH_PATTERN).unwrap();
-    let is_auth_acquisition_exempt = |path: &str| -> bool {
-        standalone_re.is_match(path)
-            || (conditional_re.is_match(path) && auth_family_re.is_match(path))
-    };
+    let acquisition = vocab::AcquisitionSurface::compile(input);
     let mutating: Vec<&zzop_core::IoProvide> = input
         .io_provides
         .iter()
@@ -206,7 +223,7 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
                 return false;
             };
             // The auth-acquisition surface itself is exempt — see module doc.
-            WRITE_HTTP_METHODS.contains(&method) && !is_auth_acquisition_exempt(path)
+            WRITE_HTTP_METHODS.contains(&method) && !acquisition.exempts(path)
         })
         .collect();
     if mutating.is_empty() {
@@ -214,12 +231,12 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
     }
 
     let name_index = build_name_index(input.symbols);
-    let guard_re = Regex::new(input.auth_guard_pattern)
-        .unwrap_or_else(|_| Regex::new(DEFAULT_AUTH_GUARD_PATTERN).unwrap());
+    let guard_re = vocab_re(input.auth_guard_pattern);
+    let qual_guard = |q: &str| qualifier::is_guard(q, &name_index, input.qualifier_guard_tokens);
     let is_guard_id = |id: &str| -> bool {
-        let mut segments = id.rsplit(['#', '.']);
-        let tail = segments.next().unwrap_or(id);
-        guard_re.is_match(tail) || segments.next().is_some_and(qualifier::qualifier_is_guard)
+        let mut seg = id.rsplit(['#', '.']);
+        let tail = seg.next().unwrap_or(id);
+        guard_re.as_ref().is_some_and(|re| re.is_match(tail)) || seg.next().is_some_and(&qual_guard)
     };
 
     // Memoizes the per-handler BFS across every mutating endpoint sharing a handler symbol.
@@ -274,7 +291,10 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
 }
 
 mod message;
-mod qualifier;
+/// `pub` only so `QUALIFIER_GUARD_TOKENS` can be re-exported at the crate root as a declarable default —
+/// everything else in it stays `pub(super)`.
+pub mod qualifier;
+mod vocab;
 
 #[cfg(test)]
 mod tests;

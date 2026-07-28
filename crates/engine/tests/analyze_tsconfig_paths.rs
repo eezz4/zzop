@@ -9,7 +9,7 @@
 //!
 //! Before this fix, a tsconfig `paths` alias other than the hardcoded `@/` convention (or an `@/*` mapping
 //! that didn't happen to match the hardcoded root/`src` fallback — e.g. `@/*` -> `./app/*`) produced no
-//! dep-graph edge at all: `dead-candidates`/`dead-exports` both flagged the aliased-only file as orphaned,
+//! dep-graph edge at all: `dead-candidates`/`unimported-export` both flagged the aliased-only file as orphaned,
 //! a false-positive pattern that scales with how much of a monorepo's tsconfig diverges from that one
 //! hardcoded convention.
 
@@ -107,7 +107,7 @@ fn tsconfig_paths_alias_clears_dead_candidates_on_the_target_file() {
 
 #[test]
 fn tsconfig_paths_alias_clears_dead_exports_on_the_consumed_symbol() {
-    let dir = TempDir::new("zzop-engine-tsconfig-paths-dead-exports");
+    let dir = TempDir::new("zzop-engine-tsconfig-paths-unimported-export");
     dir.write(
         "tsconfig.json",
         r#"{"compilerOptions": {"baseUrl": ".", "paths": {"@/*": ["./app/*"]}}}"#,
@@ -123,20 +123,20 @@ fn tsconfig_paths_alias_clears_dead_exports_on_the_consumed_symbol() {
     let out = analyze_tree(dir.path(), &config());
 
     assert!(
-        !out.findings.iter().any(|f| f.rule_id == "dead-exports"
+        !out.findings.iter().any(|f| f.rule_id == "unimported-export"
             && f.file == "app/lib/helper.ts"
             && f.data.as_ref().is_some_and(|d| d["name"] == "helper")),
-        "helper should not be dead-exports once the tsconfig-paths resolver sees the import, got: {:?}",
+        "helper should not be unimported-export once the tsconfig-paths resolver sees the import, got: {:?}",
         out.findings
     );
 
     assert!(
-        out.findings.iter().any(|f| f.rule_id == "dead-exports"
+        out.findings.iter().any(|f| f.rule_id == "unimported-export"
             && f.file == "app/lib/helper.ts"
             && f.data
                 .as_ref()
                 .is_some_and(|d| d["name"] == "neverImported")),
-        "neverImported (no consumer) should still be flagged dead-exports, got: {:?}",
+        "neverImported (no consumer) should still be flagged unimported-export, got: {:?}",
         out.findings
     );
 }

@@ -1,8 +1,8 @@
-//! Public-signature type references — the evidence `dead-exports` needs to tell a type that is part
+//! Public-signature type references — the evidence `unimported-export` needs to tell a type that is part
 //! of an exported value's PUBLIC API from one that is merely mentioned inside a body.
 //!
 //! ## Why this exists (and why `used_names` cannot do it)
-//! `dead-exports` reports an export as `in-file-only` when the file's own `used_names` contains its
+//! `unimported-export` reports an export as `in-file-only` when the file's own `used_names` contains its
 //! name. `used_names` (`ident_refs.rs`) is a flat set with no positions, so these three shapes are
 //! indistinguishable to it even though only the first is a false positive:
 //!
@@ -34,7 +34,7 @@
 //! values, not types).
 //!
 //! ## Accepted limits (under-collection is the safe direction)
-//! Missing a name here only means a `dead-exports` finding that would have been exempted still
+//! Missing a name here only means a `unimported-export` finding that would have been exempted still
 //! reports — the pre-existing behavior. Over-collecting would silently HIDE a real dead type, so
 //! every judgment call below resolves toward collecting less: no cross-file resolution, no
 //! `typeof x` value-to-type bridging, no namespace/`export *` reach, and no inference of an

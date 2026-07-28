@@ -1,4 +1,4 @@
-//! Finding-shaping for the `"dead-exports"` native analysis — see the parent module doc's
+//! Finding-shaping for the `"unimported-export"` native analysis — see the parent module doc's
 //! "Engine wiring" section.
 
 use std::collections::HashMap;
@@ -36,10 +36,10 @@ fn dead_export_to_finding(symbol_lines: &HashMap<(&str, &str), u32>, d: DeadExpo
             DeadExportReason::Unused => "Delete it, or export it from somewhere it's actually consumed.",
             DeadExportReason::InFileOnly => "Drop the `export` keyword to make the un-used-elsewhere status explicit.",
         },
-        disable_hint("dead-exports"),
+        disable_hint("unimported-export"),
     );
     Finding {
-        rule_id: "dead-exports".to_string(),
+        rule_id: "unimported-export".to_string(),
         severity: Severity::Info,
         file: d.file.clone(),
         line,

@@ -151,8 +151,8 @@ fn the_rule_pack_schema_parses_and_names_every_severity() {
 // ---------------------------------------------------------------------------------------------
 //
 // WHY THIS EXISTS. `docs/contracts/rule-pack.schema.json` is a HAND-AUTHORED mirror of
-// `zzop_core::dsl::def`'s matcher structs, and `zzop-host` embeds it verbatim
-// (`crates/host/src/embedded.rs`) to serve as the MCP resource `zzop://contract/rule-pack-schema`.
+// `zzop_core::dsl::def`'s matcher structs, and `zzop-summary` embeds it verbatim
+// (`crates/summary/src/contracts.rs`) to serve as the MCP resource `zzop://contract/rule-pack-schema`.
 // An external pack author reads THAT, not the Rust source. Because the schema declares
 // `additionalProperties: true` everywhere, a field the schema forgot breaks no validator — it just
 // makes the knob invisible, and an author who cannot see e.g. an ordering gate builds an

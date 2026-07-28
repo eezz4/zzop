@@ -5,7 +5,7 @@
 //!
 //! `.vue`/`.svelte` files dispatch to `None` (no structural parser frontend — `zzop_engine::dispatch`),
 //! so before this pre-scan a `.ts` symbol imported and used ONLY inside a component's `<script>` block had
-//! zero visible fan-in through the normal fused pipeline, false-firing `dead-exports`/`dead-candidates`.
+//! zero visible fan-in through the normal fused pipeline, false-firing `unimported-export`/`dead-candidates`.
 //! These tests exercise the whole real pipeline (`analyze_tree`, real `.vue` source on disk) to prove the
 //! wiring connects end to end, plus the two safety pins the parser-owner review called out: (F3) the
 //! `.vue`/`.svelte` file itself must never become a NEW `dead-candidates` false positive (it must never
@@ -74,15 +74,15 @@ fn write_vue_fixture(dir: &TempDir) {
 
 #[test]
 fn vue_script_setup_import_clears_dead_exports_on_the_consumed_symbol() {
-    let dir = TempDir::new("zzop-engine-sfc-dead-exports");
+    let dir = TempDir::new("zzop-engine-sfc-unimported-export");
     write_vue_fixture(&dir);
     let out = analyze_tree(dir.path(), &config());
 
     assert!(
-        !out.findings.iter().any(|f| f.rule_id == "dead-exports"
+        !out.findings.iter().any(|f| f.rule_id == "unimported-export"
             && f.file == "src/composable/use-x.ts"
             && f.data.as_ref().is_some_and(|d| d["name"] == "useX")),
-        "useX should not be dead-exports once the .vue <script>-block pre-scan sees the import, got: {:?}",
+        "useX should not be unimported-export once the .vue <script>-block pre-scan sees the import, got: {:?}",
         out.findings
     );
 
@@ -90,10 +90,10 @@ fn vue_script_setup_import_clears_dead_exports_on_the_consumed_symbol() {
     // .vue file) and must still be flagged — the pre-scan must not blanket-suppress every export in a
     // file an SFC happens to import from.
     assert!(
-        out.findings.iter().any(|f| f.rule_id == "dead-exports"
+        out.findings.iter().any(|f| f.rule_id == "unimported-export"
             && f.file == "src/composable/use-x.ts"
             && f.data.as_ref().is_some_and(|d| d["name"] == "unusedHelper")),
-        "unusedHelper (no consumer) should still be flagged dead-exports, got: {:?}",
+        "unusedHelper (no consumer) should still be flagged unimported-export, got: {:?}",
         out.findings
     );
 }
@@ -193,11 +193,11 @@ fn vue_file_with_no_script_import_leaves_dead_exports_untouched() {
     let out = analyze_tree(dir.path(), &config());
 
     assert!(
-        out.findings.iter().any(|f| f.rule_id == "dead-exports"
+        out.findings.iter().any(|f| f.rule_id == "unimported-export"
             && f.file == "src/composable/use-y.ts"
             && f.data.as_ref().is_some_and(|d| d["name"] == "useY")),
         "useY (no consumer anywhere, including the script-import-less .vue) should still be flagged \
-         dead-exports, got: {:?}",
+         unimported-export, got: {:?}",
         out.findings
     );
 }

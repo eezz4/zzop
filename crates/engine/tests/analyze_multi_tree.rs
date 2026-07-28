@@ -5,7 +5,7 @@
 //!
 //! `overlay_injected_consume_joins_a_native_provide_across_trees` additionally locks the Mode-B injection
 //! path's cross-tree behaviour — an adapter-overlay-supplied `IoConsume` on one tree joining another tree's
-//! NATIVE provide into a `cross_source` edge (the openapi-sdk-adapter pipeline, immich's "web SDK consumes
+//! NATIVE provide into a `cross_source` edge (a generated-SDK overlay pipeline, immich's "web SDK consumes
 //! 0 -> 349" lift in miniature). The single-tree overlay tests in `analyze_adapter_overlay.rs` never cross
 //! a tree boundary, so this is the one slice of that shipped behaviour they leave unguarded.
 
@@ -254,7 +254,7 @@ fn analyze_trees_surfaces_ambiguous_external_and_low_confidence_buckets() {
 
 /// The Mode-B injection path across a tree boundary: the FE talks to its backend only through a generated
 /// SDK function (`getUserInfo()` is not `fetch`/`axios`/`ky`, so native egress keys NOTHING), an adapter
-/// overlay projects that call site as a keyed `IoConsume` (what `openapi-sdk-adapter.mjs` emits from the
+/// overlay projects that call site as a keyed `IoConsume` (what a generated-SDK Mode B overlay emits from the
 /// spec's `operationId -> "METHOD /path"`), and `analyze_trees` joins it to the BE's native Hono provide.
 /// Asserts BOTH directions — the miniature of immich's "0 -> 349 cross-layer edges" lift — so a future
 /// change that drops overlay consumes from the cross-tree join can't regress silently.
@@ -293,7 +293,7 @@ fn overlay_injected_consume_joins_a_native_provide_across_trees() {
         retry_configured: None,
     });
     let mut fe_cfg = config("fe");
-    fe_cfg.adapter_overlays = vec![overlay("openapi-sdk-adapter/1", vec![sdk_call])];
+    fe_cfg.adapter_overlays = vec![overlay("generated-sdk-adapter/1", vec![sdk_call])];
 
     let out = analyze_trees(&[
         (fe.path().to_path_buf(), fe_cfg),

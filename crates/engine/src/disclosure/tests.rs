@@ -25,7 +25,11 @@ const EXPECTED: &[(&str, &str)] = &[
     // `notYetDetected` on purpose: the sightlines the affected rules publish are PROSE on a finding and
     // in the catalog, and the silent case emits no finding — so nothing asserts this per run. Promote
     // only once a run actually reports which rules had an empty evidence channel for the tree's languages.
-    ("rule-evidence-language-gap", "notYetDetected"),
+    // Promoted notYetDetected -> partial when the call-graph LANGUAGE gap became a real per-run
+    // self-report (`framework_silence::call_graph_language_gap_warning`, tripwire S8): a tree with http
+    // routes in a language that has no call-site producer now names that language and the rule it
+    // silences. Still `partial`, never `asserted` — that is the ONE fact/rule pair measured per run.
+    ("rule-evidence-language-gap", "partial"),
     ("silent-truncation", "partial"),
     ("stale-cache", "partial"),
 ];

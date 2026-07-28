@@ -51,7 +51,7 @@ fn route_catch_ok_marker_above_the_route_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/routes.ts",
-        "declare function getItems(): Promise<unknown>;\nexport function registerRoutes(app: any) {\n  // async-route-no-catch-ok: reviewed, failures are non-critical telemetry reads\n  app.get(\"/items\", async (req: any, res: any) => {\n    const items = await getItems();\n    res.json(items);\n  });\n}\n",
+        "declare function getItems(): Promise<unknown>;\nexport function registerRoutes(app: any) {\n  // zzop-async-route-no-catch-ok: reviewed, failures are non-critical telemetry reads\n  app.get(\"/items\", async (req: any, res: any) => {\n    const items = await getItems();\n    res.json(items);\n  });\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -115,7 +115,7 @@ fn sync_io_ok_marker_above_the_sync_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/handler.ts",
-        "import { readFileSync } from \"fs\";\nexport function handler(req: any, res: any) {\n  // sync-fs-in-handler-ok: startup-time cache warm, not on the per-request path\n  const data = readFileSync(\"./config.json\", \"utf8\");\n  res.status(200).json(data);\n}\n",
+        "import { readFileSync } from \"fs\";\nexport function handler(req: any, res: any) {\n  // zzop-sync-fs-in-handler-ok: startup-time cache warm, not on the per-request path\n  const data = readFileSync(\"./config.json\", \"utf8\");\n  res.status(200).json(data);\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -166,7 +166,7 @@ fn handler_with_only_bare_res_json_evidence_is_now_silent_accepted_false_negativ
     );
 }
 
-// --- await-in-map ---
+// --- map-async-no-promise-all ---
 
 #[test]
 fn map_async_without_promise_all_is_flagged() {
@@ -176,7 +176,7 @@ fn map_async_without_promise_all_is_flagged() {
         "declare function fetchItem(id: string): Promise<unknown>;\nexport async function process(ids: string[]) {\n  return ids.map(async (id) => {\n    return await fetchItem(id);\n  });\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "await-in-map");
+    let h = hits(&out, "map-async-no-promise-all");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 3);
 }
@@ -189,7 +189,11 @@ fn map_async_wrapped_in_promise_all_is_not_flagged() {
         "declare function fetchItem(id: string): Promise<unknown>;\nexport async function process(ids: string[]) {\n  return Promise.all(ids.map(async (id) => {\n    return await fetchItem(id);\n  }));\n}\n",
     );
     let out = scan(&dir);
-    assert!(hits(&out, "await-in-map").is_empty(), "{:?}", out.findings);
+    assert!(
+        hits(&out, "map-async-no-promise-all").is_empty(),
+        "{:?}",
+        out.findings
+    );
 }
 
 #[test]
@@ -197,8 +201,12 @@ fn map_async_ok_marker_above_the_map_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/process.ts",
-        "declare function notify(id: string): Promise<unknown>;\nexport async function process(ids: string[]) {\n  // await-in-map-ok: fire-and-forget notifications, failures logged elsewhere\n  return ids.map(async (id) => {\n    return await notify(id);\n  });\n}\n",
+        "declare function notify(id: string): Promise<unknown>;\nexport async function process(ids: string[]) {\n  // zzop-map-async-no-promise-all-ok: fire-and-forget notifications, failures logged elsewhere\n  return ids.map(async (id) => {\n    return await notify(id);\n  });\n}\n",
     );
     let out = scan(&dir);
-    assert!(hits(&out, "await-in-map").is_empty(), "{:?}", out.findings);
+    assert!(
+        hits(&out, "map-async-no-promise-all").is_empty(),
+        "{:?}",
+        out.findings
+    );
 }

@@ -1,6 +1,6 @@
 use crate::{hits, scan, TempDir};
 
-// --- promise-all-writes ---
+// --- promise-all-and-writes ---
 
 #[test]
 fn promise_all_wrapping_create_calls_is_flagged() {
@@ -10,7 +10,7 @@ fn promise_all_wrapping_create_calls_is_flagged() {
         "declare const db: any;\nexport async function saveAll(items: any[]) {\n  return Promise.all(items.map((i) => db.record.create({ data: i })));\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "promise-all-writes");
+    let h = hits(&out, "promise-all-and-writes");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 3);
 }
@@ -24,7 +24,7 @@ fn promise_all_wrapping_only_reads_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "promise-all-writes").is_empty(),
+        hits(&out, "promise-all-and-writes").is_empty(),
         "{:?}",
         out.findings
     );
@@ -40,7 +40,7 @@ fn promise_all_settled_wrapping_writes_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "promise-all-writes").is_empty(),
+        hits(&out, "promise-all-and-writes").is_empty(),
         "{:?}",
         out.findings
     );
@@ -51,11 +51,11 @@ fn promise_all_ok_marker_above_the_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/save.ts",
-        "declare const db: any;\nexport async function saveAll(items: any[]) {\n  // promise-all-writes-ok: single-tenant seed script, re-run is idempotent\n  return Promise.all(items.map((i) => db.record.create({ data: i })));\n}\n",
+        "declare const db: any;\nexport async function saveAll(items: any[]) {\n  // zzop-promise-all-and-writes-ok: single-tenant seed script, re-run is idempotent\n  return Promise.all(items.map((i) => db.record.create({ data: i })));\n}\n",
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "promise-all-writes").is_empty(),
+        hits(&out, "promise-all-and-writes").is_empty(),
         "{:?}",
         out.findings
     );
@@ -72,7 +72,7 @@ fn file_system_access_api_create_writable_alongside_promise_all_is_not_flagged()
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "promise-all-writes").is_empty(),
+        hits(&out, "promise-all-and-writes").is_empty(),
         "{:?}",
         out.findings
     );
@@ -88,7 +88,7 @@ fn promise_all_with_a_store_suffixed_receiver_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "promise-all-writes").is_empty(),
+        hits(&out, "promise-all-and-writes").is_empty(),
         "{:?}",
         out.findings
     );
@@ -129,7 +129,7 @@ fn json_parse_ok_marker_above_the_parse_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/handler.ts",
-        "export function handleBody(req: any) {\n  // json-parse-no-try-ok: upstream gateway already validates JSON shape\n  const parsed = JSON.parse(req.body);\n  return parsed;\n}\n",
+        "export function handleBody(req: any) {\n  // zzop-json-parse-no-try-ok: upstream gateway already validates JSON shape\n  const parsed = JSON.parse(req.body);\n  return parsed;\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -207,7 +207,7 @@ fn promise_all_await_ok_marker_above_the_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/load.ts",
-        "declare function getA(): Promise<number>;\ndeclare function getB(): Promise<number>;\nexport async function loadBoth() {\n  // await-inside-promise-all-array-ok: two independent one-off calls, serial cost is negligible here\n  return await Promise.all([await getA(), await getB()]);\n}\n",
+        "declare function getA(): Promise<number>;\ndeclare function getB(): Promise<number>;\nexport async function loadBoth() {\n  // zzop-await-inside-promise-all-array-ok: two independent one-off calls, serial cost is negligible here\n  return await Promise.all([await getA(), await getB()]);\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -277,7 +277,7 @@ fn fs_check_use_ok_marker_above_the_write_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/save.ts",
-        "import fs from \"fs\";\n\nexport function saveIfAbsent(p: string, data: string) {\n  if (!fs.existsSync(p)) {\n    // fs-check-then-use-ok: single-writer batch job, no concurrent access to this path\n    fs.writeFileSync(p, data);\n  }\n}\n",
+        "import fs from \"fs\";\n\nexport function saveIfAbsent(p: string, data: string) {\n  if (!fs.existsSync(p)) {\n    // zzop-fs-check-then-use-ok: single-writer batch job, no concurrent access to this path\n    fs.writeFileSync(p, data);\n  }\n}\n",
     );
     let out = scan(&dir);
     assert!(

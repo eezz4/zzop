@@ -3,7 +3,7 @@
 //! plain sibling directories, not published crates) and this crate's own `tools/definitions.rs` tool
 //! schemas — two hand-written descriptions of one argument contract, now living in two different
 //! Cargo packages. Runtime answers can't drift apart (both the CLI subcommand and its MCP tool twin
-//! dispatch to the same shared `zzop_host::tools`/`zzop_summary` handlers), but the PROSE describing
+//! call the same shared `zzop_summary` functions), but the PROSE describing
 //! that contract is free-standing English on both sides and can silently go stale (a renamed tool, a
 //! dropped mode, a schema argument with no CLI-side mention). Same drift class `tools/tests.rs`'s
 //! `every_tool_name_from_tools_list_appears_in_the_readme` pins for the README table; this pins it
@@ -46,25 +46,41 @@ fn every_mcp_tool_names_cli_twin_subcommand_appears_in_usage() {
         .map(|t| t["name"].as_str().expect("tool name must be a string"))
         .collect();
 
-    // (MCP tool name, CLI twin subcommand) — the pairing table this test pins against drift.
-    // `analyze` is searched as `analyze <path>` (its distinctive USAGE phrase): the bare token is a
-    // substring of `analyze-envelope`, so a bare-`analyze` search would stay green even if the
-    // standalone subcommand were dropped — the masking defeats the pin.
+    // (MCP tool name, CLI twin subcommand) — a LOOKUP, not the subject set. The distinction is the
+    // whole correctness of this test and it was wrong until 2026-07-28: the loop below used to iterate
+    // this table, so a tool absent from it was never checked at all. `check_file` shipped in D16 and
+    // nobody added a row, and this test stayed GREEN while the USAGE line it exists to pin had no
+    // mention of `zzop file` — the guard built for exactly that drift was blind to it. Iterating the
+    // SHIPPED tool list instead makes an unpaired tool a failure, so the table cannot silently shrink
+    // out from under the check.
+    //
+    // The CLI spelling is a distinctive USAGE PHRASE rather than the bare subcommand token wherever one
+    // token is a substring of another: `analyze` occurs inside `analyze-envelope`, so a bare search
+    // would stay green even if the standalone subcommand were dropped.
     let pairs = [
         ("analyze_repo", "analyze <path>"),
         ("cross_repo", "cross"),
+        ("check_file", "file <path>"),
         ("check_endpoint", "endpoint"),
         ("analyze_envelope", "analyze-envelope"),
         ("validate_envelope", "validate-envelope"),
         ("validate_rule_pack", "validate-rule-pack"),
     ];
 
-    for (tool_name, cli_subcommand) in pairs {
-        assert!(
-            tool_names.contains(&tool_name),
-            "expected an MCP tool named `{tool_name}` in tools/list — this test's pairing table is \
-             stale (tools/list has: {tool_names:?})"
-        );
+    assert!(
+        !tool_names.is_empty(),
+        "tools/list returned no tools — this test would then vouch for nothing"
+    );
+
+    for tool_name in &tool_names {
+        let Some((_, cli_subcommand)) = pairs.iter().find(|(t, _)| t == tool_name) else {
+            panic!(
+                "MCP tool `{tool_name}` has no row in this test's CLI-twin pairing table. Add one \
+                 (with a distinctive USAGE phrase, not a bare token that another subcommand contains) \
+                 — or, if this tool deliberately has NO CLI twin, say so here in a row of its own \
+                 rather than leaving it unlisted, because unlisted reads as unchecked."
+            );
+        };
         assert!(
             usage.contains(cli_subcommand),
             "the CLI's USAGE string is missing `{cli_subcommand}`, the CLI twin of MCP tool \

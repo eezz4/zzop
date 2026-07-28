@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>zzop — Overview</title>
-<meta name="description" content="zzop — deterministic cross-repo contract analysis you can gate CI on, written in Rust. Also a multi-language SAST and architecture analysis engine.">
+<meta name="description" content="zzop reads the codebase your AI agent can't fit in context and answers the same way every time — which frontend calls reach which backend routes, what's risky, what's dead, and what the run could not see. Deterministic, local, written in Rust.">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="assets/site.css">
 </head>
@@ -36,22 +36,23 @@
     <div class="hero__text">
       <span class="eyebrow">ZERO ZONE OF PAIN</span>
       <h1 class="hero__title">zzop</h1>
-      <p class="hero__lead">Built for the AI-agent era: a context window can't hold your codebase, so zzop condenses it — or several codebases at once — into one deterministic JSON map. At its core is a cross-repo contract analyzer, written in Rust, that joins frontend calls against backend routes and turns drift into a finding you can gate a PR on — same code in, same findings out, every run. It also runs as a multi-language SAST and architecture analysis engine over each repo individually.</p>
+      <p class="hero__lead"><strong>Your AI coding agent can't read your whole codebase. zzop reads it — and answers the same way every time.</strong> Point it at one repo, or at your frontend and backend together, and get one JSON map of what is actually there: which calls reach which routes and which reach nothing, what looks risky, what is dead, and what this run could not see. zzop writes no code. It makes the <em>understanding</em> your agent works from accurate and repeatable.</p>
       <div class="btn-row">
-        <a href="usage.html" class="btn btn--primary">Get started</a>
-        <a href="rules.html" class="btn btn--outline-accent">Rule catalog</a>
+        <a href="#demo" class="btn btn--primary">See it break a route</a>
+        <a href="usage.html" class="btn btn--outline-accent">Get started</a>
+        <a href="rules.html" class="btn btn--outline">Rule catalog</a>
       </div>
     </div>
     <div class="hero__code">
       <div class="code-panel">
-        <div class="code-panel__tab">Run it (binary)</div>
+        <div class="code-panel__tab">Run it yourself (the zzop CLI)</div>
         <pre class="code-block"><code># download the zzop CLI from GitHub Releases (no Node.js, nothing to compile) —
 # or: npm i -g @zzop/cli
-zzop analyze .        # analyze this tree, print JSON findings
-zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop
+zzop analyze .             # analyze this tree, print JSON findings
+zzop cross ./web ./api     # join two repos: which calls reach which routes
 
-# Embedding instead? Shell out to this same binary's JSON-in / JSON-out
-# subcommands — one stable contract, no Node, no separate SDK to install.</code></pre>
+# Want your AI agent to do the asking instead? That is the other binary,
+# zzop-mcp — install the Claude Code plugin and skip the terminal entirely.</code></pre>
       </div>
       <div class="code-panel">
         <div class="code-panel__tab">Result (abridged)</div>
@@ -69,11 +70,32 @@ zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop
     </div>
   </section>
 
+  <section class="section" id="demo">
+    <div class="section__inner section__inner--wide">
+      <span class="eyebrow">SEE IT</span>
+      <h2 class="section-title">Break a route, and watch nothing else notice</h2>
+      <p class="prose-block">Two independently-authored apps — a React frontend and an Express backend — vendored side by side, sharing no code and no types. Rename one backend route. The frontend build stays clean (the route is a string literal, so there is no type to check it against) and its own mocked tests stay green. The contract is broken, and a linter, a type-checker or a test suite scoped to one repository is structurally unable to see it: the evidence is split across two repos and never crosses a compiler boundary.</p>
+      <div class="code-panel">
+        <div class="code-panel__tab">What zzop reports</div>
+        <pre class="code-block"><code>- router.put('/user',     auth.required, …)   # the backend tidy-up
++ router.put('/users/me', auth.required, …)   # the frontend is NOT touched
+
+=== unprovided consumes ===
+  "PUT /api/user"      @ fe-vite     src/pages/Settings.jsx:19       ← the call now hits nothing
+
+=== unconsumed provides ===
+  "PUT /api/users/me"  @ be-express  src/app/routes/auth/auth.controller.ts:61   ← the route nobody calls</code></pre>
+      </div>
+      <p class="prose-block">Both ends of the break, located to the file and line, across two repos that share nothing on disk. The full walkthrough — including why the frontend's own tooling stays green, and the other drift shapes the same join catches (a changed verb, a removed endpoint, a body field that stopped being returned, a DB table two services disagree on) — is <a href="https://github.com/eezz4/zzop/blob/main/docs/demo/break-a-route.md">docs/demo/break-a-route.md</a> — a narrated walkthrough that writes out every command and the output it produced, so it reads end to end without you running anything. The script behind it (<code>docs/demo/break-a-route.sh</code>) is a maintainer tool: it builds a <code>cargo</code> example, so it needs a source checkout rather than a released binary, and it analyzes two repositories you supply under a gitignored <code>corpus/oss/</code> directory that this repo does not ship.</p>
+    </div>
+  </section>
+
   <section class="section section--alt">
     <div class="section__inner">
       <span class="eyebrow">WHY ZZOP</span>
       <h2 class="section-title">Why zzop</h2>
-      <p class="prose-block">An agent working in a large repository cannot read every file — the context window is its scarcest resource. zzop condenses the whole codebase into one compact, machine-readable report: what is risky, what is dead, what drifted between frontend and backend, and where to refactor first. Agents and humans alike start from the map, not the territory.</p>
+      <p class="prose-block">An agent working in a large repository cannot read every file — the context window is its scarcest resource, and what it does not read it infers. zzop condenses the whole codebase into one compact, machine-readable report: what is risky, what is dead, what drifted between frontend and backend, and where to refactor first. Agents and humans alike start from the map, not the territory.</p>
+      <p class="prose-block">That makes zzop a <strong>context provider, not a generator</strong>. It writes nothing and suggests no code. What it changes is how accurately the model understands the project it is about to edit — and because the same input produces byte-identical output, that understanding is repeatable rather than re-guessed each session.</p>
       <p class="prose-block">That is also where it parts ways with traditional static analyzers. A classic linter or SAST tool hands you a flat list of findings and stops; zzop is built to give direction — every finding names the exact config to silence it (DSL rule findings additionally carry a concrete fix and a one-line suppress marker), structural results are ranked by refactor ROI, and cross-repo joins turn "two codebases quietly disagree" into a first-class, actionable finding.</p>
     </div>
   </section>
@@ -117,10 +139,29 @@ zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop
           <p>Same input, byte-identical output — no timestamps, no unstable ordering. A capability a run cannot provide is absent and self-reported in <code>warnings</code>, never stubbed. An empty array always means analyzed, found nothing.</p>
         </div>
         <div class="card">
-          <h3>Zero config to start</h3>
-          <p><code>{ root: "." }</code> is all a first run needs; the real leverage is tuning it per environment (custom packs, parser injection). Every finding names the exact config to silence it deliberately — DSL rule findings additionally carry the concrete fix.</p>
+          <h3>One command to start</h3>
+          <p><code>zzop init</code> writes the config a run needs, every key annotated and already set to zzop's own value. A config is required rather than optional: the names zzop would otherwise guess about your project live in it, and a key you do not declare is a judgment zzop does not make. Every finding names the exact config to silence it deliberately — DSL rule findings additionally carry the concrete fix.</p>
         </div>
       </div>
+    </div>
+  </section>
+
+  <section class="section" id="which-binary">
+    <div class="section__inner section__inner--wide">
+      <span class="eyebrow">TWO BINARIES</span>
+      <h2 class="section-title">Which one do you want?</h2>
+      <p class="prose-block">zzop ships as two Node-free binaries over one shared engine. Decide which you need before you install anything — a tool call and a CLI run against the same path dispatch through the same handlers and give the identical answer.</p>
+      <div class="card-grid">
+        <div class="card">
+          <h3><code>zzop-mcp</code> — for your AI agent</h3>
+          <p>An MCP server over stdio. Install the Claude Code plugin or the Claude Desktop <code>.mcpb</code> bundle and the agent calls the tools for you — you run no commands. The tools are <code>analyze_repo</code>, <code>cross_repo</code>, <code>check_file</code>, <code>check_endpoint</code>, <code>analyze_envelope</code>, <code>validate_envelope</code> and <code>validate_rule_pack</code>, alongside the <code>zzop://contract/*</code> resources carrying the authoring contracts. It has no analysis subcommands of its own: bare or <code>mcp</code> serves stdio, <code>version</code>/<code>help</code> are the rest.</p>
+        </div>
+        <div class="card">
+          <h3><code>zzop</code> — for a terminal or CI</h3>
+          <p>A plain CLI. <code>zzop analyze .</code>, <code>zzop cross ./web ./api</code>, <code>zzop endpoint users …</code> — JSON to stdout, ESLint-style, driven by a <code>zzop.config.jsonc</code>. These lanes are CLI-only, with no MCP tool twin: <code>manifest</code>/<code>diff</code> (commit a structural contract snapshot, diff a later run against it), <code>facts</code> (the uncapped post-assembly substrate for your own rule program), <code>graph</code> (the join as mermaid text), <code>explain</code> and <code>init</code> (write the annotated starter <code>zzop.config.jsonc</code>). There is no <code>mcp</code> subcommand here.</p>
+        </div>
+      </div>
+      <p class="prose-block">Installing either is covered on one page: <a href="usage.html#install">Usage &rarr; Install</a>.</p>
     </div>
   </section>
 
@@ -128,7 +169,7 @@ zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop
     <div class="cta-band__inner">
       <div>
         <p class="cta-band__title">Ready to run it?</p>
-        <p class="cta-band__lead">Zero config to start, full config reference when you need it.</p>
+        <p class="cta-band__lead">One command to start, full config reference when you need it.</p>
       </div>
       <div class="btn-row">
         <a href="usage.html" class="btn btn--primary">Read the usage guide</a>

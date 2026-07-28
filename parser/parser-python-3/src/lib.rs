@@ -6,11 +6,13 @@
 //!
 //! ## Layout
 //! - `lang` — ruff AST -> Common-IR LANGUAGE projection: `SourceSymbol` extraction (`symbols`),
-//!   `ImportMap` extraction (`imports`), and identifier-reference collection (`used_names`, dead-export
-//!   analysis substrate — mirrors `zzop_parser_typescript::parse_local_identifier_refs`'s purpose).
+//!   `ImportMap` extraction (`imports`), identifier-reference collection (`used_names`, dead-export
+//!   analysis substrate — mirrors `zzop_parser_typescript::parse_local_identifier_refs`'s purpose), and
+//!   `RawCall` call-site attribution (`calls`, the substrate for the engine's whole-repo `SymbolGraph`).
 //! - `adapters` — framework-vocabulary producers emitting cross-layer IO facts: FastAPI route PROVIDES
 //!   as router-mount fragments (`adapters::fastapi`) and `requests`/`httpx` literal egress CONSUMES
-//!   (`adapters::http_clients`).
+//!   (`adapters::http_clients`), plus the two AUTH-GUARD evidence producers (`adapters::fastapi::guard`,
+//!   `adapters::django_routes::guard`) feeding the framework-neutral `auth-guarded` channel.
 //!
 //! ## Line numbers
 //! ruff gives every node a `TextRange` of UTF-8 BYTE offsets, not line/column positions (unlike swc's
@@ -24,11 +26,20 @@ pub mod lang;
 
 pub use adapters::django::{extract_django_db_table_consumes, extract_django_db_table_provides};
 pub use adapters::django_routes::extract_django_route_fragments;
+pub use adapters::django_routes::guard::{
+    extract_django_view_guard_classes, extract_django_view_guard_classes_with_vocab,
+};
 pub use adapters::fastapi::extract_fastapi_router_fragments;
+pub use adapters::fastapi::guard::{
+    extract_fastapi_guarded_lines, extract_fastapi_guarded_lines_with_vocab,
+    extract_python_guard_aliases, extract_python_guard_aliases_with_vocab,
+};
+pub use adapters::guard_vocab::PythonGuardVocab;
 pub use adapters::http_clients::extract_python_http_consumes;
 pub use adapters::sqlalchemy::{
     extract_sqlalchemy_db_table_consumes, extract_sqlalchemy_db_table_provides,
 };
+pub use lang::calls::parse_calls;
 pub use lang::imports::parse_imports;
 pub use lang::resolve::python_import_candidates;
 pub use lang::symbols::parse_symbols;
@@ -38,7 +49,7 @@ pub use lang::used_names::parse_local_identifier_refs;
 /// segment must match this crate's `Cargo.toml` `ruff_python_parser`/`ruff_python_ast` pin (a ruff upgrade
 /// changes extraction → restamp); the trailing `CARGO_PKG_VERSION` is restamped when this crate's projected
 /// IR shape changes, else kept so warm Python caches survive the upgrade (2026-07-22 version reform).
-pub const PARSER_FINGERPRINT: &str = "python3/ruff-0.0.4/0.21.0";
+pub const PARSER_FINGERPRINT: &str = "python3/ruff-0.0.4/0.24.0";
 
 /// Parses `text` with ruff's Python parser, returning `None` on any syntax error (never panics —
 /// unexpected/malformed input degrades to `None`, letting the caller fall back to a lexical scan, same

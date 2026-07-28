@@ -3,7 +3,10 @@
 # Their committed blobs are LF; without pinning, Windows autocrlf checks the working tree
 # out as CRLF and both gates false-fail locally while Linux CI stays green. Pin instead of
 # repo-wide `* text=auto` to keep this a targeted fix (no mass renormalization).
+# The convention-vocab baseline is regenerated the same way (`--update-baseline` rewrites it
+# whole and the guard greps it line-exact), so it needs the same pin.
 scripts/policy-census.txt text eol=lf
+scripts/convention-vocab-baseline.txt text eol=lf
 docs/adapters/*.fixture.json text eol=lf
 
 # The plugin's SessionStart hook, pinned for the same reason in a nastier place: Claude Code clones

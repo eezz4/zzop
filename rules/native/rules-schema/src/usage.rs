@@ -5,7 +5,7 @@
 //! `identifier_counts` evidence comes from a per-file fact carried through `zzop_engine`'s fused per-file pass: [`field_usage_tokens`] (this module) is the direct per-file substrate, called once per file
 //! with the text that pass already has in hand (no filesystem re-walk). Store-binding and migration-churn are environment facts about a specific project's architecture (a store-binding convention, a
 //! migration-history layout); per the "native = common environments only, everything else injected" line, their app-specific native recognizers were removed — both are now read off the generic
-//! entity-attribute channel (`zzop_core::AttributeStore`, Symbol-keyed [`BOUND_MODEL_ATTR`]/[`MODEL_CHURN_ATTR`]) rather than typed `SchemaUsage` slots. `dead-model` therefore keys on the generic
+//! entity-attribute channel (`zzop_core::AttributeStore`, Symbol-keyed [`BOUND_MODEL_ATTR`]/[`MODEL_CHURN_ATTR`]) rather than typed `SchemaUsage` slots. `unreferenced-model-name` therefore keys on the generic
 //! vocab-free signal (is the model name referenced anywhere?) plus whatever a producer injects into `BOUND_MODEL_ATTR`.
 
 use std::collections::HashSet;
@@ -18,8 +18,8 @@ use zzop_core::{AttributeStore, SchemaModel, SchemaUsage, Severity};
 use crate::structural::{analyze_schema, SchemaAnalysis, SchemaIssue};
 
 /// Attribute key a producer/overlay sets on a model `Symbol` to assert a store/repository binding exists
-/// (suppresses dead-model). The retrofit of the removed native store-binding recognizer onto the generic
-/// entity-attribute channel — dead-model now reads this instead of `SchemaUsage.bound_models`.
+/// (suppresses unreferenced-model-name). The retrofit of the removed native store-binding recognizer onto the generic
+/// entity-attribute channel — unreferenced-model-name now reads this instead of `SchemaUsage.bound_models`.
 pub const BOUND_MODEL_ATTR: &str = "bound-model";
 /// Attribute key a producer/overlay sets on a model `Symbol` carrying that model's cumulative migration
 /// churn count (a number). Drives schema-churn. Replaces the removed `SchemaUsage.model_churn` slot.
@@ -57,7 +57,7 @@ pub fn field_usage_tokens(rel: &str, text: &str) -> HashSet<String> {
 }
 
 /// The ONE list of extensions [`field_usage_tokens`] will scan at all — the whole evidence channel behind
-/// `dead-model`/`dead-field`. `pub` and quoted (never re-spelled) by
+/// `unreferenced-model-name`/`unreferenced-field-name`. `pub` and quoted (never re-spelled) by
 /// [`crate::message::field_usage_sightline`], so the sightline the findings publish cannot drift from the
 /// scan itself; the published pages are pinned against that same rendering.
 ///
@@ -72,8 +72,8 @@ pub const FIELD_USAGE_SCAN_EXTENSIONS: &[&str] = &["ts", "tsx"];
 /// `node_modules`/`dist` under the DEFAULT `skip_dirs` (`EngineConfig`) — a subset of the old exclusions,
 /// so under default config the fused pass covers every file the old `<root>/src` walk did plus more,
 /// which only ADDS identifier evidence (the accepted tree-wide-widening deviation, see module doc) and
-/// never adds a false dead-field positive. Caveat: a MORE-aggressive custom `skip_dirs` could exclude a
-/// source dir the old walk scanned, dropping "used" tokens and potentially surfacing a false dead-field —
+/// never adds a false unreferenced-field-name positive. Caveat: a MORE-aggressive custom `skip_dirs` could exclude a
+/// source dir the old walk scanned, dropping "used" tokens and potentially surfacing a false unreferenced-field-name —
 /// acceptable, since a user who scopes analysis away from a directory is opting out of its evidence.
 fn is_field_usage_scan_file(rel: &str) -> bool {
     if rel.ends_with(".d.ts") {
@@ -111,24 +111,25 @@ lazy_re!(ident_re, r"[A-Za-z_$][A-Za-z0-9_$]*");
 
 // --- crossCheckSchema + applyChurnRule + analyzeSchema (usage branch) ---
 
-const SKIP_FIELD_NAMES: [&str; 3] = ["id", "createdAt", "updatedAt"];
-/// Very short field names appear everywhere in BE source; dead-field detection is meaningless -> exclude.
+pub const SKIP_FIELD_NAMES: &[&str] = &["id", "createdAt", "updatedAt"];
+/// Very short field names appear everywhere in BE source; unreferenced-field-name detection is meaningless -> exclude.
 const MIN_FIELD_NAME_LEN: usize = 3;
 
-/// Schema cross-check — compares the schema-IR against actual BE code usage. Surfaces dead-model (a model not bound to any store) and dead-field (a field never appearing as an identifier in BE source)
+/// Schema cross-check — compares the schema-IR against actual BE code usage. Surfaces unreferenced-model-name (a model not bound to any store) and unreferenced-field-name (a field never appearing as an identifier in BE source)
 /// issues. id/createdAt/updatedAt are excluded by default since infrastructure fields are rarely referenced directly.
 pub fn cross_check_schema(
     models: &[SchemaModel],
     usage: &SchemaUsage,
     attrs: &AttributeStore,
+    skip_field_names: &[&str],
 ) -> Vec<SchemaIssue> {
     let mut issues = Vec::new();
     for model in models {
         // A model is "used" if its name appears as an identifier anywhere in BE source
-        // (`identifier_counts`, the generic vocab-free signal — same substrate dead-field uses), OR if a
+        // (`identifier_counts`, the generic vocab-free signal — same substrate unreferenced-field-name uses), OR if a
         // Mode-B producer injected a truthy `BOUND_MODEL_ATTR` on the model's `Symbol` through the generic
         // entity-attribute channel. That channel is empty under native analysis now that the app-specific
-        // store-binding recognizer is gone. This makes dead-model a general "the model name is never
+        // store-binding recognizer is gone. This makes unreferenced-model-name a general "the model name is never
         // referenced" check instead of "the model isn't wired through one project's store convention."
         let referenced = usage
             .identifier_counts
@@ -141,7 +142,7 @@ pub fn cross_check_schema(
             .is_some_and(zzop_core::attr_is_truthy);
         if !referenced && !bound {
             issues.push(SchemaIssue {
-                rule: "dead-model".to_string(),
+                rule: "unreferenced-model-name".to_string(),
                 severity: Severity::Info,
                 model: model.name.clone(),
                 field: None,
@@ -150,7 +151,7 @@ pub fn cross_check_schema(
             continue;
         }
         for field in &model.fields {
-            if SKIP_FIELD_NAMES.contains(&field.name.as_str()) {
+            if skip_field_names.contains(&field.name.as_str()) {
                 continue;
             }
             if field.name.len() < MIN_FIELD_NAME_LEN {
@@ -166,7 +167,7 @@ pub fn cross_check_schema(
                 continue;
             }
             issues.push(SchemaIssue {
-                rule: "dead-field".to_string(),
+                rule: "unreferenced-field-name".to_string(),
                 severity: Severity::Info,
                 model: model.name.clone(),
                 field: Some(field.name.clone()),
@@ -229,7 +230,7 @@ pub fn analyze_schema_with_usage(
     let Some(usage) = usage else {
         return analysis;
     };
-    let mut extra = cross_check_schema(&analysis.models, &usage, attrs);
+    let mut extra = cross_check_schema(&analysis.models, &usage, attrs, SKIP_FIELD_NAMES);
     extra.extend(apply_churn_rule(&analysis.models, attrs));
     for issue in &extra {
         *analysis.model_risk.entry(issue.model.clone()).or_insert(0) +=

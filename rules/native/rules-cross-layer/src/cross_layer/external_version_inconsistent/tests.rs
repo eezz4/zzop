@@ -1,4 +1,5 @@
 use super::*;
+use crate::cross_layer::VERSION_SEGMENT_PATTERN;
 
 fn consume(kind: &str, key: Option<&str>, source: &str, file: &str, line: u32) -> TaggedConsume {
     TaggedConsume {
@@ -35,7 +36,7 @@ fn versioned_and_versionless_paths_on_the_same_host_are_flagged_anchored_at_vers
             7,
         ),
     ];
-    let out = external_version_inconsistent_findings(&external);
+    let out = external_version_inconsistent_findings(&external, Some(VERSION_SEGMENT_PATTERN));
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].rule_id, "cross-layer/external-version-inconsistent");
     assert_eq!(out[0].severity, Severity::Info);
@@ -71,7 +72,9 @@ fn only_versioned_paths_on_a_host_is_not_flagged() {
             7,
         ),
     ];
-    assert!(external_version_inconsistent_findings(&external).is_empty());
+    assert!(
+        external_version_inconsistent_findings(&external, Some(VERSION_SEGMENT_PATTERN)).is_empty()
+    );
 }
 
 #[test]
@@ -92,7 +95,9 @@ fn only_versionless_paths_on_a_host_is_not_flagged() {
             7,
         ),
     ];
-    assert!(external_version_inconsistent_findings(&external).is_empty());
+    assert!(
+        external_version_inconsistent_findings(&external, Some(VERSION_SEGMENT_PATTERN)).is_empty()
+    );
 }
 
 #[test]
@@ -114,7 +119,9 @@ fn bare_root_path_is_dropped_from_the_versionless_side() {
             1,
         ),
     ];
-    assert!(external_version_inconsistent_findings(&external).is_empty());
+    assert!(
+        external_version_inconsistent_findings(&external, Some(VERSION_SEGMENT_PATTERN)).is_empty()
+    );
 }
 
 /// The same argument as the root, one shape wider: an unresolved interpolation leaves an all-slot path
@@ -138,7 +145,9 @@ fn an_all_slot_path_is_dropped_from_the_versionless_side_too() {
             1,
         ),
     ];
-    assert!(external_version_inconsistent_findings(&external).is_empty());
+    assert!(
+        external_version_inconsistent_findings(&external, Some(VERSION_SEGMENT_PATTERN)).is_empty()
+    );
 }
 
 #[test]
@@ -160,7 +169,9 @@ fn each_host_is_classified_independently() {
             1,
         ),
     ];
-    assert!(external_version_inconsistent_findings(&external).is_empty());
+    assert!(
+        external_version_inconsistent_findings(&external, Some(VERSION_SEGMENT_PATTERN)).is_empty()
+    );
 }
 
 #[test]
@@ -182,7 +193,9 @@ fn consume_in_a_test_fixture_file_does_not_count_toward_the_host_classification(
             7,
         ),
     ];
-    assert!(external_version_inconsistent_findings(&external).is_empty());
+    assert!(
+        external_version_inconsistent_findings(&external, Some(VERSION_SEGMENT_PATTERN)).is_empty()
+    );
 }
 
 #[test]
@@ -203,7 +216,9 @@ fn non_http_kind_is_ignored() {
             7,
         ),
     ];
-    assert!(external_version_inconsistent_findings(&external).is_empty());
+    assert!(
+        external_version_inconsistent_findings(&external, Some(VERSION_SEGMENT_PATTERN)).is_empty()
+    );
 }
 
 #[test]
@@ -240,7 +255,7 @@ fn findings_are_sorted_deterministically_by_file_then_line() {
             3,
         ),
     ];
-    let out = external_version_inconsistent_findings(&external);
+    let out = external_version_inconsistent_findings(&external, Some(VERSION_SEGMENT_PATTERN));
     assert_eq!(out.len(), 2);
     assert_eq!((out[0].file.as_str(), out[0].line), ("A-versionless.ts", 3));
     assert_eq!((out[1].file.as_str(), out[1].line), ("B-versionless.ts", 9));

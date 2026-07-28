@@ -1,5 +1,5 @@
 //! DB-TABLE CONSUME extractor — projects the database tables a TS/JS tree reads or writes into
-//! `db-table` io consumes, so the core cross-layer linker can surface `cross-layer/shared-db-table`
+//! `db-table` io consumes, so the core cross-layer linker can surface `cross-layer/db-table-name-in-multiple-sources`
 //! (the same table touched from 2+ distinct source trees). Join key: `(kind="db-table",
 //! key="table:<accessor>")` — a plain string, same generic contract shape as the `http`/`trpc` kinds.
 //! CANONICAL KEY CASING: `<accessor>` is used byte-for-byte as written at the call site (Prisma
@@ -10,7 +10,7 @@
 //!
 //! ## What counts as a consume
 //! Two anchor forms, both `<base>.<accessor>.<method>(...)` (one plain-identifier model accessor, then
-//! any method call — read OR write both count, `shared-db-table` is about who *touches* a table, not
+//! any method call — read OR write both count, `db-table-name-in-multiple-sources` is about who *touches* a table, not
 //! the direction):
 //! - `getPrisma().<accessor>.<method>(...)` — a zero-arg client-getter call anchors the chain, mirroring
 //!   how `zzop_rules_schema::scan_store_map` recognizes the same shape; the getter name is fixed to
@@ -23,7 +23,7 @@
 //!   `src/prisma/prisma-client.ts` + any `src/app/routes/*/*.service.ts`).
 //!
 //! This is the FIRST producer feeding the (already generic) db-table io channel: the linker and
-//! `shared-db-table` rule stay kind-agnostic, and this adapter supplies the facts.
+//! `db-table-name-in-multiple-sources` rule stay kind-agnostic, and this adapter supplies the facts.
 //!
 //! ## Query call sites (`extract_query_call_sites`)
 //! This file also hosts `extract_query_call_sites`, sharing `recognize::match_prisma_model_call`'s
@@ -67,7 +67,18 @@ pub const PRISMA_CLIENT_GETTER: &str = "getPrisma";
 const QUERY_METHODS: [&str; 4] = ["findMany", "findFirst", "findUnique", "count"];
 
 /// Extract db-table CONSUME entries from one file's raw source.
+/// [`extract_db_table_consumes_with_vocab`] under the built-in client-getter name.
 pub fn extract_db_table_consumes(rel: &str, text: &str) -> Vec<IoConsume> {
+    extract_db_table_consumes_with_vocab(rel, text, Some(PRISMA_CLIENT_GETTER))
+}
+
+/// Extract db-table CONSUME entries from one file's raw source. `client_getter` is the run's declared
+/// `vocabulary.prismaClientGetter`.
+pub fn extract_db_table_consumes_with_vocab(
+    rel: &str,
+    text: &str,
+    client_getter: Option<&str>,
+) -> Vec<IoConsume> {
     // A test/spec file's table access isn't deployed DB coupling — skip before parsing, mirroring the
     // `is_test_file` skip other extractors and cross-layer rules already apply.
     if zzop_core::is_test_file(rel) {
@@ -82,6 +93,7 @@ pub fn extract_db_table_consumes(rel: &str, text: &str) -> Vec<IoConsume> {
         cm: cm_ref,
         file: rel,
         receivers,
+        client_getter,
         out: Vec::new(),
     };
     module.visit_with(&mut collector);
@@ -92,12 +104,13 @@ struct DbTableCollector<'a> {
     cm: &'a SourceMap,
     file: &'a str,
     receivers: HashSet<String>,
+    client_getter: Option<&'a str>,
     out: Vec<IoConsume>,
 }
 
 impl Visit for DbTableCollector<'_> {
     fn visit_call_expr(&mut self, call: &CallExpr) {
-        if let Some(m) = match_prisma_model_call(call, &self.receivers) {
+        if let Some(m) = match_prisma_model_call(call, &self.receivers, self.client_getter) {
             self.out.push(IoConsume {
                 client: None,
                 body: None,
@@ -116,7 +129,17 @@ impl Visit for DbTableCollector<'_> {
 
 /// Extract `zzop_core::QueryCallSite` facts from one file's raw source — see this module's doc for how
 /// these feed the schema x usage JOIN rules.
+/// [`extract_query_call_sites_with_vocab`] under the built-in client-getter name.
 pub fn extract_query_call_sites(rel: &str, text: &str) -> Vec<QueryCallSite> {
+    extract_query_call_sites_with_vocab(rel, text, Some(PRISMA_CLIENT_GETTER))
+}
+
+/// `client_getter` is the run's declared `vocabulary.prismaClientGetter`.
+pub fn extract_query_call_sites_with_vocab(
+    rel: &str,
+    text: &str,
+    client_getter: Option<&str>,
+) -> Vec<QueryCallSite> {
     // A test/spec file's query call sites aren't real query surface for the schema x usage JOIN rules —
     // skip before parsing, same reasoning as `extract_db_table_consumes` above.
     if zzop_core::is_test_file(rel) {
@@ -131,6 +154,7 @@ pub fn extract_query_call_sites(rel: &str, text: &str) -> Vec<QueryCallSite> {
         cm: cm_ref,
         file: rel,
         receivers,
+        client_getter,
         out: Vec::new(),
     };
     module.visit_with(&mut collector);
@@ -141,12 +165,13 @@ struct QueryCallSiteCollector<'a> {
     cm: &'a SourceMap,
     file: &'a str,
     receivers: HashSet<String>,
+    client_getter: Option<&'a str>,
     out: Vec<QueryCallSite>,
 }
 
 impl Visit for QueryCallSiteCollector<'_> {
     fn visit_call_expr(&mut self, call: &CallExpr) {
-        if let Some(m) = match_prisma_model_call(call, &self.receivers) {
+        if let Some(m) = match_prisma_model_call(call, &self.receivers, self.client_getter) {
             if QUERY_METHODS.contains(&m.method.as_str()) {
                 // The balanced-paren argument span, `(...)` inclusive: from the end of the callee member
                 // expression (`...<method>`) to the call's own end (right after the matching `)`).

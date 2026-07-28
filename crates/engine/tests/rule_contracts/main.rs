@@ -15,11 +15,11 @@
 //!
 //! ## Contracts covered
 //! 1. **Derived-marker uniqueness** (`derived_suppress_markers_are_globally_unique`) — markers are DERIVED
-//!    `<id>-ok` (`RuleDef::suppress_marker()`), so presence and the `-ok` shape are construction guarantees;
+//!    `zzop-<id>-ok` (`RuleDef::suppress_marker()`), so presence and the `-ok` shape are construction guarantees;
 //!    what still needs guarding is that no two rules — in any pack — derive the same marker (that would be a
 //!    cross-rule co-suppression), i.e. rule ids are globally unique.
 //! 2. **Message triple** (`every_dsl_rule_message_documents_how_to_exclude_it`) — every DSL rule's
-//!    `message` names its own derived marker (`<id>-ok`) OR the literal `disabled_rules`/`disabledRules`
+//!    `message` names its own derived marker (`zzop-<id>-ok`) OR the literal `disabled_rules`/`disabledRules`
 //!    string — the "how to exclude" leg of the problem+fix+exclude finding contract.
 //! 3. **Native message contract** (`native_rule_files_that_build_findings_mention_disabled_rules`,
 //!    `disable_hint_literal_args_are_known_ids_matching_the_files_own_findings`) — a
@@ -49,7 +49,7 @@
 //!    shipped DSL rule's regex matches a keyword-shaped English word (`do`/`for`/`while`/`update`/`delete`/
 //!    `select`) as a bare `\bword\b` with no adjacent syntax anchor — the defect class that shipped live in
 //!    `perf/api-in-loop` (bare `\bdo\b` matched inside prose like `"logged in to do this"`) and
-//!    `security/sql-taint` (bare `UPDATE` matched inside prose), both fixed in the same commit that
+//!    `security/sql-string-concat` (bare `UPDATE` matched inside prose), both fixed in the same commit that
 //!    added this contract (a pragmatic textual-proximity proxy, not a regex semantics engine — see that
 //!    test's own doc for exactly what it can/cannot prove).
 //! 10. **Kebab-case id hygiene** (`rule_ids_are_kebab_case`) — every loaded DSL pack id, every loaded DSL
@@ -87,6 +87,32 @@
 //!     shipped labels had drifted into English sentences on that wire (`"ECB mode (no diffusion)"` and
 //!     two siblings in `security/weak-crypto`). Same regex as contract 10, deliberately WITHOUT its
 //!     uniqueness leg — label scope is rule-local and a user never types one. See that test's own doc.
+//! 14. **This suite's own test wiring** (`every_rule_contracts_source_file_is_mod_registered`) — contract
+//!     7 mechanizes "every shipped pack folder is actually wired to a test"; contract 14 is that same
+//!     invariant turned on this file. A `.rs` file dropped into `tests/rule_contracts/` without a `mod`
+//!     line below does not fail to compile and raises no warning — it is simply never compiled, so a
+//!     declared defense runs never, silently, forever. Nothing else in the repo can see it either: these
+//!     meta-tests run only under `cargo test --workspace`, and `scripts/check-guards-wired.sh` enumerates
+//!     `scripts/check-*.sh` alone, so a missing `mod` line is invisible to every other lane.
+//! 15. **Shared crates name no MCP-only vocabulary** (`host_vocabulary.rs`) — no user-facing message built
+//!     in `crates/summary` or `crates/config` names a tool name or a wire argument the CLI spells
+//!     differently. The same sentence reaches a `zzop` CLI user, who can call no tool and
+//!     pass no JSON argument. `crates/config/src/lib_tests.rs` pinned exactly this doctrine at ONE point
+//!     while five siblings drifted and shipped; this is that pin widened to the class. Pragmatic
+//!     grep-proxy over prose-shaped string literals — see that file's own doc for the boundary.
+//! 16. **…and no CLI-only vocabulary either** (`host_vocabulary.rs`) — the mirror of 15, in the same file
+//!     because it is one doctrine: a subcommand spelling or a dash-flag in a shared message reaches an MCP
+//!     client that has no argv. It had already shipped once (the `config-template` resource description
+//!     told `resources/list` readers to run `zzop init`). Lanes with no MCP twin are exempt, read from
+//!     `docs/contracts/surface-parity.json`'s `_cliOnlyLanes[].sources` rather than listed again here.
+//! 17. **No DSL message hand-writes the engine's disable hint** (`dsl_messages.rs`'s
+//!     `no_dsl_pack_message_hand_writes_the_engine_appended_disable_hint`) — the engine appends the
+//!     disable sentence to EVERY DSL finding (`pipeline::findings`'s `append_disable_hints`), so an
+//!     author who writes one too ships it TWICE. It shipped once (`perf/sqlalchemy-eager-relationship`),
+//!     and the hand-written copy was the worse of the two — it named only the embedder field, never the
+//!     config-file spelling. Contract 2 above still ACCEPTS `disabled_rules` as a "how to exclude" leg;
+//!     this one removes that option for DSL specifically, so the single thing a pack author writes is
+//!     their own derived `zzop-<id>-ok` marker.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -98,6 +124,8 @@ mod bare_words;
 mod capability_matrix;
 mod catalog_sync;
 mod config_surface;
+mod dsl_messages;
+mod host_vocabulary;
 mod id_hygiene;
 mod kernel_vocabulary;
 mod markers;
@@ -140,6 +168,61 @@ fn native_ids() -> Vec<String> {
     let mut registry = RuleRegistry::new();
     register_all_native(&mut registry);
     registry.ids().to_vec()
+}
+
+/// Contract 14 — every `.rs` file in `crates/engine/tests/rule_contracts/` is `mod`-registered in this
+/// file, so no meta-test can sit in this directory silently uncompiled. Reads this file's own text rather
+/// than any generated list: the `mod` lines above ARE the wiring, and re-deriving them from anything else
+/// would just move the drift.
+///
+/// Both directions are asserted even though only one can actually rot: a `mod x;` with no `x.rs` is a
+/// compile error (so the test binary would not build and this test could never report it), while a
+/// `x.rs` with no `mod x;` compiles fine and is the real hole. The set equality is one assertion for
+/// both, and its offender lists name the exact fix in each direction.
+///
+/// Nested subdirectories are rejected outright rather than half-handled: none exist today, and a
+/// `mod`-path scheme for them would be untested machinery guarding nothing.
+#[test]
+fn every_rule_contracts_source_file_is_mod_registered() {
+    let this_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/rule_contracts");
+    let main_rs = this_dir.join("main.rs");
+    let text = fs::read_to_string(&main_rs)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", main_rs.display()));
+
+    let declared: std::collections::BTreeSet<String> = text
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("mod ")?.strip_suffix(';'))
+        .map(str::to_string)
+        .collect();
+
+    let mut present = std::collections::BTreeSet::new();
+    let entries = fs::read_dir(&this_dir)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", this_dir.display()));
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        assert!(
+            !path.is_dir(),
+            "{} is a subdirectory of tests/rule_contracts — this contract only understands a FLAT \
+             directory of `mod <file>;` siblings. Flatten it, or extend this test to walk nested module \
+             paths before adding one.",
+            path.display()
+        );
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if path.extension().and_then(|e| e.to_str()) == Some("rs") && stem != "main" {
+            present.insert(stem.to_string());
+        }
+    }
+
+    assert_eq!(
+        present, declared,
+        "tests/rule_contracts/ and this file's `mod` list disagree.\nfiles with NO `mod` line (they are \
+         never compiled — no error, no warning, and every contract in them runs never): {:?}\n`mod` \
+         lines with no file: {:?}",
+        present.difference(&declared).collect::<Vec<_>>(),
+        declared.difference(&present).collect::<Vec<_>>(),
+    );
 }
 
 fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {

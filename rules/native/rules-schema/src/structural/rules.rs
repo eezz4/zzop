@@ -4,7 +4,7 @@
 
 use zzop_core::{SchemaField, SchemaModel, Severity};
 
-use super::{SchemaIssue, GOD_THRESHOLD, LOOKUP_FIELD_MAX, MONEY_TOKENS};
+use super::{SchemaIssue, GOD_THRESHOLD, LOOKUP_FIELD_MAX};
 
 fn issue(rule: &str, severity: Severity, model: &str, field: Option<&str>) -> SchemaIssue {
     SchemaIssue {
@@ -93,6 +93,7 @@ pub(super) fn rule_redundant_index(model: &SchemaModel, out: &mut Vec<SchemaIssu
 pub(super) fn rule_float_money(
     model: &SchemaModel,
     field: &SchemaField,
+    money_tokens: &[&str],
     out: &mut Vec<SchemaIssue>,
 ) {
     let t = field.r#type.to_ascii_lowercase();
@@ -100,7 +101,7 @@ pub(super) fn rule_float_money(
         return;
     }
     let lower = field.name.to_ascii_lowercase();
-    if !MONEY_TOKENS.iter().any(|tok| lower.contains(tok)) {
+    if !money_tokens.iter().any(|tok| lower.contains(tok)) {
         return;
     }
     let mut i = issue(

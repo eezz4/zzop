@@ -60,12 +60,32 @@ pub struct MethodScan {
     /// means textually earlier within the same span — an earlier line, or an earlier start offset on the
     /// SAME line (so a one-liner like `p.then(r => setX(r))` counts, with `.then(` preceding `setX(`).
     ///
+    /// SAME-LINE NESTING RESIDUAL — the negative direction of that same offset comparison, and the one a
+    /// new rule author has to price in before setting this field. `order_ok` (`dsl/method_scan.rs`)
+    /// compares the two patterns' FIRST-MATCH start offsets and nothing else, so it cannot tell a callee
+    /// that merely follows the trigger from one nested INSIDE the trigger's own argument list — which
+    /// evaluates FIRST. `p.then(r => setX(r))` counts because the boundary token happens to start first;
+    /// invert the nesting and the finding disappears. Measured, not hypothesised:
+    /// `await redis.set(key, Number(await redis.get(key)) + 1)` (`redis/counter-get-set`, a genuine
+    /// lost-update read-modify-write) and `setData(await fetch(url));`
+    /// (`react/setstate-after-async-unguarded`, silent while the two-statement spelling on the next
+    /// fixture fires) are both dropped. This is structural, not a bug to fix here: separating "nested
+    /// argument" from "later statement" needs nesting awareness two independent regexes over a flat line
+    /// do not have. The policy is therefore DISCLOSE, not repair — every rule whose trigger regex can
+    /// span a nested call publishes the residual in its own message (`redis/counter-get-set`,
+    /// `redis/lock-get-then-set`, `react/setstate-after-async-unguarded`,
+    /// `db/find-then-create-no-unique`, `db/check-then-act-in-loop`, `reliability/fs-check-then-use`,
+    /// `sql/race-condition-toctou`). A trigger regex that CANNOT span a nested call is immune by
+    /// construction and stays silent about it: `db/non-atomic-counter-update`'s trigger is
+    /// `<ident>: <word-or-dots> ± 1`, which no nested call fits, so the inline form fails the TRIGGER and
+    /// never reaches this gate at all.
+    ///
     /// This is the ORDER counterpart of `trigger_in_loop`'s containment gate, and exists for the same
     /// reason: a rule whose ID or message asserts a SEQUENCE ("setState after await") must not settle for
     /// plain co-occurrence, which is satisfied just as well by a setter that runs BEFORE the await. Without
     /// it, `patterns` proves only "both tokens appear somewhere in this span", and `trigger` anchors on the
     /// FIRST trigger match — routinely a line before the ordering token (measured on mono-hub: 9 of a
-    /// 15-finding `react/setstate-after-await-unmounted` sample anchored before the first `await` in the
+    /// 15-finding `react/setstate-after-async-unguarded` sample anchored before the first `await` in the
     /// whole file). Setting `after` fixes the anchor as a side effect: the finding lands on the first
     /// trigger match that actually follows, not on the first one anywhere.
     ///
@@ -89,7 +109,7 @@ pub struct MethodScan {
     /// Why it exists: a method-scan span is a DECLARED symbol's body, so a React component's whole
     /// function is one span and every anonymous closure inside it shares that scope. `after` then pairs a
     /// setter in one closure with an `await` in an unrelated SIBLING closure — measured as 4 of a
-    /// 15-finding `react/setstate-after-await-unmounted` sample. This gate requires the two matches to be
+    /// 15-finding `react/setstate-after-async-unguarded` sample. This gate requires the two matches to be
     /// in the same function, which is the scope an async continuation actually resumes into.
     ///
     /// Why it needs a PARSER fact and not just "nearest function": the naive partition splits a promise

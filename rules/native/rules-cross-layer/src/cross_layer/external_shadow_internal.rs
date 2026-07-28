@@ -107,6 +107,12 @@ pub fn external_shadow_internal_findings(
             message,
             data: Some(serde_json::json!({
                 "consumeKey": key,
+                // The ANCHOR's tree. `matchedProvide.source` below names the OTHER side of the join, so
+                // without this a consumer keying on `<source>/<file>:<line>` (the benchmark harness does)
+                // had to key two trees' identical relative paths onto one bucket. Same field name and
+                // meaning as `method-mismatch`/`path-near-miss`/`version-skew`, which anchor at a consume
+                // the same way. Additive: the message already named this value.
+                "consumeSource": c.source,
                 "host": url.host,
                 "normalizedKey": normalized,
                 "matchedProvide": {"source": first.source, "file": first.file, "line": first.line},

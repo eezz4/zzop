@@ -32,7 +32,7 @@ fn sql_select_star_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "q.ts",
-        "// select-star-ok: internal debug dump, columns intentionally unbounded\nexport const q = \"SELECT * FROM users\";\n",
+        "// zzop-select-star-ok: internal debug dump, columns intentionally unbounded\nexport const q = \"SELECT * FROM users\";\n",
     );
     let out = scan(&dir);
     assert!(hits(&out, "select-star").is_empty(), "{:?}", out.findings);
@@ -87,7 +87,7 @@ fn sql_like_leading_wildcard_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "search.ts",
-        "// like-leading-wildcard-ok: tiny fixed lookup table, offline batch job\nexport const q = \"SELECT id FROM users WHERE name LIKE '%term'\";\n",
+        "// zzop-like-leading-wildcard-ok: tiny fixed lookup table, offline batch job\nexport const q = \"SELECT id FROM users WHERE name LIKE '%term'\";\n",
     );
     let out = scan(&dir);
     assert!(

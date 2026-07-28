@@ -67,7 +67,7 @@ fn redis_lock_atomic_ok_marker_above_the_set_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-redis");
     dir.write(
         "src/jobLockSuppressed.ts",
-        "import { redis } from \"./redis\";\nexport async function runJob() {\n  if (!(await redis.get(\"lock:job\"))) {\n    // lock-get-then-set-ok: acquire is delegated to a vetted redlock wrapper not visible to regex\n    await redis.set(\"lock:job\", 1);\n  }\n}\n",
+        "import { redis } from \"./redis\";\nexport async function runJob() {\n  if (!(await redis.get(\"lock:job\"))) {\n    // zzop-lock-get-then-set-ok: acquire is delegated to a vetted redlock wrapper not visible to regex\n    await redis.set(\"lock:job\", 1);\n  }\n}\n",
     );
     let out = scan(&dir);
     assert!(

@@ -15,10 +15,7 @@ use super::{eval_pack_into, RuleContext, SourceFile};
 /// Evaluates a one-rule pack over `files`, returning `(findings, diagnostics)`.
 fn eval(rule_json: &str, files: Vec<SourceFile>) -> (Vec<Finding>, Vec<String>) {
     let pack = rule_pack(rule_json);
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
-    };
+    let ctx = RuleContext { files: &files };
     let mut diagnostics = Vec::new();
     let findings = eval_pack_into(&pack, &ctx, &mut diagnostics);
     (findings, diagnostics)
@@ -210,10 +207,7 @@ fn one_broken_rule_is_reported_once_across_many_files() {
     let mut diags = Vec::new();
     for rel in ["a.ts", "b.ts", "c.ts"] {
         let files = vec![file(rel, "x\n", vec![])];
-        let ctx = RuleContext {
-            files: &files,
-            ir: None,
-        };
+        let ctx = RuleContext { files: &files };
         eval_pack_into(&pack, &ctx, &mut diags);
     }
     assert_eq!(diags.len(), 1, "{diags:?}");
@@ -230,10 +224,7 @@ fn a_broken_rule_does_not_take_its_pack_mates_down() {
     )
     .expect("parse pack");
     let files = vec![file("a.ts", "setInterval(f, 1);\n", vec![])];
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
-    };
+    let ctx = RuleContext { files: &files };
     let mut diags = Vec::new();
     let findings = eval_pack_into(&pack, &ctx, &mut diags);
     assert_eq!(findings.len(), 1);

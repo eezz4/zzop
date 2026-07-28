@@ -20,6 +20,10 @@
 //! Exactly one bucket class matching yields its token; two or more yield `"mixed"` (the `counts`
 //! field disambiguates); zero yield `"not-found"` (with `suggestions`).
 //!
+//! Each token's one-sentence MEANING lives in [`verdict_meaning`] and ships in the reply as
+//! `verdictMeaning` — the vocabulary is self-describing on the wire, so no host's help text or tool
+//! description is a second owner of what a token means.
+//!
 //! ## Accepted analysis shapes
 //! - `analyzeTrees` output (`{trees, crossLayer, crossLayerFindings, disclosure, ...}`) — the full
 //!   query runs over the join buckets.
@@ -55,6 +59,44 @@ const BUCKETS: [(&str, &str); 6] = [
     ("externalConsumes", "external"),
     ("ambiguousConsumes", "ambiguous"),
 ];
+
+/// What the returned token MEANS, in one sentence — shipped in the reply itself as `verdictMeaning`.
+///
+/// The definitions live HERE, next to the computation that assigns the token, and ride every reply on
+/// every host. That is the point: before this, the eight tokens were explained only in the MCP tool
+/// description, so a `zzop endpoint` user got a bare token with no vocabulary anywhere, and copying the
+/// table into the CLI's help would have given one fact two owners — the drift class this repo keeps
+/// paying for. A self-describing reply gives it one owner and reaches both surfaces at once.
+///
+/// Total over the sealed vocabulary: the six bucket tokens above plus the two derived ones. An unknown
+/// token cannot occur (every caller passes a value this module just produced), and the fallback says so
+/// rather than inventing a meaning.
+fn verdict_meaning(verdict: &str) -> &'static str {
+    match verdict {
+        "linked" => "a consume of this key is joined to a provide — the contract holds end to end",
+        "provided-only" => {
+            "the key is provided, and nothing in the analyzed trees consumes it"
+        }
+        "consumed-unprovided" => {
+            "the key is consumed, and nothing in the analyzed trees provides it — drift or a bug"
+        }
+        "unresolved-only" => {
+            "every match is a call site whose key could not be determined statically"
+        }
+        "external" => {
+            "the key is third-party egress — consumed against a host outside the analyzed trees"
+        }
+        "ambiguous" => {
+            "the key is provided by more than one source tree; each matched item's own `candidates` \
+             array lists that item's providers"
+        }
+        "mixed" => "matches span 2+ of the verdict classes at once — `counts` says which",
+        "not-found" => {
+            "no io key in the analyzed trees matched the pattern — `suggestions` lists the nearest keys, capped, with `suggestionsTruncated` counting any it left out"
+        }
+        _ => "unknown verdict token (not part of the sealed vocabulary)",
+    }
+}
 
 /// `{"pattern": "<non-empty string>"}` -> the pattern. Unknown keys are a caller error
 /// (answered by name, never guessed around — same stance as the hosts' own argument validation).
@@ -144,6 +186,12 @@ pub fn query_io_json(analysis_json: &str, query_json: &str) -> Result<String, St
     let mut out = Map::new();
     out.insert("pattern".to_string(), json!(pattern));
     out.insert("verdict".to_string(), json!(verdict));
+    // The sealed vocabulary explains ITSELF on the wire — see `verdict_meaning`'s doc for why the
+    // definitions ride the reply instead of being copied into each host's help text.
+    out.insert(
+        "verdictMeaning".to_string(),
+        json!(verdict_meaning(verdict)),
+    );
     out.insert("counts".to_string(), Value::Object(counts));
     out.insert("matches".to_string(), Value::Object(matches));
     if !truncated.is_empty() {
@@ -157,10 +205,14 @@ pub fn query_io_json(analysis_json: &str, query_json: &str) -> Result<String, St
         );
     }
     if verdict == "not-found" {
-        out.insert(
-            "suggestions".to_string(),
-            json!(suggestions(cross_layer, &pattern)),
-        );
+        let (shown, total) = suggestions(cross_layer, &pattern);
+        if total > shown.len() {
+            out.insert(
+                "suggestionsTruncated".to_string(),
+                json!(total - shown.len()),
+            );
+        }
+        out.insert("suggestions".to_string(), json!(shown));
     }
     // Forwarded verbatim — the run-global blindness-class registry rides on every facade output.
     out.insert(

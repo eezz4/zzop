@@ -41,7 +41,20 @@
 //!   surface is large (blind-field test R10's fe-svelte: `src/lib/api.js`, 20+ callers under
 //!   `src/routes/**`).
 //!
-//! All seven are per-tree self-report `warnings: Vec<String>` strings (not `Finding`s — no rule id, no
+//! - S8 [`call_graph_language_gap_warning`]: the odd one out — it fires when extraction SUCCEEDED. A tree
+//!   whose http routes were extracted from a language with no `RawCall` producer parses fine, censuses
+//!   healthy, and still leaves `mutating-route-no-auth` structurally inert on those routes. No channel
+//!   count can express that (the channels are full), so this one names the LANGUAGE and the silenced
+//!   RULE ID, reading both off the shipped constants rather than a copy.
+//!
+//! - S9 [`unknown_verb_range_warning`]: routes that ARE in a covered language but carry no HTTP method,
+//!   so every write-gated rule filters them out before evaluating — "0 findings" there is out-of-range,
+//!   not clean.
+//! - S10 [`rust_router_layer_warning`]: the newest, and the one D18 created by lifting `.rs` into the
+//!   call graph — Rust routes are now IN `mutating-route-no-auth`'s range, and the one auth idiom the
+//!   engine cannot see there (a tower `.route_layer`) is mainstream rather than marginal.
+//!
+//! All of them are per-tree self-report `warnings: Vec<String>` strings (not `Finding`s — no rule id, no
 //! catalog sync needed); over-disclosure is safe, silence is fatal (the coverage-disclosure decision doc's
 //! governing principle) — each function is additive and may fire independently of the others.
 //!
@@ -68,15 +81,18 @@
 
 mod app_buckets;
 mod builtin_fetch;
+mod call_graph_language;
 mod client_library_import;
 mod committed_spec_io_silence;
 mod controller_silence;
 mod egress_intent;
 mod fetch_wrapper;
 mod orm_schema_silence;
+mod rust_router_layer;
 mod server_framework_import;
 #[cfg(test)]
 mod tests;
+mod unknown_verb_range;
 
 pub(crate) use app_buckets::{app_roots, keyed_http_by_root};
 // `builtin_fetch_lexical_warning`/`fetch_wrapper_call_site_warning` are NOT re-exported here: their
@@ -85,11 +101,15 @@ pub(crate) use app_buckets::{app_roots, keyed_http_by_root};
 // `super::fetch_wrapper::` directly. A crate-level re-export would be dead (`mod framework_silence` is
 // private, so there is no external API surface to keep them on).
 pub use builtin_fetch::builtin_fetch_census;
+pub use call_graph_language::call_graph_language_gap_warning;
 pub use client_library_import::client_library_import_warning;
 pub use committed_spec_io_silence::committed_spec_io_silence_warning;
 pub(crate) use committed_spec_io_silence::IO_NEAR_ZERO_FLOOR;
 pub use controller_silence::controller_silence_warning;
 pub(crate) use controller_silence::MIN_PROVIDES_FLOOR;
 pub use fetch_wrapper::fetch_wrapper_census;
+pub(crate) use fetch_wrapper::WRAPPER_EXPORT_NAMES;
 pub use orm_schema_silence::orm_schema_silence_warning;
+pub use rust_router_layer::rust_router_layer_warning;
 pub use server_framework_import::{provide_blind_sources, server_framework_import_warning};
+pub use unknown_verb_range::unknown_verb_range_warning;

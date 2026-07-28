@@ -11,8 +11,11 @@ use zzop_core::{disable_hint, Finding, Severity};
 
 use super::split_external_key;
 
-/// Query parameter names (already lowercased) that commonly carry a secret/credential value.
-const SECRET_PARAM_NAMES: &[&str] = &[
+/// Query parameter names (already lowercased) that commonly carry a secret/credential value. This is the
+/// DEFAULT behind the declarable config key `vocabulary.secretParamNames` — what a project calls its own
+/// credential parameters is a name it picks — so `zzop_engine::VocabularyConfig` references THIS symbol
+/// rather than restating the list.
+pub const SECRET_PARAM_NAMES: &[&str] = &[
     "token",
     "access_token",
     "accesstoken",
@@ -30,7 +33,13 @@ const SECRET_PARAM_NAMES: &[&str] = &[
     "jwt",
 ];
 
-pub fn external_secret_in_url_findings(external_consumes: &[TaggedConsume]) -> Vec<Finding> {
+/// `secret_param_names`: the run's declared `vocabulary.secretParamNames` (already lowercased entries),
+/// else the built-in [`SECRET_PARAM_NAMES`]. A declared list REPLACES the built-in whole — the vocabulary
+/// contract's per-key whole replacement, never an element-wise merge.
+pub fn external_secret_in_url_findings(
+    external_consumes: &[TaggedConsume],
+    secret_param_names: &[&str],
+) -> Vec<Finding> {
     let mut out = Vec::new();
     for c in external_consumes
         .iter()
@@ -54,7 +63,7 @@ pub fn external_secret_in_url_findings(external_consumes: &[TaggedConsume]) -> V
             }
             let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
             let lower_name = name.to_ascii_lowercase();
-            if !SECRET_PARAM_NAMES.contains(&lower_name.as_str()) {
+            if !secret_param_names.contains(&lower_name.as_str()) {
                 continue;
             }
             matched.push(lower_name);
@@ -136,7 +145,7 @@ mod tests {
             "Client.ts",
             10,
         )];
-        let out = external_secret_in_url_findings(&external);
+        let out = external_secret_in_url_findings(&external, SECRET_PARAM_NAMES);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].rule_id, "cross-layer/external-secret-in-url");
         assert_eq!(out[0].severity, Severity::Warning);
@@ -159,7 +168,7 @@ mod tests {
             "Client.ts",
             10,
         )];
-        let out = external_secret_in_url_findings(&external);
+        let out = external_secret_in_url_findings(&external, SECRET_PARAM_NAMES);
         assert_eq!(out.len(), 1);
         let data = out[0].data.as_ref().unwrap();
         assert_eq!(data["hasLiteralValue"], false);
@@ -175,7 +184,7 @@ mod tests {
             "Client.ts",
             10,
         )];
-        assert!(external_secret_in_url_findings(&external).is_empty());
+        assert!(external_secret_in_url_findings(&external, SECRET_PARAM_NAMES).is_empty());
     }
 
     #[test]
@@ -187,7 +196,7 @@ mod tests {
             "Client.ts",
             10,
         )];
-        assert!(external_secret_in_url_findings(&external).is_empty());
+        assert!(external_secret_in_url_findings(&external, SECRET_PARAM_NAMES).is_empty());
     }
 
     #[test]
@@ -199,7 +208,7 @@ mod tests {
             "Client.ts",
             10,
         )];
-        assert!(external_secret_in_url_findings(&external).is_empty());
+        assert!(external_secret_in_url_findings(&external, SECRET_PARAM_NAMES).is_empty());
     }
 
     #[test]
@@ -211,7 +220,7 @@ mod tests {
             "Client.ts",
             10,
         )];
-        let out = external_secret_in_url_findings(&external);
+        let out = external_secret_in_url_findings(&external, SECRET_PARAM_NAMES);
         assert_eq!(out.len(), 1);
         let data = out[0].data.as_ref().unwrap();
         assert_eq!(
@@ -245,7 +254,7 @@ mod tests {
                 3,
             ),
         ];
-        let out = external_secret_in_url_findings(&external);
+        let out = external_secret_in_url_findings(&external, SECRET_PARAM_NAMES);
         assert_eq!(out.len(), 3);
         assert_eq!((out[0].file.as_str(), out[0].line), ("a.ts", 3));
         assert_eq!((out[1].file.as_str(), out[1].line), ("a.ts", 20));

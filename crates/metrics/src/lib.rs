@@ -80,6 +80,13 @@ pub use roi::{compute_roi, RecId, RoiResult};
 
 pub use scores::compute::{compute_scores, ScoresInput};
 pub use scores::config::ScoresConfig;
+// The convention-vocabulary defaults this crate owns, re-exported so `zzop_engine::VocabularyConfig`
+// can name the symbol instead of re-spelling the values (one definition per vocabulary — the rule
+// `zzop_cache::DEFAULT_CACHE_DIR` set).
+pub use scores::config::{
+    FsdConfig, FsdMatcher, DEFAULT_FSD_BASE_DIRS, DEFAULT_FSD_ENTRY, DEFAULT_FSD_SHARED,
+    DEFAULT_FSD_SLICE_CONTAINERS, DEFAULT_HIERARCHY_SHARED_DIRS,
+};
 pub use scores::types::Scores;
 
 pub use seams::{compute_seams, SeamCandidate, SEAMS_LIMIT, SEAMS_MIN_FILES};

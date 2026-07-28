@@ -113,9 +113,9 @@ fn negative_patterns_exclude_matching_directories() {
     assert_eq!(roots, vec!["packages/a"]);
 }
 
-#[test]
-fn double_star_recurses_and_skips_node_modules_and_git() {
-    let dir = TempDir::new("zzop-ws-recursion");
+/// A tree with two real packages and two that only a skip list keeps out.
+fn recursion_fixture(prefix: &str) -> TempDir {
+    let dir = TempDir::new(prefix);
     dir.write("pnpm-workspace.yaml", "packages:\n  - 'packages/**'\n");
     dir.write("packages/package.json", &pkg_json(Some("root-pkg")));
     dir.write(
@@ -130,11 +130,41 @@ fn double_star_recurses_and_skips_node_modules_and_git() {
         "packages/.git/fake/package.json",
         &pkg_json(Some("skip-me-too")),
     );
+    dir
+}
 
-    let (config, _warnings) = expand_auto_trees(auto_config(), dir.path()).unwrap();
+#[test]
+fn double_star_recurses_and_skips_the_declared_workspace_skip_dirs() {
+    let dir = recursion_fixture("zzop-ws-recursion");
+    let config = json!({
+        "trees": "auto",
+        "vocabulary": { "workspaceSkipDirs": ["node_modules", ".git"] },
+    });
+    let (config, _warnings) = expand_auto_trees(config, dir.path()).unwrap();
     let trees = config["trees"].as_array().unwrap();
     let roots: Vec<&str> = trees.iter().map(|t| t["root"].as_str().unwrap()).collect();
     assert_eq!(roots, vec!["packages", "packages/deep/nested/dir"]);
+}
+
+/// The other half of the same rule, and the reason the starter template declares this key: with no
+/// `workspaceSkipDirs` there is no skip judgment to make, so discovery descends into `node_modules` and
+/// `.git` and returns whatever `package.json` it finds there. This is the loudest consequence of the
+/// 2026-07-27 no-fallback rule, pinned so it stays a stated behaviour rather than a surprise.
+#[test]
+fn an_undeclared_workspace_skip_list_skips_nothing() {
+    let dir = recursion_fixture("zzop-ws-recursion-undeclared");
+    let (config, _warnings) = expand_auto_trees(auto_config(), dir.path()).unwrap();
+    let trees = config["trees"].as_array().unwrap();
+    let roots: Vec<&str> = trees.iter().map(|t| t["root"].as_str().unwrap()).collect();
+    assert_eq!(
+        roots,
+        vec![
+            "packages",
+            "packages/.git/fake",
+            "packages/deep/nested/dir",
+            "packages/node_modules/should-be-skipped",
+        ]
+    );
 }
 
 #[test]

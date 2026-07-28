@@ -53,7 +53,7 @@ fn timing_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/auth.ts",
-        "declare const token: string;\ndeclare const expectedToken: string;\nexport function checkToken() {\n  // timing-unsafe-compare-ok: token is a public request id, not a secret compared for auth\n  return token === expectedToken;\n}\n",
+        "declare const token: string;\ndeclare const expectedToken: string;\nexport function checkToken() {\n  // zzop-timing-unsafe-compare-ok: token is a public request id, not a secret compared for auth\n  return token === expectedToken;\n}\n",
     );
     let out = scan(&dir);
     assert!(

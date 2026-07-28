@@ -33,7 +33,11 @@ const REPO = path.resolve(HERE, "..", "..");
 const argv = process.argv.slice(2);
 const runsIdx = argv.indexOf("--runs");
 const runsRoot = runsIdx === -1 ? path.join(REPO, "scratchpad", "runs") : path.resolve(argv[runsIdx + 1] ?? "");
-const positional = argv.filter((a, i) => !a.startsWith("--") && i !== runsIdx + 1);
+// `runsIdx === -1` when `--runs` is absent, and `-1 + 1 === 0` would then drop the FIRST positional —
+// so the documented two-label form (`diff.mjs <before> <after>`) always printed usage and exited 2.
+// Guard the flag's value index instead of computing it unconditionally.
+const runsValueIdx = runsIdx === -1 ? -1 : runsIdx + 1;
+const positional = argv.filter((a, i) => !a.startsWith("--") && i !== runsValueIdx);
 const [beforeLabel, afterLabel] = positional;
 
 if (!beforeLabel || !afterLabel) {

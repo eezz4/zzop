@@ -67,15 +67,37 @@ pub fn body_field_drift_findings(
             out.push(finding);
         }
     }
-    // Dedupe identical (file, line, message) — a fan-out consume (2+ edges from the same call site,
-    // legal when a tree provides the same key twice) can produce byte-identical findings.
+    // Dedupe identical (consumeSource, file, line, message) — a fan-out consume (2+ edges from the same
+    // call site, legal when a tree provides the same key twice) can produce byte-identical findings.
+    // `Finding::file` is TREE-RELATIVE, so the consuming tree MUST be part of the key: two trees whose
+    // call sites share a relative path and line, drifting the same way against the same handler, are two
+    // real findings, and a `(file, line, message)` key silently dropped one of them.
+    dedupe_by_consume_site(out)
+}
+
+/// Sorts and dedupes on `(consumeSource, file, line, message)`, reading the consuming tree back out of
+/// each finding's own `data.consumeSource` (always present — [`build_drift_finding`] writes it
+/// unconditionally). Shared with `retrying_write_no_idempotency`, whose findings anchor at the same
+/// `edge.from` site and carry the same field for the same reason.
+pub(super) fn dedupe_by_consume_site(mut out: Vec<Finding>) -> Vec<Finding> {
+    let key = |f: &Finding| {
+        f.data
+            .as_ref()
+            .and_then(|d| d.get("consumeSource"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
     out.sort_by(|a, b| {
         a.file
             .cmp(&b.file)
             .then(a.line.cmp(&b.line))
+            .then(key(a).cmp(&key(b)))
             .then(a.message.cmp(&b.message))
     });
-    out.dedup_by(|a, b| a.file == b.file && a.line == b.line && a.message == b.message);
+    out.dedup_by(|a, b| {
+        a.file == b.file && a.line == b.line && key(a) == key(b) && a.message == b.message
+    });
     out
 }
 
@@ -189,6 +211,13 @@ fn build_drift_finding(
     );
 
     let mut data = serde_json::json!({
+        // Both sides of the join, each with its tree. The finding anchors at the CONSUME side, and
+        // `Finding::file` is tree-relative, so `consumeSource` is what makes `<source>/<file>:<line>` a
+        // unique key; `provideSource` does the same for the `provideFile`/`provideLine` pair, which
+        // previously named a path with no tree at all. `dedupe_by_consume_site` reads `consumeSource`
+        // back out, so this field must stay unconditional.
+        "consumeSource": edge.from.source,
+        "provideSource": edge.to.source,
         "provideFile": edge.to.file,
         "provideLine": edge.to.line,
         "subKey": provide.sub_key,

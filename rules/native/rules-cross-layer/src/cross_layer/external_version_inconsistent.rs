@@ -17,15 +17,21 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use regex::Regex;
-
 use zzop_core::io::TaggedConsume;
 use zzop_core::{disable_hint, Finding, Severity};
 
-use super::{is_all_slot_path, path_segments, split_external_key, VERSION_SEGMENT_PATTERN};
+use super::vocab::version_segment_re;
+use super::{is_all_slot_path, path_segments, split_external_key};
 
-pub fn external_version_inconsistent_findings(external_consumes: &[TaggedConsume]) -> Vec<Finding> {
-    let version_re = Regex::new(VERSION_SEGMENT_PATTERN).unwrap();
+/// `version_segment_pattern`: the run's declared `vocabulary.apiVersionSegmentPattern` (the same
+/// declaration `version_skew` reads), or `None` when the author declared none or declared one that will
+/// not parse. `None` means no segment is a version segment, so no host is judged version-inconsistent —
+/// see [`super::vocab::version_segment_re`] for why an absent declaration is never replaced with ours.
+pub fn external_version_inconsistent_findings(
+    external_consumes: &[TaggedConsume],
+    version_segment_pattern: Option<&str>,
+) -> Vec<Finding> {
+    let version_re = version_segment_re(version_segment_pattern);
 
     let mut by_host: BTreeMap<String, Vec<(String, &TaggedConsume)>> = BTreeMap::new();
     for c in external_consumes
@@ -56,7 +62,9 @@ pub fn external_version_inconsistent_findings(external_consumes: &[TaggedConsume
                 // versionless side rather than let it manufacture the split this rule reports.
                 continue;
             }
-            let is_versioned = segments.iter().any(|seg| version_re.is_match(seg));
+            let is_versioned = version_re
+                .as_ref()
+                .is_some_and(|re| segments.iter().any(|seg| re.is_match(seg)));
             if is_versioned {
                 versioned.insert(path);
             } else {

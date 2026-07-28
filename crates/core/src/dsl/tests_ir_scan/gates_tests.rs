@@ -175,7 +175,7 @@ fn suppress_marker_on_the_anchor_lines_own_text_suppresses_the_finding() {
         consumes: &[],
         attrs: &attrs,
         anchor_line: &|file, line| {
-            (file == "f.ts" && line == 5).then(|| "// legacy-ok".to_string())
+            (file == "f.ts" && line == 5).then(|| "// zzop-legacy-ok".to_string())
         },
     };
     eval_pack_io_scan(&pack, &ctx, &mut out);
@@ -195,7 +195,7 @@ fn suppress_marker_on_the_line_directly_above_the_anchor_suppresses_the_finding(
         consumes: &[],
         attrs: &attrs,
         anchor_line: &|file, line| {
-            (file == "f.ts" && line == 4).then(|| "// legacy-ok".to_string())
+            (file == "f.ts" && line == 4).then(|| "// zzop-legacy-ok".to_string())
         },
     };
     eval_pack_io_scan(&pack, &ctx, &mut out);
@@ -207,8 +207,8 @@ fn suppress_marker_on_the_line_directly_above_the_anchor_suppresses_the_finding(
 
 #[test]
 fn suppress_marker_recognizes_the_python_hash_comment_leader() {
-    // io-scan anchor lines span every provide-producing language — `# auth-gates-ok` on a FastAPI route
-    // line must suppress exactly like `// auth-gates-ok` on an Express one (`compile_marker_line_comment`).
+    // io-scan anchor lines span every provide-producing language — `# zzop-protected-path-no-auth-evidence-ok` on a FastAPI route
+    // line must suppress exactly like `// zzop-protected-path-no-auth-evidence-ok` on an Express one (`compile_marker_line_comment`).
     let provides = vec![IoProvide {
         kind: "http".into(),
         key: "GET /legacy".into(),
@@ -227,7 +227,7 @@ fn suppress_marker_recognizes_the_python_hash_comment_leader() {
         consumes: &[],
         attrs: &attrs,
         anchor_line: &|file, line| {
-            (file == "app.py" && line == 5).then(|| "# legacy-ok".to_string())
+            (file == "app.py" && line == 5).then(|| "# zzop-legacy-ok".to_string())
         },
     };
     eval_pack_io_scan(&pack, &ctx, &mut out);
@@ -263,7 +263,7 @@ fn a_marker_shaped_anchor_comment_that_is_not_this_rules_marker_is_named_in_the_
     assert_eq!(
         out[0].message,
         "m Note: a comment on this line (or the line directly above it) reads `legacy-route-ok`, which \
-         does not suppress this rule — the marker this rule honors is `legacy-ok`, so this finding still \
+         does not suppress this rule — the marker this rule honors is `zzop-legacy-ok`, so this finding still \
          fires."
     );
 }

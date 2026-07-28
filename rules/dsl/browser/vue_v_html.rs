@@ -58,7 +58,7 @@ fn vue_v_html_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-browser");
     dir.write(
         "Vetted.vue",
-        "<template>\n  <!-- vue-v-html-ok: sanitized upstream via DOMPurify -->\n  // vue-v-html-ok: sanitized upstream via DOMPurify\n  <div v-html=\"trusted\"></div>\n</template>\n",
+        "<template>\n  <!-- zzop-vue-v-html-ok: sanitized upstream via DOMPurify -->\n  // zzop-vue-v-html-ok: sanitized upstream via DOMPurify\n  <div v-html=\"trusted\"></div>\n</template>\n",
     );
     let out = scan(&dir);
     assert!(

@@ -4,9 +4,14 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use zzop_core::{load_dsl_packs, GlobalExclude, RulePackDef, Severity, Suppression};
-use zzop_engine::{EngineConfig, GitOptions, MountRule, PackSource, DEFAULT_SIZE_CAP};
+use zzop_engine::{EngineConfig, GitOptions, PackSource, DEFAULT_SIZE_CAP};
 
-use crate::request::{AnalyzeRequest, MountEntryRequest, PacksDir};
+use crate::request::{AnalyzeRequest, PacksDir};
+
+mod declared;
+mod mounts;
+
+pub(crate) use mounts::fold_mounts;
 
 /// Renders a rule count with correct pluralization ("1 rule" / "2 rules") — mirrors
 /// `zzop_metrics::diagnostics`'s private `entry_count` helper's pattern (that one is not `pub`, so it
@@ -226,6 +231,12 @@ pub(crate) fn build_engine_config(
                 .map(|p| (p.pattern.clone(), p.tag.clone()))
                 .collect()
         }),
+        commit_subject_patterns: g.commit_subject_patterns.as_ref().map(|patterns| {
+            patterns
+                .iter()
+                .map(|p| (p.pattern.clone(), p.label.clone()))
+                .collect()
+        }),
     });
     // Overlays flow to `analyze_tree`'s unconditional `apply_adapter_overlays` merge; no cache-key
     // impact (applied post-cache, re-applied every run regardless of hit/miss). The lightweight `routes`
@@ -240,35 +251,7 @@ pub(crate) fn build_engine_config(
     config.mounts = fold_mounts(&req.mounts, req.mounted_at.as_deref());
     config.hosts = req.hosts.clone();
 
-    config
-}
+    declared::apply_declared(&mut config, req, warnings);
 
-/// Deployment-topology mount fold, shared by BOTH request paths (`build_engine_config` for
-/// tree-rooted requests, `analyze_envelope_json` for envelope requests — one fold, so the two wire
-/// paths cannot drift): every `mounts[]` entry folds in FIRST, in array order, followed by
-/// `mounted_at` as the implicit whole-tree entry (`dir: ""`) LAST. The engine's own
-/// `apply_config_mounts` picks the longest matching `dir` on a match and resolves equal-length ties
-/// to the first entry — appending `mounted_at` last so an explicit dir entry of equal length wins
-/// ties (an explicit `{dir:"", at:"..."}` mount, the one shape that can tie with `mounted_at`'s
-/// empty `dir`, is more specific intent than the shorthand and should win). No shape validation
-/// happens here (see `AnalyzeRequest::mounted_at`/`mounts`'s docs) — this is a plain, unchecked
-/// pass-through.
-pub(crate) fn fold_mounts(
-    mounts: &[MountEntryRequest],
-    mounted_at: Option<&str>,
-) -> Vec<MountRule> {
-    let mut folded: Vec<MountRule> = mounts
-        .iter()
-        .map(|m| MountRule {
-            dir: m.dir.clone(),
-            at: m.at.clone(),
-        })
-        .collect();
-    if let Some(at) = mounted_at {
-        folded.push(MountRule {
-            dir: String::new(),
-            at: at.to_string(),
-        });
-    }
-    folded
+    config
 }

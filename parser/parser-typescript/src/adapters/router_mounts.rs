@@ -96,6 +96,52 @@ pub fn extract_router_mount_fragments(
     text: &str,
     router_names: &[&str],
 ) -> Vec<RouterMountFragment> {
+    extract_router_mount_fragments_with_vocab(
+        rel,
+        text,
+        router_names,
+        &RouterMountVocab::built_in(),
+    )
+}
+
+/// The five name vocabularies this recognizer judges with, all declarable (`vocabulary.*`) because all
+/// five name things a PROJECT chooses: what its middleware guards are called, which identifier tails mean
+/// "this is a sub-router, not a gate", which rejection verbs prefix a guard wrapper, which words mean the
+/// check is about the ENVIRONMENT rather than the caller, and which header carries an idempotency key.
+///
+/// Carried as one struct rather than five parameters: they are threaded through two visitors and three
+/// judgment functions, and five same-typed `&[&str]` parameters in a row are transposable by accident.
+#[derive(Clone, Copy)]
+pub struct RouterMountVocab<'a> {
+    pub middleware_guard_callees: &'a [&'a str],
+    pub router_name_veto_suffixes: &'a [&'a str],
+    pub wrapper_guard_prefixes: &'a [&'a str],
+    pub env_axis_veto_substrings: &'a [&'a str],
+    pub idempotency_header_names: &'a [&'a str],
+}
+
+impl RouterMountVocab<'static> {
+    /// The built-in defaults, assembled from the constants their own judgment functions document. This
+    /// is the single accessor `zzop_engine::VocabularyConfig::built_in` reads, so the five constants stay
+    /// private to their modules and there is no second copy of any of them.
+    pub fn built_in() -> Self {
+        RouterMountVocab {
+            middleware_guard_callees: guard::MIDDLEWARE_GUARD_CALLEES,
+            router_name_veto_suffixes: guard::ROUTER_NAME_VETO_SUFFIXES,
+            wrapper_guard_prefixes: guard::WRAPPER_GUARD_PREFIXES,
+            env_axis_veto_substrings: guard::ENV_AXIS_VETO_SUBSTRINGS,
+            idempotency_header_names: idempotency::IDEMPOTENCY_HEADER_NAMES,
+        }
+    }
+}
+
+/// [`extract_router_mount_fragments`] with the run's DECLARED guard/idempotency vocabulary.
+pub fn extract_router_mount_fragments_with_vocab(
+    rel: &str,
+    text: &str,
+    router_names: &[&str],
+    vocab: &RouterMountVocab<'_>,
+) -> Vec<RouterMountFragment> {
     let Some((cm, module)) = crate::parse_with_cm(rel, text) else {
         return Vec::new();
     };
@@ -116,6 +162,7 @@ pub fn extract_router_mount_fragments(
         imports: &imports,
         receivers: &receivers,
         express_receivers: &express_receivers,
+        vocab,
         fragments: Vec::new(),
         index: HashMap::new(),
     };

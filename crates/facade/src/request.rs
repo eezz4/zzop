@@ -2,6 +2,10 @@
 
 use std::collections::BTreeMap;
 
+mod parsers;
+
+pub use parsers::ParsersRequest;
+
 use serde::Deserialize;
 
 use zzop_core::{GlobalExclude, Severity, Suppression};
@@ -105,6 +109,22 @@ pub struct AnalyzeRequest {
     /// `http` provides/consumes (see `RouteInjectionRequest`), so it composes through the same join path as
     /// a hand-authored overlay. Empty (the default) injects no routes.
     pub routes: Vec<RouteInjectionRequest>,
+    /// Declared convention vocabulary — the wire exposure of the config file's `vocabulary` object and of
+    /// `zzop_engine::EngineConfig::vocabulary`. Reuses the engine type directly (rather than mirroring it
+    /// the way `GitOptionsRequest` mirrors `GitOptions`) precisely because the two must never drift: the
+    /// same struct that decides what a vocabulary key MEANS is the one deserialized off the wire, so a
+    /// field added on one side cannot go missing on the other. Default (every field unset) keeps every
+    /// built-in vocabulary — see that type's module doc for the per-key whole-replacement rule.
+    pub vocabulary: zzop_engine::VocabularyConfig,
+    /// Parser routing overrides — `parsers.globOverrides` in the config dialect. Each entry force-routes
+    /// paths matching `glob` to a named language, ahead of the extension map.
+    ///
+    /// A SEPARATE roof from `vocabulary` on purpose: every key under that one names something the project
+    /// CALLS its own (a guard, a segment, a directory), and this names a path→parser MAPPING. Folding a
+    /// mapping in among names would repeat the mistake `git.commitTypePatterns` is explicitly kept out of
+    /// `vocabulary` to avoid — same "user-declared table" feel, different subject matter.
+    #[serde(default)]
+    pub parsers: ParsersRequest,
 }
 
 /// Deserializes `T | null` into `Some(Some(T)) | Some(None)` so a struct-level `#[serde(default)]`
@@ -179,6 +199,13 @@ pub struct GitOptionsRequest {
     /// `zzop_engine::GitOptions::commit_type_patterns`'s doc for the full contract, including how an
     /// invalid regex is handled (skipped, surfaced as a `warnings` entry, never a panic).
     pub commit_type_patterns: Option<Vec<CommitTypePatternRequest>>,
+    /// DECLARED subject-pattern table — the wire exposure of config `git.commitSubjectPatterns`.
+    /// Absent or empty means NO commit gets a label: this axis has no default table to fall back to,
+    /// deliberately (see `zzop_engine::GitOptions::commit_subject_patterns`). Independent of
+    /// `commit_type_patterns` in every way — different output field (`labels`, not `tags`), all
+    /// matches kept rather than first-match-wins, and the pattern is compiled exactly as written with
+    /// no `(?i)` injected.
+    pub commit_subject_patterns: Option<Vec<CommitSubjectPatternRequest>>,
 }
 
 /// One `git.commitTypePatterns` config-file entry: `{ pattern: <regex>, tag: <TAG> }`. A dedicated struct
@@ -191,6 +218,18 @@ pub struct GitOptionsRequest {
 pub struct CommitTypePatternRequest {
     pub pattern: String,
     pub tag: String,
+}
+
+/// One `git.commitSubjectPatterns` config-file entry: `{ pattern: <regex>, label: <string> }`. Same
+/// self-describing-struct rationale as `CommitTypePatternRequest` above; the field is `label` rather
+/// than `tag` because the two axes must stay tellable apart at the config surface — a `tag` feeds the
+/// commit-TYPE vocabulary (and per-file `tagCounts`), a `label` is whatever the author declared it to
+/// mean and rides on `CommitFileSet::labels` alone.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitSubjectPatternRequest {
+    pub pattern: String,
+    pub label: String,
 }
 
 /// `analyzeTrees`'s request shape: `{trees: AnalyzeRequest[]}` — one `EngineConfig` per tree, joined by

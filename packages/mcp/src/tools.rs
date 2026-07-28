@@ -3,9 +3,10 @@
 //! `zzop_summary` function (config auto-discovery + facade call + summary assembly all live there —
 //! see its crate doc), and wrap the result into the MCP reply shape. No shaping/filtering/warning-merge
 //! logic lives here — if it did, it would be exactly the per-host drift the `zzop-summary` split exists
-//! to prevent. The `zzop` CLI's twin subcommands (`analyze`/`cross`/`endpoint`/…) dispatch to the same
-//! `zzop_summary` functions through the shared `zzop-host` crate's own `tools.rs` — see that module for
-//! the CLI-facing wrappers this crate does NOT duplicate.
+//! to prevent. The `zzop` CLI's twin subcommands (`analyze`/`cross`/`endpoint`/…) call the same
+//! `zzop_summary` functions directly from `packages/cli-bin/src/main.rs` — there is no shared
+//! per-product dispatch layer between the two, because a wrapper only one product traversed was drift
+//! surface rather than a guard against it (2026-07-26 `crates/host` teardown).
 
 mod definitions;
 #[cfg(test)]
@@ -26,9 +27,14 @@ pub fn call(params: Option<&serde_json::Value>) -> serde_json::Value {
     let args = params.and_then(|p| p.get("arguments"));
     let outcome = match name {
         "analyze_repo" => (|| {
-            let path = args::required_string(args, "path")?;
+            // `path` XOR `configPath` — the same two source modes the `zzop analyze` CLI twin takes.
+            // Both are OPTIONAL here and the shared handler decides: it owns "exactly one source", so
+            // the two hosts cannot drift on which combinations are legal (a `required_string` here
+            // would have made "neither" this layer's error and "both" the handler's).
+            let path = args::optional_string(args, "path")?;
+            let config_path = args::optional_string(args, "configPath")?;
             let filters = FindingFilters::from_args(args)?;
-            zzop_summary::analyze_summary(path, &filters)
+            zzop_summary::analyze_summary(path, config_path, &filters)
         })(),
         "cross_repo" => (|| {
             // Every declared-type violation (a non-array `paths`, a non-string element inside it, a
@@ -49,6 +55,14 @@ pub fn call(params: Option<&serde_json::Value>) -> serde_json::Value {
                     zzop_summary::cross_summary(&paths, config_path, &filters)
                 }
             }
+        })(),
+        "check_file" => (|| {
+            let target = args::required_string(args, "target")?;
+            let source_id = args::optional_string(args, "sourceId")?;
+            let path = args::optional_string(args, "path")?;
+            let paths = args::optional_string_array(args, "paths")?;
+            let config_path = args::optional_string(args, "configPath")?;
+            zzop_summary::file_summary(target, source_id, path, &paths, config_path)
         })(),
         "check_endpoint" => (|| {
             let pattern = args::required_string(args, "pattern")?;

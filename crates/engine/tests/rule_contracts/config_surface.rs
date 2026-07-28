@@ -17,6 +17,7 @@ pub(crate) struct ConfigKeysSurface {
     pub(crate) top: Vec<String>,
     pub(crate) packs: Vec<String>,
     pub(crate) git: Vec<String>,
+    pub(crate) vocabulary: Vec<String>,
     pub(crate) report: Vec<String>,
     pub(crate) tree: Vec<String>,
     #[serde(rename = "ruleObject")]
@@ -44,7 +45,7 @@ pub(crate) struct ConfigSurface {
     pub(crate) allowlisted_tokens: Vec<String>,
     /// The MCP host's tool-surface vocabulary (tool argument names + the reply fields its
     /// self-description text backticks) — a DIFFERENT dialect from config keys, vouched separately
-    /// so `crates/host/src` joined the CHECK B scan set (2026-07-17) without allowlist-noise.
+    /// so the tool-surface sources joined the CHECK B scan set (2026-07-17) without allowlist-noise.
     /// `default` for the same older-file degradation contract as `embedder_field_shapes`.
     #[serde(default)]
     pub(crate) mcp_tool_tokens: Vec<String>,
@@ -208,6 +209,7 @@ pub(crate) fn unknown_config_context_tokens(
     for scope in [
         &vocab.config_keys.packs,
         &vocab.config_keys.git,
+        &vocab.config_keys.vocabulary,
         &vocab.config_keys.report,
         &vocab.config_keys.tree,
         &vocab.config_keys.rule_object,
@@ -222,7 +224,7 @@ pub(crate) fn unknown_config_context_tokens(
         .map(String::as_str)
         .collect();
     // The MCP tool-surface dialect (tool argument names + backticked reply fields) — a distinct
-    // vocabulary vouched by `mcpToolTokens`, added when `crates/host/src` joined the scan set.
+    // vocabulary vouched by `mcpToolTokens`, added when the tool-surface sources joined the scan set.
     let mcp: BTreeSet<&str> = vocab.mcp_tool_tokens.iter().map(String::as_str).collect();
 
     tokens

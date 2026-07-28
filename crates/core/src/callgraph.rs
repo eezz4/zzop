@@ -104,6 +104,15 @@ fn resolve_one(
 }
 
 /// Resolves the receiver class via import or local, then combines to `<classFile>#<OriginalClass>.<method>`.
+///
+/// **The id it returns is a CANDIDATE, not a verified node.** Nothing here checks that a `SourceSymbol`
+/// with that id exists: an imported name is enough, so a Python `Annotated` alias, a TS `type` alias, or
+/// any other non-class binding mints a well-formed id for a symbol that was never declared. That is
+/// deliberate — a candidate graph is what lets a consumer decide how much evidence it needs — but it is
+/// a contract a consumer must read, and one did not: `mutating_route_no_auth` accepted such an id's
+/// QUALIFIER as auth evidence, so `session: SessionDep` + `session.add(...)` cleared an unauthenticated
+/// write route (2026-07-27, fixed on the rule side by requiring the qualifier name to be a declared
+/// symbol). Any consumer that reads meaning out of an id's SHAPE owes itself the same check.
 /// A namespace receiver (`import * as X` / `var X = require(...)`, `original == "*"`) targets the bare
 /// member `<file>#<method>` — matches how CommonJS/namespace exports are emitted as bare-member symbols.
 fn resolve_method(

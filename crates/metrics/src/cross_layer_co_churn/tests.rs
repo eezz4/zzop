@@ -17,6 +17,8 @@ fn commit(sha: &str, files: &[&str]) -> CommitFileSet {
         files: files.iter().map(|s| s.to_string()).collect(),
         tags: vec![],
         date: None,
+        subject: None,
+        labels: vec![],
     }
 }
 

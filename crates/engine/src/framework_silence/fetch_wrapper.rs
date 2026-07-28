@@ -25,7 +25,7 @@ use super::egress_intent::{arg_region, region_is_internal_intent, ArgSpan};
 /// `send`) or a generic wrapper-object name (`api`, `http`, `client`) real-world wrapper modules export
 /// under (e.g. `export default { get, post }` style access as `api.get(...)`, matched via the exported
 /// default-object accessor name itself). Census-tracked — see `scripts/policy-census.txt`.
-const WRAPPER_EXPORT_NAMES: &[&str] = &[
+pub(crate) const WRAPPER_EXPORT_NAMES: &[&str] = &[
     "get", "post", "put", "del", "delete_", "patch", "request", "send", "api", "http", "client",
 ];
 
@@ -94,9 +94,9 @@ fn exported_names(text: &str) -> BTreeSet<String> {
 
 /// The subset of `WRAPPER_EXPORT_NAMES` that `text` lexically exports, in vocab order (so the warning's
 /// name list is deterministic regardless of the source file's own declaration order).
-fn matched_wrapper_export_names(text: &str) -> Vec<&'static str> {
+fn matched_wrapper_export_names<'a>(text: &str, wrapper_export_names: &[&'a str]) -> Vec<&'a str> {
     let names = exported_names(text);
-    WRAPPER_EXPORT_NAMES
+    wrapper_export_names
         .iter()
         .copied()
         .filter(|vocab| names.contains(*vocab))
@@ -172,6 +172,7 @@ pub fn fetch_wrapper_call_site_warning(
     root: &Path,
     candidate_rels: &[String],
     http_consumes_keyed_count: usize,
+    wrapper_export_names: &[&str],
 ) -> Option<String> {
     if http_consumes_keyed_count >= MIN_PROVIDES_FLOOR {
         return None;
@@ -182,7 +183,7 @@ pub fn fetch_wrapper_call_site_warning(
         .filter(|rel| is_js_ts_family(rel))
         .collect();
 
-    let (wrapper_rel, matched_names) = find_wrapper(root, &js_rels)?;
+    let (wrapper_rel, matched_names) = find_wrapper(root, &js_rels, wrapper_export_names)?;
     let wrapper_stem = wrapper_stem_of(wrapper_rel);
 
     let mut total = 0usize;
@@ -229,7 +230,11 @@ const WRAPPER_FUNNEL_TAIL: &str = "wrapper indirection over builtin fetch is not
 /// that both calls builtin `fetch(` and lexically exports a [`WRAPPER_EXPORT_NAMES`] binding, with the
 /// vocab-ordered subset of names it exports. Deliberately NOT intent-filtered on the wrapper's own
 /// internal `fetch(` — the wrapper's URL is the internal call sites' concern (PASS 2), not PASS 1's.
-fn find_wrapper<'a>(root: &Path, js_rels: &[&'a str]) -> Option<(&'a str, Vec<&'static str>)> {
+fn find_wrapper<'a, 'v>(
+    root: &Path,
+    js_rels: &[&'a str],
+    wrapper_export_names: &[&'v str],
+) -> Option<(&'a str, Vec<&'v str>)> {
     for &rel in js_rels {
         let Ok(text) = fs::read_to_string(root.join(rel)) else {
             continue;
@@ -237,7 +242,7 @@ fn find_wrapper<'a>(root: &Path, js_rels: &[&'a str]) -> Option<(&'a str, Vec<&'
         if !fetch_call_re().is_match(&text) {
             continue;
         }
-        let matched = matched_wrapper_export_names(&text);
+        let matched = matched_wrapper_export_names(&text, wrapper_export_names);
         if !matched.is_empty() {
             return Some((rel, matched));
         }

@@ -22,11 +22,11 @@ pub fn register_native_analyses(registry: &mut RuleRegistry) {
         "cross-layer/path-near-miss",
         "cross-layer/route-near-miss",
         "cross-layer/prefix-drift",
-        "cross-layer/shared-db-table",
+        "cross-layer/db-table-name-in-multiple-sources",
         "cross-layer/duplicate-route",
         "cross-layer/external-shadow-internal",
         "cross-layer/external-secret-in-url",
-        "cross-layer/external-duplicated-integration",
+        "cross-layer/external-host-in-multiple-sources",
         "cross-layer/external-host-fanout",
         "cross-layer/external-base-url-drift",
         "cross-layer/external-version-inconsistent",
@@ -36,7 +36,7 @@ pub fn register_native_analyses(registry: &mut RuleRegistry) {
         "cross-layer/unprovided-mutation-call",
         "cross-layer/route-shadowing",
         "cross-layer/unresolved-consume-ratio",
-        "cross-layer/sdk-import-no-visible-consume",
+        "cross-layer/untraced-client-import-no-visible-consume",
         "cross-layer/unconsumed-procedure",
         "cross-layer/body-field-drift",
         "cross-layer/retrying-write-no-idempotency",
@@ -46,7 +46,11 @@ pub fn register_native_analyses(registry: &mut RuleRegistry) {
     }
 }
 
+pub use cross_layer::external_secret_in_url::SECRET_PARAM_NAMES;
 pub use cross_layer::retrying_write_no_idempotency::IDEMPOTENCY_GUARDED_ATTR;
+pub use cross_layer::unconsumed_endpoint::EXTERNALLY_FETCHED_PATHS;
+pub use cross_layer::CROSS_LAYER_WRITE_METHODS;
+pub use cross_layer::VERSION_SEGMENT_PATTERN;
 pub use cross_layer::{
     ambiguous_consume_findings, body_field_drift_findings, cross_layer_duplicate_route_findings,
     cross_tree_route_shadowing_findings, external_base_url_drift_findings,

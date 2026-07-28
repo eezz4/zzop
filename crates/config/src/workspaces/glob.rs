@@ -1,17 +1,23 @@
 //! Glob expansion + matching engine for `trees: "auto"`. Resolves positive workspace patterns
 //! segment-by-segment against real directories and
-//! applies `!`-negations as whole-path filters; the census-pinned `SKIP_DIRS`/`MAX_GLOB_DEPTH`
-//! constants stay in the parent module. See the `workspaces` module doc for the JS-parity mandate.
+//! applies `!`-negations as whole-path filters; the policy-shaped `MAX_GLOB_DEPTH` constant stays
+//! in the parent module (it is NOT census-tracked, as this line used to claim:
+//! `scripts/check-policy-census.sh` does not scan `crates/config/src`). See the `workspaces` module
+//! doc for the JS-parity mandate.
 
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use super::{MAX_GLOB_DEPTH, SKIP_DIRS};
+use super::MAX_GLOB_DEPTH;
 
 /// Resolve workspace-package glob patterns to the set of relative directories that both match a
 /// positive pattern, survive every `!`-negated pattern, and contain a `package.json`.
 /// Deterministically sorted.
-pub(super) fn resolve_workspace_dirs(base_dir: &Path, patterns: &[String]) -> Vec<String> {
+pub(super) fn resolve_workspace_dirs(
+    base_dir: &Path,
+    patterns: &[String],
+    skip_dirs: &[String],
+) -> Vec<String> {
     let mut positives: Vec<String> = Vec::new();
     let mut negatives: Vec<String> = Vec::new();
     for raw in patterns {
@@ -29,7 +35,7 @@ pub(super) fn resolve_workspace_dirs(base_dir: &Path, patterns: &[String]) -> Ve
     let mut matched: BTreeSet<String> = BTreeSet::new();
     for pattern in &positives {
         let segments = split_pattern(pattern);
-        for rel in expand_segments(base_dir, "", &segments, 0) {
+        for rel in expand_segments(base_dir, "", &segments, 0, skip_dirs) {
             if !rel.is_empty() {
                 matched.insert(rel);
             }
@@ -61,11 +67,12 @@ fn split_pattern(pattern: &str) -> Vec<String> {
         .collect()
 }
 
-/// List immediate subdirectory names of `abs_dir`, excluding `SKIP_DIRS`. Returns `[]` for a
+/// List immediate subdirectory names of `abs_dir`, excluding `skip_dirs` (the run's declared
+/// `vocabulary.workspaceSkipDirs`, with no fallback — an empty list skips nothing). Returns `[]` for a
 /// missing/unreadable directory (a glob pattern pointing at a non-existent path simply matches
 /// nothing). Does not follow symlinks (mirrors Node's `Dirent.isDirectory()`, which reflects the raw
 /// directory-entry type, not the symlink target).
-fn list_subdirs(abs_dir: &Path) -> Vec<String> {
+fn list_subdirs(abs_dir: &Path, skip_dirs: &[String]) -> Vec<String> {
     let entries = match std::fs::read_dir(abs_dir) {
         Ok(e) => e,
         Err(_) => return Vec::new(),
@@ -77,7 +84,7 @@ fn list_subdirs(abs_dir: &Path) -> Vec<String> {
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
-        if SKIP_DIRS.contains(&name.as_str()) {
+        if skip_dirs.iter().any(|d| d == &name) {
             continue;
         }
         dirs.push(name);
@@ -93,6 +100,7 @@ fn expand_segments(
     current_rel: &str,
     segments: &[String],
     depth: u32,
+    skip_dirs: &[String],
 ) -> Vec<String> {
     if segments.is_empty() {
         return vec![current_rel.to_string()];
@@ -112,16 +120,28 @@ fn expand_segments(
 
     if seg == "**" {
         // Zero levels: apply the rest right here. One-or-more: recurse into each subdir keeping `**`.
-        results.extend(expand_segments(base_dir, current_rel, rest, depth));
-        for sub in list_subdirs(&current_abs) {
+        results.extend(expand_segments(
+            base_dir,
+            current_rel,
+            rest,
+            depth,
+            skip_dirs,
+        ));
+        for sub in list_subdirs(&current_abs, skip_dirs) {
             let next_rel = join_rel(current_rel, &sub);
-            results.extend(expand_segments(base_dir, &next_rel, segments, depth + 1));
+            results.extend(expand_segments(
+                base_dir,
+                &next_rel,
+                segments,
+                depth + 1,
+                skip_dirs,
+            ));
         }
         return results;
     }
 
     let is_wild = seg.contains('*') || seg.contains('?');
-    for sub in list_subdirs(&current_abs) {
+    for sub in list_subdirs(&current_abs, skip_dirs) {
         let is_match = if is_wild {
             segment_matches(seg, &sub)
         } else {
@@ -129,7 +149,13 @@ fn expand_segments(
         };
         if is_match {
             let next_rel = join_rel(current_rel, &sub);
-            results.extend(expand_segments(base_dir, &next_rel, rest, depth + 1));
+            results.extend(expand_segments(
+                base_dir,
+                &next_rel,
+                rest,
+                depth + 1,
+                skip_dirs,
+            ));
         }
     }
     results

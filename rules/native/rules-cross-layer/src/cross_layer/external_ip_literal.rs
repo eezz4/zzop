@@ -2,7 +2,7 @@
 //! (dotted-quad IPv4, or bracketed IPv6) rather than a hostname. A hardcoded IP pins the call to one specific
 //! network/environment and silently breaks — or silently points elsewhere — once the target moves; hostnames
 //! exist so infra can rotate underneath a stable name. Loopback literals (`127.0.0.0/8`, `[::1]`) are excluded
-//! as the separate "committed dev config" smell owned by the DSL `localhost-egress-committed` rule.
+//! as the separate "committed dev config" smell owned by the DSL `localhost-url-literal-committed` rule.
 //! Private-range IPs (`10.x`, `192.168.x`, ...) are NOT excluded: a hardcoded internal IP is still the
 //! environment-drift signal this rule exists to surface. Anchored at the consume site.
 
@@ -99,7 +99,8 @@ pub fn external_ip_literal_findings(external_consumes: &[TaggedConsume]) -> Vec<
              break — or silently point at the wrong place — if the target ever moves; DNS-backed hostnames \
              are what let infra rotate underneath a stable name. Verify whether this should be a real hostname \
              (config/DNS drift) and replace the literal with one. (Loopback literals like `127.0.0.1`/`[::1]` \
-             are intentionally not flagged here — that's the DSL `localhost-egress-committed` rule's turf.) \
+             are intentionally not flagged here — that's the DSL `localhost-url-literal-committed` rule's \
+             turf.) \
              {} if this integration legitimately targets a fixed IP on purpose (e.g. a pinned on-prem \
              appliance with no DNS entry).",
             url.method, url.host, url.path, c.source,

@@ -4,10 +4,25 @@
 # Enable once per clone (no dependency on husky or any package manager; plain git):
 #   git config core.hooksPath .githooks
 #
-# Scope: the fast, working-tree-only guards. The parser-fingerprint guard is excluded (it diffs
-# against a base commit — a release/CI concern, not a per-commit one), as are cargo test/clippy
-# (too slow for a hook; CI owns them). Note the guards scan the WORKING TREE, not the index — a
-# violation in an unstaged file also blocks the commit; stash if that's ever wrong.
+# Scope: the fast guards. cargo test/clippy are excluded (too slow for a hook; CI owns them).
+#
+# check-parser-fingerprint-bump USED to be excluded here too, on the reasoning that it "diffs against
+# a base commit — a release/CI concern, not a per-commit one". That reasoning was wrong in exactly the
+# way that mattered: this project's batch flow leaves a whole batch uncommitted, so at the moment the
+# guard's subject (an unbumped fingerprint) is most likely to exist, the only two lanes running it
+# (pre-push, CI) had not run yet — and the guard itself, on a 100%-uncommitted batch, read the empty
+# range and printed OK having looked at nothing. It now reads the WORKING TREE for its file list (see
+# its own header), which is precisely the bytes a pre-commit hook is supposed to judge, so it belongs
+# in this array. It is still ALSO wired into .githooks/pre-push, which asks the different, push-shaped
+# question (does the outgoing COMMIT range carry the bump / the squash marker?).
+#
+# Which bytes the guards read: the WORKING TREE, not the index — a violation in an unstaged file also
+# blocks the commit; stash if that's ever wrong. ONE guard deliberately differs:
+# check-vendor-token-literals scans the INDEX as well, because its subject is what a push carries and
+# a commit carries staged content, not working-tree content (see its header for the false green that
+# forced this). Its index pass reads $GIT_INDEX_FILE, which git sets for this hook — so it judges the
+# right bytes under `git commit -a` and `git commit <paths>` too, both of which build a temporary
+# index before running us.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -20,15 +35,21 @@ GUARDS=(
   check-tree-sitter-isolation
   check-guards-wired
   check-rules-catalog-sync
+  check-rule-desc-tokens
   check-docs-rule-ids
   check-docs-link-graph
   check-io-key-vocab
   check-policy-census
+  check-convention-vocab-declarable
+  check-example-config-vocabulary
   check-shell-pipe-sigpipe
   check-version-lists-parsers
   check-asset-name-prose
   check-deploy-facts-prose
   check-overclaim-prose
+  check-vendor-token-literals
+  check-server-json-hashes
+  check-parser-fingerprint-bump
 )
 
 for g in "${GUARDS[@]}"; do

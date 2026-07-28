@@ -21,10 +21,12 @@ use super::FileArtifact;
 /// Cache flow: content-hash `bytes` -> `get_ir`. IR miss -> full parse via `compute_fresh_artifact`,
 /// then `put_ir` + `put_findings`. IR hit + findings hit -> full skip, no reparse. IR hit but findings
 /// miss (ruleset-only change) -> reuse the cached `FileIrSlice`, re-run `eval_packs`, `put_findings`.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn process_file(
     rel: &str,
     abs: &Path,
     config: &EngineConfig,
+    vocab: &crate::vocabulary::ResolvedVocabulary<'_>,
     packs: &[&RulePackDef],
     cache: Option<&AnalysisCache>,
     ruleset_fingerprint: Option<&str>,
@@ -74,6 +76,9 @@ pub(super) fn process_file(
             // Without `scope`, two different files with byte-identical content could alias each
             // other's cached IR/findings (which embed their own `file` path).
             scope: crate::cache::cache_scope(config, rel),
+            // In BOTH halves of the key (the `IrKey` projection keeps it): a declared vocabulary changes
+            // what the per-file projection extracts, not only what the rules say about it.
+            vocabulary_fingerprint: crate::cache::vocabulary_fingerprint(config),
             ruleset_fingerprint: rsfp.to_string(),
         }),
         _ => None,
@@ -103,7 +108,12 @@ pub(super) fn process_file(
                 config.profile_rules,
             );
             if schema_findings_eligible(language, ir.degraded) {
-                findings.extend(schema_findings(&config.rule_config, rel, &text));
+                findings.extend(schema_findings(
+                    &config.rule_config,
+                    rel,
+                    &text,
+                    &vocab.money_tokens,
+                ));
             }
             let _ = cache.put_findings(key, &findings);
             if let Some(c) = counters {
@@ -119,7 +129,7 @@ pub(super) fn process_file(
     }
 
     let text = String::from_utf8_lossy(&bytes).into_owned();
-    let artifact = compute_fresh_artifact(rel, &bytes, &text, language, config, packs);
+    let artifact = compute_fresh_artifact(rel, &bytes, &text, language, config, vocab, packs);
 
     if let (Some(cache), Some(key)) = (cache, cache_key.as_ref()) {
         let ir_slice = FileIrSlice {

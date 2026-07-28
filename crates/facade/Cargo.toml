@@ -10,13 +10,15 @@ zzop-core = { path = "../core" }
 zzop-metrics = { path = "../metrics" }
 zzop-engine = { path = "../engine" }
 # Data dependency only: `zzop-config` owns the ONE compile-time embed of the bundled rule packs
-# (`BUNDLED_PACK_SOURCES`, build.rs) — `analyze_envelope_json`'s bundled-pack default reuses it
-# instead of embedding the same JSON a second time ("one embed, one truth"). No config-front-end
-# logic (discovery/JSONC/mapping) is called from this crate; the dependency edge is acyclic
-# (`zzop-config` depends only on `serde_json`).
+# (`BUNDLED_PACK_SOURCES`, build.rs) — both `analyze_envelope_json`'s bundled-pack default and
+# `explain`'s rule lookup read it instead of embedding the same JSON a second time ("one embed, one
+# truth"). No config-front-end logic (discovery/JSONC/mapping/request assembly) is called from this
+# crate; the dependency edge stays acyclic (`zzop-config` depends only on `serde_json` + `zzop-cache`
+# and must never depend on this crate's request types — see `src/lib.rs`'s corollary).
 zzop-config = { path = "../config" }
-# Path deps purely for `version()`'s diagnostic string (`PARSER_FINGERPRINT` constants) — not part of the
-# analyze pipeline itself (that lives entirely inside `zzop-engine`).
+# Path deps purely for `version_string()`'s diagnostic form (`PARSER_FINGERPRINT` constants) — NOT for
+# `version()`, the bare form in the same module, which reads no parser at all. Not part of the analyze
+# pipeline either (that lives entirely inside `zzop-engine`).
 zzop-parser-typescript = { path = "../../parser/parser-typescript" }
 zzop-parser-prisma = { path = "../../parser/parser-prisma" }
 zzop-parser-python-3 = { path = "../../parser/parser-python-3" }

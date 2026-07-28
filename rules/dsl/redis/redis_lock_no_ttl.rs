@@ -46,7 +46,7 @@ fn lock_ttl_ok_marker_above_the_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-redis");
     dir.write(
         "src/jobLockSuppressed.ts",
-        "import { redis } from \"./redis\";\nexport async function acquireJobLock() {\n  // lock-no-ttl-ok: TTL applied via a separate PEXPIRE call right after, in a wrapper not on this line\n  await redis.set(\"lock:job\", 1, \"NX\");\n}\n",
+        "import { redis } from \"./redis\";\nexport async function acquireJobLock() {\n  // zzop-lock-no-ttl-ok: TTL applied via a separate PEXPIRE call right after, in a wrapper not on this line\n  await redis.set(\"lock:job\", 1, \"NX\");\n}\n",
     );
     let out = scan(&dir);
     assert!(hits(&out, "lock-no-ttl").is_empty(), "{:?}", out.findings);

@@ -56,28 +56,45 @@ fn compute(
     )
 }
 
-/// Every field's `.score`, paired with its name — Rust has no dynamic key iteration over a struct, so
-/// this collects the 17 scores into a fixed-size array up front.
-fn all_scores(s: &Scores) -> [(&'static str, f64); 17] {
-    [
-        ("fsd", s.fsd.score),
-        ("cohesion", s.cohesion.score),
-        ("coupling", s.coupling.score),
-        ("sdp", s.sdp.score),
-        ("hierarchy", s.hierarchy.score),
-        ("public_api", s.public_api.score),
-        ("sfc", s.sfc.score),
-        ("main_sequence", s.main_sequence.score),
-        ("modularity", s.modularity.score),
-        ("god_file", s.god_file.score),
-        ("sibling_cross", s.sibling_cross.score),
-        ("diamond", s.diamond.score),
-        ("rename_instability", s.rename_instability.score),
-        ("bus_factor", s.bus_factor.score),
-        ("fix_ratio", s.fix_ratio.score),
-        ("type_safety", s.type_safety.score),
-        ("lod", s.lod.score),
-    ]
+/// Every metric's `.score`, paired with its field name — read out of the SERIALIZED `Scores` rather
+/// than dot-accessed field by field. Rust has no dynamic key iteration over a struct, but `Scores` is
+/// `Serialize`, and walking the resulting JSON map is the same trick
+/// `crates/engine/src/cross_layer_findings/merge_config.rs` uses for the same reason: a hand-written
+/// field list only ever covers the struct of the day it was written, so an 18th metric shipped with an
+/// out-of-range or non-baseline score while all three callers below stayed green (measured 2026-07-28).
+///
+/// Every top-level field is REQUIRED to be an object carrying a numeric `score`, which is what `Scores`
+/// is documented to be ("one field per structural-health metric"). A field that is not fails here
+/// rather than being skipped — a walk that silently ignores what it does not understand is the same
+/// blindness in a new shape.
+fn all_scores(s: &Scores) -> Vec<(String, f64)> {
+    let value = serde_json::to_value(s).expect("Scores is Serialize");
+    let obj = value
+        .as_object()
+        .expect("Scores must serialize to a JSON object");
+    let out: Vec<(String, f64)> = obj
+        .iter()
+        .map(|(name, metric)| {
+            let score = metric
+                .get("score")
+                .and_then(serde_json::Value::as_f64)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Scores field {name:?} carries no numeric `score` — every field of Scores is \
+                         one structural-health metric; if that stopped being true, say so here rather \
+                         than letting the walk skip it"
+                    )
+                });
+            (name.clone(), score)
+        })
+        .collect();
+    assert!(
+        out.len() >= 10,
+        "the Scores walk found {} metric(s) — an empty or collapsed subject set must be RED, never a \
+         silent pass",
+        out.len()
+    );
+    out
 }
 
 #[test]

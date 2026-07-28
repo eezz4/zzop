@@ -4,11 +4,15 @@
 # mechanically enforces that a newly authored guard actually runs anywhere; without this, a guard
 # can be written, committed, and quietly never invoked again.
 #
-# Single hardcoded exception: check-parser-fingerprint-bump.sh is RANGE-based (it diffs a
-# base..head commit range — see its own header comment) and structurally cannot run from
-# pre-commit, which only ever sees the working tree, not a range (see .githooks/pre-commit's own
-# "Scope" comment). It is wired into .githooks/pre-push instead, plus its own CI step in
-# ci.yml — both of those are what this guard checks for it, in place of pre-commit.
+# Single hardcoded EXTRA requirement (2026-07-26 — it used to be an EXEMPTION):
+# check-parser-fingerprint-bump.sh must additionally be wired into .githooks/pre-push. It used to be
+# exempted from the pre-commit requirement on the claim that it "structurally cannot run from
+# pre-commit, which only ever sees the working tree, not a range". Both halves were wrong once
+# measured: the guard now takes its file list from the working tree when the range's right end is
+# HEAD (see its own header), and the batch flow that leaves work uncommitted is exactly when its
+# subject exists. So it is held to the same pre-commit + CI bar as every sibling, and pre-push — which
+# asks the separate push-shaped question about the outgoing COMMIT range — is asserted on top.
+# A hardcoded name that only ever ADDS a requirement cannot become a hole; the old spelling could.
 #
 # This script wires itself the same way its siblings are wired (see .githooks/pre-commit and
 # ci.yml, both updated alongside this file) rather than special-casing itself out of the
@@ -23,6 +27,18 @@
 # under scripts/lib/, has no independent exit status of its own, and is only ever sourced by a real
 # guard -- the `git ls-files -z -- 'scripts/check-*.sh'` glob below does not (and must not) match it.
 #
+# SECOND SUBJECT (2026-07-28): cross-workflow `workflow_run: workflows: [<name>]` references.
+# Added here rather than as a 24th scripts/check-*.sh because this file is already the repo's answer to
+# "is the defense actually CONNECTED to a trigger" — and a new script would itself need wiring into
+# pre-commit, ci.yml and this very loop to be worth anything.
+#
+# The reference is by workflow NAME, not by path, and GitHub resolves an unknown name to SILENCE: the
+# dependent workflow simply never fires, with no error anywhere. `.github/workflows/pages.yml` gates the
+# public site on `workflows: [ci]`, so renaming ci.yml's `name:` would not break the gate loudly — it
+# would remove it, and the only symptom is a site that quietly stops updating. That is a literal
+# cross-file constant with nothing checking it, i.e. the same shape this repo spent 2026-07-28 removing
+# from sixteen guards, committed in the very edit that added the gate.
+#
 # No deps beyond git + grep + awk. Exit 1 on any violation, listing the exact (guard,
 # missing-location) pairs.
 set -euo pipefail
@@ -33,9 +49,10 @@ PRE_PUSH=.githooks/pre-push
 CI=.github/workflows/ci.yml
 TRACKED_GREP_LIB=scripts/lib/tracked-grep.sh
 
-RANGE_BASED_EXCEPTION="check-parser-fingerprint-bump"
+ALSO_NEEDS_PRE_PUSH="check-parser-fingerprint-bump"
 
-missing=0
+missing=0        # any failure at all -> exit 1
+wiring_missing=0 # the scripts/check-*.sh axis only, so its spelling epilogue prints only for it
 count=0
 
 # Is `scripts/<base>.sh` INVOKED on a code line of <file>? Full-line comments are skipped — the same
@@ -137,49 +154,132 @@ list_guards() {
 if [ ! -f "$TRACKED_GREP_LIB" ]; then
   echo "check-guards-wired: $TRACKED_GREP_LIB -- missing. Several isolation/scope guards source it" >&2
   echo "  for their TRACKED-file enumeration; without it they fail at the '. ./$TRACKED_GREP_LIB' line." >&2
-  missing=1
+  missing=1; wiring_missing=1
 fi
 
 while IFS= read -r -d '' f; do
   base="$(basename "$f" .sh)"
   count=$((count + 1))
 
-  if [ "$base" = "$RANGE_BASED_EXCEPTION" ]; then
-    if ! invoked_in "$PRE_PUSH" "$base"; then
-      echo "check-guards-wired: ($base, $PRE_PUSH) -- range-based guard not wired into pre-push"
-      missing=1
-    fi
-    if ! invoked_in "$CI" "$base"; then
-      echo "check-guards-wired: ($base, $CI) -- range-based guard not wired into CI"
-      missing=1
-    fi
-    continue
+  if [ "$base" = "$ALSO_NEEDS_PRE_PUSH" ] && ! invoked_in "$PRE_PUSH" "$base"; then
+    echo "check-guards-wired: ($base, $PRE_PUSH) -- range-based guard not wired into pre-push"
+    missing=1; wiring_missing=1
   fi
 
   if ! grep -qE "^[[:space:]]*${base}[[:space:]]*$" "$PRE_COMMIT"; then
     echo "check-guards-wired: ($base, $PRE_COMMIT) -- not wired into pre-commit's GUARDS array"
-    missing=1
+    missing=1; wiring_missing=1
   fi
 
   if ! invoked_in "$CI" "$base"; then
     echo "check-guards-wired: ($base, $CI) -- not wired into CI's guards job"
-    missing=1
+    missing=1; wiring_missing=1
   fi
 done < <(list_guards)
 
-if [ "$missing" -ne 0 ]; then
+# --- cross-workflow `workflow_run` name references --------------------------------------------------
+# One awk pass over every tracked workflow: collect each file's `name:`, collect every workflow named by
+# a `workflow_run:` block, then in END report the references that resolve to nothing. Both YAML list
+# spellings are read (`workflows: [a, b]` and a `-` block), because accepting only the one this repo
+# happens to use today would make a legal rewrite look like a broken reference.
+workflow_files=()
+while IFS= read -r -d '' f; do
+  workflow_files+=("$f")
+done < <(git ls-files -z -- '.github/workflows/*.yml' '.github/workflows/*.yaml')
+
+if [ "${#workflow_files[@]}" -eq 0 ]; then
+  echo "check-guards-wired: FAILED -- enumerated ZERO workflow files. The workflow_run cross-reference"
+  echo "check therefore proved nothing. An empty subject set is a broken guard, never a clean tree."
+  missing=1
+else
+  dangling="$(awk '
+    function indent_of(s,   i) { i = match(s, /[^ ]/); return (i == 0 ? -1 : i - 1) }
+    FNR == 1 { inrun = 0; inlist = 0 }
+    /^[[:space:]]*#/ { next }
+    # A workflow`s own name. First one wins: `name:` also appears on steps, but always indented.
+    /^name:[[:space:]]*[^[:space:]]/ {
+      if (!(FILENAME in selfname)) {
+        v = $0; sub(/^name:[[:space:]]*/, "", v)
+        gsub(/^["\047]|["\047][[:space:]]*$/, "", v); sub(/[[:space:]]+$/, "", v)
+        selfname[FILENAME] = v; names[v] = 1
+      }
+      next
+    }
+    /^[[:space:]]*workflow_run:[[:space:]]*$/ { inrun = 1; runind = indent_of($0); inlist = 0; next }
+    # Any line at or left of `workflow_run:` closes its block.
+    inrun && /[^[:space:]]/ && indent_of($0) <= runind { inrun = 0; inlist = 0 }
+    inrun && /^[[:space:]]*workflows:[[:space:]]*\[/ {
+      v = $0; sub(/^[^\[]*\[/, "", v); sub(/\].*$/, "", v)
+      n = split(v, parts, ",")
+      for (i = 1; i <= n; i++) {
+        w = parts[i]; gsub(/^[[:space:]]*["\047]?|["\047]?[[:space:]]*$/, "", w)
+        if (w != "") refs[++nref] = FILENAME "\t" FNR "\t" w
+      }
+      inlist = 0; next
+    }
+    inrun && /^[[:space:]]*workflows:[[:space:]]*$/ { inlist = 1; listind = indent_of($0); next }
+    inlist && /^[[:space:]]*-[[:space:]]*[^[:space:]]/ && indent_of($0) > listind {
+      w = $0; sub(/^[[:space:]]*-[[:space:]]*/, "", w)
+      gsub(/^["\047]|["\047][[:space:]]*$/, "", w); sub(/[[:space:]]+$/, "", w)
+      if (w != "") refs[++nref] = FILENAME "\t" FNR "\t" w
+      next
+    }
+    inlist && /[^[:space:]]/ { inlist = 0 }
+    END {
+      # `#total` and not an empty leading field: TAB is IFS whitespace, so bash `read` collapses a
+      # leading empty field and the count line would arrive shifted, be read as a file path, and
+      # report itself as a dangling reference. Observed, not reasoned about. No real path can
+      # collide -- every one of these starts with `.github/`.
+      print "#total\t" nref + 0
+      for (i = 1; i <= nref; i++) { split(refs[i], r, "\t"); if (!(r[3] in names)) print refs[i] }
+    }
+  ' "${workflow_files[@]}")"
+
+  wf_refs=""
+  while IFS=$'\t' read -r wf wl wn; do
+    # The count line, matched before anything treats it as a path. It exists so a green states how many
+    # references were actually resolved, rather than letting "no dangling references" read identically
+    # whether there were nine or zero.
+    if [ "$wf" = "#total" ]; then wf_refs="$wl"; continue; fi
+    [ -n "$wf" ] || continue
+    echo "check-guards-wired: ($wf:$wl, workflow_run) -- waits on a workflow named \"$wn\", and no"
+    echo "  .github/workflows/*.yml declares that name. GitHub resolves an unknown name to SILENCE, so"
+    echo "  this workflow would never run again -- and nothing else would say so."
+    missing=1
+  done <<< "$dangling"
+fi
+
+# The epilogue below is SPELLING advice about scripts/check-*.sh wiring. Printing it after a dangling
+# `workflow_run` failure would send the reader to the wrong file entirely, so it is bound to the wiring
+# axis rather than to `missing` — which now has two contributors.
+if [ "$missing" -ne 0 ] && [ "$wiring_missing" -ne 0 ]; then
   echo
   echo "check-guards-wired: every scripts/check-*.sh must run in BOTH .githooks/pre-commit and"
-  echo ".github/workflows/ci.yml's guards job. The one hardcoded exception is"
-  echo "check-parser-fingerprint-bump.sh, which is range-based and runs from .githooks/pre-push"
-  echo "plus its own CI step instead of pre-commit."
+  echo ".github/workflows/ci.yml's guards job. check-parser-fingerprint-bump.sh must ALSO run from"
+  echo ".githooks/pre-push (the outgoing-commit-range question); that is an extra requirement on top"
+  echo "of the two, not a substitute for them."
   echo
   echo "If the guard IS wired and this still fails, check the SPELLING: ci.yml/pre-push invocations"
   echo "are recognized only as 'bash scripts/<name>.sh', 'sh scripts/<name>.sh', './scripts/<name>.sh'"
   echo "(flags and a quoted path are fine, anywhere on the line). A bare 'scripts/<name>.sh' with no"
   echo "interpreter, or a variable path prefix, is NOT recognized — deliberately, see this script's"
   echo "header. Use one of the accepted spellings; .githooks/pre-commit wires by GUARDS-array entry."
+fi
+
+if [ "$missing" -ne 0 ]; then
   exit 1
 fi
 
-echo "check-guards-wired: clean ($count guards checked)."
+# The subject set is a glob, and a glob that stops matching makes THIS guard — the one whose whole
+# job is proving the fleet is wired — certify a fleet of nothing. Measured 2026-07-28 by redirecting
+# the pathspec in a scratch copy: it printed "clean (0 guards checked)" and exited 0. That is the
+# repo's own twice-paid class (a scan root pointing at a deleted directory, green while reading
+# nothing), landing on the meta-guard itself.
+if [ "$count" -eq 0 ]; then
+  echo "check-guards-wired: FAILED -- enumerated ZERO guards. scripts/check-*.sh matched nothing, so"
+  echo "this run proved nothing about whether any guard is wired. Fix the enumeration before trusting"
+  echo "a green from this script; an empty subject set is a broken guard, never a clean fleet."
+  exit 1
+fi
+
+echo "check-guards-wired: clean ($count guards checked; ${#workflow_files[@]} workflows, ${wf_refs:-0} workflow_run reference(s) resolved)."

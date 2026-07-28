@@ -23,6 +23,8 @@ pub(super) struct FragmentBuilder<'a> {
     pub(super) receivers: &'a HashSet<String>,
     /// Subset of `receivers` recognized via Express shapes — gates the `.use`-as-`Mount` rule.
     pub(super) express_receivers: &'a HashSet<String>,
+    /// The run's declared guard/idempotency name vocabulary (`super::RouterMountVocab`).
+    pub(super) vocab: &'a super::RouterMountVocab<'a>,
     pub(super) fragments: Vec<RouterMountFragment>,
     pub(super) index: HashMap<String, usize>,
 }
@@ -162,11 +164,11 @@ impl FragmentBuilder<'_> {
                 if (call.args.len() > 2
                     && call.args[1..call.args.len() - 1]
                         .iter()
-                        .any(|a| judge_guard_arg(unwrap_expr(&a.expr))))
+                        .any(|a| judge_guard_arg(unwrap_expr(&a.expr), self.vocab)))
                     || call
                         .args
                         .last()
-                        .is_some_and(|a| judge_guard_wrapper_arg(unwrap_expr(&a.expr)))
+                        .is_some_and(|a| judge_guard_wrapper_arg(unwrap_expr(&a.expr), self.vocab))
                 {
                     attr_keys.push(AUTH_GUARDED_ATTR_KEY.to_string());
                 }
@@ -175,11 +177,12 @@ impl FragmentBuilder<'_> {
                 // be present on the same entry). `.all` expansion below clones `attr_keys` to
                 // every verb, which is correct — the guard is a property of the handler, not of
                 // any one HTTP method.
-                if call
-                    .args
-                    .last()
-                    .is_some_and(|a| inline_handler_reads_idempotency_key(unwrap_expr(&a.expr)))
-                {
+                if call.args.last().is_some_and(|a| {
+                    inline_handler_reads_idempotency_key(
+                        unwrap_expr(&a.expr),
+                        self.vocab.idempotency_header_names,
+                    )
+                }) {
                     attr_keys.push(IDEMPOTENCY_GUARDED_ATTR_KEY.to_string());
                 }
                 // `HTTP_KEY_VERBS` are already uppercase; a single verb uppercases its own spelling.
@@ -226,7 +229,7 @@ impl FragmentBuilder<'_> {
             // doc for the full 1-arg/2-arg/multi-arg shape spec and the guard-name judgment it
             // layers on top (a RECOGNIZED guard name/callee mints `attr_keys`/`ScopedAttr` rather
             // than being silently dropped).
-            "use" if is_express => classify_use_call(call, line, self.imports),
+            "use" if is_express => classify_use_call(call, line, self.imports, self.vocab),
             _ => Vec::new(),
         }
     }

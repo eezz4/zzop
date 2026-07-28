@@ -99,9 +99,10 @@ pub(super) fn collect(
     // `analyze::diagnostics::capability` exists to prevent. Sourcing the set from the apply result instead
     // of from config is what makes "declared coverage" and "real coverage" impossible to confuse.
     //
-    // NOTE the `dead-candidates` `is_entry` union in `super::rules` still reads `config.adapter_overlays`
-    // directly and so still honors a rejected overlay's `is_entry` declarations — a separate (opposite-
-    // direction, non-disclosure) gap, untouched here.
+    // The `dead-candidates` `is_entry` union in `super::rules` now follows the same rule, through the
+    // same return value's `entry_paths` half (`envelope::OverlayApplication`): it used to read
+    // `config.adapter_overlays` directly and so honored a REJECTED overlay's `is_entry`, leaving a dead
+    // file exempt forever. `super::rules::GraphInputs::overlay_entry_paths` carries the fix.
 
     for artifact in artifacts {
         loc_by_path.insert(artifact.rel.clone(), artifact.loc);
@@ -229,7 +230,7 @@ pub(super) fn collect(
 
     // F5 drain: `ts_paths`/`rust_workspace`/etc. are all final now (every artifact's own `insert` above
     // has run) — see `census`'s own doc for what each drain resolves and why a resolved specifier must
-    // not pollute `package_import_files` (S2/S4's tripwires, `cross-layer/sdk-import-no-visible-consume`).
+    // not pollute `package_import_files` (S2/S4's tripwires, `cross-layer/untraced-client-import-no-visible-consume`).
     census::drain_python_candidates(
         python_package_import_candidates,
         &ts_paths,

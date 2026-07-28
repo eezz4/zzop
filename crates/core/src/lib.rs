@@ -60,8 +60,8 @@ pub use node::{
     RiskWeights, DEFAULT_RECENT_THRESHOLD_DAYS, DEFAULT_WEIGHTS,
 };
 pub use normalized::{
-    validate_envelope, FileProjection, NormalizedEnvelope, NORMALIZED_AST_FORMAT,
-    SUPPORTED_NORMALIZED_AST_VERSION,
+    envelope_hints, validate_envelope, validate_envelope_verdict, EnvelopeVerdict, FileProjection,
+    NormalizedEnvelope, NORMALIZED_AST_FORMAT, SUPPORTED_NORMALIZED_AST_VERSION,
 };
 pub use pack_loader::{
     applies_to, check_dsl_schema_version, load_dsl_packs, pack_regex_issues, parse_dsl_pack,

@@ -56,7 +56,7 @@ fn goroutine_in_loop_ok_marker_directly_above_the_go_line_suppresses_the_finding
     let dir = TempDir::new("zzop-go");
     dir.write(
         "worker.go",
-        "package main\n\nfunc f(items []int) {\n\tfor _, it := range items {\n\t\t// goroutine-in-loop-ok: bounded fixture list, single-shot job runner\n\t\tgo process(it)\n\t}\n}\n\nfunc process(it int) {}\n",
+        "package main\n\nfunc f(items []int) {\n\tfor _, it := range items {\n\t\t// zzop-goroutine-in-loop-ok: bounded fixture list, single-shot job runner\n\t\tgo process(it)\n\t}\n}\n\nfunc process(it int) {}\n",
     );
     let out = scan(&dir);
     assert!(

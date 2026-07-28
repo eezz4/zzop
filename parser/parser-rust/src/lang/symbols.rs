@@ -75,7 +75,7 @@ fn is_exported(vis: &Visibility) -> bool {
 /// The final path segment of a `syn::Type`, e.g. `Foo` from `Foo<T>` or from `crate::mod_a::Foo`.
 /// `None` for any non-`Type::Path` shape (a reference, tuple, etc.) — those `impl` self-types are out of
 /// v1 scope (never guessed at; document via the caller skipping the whole `impl` block).
-fn type_leaf_name(ty: &syn::Type) -> Option<String> {
+pub(crate) fn type_leaf_name(ty: &syn::Type) -> Option<String> {
     let syn::Type::Path(tp) = ty else { return None };
     tp.path.segments.last().map(|s| s.ident.to_string())
 }

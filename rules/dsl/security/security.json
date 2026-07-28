@@ -5,7 +5,7 @@
     {
       "id": "hardcoded-secret",
       "severity": "warning",
-      "message": "Hardcoded secret-shaped literal (an API-key/password/token assignment, or a known cloud-key prefix) — a credential committed to source is exposed to every reader/fork/clone and cannot be rotated without a code change. Move it to an environment variable or a secrets manager (e.g. `process.env.API_KEY`) — but that only stops the NEXT leak: this value is already exposed via git history and any forks/clones that pulled it, so rotate/revoke the actual credential too. The match is NOT on the property name alone — a VALUE-SHAPE gate rejects identifier-shaped values: any literal built from letter-only words joined by `-`/`_` (`\"mantine-DatePickerInput-input\"`, `\"refresh-token\"`, `\"MY_API_KEY\"`) is a CSS class / selector / constant name, not a credential, and is dropped in any casing. That CASING-AGNOSTIC arm belongs to THIS rule only: the sibling CRITICAL rule `security/jwt-sign-literal-secret` keeps just the all-lowercase `snake_case`/`kebab-case` arms (the `UPPER_SNAKE` and `PascalCase` shapes are dropped by both), so a MIXED-CASE identifier-shaped value is silent here and still fires there — `apiKey: \"Mantine_DatePicker_Input\"` reports nothing while `jwt.sign(payload, \"Mantine_DatePicker_Input\")` on the next line reports a critical. That split is deliberate, not drift: the false positives that widened this veto were all measured on the `key: value` assignment shape, none on the positional `jwt.sign` shape, and widening a CRITICAL rule's veto with no measurement behind it buys silence, not signal. Measured on the corpus that motivated the gate (all seven findings came from one `ALLOW` table in a lint script): SIX of the seven are dropped by it. The seventh, `token: \"adsbygoogle\"`, is a separator-free single word and DELIBERATELY still fires — no shape test tells it apart from a weak literal password like `token: \"letmeinplease\"`, and silencing the one would silence the other. A value whose segments carry digits keeps firing (`\"sk-a1B2c3D4e5F6g7H8i9J0\"`), as does a separator-free word (`\"Changemeplease\"`), so weak literal passwords are not silenced. Blind spot, measured rather than guessed: this is a SHAPE test, not entropy, so a passphrase-style credential built from dictionary words (`\"correct-horse-battery-staple\"`, `\"trombone_ravine_wallet_ember\"`) is ALWAYS silenced, and a random base64url token is silenced whenever it happens to draw no digits — about 0.9% of 24-char, 0.26% of 32-char and 0.04% of 43-char tokens (200k samples each). Nothing is lost for base64-standard, hex or alphanumeric values (0%, those alphabets carry no `-`/`_`), and every common vendor prefix keeps firing (AWS `AKIA…`, `sk_live_…`, `ghp_…`, `xoxb-…`). The honest fix needs a string-literal-with-binding-name IR node the matcher does not have, so shape is the ceiling here. Suppress a vetted case with `// hardcoded-secret-ok`.",
+      "message": "Hardcoded secret-shaped literal (an API-key/password/token assignment, or a known cloud-key prefix) — a credential committed to source is exposed to every reader/fork/clone and cannot be rotated without a code change. Move it to an environment variable or a secrets manager (e.g. `process.env.API_KEY`) — but that only stops the NEXT leak: this value is already exposed via git history and any forks/clones that pulled it, so rotate/revoke the actual credential too. The match is NOT on the property name alone — a VALUE-SHAPE gate rejects identifier-shaped values: any literal built from letter-only words joined by `-`/`_` (`\"mantine-DatePickerInput-input\"`, `\"refresh-token\"`, `\"MY_API_KEY\"`) is a CSS class / selector / constant name, not a credential, and is dropped in any casing. That CASING-AGNOSTIC arm belongs to THIS rule only: the sibling CRITICAL rule `security/jwt-sign-literal-secret` keeps just the all-lowercase `snake_case`/`kebab-case` arms (the `UPPER_SNAKE` and `PascalCase` shapes are dropped by both), so a MIXED-CASE identifier-shaped value is silent here and still fires there — `apiKey: \"Mantine_DatePicker_Input\"` reports nothing while `jwt.sign(payload, \"Mantine_DatePicker_Input\")` on the next line reports a critical. That split is deliberate, not drift: the false positives that widened this veto were all measured on the `key: value` assignment shape, none on the positional `jwt.sign` shape, and widening a CRITICAL rule's veto with no measurement behind it buys silence, not signal. Measured on the corpus that motivated the gate (all seven findings came from one `ALLOW` table in a lint script): SIX of the seven are dropped by it. The seventh, `token: \"adsbygoogle\"`, is a separator-free single word and DELIBERATELY still fires — no shape test tells it apart from a weak literal password like `token: \"letmeinplease\"`, and silencing the one would silence the other. A value whose segments carry digits keeps firing (`\"sk-a1B2c3D4e5F6g7H8i9J0\"`), as does a separator-free word (`\"Changemeplease\"`), so weak literal passwords are not silenced. Blind spot, measured rather than guessed: this is a SHAPE test, not entropy, so a passphrase-style credential built from dictionary words (`\"correct-horse-battery-staple\"`, `\"trombone_ravine_wallet_ember\"`) is ALWAYS silenced, and a random base64url token is silenced whenever it happens to draw no digits — about 0.9% of 24-char, 0.26% of 32-char and 0.04% of 43-char tokens (200k samples each). Nothing is lost for base64-standard, hex or alphanumeric values (0%, those alphabets carry no `-`/`_`), and every common vendor prefix keeps firing (AWS `AKIA…`, `sk_live_…`, `ghp_…`, `xoxb-…`). The honest fix needs a string-literal-with-binding-name IR node the matcher does not have, so shape is the ceiling here. Suppress a vetted case with `// zzop-hardcoded-secret-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|java)$",
@@ -27,7 +27,7 @@
     {
       "id": "config-file-secret",
       "severity": "warning",
-      "message": "A high-entropy secret value is committed in a configuration file (`jwt.secret`, `*.password`, `api-key`, ... in a config file — `.properties`, `.ya?ml`, `.toml`, `.ini`, `.conf`, `.cfg`, or `.env`) — this is a live credential exposed to every reader/fork/clone AND preserved in git history, and unlike a code literal it is often the app's real signing key or datastore password. Move it to an environment variable or secrets manager referenced from config (`jwt.secret=${JWT_SECRET}`) AND rotate/revoke the committed value. An empty value, a short placeholder (<16 chars), and a `${VAR}` env reference are not flagged. Suppress a vetted case with `# config-file-secret-ok`.",
+      "message": "A high-entropy secret value is committed in a configuration file (`jwt.secret`, `*.password`, `api-key`, ... in a config file — `.properties`, `.ya?ml`, `.toml`, `.ini`, `.conf`, `.cfg`, or `.env`) — this is a live credential exposed to every reader/fork/clone AND preserved in git history, and unlike a code literal it is often the app's real signing key or datastore password. Move it to an environment variable or secrets manager referenced from config (`jwt.secret=${JWT_SECRET}`) AND rotate/revoke the committed value. An empty value, a short placeholder (<16 chars), and a `${VAR}` env reference are not flagged. Suppress a vetted case with `# zzop-config-file-secret-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)(\\.(properties|ya?ml|toml|ini|conf|cfg)$|(^|/)\\.env(\\.[\\w.-]+)?$)",
@@ -45,7 +45,7 @@
     {
       "id": "api-key-in-url",
       "severity": "warning",
-      "message": "A secret-shaped query parameter (`api_key`/`access_token`/`token`/`secret`) appears in a URL — URLs are logged by proxies, load balancers, browser history and the `Referer` header. Move the credential into an `Authorization` header (or body/cookie) instead. Suppress a vetted case with `// api-key-in-url-ok`.",
+      "message": "A secret-shaped query parameter (`api_key`/`access_token`/`token`/`secret`) appears in a URL — URLs are logged by proxies, load balancers, browser history and the `Referer` header. Move the credential into an `Authorization` header (or body/cookie) instead. Suppress a vetted case with `// zzop-api-key-in-url-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|java)$",
@@ -58,7 +58,7 @@
     {
       "id": "secret-env-in-fe",
       "severity": "warning",
-      "message": "A server-only-shaped env var (`SECRET`/`PRIVATE`/`SERVICE_ROLE`/`SERVICE_KEY`) is referenced from frontend code — build tools inline `process.env.*`/`import.meta.env.*` into the shipped JS bundle, making it readable in devtools. If the value is genuinely secret, the only correct fix is moving its use behind a backend endpoint (proxy it server-side) — do not just rename it with a `NEXT_PUBLIC_`/`VITE_` prefix. Only reach for that prefix if the value was never actually secret to begin with (e.g. a public config flag flagged by mistake). Suppress a vetted case with `// secret-env-in-fe-ok`.",
+      "message": "A server-only-shaped env var (`SECRET`/`PRIVATE`/`SERVICE_ROLE`/`SERVICE_KEY`) is referenced from frontend code — build tools inline `process.env.*`/`import.meta.env.*` into the shipped JS bundle, making it readable in devtools. PATH SCOPE, disclosed because a security rule's silence reads as a clean bill of health when it is not one: this rule's `file_pattern` is `(?i)(\\.(tsx|jsx)$|(^|/)(fe|frontend|client|web)/.*\\.(ts|js)$)`, so \"frontend code\" here means exactly two things — ANY `.tsx`/`.jsx` file anywhere in the tree, or a `.ts`/`.js` file under a path segment literally named `fe`, `frontend`, `client` or `web`. A plain `.ts`/`.js` module that is nonetheless bundled into the client (`src/lib/api.ts` in a Next.js app, a `shared/`/`common/` helper, a non-`.tsx` file under `app/`/`pages/`/`components/`) is never scanned, and `.mjs`/`.cjs` are not scanned at all. A `process.env.SUPABASE_SERVICE_ROLE_KEY` in `src/lib/api.ts` is therefore invisible here: zero findings from this rule means \"not scanned there\", never \"no server-only secret reaches the bundle\". If the value is genuinely secret, the only correct fix is moving its use behind a backend endpoint (proxy it server-side) — do not just rename it with a `NEXT_PUBLIC_`/`VITE_` prefix. Only reach for that prefix if the value was never actually secret to begin with (e.g. a public config flag flagged by mistake). Suppress a vetted case with `// zzop-secret-env-in-fe-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)(\\.(tsx|jsx)$|(^|/)(fe|frontend|client|web)/.*\\.(ts|js)$)",
@@ -71,7 +71,7 @@
     {
       "id": "hardcoded-password",
       "severity": "warning",
-      "message": "A password-shaped literal is hardcoded — a direct assignment (`password = \"...\"`) or a JDBC `getConnection(url, user, password)` call with literal credentials — exposed to every reader of the repo and impossible to rotate without a code change. Read it from an environment variable, an excluded properties file, or a secrets manager — but that only stops the NEXT leak: this password is already exposed via git history and any forks/clones that pulled it, so rotate/revoke the actual credential too. Suppress a vetted case with `// hardcoded-password-ok`.",
+      "message": "A password-shaped literal is hardcoded — a direct assignment (`password = \"...\"`) or a JDBC `getConnection(url, user, password)` call with literal credentials — exposed to every reader of the repo and impossible to rotate without a code change. Read it from an environment variable, an excluded properties file, or a secrets manager — but that only stops the NEXT leak: this password is already exposed via git history and any forks/clones that pulled it, so rotate/revoke the actual credential too. Suppress a vetted case with `// zzop-hardcoded-password-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.java$",
@@ -92,7 +92,7 @@
     {
       "id": "conn-string-credentials",
       "severity": "critical",
-      "message": "A connection-string URL embeds a password directly in source (`scheme://user:pass@host`) — anyone with repo read access effectively owns the datastore, and git history preserves the credential even after it's later removed from HEAD. Move the URL to environment/secret configuration AND rotate the credential (treat it as already compromised). Loopback hosts (localhost/127.0.0.1) and placeholder-shaped passwords (`changeme`, `mypwd`, ...) are not flagged; suppress a remaining vetted sample with `// conn-string-credentials-ok`.",
+      "message": "A connection-string URL embeds a password directly in source (`scheme://user:pass@host`) — anyone with repo read access effectively owns the datastore, and git history preserves the credential even after it's later removed from HEAD. Move the URL to environment/secret configuration AND rotate the credential (treat it as already compromised). Loopback hosts (localhost/127.0.0.1) and placeholder-shaped passwords (`changeme`, `mypwd`, ...) are not flagged; suppress a remaining vetted sample with `// zzop-conn-string-credentials-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|java)$",
@@ -105,7 +105,7 @@
     {
       "id": "private-key-committed",
       "severity": "critical",
-      "message": "A PEM-format private key (a `-----BEGIN ... PRIVATE KEY-----` header carrying its base64 key body, or a header alone on a dedicated key line) is committed to source — header-plus-key-material is unambiguous, so unlike a heuristic secret-shaped literal there's no plausible non-key reading of this text (a prose mention of the header in docs/i18n strings, with no base64 body accompanying it, does NOT fire). The moment this repo is shared (a fork, a clone, a public push) the key is compromised, and git history keeps it even after the file is later removed. Rotate the key immediately and move it to a secret store (a vault, KMS, or CI secret) instead — an actual PEM header sitting in a test fixture is still a committed key, so this rule scans test paths too, not just application code. Suppress a vetted case (e.g. a throwaway key generated only for a test, never used against a real service) with `// private-key-committed-ok`.",
+      "message": "A PEM-format private key (a `-----BEGIN ... PRIVATE KEY-----` header carrying its base64 key body, or a header alone on a dedicated key line) is committed to source — header-plus-key-material is unambiguous, so unlike a heuristic secret-shaped literal there's no plausible non-key reading of this text (a prose mention of the header in docs/i18n strings, with no base64 body accompanying it, does NOT fire). The moment this repo is shared (a fork, a clone, a public push) the key is compromised, and git history keeps it even after the file is later removed. Rotate the key immediately and move it to a secret store (a vault, KMS, or CI secret) instead — an actual PEM header sitting in a test fixture is still a committed key, so this rule scans test paths too, not just application code. Suppress a vetted case (e.g. a throwaway key generated only for a test, never used against a real service) with `// zzop-private-key-committed-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|json|ya?ml|env|pem)$",
@@ -118,7 +118,7 @@
     {
       "id": "vendor-token-committed",
       "severity": "critical",
-      "message": "A live-mode vendor credential appears in its recognized production-token format — Stripe `sk_live_`/`rk_live_`, a GitHub `ghp_`/`gho_` personal access token, a Slack `xox[bpars]-` token, or a Google API key (`AIza...`). Format alone identifies these as production secrets, and a committed credential is a leaked credential the instant the repo is shared, regardless of later git-history cleanup. Deliberately NOT matched: Stripe `sk_test_...` — a test-mode key is not a production credential, so flagging it would be noise, not signal. Rotate the credential through the vendor's own key-rotation/revocation flow immediately, then move the replacement into env/secret storage. Suppress a vetted case with `// vendor-token-committed-ok`.",
+      "message": "A live-mode vendor credential appears in its recognized production-token format — Stripe `sk_live_`/`rk_live_`, a GitHub `ghp_`/`gho_` personal access token, a Slack `xox[bpars]-` token, or a Google API key (`AIza...`). Format alone identifies these as production secrets, and a committed credential is a leaked credential the instant the repo is shared, regardless of later git-history cleanup. Deliberately NOT matched: Stripe `sk_test_...` — a test-mode key is not a production credential, so flagging it would be noise, not signal. Rotate the credential through the vendor's own key-rotation/revocation flow immediately, then move the replacement into env/secret storage. Suppress a vetted case with `// zzop-vendor-token-committed-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|json|ya?ml|env|pem)$",
@@ -156,7 +156,7 @@
     {
       "id": "jwt-sign-literal-secret",
       "severity": "critical",
-      "message": "`jwt.sign(payload, \"...\")` is called with a positional string-literal signing secret — anyone who reads this line can forge a validly-signed token for any payload they want. This is a distinct shape from `hardcoded-secret`: that rule's `assignment` pattern needs a `key: value`/`key = value` shape, so a positional literal passed straight as `jwt.sign`'s second argument is uncovered by it — this rule closes that gap. Their identifier-shaped-VALUE vetoes diverge too, and this one is deliberately NARROWER: this rule drops only all-lowercase `snake_case`/`kebab-case` values (plus the `UPPER_SNAKE`/`PascalCase` shapes both rules drop), while `hardcoded-secret` drops letter-only words joined by `-`/`_` in ANY casing. So a mixed-case value such as `\"Mantine_DatePicker_Input\"` is silenced as a CSS-class/constant name there and still fires here — on purpose: the false positives that widened the sibling's veto were all measured on the `key: value` shape, no measurement has arrived for this positional form, and an identifier-shaped signing key is still a forgeable signing key. Move the signing secret into an environment variable or secrets manager, and rotate the exposed key (it's already leaked via git history and any forks/clones that pulled it). Suppress a vetted case with `// jwt-sign-literal-secret-ok`.",
+      "message": "`jwt.sign(payload, \"...\")` is called with a positional string-literal signing secret — anyone who reads this line can forge a validly-signed token for any payload they want. This is a distinct shape from `hardcoded-secret`: that rule's `assignment` pattern needs a `key: value`/`key = value` shape, so a positional literal passed straight as `jwt.sign`'s second argument is uncovered by it — this rule closes that gap. Their identifier-shaped-VALUE vetoes diverge too, and this one is deliberately NARROWER: this rule drops only all-lowercase `snake_case`/`kebab-case` values (plus the `UPPER_SNAKE`/`PascalCase` shapes both rules drop), while `hardcoded-secret` drops letter-only words joined by `-`/`_` in ANY casing. So a mixed-case value such as `\"Mantine_DatePicker_Input\"` is silenced as a CSS-class/constant name there and still fires here — on purpose: the false positives that widened the sibling's veto were all measured on the `key: value` shape, no measurement has arrived for this positional form, and an identifier-shaped signing key is still a forgeable signing key. Move the signing secret into an environment variable or secrets manager, and rotate the exposed key (it's already leaked via git history and any forks/clones that pulled it). Suppress a vetted case with `// zzop-jwt-sign-literal-secret-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -167,9 +167,9 @@
       }
     },
     {
-      "id": "raw-query-interpolation",
+      "id": "raw-query-unsafe-api",
       "severity": "critical",
-      "message": "`$queryRawUnsafe`/`$executeRawUnsafe` called — these run the given SQL as-is with no parameterization, so any request-derived string interpolated into it is a SQL injection. Use `$queryRaw`/`$executeRaw` tagged templates (or pass values as separate arguments) so Prisma parameterizes the query. Suppress a vetted case with `// raw-query-interpolation-ok`.",
+      "message": "`$queryRawUnsafe`/`$executeRawUnsafe` called — these run the given SQL as-is with no parameterization, so any request-derived string interpolated into it is a SQL injection. Use `$queryRaw`/`$executeRaw` tagged templates (or pass values as separate arguments) so Prisma parameterizes the query. Suppress a vetted case with `// zzop-raw-query-unsafe-api-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -182,7 +182,7 @@
     {
       "id": "annotation-sql-concat",
       "severity": "critical",
-      "message": "JPA `@Query` built via string concatenation (`@Query(\"...\" + ...)`) — if the concatenated part is request-derived, it's spliced straight into SQL/JPQL, the same SQL injection risk as building any query string by hand; a constant/literal fragment isn't injectable but still obscures the risk and makes future refactors unsafe. Use named parameters (`:param` with `@Param`) or a parameterized query instead. Suppress a vetted case with `// annotation-sql-concat-ok`.",
+      "message": "JPA `@Query` built via string concatenation (`@Query(\"...\" + ...)`) — if the concatenated part is request-derived, it's spliced straight into SQL/JPQL, the same SQL injection risk as building any query string by hand; a constant/literal fragment isn't injectable but still obscures the risk and makes future refactors unsafe. Use named parameters (`:param` with `@Param`) or a parameterized query instead. Suppress a vetted case with `// zzop-annotation-sql-concat-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.java$",
@@ -193,9 +193,9 @@
       }
     },
     {
-      "id": "sql-taint",
+      "id": "sql-string-concat",
       "severity": "warning",
-      "message": "A SQL string is built by concatenating an expression into the statement text — if the concatenated part is request-derived, this is SQL injection (the input rewrites the query); even a constant fragment hides that risk from review. Use a parameterized/bound query instead (PreparedStatement `?`, JPA `:named` + setParameter) — never escape values into the string. Suppress a vetted case with `// sql-taint-ok`.",
+      "message": "A SQL string is built by concatenating an expression into the statement text — if the concatenated part is request-derived, this is SQL injection (the input rewrites the query); even a constant fragment hides that risk from review. Use a parameterized/bound query instead (PreparedStatement `?`, JPA `:named` + setParameter) — never escape values into the string. Suppress a vetted case with `// zzop-sql-string-concat-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(java|jsp|jspx|tag)$",
@@ -209,7 +209,7 @@
     {
       "id": "taint-flow",
       "severity": "warning",
-      "message": "A tainted-source access (request body/query/params/headers, `searchParams`, `process.argv`) and a dangerous sink (`eval`, `new Function`, `exec`/`spawn`, raw SQL, `dangerouslySetInnerHTML`, `.innerHTML`) both appear in the same function — this is a coarse v1 check (source+sink co-occurrence, not real dataflow), so confirm the value is actually tainted here. Kept at `warning`, not `critical`: co-occurrence is an approximation of dataflow, not proof of it, and `critical` is reserved for matchers that can prove their claim — treat a hit as a lead to confirm, not a confirmed exploit. For a SQL sink, parameterize the query (prepared/parameterized statement API) — never escape or interpolate the tainted value into the SQL string. For a shell/process-exec sink, use `execFile`/`spawn` with an args array, not a shell-string `exec()` with string concatenation. For a DOM/HTML sink, use `textContent` (not `innerHTML`) for plain text, or a vetted HTML-sanitizer library if HTML must be inserted — never raw `innerHTML` with tainted input. Suppress a vetted case with `// taint-flow-ok`.",
+      "message": "A tainted-source access (request body/query/params/headers, `searchParams`, `process.argv`) and a dangerous sink (`eval`, `new Function`, `exec`/`spawn`, raw SQL, `dangerouslySetInnerHTML`, `.innerHTML`) both appear in the same function — this is a coarse v1 check (source+sink co-occurrence, not real dataflow), so confirm the value is actually tainted here. Kept at `warning`, not `critical`: co-occurrence is an approximation of dataflow, not proof of it, and `critical` is reserved for matchers that can prove their claim — treat a hit as a lead to confirm, not a confirmed exploit. For a SQL sink, parameterize the query (prepared/parameterized statement API) — never escape or interpolate the tainted value into the SQL string. For a shell/process-exec sink, use `execFile`/`spawn` with an args array, not a shell-string `exec()` with string concatenation. For a DOM/HTML sink, use `textContent` (not `innerHTML`) for plain text, or a vetted HTML-sanitizer library if HTML must be inserted — never raw `innerHTML` with tainted input. Suppress a vetted case with `// zzop-taint-flow-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
@@ -239,7 +239,7 @@
     {
       "id": "eval-dynamic-code",
       "severity": "warning",
-      "message": "`eval(...)` called with a non-literal argument, or `new Function(...)` used at all (even with only literal arguments — constructing a function from a string at runtime still defeats CSP's `script-src` and is invisible to every static analyzer downstream, so it is a code smell worth surfacing regardless) — building and executing code from a runtime string is one of the highest-risk sinks in JS: if any part of that string can be influenced by user input, it's arbitrary code execution. Avoid dynamic code construction; use a plain function/lookup table/JSON.parse instead. Note: `security/taint-flow` already covers `eval` when a request-derived source co-occurs in the same function, `.ts`/`.tsx` only; this rule is source-free (fires on the construct itself, not just a proven-tainted case) and also covers `.js`/`.jsx`/`.mjs`/`.cjs`. Suppress a vetted case (e.g. a sandboxed plugin-eval with no user-controlled input) with `// eval-dynamic-code-ok`.",
+      "message": "`eval(...)` called with a non-literal argument, or `new Function(...)` used at all (even with only literal arguments — constructing a function from a string at runtime still defeats CSP's `script-src` and is invisible to every static analyzer downstream, so it is a code smell worth surfacing regardless) — building and executing code from a runtime string is one of the highest-risk sinks in JS: if any part of that string can be influenced by user input, it's arbitrary code execution. Avoid dynamic code construction; use a plain function/lookup table/JSON.parse instead. Note: `security/taint-flow` already covers `eval` when a request-derived source co-occurs in the same function, `.ts`/`.tsx` only; this rule is source-free (fires on the construct itself, not just a proven-tainted case) and also covers `.js`/`.jsx`/`.mjs`/`.cjs`. Suppress a vetted case (e.g. a sandboxed plugin-eval with no user-controlled input) with `// zzop-eval-dynamic-code-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
@@ -262,7 +262,7 @@
     {
       "id": "cmd-injection",
       "severity": "warning",
-      "message": "Method runs an external process (Runtime.exec / ProcessBuilder) and builds the command by string concatenation — command-injection risk. Pass arguments as an array element per token and validate/allow-list any user-controlled part. Suppress a vetted case with `// cmd-injection-ok`.",
+      "message": "A method contains the BARE WORD `exec` or `ProcessBuilder` — the whole pattern is `\\b(?:exec|ProcessBuilder)\\b`, with no receiver and no call shape required, so a local variable, field, parameter or unrelated method named `exec` satisfies it exactly as well as a real `Runtime.getRuntime().exec(...)` — and the method also builds SOME string by concatenating an identifier onto a literal (that half IS exact: `\"...\" + ident`). This is therefore a co-occurrence heuristic over one weak token and one precise one, not proof the concatenated string is a command, let alone the command that gets executed (the two may be unrelated statements in the same method). When they are connected, and the concatenated part is request-derived, it is command injection. Pass arguments as an array element per token and validate/allow-list any user-controlled part. Suppress a vetted case with `// zzop-cmd-injection-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.java$",
@@ -286,7 +286,7 @@
     {
       "id": "shell-exec-interpolation",
       "severity": "critical",
-      "message": "A dynamic segment (a template-literal `${...}` or a string-concatenation `+`) is spliced directly into `exec`/`execSync`'s shell-command-string argument — the shell interprets that whole string, so any dynamic part reaching it is command injection, whether or not this rule can prove it's request-derived (see boundary note below). Use `execFile`/`spawn` with an argv array instead — arguments passed as separate array elements are never shell-interpreted, which is exactly why this rule does not fire on `execFile`/`spawn` calls. Matched shapes are child_process-scoped: a bare/destructured `exec(...)`/`execSync(...)` call, or a `child_process.`/`childProcess.`/`cp.` member call, in a file that mentions `child_process` at all — a RegExp's own `pattern.exec(...)` (or any other dotted receiver) does not fire. Boundary: `security/taint-flow` also flags `exec`/`execSync` as a sink, but only when a request-derived source co-occurs in the same `.ts`/`.tsx` function; this rule needs no source, fires on the interpolation shape alone, and also covers plain `.js` files — treat the two as complementary, not redundant. Suppress a vetted case with `// shell-exec-interpolation-ok`.",
+      "message": "A dynamic segment (a template-literal `${...}` or a string-concatenation `+`) is spliced directly into `exec`/`execSync`'s shell-command-string argument — the shell interprets that whole string, so any dynamic part reaching it is command injection, whether or not this rule can prove it's request-derived (see boundary note below). Use `execFile`/`spawn` with an argv array instead — arguments passed as separate array elements are never shell-interpreted, which is exactly why this rule does not fire on `execFile`/`spawn` calls. Matched shapes are child_process-scoped: a bare/destructured `exec(...)`/`execSync(...)` call, or a `child_process.`/`childProcess.`/`cp.` member call, in a file that mentions `child_process` at all — a RegExp's own `pattern.exec(...)` (or any other dotted receiver) does not fire. Boundary: `security/taint-flow` also flags `exec`/`execSync` as a sink, but only when a request-derived source co-occurs in the same `.ts`/`.tsx` function; this rule needs no source, fires on the interpolation shape alone, and also covers plain `.js` files — treat the two as complementary, not redundant. Suppress a vetted case with `// zzop-shell-exec-interpolation-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -309,7 +309,7 @@
     {
       "id": "xxe-no-guard",
       "severity": "critical",
-      "message": "`DocumentBuilderFactory`/`SAXParserFactory.newInstance()` with no recognized XXE guard in the same method — a default-configured XML parser resolves external entities, so crafted XML can read local files, perform SSRF, or exhaust memory. Set `disallow-doctype-decl` to `true`; `FEATURE_SECURE_PROCESSING` alone does NOT disable external entity resolution and is not sufficient on its own. If DOCTYPEs are genuinely required, set both `external-general-entities` and `external-parameter-entities` to `false` instead. Each recognized guard pattern silences this finding independently (any one alone is enough to veto it). Suppress a vetted case with `// xxe-no-guard-ok`.",
+      "message": "`DocumentBuilderFactory`/`SAXParserFactory.newInstance()` with no recognized XXE guard in the same method — a default-configured XML parser resolves external entities, so crafted XML can read local files, perform SSRF, or exhaust memory. Set `disallow-doctype-decl` to `true`; `FEATURE_SECURE_PROCESSING` alone does NOT disable external entity resolution and is not sufficient on its own. If DOCTYPEs are genuinely required, set both `external-general-entities` and `external-parameter-entities` to `false` instead. Each recognized guard pattern silences this finding independently (any one alone is enough to veto it). Suppress a vetted case with `// zzop-xxe-no-guard-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.java$",
@@ -342,7 +342,7 @@
     {
       "id": "unsafe-deserialization",
       "severity": "warning",
-      "message": "`ObjectInputStream.readObject()` is called in this function — Java's native deserialization invokes arbitrary code paths (gadget chains), so deserializing an attacker-controlled byte stream can lead to remote code execution. Kept at `warning` because this local analysis can't prove the deserialized payload is attacker-reachable — treat it as CRITICAL wherever the input actually comes from a request body/query/header/upload. Use JSON/Protobuf instead, or validate the stream with an allow-list `ObjectInputFilter`. Suppress a vetted case with `// unsafe-deserialization-ok`.",
+      "message": "A `new ObjectInputStream` construction and a `readObject(` call CO-OCCUR in this Java method — TWO INDEPENDENT patterns (`new\\s+ObjectInputStream` and `\\breadObject\\s*\\(`), not one dotted `ObjectInputStream.readObject()` chain — that dotted shape is never matched as such, and nothing links the call's receiver to the constructed stream, so a `readObject(` on an unrelated object satisfies the second pattern just as well — the regex is receiverless, so even the DECLARATION of a custom `private void readObject(ObjectInputStream in)` serialization hook matches it. No order is required either, and the reported line is the `readObject(` one, which is the trigger. When they ARE connected, Java's native deserialization invokes arbitrary code paths (gadget chains), so deserializing an attacker-controlled byte stream can lead to remote code execution. Kept at `warning` because this local analysis can't prove the deserialized payload is attacker-reachable — treat it as CRITICAL wherever the input actually comes from a request body/query/header/upload. Use JSON/Protobuf instead, or validate the stream with an allow-list `ObjectInputFilter`. Suppress a vetted case with `// zzop-unsafe-deserialization-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.java$",
@@ -365,7 +365,7 @@
     {
       "id": "template-unescaped-output",
       "severity": "warning",
-      "message": "This line uses a template-engine syntax that emits UNescaped HTML: EJS `<%- %>`, Handlebars `{{{ }}}` triple-stache, or Mustache `{{& }}` — if any interpolated value is user-influenced, this is reflected/stored server-side XSS. Use the escaped output form instead (EJS `<%= %>`, Handlebars/Mustache `{{ }}`), or route the value through a vetted sanitizer when intentional raw HTML is actually required. Sibling boundary: `browser/unsafe-html-sink` catches the client-side DOM-sink half of this class (`innerHTML` assignment in browser code); this rule catches the server-side template-engine half that produces the HTML in the first place — complementary, not overlapping. Scoped to template file extensions only (`.ejs`/`.hbs`/`.handlebars`/`.mustache`/`.njk`/`.nunjucks`), since these tokens only mean \"unescaped output\" inside a template file. (Pug's buffered `!= expr` form is deliberately NOT covered: it is lexically indistinguishable from Pug/Nunjucks's loose-inequality operator `!=`, so flagging it would false-fire on every `a != b` conditional — a never-guess omission, not an oversight.) Suppress a vetted case with `// template-unescaped-output-ok` — but note `//` is not a comment in EJS/Handlebars/Mustache/Nunjucks, so an inline marker there renders as literal page output, and inline suppression isn't clean there — prefer the config-level disable (hint below).",
+      "message": "This line uses a template-engine syntax that emits UNescaped HTML: EJS `<%- %>`, Handlebars `{{{ }}}` triple-stache, or Mustache `{{& }}` — if any interpolated value is user-influenced, this is reflected/stored server-side XSS. Use the escaped output form instead (EJS `<%= %>`, Handlebars/Mustache `{{ }}`), or route the value through a vetted sanitizer when intentional raw HTML is actually required. Sibling boundary: `browser/unsafe-html-sink` catches the client-side DOM-sink half of this class (`innerHTML` assignment in browser code); this rule catches the server-side template-engine half that produces the HTML in the first place — complementary, not overlapping. Scoped to template file extensions only (`.ejs`/`.hbs`/`.handlebars`/`.mustache`/`.njk`/`.nunjucks`), since these tokens only mean \"unescaped output\" inside a template file. (Pug's buffered `!= expr` form is deliberately NOT covered: it is lexically indistinguishable from Pug/Nunjucks's loose-inequality operator `!=`, so flagging it would false-fire on every `a != b` conditional — a never-guess omission, not an oversight.) Suppress a vetted case with `// zzop-template-unescaped-output-ok` — but note `//` is not a comment in EJS/Handlebars/Mustache/Nunjucks, so an inline marker there renders as literal page output, and inline suppression isn't clean there — prefer the config-level disable (hint below).",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ejs|hbs|handlebars|mustache|njk|nunjucks)$",
@@ -390,7 +390,7 @@
     {
       "id": "html-response-from-request",
       "severity": "warning",
-      "message": "A `res.send`/`res.write`/`res.end` call co-occurs with request input (`req.query`/`req.params`/`req.body`/`req.headers`) AND an HTML-shaped marker (a literal opening tag like `<div>`/`<html>`, or a `Content-Type: text/html` header) in the same function, with no sanitizer call anywhere in it — this is a co-occurrence heuristic, not a proof that the request value actually reaches the HTML output (same honesty as `db/multi-write-no-tx`'s documented approximation): it flags the shape, not a traced data flow. Escape/sanitize request-derived values before splicing them into HTML, set an explicit `application/json` content type for pure API responses, or use a template engine with auto-escaping instead of building markup by hand. Sibling boundary: `security/taint-flow` also does source+sink co-occurrence for `.ts`/`.tsx`, but its sink list does not include `res.send`/`res.write`/`res.end` — this rule covers exactly the class taint-flow misses, and also runs on plain `.js`/`.cjs`/`.mjs` files taint-flow doesn't scan. Suppress a vetted case with `// html-response-from-request-ok`.",
+      "message": "A `res.send`/`res.write`/`res.end` call co-occurs with request input (`req.query`/`req.params`/`req.body`/`req.headers`) AND an HTML-shaped marker (a literal opening tag like `<div>`/`<html>`, or a `Content-Type: text/html` header) in the same function, with no sanitizer call anywhere in it — this is a co-occurrence heuristic, not a proof that the request value actually reaches the HTML output (same honesty as `db/multi-write-no-tx`'s documented approximation): it flags the shape, not a traced data flow. Escape/sanitize request-derived values before splicing them into HTML, set an explicit `application/json` content type for pure API responses, or use a template engine with auto-escaping instead of building markup by hand. Sibling boundary: `security/taint-flow` also does source+sink co-occurrence for `.ts`/`.tsx`, but its sink list does not include `res.send`/`res.write`/`res.end` — this rule covers exactly the class taint-flow misses, and also runs on plain `.js`/`.cjs`/`.mjs` files taint-flow doesn't scan. Suppress a vetted case with `// zzop-html-response-from-request-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -423,7 +423,7 @@
     {
       "id": "dangerous-html-concat",
       "severity": "warning",
-      "message": "A string literal that opens or closes an HTML tag (`\"<div>\"`, `\"</span>\"`, ...) is concatenated with a non-literal (`+ someVar` / `someVar +`) in a file that also mentions a `res`/`response`/content-type-`text/html` server-response context — building HTML by concatenating a variable into tag markup is an injection sink if that variable is user-influenced. Use a template engine with auto-escaping, or a sanitizer, instead of hand-assembling markup. Kept `warning` and deployed-surface-excluded because this is shape-only and FP-prone (logging strings, test fixtures, non-response string building all read the same way to a regex) — the `require_file` gate on a response/content-type mention is there specifically to bias this toward real server-response context rather than firing on every HTML-shaped concatenation in the repo. Sibling boundary: `html-response-from-request` needs the request-input+HTML-marker co-occurrence inside one function; this rule needs neither — it fires on the concatenation shape alone, so treat the two as complementary. Suppress a vetted case with `// dangerous-html-concat-ok`.",
+      "message": "A string literal that opens or closes an HTML tag (`\"<div>\"`, `\"</span>\"`, ...) is concatenated with a non-literal (`+ someVar` / `someVar +`) in a file that also mentions a `res`/`response`/content-type-`text/html` server-response context — building HTML by concatenating a variable into tag markup is an injection sink if that variable is user-influenced. Use a template engine with auto-escaping, or a sanitizer, instead of hand-assembling markup. Kept `warning` and deployed-surface-excluded because this is shape-only and FP-prone (logging strings, test fixtures, non-response string building all read the same way to a regex) — the `require_file` gate on a response/content-type mention is there specifically to bias this toward real server-response context rather than firing on every HTML-shaped concatenation in the repo. Sibling boundary: `html-response-from-request` needs the request-input+HTML-marker co-occurrence inside one function; this rule needs neither — it fires on the concatenation shape alone, so treat the two as complementary. Suppress a vetted case with `// zzop-dangerous-html-concat-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -446,7 +446,7 @@
     {
       "id": "path-traversal",
       "severity": "warning",
-      "message": "A filesystem call (`fs`/`fsp.*`, `readFile`/`writeFile`), request input (`req.params`/`req.query`/`req.body`), and a `path.join(...)` call all appear in the same function — this is a co-occurrence heuristic, not proof the request-derived value actually flows into the joined path, but when it does: an unvalidated `..` segment lets an attacker escape the intended directory (path traversal). Reject `..` segments, or verify the resolved path stays under the base directory. Suppress a vetted case with `// path-traversal-ok`.",
+      "message": "A filesystem call (`fs`/`fsp.*`, `readFile`/`writeFile`), request input (`req.params`/`req.query`/`req.body`), and a `path.join(...)` call all appear in the same function — this is a co-occurrence heuristic, not proof the request-derived value actually flows into the joined path, but when it does: an unvalidated `..` segment lets an attacker escape the intended directory (path traversal). Reject `..` segments, or verify the resolved path stays under the base directory. Suppress a vetted case with `// zzop-path-traversal-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -474,7 +474,7 @@
       "id": "java-path-traversal",
       "_note": "Rule id intentionally keeps its `java-` prefix: dropping it to `path-traversal` would collide with this pack's existing JS `path-traversal` rule (the Java `new File(...)` + `request.getParameter(...)` shape is distinct from the JS fs+path.join shape). The prefix earns its keep as a disambiguator.",
       "severity": "warning",
-      "message": "`new File(...)` is constructed in a function that also reads `request.getParameter(...)` — an unvalidated parameter flowing into the path lets an attacker escape the intended directory and read/write files outside it. Reject `..` segments, or resolve and compare against the base directory before use. Suppress a vetted case with `// java-path-traversal-ok`.",
+      "message": "`new File(...)` is constructed in a method that also reads `request.getParameter(...)` — a CO-OCCURRENCE heuristic, not proof the parameter reaches the path: the two patterns may match unrelated statements in the same method, and nothing here checks order or dataflow (a `new File(...)` on a constant path in a method that reads an unrelated parameter fires just the same). It is deliberately weaker evidence than its TypeScript sibling `path-traversal`, which requires a third co-occurring `path.join(...)`. When they ARE connected, an unvalidated parameter flowing into the path lets an attacker escape the intended directory and read/write files outside it. Reject `..` segments, or resolve and compare against the base directory before use. Suppress a vetted case with `// zzop-java-path-traversal-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.java$",
@@ -497,7 +497,7 @@
     {
       "id": "ssrf-user-url",
       "severity": "warning",
-      "message": "An outbound HTTP call (`fetch`/`axios`/`got`) is made in a function that also reads `req.query`/`req.params`/`req.body` — if that value becomes part of the URL, the server can be made to request attacker-chosen hosts (SSRF), reaching internal services or a metadata endpoint. Validate the target against an allow-list of hosts. Suppress a vetted case with `// ssrf-user-url-ok`.",
+      "message": "An outbound HTTP call (`fetch`/`axios`/`got`) is made in a function that also reads `req.query`/`req.params`/`req.body` — if that value becomes part of the URL, the server can be made to request attacker-chosen hosts (SSRF), reaching internal services or a metadata endpoint. Validate the target against an allow-list of hosts. Suppress a vetted case with `// zzop-ssrf-user-url-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -520,7 +520,7 @@
     {
       "id": "open-redirect",
       "severity": "warning",
-      "message": "`redirect(...)` is called in a function that also reads `req.query`/`req.params`/`req.body` — an unchecked request-derived target lets an attacker send victims to an arbitrary external site (open redirect), a common phishing/OAuth-token-theft vector. Validate the target against an allow-list of known internal paths. Suppress a vetted case with `// open-redirect-ok`.",
+      "message": "`redirect(...)` is called in a function that also reads `req.query`/`req.params`/`req.body` — an unchecked request-derived target lets an attacker send victims to an arbitrary external site (open redirect), a common phishing/OAuth-token-theft vector. Validate the target against an allow-list of known internal paths. Suppress a vetted case with `// zzop-open-redirect-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -543,7 +543,7 @@
     {
       "id": "sendfile-from-request",
       "severity": "warning",
-      "message": "`sendFile`/`download` is called with a `req.params`/`req.query`/`req.body`-derived path — the sibling `path-traversal` rule catches `fs`/`path.join` reads built from request input in the same shape, but does not cover Express's file-serving APIs (`res.sendFile`/`res.download`) directly, so this rule fills that gap. An unvalidated `..` segment lets an attacker read arbitrary files off disk via path traversal. Reject `..` segments, or resolve the path and confirm it stays under the intended base directory, before passing it in. v1 is kept honest rather than clever: a same-line `path.basename(...)` call vetoes the finding by simple textual co-presence, not by proving it actually wraps the request-derived argument — a real sanitizer elsewhere in the function is not detected. Suppress a vetted case with `// sendfile-from-request-ok`.",
+      "message": "`sendFile`/`download` is called with a `req.params`/`req.query`/`req.body`-derived path — the sibling `path-traversal` rule catches `fs`/`path.join` reads built from request input in the same shape, but does not cover Express's file-serving APIs (`res.sendFile`/`res.download`) directly, so this rule fills that gap. An unvalidated `..` segment lets an attacker read arbitrary files off disk via path traversal. Reject `..` segments, or resolve the path and confirm it stays under the intended base directory, before passing it in. v1 is kept honest rather than clever: a same-line `path.basename(...)` call vetoes the finding by simple textual co-presence, not by proving it actually wraps the request-derived argument — a real sanitizer elsewhere in the function is not detected. Suppress a vetted case with `// zzop-sendfile-from-request-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -557,7 +557,7 @@
     {
       "id": "weak-password-hash",
       "severity": "critical",
-      "message": "Password hashed/compared with a broken algorithm (MD5/SHA-1) or bcrypt at a single-digit cost factor — both are too cheap to resist offline brute force at billions of guesses/sec on commodity GPUs. Use bcrypt with a cost factor of at least 10 (bcrypt-specific — cost factor isn't a scrypt/argon2 unit), or argon2id/scrypt configured at OWASP-recommended memory/parallelism parameters. Suppress a vetted case with `// weak-password-hash-ok`.",
+      "message": "Password hashed/compared with a broken algorithm (MD5/SHA-1) or bcrypt at a single-digit cost factor — both are too cheap to resist offline brute force at billions of guesses/sec on commodity GPUs. Use bcrypt with a cost factor of at least 10 (bcrypt-specific — cost factor isn't a scrypt/argon2 unit), or argon2id/scrypt configured at OWASP-recommended memory/parallelism parameters. Suppress a vetted case with `// zzop-weak-password-hash-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|java)$",
@@ -583,7 +583,7 @@
     {
       "id": "weak-token-random",
       "severity": "warning",
-      "message": "`Math.random()` is used on the same line as a token/otp/nonce/session-id/secret-shaped identifier — it's a predictable PRNG, not cryptographically secure, so a value generated this way can be guessed or brute-forced. Use `crypto.randomBytes(n).toString('hex')` or `crypto.randomUUID()`. Suppress a vetted case with `// weak-token-random-ok`.",
+      "message": "`Math.random()` is used on the same line as a token/otp/nonce/session-id/secret-shaped identifier — it's a predictable PRNG, not cryptographically secure, so a value generated this way can be guessed or brute-forced. Use `crypto.randomBytes(n).toString('hex')` or `crypto.randomUUID()`. Suppress a vetted case with `// zzop-weak-token-random-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -605,7 +605,7 @@
     {
       "id": "weak-random",
       "severity": "warning",
-      "message": "`new Random()` is used on the same line as a token/session/otp/nonce-shaped identifier — `java.util.Random` is a predictable PRNG, not cryptographically secure, so a value generated this way can be predicted or brute-forced. Use `java.security.SecureRandom` instead. Suppress a vetted case with `// weak-random-ok`.",
+      "message": "`new Random()` is used on the same line as a token/session/otp/nonce-shaped identifier — `java.util.Random` is a predictable PRNG, not cryptographically secure, so a value generated this way can be predicted or brute-forced. Use `java.security.SecureRandom` instead. Suppress a vetted case with `// zzop-weak-random-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.java$",
@@ -627,7 +627,7 @@
     {
       "id": "weak-crypto",
       "severity": "warning",
-      "message": "Weak/deprecated cryptography in use — MD5 and SHA-1 have practical collision attacks (forgeable signatures/certificates), DES/RC4 are brute-forceable or biased, and ECB mode leaks plaintext structure across blocks. Use SHA-256 or stronger for hashing and AES-GCM for encryption; for passwords specifically use bcrypt/PBKDF2/Argon2 (a fast hash is the wrong tool even at SHA-256). Suppress a vetted non-security use (e.g. a legacy-interop checksum) with `// weak-crypto-ok`.",
+      "message": "Weak/deprecated cryptography in use — MD5 and SHA-1 have practical collision attacks (forgeable signatures/certificates), DES/RC4 are brute-forceable or biased, and ECB mode leaks plaintext structure across blocks. Use SHA-256 or stronger for hashing and AES-GCM for encryption; for passwords specifically use bcrypt/PBKDF2/Argon2 (a fast hash is the wrong tool even at SHA-256). Suppress a vetted non-security use (e.g. a legacy-interop checksum) with `// zzop-weak-crypto-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(java|jsp|jspx|tag)$",
@@ -658,7 +658,7 @@
     {
       "id": "timing-unsafe-compare",
       "severity": "info",
-      "message": "A secret/token/signature/hmac/api-key-shaped identifier is compared with `===`/`!==` — equality operators short-circuit on the first differing byte, so the comparison time itself can leak a timing signal about the value to an attacker positioned to measure it. Use `crypto.timingSafeEqual(...)` on fixed-length buffers instead. Suppress a vetted case with `// timing-unsafe-compare-ok`.",
+      "message": "A secret/token/signature/hmac/api-key-shaped identifier is compared with `===`/`!==` — equality operators short-circuit on the first differing byte, so the comparison time itself can leak a timing signal about the value to an attacker positioned to measure it. Use `crypto.timingSafeEqual(...)` on fixed-length buffers instead. Suppress a vetted case with `// zzop-timing-unsafe-compare-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -672,7 +672,7 @@
     {
       "id": "trust-all-tls",
       "severity": "critical",
-      "message": "TLS certificate/hostname verification is disabled (a trust-all `X509TrustManager`, `ALLOW_ALL_HOSTNAME_VERIFIER`, or a `setHostnameVerifier` lambda always returning `true`) — accepts any certificate for any host, so the app can't detect a man-in-the-middle. Use the default (or a properly validating custom) trust manager/verifier. Suppress a vetted case with `// trust-all-tls-ok`.",
+      "message": "TLS certificate/hostname verification is disabled (a trust-all `X509TrustManager`, `ALLOW_ALL_HOSTNAME_VERIFIER`, or a `setHostnameVerifier` lambda always returning `true`) — accepts any certificate for any host, so the app can't detect a man-in-the-middle. Use the default (or a properly validating custom) trust manager/verifier. Suppress a vetted case with `// zzop-trust-all-tls-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.java$",
@@ -698,7 +698,7 @@
     {
       "id": "jwt-no-expiry",
       "severity": "warning",
-      "message": "`jwt.sign(...)` is called where `expiresIn` never appears in the same function — a token with no expiry is valid forever, so a leak (logs, XSS, a compromised client) can be replayed indefinitely. Pass `{ expiresIn: '...' }` (or set `exp` in the payload) so tokens expire. Suppress a vetted case with `// jwt-no-expiry-ok`.",
+      "message": "`jwt.sign(...)` is called where `expiresIn` never appears in the same function — a token with no expiry is valid forever, so a leak (logs, XSS, a compromised client) can be replayed indefinitely. Pass `{ expiresIn: '...' }` (or set `exp` in the payload) so tokens expire. Suppress a vetted case with `// zzop-jwt-no-expiry-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -723,7 +723,7 @@
     {
       "id": "jwt-none-algorithm",
       "severity": "critical",
-      "message": "`algorithm(s): 'none'` appears in a JWT-related file — `alg: none` turns signature verification off entirely, so a caller can mint an arbitrary token that validates with any payload it wants. There is no legitimate production use of this algorithm. Remove `none` from the allowed/signing algorithm list and use a real algorithm (`HS256`/`RS256`/...), pinning `algorithms` explicitly on the verifying side too so a future token can't downgrade itself. Suppress a vetted case (e.g. a local test harness that intentionally exercises the none-alg attack) with `// jwt-none-algorithm-ok`.",
+      "message": "`algorithm(s): 'none'` appears in a JWT-related file — `alg: none` turns signature verification off entirely, so a caller can mint an arbitrary token that validates with any payload it wants. There is no legitimate production use of this algorithm. Remove `none` from the allowed/signing algorithm list and use a real algorithm (`HS256`/`RS256`/...), pinning `algorithms` explicitly on the verifying side too so a future token can't downgrade itself. Suppress a vetted case (e.g. a local test harness that intentionally exercises the none-alg attack) with `// zzop-jwt-none-algorithm-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -737,7 +737,7 @@
     {
       "id": "jwt-verify-bypass",
       "severity": "warning",
-      "message": "`ignoreExpiration: true` or `verify: false` appears in a file that imports a JWT library (`jsonwebtoken`/`jose`/a `jwt` specifier) — either option turns off a check `jwt.verify` exists to perform: `ignoreExpiration: true` accepts an expired token, `verify: false` accepts one with no signature check at all (an outright auth bypass). The require-file gate on a JWT-library import is load-bearing here: bare `verify: false` also appears in plenty of unrelated configs (bundlers, linters, ...), and without the gate this rule would fire on those too. Remove the option (or set it to the safe default) so `jwt.verify` performs its normal checks. Suppress a vetted case with `// jwt-verify-bypass-ok`.",
+      "message": "`ignoreExpiration: true` or `verify: false` appears in a file that imports a JWT library (`jsonwebtoken`/`jose`/a `jwt` specifier) — either option turns off a check `jwt.verify` exists to perform: `ignoreExpiration: true` accepts an expired token, `verify: false` accepts one with no signature check at all (an outright auth bypass). The require-file gate on a JWT-library import is load-bearing here: bare `verify: false` also appears in plenty of unrelated configs (bundlers, linters, ...), and without the gate this rule would fire on those too. Remove the option (or set it to the safe default) so `jwt.verify` performs its normal checks. Suppress a vetted case with `// zzop-jwt-verify-bypass-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -760,7 +760,7 @@
     {
       "id": "cors-wildcard",
       "severity": "warning",
-      "message": "CORS origin set to `*` (a wildcard `Access-Control-Allow-Origin` header, or `origin: '*'`) — lets any website make cross-origin requests to this endpoint, defeating same-origin protection. Return a specific allow-listed origin instead, especially on endpoints that accept cookies or auth headers. A wildcard is legitimate for a purely public, credential-less API (no cookies/auth headers involved) — suppress that case with `// cors-wildcard-ok` rather than \"fixing\" it.",
+      "message": "CORS origin set to `*` (a wildcard `Access-Control-Allow-Origin` header, or `origin: '*'`) — lets any website make cross-origin requests to this endpoint, defeating same-origin protection. Return a specific allow-listed origin instead, especially on endpoints that accept cookies or auth headers. A wildcard is legitimate for a purely public, credential-less API (no cookies/auth headers involved) — suppress that case with `// zzop-cors-wildcard-ok` rather than \"fixing\" it.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -782,7 +782,7 @@
     {
       "id": "cors-credentials-wildcard",
       "severity": "warning",
-      "message": "`credentials: true` appears in a file that also configures `origin: '*'` — browsers actually REJECT (refuse to expose the response for) a wildcard `Access-Control-Allow-Origin` combined with credentials, so this exact configuration is broken/non-functional rather than exploitable as written. The real risk: to \"fix\" the breakage, code often reflects the request's `Origin` header back with `credentials: true` still set — that treats any origin as trusted and IS the actual vulnerability. Return a specific allow-listed origin (never `*`, never an echoed `Origin`) whenever `credentials: true` is set. Suppress a vetted case with `// cors-credentials-wildcard-ok`.",
+      "message": "`credentials: true` appears in a file that also configures `origin: '*'` — the pairing is FILE-level, not object-level: the two keys are matched anywhere in the same file, so they may belong to two unrelated config objects (a wildcard-origin public CORS block and a separate credentialed one) and still fire. Browsers actually REJECT (refuse to expose the response for) a wildcard `Access-Control-Allow-Origin` combined with credentials, so this exact configuration is broken/non-functional rather than exploitable as written. The real risk: to \"fix\" the breakage, code often reflects the request's `Origin` header back with `credentials: true` still set — that treats any origin as trusted and IS the actual vulnerability. Return a specific allow-listed origin (never `*`, never an echoed `Origin`) whenever `credentials: true` is set. Suppress a vetted case with `// zzop-cors-credentials-wildcard-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -798,7 +798,7 @@
     {
       "id": "cors-reflected-origin-credentials",
       "severity": "warning",
-      "message": "`credentials: true` co-occurs on one line with `origin: true` (cors()'s reflect-any-origin mode) or `origin: req.headers...` (manually echoing the request's Origin header) — either shape treats any origin as trusted while allowing cookies/credentials, which is the actual exploitable CORS misconfiguration (unlike a literal `'*'`, which browsers reject alongside credentials). Sibling boundary: `cors-wildcard`/`cors-credentials-wildcard` cover the literal `'*'` shape; this rule covers the REFLECTION shape those two miss. Return a specific allow-listed origin instead of reflecting the request's origin. Known limitation, not desired behavior: this is a single-line co-occurrence check, so a multi-line CORS options object (each key on its own line) is missed — see the pinned fixture documenting this gap. Suppress a vetted case with `// cors-reflected-origin-credentials-ok`.",
+      "message": "`credentials: true` co-occurs on one line with `origin: true` (cors()'s reflect-any-origin mode) or `origin: req.headers...` (manually echoing the request's Origin header) — either shape treats any origin as trusted while allowing cookies/credentials, which is the actual exploitable CORS misconfiguration (unlike a literal `'*'`, which browsers reject alongside credentials). Sibling boundary: `cors-wildcard`/`cors-credentials-wildcard` cover the literal `'*'` shape; this rule covers the REFLECTION shape those two miss. Return a specific allow-listed origin instead of reflecting the request's origin. Known limitation, not desired behavior: this is a single-line co-occurrence check, so a multi-line CORS options object (each key on its own line) is missed — see the pinned fixture documenting this gap. Suppress a vetted case with `// zzop-cors-reflected-origin-credentials-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -818,9 +818,9 @@
       }
     },
     {
-      "id": "csp-disabled",
+      "id": "csp-weak-or-disabled",
       "severity": "warning",
-      "message": "Content-Security-Policy is explicitly turned off or weakened: Helmet's `contentSecurityPolicy: false`, a `Content-Security-Policy` header value containing `unsafe-inline`, or a `default-src` directive containing a wildcard `*` — CSP is the browser's last line of defense against XSS once a payload has already been injected, so disabling/weakening it removes a mitigation that has nothing to do with whether the injection itself is possible. Keep a restrictive policy: enable Helmet's default CSP (or a hand-configured one) instead of `false`, drop `unsafe-inline` in favor of nonces/hashes, and scope `default-src`/`script-src` to specific allow-listed origins instead of `*`. Kept at `warning` because this is a mitigation-ABSENCE rule (defense-in-depth), not proof of an exploitable injection by itself. Suppress a vetted case with `// csp-disabled-ok`.",
+      "message": "Content-Security-Policy is explicitly turned off or weakened: Helmet's `contentSecurityPolicy: false`, a `Content-Security-Policy` header value containing `unsafe-inline`, or a `default-src` directive containing a wildcard `*` — CSP is the browser's last line of defense against XSS once a payload has already been injected, so disabling/weakening it removes a mitigation that has nothing to do with whether the injection itself is possible. Keep a restrictive policy: enable Helmet's default CSP (or a hand-configured one) instead of `false`, drop `unsafe-inline` in favor of nonces/hashes, and scope `default-src`/`script-src` to specific allow-listed origins instead of `*`. Kept at `warning` because this is a mitigation-ABSENCE rule (defense-in-depth), not proof of an exploitable injection by itself. Suppress a vetted case with `// zzop-csp-weak-or-disabled-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -847,7 +847,7 @@
     {
       "id": "insecure-cookie",
       "severity": "warning",
-      "message": "A cookie is set (`res.cookie`/`setCookie`/`cookies.set`) without `httpOnly` in the same function — a session/auth cookie without it is readable by any script on the page, so an XSS bug becomes full session theft. Add `{ httpOnly: true }` (plus `secure`/`sameSite` as appropriate). Suppress a vetted case with `// insecure-cookie-ok`.",
+      "message": "A cookie is set (`res.cookie`/`setCookie`/`cookies.set`) without `httpOnly` in the same function — a session/auth cookie without it is readable by any script on the page, so an XSS bug becomes full session theft. Add `{ httpOnly: true }` (plus `secure`/`sameSite` as appropriate). Suppress a vetted case with `// zzop-insecure-cookie-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -872,7 +872,7 @@
     {
       "id": "error-leak-to-client",
       "severity": "warning",
-      "message": "A raw error object is sent directly to the client (`res.status(5xx).send/json(err)`, or Hono's `c.json(err)`) — errors often carry stack traces, file paths, or internal config that help an attacker map the system. Log server-side and send a generic message (e.g. `{ error: 'Internal server error' }`) instead. Suppress a vetted case with `// error-leak-to-client-ok`.",
+      "message": "A raw error object is sent directly to the client (`res.status(5xx).send/json(err)`, or Hono's `c.json(err)`) — errors often carry stack traces, file paths, or internal config that help an attacker map the system. Log server-side and send a generic message (e.g. `{ error: 'Internal server error' }`) instead. Suppress a vetted case with `// zzop-error-leak-to-client-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -894,7 +894,7 @@
     {
       "id": "stacktrace-to-response",
       "severity": "warning",
-      "message": "An exception's stack trace (`printStackTrace()`, `getStackTrace()`) touches the HTTP response (`getWriter()`, `ResponseEntity`, `@ResponseBody`) in the same method — if it reaches the client, it exposes internal class names and file paths. Log server-side and return a generic error body instead. (A custom exception's `.getMessage()` — a curated message string, not a stack trace — is deliberately NOT flagged, to match this rule's stack-trace-exposure scope.) Suppress a vetted case with `// stacktrace-to-response-ok`.",
+      "message": "A stack-trace call (`printStackTrace()`, `getStackTrace()`) and an HTTP-response token (`getWriter()`, `ResponseEntity`, `@ResponseBody`, `HttpServletResponse`) both appear in the same method — this is a co-occurrence heuristic, not proof the trace is written to the response (a `printStackTrace()` that goes to stderr in a method that merely mentions `HttpServletResponse` fires too). When the trace does reach the client, it exposes internal class names and file paths. Log server-side and return a generic error body instead. (A custom exception's `.getMessage()` — a curated message string, not a stack trace — is deliberately NOT flagged, to match this rule's stack-trace-exposure scope.) Suppress a vetted case with `// zzop-stacktrace-to-response-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.java$",
@@ -917,7 +917,7 @@
     {
       "id": "localstorage-jwt",
       "severity": "warning",
-      "message": "A token/JWT-shaped value is written to `localStorage` — readable by any script on the page, so a single XSS bug anywhere on the origin can exfiltrate it with no further exploitation. Default fix: store it in an `httpOnly` cookie with `sameSite` set, plus CSRF-token protection. This isn't a full fix either — cookies reintroduce CSRF risk (mitigated by `sameSite`/CSRF tokens), and an active XSS bug can still ride an existing cookie session in-place — but it does stop direct token theft/exfiltration. Accepted alternative: an in-memory access token with a rotating refresh token, or a Backend-For-Frontend (BFF) pattern. Suppress a vetted case with `// localstorage-jwt-ok`.",
+      "message": "A token/JWT-shaped value is written to `localStorage` — readable by any script on the page, so a single XSS bug anywhere on the origin can exfiltrate it with no further exploitation. Default fix: store it in an `httpOnly` cookie with `sameSite` set, plus CSRF-token protection. This isn't a full fix either — cookies reintroduce CSRF risk (mitigated by `sameSite`/CSRF tokens), and an active XSS bug can still ride an existing cookie session in-place — but it does stop direct token theft/exfiltration. Accepted alternative: an in-memory access token with a rotating refresh token, or a Backend-For-Frontend (BFF) pattern. Suppress a vetted case with `// zzop-localstorage-jwt-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -930,7 +930,7 @@
     {
       "id": "mass-assignment",
       "severity": "warning",
-      "message": "`req.body` (or a spread of it) passed directly into a database write (`create`/`update`/`upsert`/`updateMany`) — an attacker can set any field the model accepts (role, isAdmin, price, ownerId, ...) that the handler never intended to expose. Whitelist the fields you accept, or use a validated DTO. Suppress a vetted case with `// mass-assignment-ok`.",
+      "message": "`req.body` (or a spread of it) passed directly into a database write (`create`/`update`/`upsert`/`updateMany`) — an attacker can set any field the model accepts (role, isAdmin, price, ownerId, ...) that the handler never intended to expose. Whitelist the fields you accept, or use a validated DTO. Suppress a vetted case with `// zzop-mass-assignment-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",

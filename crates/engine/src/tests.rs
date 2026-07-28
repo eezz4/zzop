@@ -43,7 +43,7 @@ impl Drop for TempDir {
 
 /// Loads the real `rules/dsl/security/security.json` from the repo, resolved from
 /// `CARGO_MANIFEST_DIR` (`crates/engine` -> up two -> repo root -> `rules/dsl/...`), filtered to the
-/// three Java security-concern rules (`sql-taint`/`weak-crypto`/`cmd-injection`) that moved into
+/// three Java security-concern rules (`sql-string-concat`/`weak-crypto`/`cmd-injection`) that moved into
 /// `security` when the language-named `java-security` pack was dissolved (v0.15). Filtering keeps
 /// this fixture a small, fully-`.java`-applicable pack (every rule fires only on the `.java` fixture
 /// file), which the profiling/degradation tests below rely on. Goes through `zzop_core::parse_dsl_pack`
@@ -54,8 +54,12 @@ fn security_java_pack() -> RulePackDef {
     let text = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
     let mut pack: RulePackDef = zzop_core::parse_dsl_pack(&text).expect("parse security.json");
-    pack.rules
-        .retain(|r| matches!(r.id.as_str(), "sql-taint" | "weak-crypto" | "cmd-injection"));
+    pack.rules.retain(|r| {
+        matches!(
+            r.id.as_str(),
+            "sql-string-concat" | "weak-crypto" | "cmd-injection"
+        )
+    });
     pack
 }
 
@@ -64,7 +68,7 @@ fn security_java_pack() -> RulePackDef {
 /// - `c.ts`: imports a module that does not exist (dangling import — must not panic, must not resolve
 ///   to an edge).
 /// - `db/schema.prisma`: a `User` model.
-/// - `legacy/C.java`: a SQL-taint pattern the `security` pack's `sql-taint` line-scan rule matches.
+/// - `legacy/C.java`: a SQL-taint pattern the `security` pack's `sql-string-concat` line-scan rule matches.
 /// - `generated/big.ts`: exceeds `size_cap` -> oversized lexical fallback.
 /// - `broken.ts`: unbalanced braces -> structurally-broken lexical fallback.
 fn fixture_tree() -> TempDir {
@@ -127,10 +131,10 @@ fn security_java_line_scan_rules_fire_on_the_java_file() {
     let hit = out
         .findings
         .iter()
-        .find(|f| f.rule_id == "security/sql-taint");
+        .find(|f| f.rule_id == "security/sql-string-concat");
     assert!(
         hit.is_some(),
-        "expected a security/sql-taint finding, got: {:?}",
+        "expected a security/sql-string-concat finding, got: {:?}",
         out.findings
     );
     assert_eq!(hit.unwrap().file, "legacy/C.java");
@@ -246,9 +250,9 @@ fn dsl_finding_message_carries_the_config_disable_hint_for_its_own_id() {
     let hit = out
         .findings
         .iter()
-        .find(|f| f.rule_id == "security/sql-taint")
-        .expect("expected a security/sql-taint finding");
-    let hint = zzop_core::disable_hint("security/sql-taint");
+        .find(|f| f.rule_id == "security/sql-string-concat")
+        .expect("expected a security/sql-string-concat finding");
+    let hint = zzop_core::disable_hint("security/sql-string-concat");
     assert!(
         hit.message.ends_with(&hint),
         "expected the DSL finding's message to end with disable_hint's fragment {hint:?}, got: {:?}",
@@ -265,7 +269,7 @@ fn rule_overrides_applied_lists_only_ids_that_actually_matched() {
     let mut cfg = config(DEFAULT_SIZE_CAP);
     cfg.rule_config
         .disabled_rules
-        .push("security/sql-taint".to_string());
+        .push("security/sql-string-concat".to_string());
     cfg.rule_config
         .disabled_rules
         .push("no-such-rule-typo".to_string());
@@ -276,7 +280,10 @@ fn rule_overrides_applied_lists_only_ids_that_actually_matched() {
     let applied = out
         .rule_overrides_applied
         .expect("expected Some — disabled_rules/severity_overrides were both non-empty");
-    assert_eq!(applied.disabled, vec!["security/sql-taint".to_string()]);
+    assert_eq!(
+        applied.disabled,
+        vec!["security/sql-string-concat".to_string()]
+    );
     assert_eq!(applied.severity_remapped, vec!["circular".to_string()]);
     assert!(!applied.disabled.contains(&"no-such-rule-typo".to_string()));
     assert!(!applied
@@ -673,5 +680,110 @@ fn directly_extracted_literal_fetch_calls_do_not_fire_the_lexical_self_report() 
             .any(|w| w.contains("builtin `fetch(` call site(s)")),
         "a directly-extracted tree must stay silent, got: {:?}",
         out.warnings
+    );
+}
+
+/// Every `.rs` file under this crate's `src/`, recursively — the haystack the gate-coverage pin below
+/// scans. Resolved from `CARGO_MANIFEST_DIR` like `security_java_pack` above.
+fn engine_src_lines() -> Vec<String> {
+    fn walk(dir: &Path, out: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+        paths.sort();
+        for path in paths {
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                if let Ok(text) = fs::read_to_string(&path) {
+                    out.extend(text.lines().map(str::to_string));
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut out);
+    out
+}
+
+/// Seals the invariant that every REGISTERED native analysis id is actually gated by a literal
+/// `is_enabled(..., "<id>")` call somewhere in this crate — i.e. that `disabledRules` really disables it.
+///
+/// This is the invariant a `{rule_id, runner}` dispatch table was once proposed to protect, recorded as
+/// long-term cleanup for the ~14 inline `if is_enabled` checks in `analyze::assemble::rules`,
+/// `native_rules::callgraph` and `native_rules::schema_join`. The table was NOT built, for two reasons
+/// worth keeping written down: (1) the runners have irreconcilable signatures — `circular(cycles)` vs
+/// `dead_export_findings(8 args)` vs `unreachable` with 20 lines of entry-set construction and
+/// `dead-candidates` with a generated-banner post-filter — so a uniform `runner` column would need a
+/// god-context struct passed to every closure, adding indirection rather than removing it; and (2) the
+/// one drift this class has ACTUALLY suffered (v0.24.0: the five `zzop-metrics` ids were accepted by
+/// `disabledRules`, reported back as applied, and kept running) was a MISSING gate, which a table cannot
+/// catch on its own — only a registry-vs-gate cross-check like this test can. So the check is the fix and
+/// the table is not; a comment promising work nobody intends to do would be the worse residue.
+///
+/// Deliberately a source-text check, not a behavioral one: it proves the gate EXISTS for every id, which
+/// is exactly the drift shape observed. It cannot prove the gate wraps the right call — that stays the
+/// job of each analysis's own `disabling_X_removes_the_X_finding` test.
+///
+/// ONE family is gated by a DERIVED id instead of a literal, and is accounted for explicitly rather than
+/// waved through: the 12 `schema/<label>` ids all flow through the same
+/// `is_enabled(rule_config, &finding.rule_id)` filter in `pipeline::findings`, because writing 12 literal
+/// gates would be 12 chances to forget one. [`DERIVED_SCHEMA_GATE`] is asserted to still exist in the
+/// source, so deleting the derived gate turns this test red exactly as deleting a literal one would; the
+/// behavioral half (that it drops the right findings) is
+/// `crates/engine/tests/pack_prisma_schema.rs`'s `disabling_one_*_issue_id_drops_only_that_rule`.
+const DERIVED_SCHEMA_GATE: &str = "is_enabled(rule_config, &finding.rule_id)";
+
+#[test]
+fn every_registered_native_analysis_id_has_an_is_enabled_gate_in_this_crate() {
+    let mut registry = zzop_core::RuleRegistry::new();
+    register_all_native(&mut registry);
+    // Windowed over the joined source, not per LINE: `rustfmt` wraps a long-enough call across lines, so a
+    // line-scoped search silently stops seeing the gate for any id long enough to trigger the wrap
+    // (`cross-layer/untraced-client-import-no-visible-consume` did exactly that the moment it was renamed —
+    // the gate was right there, one line below its own `is_enabled(`).
+    let text = engine_src_lines().join("\n");
+    let gate_windows: Vec<&str> = text
+        .match_indices("is_enabled(")
+        .map(|(i, _)| &text[i..(i + 240).min(text.len())])
+        .collect();
+
+    // Counted in the ONE file that owns both schema call sites, not across `engine_src_lines()` — this
+    // test file quotes the same literal in its own constant and doc comment, which would inflate the count.
+    let findings_rs =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/pipeline/findings.rs"))
+            .expect("crates/engine/src/pipeline/findings.rs must exist");
+    let derived_gate_sites = findings_rs.matches(DERIVED_SCHEMA_GATE).count();
+    assert_eq!(
+        derived_gate_sites, 2,
+        "the derived per-issue schema gate `{DERIVED_SCHEMA_GATE}` must exist at BOTH schema call sites \
+         (`schema_findings`, `schema_usage_findings`) — found {derived_gate_sites}. If it moved, move this \
+         constant with it; if it is gone, the 12 `schema/*` ids are silently ungated again"
+    );
+    let derived: std::collections::BTreeSet<String> =
+        zzop_rules_schema::SCHEMA_STRUCTURAL_ISSUE_LABELS
+            .iter()
+            .chain(zzop_rules_schema::SCHEMA_USAGE_ISSUE_LABELS.iter())
+            .map(|label| zzop_rules_schema::schema_issue_rule_id(label))
+            .collect();
+
+    let ungated: Vec<&str> = registry
+        .ids()
+        .iter()
+        .map(String::as_str)
+        .filter(|id| {
+            let needle = format!("\"{id}\"");
+            !gate_windows.iter().any(|w| w.contains(&needle)) && !derived.contains(*id)
+        })
+        .collect();
+    assert!(
+        ungated.is_empty(),
+        "registered native analysis ids with no `is_enabled` gate in crates/engine/src: {ungated:?}"
+    );
+    assert!(
+        registry.ids().len() >= 57,
+        "registry shrank unexpectedly: {} ids",
+        registry.ids().len()
     );
 }

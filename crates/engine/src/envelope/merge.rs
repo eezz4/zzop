@@ -129,7 +129,7 @@ pub(super) fn synthetic_artifact_from_projection(
         rule_timings: Vec::new(),
         used_names: Vec::new(),
         // An external projection carries no signature evidence (the envelope has no such channel),
-        // so an overlay-only file simply gets no `dead-exports` exemptions — same graceful degrade
+        // so an overlay-only file simply gets no `unimported-export` exemptions — same graceful degrade
         // as `used_names` directly above.
         exported_signature_names: Vec::new(),
         const_map_fragment: projection.const_map_fragment.clone(),

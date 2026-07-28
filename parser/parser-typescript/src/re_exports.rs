@@ -15,7 +15,7 @@ use crate::parse_module;
 /// per-specifier `export { type X } from "./y"` marker (mirrors `parse_imports`'s
 /// `clause_type_only || n.is_type_only` combination). A type-only re-export is erased by TS at compile
 /// time, so `lang::resolve::build_dep`/`build_dep_with_workspace` merge it into `resolved` as a real edge
-/// (the target is still "used" — fan-in/dead-exports/metrics need it) but add it to the noncycle
+/// (the target is still "used" — fan-in/unimported-export/metrics need it) but add it to the noncycle
 /// exclusion set so it is never treated as a circular-dependency edge — the same treatment a type-only
 /// import binding gets.
 pub fn parse_re_exports(file: &str, source: &str) -> Vec<ReExport> {

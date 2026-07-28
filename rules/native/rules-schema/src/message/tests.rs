@@ -13,13 +13,15 @@ fn issue(rule: &str, field: Option<&str>, params: Option<serde_json::Value>) -> 
     }
 }
 
-/// Pins the exact byte shape of the "whole family" disable-hint tail (`family_disable_hint`) — this is
+/// Pins the exact byte shape of the two-id disable-hint tail (`issue_disable_hint`) — this is
 /// the one native message dialect that does NOT read `disable_hint`'s own "Disable via config ..."
 /// output verbatim (it splices `disable_hint_tail` into a differently-worded sentence instead, see
-/// `family_disable_hint`'s doc), so this regression pin exists specifically to catch a future edit that
-/// breaks that splice.
+/// `issue_disable_hint`'s doc), so this regression pin exists specifically to catch a future edit that
+/// breaks that splice. It also pins the honesty property the promotion of these labels to registered ids
+/// bought: the sentence names the issue's OWN id first, because that id is now what
+/// `disabledRules`/`severityOverrides` actually match on.
 #[test]
-fn god_model_message_ends_with_the_exact_whole_family_disable_hint() {
+fn god_model_message_ends_with_the_exact_own_id_and_family_disable_hint() {
     let i = issue(
         "god-model",
         None,
@@ -28,27 +30,54 @@ fn god_model_message_ends_with_the_exact_whole_family_disable_hint() {
     let msg = schema_issue_message(&i);
     assert!(
         msg.ends_with(
-            " Disable the whole family via config `rules: { \"schema-structural\": \"off\" }` \
-             (embedders: `disabled_rules`); to drop just this one finding, use config `exclude` (or a \
-             per-rule `exclude`) on its file path instead."
+            " Disable this one rule via config `rules: { \"schema/god-model\": \"off\" }` (embedders: \
+             `disabled_rules`), or its whole family via config `rules: { \"schema-structural\": \
+             \"off\" }` (embedders: `disabled_rules`); to drop a single finding, use config `exclude` \
+             (or a per-rule `exclude`) on its file path instead."
         ),
         "unexpected message tail: {msg:?}"
     );
 }
 
-/// Same pin as the structural test above, for the usage-family gate id.
+/// Same pin as the structural test above, for the usage family.
 #[test]
-fn dead_model_message_ends_with_the_exact_whole_family_disable_hint() {
-    let i = issue("dead-model", None, None);
+fn unreferenced_model_name_message_ends_with_the_exact_own_id_and_family_disable_hint() {
+    let i = issue("unreferenced-model-name", None, None);
     let msg = schema_issue_message(&i);
     assert!(
         msg.ends_with(
-            " Disable the whole family via config `rules: { \"schema-usage\": \"off\" }` (embedders: \
-             `disabled_rules`); to drop just this one finding, use config `exclude` (or a per-rule \
-             `exclude`) on its file path instead."
+            " Disable this one rule via config `rules: { \"schema/unreferenced-model-name\": \"off\" \
+             }` (embedders: `disabled_rules`), or its whole family via config `rules: { \
+             \"schema-usage\": \"off\" }` (embedders: `disabled_rules`); to drop a single finding, use \
+             config `exclude` (or a per-rule `exclude`) on its file path instead."
         ),
         "unexpected message tail: {msg:?}"
     );
+}
+
+/// Every registered `schema/<label>` id is a label `schema_issue_message` RECOGNIZES: it renders a
+/// specific body (not the `schema rule '<other>' fired.` fallback) and appends a hint naming that exact
+/// id. The registration lists and the message dispatch read the same two constants, so this is the seal
+/// that the third copy — the `rule:` literals `structural.rs`/`usage.rs` actually emit — has not drifted
+/// from them: a label emitted under a name nobody registered would reach a user as a `ruleId` that
+/// `disabledRules` cannot match, which is exactly the defect the promotion removed.
+#[test]
+fn every_registered_schema_issue_id_has_a_specific_message_naming_that_id() {
+    for label in crate::SCHEMA_STRUCTURAL_ISSUE_LABELS
+        .iter()
+        .chain(crate::SCHEMA_USAGE_ISSUE_LABELS.iter())
+    {
+        let msg = schema_issue_message(&issue(label, Some("someField"), None));
+        assert!(
+            !msg.contains("fired."),
+            "`{label}` fell through to the generic fallback message: {msg}"
+        );
+        let own = format!("\"{}\"", crate::schema_issue_rule_id(label));
+        assert!(
+            msg.contains(&own),
+            "`{label}`'s message never names its own registered id {own}: {msg}"
+        );
+    }
 }
 
 #[test]
@@ -166,7 +195,7 @@ fn enum_string_drift_message_ends_with_the_exact_disable_hint() {
 }
 
 /// The published pages that must carry this crate's two language sightlines. `docs/rules/catalog.md` is
-/// additionally embedded in the shipped binary (`crates/host/src/embedded.rs`'s `rule-catalog` resource),
+/// additionally embedded in the shipped binary (`crates/summary/src/contracts.rs`'s `rule-catalog` resource),
 /// so its copy is what an MCP client reads without a source checkout. `docs/getting-started.md` is NOT in
 /// the list on purpose: it never names any of these five rule ids, so a sightline there would have nothing
 /// to attach to — see this crate's report note.
@@ -217,16 +246,16 @@ fn the_query_call_site_sightline_is_identical_in_the_findings_and_the_docs() {
     }
 }
 
-/// Policy pin (T2), same shape, for the INVERTED case: `dead-model`/`dead-field` do not go silent when
+/// Policy pin (T2), same shape, for the INVERTED case: `unreferenced-model-name`/`unreferenced-field-name` do not go silent when
 /// their evidence channel is empty — they ASSERT. `field_usage_tokens` only ever scans
 /// `FIELD_USAGE_SCAN_EXTENSIONS`, so a tree holding a schema and no `.ts`/`.tsx` supplies zero identifier
 /// evidence and every model reports dead (measured 2026-07-25 on a directory containing one
-/// `schema.prisma`: 2 models in, 2 `dead-model` findings out). The claim is derived from the constant, so
+/// `schema.prisma`: 2 models in, 2 `unreferenced-model-name` findings out). The claim is derived from the constant, so
 /// the extension list cannot drift out of the published sightline.
 #[test]
 fn the_field_usage_sightline_is_identical_in_the_findings_and_the_docs() {
     let claim = field_usage_sightline_claim();
-    for rule in ["dead-model", "dead-field"] {
+    for rule in ["unreferenced-model-name", "unreferenced-field-name"] {
         let msg = schema_issue_message(&issue(rule, Some("someField"), None));
         assert!(
             msg.contains(&claim),

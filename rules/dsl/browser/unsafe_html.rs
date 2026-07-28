@@ -260,7 +260,7 @@ fn unsafe_html_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-browser");
     dir.write(
         "vetted.ts",
-        "declare const el: HTMLElement;\ndeclare const trusted: string;\nexport function render() {\n  // unsafe-html-sink-ok: value is sanitized upstream via DOMPurify\n  el.innerHTML = trusted;\n}\n",
+        "declare const el: HTMLElement;\ndeclare const trusted: string;\nexport function render() {\n  // zzop-unsafe-html-sink-ok: value is sanitized upstream via DOMPurify\n  el.innerHTML = trusted;\n}\n",
     );
     let out = scan(&dir);
     assert!(

@@ -66,12 +66,48 @@ fn plain_incr_with_no_arithmetic_set_at_all_is_not_flagged() {
     );
 }
 
+// ORDER-GATE pin (`after: "read"` + `after_in_same_function: true`): the arithmetic `.set(` runs BEFORE
+// the only `.get(` in the function, so there is no read for it to follow. Both patterns still match in the
+// span — this is exactly the shape the pre-gate co-occurrence matcher reported as a read-modify-write
+// counter, and the reason the `get-set` name was not true of it.
+#[test]
+fn an_arith_set_that_precedes_the_only_read_is_not_flagged() {
+    let dir = TempDir::new("zzop-redis");
+    dir.write(
+        "src/seedCounter.ts",
+        "import { redis } from \"./redis\";\nexport async function seedThenReport(key: string) {\n  await redis.set(key, Number(0) + 1);\n  const n = await redis.get(key);\n  return n;\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "counter-get-set").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+// ORDER-GATE pin, sibling-closure leg: the read lives in a DIFFERENT nearest-enclosing function than the
+// arithmetic set, so `after_in_same_function` refuses the pairing even though the read is lexically first.
+#[test]
+fn a_read_in_a_sibling_closure_does_not_pair_with_the_arith_set() {
+    let dir = TempDir::new("zzop-redis");
+    dir.write(
+        "src/siblingCounter.ts",
+        "import { redis } from \"./redis\";\nexport function makeCounter(key: string) {\n  const load = async () => {\n    return await redis.get(key);\n  };\n  const bump = async (n: number) => {\n    await redis.set(key, Number(n) + 1);\n  };\n  return { load, bump };\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "counter-get-set").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
 #[test]
 fn redis_counter_ok_marker_above_the_set_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-redis");
     dir.write(
         "src/hitCounterSuppressed.ts",
-        "import { redis } from \"./redis\";\nexport async function bumpHitCount(key: string) {\n  const n = await redis.get(key);\n  // counter-get-set-ok: single-writer cron job, no concurrent access possible\n  await redis.set(key, Number(n) + 1);\n}\n",
+        "import { redis } from \"./redis\";\nexport async function bumpHitCount(key: string) {\n  const n = await redis.get(key);\n  // zzop-counter-get-set-ok: single-writer cron job, no concurrent access possible\n  await redis.set(key, Number(n) + 1);\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -97,4 +133,22 @@ fn hyphen_suffixed_string_key_cache_set_is_not_a_counter_and_is_not_flagged() {
         "{:?}",
         out.findings
     );
+}
+
+// Seals the SAME-LINE NESTING RESIDUAL the rule's message discloses as a measured false negative: the
+// `.get(` is nested inside the `.set(` call's own arguments, so `order_ok`'s first-match start-offset
+// comparison reads it as coming AFTER the trigger and refuses the pairing — a genuine lost-update
+// read-modify-write goes unreported. The second function writes the same logic across two statements
+// and DOES fire, so the silence is provably the nesting and not the fixture.
+#[test]
+fn an_inline_read_nested_inside_the_arith_set_is_the_disclosed_false_negative() {
+    let dir = TempDir::new("zzop-redis");
+    dir.write(
+        "src/inlineCounter.ts",
+        "import { redis } from \"./redis\";\nexport async function bumpInline(key: string) {\n  await redis.set(key, Number(await redis.get(key)) + 1);\n}\nexport async function bumpTwoStatement(key: string) {\n  const n = await redis.get(key);\n  await redis.set(key, Number(n) + 1);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "counter-get-set");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 7, "{:?}", out.findings);
 }

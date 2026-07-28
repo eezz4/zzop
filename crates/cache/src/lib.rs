@@ -60,7 +60,7 @@ mod dir_tests {
     }
 
     /// Value pin (T2 style, for the surfaces that cannot import these symbols): both names appear
-    /// verbatim in shipped documentation and in this repo's own `.gitignore` (`/.zzop/`), so a change
+    /// verbatim in shipped documentation and in this repo's own `.gitignore` (`**/.zzop/`), so a change
     /// here is a public, documented change — never a silent one.
     #[test]
     fn the_on_disk_names_are_pinned() {

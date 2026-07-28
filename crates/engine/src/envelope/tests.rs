@@ -1,8 +1,8 @@
 //! Shared fixtures for the envelope test suite. The tests themselves live in the child modules,
 //! split by concern: core Mode A ingestion (`ingest`), DSL rules / config diagnostics / determinism /
 //! composition / the fragment-specifier resolver (`rules_and_diagnostics`), and reserved-sentinel
-//! drops + config mounts (`reserved_and_mounts`). Mode B (`apply_adapter_overlays`) is covered by the
-//! crate-level integration tests (`tests/analyze_adapter_overlay.rs` and friends).
+//! drops + config mounts (`reserved_and_mounts`). Mode B's applied-vs-declared return contract lives in
+//! (`overlay`); its end-to-end effects stay in the crate-level `tests/analyze_adapter_overlay.rs`.
 
 use std::collections::HashMap;
 
@@ -11,6 +11,7 @@ use zzop_core::{FileProjection, ImportMap, IoFacts, NormalizedEnvelope, NORMALIZ
 use crate::EngineConfig;
 
 mod ingest;
+mod overlay;
 mod reserved_and_mounts;
 mod rules_and_diagnostics;
 

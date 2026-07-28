@@ -6,7 +6,8 @@
 //!
 //! ## Parser fingerprint composition
 //!
-//! A file's cache key is `(content hash, parser fingerprint, scope, ruleset fingerprint)`. The parser
+//! A file's cache key is `(content hash, parser fingerprint, scope, vocabulary fingerprint, ruleset
+//! fingerprint)`. The parser
 //! fingerprint is mainly "parser id + swc version + parser-logic version counter" (a function of which
 //! language handled the file), plus one extra ingredient in [`parser_fingerprint`]:
 //! `EngineConfig::size_cap`. `pipeline::process_file`'s oversized-file branch decides lexical-fallback
@@ -58,16 +59,43 @@ use zzop_core::RulePackDef;
 use crate::dispatch::Language;
 use crate::{CacheStats, EngineConfig};
 
-/// Schema version passed to `AnalysisCache::open` — bump on any change to `FileIrSlice`'s or the
-/// findings entry's shape that old entries cannot satisfy (see `AnalysisCache::open`'s own doc: a bump
-/// is a bulk wipe, not a per-entry migration). This matters even when `serde(default)` could deserialize
-/// an old entry without erroring: a missing field silently defaulting (e.g. an empty `Vec`/`false`) is
-/// indistinguishable from "genuinely has none", which would make a cache hit against a pre-existing
-/// directory serve a wrong answer instead of a fresh recompute — the schema bump forces a clean cache
-/// instead. "Bump" (2026-07-22 version reform) = set this to the current workspace `CARGO_PKG_VERSION`
-/// whenever `FileIrSlice` (or the cached findings shape) gains, renames, or removes a field; an unchanged
-/// release keeps the old value so warm caches survive the upgrade (see the cache decision doc).
-pub const CACHE_SCHEMA_VERSION: &str = "0.23.0";
+/// Schema version passed to `AnalysisCache::open` — the cache's one bulk invalidator (see
+/// `AnalysisCache::open`'s own doc: a mismatch is a wipe, not a per-entry migration). It is a
+/// COMPOSITE of two axes, and neither one alone is enough:
+///
+/// - **Release axis** — `env!("CARGO_PKG_VERSION")`, the workspace version. DERIVED, never typed by
+///   hand, so it cannot drift from the release it claims. It did drift: this const sat at `"0.23.0"`
+///   for the whole of the 0.24.0 cycle and was corrected by hand, which is exactly the failure a
+///   hand-copied version always eventually has. The consequence is deliberate and is now part of what
+///   a release DOES: the string changes on every release, so **every release reclaims exactly one
+///   cache generation**. This crate has no GC — `zzop_cache`'s store module doc records non-eviction
+///   as designed — so a generation that stops being addressed would otherwise sit unread on every
+///   user's disk forever. The price is one cold run per upgrade.
+/// - **In-cycle axis** — the trailing `+rN` counter, bumped BY HAND when a persisted shape changes
+///   BETWEEN releases. The release axis cannot cover that case at all: within one cycle the version
+///   does not move, so a developer's (or a nightly consumer's) warm cache would be served slices of
+///   the old shape under a version that claims to describe the new one. Monotonic and never reset —
+///   a reset would be harmless once the release axis has moved, but buys nothing.
+///
+/// Bump `+rN` whenever `FileIrSlice`, the cached findings payload, or either entry envelope gains,
+/// renames, or removes a field. That holds even when `#[serde(default)]` would deserialize an old
+/// entry without erroring: a missing field silently defaulting (an empty `Vec`/`false`) is
+/// indistinguishable from "genuinely has none", so a hit against a pre-existing directory would serve
+/// a wrong answer instead of recomputing.
+///
+/// **And whenever the MEANING of an existing key ingredient changes**, which is not a shape change and
+/// is easy to miss. `+r2` is exactly that case: on 2026-07-27 an undeclared convention vocabulary
+/// stopped falling back to built-ins and started making no judgment at all. The declared struct — which
+/// is what [`vocabulary_fingerprint`] hashes — is byte-identical across that change, so the key does NOT
+/// move on its own, while the slices it addresses are computed differently. Without this bump a warm
+/// cache would serve pre-flip IR under a post-flip key.
+///
+/// `scripts/check-parser-fingerprint-bump.sh`'s `core` scope enforces this. It compares the const's
+/// value EXPRESSION at both ends of the diff range and resolves `env!("CARGO_PKG_VERSION")` against
+/// each end's `Cargo.toml`, so both axes are visible to it: a `CORE_SHARED_FILES` change with neither
+/// the release version nor `+rN` moved is red, and a release bump alone is accepted as the
+/// invalidation it really is.
+pub const CACHE_SCHEMA_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+r2");
 
 /// Fingerprint for files that never reach a structural parser crate in the fused pass: no `Language` match
 /// (`dispatch::dispatch` returned `None` — unrecognized extension), or the size-cap lexical fallback
@@ -82,7 +110,10 @@ const LEXICAL_FALLBACK_FINGERPRINT: &str = "lexical/0.21.0";
 /// (`zzop_rules_schema::apply_schema_rules`, wired into the fused per-file pass for Prisma files). Unlike
 /// a DSL pack (whose content already changes the fingerprint via `pack:?`), this is Rust logic with no
 /// pack content to hash, so the version counter (`zzop_rules_schema::STRUCTURAL_RULES_VERSION`) lives
-/// beside the rule itself and is bumped whenever its output shape changes.
+/// beside the rule itself. It covers everything that reaches the cached finding — not just the output
+/// SHAPE but rule bodies, thresholds, and the message/disable-hint text authored in
+/// `rules-schema`'s `message.rs`; see that const's doc for the cached (`structural.rs`) vs
+/// recomputed-every-run (`usage.rs`) lane split that decides whether a bump is needed.
 fn schema_structural_fingerprint() -> String {
     format!(
         "schema-structural-{}",
@@ -96,7 +127,8 @@ fn schema_structural_fingerprint() -> String {
 /// window, ...) alters findings for byte-identical source AND identical pack content — invisible to the
 /// key without this token. Restamp with the current `CARGO_PKG_VERSION` on any such change (2026-07-22
 /// version reform: cache-bust tokens are package-version stamps).
-const DSL_INTERPRETER_FINGERPRINT: &str = "dsl/0.23.0+near-miss-marker-v1";
+const DSL_INTERPRETER_FINGERPRINT: &str =
+    "dsl/0.24.0+zzop-marker-prefix-v1+method-scan-trigger-lines";
 
 /// Opens the on-disk cache at `config.cache_dir`, if set. Never panics: an open failure (bad permissions,
 /// path collides with a plain file, disk full while writing the schema-version marker, ...) degrades to
@@ -161,6 +193,39 @@ pub(crate) fn parser_fingerprint(language: Option<Language>, config: &EngineConf
 /// [`ruleset_fingerprint`]'s pack-part joining below.
 pub(crate) fn cache_scope(config: &EngineConfig, rel: &str) -> String {
     format!("{}\u{0}{rel}", config.source_id)
+}
+
+/// The vocabulary-fingerprint component of a file's `CacheKey` — a hash of the run's DECLARED convention
+/// vocabulary, present in the IR key as well as the findings key (see `CacheKey::vocabulary_fingerprint`).
+///
+/// ## One fingerprint over the WHOLE struct, not a per-lane subset
+///
+/// Individual vocabulary keys land in different lanes: `ormReceiverPattern` reaches the cached IR,
+/// `moneyTokens` reaches the cached findings, `authGuardPattern` reaches only the uncached whole-graph
+/// pass. Keying each lane on just the subset it reads would be precise — and would be a standing drift
+/// hazard, because that subset is a hand-maintained CLAIM about which lane consumes what, and nothing
+/// makes the claim fail when a consumer moves. The two errors are not symmetric: over-invalidating costs
+/// a recompute, under-invalidating serves a WRONG answer from a warm cache. `packs.disabled` already sets
+/// this precedent — it is folded into `ruleset_fingerprint` wholesale rather than per-pack.
+///
+/// ## The digest input is the serialized struct, so a NEW key is covered by construction
+///
+/// `VocabularyConfig` derives `Serialize` with every field always emitted (no `skip_serializing_if`), so
+/// `serde_json` output is a total function of its field list: adding the next vocabulary key changes this
+/// hash without anyone remembering to extend a list here. That is the whole point of hashing the wire
+/// shape rather than a hand-picked tuple — a hand-picked tuple is the same drift hazard as a per-lane
+/// subset, one level down. JSON (not `Debug`) because `serde_json` is already this crate's canonical
+/// serializer for config-shaped values and the struct's own field ORDER, which `Debug` and `serde` both
+/// follow, is what makes either deterministic.
+///
+/// Consequence worth stating plainly: this hashes what was DECLARED, not what was RESOLVED, so a request
+/// that omits `vocabulary` entirely and a request that declares exactly the built-ins are two different
+/// fingerprints for one behavior. That is over-invalidation, which is the safe direction; the product
+/// front end (`zzop-config`) injects `VocabularyConfig::built_in()` into every request, so the CLI/MCP
+/// lanes are stable and only a raw-facade embedder can straddle the two.
+pub(crate) fn vocabulary_fingerprint(config: &EngineConfig) -> String {
+    let declared = serde_json::to_string(&config.vocabulary).unwrap_or_default();
+    AnalysisCache::content_hash(declared.as_bytes())
 }
 
 /// The ruleset-fingerprint half of a file's `CacheKey`, over the already `is_enabled`-filtered pack set

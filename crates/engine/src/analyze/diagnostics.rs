@@ -9,22 +9,21 @@ mod capability;
 mod config_filters;
 mod coverage_report;
 mod git_collect;
+mod pack_scope;
 
 #[cfg(test)]
 mod unmatched_suppression_tests;
 #[cfg(test)]
 mod unparsed_extension_tests;
 
-pub(crate) use capability::{
-    compute_dsl_scope, no_applicable_dsl_rule_warning, uncompilable_rule_warnings,
-    zero_packs_warning,
-};
 pub(super) use capability::{git_not_requested_warning, unparsed_extension_warning};
+pub(crate) use capability::{uncompilable_rule_warnings, zero_packs_warning};
 pub(crate) use config_filters::{
     unmatched_global_exclude_warnings, unmatched_suppression_warnings,
 };
 pub(crate) use coverage_report::{rule_overrides_applied, run_diagnostics};
 pub(super) use git_collect::collect_git;
+pub(crate) use pack_scope::{compute_dsl_scope, pack_scope_warnings};
 
 /// Capability self-report: how many files this run classified minified/generated and were therefore
 /// skipped for every DSL rule-pack matcher type (distinct from `degraded`, which still runs line-scan

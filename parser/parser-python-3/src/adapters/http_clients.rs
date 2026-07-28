@@ -65,6 +65,9 @@ use zzop_core::{http_consume_interface_key, ImportMap, IoConsume};
 
 mod instances;
 
+/// The CALLED HTTP-method names this adapter recognizes on a client instance — the lowercase spelling
+/// of `zzop_core::HTTP_KEY_VERBS`, pinned to it (both directions) by
+/// `tests::verb_methods_and_fastapi_verb_decorators_are_the_core_verb_set`.
 pub(crate) const VERB_METHODS: &[&str] = &["get", "post", "put", "patch", "delete"];
 
 /// Extract this file's `requests`/`httpx` HTTP egress consumes — see module doc. Empty on parse failure,

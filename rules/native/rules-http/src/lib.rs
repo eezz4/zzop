@@ -38,11 +38,16 @@ pub fn register_native_analyses(registry: &mut RuleRegistry) {
 pub use duplicate_route::duplicate_route_findings;
 pub use http_scan::{
     scan_non_idempotent_write, scan_unsafe_read_endpoint, ScanNonIdempotentWriteInput,
-    ScanUnsafeReadEndpointInput,
+    ScanUnsafeReadEndpointInput, WRITE_HTTP_METHODS,
 };
+// The convention-vocabulary constants are exported so the ONE crate that assembles declarable defaults
+// (`zzop_engine::VocabularyConfig::built_in`) references these symbols instead of copying their values —
+// a second copy of a guard vocabulary is a second answer to "what does zzop think a guard is called".
+pub use mutating_route_no_auth::qualifier::QUALIFIER_GUARD_TOKENS;
 pub use mutating_route_no_auth::{
-    scan_mutating_route_no_auth, ScanMutatingRouteNoAuthInput, CALL_GRAPH_COVERED_EXTENSIONS,
-    DEFAULT_AUTH_GUARD_PATTERN,
+    scan_mutating_route_no_auth, ScanMutatingRouteNoAuthInput,
+    AUTH_ACQUISITION_CONDITIONAL_PATTERN, AUTH_ACQUISITION_STANDALONE_PATTERN,
+    AUTH_FAMILY_PATH_PATTERN, CALL_GRAPH_COVERED_EXTENSIONS, DEFAULT_AUTH_GUARD_PATTERN,
 };
 pub use route_shadowing::route_shadowing_findings;
-pub use unprovided_consume::unprovided_consume_findings;
+pub use unprovided_consume::{unprovided_consume_findings, API_SEGMENT_PATTERN};

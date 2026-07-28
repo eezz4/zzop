@@ -9,7 +9,7 @@
 //! awareness) and `dead_exports`' resolver closure called the plain `resolve_file` — both treat ANY
 //! non-`.`/non-`@/` specifier as external, so a cross-package import produced no dep-graph edge at all.
 //! That made the imported package's file look unreferenced from outside: `dead-candidates` (file-level,
-//! `fan_in == 0`) and `dead-exports` (symbol-level, "no importer") both fired on code a sibling package
+//! `fan_in == 0`) and `unimported-export` (symbol-level, "no importer") both fired on code a sibling package
 //! genuinely uses.
 
 use std::fs;
@@ -112,28 +112,28 @@ fn cross_package_workspace_import_clears_dead_candidates_on_the_target_file() {
 
 #[test]
 fn cross_package_workspace_import_clears_dead_exports_on_the_consumed_symbol() {
-    let dir = TempDir::new("zzop-engine-ws-alias-dead-exports");
+    let dir = TempDir::new("zzop-engine-ws-alias-unimported-export");
     write_two_package_fixture(&dir);
     let out = analyze_tree(dir.path(), &config());
 
-    // `helper` is imported by `pkg-a` through the workspace-alias specifier — the dead-exports resolver
+    // `helper` is imported by `pkg-a` through the workspace-alias specifier — the unimported-export resolver
     // closure must resolve that specifier back to `util.ts` for `helper` to count as used.
     assert!(
-        !out.findings.iter().any(|f| f.rule_id == "dead-exports"
+        !out.findings.iter().any(|f| f.rule_id == "unimported-export"
             && f.file == "packages/pkg-b/util.ts"
             && f.data.as_ref().is_some_and(|d| d["name"] == "helper")),
-        "helper should not be dead-exports once the workspace-alias resolver sees the import, got: {:?}",
+        "helper should not be unimported-export once the workspace-alias resolver sees the import, got: {:?}",
         out.findings
     );
 
     // Regression control: `neverImported` has no consumer anywhere and must still be flagged.
     assert!(
-        out.findings.iter().any(|f| f.rule_id == "dead-exports"
+        out.findings.iter().any(|f| f.rule_id == "unimported-export"
             && f.file == "packages/pkg-b/orphan.ts"
             && f.data
                 .as_ref()
                 .is_some_and(|d| d["name"] == "neverImported")),
-        "neverImported (no consumer) should still be flagged dead-exports, got: {:?}",
+        "neverImported (no consumer) should still be flagged unimported-export, got: {:?}",
         out.findings
     );
 }
@@ -142,7 +142,7 @@ fn cross_package_workspace_import_clears_dead_exports_on_the_consumed_symbol() {
 fn bare_workspace_specifier_resolves_to_the_named_packages_main_entry() {
     // Companion to the sub-path case above: `pkg-c` DOES declare a `main`, and `pkg-a` imports it with a
     // bare specifier (no sub-path) — exercises `WorkspacePkg::entry` end to end, not just `dir`. The main
-    // file is deliberately named `root.ts`, not `index.ts`/`main.ts` — both match dead-exports' own
+    // file is deliberately named `root.ts`, not `index.ts`/`main.ts` — both match unimported-export' own
     // `entry_patterns` (exempt unconditionally, real importer or not), which would make this test pass
     // even without the workspace-alias fix and prove nothing.
     let dir = TempDir::new("zzop-engine-ws-alias-bare-entry");
@@ -161,10 +161,10 @@ fn bare_workspace_specifier_resolves_to_the_named_packages_main_entry() {
     );
     let out = analyze_tree(dir.path(), &config());
     assert!(
-        !out.findings.iter().any(|f| f.rule_id == "dead-exports"
+        !out.findings.iter().any(|f| f.rule_id == "unimported-export"
             && f.file == "packages/pkg-c/root.ts"
             && f.data.as_ref().is_some_and(|d| d["name"] == "fromC")),
-        "fromC should not be dead-exports via the bare-specifier workspace entry resolution, got: {:?}",
+        "fromC should not be unimported-export via the bare-specifier workspace entry resolution, got: {:?}",
         out.findings
     );
 }

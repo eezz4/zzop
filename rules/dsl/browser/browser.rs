@@ -8,15 +8,15 @@
 //! flagged with the receiver kept in the snippet; a call on an unrelated receiver, or a clean file,
 //! produces no findings.
 //!
-//! `// no-system-dialogs-ok` (on the finding's line or the 3 lines above) suppresses `no-system-dialogs`;
-//! `// no-document-write-ok` does the same for `no-document-write` — distinct markers, since a shared one
+//! `// zzop-no-system-dialogs-ok` (on the finding's line or the 3 lines above) suppresses `no-system-dialogs`;
+//! `// zzop-no-document-write-ok` does the same for `no-document-write` — distinct markers, since a shared one
 //! would let suppressing one rule silently suppress the other (the `rule_contracts` meta-test checks this).
 //!
-//! `postmessage-wildcard` flags `postMessage(..., '*')`; `// postmessage-wildcard-ok` suppresses it.
+//! `postmessage-wildcard` flags `postMessage(..., '*')`; `// zzop-postmessage-wildcard-ok` suppresses it.
 //! `unsafe-html-sink` flags a non-literal `.innerHTML`/`.outerHTML` assignment (`innerhtml-assign`), a
 //! backtick template assignment that interpolates (`innerhtml-template`), `insertAdjacentHTML(...)` whose
 //! html argument isn't a plain literal (`insert-adjacent`), or JSX `dangerouslySetInnerHTML={{ __html: ... }}`
-//! whose value isn't a plain literal (`dangerously-set`); `// unsafe-html-sink-ok` suppresses it. It also
+//! whose value isn't a plain literal (`dangerously-set`); `// zzop-unsafe-html-sink-ok` suppresses it. It also
 //! carries a SANITIZER-PASSAGE veto (`html-sink-sanitized`): a finding is dropped only when a
 //! sanitizer-shaped call — `escape*`/`sanitize*`/`validate*`/`purify*`, optionally method-qualified, or a
 //! `*Safe`/`*Sanitized`/`*Escaped`/`*Purified` wrapper — is the ENTIRE value. The veto consumes the call's
@@ -28,27 +28,27 @@
 //!
 //! `javascript-url` flags a literal `javascript:`-scheme URL in a link/src position: a JSX/HTML attribute
 //! literal (`jsx-href-literal`), a `.href`/`.src` property assignment (`href-assign`), or a `setAttribute`
-//! call (`setattr-js`); `// javascript-url-ok` suppresses it. Scope-limited to the literal form — a dynamic
+//! call (`setattr-js`); `// zzop-javascript-url-ok` suppresses it. Scope-limited to the literal form — a dynamic
 //! `href={x}` is not attempted.
 //!
 //! `location-assign-dynamic` flags a non-literal assignment to the client navigation sink (`location`/
 //! `window.location`/`location.href` = ..., or `location.assign(...)`/`location.replace(...)`);
-//! `// location-assign-dynamic-ok` suppresses it. Receiver-aware like `no-document-write` (an arbitrary object's
+//! `// zzop-location-assign-dynamic-ok` suppresses it. Receiver-aware like `no-document-write` (an arbitrary object's
 //! own `.location` field, e.g. `user.location = x`, is never matched — only the bare global/`window.`
 //! form is); a literal string/`/`-prefixed path stays silent; a `const location = ...` declaration
 //! (the React Router `useLocation()` shape) is excluded via `exclude_pattern`.
 //!
 //! `jquery-html-sink` flags a jQuery HTML-insertion method (`.html`/`.append`/`.prepend`/`.after`/
 //! `.before`/`.wrapAll`) called with a non-literal argument, gated on the file mentioning `jquery` or a
-//! `$(` call; `// jquery-html-sink-ok` suppresses it.
+//! `$(` call; `// zzop-jquery-html-sink-ok` suppresses it.
 //!
 //! `vue-v-html` flags Vue's `v-html` directive (`.vue` files, plus `.ts`/`.tsx`/`.js`/`.jsx`);
-//! `// vue-v-html-ok` suppresses it.
+//! `// zzop-vue-v-html-ok` suppresses it.
 //!
-//! `unsanitized-markdown-html` (method-scan) flags a markdown-render call (`marked(`/`markdownit(`/
+//! `markdown-and-html-sink-unsanitized` (method-scan) flags a markdown-render call (`marked(`/`markdownit(`/
 //! `md.render(`/`remark(`/`showdown(`) co-occurring with an HTML sink (`innerHTML`/`outerHTML`/
 //! `dangerouslySetInnerHTML`/`v-html`) in the same function span, with no `DOMPurify`/`sanitize`/
-//! `sanitizeHtml`/`xss` token anywhere in that span; `// unsanitized-markdown-html-ok` suppresses it. `.vue` is in its
+//! `sanitizeHtml`/`xss` token anywhere in that span; `// zzop-markdown-and-html-sink-unsanitized-ok` suppresses it. `.vue` is in its
 //! file pattern for forward-compatibility only — this engine has no symbol/span parser for `.vue` today
 //! (see `docs/rules/dsl-reference.md`'s method-scan doc), so a `.vue` SFC's `<script>`+`<template>`
 //! pairing never actually co-fires; only same-file `.ts`/`.tsx`/`.js`/`.jsx` co-occurrence does.

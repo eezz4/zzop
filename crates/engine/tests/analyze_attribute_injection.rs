@@ -7,9 +7,9 @@
 //!   guard the call-graph BFS cannot see is completed by an injected `AUTH_GUARDED_ATTR` attribute, either
 //!   as an exact route `IoKey` or a `PathScope` prefix — either clears the route, composing with (not
 //!   replacing) the native BFS.
-//! - `zzop_rules_schema::usage` (`dead-model` / `schema-churn`): the retrofitted Symbol-keyed
+//! - `zzop_rules_schema::usage` (`unreferenced-model-name` / `schema-churn`): the retrofitted Symbol-keyed
 //!   `BOUND_MODEL_ATTR`/`MODEL_CHURN_ATTR` attributes — store-binding and migration-churn are environment
-//!   facts with no native recognizer any more, so `dead-model` is suppressible and `schema-churn` is only
+//!   facts with no native recognizer any more, so `unreferenced-model-name` is suppressible and `schema-churn` is only
 //!   reachable at all through this channel.
 //!
 //! Self-contained: helpers (`TempDir`, `config`, `projection`, `overlay`) are copied/adapted from
@@ -228,9 +228,9 @@ fn bound_model_symbol_injection_suppresses_dead_model() {
         "model Ghost {\n  id String @id\n  payload String\n}\n",
     );
 
-    // Baseline: `Ghost` is never referenced anywhere in BE source and no overlay is present -> dead-model.
+    // Baseline: `Ghost` is never referenced anywhere in BE source and no overlay is present -> unreferenced-model-name.
     let baseline = analyze_tree(dir.path(), &config());
-    let dead = hits(&baseline, "schema/dead-model");
+    let dead = hits(&baseline, "schema/unreferenced-model-name");
     assert_eq!(dead.len(), 1, "{:?}", baseline.findings);
     assert_eq!(
         dead[0].data.as_ref().unwrap()["model"].as_str(),
@@ -253,7 +253,7 @@ fn bound_model_symbol_injection_suppresses_dead_model() {
     )];
     let out = analyze_tree(dir.path(), &cfg);
     assert_eq!(
-        hits(&out, "schema/dead-model").len(),
+        hits(&out, "schema/unreferenced-model-name").len(),
         0,
         "{:?}",
         out.findings
@@ -268,17 +268,17 @@ fn model_churn_symbol_injection_fires_schema_churn_critical() {
         "model Wobbly {\n  id String @id\n  payload String\n}\n",
     );
     // Referenced as a real identifier (not inside a string literal, which `field_usage_tokens` strips)
-    // so dead-model does NOT fire — isolating this test to the churn signal alone.
+    // so unreferenced-model-name does NOT fire — isolating this test to the churn signal alone.
     dir.write(
         "src/service.ts",
         "import { Wobbly } from \"./types\";\nexport function useWobbly(w: Wobbly) {\n  return w;\n}\n",
     );
 
-    // Baseline: no overlay at all -> `Wobbly` is referenced (no dead-model) and carries no churn count
+    // Baseline: no overlay at all -> `Wobbly` is referenced (no unreferenced-model-name) and carries no churn count
     // (churn is injection-only now, so it self-gates to zero with an empty attribute store).
     let baseline = analyze_tree(dir.path(), &config());
     assert_eq!(
-        hits(&baseline, "schema/dead-model").len(),
+        hits(&baseline, "schema/unreferenced-model-name").len(),
         0,
         "{:?}",
         baseline.findings

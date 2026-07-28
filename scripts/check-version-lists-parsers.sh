@@ -57,4 +57,13 @@ if [ "$missing" -ne 0 ]; then
   exit 1
 fi
 
+# An empty subject set is a broken scan, not a clean tree — same class this repo has already paid for
+# twice. Measured 2026-07-28: redirecting the pathspec printed "clean (0 parser crates reported)".
+if [ "$count" -eq 0 ]; then
+  echo "check-version-lists-parsers: FAILED -- found ZERO parser crates. The parser/*/Cargo.toml scan"
+  echo "matched nothing, so no crate was checked against version_string(). This repo ships parsers; a"
+  echo "zero here is a broken enumeration, not an empty workspace."
+  exit 1
+fi
+
 echo "check-version-lists-parsers: clean ($count parser crates reported)."

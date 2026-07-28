@@ -6,22 +6,42 @@
 //! ```text
 //! <root>/
 //!   schema_version        plain UTF-8 text: the schema version string passed to `open`
-//!   ir/<digest>.json      one IrEntry per (content_hash, parser_fingerprint, scope) triple seen
-//!   findings/<digest>.json one FindingsEntry per (content_hash, parser_fingerprint, scope, ruleset_fingerprint)
+//!   ir/<digest>.json      one IrEntry per (content_hash, parser_fingerprint, scope, vocabulary_fingerprint)
+//!   findings/<digest>.json one FindingsEntry per (… the same four, plus ruleset_fingerprint)
 //! ```
 //!
-//! `<digest>` is `hash::digest128` of the relevant key fields joined with a NUL separator — it exists
-//! only to shard entries into filenames; it is never trusted on its own (see `hash.rs` and the read-path
-//! key comparison below).
+//! ## No eviction, by design — and what that costs when a key gains a field
+//!
+//! Nothing in this crate deletes an entry except [`AnalysisCache::open`]'s schema-version wipe. Entries
+//! are pure derived state, immutable once written, and addressed by a digest of their own key, so a key
+//! that stops being asked for simply stops being read: it is never stale, only orphaned. That is the
+//! deliberate trade — a background GC would have to decide "still reachable?" from outside the run that
+//! knows, and getting that wrong deletes a live entry. Editing a source file already orphans its old
+//! `content_hash` entry, so the directory has always grown monotonically and `docs/ARCHITECTURE.md`
+//! documents it as safe to delete at any time.
+//!
+//! The consequence for key CHANGES: adding a field to `CacheKey`/`IrKey` orphans EVERY existing entry at
+//! once (every digest moves), so the reclamation lever is the one that already exists — a
+//! `CACHE_SCHEMA_VERSION` bump, whose bulk wipe turns "the old generation lives on disk forever" into
+//! "one cold run". A key change needs no bump for CORRECTNESS (see
+//! `scripts/check-parser-fingerprint-bump.sh`'s note on `key.rs`: every key mutation degrades to a MISS,
+//! never a stale hit); it needs one for HOUSEKEEPING.
+//!
+//! `<digest>` is `hash::digest128` of `CacheKey::digest_input`/`IrKey::digest_input` — the key type's own
+//! field list, NUL-joined, generated from the declaration (see `key.rs`) rather than hand-listed here, so
+//! a new key field cannot silently skip the digest. It exists only to shard entries into filenames; it is
+//! never trusted on its own (see `hash.rs` and the read-path key comparison below).
 //!
 //! ## Format
 //!
 //! Each entry file is JSON with a leading `format_version` field (spec: "lead with a format-version
 //! marker" — so a future switch to a binary format like bincode can coexist with, or cleanly reject,
-//! entries written by this version). The full cache key is duplicated inside the entry;
-//! every read compares it against the requested key by exact string equality and treats a mismatch (or
-//! any deserialization failure) as a miss rather than an error — see `hash.rs` for why this matters even
-//! though digest collisions are already astronomically unlikely.
+//! entries written by this version). The cache key is duplicated inside the entry — the KEY VALUE
+//! itself, `#[serde(flatten)]`ed so the stored JSON keeps the same flat field layout it always had;
+//! every read compares stored-key against requested-key with `PartialEq` (never a hand-written field
+//! chain, for the same reason the digest is generated) and treats a mismatch — or any deserialization
+//! failure — as a miss rather than an error. See `hash.rs` for why this matters even though digest
+//! collisions are already astronomically unlikely.
 //!
 //! ## Concurrency / atomicity
 //!
@@ -45,7 +65,7 @@ use zzop_core::Finding;
 
 use crate::hash::digest128;
 use crate::ir_slice::FileIrSlice;
-use crate::key::CacheKey;
+use crate::key::{CacheKey, IrKey};
 
 const SCHEMA_VERSION_FILE: &str = "schema_version";
 const IR_DIR: &str = "ir";
@@ -55,22 +75,24 @@ const FINDINGS_DIR: &str = "findings";
 /// miss, not a crash (see `get_ir`/`get_findings`).
 const FORMAT_VERSION: u32 = 1;
 
+/// `key` is `#[serde(flatten)]`ed, so the stored JSON keeps the flat shape earlier versions wrote
+/// (`format_version`, then the key's own fields, then `ir` — same names, same order) — this entry gained
+/// a structural guarantee, not a new on-disk format, so no `CACHE_SCHEMA_VERSION` bump is owed. Pinned by
+/// `stored_entries_keep_the_flat_on_disk_key_layout`.
 #[derive(Serialize, Deserialize)]
 struct IrEntry {
     format_version: u32,
-    content_hash: String,
-    parser_fingerprint: String,
-    scope: String,
+    #[serde(flatten)]
+    key: IrKey,
     ir: FileIrSlice,
 }
 
+/// Same flattened-key shape as [`IrEntry`], over the full five-field key.
 #[derive(Serialize, Deserialize)]
 struct FindingsEntry {
     format_version: u32,
-    content_hash: String,
-    parser_fingerprint: String,
-    scope: String,
-    ruleset_fingerprint: String,
+    #[serde(flatten)]
+    key: CacheKey,
     findings: Vec<Finding>,
 }
 
@@ -106,90 +128,73 @@ impl AnalysisCache {
         digest128(bytes)
     }
 
-    /// Looks up a file's cached Common IR slice by `(content_hash, parser_fingerprint, scope)` —
+    /// Looks up a file's cached Common IR slice by `(content_hash, parser_fingerprint, scope,
+    /// vocabulary_fingerprint)` —
     /// ruleset-independent, per the spec's IR/findings split, but NOT scope-independent: `scope`
     /// disambiguates "which file" (see `CacheKey::scope`'s doc) since a `FileIrSlice`'s `symbols`/`io`
     /// embed their own originating path. Returns `None` on a miss, a stored-key mismatch (see module
     /// doc), or any I/O / deserialization failure — this method never panics or errors on a corrupted or
     /// missing entry, it simply reports "not cached".
     pub fn get_ir(&self, key: &CacheKey) -> Option<FileIrSlice> {
-        let path = self.ir_path(key);
-        let bytes = fs::read(path).ok()?;
+        let ir_key = IrKey::from(key);
+        let bytes = fs::read(self.ir_path(&ir_key)).ok()?;
         let entry: IrEntry = serde_json::from_slice(&bytes).ok()?;
-        if entry.format_version != FORMAT_VERSION
-            || entry.content_hash != key.content_hash
-            || entry.parser_fingerprint != key.parser_fingerprint
-            || entry.scope != key.scope
-        {
+        if entry.format_version != FORMAT_VERSION || entry.key != ir_key {
             return None;
         }
         Some(entry.ir)
     }
 
-    /// Stores `ir` under `(content_hash, parser_fingerprint, scope)`, independent of
+    /// Stores `ir` under `(content_hash, parser_fingerprint, scope, vocabulary_fingerprint)`, independent of
     /// `key.ruleset_fingerprint` — a later `put_ir` for the same content + parser + scope but a different
     /// ruleset overwrites the same entry (harmlessly: the IR itself does not vary with the ruleset).
     pub fn put_ir(&self, key: &CacheKey, ir: &FileIrSlice) -> io::Result<()> {
         let entry = IrEntry {
             format_version: FORMAT_VERSION,
-            content_hash: key.content_hash.clone(),
-            parser_fingerprint: key.parser_fingerprint.clone(),
-            scope: key.scope.clone(),
+            key: IrKey::from(key),
             ir: ir.clone(),
         };
         let bytes = serde_json::to_vec(&entry).map_err(to_io_err)?;
-        write_atomic(&self.ir_path(key), &bytes)
+        write_atomic(&self.ir_path(&entry.key), &bytes)
     }
 
     /// Looks up a file's cached per-file rule findings by the full `(content_hash, parser_fingerprint,
-    /// scope, ruleset_fingerprint)` quadruple. Same never-panics-on-corruption contract as `get_ir`.
+    /// scope, vocabulary_fingerprint, ruleset_fingerprint)` key. Same never-panics-on-corruption
+    /// contract as `get_ir`.
     pub fn get_findings(&self, key: &CacheKey) -> Option<Vec<Finding>> {
-        let path = self.findings_path(key);
-        let bytes = fs::read(path).ok()?;
+        let bytes = fs::read(self.findings_path(key)).ok()?;
         let entry: FindingsEntry = serde_json::from_slice(&bytes).ok()?;
-        if entry.format_version != FORMAT_VERSION
-            || entry.content_hash != key.content_hash
-            || entry.parser_fingerprint != key.parser_fingerprint
-            || entry.scope != key.scope
-            || entry.ruleset_fingerprint != key.ruleset_fingerprint
-        {
+        if entry.format_version != FORMAT_VERSION || entry.key != *key {
             return None;
         }
         Some(entry.findings)
     }
 
-    /// Stores `findings` under the full four-field key.
+    /// Stores `findings` under the full five-field key.
     pub fn put_findings(&self, key: &CacheKey, findings: &[Finding]) -> io::Result<()> {
         let entry = FindingsEntry {
             format_version: FORMAT_VERSION,
-            content_hash: key.content_hash.clone(),
-            parser_fingerprint: key.parser_fingerprint.clone(),
-            scope: key.scope.clone(),
-            ruleset_fingerprint: key.ruleset_fingerprint.clone(),
+            key: key.clone(),
             findings: findings.to_vec(),
         };
         let bytes = serde_json::to_vec(&entry).map_err(to_io_err)?;
         write_atomic(&self.findings_path(key), &bytes)
     }
 
-    fn ir_path(&self, key: &CacheKey) -> PathBuf {
-        let combined = format!(
-            "{}\0{}\0{}",
-            key.content_hash, key.parser_fingerprint, key.scope
-        );
-        self.root
-            .join(IR_DIR)
-            .join(format!("{}.json", digest128(combined.as_bytes())))
+    fn ir_path(&self, key: &IrKey) -> PathBuf {
+        self.entry_path(IR_DIR, &key.digest_input())
     }
 
     fn findings_path(&self, key: &CacheKey) -> PathBuf {
-        let combined = format!(
-            "{}\0{}\0{}\0{}",
-            key.content_hash, key.parser_fingerprint, key.scope, key.ruleset_fingerprint
-        );
+        self.entry_path(FINDINGS_DIR, &key.digest_input())
+    }
+
+    /// The one place a key digest becomes a filename. Takes the key's OWN `digest_input` (see `key.rs`)
+    /// rather than a field list, so neither path function can drift from the key it shards.
+    fn entry_path(&self, sub_dir: &str, digest_input: &str) -> PathBuf {
         self.root
-            .join(FINDINGS_DIR)
-            .join(format!("{}.json", digest128(combined.as_bytes())))
+            .join(sub_dir)
+            .join(format!("{}.json", digest128(digest_input.as_bytes())))
     }
 }
 

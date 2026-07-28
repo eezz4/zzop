@@ -6,12 +6,14 @@
 
 use std::collections::BTreeMap;
 
-/// Runs all seven framework-silence tripwires (S1-S7) and returns every warning that fired, in push
-/// order S1/S2/S4/S6/S3/S5/S7 (S6 slotted after S4 at introduction; S3/S5 keep their pre-split tail
+/// Runs all eight framework-silence tripwires (S1-S8) and returns every warning that fired, in push
+/// order S1/S2/S4/S6/S8/S3/S5/S7 (S6 slotted after S4 at introduction; S8 after S6, before the S3/S5/S7
+/// precheck block, since it needs no precheck; S3/S5 keep their pre-split tail
 /// positions; S7 slotted after S5 at introduction, sharing S5's precheck block) — order matters for
 /// `AnalyzeOutput::warnings`' documented stability, not correctness (each tripwire is independent). S5
 /// and S7 are now per-app censuses: each may contribute MULTIPLE entries (one per below-floor app-root,
 /// in sorted `app_roots` order) plus an optional tree-wide fallback, all of S5's before all of S7's.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn framework_silence_warnings(
     root: &std::path::Path,
     io_provides: &[zzop_core::IoProvide],
@@ -20,6 +22,8 @@ pub(super) fn framework_silence_warnings(
     java_rels: &[String],
     package_import_files: &BTreeMap<String, std::collections::BTreeSet<String>>,
     loc_by_path: &std::collections::HashMap<String, u32>,
+    // The run's declared `vocabulary.fetchWrapperExportNames` — S7's wrapper-module recognizer.
+    wrapper_export_names: &[&str],
 ) -> Vec<String> {
     let mut warnings = Vec::new();
 
@@ -71,6 +75,29 @@ pub(super) fn framework_silence_warnings(
         package_import_files,
         db_table_fact_count,
     ) {
+        warnings.push(w);
+    }
+
+    // S8 — call-graph language-coverage self-report: this tree extracted http routes from a language
+    // whose call sites no parser in this build produces, so `mutating-route-no-auth` is structurally
+    // silent there. Unlike S1-S7 this one fires on FULL channels (see its own module doc), and it is a
+    // pure pass over `io_provides` — no disk IO, so unconditional.
+    if let Some(w) = crate::framework_silence::call_graph_language_gap_warning(io_provides) {
+        warnings.push(w);
+    }
+
+    // S9 — method-unknown route RANGE self-report. Same shape as S8 and the opposite gap: these routes
+    // ARE in a call-graph-covered language, they just carry no verb, so every write-gated rule filters
+    // them out before evaluating. Also a pure pass over `io_provides`, so also unconditional.
+    if let Some(w) = crate::framework_silence::unknown_verb_range_warning(io_provides) {
+        warnings.push(w);
+    }
+
+    // S10 — Rust router-layer auth RANGE self-report. Third of the same family and the one D18 created:
+    // lifting `.rs` into the call graph put Rust routes in `mutating-route-no-auth`'s range, which made
+    // the one auth idiom this engine cannot see (a tower layer) start costing false positives. Also a
+    // pure pass over `io_provides`, so also unconditional.
+    if let Some(w) = crate::framework_silence::rust_router_layer_warning(io_provides) {
         warnings.push(w);
     }
 
@@ -133,6 +160,7 @@ pub(super) fn framework_silence_warnings(
                 &all_walked_rels,
                 &keyed_by_root,
                 &roots,
+                wrapper_export_names,
             ));
         }
     }

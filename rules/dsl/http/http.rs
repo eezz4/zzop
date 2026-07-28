@@ -1,11 +1,11 @@
 //! Exercises `rules/dsl/http/http.json`'s HTTP-route rules end-to-end via `zzop_engine::analyze_tree` against
 //! real swc-parsed TypeScript fixtures. See `http.json` for each rule's exact matcher shape and message.
 //!
-//! **`read-model-path`'s name**: "read model" means "the path of a read (GET) endpoint" here — not a
+//! **`get-route-no-cache-marker`'s name**: "read model" means "the path of a read (GET) endpoint" here — not a
 //! CQRS/DDD read-model or a DB read-replica. The rule flags an `apiRoutes.get(...)`-registered GET route
 //! carrying no `// cache:`/`// no-cache:` annotation on its own line (`http.json`'s message has the exact
 //! contract); it never inspects request/response shape or persistence. A vetted case is suppressed by the
-//! DERIVED marker `// read-model-path-ok` — that channel is not the annotation channel: it also accepts the
+//! DERIVED marker `// zzop-get-route-no-cache-marker-ok` — that channel is not the annotation channel: it also accepts the
 //! line above, and its trailing colon is optional.
 //!
 //! Ordering-aware and graph-shaped route checks (auth-state-machine transitions, API churn, unsafe-read-endpoint,
@@ -113,6 +113,6 @@ fn java_file_under_an_api_directory_is_out_of_scope() {
     assert!(out.findings.is_empty(), "{:?}", out.findings);
 }
 
-mod auth_gates;
-mod read_model;
-mod route_exposure;
+mod dev_path_no_guard_hint;
+mod get_route_no_cache_marker;
+mod protected_path_no_auth_evidence;

@@ -133,7 +133,7 @@ fn structural_toggle_leaves_usage_findings_and_vice_versa() {
         out.findings
     );
     assert_eq!(
-        schema_hits(&out, "dead-model").len(),
+        schema_hits(&out, "unreferenced-model-name").len(),
         1,
         "{:?}",
         out.findings
@@ -154,7 +154,7 @@ fn structural_toggle_leaves_usage_findings_and_vice_versa() {
         out.findings
     );
     assert!(
-        schema_hits(&out, "dead-model").is_empty(),
+        schema_hits(&out, "unreferenced-model-name").is_empty(),
         "{:?}",
         out.findings
     );
@@ -244,13 +244,13 @@ fn ruleset_only_change_still_reflects_schema_structural_toggle_on_a_warm_cache()
 }
 
 // --- schema-usage wiring (`zzop_core` implements the schema usage cross-checks —
-// dead-model/dead-field/schema-churn — but the engine has to wire them in explicitly:
+// unreferenced-model-name/unreferenced-field-name/schema-churn — but the engine has to wire them in explicitly:
 // `pipeline::schema_usage_findings` runs `cross_check_schema`/`apply_churn_rule` as a whole-tree
 // global pass whenever code access exists, gated behind the pre-registered native id
 // `"schema-usage"`. These tests prove that wiring end-to-end.) ---
 
-/// Two models, no store bindings anywhere in the tree -> both are dead-model.
-/// `cross_check_schema` short-circuits a dead model before its fields, so no dead-field noise
+/// Two models, no store bindings anywhere in the tree -> both are unreferenced-model-name.
+/// `cross_check_schema` short-circuits a dead model before its fields, so no unreferenced-field-name noise
 /// despite zero identifier usage.
 #[test]
 fn unbound_models_fire_dead_model_per_model() {
@@ -261,7 +261,7 @@ fn unbound_models_fire_dead_model_per_model() {
     );
     let out = analyze_tree(dir.path(), &EngineConfig::default());
 
-    let dead = schema_hits(&out, "dead-model");
+    let dead = schema_hits(&out, "unreferenced-model-name");
     let models: Vec<&str> = dead
         .iter()
         .map(|f| f.data.as_ref().unwrap()["model"].as_str().unwrap())
@@ -272,10 +272,10 @@ fn unbound_models_fire_dead_model_per_model() {
     assert_eq!(dead[1].line, 6); // `model Customer {` (line 5 is the blank separator)
 }
 
-/// A model whose NAME is referenced anywhere in BE source clears dead-model (the generic, vocab-free
+/// A model whose NAME is referenced anywhere in BE source clears unreferenced-model-name (the generic, vocab-free
 /// "is this model used?" signal, now that the app-specific store-binding recognizer is gone); the
 /// referenced model's fields are then usage-checked individually — `nickname` appears nowhere as an
-/// identifier while `email` does, so exactly one dead-field fires.
+/// identifier while `email` does, so exactly one unreferenced-field-name fires.
 #[test]
 fn referenced_model_skips_dead_model_but_flags_unused_field() {
     let dir = TempDir::new("zzop-schema-usage");
@@ -290,11 +290,11 @@ fn referenced_model_skips_dead_model_but_flags_unused_field() {
     let out = analyze_tree(dir.path(), &EngineConfig::default());
 
     assert!(
-        schema_hits(&out, "dead-model").is_empty(),
+        schema_hits(&out, "unreferenced-model-name").is_empty(),
         "{:?}",
         out.findings
     );
-    let dead_fields = schema_hits(&out, "dead-field");
+    let dead_fields = schema_hits(&out, "unreferenced-field-name");
     assert_eq!(dead_fields.len(), 1, "{:?}", out.findings);
     assert_eq!(
         dead_fields[0].data.as_ref().unwrap()["field"].as_str(),
@@ -302,4 +302,117 @@ fn referenced_model_skips_dead_model_but_flags_unused_field() {
     );
     assert_eq!(dead_fields[0].file, "prisma/schema.prisma");
     assert_eq!(dead_fields[0].line, 1); // anchors on the model declaration, same as structural rules
+}
+
+// --- per-issue rule ids (the 12 `schema/<label>` ids are registered analyses, not bare labels) ---
+//
+// Before this, `ruleId` said `schema/float-money` while the only ids the config space knew were the two
+// family gates: `disabledRules: ["schema/float-money"]` disabled nothing AND was reported unknown, and a
+// `severityOverrides` entry on the same string was reported unknown while `apply_severity_override` — which
+// matches `Finding::rule_id` exactly — quietly honored it. The three tests below pin the two halves of the
+// fix: the id now gates, and the diagnostics no longer contradict the behavior.
+
+/// Disabling one structural issue id drops exactly that rule's findings and leaves its siblings — the
+/// family gate (`schema-structural`, pinned above) still drops all of them.
+#[test]
+fn disabling_one_structural_issue_id_drops_only_that_rule() {
+    let dir = invoice_fixture();
+    let config = EngineConfig {
+        rule_config: RuleConfig {
+            disabled_rules: vec!["schema/float-money".to_string()],
+            ..RuleConfig::default()
+        },
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &config);
+
+    assert!(
+        schema_hits(&out, "float-money").is_empty(),
+        "schema/float-money was disabled by id but still fired: {:?}",
+        out.findings
+    );
+    assert!(
+        !schema_hits(&out, "fk-no-index").is_empty(),
+        "disabling one issue id must not take its siblings with it: {:?}",
+        out.findings
+    );
+}
+
+/// Same, for the whole-tree usage pass — a different call site (`schema_usage_findings`, outside the
+/// per-file findings cache) that needs its own gate.
+#[test]
+fn disabling_one_usage_issue_id_drops_only_that_rule() {
+    let dir = TempDir::new("zzop-schema-usage");
+    // Four fields, deliberately: `missing-timestamps` (the structural sibling asserted below) skips any
+    // model at or under `LOOKUP_FIELD_MAX` fields, so the 3-field `User` used elsewhere in this file
+    // produces no structural finding at all and would make that assertion untestable.
+    dir.write(
+        "prisma/schema.prisma",
+        "model User {\n  id String @id\n  email String\n  nickname String\n  locale String\n}\n",
+    );
+    dir.write(
+        "src/user/service.ts",
+        "import { User } from \"./types\";\nexport function contact(u: User) {\n  return u.email;\n}\n",
+    );
+    let config = EngineConfig {
+        rule_config: RuleConfig {
+            disabled_rules: vec!["schema/unreferenced-field-name".to_string()],
+            ..RuleConfig::default()
+        },
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &config);
+
+    assert!(
+        schema_hits(&out, "unreferenced-field-name").is_empty(),
+        "schema/unreferenced-field-name was disabled by id but still fired: {:?}",
+        out.findings
+    );
+    assert!(
+        !schema_hits(&out, "missing-timestamps").is_empty(),
+        "a structural sibling must survive a usage-issue disable: {:?}",
+        out.findings
+    );
+}
+
+/// The self-contradiction this promotion closes: `apply_severity_override` matches `Finding::rule_id`
+/// EXACTLY, so an override keyed on `schema/float-money` was ALREADY being honored — while
+/// `unknown_severity_override_ids` reported that same key as matching no known rule id, i.e. the tool
+/// warned that something failed which it had in fact just done. Both halves are asserted here, because
+/// asserting only the warning's absence would pass just as well if the override had stopped working.
+#[test]
+fn a_severity_override_on_a_schema_issue_id_is_honored_and_not_reported_unknown() {
+    let dir = invoice_fixture();
+    let mut overrides = std::collections::BTreeMap::new();
+    overrides.insert(
+        "schema/float-money".to_string(),
+        zzop_core::Severity::Critical,
+    );
+    let config = EngineConfig {
+        rule_config: RuleConfig {
+            severity_overrides: overrides,
+            ..RuleConfig::default()
+        },
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &config);
+
+    let money = schema_hits(&out, "float-money");
+    assert_eq!(money.len(), 1, "{:?}", out.findings);
+    assert_eq!(money[0].severity, zzop_core::Severity::Critical);
+    assert!(
+        !out.config_warnings
+            .iter()
+            .any(|w| w.contains("schema/float-money")),
+        "an override that was honored must not also be reported unknown: {:?}",
+        out.config_warnings
+    );
+    assert!(
+        out.rule_overrides_applied.as_ref().is_some_and(|a| a
+            .severity_remapped
+            .iter()
+            .any(|id| id == "schema/float-money")),
+        "the positive confirmation channel must name the id it remapped: {:?}",
+        out.rule_overrides_applied
+    );
 }

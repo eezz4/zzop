@@ -6,7 +6,7 @@
 //! `seams`/`criticality`/`scores`/`health`/`recommendations` are registered native analysis ids
 //! (`crates/metrics/src/lib.rs`), so they share the `RuleConfig` id space every DSL rule and native
 //! rule rides — and this file is their SOLE call site. Each therefore carries its own
-//! [`is_enabled`] gate here, exactly as `super::rules` does for `circular`/`dead-exports`/...
+//! [`is_enabled`] gate here, exactly as `super::rules` does for `circular`/`unimported-export`/...
 //! Without them the ids were accepted by `disabledRules` and then ignored: no `configWarnings` entry
 //! (they ARE known ids) AND a positive `ruleOverridesApplied.disabled` confirmation that the disable
 //! had been applied, while the analysis kept running and kept emitting. A disable that reports

@@ -93,7 +93,7 @@ fn html_response_ok_marker_above_the_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/greet.ts",
-        "declare const res: any;\ndeclare const req: any;\nexport function greet() {\n  const name = req.query.name;\n  // html-response-from-request-ok: name is allow-listed to alpha chars upstream\n  res.send('<div>' + name + '</div>');\n}\n",
+        "declare const res: any;\ndeclare const req: any;\nexport function greet() {\n  const name = req.query.name;\n  // zzop-html-response-from-request-ok: name is allow-listed to alpha chars upstream\n  res.send('<div>' + name + '</div>');\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -217,7 +217,7 @@ fn html_concat_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/render.ts",
-        "declare const res: any;\ndeclare const name: string;\nexport function render() {\n  // dangerous-html-concat-ok: name is escaped via a wrapper the regex can't see\n  res.send('<div>' + name);\n}\n",
+        "declare const res: any;\ndeclare const name: string;\nexport function render() {\n  // zzop-dangerous-html-concat-ok: name is escaped via a wrapper the regex can't see\n  res.send('<div>' + name);\n}\n",
     );
     let out = scan(&dir);
     assert!(

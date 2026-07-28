@@ -1,44 +1,30 @@
-# examples — extending zzop
+# examples — worked references for extending zzop
 
-Worked, runnable references for the two authoring modes, both speaking the Normalized-AST contract
-([`docs/NORMALIZED_AST.md`](../docs/NORMALIZED_AST.md); authoring guide
-[`docs/adapters/README.md`](../docs/adapters/README.md)). Each is a reference, not a product
-dependency — copy it, point it at your repo. Approach, usage, measured results, and limitations live
-in each folder's own README.
+Everything here is a **runnable reference you copy from**. That is the whole rule for this directory,
+and it got narrower on 2026-07-28: the labeled detection benchmark used to live under
+`examples/cases/` and now sits at [`../cases/`](../cases/README.md), because it is not an example.
+Nobody copies a benchmark — it is scored, in CI, by the `detection-benchmark` job. One directory
+holding both "read this to learn" and "this is our ground truth" meant the second one read as
+optional, and it went unscored for two years.
 
-## Mode A — bundle (full envelope for a new language, replaces native analysis via `analyzeEnvelope`)
+Third-party code we merely check out (the dogfood corpora of real OSS repositories) is somebody
+else's to license and lives in the gitignored `corpus/oss/`, never here.
 
-- [`rust-parser-adapter/`](rust-parser-adapter/) — external parser for a language with no engine
-  crate: module-tree import resolution to exact repo-relative paths, cargo-convention `is_entry`,
-  `type_only` root-fallback edges.
-- [`jsp-envelope.example.json`](jsp-envelope.example.json) — hand-written minimal envelope (no body
-  spans, one `http` provide + one `db-table` consume); the fixture behind `zzop-core`'s
-  `normalized::tests::jsp_contract_example_validates`.
+## [`adapters/`](adapters/README.md) — the one extension path that needs an example
 
-## Mode B — overlay (partial envelope merged onto native analysis via `adapterOverlays`)
+Runnable references for the two authoring modes (Mode A bundle, Mode B overlay), all speaking the
+Normalized-AST contract ([`docs/NORMALIZED_AST.md`](../docs/NORMALIZED_AST.md); authoring guide
+[`docs/adapters/README.md`](../docs/adapters/README.md)).
 
-- [`java-imports-adapter/`](java-imports-adapter/) — **start here**: the minimal on-ramp, one
-  channel (`imports`) in ~90 lines — built when the v0.16-era lexical Java projector left a
-  dep-graph gap (`imports: None`), proving a partial envelope is enough; no parser required. The
-  native Java parser has since closed that gap, so on Java trees it now merges as a no-op — kept
-  as the reference recipe for any extension still missing a channel.
-- [`openapi-sdk-adapter/`](openapi-sdk-adapter/) — generated OpenAPI SDK calls keyed from the
-  committed spec (`operationId → "METHOD /path"`), including class-method clients.
-- [`oazapfts-adapter/`](oazapfts-adapter/) — the oazapfts generator's call-shape recognizer, ported
-  out of the engine (generated-SDK knowledge lives in adapters, not engine vocabulary).
-- [`svelte-adapter/`](svelte-adapter/) — `.svelte` importer fan-in plus SvelteKit entry exemption
-  via `is_entry`.
-- [`wrapper-adapter/`](wrapper-adapter/) — hand-rolled HTTP client wrapper calls keyed for the
-  cross-layer join (the broadest opaque-client class).
-- [`react-query-adapter/`](react-query-adapter/) — react-query v3 positional cache keys
-  (`useQuery('/tags')`) keyed as `GET` consumes.
-- [`auth-overlay-adapter/`](auth-overlay-adapter/) — a demo of the entity-ATTRIBUTES injection
-  channel: router-level `app.use('/prefix', requireAuth)` guards injected as file attributes to
-  close `mutating-route-no-auth`'s middleware blind spot for non-Express frameworks/custom
-  middleware naming — common Express guard registrations are now recognized natively (see the
-  rule's catalog entry).
+**Why adapters get examples and the other extension surfaces do not.** The test is whether what zzop
+ships is the same shape as what you would write:
 
-## Shared
+| You want to extend | What zzop ships | Same shape? |
+|---|---|---|
+| A rule | `rules/dsl/http/http.json` — read by the same `parse_dsl_pack`, checked by the same `validate_rule_pack` as yours | **Yes** — the shipped packs *are* the example. Point `packs.extraDirs` at your own. |
+| Vocabulary, parser routing, join topology | the `zzop.config.jsonc` that `zzop init` writes | **Yes** — the starter file is the example. |
+| A parser or a middleware recognizer, natively | a Rust crate under `parser/` | No user path at all — those are ours to write. |
+| **A parser or facts producer, as a user** | Rust structs and internal APIs | **No** — you write a JSON *envelope producer*, a different interface with no shipped instance. **That is why this directory exists.** |
 
-- [`adapter-kit/`](adapter-kit/) — the walk / envelope-builder / key-normalization library the JS
-  adapters import (key normalization byte-identical to `zzop_core`).
+So there is no `rule-kit` and no `parser-kit`, and adding one would mean maintaining a second copy of
+something already shipped. If a surface is hard to find, the fix is a pointer, not a duplicate.

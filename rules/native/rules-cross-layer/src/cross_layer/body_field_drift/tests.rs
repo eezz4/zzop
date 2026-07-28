@@ -285,3 +285,78 @@ fn determinism_sorted_by_file_then_line() {
     let sites: Vec<(&str, u32)> = out.iter().map(|f| (f.file.as_str(), f.line)).collect();
     assert_eq!(sites, vec![("a.tsx", 2), ("a.tsx", 9), ("z.tsx", 1)]);
 }
+
+/// Seals the tree attribution on BOTH sides of the join: the anchor (consume) side, which
+/// `dedupe_by_consume_site` also keys on, and the provider side, whose `provideFile`/`provideLine` used
+/// to name a path belonging to no stated tree.
+#[test]
+fn payload_names_the_tree_on_both_sides_of_the_join() {
+    let e = edge("Api.tsx", 10, "Api.java", 20);
+    let consumes = bodies(&[("fe", 10, "Api.tsx", consume(&["name", "extra"], &[""]))]);
+    let provs = provides(&[(
+        "be",
+        20,
+        "Api.java",
+        provide(None, vec![field("name", false)], true),
+    )]);
+    let out = body_field_drift_findings(&[e], &consumes, &provs);
+    assert_eq!(out.len(), 1);
+    let data = out[0].data.as_ref().unwrap();
+    assert_eq!(data["consumeSource"], "fe");
+    assert_eq!(data["provideSource"], "be");
+    assert_eq!(data["provideFile"], "Api.java");
+}
+
+/// Seals the dedupe key: two TREES whose call sites share a relative path and line, drifting the same
+/// way against the same handler, are two real findings — a `(file, line, message)` key dropped one.
+#[test]
+fn two_trees_at_the_same_relative_path_and_line_are_not_deduped_into_one() {
+    let mut a = edge("src/consumes.ts", 7, "Api.java", 20);
+    a.from.source = "xfe".to_string();
+    let mut b = edge("src/consumes.ts", 7, "Api.java", 20);
+    b.from.source = "xbe2".to_string();
+    let consumes = bodies(&[
+        ("xfe", 7, "src/consumes.ts", consume(&["name"], &[""])),
+        ("xbe2", 7, "src/consumes.ts", consume(&["name"], &[""])),
+    ]);
+    let provs = provides(&[(
+        "be",
+        20,
+        "Api.java",
+        provide(
+            None,
+            vec![field("name", false), field("email", false)],
+            true,
+        ),
+    )]);
+    let out = body_field_drift_findings(&[a, b], &consumes, &provs);
+    assert_eq!(out.len(), 2);
+    let mut sources: Vec<&str> = out
+        .iter()
+        .map(|f| f.data.as_ref().unwrap()["consumeSource"].as_str().unwrap())
+        .collect();
+    sources.sort_unstable();
+    assert_eq!(sources, vec!["xbe2", "xfe"]);
+}
+
+/// The other half of the same key: a genuine fan-out (ONE call site, 2+ edges) must still collapse.
+#[test]
+fn one_call_site_fanning_out_to_identical_provider_shapes_still_dedupes_to_one() {
+    let e1 = edge("Api.tsx", 10, "Api.java", 20);
+    let e2 = edge("Api.tsx", 10, "Api.java", 20);
+    let consumes = bodies(&[("fe", 10, "Api.tsx", consume(&["name"], &[""]))]);
+    let provs = provides(&[(
+        "be",
+        20,
+        "Api.java",
+        provide(
+            None,
+            vec![field("name", false), field("email", false)],
+            true,
+        ),
+    )]);
+    assert_eq!(
+        body_field_drift_findings(&[e1, e2], &consumes, &provs).len(),
+        1
+    );
+}

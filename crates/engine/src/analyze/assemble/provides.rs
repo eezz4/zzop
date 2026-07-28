@@ -27,7 +27,7 @@ use super::orm::resolve_orm_entity_consumes;
 
 /// Every output the provide/consume composition seam produces, consumed by the phases after it
 /// (`super::dep_graph` needs `pkg_scan`/`tsconfigs` too — the workspace-aware resolver both the dep
-/// graph AND `dead-exports` need).
+/// graph AND `unimported-export` need).
 pub(super) struct ProvidesResult {
     pub(super) io_provides: Vec<IoProvide>,
     pub(super) io_consumes: Vec<IoConsume>,
@@ -216,7 +216,7 @@ pub(super) fn compose(
     // tree-wide (overlay wins on a target+key collision — see `AttributeStore::from_parts`'s doc).
     // Built here (AFTER router-mount composition, which is the only native attribute producer today)
     // rather than at the top of this function — a pure ordering move, overlay-only behavior unchanged.
-    // Shared by both `schema_usage_findings` (dead-model/schema-churn read Symbol-keyed
+    // Shared by both `schema_usage_findings` (unreferenced-model-name/schema-churn read Symbol-keyed
     // `bound-model`/`model-churn`) and `run_callgraph_rules` (route-level auth-guard evidence) in
     // `super::rules`.
     let attribute_store =

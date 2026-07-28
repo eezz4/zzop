@@ -169,7 +169,7 @@ fn no_where_ok_marker_directly_above_the_bulk_write_line_suppresses_the_finding(
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const prisma: any;\nexport async function bulkArchiveMarked() {\n  // update-delete-no-where-ok: admin console confirmed intentional full-table archive\n  await prisma.order.updateMany({ data: { archived: true } });\n}\n",
+        "declare const prisma: any;\nexport async function bulkArchiveMarked() {\n  // zzop-update-delete-no-where-ok: admin console confirmed intentional full-table archive\n  await prisma.order.updateMany({ data: { archived: true } });\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -215,7 +215,7 @@ fn unawaited_ok_marker_directly_above_the_write_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const prisma: any;\nexport async function logEventMarked(id: string) {\n  // unawaited-write-ok: best-effort audit log, failure intentionally ignored\n  prisma.event.create({ data: { id } });\n}\n",
+        "declare const prisma: any;\nexport async function logEventMarked(id: string) {\n  // zzop-unawaited-write-ok: best-effort audit log, failure intentionally ignored\n  prisma.event.create({ data: { id } });\n}\n",
     );
     let out = scan(&dir);
     assert!(

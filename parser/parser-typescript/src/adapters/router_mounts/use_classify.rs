@@ -9,6 +9,7 @@ use zzop_core::{ImportMap, RouterMountEntry};
 use super::build::string_lit_arg;
 use super::chain::unwrap_expr;
 use super::guard::{judge_guard_arg, AUTH_GUARDED_ATTR_KEY};
+use super::RouterMountVocab;
 
 /// Express mounts sub-routers via `.use(prefixLit, subRouter)`, gated on Express vocabulary since
 /// Hono's `.use` is always middleware. Known limit: a plain-ident second arg that is actually
@@ -34,6 +35,7 @@ pub(super) fn classify_use_call(
     call: &CallExpr,
     line: u32,
     imports: &ImportMap,
+    vocab: &RouterMountVocab<'_>,
 ) -> Vec<RouterMountEntry> {
     match call.args.len() {
         1 => {
@@ -42,7 +44,7 @@ pub(super) fn classify_use_call(
                 Expr::Ident(id) => {
                     let ident = id.sym.to_string();
                     let specifier = imports.get(&ident).map(|b| b.specifier.clone());
-                    let attr_keys = if judge_guard_arg(unwrap_expr(&arg.expr)) {
+                    let attr_keys = if judge_guard_arg(unwrap_expr(&arg.expr), vocab) {
                         vec![AUTH_GUARDED_ATTR_KEY.to_string()]
                     } else {
                         Vec::new()
@@ -55,7 +57,7 @@ pub(super) fn classify_use_call(
                     }]
                 }
                 call_expr @ Expr::Call(_) => {
-                    if judge_guard_arg(call_expr) {
+                    if judge_guard_arg(call_expr, vocab) {
                         vec![RouterMountEntry::ScopedAttr {
                             prefix: "/".to_string(),
                             key: AUTH_GUARDED_ATTR_KEY.to_string(),
@@ -83,7 +85,7 @@ pub(super) fn classify_use_call(
                 Expr::Ident(id) => {
                     let ident = id.sym.to_string();
                     let specifier = imports.get(&ident).map(|b| b.specifier.clone());
-                    let attr_keys = if judge_guard_arg(unwrap_expr(&arg.expr)) {
+                    let attr_keys = if judge_guard_arg(unwrap_expr(&arg.expr), vocab) {
                         vec![AUTH_GUARDED_ATTR_KEY.to_string()]
                     } else {
                         Vec::new()
@@ -96,7 +98,7 @@ pub(super) fn classify_use_call(
                     }]
                 }
                 call_expr @ Expr::Call(_) => {
-                    if judge_guard_arg(call_expr) {
+                    if judge_guard_arg(call_expr, vocab) {
                         vec![RouterMountEntry::ScopedAttr {
                             prefix,
                             key: AUTH_GUARDED_ATTR_KEY.to_string(),
@@ -123,7 +125,7 @@ pub(super) fn classify_use_call(
                     let e = unwrap_expr(&a.expr);
                     matches!(e, Expr::Call(_)).then_some(e)
                 })
-                .filter(|e| judge_guard_arg(e))
+                .filter(|e| judge_guard_arg(e, vocab))
                 .map(|_| RouterMountEntry::ScopedAttr {
                     prefix: prefix.clone(),
                     key: AUTH_GUARDED_ATTR_KEY.to_string(),

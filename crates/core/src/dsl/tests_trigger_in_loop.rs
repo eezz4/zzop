@@ -97,7 +97,7 @@ fn trigger_in_loop_absent_defaults_to_false_and_plain_cooccurrence_still_fires()
 
 #[test]
 fn trigger_in_loop_suppress_marker_above_the_in_loop_trigger_suppresses() {
-    let src = "async function f(ids) {\n  for (const id of ids) {\n    // fetch-ok: batched via queue\n    fetch(url(id));\n  }\n}\n";
+    let src = "async function f(ids) {\n  for (const id of ids) {\n    // zzop-fetch-ok: batched via queue\n    fetch(url(id));\n  }\n}\n";
     let f = scan_pack_loops(
         &trigger_in_loop_pack(),
         "f.ts",

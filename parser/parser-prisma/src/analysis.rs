@@ -1,32 +1,14 @@
-//! prismaSchemaAnalysis — thin orchestrator: schema.prisma on disk -> core structural/DB-pattern analysis —
-//! plus the schema-IR -> Common IR bridge (`build_common_ir`).
+//! The schema-IR -> Common IR bridge (`build_common_ir`): schema.prisma text this crate has already
+//! parsed, projected into the symbol/io space the engine and cross-layer passes consume.
+//!
+//! There is no second, filesystem-walking entry point here. `prisma_schema_analysis` (a `find schema
+//! files under app_dir -> analyze_schema` orchestrator, gated on a `target: &str` of `"be"`/`"all"`
+//! left over from the JS CLI) and the `find_prisma_schemas` discovery walk it wrapped were removed
+//! 2026-07-27 with zero callers workspace-wide: the engine reaches Prisma files through its own
+//! dispatch + fused per-file pass, which calls `parse_schema`/`build_common_ir` per file and runs
+//! `zzop_rules_schema` itself. Nothing routed through this crate's own walk.
 
-use std::path::Path;
-
-use zzop_rules_schema::{analyze_schema, SchemaAnalysis};
-
-use crate::discover::find_prisma_schemas;
 use crate::parse::parse_schema;
-
-/// Public Prisma schema analysis — the bundled provider's `schemaAnalysis` capability. Discovers schema.prisma
-/// files, parses them to the schema-IR, and runs `zzop_rules_schema::analyze_schema` for the STRUCTURAL +
-/// DB-anti-pattern rules (god-model, fk-no-index, float-money, ...). No code-usage scan, so usage-based rules
-/// (dead-model / dead-field / schema-churn) do NOT run here — that requires the richer
-/// `prisma_schema_analysis_with_usage`.
-/// Honest by omission: returns `None` when not a BE target or no schema is found.
-///
-/// Design note: a `phase(name, fn)` tracing callback wrapping each step was considered and dropped —
-/// pure instrumentation with no effect on output (see `zzop_rules_schema::usage`'s module doc).
-pub fn prisma_schema_analysis(app_dir: &Path, target: &str) -> Option<SchemaAnalysis> {
-    if target != "be" && target != "all" {
-        return None;
-    }
-    let models = find_prisma_schemas(app_dir);
-    if models.is_empty() {
-        return None;
-    }
-    Some(analyze_schema(models))
-}
 
 /// The standard Prisma-client accessor name the `db-table` consume recognizer keys off
 /// (`zzop_parser_typescript::adapters::db_table_consume`) — a common-Prisma idiom, shared as one literal.
@@ -120,7 +102,7 @@ pub fn build_common_ir(source_id: &str, files: &[(String, String)]) -> zzop_core
 /// declaring the same physical table IS a genuine ambiguity the linker is meant to report; and every
 /// rule reading `unconsumed_provides` (`cross-layer/unconsumed-endpoint`, `-mutation-endpoint`,
 /// `-procedure`, `cross-layer/duplicate-route`) filters to `kind == "http"`/`"trpc"`, so an
-/// unconsumed extra `db-table` provide produces no finding. `cross-layer/shared-db-table` counts
+/// unconsumed extra `db-table` provide produces no finding. `cross-layer/db-table-name-in-multiple-sources` counts
 /// CONSUMES only, so provide count cannot move it either.
 ///
 /// The `@@map` key gets the SAME [`zzop_core::db_table_channel_casing`] the SQL side applies to a

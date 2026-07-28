@@ -90,7 +90,7 @@ fn lines_of(findings: &[Finding]) -> Vec<u32> {
     v
 }
 
-// --- float-equality / always-false-comparison / numeric-string-comparison / tofixed-arithmetic /
+// --- float-equality / always-constant-comparison / numeric-string-comparison / tofixed-arithmetic /
 // date-pitfalls / foreach-async-callback / promise-async-executor / parseint-no-radix ---
 //
 // These 8 rules are plain-JS correctness bugs, not TS-type-system bugs, so unlike the 4 rules above they

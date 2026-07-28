@@ -243,3 +243,38 @@ fn is_non_source_extension_rejects_real_source_and_template_dialects() {
         assert!(!is_non_source_extension(ext), "{ext}");
     }
 }
+
+/// Seals the config-facing language vocabulary in both directions.
+///
+/// `as_wire`'s match is exhaustive with no wildcard, so a NEW `Language` variant fails to compile until
+/// it is given a spelling — that half needs no test. What a test must hold is the other half:
+/// `WIRE_NAMES` is a hand-kept list, and a variant missing from it would be unnameable in a config while
+/// every compile stayed green. The length assertion is what fails then, and it fails one screen away
+/// from the match the author has just edited.
+#[test]
+fn every_language_round_trips_through_its_config_spelling() {
+    assert_eq!(
+        Language::WIRE_NAMES.len(),
+        8,
+        "a Language variant was added or removed — give it a config spelling in WIRE_NAMES too, \
+         otherwise parsers.globOverrides cannot name it"
+    );
+    for lang in Language::WIRE_NAMES {
+        assert_eq!(
+            Language::from_wire(lang.as_wire()),
+            Some(*lang),
+            "{} must parse back to itself",
+            lang.as_wire()
+        );
+    }
+    assert_eq!(
+        Language::from_wire("java21"),
+        None,
+        "the grammar version is not the config spelling"
+    );
+    assert_eq!(
+        Language::from_wire("Java"),
+        None,
+        "spellings are exact, not case-folded"
+    );
+}

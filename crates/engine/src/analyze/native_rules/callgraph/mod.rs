@@ -1,5 +1,5 @@
 //! The call-graph-BFS HTTP native rules — see `run_callgraph_rules`'s doc for the engine-wiring route
-//! (a second, uncached TS/Java re-parse off disk).
+//! (a second, uncached TS/Java/Python re-parse off disk).
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Instant;
@@ -9,9 +9,12 @@ use zzop_core::{is_enabled, Finding, ImportMap};
 use crate::analyze::record_native_timing;
 use crate::EngineConfig;
 
+mod cache_lane;
 mod decorator_gate;
+mod python_guard;
+mod rust_guard;
 
-use decorator_gate::{forroutes_path_matches, packs_read_io_scan_attrs, spring_app_root};
+use decorator_gate::{assemble_decorator_guarded, packs_read_io_scan_attrs};
 
 /// Runs the three call-graph-BFS native rules — `zzop-rules-http`'s `scan_unsafe_read_endpoint` /
 /// `scan_non_idempotent_write` / `scan_mutating_route_no_auth` — and extends `global_findings` in place.
@@ -21,16 +24,16 @@ use decorator_gate::{forroutes_path_matches, packs_read_io_scan_attrs, spring_ap
 /// ## Engine-wiring route taken
 /// `FileArtifact` carries no `RawCall`s — the fused pass's contract is "parse once, project, drop the
 /// AST", and `SourceSymbol`/`ImportMap` alone do not encode call sites. Rather than widen that contract,
-/// this function runs a **second, uncached pass**: it re-reads every already-dispatched TypeScript
-/// file's text off disk (`ts_paths`) and re-parses it with `zzop_parser_typescript::parse_calls`, AND —
-/// symmetrically — every already-dispatched Java file's text off disk (`java_rels`), re-parsed with
-/// `zzop_parser_java_21::parse_calls`/`parse_imports` (this is the "lift the exemption" wiring
-/// `rules-http`'s `mutating_route_no_auth` module doc names as the completion of its own "Call-graph
-/// language coverage" gap — see that doc). Neither re-parse ever consults `zzop_cache::AnalysisCache` — a
-/// full per-file cache hit still re-reads and re-parses every TS/Java file here whenever any of the three
-/// call-graph-BFS rules is enabled and at least one HTTP endpoint exists.
+/// this function runs a **second, uncached pass** over three languages: every already-dispatched
+/// TypeScript file (`ts_paths`, `zzop_parser_typescript::parse_calls`), every Java file (`java_rels`,
+/// `zzop_parser_java_21::parse_calls`/`parse_imports`), and every Python file (`python_guard::
+/// parse_calls_and_guards`, which owns that loop and its own resolution/guard docs). The two non-TS loops
+/// are the "lift the exemption" wiring `rules-http`'s `mutating_route_no_auth` module doc names as the
+/// completion of its own "Call-graph language coverage" gap. No re-parse ever consults
+/// `zzop_cache::AnalysisCache` — a full per-file cache hit still re-reads and re-parses every one of
+/// those files whenever any call-graph-BFS rule is enabled and at least one HTTP endpoint exists.
 ///
-/// Java's imports are ALSO re-parsed fresh here (unlike TS's, which arrive pre-computed via
+/// Java's imports are ALSO re-parsed fresh here (unlike TS's and Python's, which arrive pre-computed via
 /// `ts_import_pairs` from the fused per-file pass) — no `java_import_pairs` equivalent is threaded into
 /// this function, so re-parsing both calls and imports together keeps the Java side self-contained
 /// rather than growing the caller's parameter list for a fact only this function needs.
@@ -41,20 +44,19 @@ use decorator_gate::{forroutes_path_matches, packs_read_io_scan_attrs, spring_ap
 /// `path` is that normalized form, not the endpoint's literal source text. This only affects display;
 /// BFS correctness never depends on exact path spelling.
 ///
-/// ## Java call resolution: an opaque-specifier `resolve_file`, not real package resolution
-/// The combined `resolve_file_fn` below dispatches on the CALLING file's own extension: a TS `from_file`
-/// keeps using the real `zzop_parser_typescript::resolve_file` (relative-specifier, `ts_paths`-aware); a
-/// Java `from_file` always resolves a specifier to itself (`Some(specifier.to_string())`) — Java import
-/// specifiers are dotted package/class names (`io.spring.core.service.AuthorizationService`), not
-/// relative paths, and no whole-corpus Java package/type index (`pipeline::JavaIndex`, used elsewhere for
-/// the dep-graph) is threaded into this function. Treating the specifier as its own opaque, stable target
-/// identity is sufficient for THIS graph's purpose — `bfs_reachable`'s predicate only needs a stable node
-/// id to visit and vocabulary-match (`mutating_route_no_auth::is_guard_id`), not a real cross-file
-/// resolution to another parsed Java file's own outgoing edges. Known limitation: a guard reachable only
-/// through a SECOND hop through Java code (handler -> helper method in another Java file -> guard) won't
-/// be found, since the first hop's target id is this opaque specifier string, not a real symbol id
-/// anything else in the graph has outgoing edges from — single-hop (handler directly calls the guard, or
-/// a same-file helper) is the coverage this wiring buys.
+/// ## Call resolution is per-language: the combined `resolve_file_fn` dispatches on the CALLING file
+/// A TS `from_file` keeps the real `zzop_parser_typescript::resolve_file` (relative-specifier,
+/// `ts_paths`-aware); a PYTHON one uses the real module resolver (`python_guard::
+/// resolve_python_call_target`); a JAVA one resolves a specifier to ITSELF (`Some(specifier.to_string())`)
+/// — Java import specifiers are dotted package/class names (`io.spring.core.service.AuthorizationService`),
+/// not relative paths, and no whole-corpus Java package/type index (`pipeline::JavaIndex`, used elsewhere
+/// for the dep-graph) is threaded into this function. Treating the specifier as its own opaque, stable
+/// target identity is sufficient for THIS graph's purpose — `bfs_reachable`'s predicate only needs a
+/// stable node id to visit and vocabulary-match (`mutating_route_no_auth::is_guard_id`), not a real
+/// cross-file resolution. Known limitation, shared with Python's own module-attribute case: a guard
+/// reachable only through a SECOND hop (handler -> helper in another file -> guard) is not found, since
+/// the first hop's target id is a node nothing else has outgoing edges from — single-hop (handler calls
+/// the guard directly, or through a same-file helper) is the coverage this wiring buys.
 #[allow(clippy::too_many_arguments)]
 pub(in crate::analyze) fn run_callgraph_rules(
     root: &std::path::Path,
@@ -64,6 +66,7 @@ pub(in crate::analyze) fn run_callgraph_rules(
     ts_paths: &HashSet<String>,
     ts_import_pairs: &[(String, ImportMap)],
     java_rels: &[String],
+    rust_workspace: &crate::pipeline::RustWorkspaceMap,
     all_symbols: &[zzop_core::SourceSymbol],
     profile: bool,
     rule_time: &mut HashMap<String, (u128, usize)>,
@@ -82,10 +85,22 @@ pub(in crate::analyze) fn run_callgraph_rules(
             })
         })
         .collect();
-    if api_endpoints.is_empty() {
+
+    // Convention vocabulary for this run: what the CONFIG declared, each key falling back to its built-in
+    // (`VocabularyConfig::resolve`). Resolved once here rather than at each use so every consumer in this
+    // pass reads the same answer.
+    let vocab = config.vocabulary.resolve();
+    // `cache-lane-file-read` is the first consumer of this pass that has NOTHING to do with HTTP, which is
+    // why the "no endpoints, nothing to do" early return moved from the top of this function to here and
+    // became conditional. Leaving it above would have made the rule structurally unreachable on exactly
+    // the trees it is for — a library or a compiler with no routes at all — and it would have failed
+    // SILENTLY, which is the defect class this repo spends the most effort on. Its own two vocabularies
+    // gate it further inside the rule; this only decides whether the pass runs at all.
+    let run_cache_lane = is_enabled(&config.rule_config, "cache-lane-file-read")
+        && vocab.cache_lane_anchor_pattern.is_some();
+    if api_endpoints.is_empty() && !run_cache_lane {
         return;
     }
-
     let run_unsafe_read = is_enabled(&config.rule_config, "unsafe-read-endpoint");
     let run_non_idempotent = is_enabled(&config.rule_config, "non-idempotent-write");
     let run_mutating_no_auth = is_enabled(&config.rule_config, "mutating-route-no-auth");
@@ -109,7 +124,7 @@ pub(in crate::analyze) fn run_callgraph_rules(
     // unconditional run) still skips everything when NEITHER consumer is active, via the early-return
     // below.
     let need_decorator_guarded = run_mutating_no_auth || packs_read_io_scan_attrs(config);
-    if !run_unsafe_read && !run_non_idempotent && !need_decorator_guarded {
+    if !run_unsafe_read && !run_non_idempotent && !need_decorator_guarded && !run_cache_lane {
         return;
     }
 
@@ -152,6 +167,19 @@ pub(in crate::analyze) fn run_callgraph_rules(
             }
         }
     }
+    // Python's own re-parse + its two decorator-guard producers — module doc "Engine-wiring route taken",
+    // and `python_guard`'s own doc for the two guard shapes and why they are gathered in two phases.
+    let python_guards = python_guard::parse_calls_and_guards(
+        root,
+        ts_paths,
+        need_decorator_guarded,
+        &vocab.python_guard(),
+        &mut raw_calls,
+    );
+    // Rust's own re-parse — calls PLUS handler-signature extractor evidence. Unconditional (not behind
+    // `need_decorator_guarded`) because the signature edges are ordinary graph edges, not side-channel
+    // guard evidence: see `rust_guard`'s module doc.
+    rust_guard::parse_calls_and_guards(root, ts_paths, &vocab.rust_guard(), &mut raw_calls);
     let mut local_symbols_by_file: HashMap<String, HashSet<String>> = HashMap::new();
     for s in all_symbols {
         local_symbols_by_file
@@ -164,6 +192,10 @@ pub(in crate::analyze) fn run_callgraph_rules(
     let resolve_file_fn = |specifier: &str, from_file: &str| {
         if from_file.ends_with(".java") {
             Some(specifier.to_string())
+        } else if crate::analyze::assemble::helpers::is_python_source_ext(from_file) {
+            python_guard::resolve_python_call_target(specifier, from_file, ts_paths)
+        } else if crate::analyze::assemble::helpers::is_rust_source_ext(from_file) {
+            rust_guard::resolve_rust_call_target(specifier, from_file, ts_paths, rust_workspace)
         } else {
             zzop_parser_typescript::resolve_file(specifier, from_file, ts_paths)
         }
@@ -174,6 +206,18 @@ pub(in crate::analyze) fn run_callgraph_rules(
         &local_symbols_by_file,
         &resolve_file_fn,
     );
+    if run_cache_lane {
+        let t0 = profile.then(Instant::now);
+        let found = cache_lane::run(
+            &raw_calls,
+            &symbol_graph,
+            all_symbols,
+            vocab.cache_lane_anchor_pattern,
+            &vocab.file_read_callees,
+        );
+        record_native_timing(rule_time, t0, "cache-lane-file-read", found.len());
+        global_findings.extend(found);
+    }
     if run_unsafe_read {
         let t0 = profile.then(Instant::now);
         let found = zzop_rules_http::scan_unsafe_read_endpoint(
@@ -206,68 +250,19 @@ pub(in crate::analyze) fn run_callgraph_rules(
         // which `ApiEndpoint` cannot carry.
         //
         // `decorator_guarded`: framework-neutral decorator/annotation auth coverage the call-graph BFS
-        // can't see (a decorator/annotation application is metadata, not a call edge). Two producers feed
-        // the one `(file, line)` set: NestJS `@UseGuards(...)` from the TS `file_texts` already read off
-        // disk (no extra I/O), and Spring method-security annotations gathered above into
-        // `java_decorator_guarded`. Both key routes by the same `(file, line)` the provide anchors on.
+        // can't see (a decorator/annotation application is metadata, not a call edge). Every producer and
+        // the load-bearing order they apply in live in `decorator_gate::assemble_decorator_guarded`.
         // This whole block runs whenever EITHER consumer needs it — see `need_decorator_guarded`'s doc —
         // not only when `run_mutating_no_auth` itself is on.
-        let mut decorator_guarded = java_decorator_guarded;
-        for (rel, text) in &file_texts {
-            for line in zzop_parser_typescript::extract_controller_guarded_lines(rel, text) {
-                decorator_guarded.insert((rel.clone(), line));
-            }
-        }
-        // NestJS route-scoped auth middleware: `consumer.apply(AuthX).forRoutes({path, method})` in a
-        // module names its covered routes by (method, path) PATTERN, not a (file, line). Match each
-        // pattern against the actual route provides and exempt every match by its own registration line.
-        let forroutes: Vec<zzop_parser_typescript::ForRoutesPattern> = file_texts
-            .iter()
-            .flat_map(|(rel, text)| {
-                zzop_parser_typescript::extract_nest_forroutes_guarded(rel, text)
-            })
-            .collect();
-        if !forroutes.is_empty() {
-            // The app's NestJS global prefix (`app.setGlobalPrefix('api')`), if any — a controller route
-            // provide's key already carries it (applied at assembly) but a forRoutes `path` is written
-            // WITHOUT it, so exact matching needs to prepend it. A non-literal / absent prefix leaves it
-            // `None` (exact match against the unprefixed pattern) — a miss then only fails to exempt.
-            let global_prefix: Option<String> = file_texts
-                .iter()
-                .find_map(|(rel, text)| {
-                    zzop_parser_typescript::extract_global_prefix_marker(rel, text)
-                })
-                .map(|p| p.key);
-            for p in io_provides.iter().filter(|p| p.kind == "http") {
-                let Some((method, path)) = p.key.split_once(' ') else {
-                    continue;
-                };
-                let covered = forroutes.iter().any(|(m, pat)| {
-                    (m == "*" || m == method)
-                        && forroutes_path_matches(path, pat, global_prefix.as_deref())
-                });
-                if covered {
-                    decorator_guarded.insert((p.file.clone(), p.line));
-                }
-            }
-        }
-        // Spring Security global posture — a secure-by-default chain governs its app's Java routes: one is
-        // authenticated (exempt) iff it escapes every `.permitAll()` matcher. Applied only when EXACTLY one
-        // posture exists tree-wide (else config-vs-config scoping is ambiguous), and SCOPED to the config's
-        // own source root (`spring_app_root`) so it never false-clears a sibling module's open routes.
-        if let [(config_file, posture)] = spring_postures.as_slice() {
-            let app_root = spring_app_root(config_file);
-            for p in io_provides.iter().filter(|p| {
-                p.kind == "http" && p.file.ends_with(".java") && p.file.starts_with(app_root)
-            }) {
-                let Some((method, path)) = p.key.split_once(' ') else {
-                    continue;
-                };
-                if posture.route_is_authenticated(method, path) {
-                    decorator_guarded.insert((p.file.clone(), p.line));
-                }
-            }
-        }
+        let decorator_guarded = assemble_decorator_guarded(
+            java_decorator_guarded,
+            &python_guards,
+            &spring_postures,
+            &file_texts,
+            io_provides,
+            all_symbols,
+            vocab.java_source_root,
+        );
         *decorator_guarded_out = decorator_guarded.iter().cloned().collect();
 
         if run_mutating_no_auth {
@@ -281,7 +276,12 @@ pub(in crate::analyze) fn run_callgraph_rules(
                     io_provides,
                     symbols: all_symbols,
                     symbol_graph: &symbol_graph,
-                    auth_guard_pattern: zzop_rules_http::DEFAULT_AUTH_GUARD_PATTERN,
+                    auth_guard_pattern: vocab.auth_guard_pattern,
+                    qualifier_guard_tokens: &vocab.auth_guard_qualifier_tokens,
+                    auth_acquisition_standalone_pattern: vocab.auth_acquisition_standalone_pattern,
+                    auth_acquisition_conditional_pattern: vocab
+                        .auth_acquisition_conditional_pattern,
+                    auth_family_path_pattern: vocab.auth_family_path_pattern,
                     decorator_guarded: &decorator_guarded,
                     route_attr_store: attribute_store,
                 },

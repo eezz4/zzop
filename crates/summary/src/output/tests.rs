@@ -150,6 +150,55 @@ fn a_valid_in_range_limit_is_accepted() {
     assert_eq!(filters.limit, Some(500));
 }
 
+/// The wire-neutral constructor is what a non-JSON host (the `zzop` CLI) reaches for: already-parsed
+/// values in, no MCP `tools/call` object fabricated on the way. `None`s are the unfiltered default view.
+#[test]
+fn the_wire_neutral_constructor_takes_parsed_values_with_no_json_in_sight() {
+    let unfiltered = FindingFilters::new(None, None, None).expect("no filters always construct");
+    assert_eq!(unfiltered.min_severity, None);
+    assert_eq!(unfiltered.rule, None);
+    assert_eq!(unfiltered.limit, None);
+
+    let filtered = FindingFilters::new(Some("warning"), Some("sql/nplus1"), Some(0))
+        .expect("valid values construct");
+    assert_eq!(filtered.min_severity.as_deref(), Some("warning"));
+    assert_eq!(filtered.rule.as_deref(), Some("sql/nplus1"));
+    // `0` survives as `Some(0)` here for the same reason it does through `from_args`: "counts only"
+    // is a real request, never "not provided".
+    assert_eq!(filtered.limit, Some(0));
+}
+
+/// The two constructors share ONE validation vocabulary — a wire-neutral caller must not be the lenient
+/// door into the shaping layer. Both rejections are asserted to carry the SAME message the JSON lane
+/// produces, so a future divergence fails here rather than shipping two answers.
+#[test]
+fn the_wire_neutral_constructor_rejects_exactly_what_the_json_lane_rejects() {
+    let neutral_severity = FindingFilters::new(Some("sev-nope"), None, None).unwrap_err();
+    let json_severity =
+        FindingFilters::from_args(Some(&serde_json::json!({ "severity": "sev-nope" })))
+            .unwrap_err();
+    assert_eq!(neutral_severity, json_severity);
+    assert!(
+        neutral_severity.contains("critical"),
+        "got: {neutral_severity}"
+    );
+
+    let neutral_limit = FindingFilters::new(None, None, Some(1001)).unwrap_err();
+    let json_limit =
+        FindingFilters::from_args(Some(&serde_json::json!({ "limit": 1001 }))).unwrap_err();
+    assert_eq!(neutral_limit, json_limit);
+    assert!(
+        neutral_limit.contains("limit must be an integer between 0 and 1000"),
+        "got: {neutral_limit}"
+    );
+
+    // An in-range limit at the exact cap is accepted by both.
+    assert_eq!(
+        FindingFilters::new(None, None, Some(1000)).unwrap().limit,
+        Some(1000)
+    );
+}
+
 /// A `rule` NUMBER used to fall through `as_str()` and silently drop the filter (indistinguishable
 /// from "no `rule` argument") — now a named type error, same class as `path`/`configPath`/`pattern`.
 #[test]

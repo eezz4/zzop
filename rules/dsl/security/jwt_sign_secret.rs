@@ -177,7 +177,7 @@ fn jwt_secret_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/auth.ts",
-        "declare const jwt: any;\ndeclare const payload: any;\nexport function issue() {\n  // jwt-sign-literal-secret-ok: rotated test-only fixture key, not a real credential\n  return jwt.sign(payload, \"abcd1234efgh5678\");\n}\n",
+        "declare const jwt: any;\ndeclare const payload: any;\nexport function issue() {\n  // zzop-jwt-sign-literal-secret-ok: rotated test-only fixture key, not a real credential\n  return jwt.sign(payload, \"abcd1234efgh5678\");\n}\n",
     );
     let out = scan(&dir);
     assert!(

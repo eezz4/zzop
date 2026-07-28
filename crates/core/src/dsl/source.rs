@@ -3,15 +3,17 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    io::IoFacts,
-    ir::{CommonIr, SourceSymbol},
-};
+use crate::{io::IoFacts, ir::SourceSymbol};
 
-/// Rule interpreter input — source files (lexical rules) + optional Common IR (IR-query rules, later).
+/// Rule interpreter input — the source files a rule pack evaluates against, each already carrying its own
+/// projected structural facts (`symbols`/`io`/`loop_spans`/`function_spans`).
+///
+/// Deliberately per-file: the tree-wide `CommonIr` is NOT reachable from here. A rule that needs the
+/// assembled IR is answered out of process by the `zzop facts` CLI lane, which emits the whole
+/// post-assembly substrate — the only stage with an honest cache story, since per-file rules participate
+/// in the engine's `ruleset_fingerprint` and no honest fingerprint exists for a user's own program.
 pub struct RuleContext<'a> {
     pub files: &'a [SourceFile],
-    pub ir: Option<&'a CommonIr>,
 }
 
 /// Per-rule wall-clock timing from one `eval_pack_profiled` call — the substrate for rule profiling.

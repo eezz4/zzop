@@ -146,7 +146,7 @@ pub(super) fn run_file_pass(
         let mut target_noncycle: HashMap<String, bool> = HashMap::new();
         for binding in file.imports.values() {
             // Non-relative specifier naming no projected file = a package import — summarized for
-            // `cross-layer/sdk-import-no-visible-consume`.
+            // `cross-layer/untraced-client-import-no-visible-consume`.
             if !binding.specifier.starts_with('.')
                 && !binding.specifier.starts_with('/')
                 && !all_paths.contains(binding.specifier.as_str())
@@ -223,10 +223,7 @@ pub(super) fn run_file_pass(
             io: Some(file.io.clone()),
         };
         let ctx_files = std::slice::from_ref(&source_file);
-        let ctx = RuleContext {
-            files: ctx_files,
-            ir: None,
-        };
+        let ctx = RuleContext { files: ctx_files };
         for pack in enabled_packs {
             if pack_loader::applies_to(pack, &file.path) {
                 // D13①: same config-disable-hint append `pipeline::findings::eval_packs` does for Mode

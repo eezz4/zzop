@@ -11,35 +11,38 @@ use crate::mapper::config_to_request;
 fn mounted_at_gate_error_texts() {
     let run = |v: serde_json::Value| {
         config_to_request(
-            &json!({"trees": [{"root": ".", "mountedAt": v}]}),
+            &json!({"trees": [{"root": ".", "topology": {"mountedAt": v}}]}),
             Path::new("/base"),
         )
         .unwrap_err()
         .0
     };
-    assert_eq!(run(json!(5)), "trees[0].mountedAt must be a string.");
+    assert_eq!(
+        run(json!(5)),
+        "trees[0].topology.mountedAt must be a string."
+    );
     assert_eq!(
         run(json!("///")),
-        "trees[0].mountedAt must be a non-empty path after trimming slashes."
+        "trees[0].topology.mountedAt must be a non-empty path after trimming slashes."
     );
     assert_eq!(
         run(json!("api")),
-        "trees[0].mountedAt must start with \"/\"."
+        "trees[0].topology.mountedAt must start with \"/\"."
     );
     // The leading-"/" check runs BEFORE the scheme check (same order as the JS source), so a bare
     // "https://api" (which does not start with "/") trips the "/" message, not the scheme one —
     // the scheme check only fires for a value that already starts with "/".
     assert_eq!(
         run(json!("/gateway://oops")),
-        "trees[0].mountedAt must not contain a scheme (\"://\") — it is a path prefix, not a full URL."
+        "trees[0].topology.mountedAt must not contain a scheme (\"://\") — it is a path prefix, not a full URL."
     );
     assert_eq!(
         run(json!("/api/{}")),
-        "trees[0].mountedAt must not contain a path-param placeholder (\"{}\")."
+        "trees[0].topology.mountedAt must not contain a path-param placeholder (\"{}\")."
     );
     assert_eq!(
         run(json!("/a b")),
-        "trees[0].mountedAt must not contain whitespace."
+        "trees[0].topology.mountedAt must not contain whitespace."
     );
 }
 
@@ -47,7 +50,7 @@ fn mounted_at_gate_error_texts() {
 fn mounts_gate_error_texts() {
     let run = |v: serde_json::Value| {
         config_to_request(
-            &json!({"trees": [{"root": ".", "mounts": v}]}),
+            &json!({"trees": [{"root": ".", "topology": {"mounts": v}}]}),
             Path::new("/base"),
         )
         .unwrap_err()
@@ -55,19 +58,19 @@ fn mounts_gate_error_texts() {
     };
     assert_eq!(
         run(json!("x")),
-        "trees[0].mounts must be an array of { dir, at } objects."
+        "trees[0].topology.mounts must be an array of { dir, at } objects."
     );
     assert_eq!(
         run(json!(["x"])),
-        "trees[0].mounts[0] must be an object with \"dir\" and \"at\" strings."
+        "trees[0].topology.mounts[0] must be an object with \"dir\" and \"at\" strings."
     );
     assert_eq!(
         run(json!([{"dir": "/abs", "at": "/api"}])),
-        "trees[0].mounts[0].dir must be tree-relative and must not start with \"/\"."
+        "trees[0].topology.mounts[0].dir must be tree-relative and must not start with \"/\"."
     );
     assert_eq!(
         run(json!([{"dir": "a\\b", "at": "/api"}])),
-        "trees[0].mounts[0].dir must use forward slashes, not backslashes."
+        "trees[0].topology.mounts[0].dir must use forward slashes, not backslashes."
     );
 }
 
@@ -75,7 +78,7 @@ fn mounts_gate_error_texts() {
 fn hosts_gate_error_texts() {
     let run = |v: serde_json::Value| {
         config_to_request(
-            &json!({"trees": [{"root": ".", "hosts": v}]}),
+            &json!({"trees": [{"root": ".", "topology": {"hosts": v}}]}),
             Path::new("/base"),
         )
         .unwrap_err()
@@ -83,23 +86,23 @@ fn hosts_gate_error_texts() {
     };
     assert_eq!(
         run(json!("x")),
-        "trees[0].hosts must be an array of host strings."
+        "trees[0].topology.hosts must be an array of host strings."
     );
     assert_eq!(
         run(json!([""])),
-        "trees[0].hosts[0] must be a non-empty string."
+        "trees[0].topology.hosts[0] must be a non-empty string."
     );
     assert_eq!(
         run(json!(["https://x"])),
-        "trees[0].hosts[0] must be a bare host, not a full URL (\"://\" is not allowed)."
+        "trees[0].topology.hosts[0] must be a bare host, not a full URL (\"://\" is not allowed)."
     );
     assert_eq!(
         run(json!(["x/y"])),
-        "trees[0].hosts[0] must be a bare host, not a path (\"/\" is not allowed)."
+        "trees[0].topology.hosts[0] must be a bare host, not a path (\"/\" is not allowed)."
     );
     assert_eq!(
         run(json!(["x y"])),
-        "trees[0].hosts[0] must not contain whitespace."
+        "trees[0].topology.hosts[0] must not contain whitespace."
     );
 }
 
@@ -108,23 +111,69 @@ fn well_formed_mounted_at_mounts_hosts_flow_into_the_tree_request() {
     let mapped = config_to_request(
         &json!({"trees": [{
             "root": ".",
-            "mountedAt": "/gateway",
-            "mounts": [{"dir": "apps/api", "at": "/api"}],
-            "hosts": ["internal.example.com"]
+            "topology": {
+                "mountedAt": "/gateway",
+                "mounts": [{"dir": "apps/api", "at": "/api"}],
+                "hosts": ["internal.example.com"]
+            }
         }]}),
         Path::new("/base"),
     )
     .unwrap();
+    // The REQUEST keeps the three flat: `topology` is a config-file grouping, not a wire change, the
+    // same way `packs.extraDirs` maps onto the flat `packsDir` request field. An embedder's dialect and
+    // an author's file are allowed to differ; what must not differ is what they mean.
     let tree = &mapped.request["trees"][0];
     assert_eq!(tree["mountedAt"], "/gateway");
     assert_eq!(tree["mounts"][0]["dir"], "apps/api");
     assert_eq!(tree["hosts"][0], "internal.example.com");
 }
 
+/// The old flat spelling is refused BY NAME, pointing at where the key went — never honored quietly and
+/// never dropped with a warning. A mis-declared gateway prefix does not fail loudly at analysis time; it
+/// mis-keys the cross-layer join and reports with confidence, which is why every other topology mistake
+/// in this mapper is a load-time error too.
+#[test]
+fn the_old_flat_topology_keys_are_refused_and_name_their_new_home() {
+    for (key, value) in [
+        ("mountedAt", json!("/gateway")),
+        ("mounts", json!([{"dir": "apps/api", "at": "/api"}])),
+        ("hosts", json!(["internal.example.com"])),
+    ] {
+        let err = config_to_request(
+            &json!({"trees": [{"root": ".", key: value}]}),
+            Path::new("/base"),
+        )
+        .expect_err("a moved key must not be silently ignored");
+        assert!(
+            err.0
+                .contains(&format!("trees[0].{key} moved to trees[0].topology.{key}")),
+            "the refusal must name both the old and the new spelling: {}",
+            err.0
+        );
+    }
+}
+
+/// A non-object `topology` is a shape error, not a silently skipped key — the same treatment `packs`
+/// gets, and for the same reason: an author who wrote the wrong shape learns nothing from silence.
+#[test]
+fn a_non_object_topology_is_a_shape_error() {
+    let err = config_to_request(
+        &json!({"trees": [{"root": ".", "topology": ["/gateway"]}]}),
+        Path::new("/base"),
+    )
+    .expect_err("a non-object topology must be refused");
+    assert!(
+        err.0.contains("trees[0].topology must be an object"),
+        "got: {}",
+        err.0
+    );
+}
+
 #[test]
 fn empty_mounts_and_hosts_arrays_are_omitted_from_the_request() {
     let mapped = config_to_request(
-        &json!({"trees": [{"root": ".", "mounts": [], "hosts": []}]}),
+        &json!({"trees": [{"root": ".", "topology": {"mounts": [], "hosts": []}}]}),
         Path::new("/base"),
     )
     .unwrap();

@@ -1,9 +1,9 @@
-//! End-to-end coverage for the SHIPPED `rules/dsl/http/http.json` pack's A2-migrated `auth-gates` /
-//! `route-exposure` rules (io-scan, framework-neutral — the IoScan projection redesign's follow-up pack
+//! End-to-end coverage for the SHIPPED `rules/dsl/http/http.json` pack's A2-migrated `protected-path-no-auth-evidence` /
+//! `dev-path-no-guard-hint` rules (io-scan, framework-neutral — the IoScan projection redesign's follow-up pack
 //! migration), loaded off the real file (not an inline synthetic pack — that's `analyze_io_scan_tree.rs`'s
 //! job) via `zzop_core::load_dsl_packs`. Proves:
 //!
-//! - THE FRAMEWORK-NEUTRAL WIN: an unguarded Express `/admin` route now fires `auth-gates` — silent
+//! - THE FRAMEWORK-NEUTRAL WIN: an unguarded Express `/admin` route now fires `protected-path-no-auth-evidence` — silent
 //!   before this migration, since the old rule was hard-gated on the `apiRoutes\.` house convention and
 //!   Express never satisfies it.
 //! - A native Express middleware guard (`app.use('/admin', requireAuth())`) clears it via the
@@ -11,10 +11,10 @@
 //! - A NestJS `@UseGuards` decorator-guarded route clears it EVEN WITH the native `mutating-route-no-auth`
 //!   rule disabled in config — proving the A2 decoupling (`callgraph::packs_read_io_scan_attrs`): the
 //!   shipped pack's `attr_absent: "auth-guarded"` gate alone is enough to keep the evidence flowing.
-//! - `// auth-gates-ok` on the route's own registration line suppresses it.
+//! - `// zzop-protected-path-no-auth-evidence-ok` on the route's own registration line suppresses it.
 //! - A route registered in a test file (`${test-paths-stories}`) never fires — `file_exclude_pattern`.
-//! - An unguarded `/debug` route fires `route-exposure`.
-//! - A registration line also containing `isProduction` does not fire `route-exposure` —
+//! - An unguarded `/debug` route fires `dev-path-no-guard-hint`.
+//! - A registration line also containing `isProduction` does not fire `dev-path-no-guard-hint` —
 //!   `anchor_exclude_pattern`'s env-gate=WHERE-axis carve-out.
 //!
 //! Self-contained `TempDir`/`config` helpers, same pattern as `analyze_io_scan_tree.rs`/
@@ -115,7 +115,7 @@ fn unguarded_express_admin_route_fires_auth_gates() {
     );
 
     let out = analyze_tree(dir.path(), &config());
-    let found = hits(&out, "auth-gates");
+    let found = hits(&out, "protected-path-no-auth-evidence");
     assert_eq!(found.len(), 1, "{:?}", out.findings);
     assert_eq!(snippet(found[0]), "POST /admin/widgets");
 }
@@ -142,7 +142,7 @@ fn native_express_middleware_guard_clears_auth_gates() {
 
     let out = analyze_tree(dir.path(), &config());
     assert!(
-        hits(&out, "auth-gates").is_empty(),
+        hits(&out, "protected-path-no-auth-evidence").is_empty(),
         "the /admin-scoped native middleware guard must clear attr_absent: {:?}",
         out.findings
     );
@@ -178,7 +178,7 @@ fn decorator_guarded_route_clears_auth_gates_even_with_the_native_rule_disabled(
     };
     let out = analyze_tree(dir.path(), &cfg);
     assert!(
-        hits(&out, "auth-gates").is_empty(),
+        hits(&out, "protected-path-no-auth-evidence").is_empty(),
         "decorator-guard evidence must still be minted for the shipped pack's attr_absent gate even \
          when the native mutating-route-no-auth rule is disabled: {:?}",
         out.findings
@@ -201,13 +201,13 @@ fn decorator_guarded_route_clears_auth_gates_even_with_the_native_rule_disabled(
         ),
     );
     let out = analyze_tree(sibling.path(), &cfg);
-    let found = hits(&out, "auth-gates");
+    let found = hits(&out, "protected-path-no-auth-evidence");
     assert_eq!(found.len(), 1, "{:?}", out.findings);
     assert_eq!(snippet(found[0]), "POST /admin/orders/x");
 }
 
 // ---------------------------------------------------------------------------------------------
-// `// auth-gates-ok` on the registration line suppresses.
+// `// zzop-protected-path-no-auth-evidence-ok` on the registration line suppresses.
 // ---------------------------------------------------------------------------------------------
 
 #[test]
@@ -215,7 +215,7 @@ fn auth_gate_ok_marker_on_the_registration_line_suppresses() {
     let dir = TempDir::new("zzop-http-pack-marker");
     dir.write(
         "routes/api.ts",
-        "const app = express();\napp.post('/admin/widgets', createWidget); // auth-gates-ok\n",
+        "const app = express();\napp.post('/admin/widgets', createWidget); // zzop-protected-path-no-auth-evidence-ok\n",
     );
     dir.write(
         "routes/handlers.ts",
@@ -224,8 +224,8 @@ fn auth_gate_ok_marker_on_the_registration_line_suppresses() {
 
     let out = analyze_tree(dir.path(), &config());
     assert!(
-        hits(&out, "auth-gates").is_empty(),
-        "the // auth-gates-ok comment on the registration line must suppress: {:?}",
+        hits(&out, "protected-path-no-auth-evidence").is_empty(),
+        "the // zzop-protected-path-no-auth-evidence-ok comment on the registration line must suppress: {:?}",
         out.findings
     );
 }
@@ -248,14 +248,14 @@ fn a_route_registered_in_a_test_file_does_not_fire() {
 
     let out = analyze_tree(dir.path(), &config());
     assert!(
-        hits(&out, "auth-gates").is_empty(),
+        hits(&out, "protected-path-no-auth-evidence").is_empty(),
         "a route registered in a *.test.ts file must be excluded by file_exclude_pattern: {:?}",
         out.findings
     );
 }
 
 // ---------------------------------------------------------------------------------------------
-// An unguarded /debug route fires `route-exposure`.
+// An unguarded /debug route fires `dev-path-no-guard-hint`.
 // ---------------------------------------------------------------------------------------------
 
 #[test]
@@ -271,13 +271,13 @@ fn unguarded_debug_route_fires_route_exposure() {
     );
 
     let out = analyze_tree(dir.path(), &config());
-    let found = hits(&out, "route-exposure");
+    let found = hits(&out, "dev-path-no-guard-hint");
     assert_eq!(found.len(), 1, "{:?}", out.findings);
     assert_eq!(snippet(found[0]), "POST /debug/tools");
 }
 
 // ---------------------------------------------------------------------------------------------
-// A registration line also naming `isProduction` does not fire `route-exposure` —
+// A registration line also naming `isProduction` does not fire `dev-path-no-guard-hint` —
 // `anchor_exclude_pattern`'s env-gate=WHERE-axis carve-out.
 // ---------------------------------------------------------------------------------------------
 
@@ -295,8 +295,8 @@ fn is_production_on_the_registration_line_clears_route_exposure() {
 
     let out = analyze_tree(dir.path(), &config());
     assert!(
-        hits(&out, "route-exposure").is_empty(),
-        "an isProduction check on the same registration line must clear route-exposure via \
+        hits(&out, "dev-path-no-guard-hint").is_empty(),
+        "an isProduction check on the same registration line must clear dev-path-no-guard-hint via \
          anchor_exclude_pattern: {:?}",
         out.findings
     );

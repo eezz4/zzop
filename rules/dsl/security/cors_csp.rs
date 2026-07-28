@@ -153,7 +153,7 @@ fn cors_reflect_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/cors.ts",
-        "// cors-reflected-origin-credentials-ok: internal-only service mesh endpoint, never exposed publicly\nexport const corsOptions = { credentials: true, origin: true };\n",
+        "// zzop-cors-reflected-origin-credentials-ok: internal-only service mesh endpoint, never exposed publicly\nexport const corsOptions = { credentials: true, origin: true };\n",
     );
     let out = scan(&dir);
     assert!(
@@ -163,7 +163,7 @@ fn cors_reflect_ok_marker_above_the_line_suppresses_the_finding() {
     );
 }
 
-// --- csp-disabled ---
+// --- csp-weak-or-disabled ---
 
 #[test]
 fn helmet_content_security_policy_false_is_flagged() {
@@ -173,7 +173,7 @@ fn helmet_content_security_policy_false_is_flagged() {
         "declare const helmet: any;\ndeclare const app: any;\napp.use(helmet({\n  contentSecurityPolicy: false,\n}));\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "csp-disabled");
+    let h = hits(&out, "csp-weak-or-disabled");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 4);
     assert_eq!(label_of(h[0]), Some("helmet-csp-false"));
@@ -187,7 +187,7 @@ fn csp_header_with_unsafe_inline_is_flagged() {
         "declare const res: any;\nres.setHeader('Content-Security-Policy', \"default-src 'self' 'unsafe-inline'\");\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "csp-disabled");
+    let h = hits(&out, "csp-weak-or-disabled");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(label_of(h[0]), Some("csp-unsafe-inline"));
 }
@@ -200,7 +200,7 @@ fn csp_default_src_wildcard_is_flagged() {
         "declare const res: any;\nres.setHeader('Content-Security-Policy', \"default-src *\");\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "csp-disabled");
+    let h = hits(&out, "csp-weak-or-disabled");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(label_of(h[0]), Some("csp-wildcard"));
 }
@@ -213,7 +213,11 @@ fn helmet_content_security_policy_enabled_is_not_flagged() {
         "declare const helmet: any;\ndeclare const app: any;\napp.use(helmet({\n  contentSecurityPolicy: true,\n}));\n",
     );
     let out = scan(&dir);
-    assert!(hits(&out, "csp-disabled").is_empty(), "{:?}", out.findings);
+    assert!(
+        hits(&out, "csp-weak-or-disabled").is_empty(),
+        "{:?}",
+        out.findings
+    );
 }
 
 #[test]
@@ -228,7 +232,11 @@ fn csp_wildcard_with_no_helmet_gate_present_is_not_flagged() {
         "export const unrelatedConfig = {\n  defaultSrcNote: 'default-src * everywhere',\n};\n",
     );
     let out = scan(&dir);
-    assert!(hits(&out, "csp-disabled").is_empty(), "{:?}", out.findings);
+    assert!(
+        hits(&out, "csp-weak-or-disabled").is_empty(),
+        "{:?}",
+        out.findings
+    );
 }
 
 #[test]
@@ -239,7 +247,11 @@ fn csp_disabled_in_a_test_fixture_path_is_not_flagged() {
         "declare const helmet: any;\ndeclare const app: any;\napp.use(helmet({\n  contentSecurityPolicy: false,\n}));\n",
     );
     let out = scan(&dir);
-    assert!(hits(&out, "csp-disabled").is_empty(), "{:?}", out.findings);
+    assert!(
+        hits(&out, "csp-weak-or-disabled").is_empty(),
+        "{:?}",
+        out.findings
+    );
 }
 
 #[test]
@@ -247,8 +259,12 @@ fn csp_disabled_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/app.ts",
-        "declare const helmet: any;\ndeclare const app: any;\napp.use(helmet({\n  // csp-disabled-ok: CSP is enforced at the CDN edge instead\n  contentSecurityPolicy: false,\n}));\n",
+        "declare const helmet: any;\ndeclare const app: any;\napp.use(helmet({\n  // zzop-csp-weak-or-disabled-ok: CSP is enforced at the CDN edge instead\n  contentSecurityPolicy: false,\n}));\n",
     );
     let out = scan(&dir);
-    assert!(hits(&out, "csp-disabled").is_empty(), "{:?}", out.findings);
+    assert!(
+        hits(&out, "csp-weak-or-disabled").is_empty(),
+        "{:?}",
+        out.findings
+    );
 }

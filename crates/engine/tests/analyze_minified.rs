@@ -8,7 +8,7 @@
 //! proves, and its explicit distinction from "degraded" (which still runs line-scan rules).
 //!
 //! Loads the REAL shipped packs from `rules/dsl/` (not stubs) so this exercises two independently-shipped
-//! packs' rules at once: `db/empty-catch-on-write` (method-scan) and `security/raw-query-interpolation`
+//! packs' rules at once: `db/empty-catch-and-write` (method-scan) and `security/raw-query-unsafe-api`
 //! (line-scan) — proving the skip applies across matcher types and across packs, not just to the one rule
 //! the 500-char heuristic used to be hard-coded onto.
 
@@ -69,8 +69,8 @@ fn all_shipped_packs() -> Vec<RulePackDef> {
 }
 
 /// A single fat line (6000+ chars, no newline) containing BOTH trigger shapes at once: a DB write followed
-/// by an empty `catch {}` in the same function (`db/empty-catch-on-write`, a method-scan rule) and a
-/// `$queryRawUnsafe` call (`security/raw-query-interpolation`, a line-scan rule). The long string literal
+/// by an empty `catch {}` in the same function (`db/empty-catch-and-write`, a method-scan rule) and a
+/// `$queryRawUnsafe` call (`security/raw-query-unsafe-api`, a line-scan rule). The long string literal
 /// (`bundled`) is only padding — 6000 chars deliberately trips the classifier's ABSOLUTE prong (5000+ char
 /// single line, minified regardless of file-byte ratio), so this fixture stays classified minified no
 /// matter what other lines future edits add to it; none of the padding is itself part of either trigger
@@ -144,7 +144,7 @@ fn minified_file_produces_zero_dsl_findings_across_every_loaded_pack() {
 
     // Restricted to DSL findings (rule_id = "{pack.id}/{rule.id}") — this deliberately does NOT assert
     // zero findings of every kind for this file: whole-graph NATIVE analyses (`dead-candidates`/
-    // `dead-exports`, both bare ids with no pack prefix) still run over this file's structural extraction
+    // `unimported-export`, both bare ids with no pack prefix) still run over this file's structural extraction
     // exactly as normal (see `native_structural_extraction_still_covers_the_minified_file` below) and are
     // expected to fire here (an unimported, single-file `run` export is a legitimate dead-candidate/
     // dead-export in this tiny fixture tree) — only the DSL rule-pack matchers are what the minified skip
@@ -191,12 +191,12 @@ fn the_same_trigger_shapes_on_normal_length_lines_still_fire() {
         .map(|f| f.rule_id.as_str())
         .collect();
     assert!(
-        normal_findings.contains(&"db/empty-catch-on-write"),
-        "expected empty-catch-on-write to fire on the normal-length control file, got: {normal_findings:?}"
+        normal_findings.contains(&"db/empty-catch-and-write"),
+        "expected empty-catch-and-write to fire on the normal-length control file, got: {normal_findings:?}"
     );
     assert!(
-        normal_findings.contains(&"security/raw-query-interpolation"),
-        "expected raw-query-interpolation to fire on the normal-length control file, got: {normal_findings:?}"
+        normal_findings.contains(&"security/raw-query-unsafe-api"),
+        "expected raw-query-unsafe-api to fire on the normal-length control file, got: {normal_findings:?}"
     );
 }
 
@@ -210,11 +210,10 @@ fn one_long_string_literal_line_in_a_normal_file_does_not_cost_it_dsl_coverage()
     let out = analyze_tree(dir.path(), &config());
 
     assert!(
-        out.findings
-            .iter()
-            .any(|f| f.file == "src/prompt-tool.mjs"
-                && f.rule_id == "security/raw-query-interpolation"),
-        "expected raw-query-interpolation to still fire on the one-long-line normal file, got: {:?}",
+        out.findings.iter().any(
+            |f| f.file == "src/prompt-tool.mjs" && f.rule_id == "security/raw-query-unsafe-api"
+        ),
+        "expected raw-query-unsafe-api to still fire on the one-long-line normal file, got: {:?}",
         out.findings
     );
     assert!(

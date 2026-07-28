@@ -6,7 +6,7 @@
 //! ## Why this exists
 //! `.vue`/`.svelte` files reach the engine as lexical-only `SourceFile`s (dispatch routes them to `None` —
 //! `zzop_engine::dispatch`), so a `.ts` symbol imported and used ONLY inside a component's `<script>`
-//! block has zero visible fan-in through the normal fused pipeline, false-firing `dead-exports`/
+//! block has zero visible fan-in through the normal fused pipeline, false-firing `unimported-export`/
 //! `dead-candidates`. This helper is called by the engine at ASSEMBLE time (uncached, off-disk, mirroring
 //! `dead_exports.rs`'s own re-read-off-disk pattern) so the win costs no cache-schema/fingerprint bump: it
 //! never touches the cached fused-pipeline projection for the `.vue`/`.svelte` file itself.
@@ -18,7 +18,7 @@
 //! ## Known lexical limits (bounded on purpose)
 //! Because this is a raw block extract and not a real SFC parser, a `<script>…import…</script>` that is
 //! commented out (`<!-- … -->`) or embedded inside a template string is still captured, so its imports
-//! count as live. The failure direction is conservative: it can only SUPPRESS a `dead-exports`/
+//! count as live. The failure direction is conservative: it can only SUPPRESS a `unimported-export`/
 //! `dead-candidates` finding (mark a possibly-dead export alive), never mint a new false positive — an
 //! acceptable trade for a pre-scan whose whole job is removing SFC-blindness false positives.
 

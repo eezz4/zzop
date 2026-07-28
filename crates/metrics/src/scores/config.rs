@@ -4,7 +4,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use regex::Regex;
+mod fsd;
+
+pub use fsd::{
+    FsdConfig, FsdMatcher, DEFAULT_FSD_BASE_DIRS, DEFAULT_FSD_ENTRY, DEFAULT_FSD_SHARED,
+    DEFAULT_FSD_SLICE_CONTAINERS,
+};
 use serde::{Deserialize, Serialize};
 
 /// Fallback Single-File-Component LOC limit for a role with no `loc_limits` entry.
@@ -171,82 +176,6 @@ impl Default for ScoreThresholds {
     }
 }
 
-/// Feature-Sliced Design vocabulary — the per-repo directory conventions that drive `classify_path`/`module_of`.
-/// A generic FSD repo needs no overrides; the derived `Default` impl's values apply.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FsdConfig {
-    /// L2 slice containers — first subdirectory is the slice (e.g. features/auth).
-    pub slice_containers: Vec<String>,
-    /// L1 entry layer prefixes.
-    pub entry: Vec<String>,
-    /// L3 shared layer prefixes.
-    pub shared: Vec<String>,
-    /// Foundation directory names — paths containing `/{dir}/` are classified as base modules (L4).
-    pub base_dirs: Vec<String>,
-}
-
-impl Default for FsdConfig {
-    fn default() -> Self {
-        FsdConfig {
-            slice_containers: vec!["features".to_string(), "domains".to_string()],
-            entry: vec!["pages".to_string(), "routes".to_string(), "api".to_string()],
-            shared: vec![
-                "core".to_string(),
-                "hooks".to_string(),
-                "render".to_string(),
-                "ui".to_string(),
-                "shared".to_string(),
-                "lib".to_string(),
-                "utils".to_string(),
-                "__test__".to_string(),
-            ],
-            base_dirs: vec!["base".to_string()],
-        }
-    }
-}
-
-/// Precompiled FSD regexes bundled with the config that produced them — an explicitly constructed value passed
-/// at call sites rather than module-level mutable globals. Not `Serialize`/`Deserialize`: it holds compiled
-/// `Regex` values, so it is treated as engine config, not analysis output (unlike `ScoreThresholds`).
-#[derive(Debug, Clone)]
-pub struct FsdMatcher {
-    pub config: FsdConfig,
-    pub entry_re: Regex,
-    pub slice_re: Regex,
-    pub shared_re: Regex,
-    pub base_re: Regex,
-}
-
-impl FsdMatcher {
-    /// Precompiles the four FSD regexes from `config`.
-    pub fn new(config: FsdConfig) -> Self {
-        fn alt(xs: &[String]) -> String {
-            xs.join("|")
-        }
-        let entry_re =
-            Regex::new(&format!("^({})/", alt(&config.entry))).expect("valid entry regex");
-        let slice_re = Regex::new(&format!("^({})/([^/]+)/", alt(&config.slice_containers)))
-            .expect("valid slice regex");
-        let shared_re =
-            Regex::new(&format!("^({})/", alt(&config.shared))).expect("valid shared regex");
-        let base_re = Regex::new(&format!("/({})/([^/]+)/", alt(&config.base_dirs)))
-            .expect("valid base regex");
-        FsdMatcher {
-            config,
-            entry_re,
-            slice_re,
-            shared_re,
-            base_re,
-        }
-    }
-}
-
-impl Default for FsdMatcher {
-    fn default() -> Self {
-        FsdMatcher::new(FsdConfig::default())
-    }
-}
-
 /// The scores subsystem's full configuration — bundles the threshold knobs, the shared/cross-cutting dir
 /// vocabulary, and the FSD matcher that every scores/* module needs. Threaded explicitly through call sites
 /// (see module doc comment for why this uses an explicit struct instead of global state).
@@ -262,23 +191,30 @@ pub struct ScoresConfig {
     pub fsd: FsdMatcher,
 }
 
+/// Cross-cutting directory names exempt from layering violations when a project declares none — the
+/// value `vocabulary.hierarchySharedDirs` replaces. Deliberately a SEPARATE axis from
+/// [`DEFAULT_FSD_SHARED`] despite the overlapping words: this one decides what is exempt from
+/// upward-import / sibling-cross checks, that one names an FSD layer. Flattening them into one list
+/// would give two questions one answer.
+pub const DEFAULT_HIERARCHY_SHARED_DIRS: &[&str] = &[
+    "utils",
+    "types",
+    "helpers",
+    "hooks",
+    "constants",
+    "lib",
+    "display",
+    "__test__",
+];
+
 impl Default for ScoresConfig {
     fn default() -> Self {
         ScoresConfig {
             thresholds: ScoreThresholds::default(),
-            hierarchy_shared_dirs: [
-                "utils",
-                "types",
-                "helpers",
-                "hooks",
-                "constants",
-                "lib",
-                "display",
-                "__test__",
-            ]
-            .into_iter()
-            .map(String::from)
-            .collect(),
+            hierarchy_shared_dirs: DEFAULT_HIERARCHY_SHARED_DIRS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect(),
             fsd: FsdMatcher::default(),
         }
     }

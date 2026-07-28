@@ -17,15 +17,13 @@
 //! Static-asset fetches (`public/` JSON, `.svg` icons, ...) are not API consumption, so the veto has two
 //! tiers. [`ALWAYS_VETO_EXTENSION_PATTERN`] vetoes static-asset-shaped extensions unconditionally, anchored
 //! to end-of-path. [`ASSET_DIR_GATED_EXTENSION_PATTERN`] (`json`/`xml`) also legitimately names a real API
-//! shape (`GET /api/users.json`), so it's gated on an API-ish path segment ([`API_SEGMENT_PATTERN`]) instead
-//! of an asset-directory allowlist, since some frameworks strip the `public/` prefix from served asset URLs
-//! (a Next.js `public/i18n/*.json` fetch keyed `GET /i18n/{}.json` is vetoed by the ABSENT API segment).
-//! Tradeoff: an API route living outside any `/api`-ish segment is missed here too.
+//! shape (`GET /api/users.json`), so it is gated on the run's DECLARED API-ish path segment instead — see
+//! [`vocab`] for what that gate does and does not cover, including an undeclared one.
 //!
 //! A related residual gap: raw-Worker manual dispatch (`export default { fetch }` comparing `url.pathname`
 //! against literals) IS extracted by the evidence-gated `pathname_dispatch` adapter, but shapes outside its
-//! never-guess gate (dynamic/`startsWith` paths, const-indirected literals, functions without Request evidence)
-//! stay invisible on the provide side. [`Severity::Info`] absorbs both this residue and the tradeoff above.
+//! never-guess gate (dynamic/`startsWith` paths, const-indirected literals, functions without Request
+//! evidence) stay invisible on the provide side. [`Severity::Info`] absorbs both this and the tradeoff above.
 //!
 //! ## Structural gates — one shared sequence, not local copies
 //! Everything decidable from the KEY or the FILE alone belongs to the STRUCTURAL layer, whose single
@@ -74,8 +72,8 @@
 //! folds into ONE aggregate finding once [`MIN_FOREIGN_UNPROVIDED_GROUP`] or more accumulate, under the same
 //! replace-not-silently-suppress contract as `cross-layer/prefix-drift` (that rule's own module): the
 //! aggregate enumerates every folded key in `data.routes` and the message body, so nothing is lost, only N
-//! findings replaced by one. Below the
-//! fold threshold, foreign consumes stay individual — 1-2 could be coincidence, not a pattern.
+//! findings replaced by one. Below the fold threshold, foreign consumes stay individual — 1-2 could be
+//! coincidence, not a pattern.
 //!
 //! ### A veto can RAISE the finding count (fold interaction)
 //! Every veto above is applied BEFORE this split, so the threshold counts surviving consumes. Dropping one
@@ -108,10 +106,6 @@ const ALWAYS_VETO_EXTENSION_PATTERN: &str =
 /// [`API_SEGMENT_PATTERN`] also matches (inverted gate: absence of an API-ish segment is the veto signal).
 const ASSET_DIR_GATED_EXTENSION_PATTERN: &str = r"(?i)\.(json|xml)([?#]|$)";
 
-/// API-ish path-segment vocabulary — see module doc "Static-asset veto". `/`-delimited so it matches a
-/// whole path segment, not a bare substring (e.g. `/apiary/` does not match `/api/`).
-const API_SEGMENT_PATTERN: &str = r"(?i)/(api|graphql|rpc|v[0-9]+)(/|$)";
-
 /// Fold threshold for "foreign" unprovided consumes (first path segment outside the tree's provided key
 /// space). Same rationale as `MIN_PREFIX_DRIFT_GROUP` in the cross-layer crate: 2 can be coincidence, 3+ is
 /// a pattern (here: a partial-provider tree, e.g. a monorepo where only one app's routes are extracted).
@@ -139,10 +133,12 @@ struct UnmatchedConsume<'a> {
 
 /// `internal_hosts`: hosts this tree declares it owns (`EngineConfig::hosts`), threaded in from
 /// `analyze::assemble` — see module doc "Structural gates". Pass `&[]` for no declared hosts.
+/// `api_segment_pattern`: the declared API-segment vocabulary — see [`vocab::api_segment_re`] for `None`.
 pub fn unprovided_consume_findings(
     io_provides: &[zzop_core::IoProvide],
     io_consumes: &[zzop_core::IoConsume],
     internal_hosts: &[String],
+    api_segment_pattern: Option<&str>,
 ) -> Vec<zzop_core::Finding> {
     let has_http_provide = io_provides.iter().any(|p| p.kind == "http");
     if !has_http_provide {
@@ -168,7 +164,7 @@ pub fn unprovided_consume_findings(
 
     let always_veto_re = Regex::new(ALWAYS_VETO_EXTENSION_PATTERN).unwrap();
     let asset_dir_gated_re = Regex::new(ASSET_DIR_GATED_EXTENSION_PATTERN).unwrap();
-    let api_segment_re = Regex::new(API_SEGMENT_PATTERN).unwrap();
+    let api_segment_re = vocab::api_segment_re(api_segment_pattern);
 
     let mut overlapping: Vec<UnmatchedConsume> = Vec::new();
     let mut foreign: Vec<UnmatchedConsume> = Vec::new();
@@ -205,7 +201,10 @@ pub fn unprovided_consume_findings(
         if always_veto_re.is_match(key_str) {
             continue; // static-asset fetch, not API consumption — see module doc
         }
-        if asset_dir_gated_re.is_match(key_str) && !api_segment_re.is_match(key_str) {
+        let api_ish = api_segment_re
+            .as_ref()
+            .is_some_and(|re| re.is_match(key_str));
+        if asset_dir_gated_re.is_match(key_str) && !api_ish {
             continue; // json/xml with no API-ish path segment — vetoed by default, see module doc
         }
 
@@ -293,6 +292,9 @@ pub fn unprovided_consume_findings(
     findings.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
     findings
 }
+
+mod vocab;
+pub use vocab::API_SEGMENT_PATTERN;
 
 #[cfg(test)]
 mod tests;

@@ -4,29 +4,65 @@
 [![npm](https://img.shields.io/npm/v/@zzop/cli?logo=npm)](https://www.npmjs.com/package/@zzop/cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-zzop is built for an AI agent working in one repo — say the frontend — that needs to verify or
-understand the other side of a contract (the backend) without reading it whole; a human reviewing the
-same cross-repo change is the identical use case. Its core move is a cross-repo join: it parses each
-repo into a language-neutral IR, exact-matches frontend `fetch` calls against backend routes across the
-repo boundary, and names near-misses (a typo'd path segment, a version drift, a method mismatch) instead
-of leaving you to diff two codebases by hand — cutting the read/context cost of confirming the other
-side actually agrees. Alongside that cross-layer join it also runs a SAST-style layered rule system
-(native whole-graph analyses + declarative JSON rule packs) over each repo individually, returning
-structural findings, dependency/dead-code analysis, and health scores as one JSON document.
+**Your AI coding agent can't read your whole codebase. zzop reads it — and answers the same way every
+time.**
 
-Every run is deterministic: same code in, same findings out — byte-stable output you can diff between
-runs. That determinism is what makes zzop usable as a CI gate — fail a PR on contract drift by reading
-the JSON severity counts — and as a substrate an agent can re-run and diff without chasing flaky
-rechecks.
+Point zzop at one repository, or at your frontend and backend together, and it returns a single JSON
+document describing what is actually there: which frontend calls reach which backend routes and which
+reach nothing, what looks risky, what is dead, where to refactor first — and what this run could not
+see. An agent starts from that instead of guessing from the handful of files it had room to open.
+
+zzop does not write code. It makes the *understanding* a code generator works from accurate and
+repeatable — same commit in, byte-identical findings out — so what your agent writes rests on what your
+code does rather than on what it inferred from a partial read. The thing being improved is
+comprehension, not capability.
+
+## See it break something
+
+**[Break a route](docs/demo/break-a-route.md)** is the whole product in one change: rename
+one backend route in a frontend/backend pair that share no code and no types. The frontend still
+compiles, its tests still pass — and zzop names both ends of the break, file and line:
+
+```
+=== unprovided consumes ===
+  "PUT /api/user"      @ fe-vite     src/pages/Settings.jsx:19    ← the call now hits nothing
+
+=== unconsumed provides ===
+  "PUT /api/users/me"  @ be-express  src/app/routes/auth/auth.controller.ts:61   ← the route nobody calls
+```
+
+That page is a **narrated walkthrough**: every command and the output it produced are written out, so it
+reads end to end without you running anything. The script behind it, `docs/demo/break-a-route.sh`, is a
+maintainer tool rather than a first-run command — it builds a `cargo` example (so it needs a **source
+checkout**, not a released binary) and analyzes two repositories **you supply** at
+`corpus/oss/fe-vite` and `corpus/oss/be-express`. `corpus/oss/` is gitignored and nothing in this repo
+ships those trees — they are third-party checkouts, not ours to redistribute; see
+[CONTRIBUTING.md](CONTRIBUTING.md) on bringing your own corpus. (The synthetic corpus we *did* write
+is committed, at [`cases/`](cases/README.md) — every file of it but one, a fixture
+that has to carry a live vendor-token literal and so cannot be committed at all; its README says what
+that costs the benchmark score.)
+
+## Which of the two binaries do you want?
+
+zzop ships as two Node-free binaries. Decide which one you need before you install anything:
+
+| If you want | Use | How you drive it |
+|---|---|---|
+| An AI agent (Claude Code, Claude Desktop, any MCP client) to answer questions about your repos | **`zzop-mcp`** — an MCP server over stdio | Install the plugin or the `.mcpb` bundle and the agent calls the tools. You run no commands. → [Use in Claude Code](#use-in-claude-code-mcp-plugin) |
+| To run analyses yourself — a terminal, a CI job, a script | **`zzop`** — a plain CLI | `zzop analyze .`, `zzop cross ./web ./api`, … JSON to stdout, ESLint-style. → [Use in a terminal or CI](#use-in-a-terminal-or-ci-zzop-cli) |
+
+Both binaries dispatch to the same shared handlers over the same engine, so a tool call and a CLI run
+against the same path give the identical answer. Neither one makes a network request of any kind — they
+carry no HTTP dependency at all ([privacy](https://eezz4.github.io/zzop/privacy.html)).
 
 - Documentation site: <https://eezz4.github.io/zzop/> (source in [`site/`](site/))
 - Documentation (in-repo): [`docs/README.md`](docs/README.md)
+- How it works, in depth: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - External parser protocol: [`docs/NORMALIZED_AST.md`](docs/NORMALIZED_AST.md)
 
 ## Quick start
 
-zzop's primary distribution is two Node-free binaries — `zzop` (CLI) and `zzop-mcp` (MCP server) — no
-Node.js, no npm, nothing to compile. Get them one of four ways:
+Neither binary needs Node.js, npm, or a compiler. Get them one of four ways:
 
 <!-- Canonical install-lane list for repo readers. docs/getting-started.md, docs/modules/mcp.md and
      VERSIONING.md link here instead of restating it; site/usage.html is the site-side twin (one copy
@@ -40,18 +76,49 @@ Node.js, no npm, nothing to compile. Get them one of four ways:
 - **Claude Desktop.** One-click `.mcpb` bundle (drag-and-drop install) — see
   [packages/mcpb/README.md](packages/mcpb/README.md).
 - **npm.** `npm i -g @zzop/cli` installs the exact same `zzop` binary above, fetched for your platform
-  as an npm dependency — same subcommands (`analyze`/`cross`/`endpoint`/`manifest`/`diff`/`contract`/
-  `explain`/`validate-*`),
+  as an npm dependency — every subcommand `zzop help` lists, byte-for-byte the
   same output, no Node runtime involved beyond a tiny launcher script and no separate JS implementation
   that could drift from the native binary. Convenient when a project already manages its toolchain
   through npm. See [packages/cli/README.md](packages/cli/README.md).
 
-Write a `zzop.config.jsonc` and run it, ESLint-style:
+## Use in Claude Code (MCP plugin)
+
+The agent-facing lane. `zzop-mcp` is a self-contained binary with an MCP server built in; you install it
+once and then ask questions in plain language — the agent picks the tool.
+
+1. `/plugin marketplace add eezz4/zzop` — then `/plugin install zzop@zzop` (two separate steps).
+2. Start a new session. The plugin downloads the binary for your platform on first run; nothing goes
+   on `PATH`. **That first session does not list the zzop tools yet** — the tool list is settled
+   before the download finishes — so restart Claude Code once and they appear (the hook says so on
+   stdout too). Once installed, a newer release is reported to you, never installed behind your back.
+
+The server exposes the tools `analyze_repo`, `cross_repo`, `check_file`, `check_endpoint`,
+`analyze_envelope`, `validate_envelope`, `validate_rule_pack` — plus the `zzop://contract/*` resources
+carrying the authoring contracts (among them the envelope schema, the DSL reference, the rule catalog,
+the config surface and an annotated starter config), so an adapter or rule pack can be written with
+nothing but the binary. `zzop-mcp` itself takes no analysis subcommands: bare or `mcp` serves stdio,
+and `version`/`help` are the only other forms.
+
+See [packages/README.md](packages/README.md) for the full install/tool/resource reference, and
+[docs/modules/mcp.md](docs/modules/mcp.md) for exact argument shapes.
+
+## Use in a terminal or CI (`zzop` CLI)
+
+The human-facing lane. Write a `zzop.config.jsonc` and run it, ESLint-style. **A config is required** —
+every analysis lane refuses a tree that has none, on both binaries alike, because the names zzop would
+otherwise guess about your project (what you call your auth guards, which banners mark your generated
+files) live in that file, and a key you do not declare is a judgment zzop does not make:
 
 ```sh
+zzop init                               # write the starter config — do this first, once per tree
 zzop analyze .                          # analyze one repo/tree -> JSON findings summary
+zzop analyze --config ci/zzop.config.jsonc   # same, for a config that does not sit at the tree root
+zzop analyze . --severity critical --limit 10  # narrow the findings LIST (counts always cover everything)
 zzop cross --config zzop.config.jsonc   # cross-layer join, driven by that config
+zzop <subcommand> --help                # that one subcommand's own line (exit 0); `zzop help` prints them all
 ```
+
+`zzop --help` is the canonical subcommand list — this README does not repeat it.
 
 To track contract drift over time rather than at one instant, commit a **structural manifest** and diff
 a later run against it — the same shape a lint baseline file has, kept by you, not by zzop:
@@ -60,6 +127,16 @@ a later run against it — the same shape a lint baseline file has, kept by you,
 zzop manifest ./api ./web > contracts.json   # identity only: provides/edges/bucket membership
 zzop diff contracts.json contracts.new.json  # read `transitions` first — a key that left `edges`
                                              # for `unprovidedConsumes` is a broken contract
+zzop facts ./api ./web > facts.json          # post-assembly facts (per-tree CommonIr + the whole join,
+                                             # uncapped) for your own rule program
+zzop graph ./api ./web > join.mmd            # the cross-layer join as mermaid, for any renderer —
+                                             # scoped with --scope/--top, every cap disclosed in the file
+zzop graph . --domain dep > imports.mmd      # the FILE import graph instead — cycles drawn as hexagons
+                                             # with thick arrows, from the engine's own circular findings
+zzop graph . --domain risk > risk.mmd        # blast-radius hubs + extraction seams. The 17 health
+                                             # SCORES are NOT drawn — a table of numbers is not a graph
+zzop graph . --domain posture               # the mutating attack surface and its guard status —
+                                             # a box means GUARDED-OR-EXEMPT, never proven guarded
 ```
 
 The manifest is deliberately uncapped and carries no file or line, so a pure refactor diffs empty while
@@ -67,30 +144,32 @@ a route leaving the join cannot hide above a summary's caps. `diff` refuses two 
 zzop builds unless you pass `--allow-tool-drift` (which then discloses the drift), and tags a removal
 attributable to a source that lost coverage as `blindnessSuspect` rather than calling it a deletion.
 
-See [crates/host/README.md](crates/host/README.md) for the full CLI and config reference.
+`facts` is the other uncapped lane, and the consumer half of the custom-rule extension point: when the
+DSL cannot express your rule, zzop emits everything it knows after assembly and the cross-layer join —
+each tree's whole `CommonIr` plus every join bucket, verbatim — and your own program decides what counts
+as a problem. zzop neither runs your program nor reads its findings back; see
+[docs/modules/facade.md](docs/modules/facade.md#custom-rules-consumer-side-zzop-facts) for the shape.
+`manifest`, `diff`, `facts`, `graph`, `explain` and `init` are CLI-only lanes with no MCP tool twin.
 
-To embed the engine instead of running the binary, depend on the `zzop-facade`/`zzop-summary` Rust
-crates and call the JSON-in/JSON-out contract directly — or shell out to `zzop-mcp`'s JSON subcommands,
-no linkage required:
+The rest of the surface: `analyze-envelope`, `validate-envelope`, `validate-rule-pack`, `endpoint`,
+`file` (everything zzop knows about ONE file — its tree, symbols, io facts, dependency edges both
+ways, and every finding anchored there; its verdict says whether the file was ANALYZED, so an empty
+findings list is never mistaken for "clean" on a file nothing structural ran on),
+`init` (write the annotated starter `zzop.config.jsonc`; the same document MCP serves as the
+`config-template` resource), `contract`, `explain`, `version`, `help`. See
+[packages/README.md](packages/README.md) for the full CLI and config reference.
+
+To embed the engine instead of running either binary, call the `zzop-facade`/`zzop-summary` crates'
+JSON-in/JSON-out contract directly — they are workspace-internal and not published to crates.io, so an
+in-process Rust dependency means vendoring this workspace, not `cargo add`. Shelling out to the CLI's
+JSON subcommands needs no linkage at all:
 
 ```rust
 let report: serde_json::Value =
     serde_json::from_str(&zzop_facade::analyze_json(r#"{"root":"."}"#)?)?;
 ```
 
-### Use in Claude Code (MCP plugin)
-
-`zzop-mcp` is a self-contained binary with an MCP server built in:
-
-1. `/plugin marketplace add eezz4/zzop` — then `/plugin install zzop@zzop` (two separate steps).
-2. Start a new session. The plugin downloads the binary for your platform on first run; nothing goes
-   on `PATH`. **That first session does not list the zzop tools yet** — the tool list is settled
-   before the download finishes — so restart Claude Code once and they appear (the hook says so on
-   stdout too). Once installed, a newer release is reported to you, never installed behind your back.
-
-See [crates/host/README.md](crates/host/README.md) for the full install/build reference.
-
-### Result (abridged)
+## Result (abridged)
 
 Every finding carries a rule id, severity, and a `file:line` location, e.g.:
 
@@ -102,7 +181,7 @@ Every finding carries a rule id, severity, and a `file:line` location, e.g.:
       "severity": "warning",
       "file": "src/routes/orders.ts",
       "line": 42,
-      "message": "await on a store/ORM call (`Repository`/`Store`/`prisma`/`db`/`orm`/`tx`/`trx`) verified structurally inside a for/for-of/for-in/while/do-while statement or an array-iteration callback — checked against the parser's projected loop spans, not merely co-occurring with loop syntax somewhere in the same function — N+1 query pattern. Batch the fetch (e.g. `findMany` with an `in` filter) instead of one call per item. Suppress a vetted case with `// nplus1-ok`."
+      "message": "await on a store/ORM call (`Repository`/`Store`/`prisma`/`db`/`orm`/`tx`/`trx`) verified structurally inside a for/for-of/for-in/while/do-while statement or an array-iteration callback — checked against the parser's projected loop spans, not merely co-occurring with loop syntax somewhere in the same function — N+1 query pattern. HOUSE-CONVENTION PATH SCOPE, disclosed because nothing else announces it: this rule's `file_pattern` is `^(?:domains/[^/]+/routes/.+|api/.+)\\.ts$`, so it only ever scans `.ts` files under a `domains/<name>/routes/` or `api/` prefix — an awaited store call inside a loop ANYWHERE else in the tree (services, repositories, jobs, a differently-laid-out repo) is silently not checked, and zero findings from this rule means \"not scanned there\", never \"no N+1 there\". Batch the fetch (e.g. `findMany` with an `in` filter) instead of one call per item. Suppress a vetted case with `// zzop-nplus1-ok`."
     }
   ],
   "scores":             { /* structural subscores, 0-100 */ },
@@ -115,13 +194,34 @@ Every finding carries a rule id, severity, and a `file:line` location, e.g.:
 `analyzeTrees` (multi-tree) additionally returns `crossLayerFindings` — frontend fetch <-> backend
 route joins — which has no single-tree equivalent.
 
+## How it works
+
+Each repository is parsed into one language-neutral IR, so a Python route and a TypeScript `fetch` end
+up as the same kind of fact. The headline move is the cross-repo join: frontend calls are exact-matched
+against backend routes across the repo boundary, and the leftovers are named rather than dropped — a
+typo'd path segment, a version drift, a method mismatch each come back as a near-miss finding instead of
+a diff you have to do by hand. Alongside the join, the same engine runs a layered rule system (native
+whole-graph analyses plus declarative JSON rule packs) over each repo individually, adding structural
+findings, dependency/dead-code analysis, and health scores to the same JSON document.
+
+Every run is deterministic — same code in, same findings out, byte-stable enough to diff two runs
+against each other. That is what makes zzop usable as a CI gate (fail a PR on contract drift by reading
+the JSON severity counts) and as a substrate an agent can re-run without chasing a moving answer. Just
+as important, a run reports its own blind spots: `warnings` and the per-tree `coverage` census say what
+did **not** run, so a short findings list can be told apart from a blind engine.
+
+Full design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Reading the output, severity semantics and
+suppression: [`docs/getting-started.md`](docs/getting-started.md). When your stack does not match the
+defaults — a house extension, your own guard names, a gateway prefix, a rule that does not exist yet —
+[`docs/extending.md`](docs/extending.md) lists every plug-in point in the order you hit them.
+
 ## Supported languages
 
 | Language | Support |
 |---|---|
 | TypeScript / JavaScript (`.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts`) | Native, full AST (swc): symbols, imports, calls, HTTP routes/egress, `db-table` consumes from ORM accessors AND from raw SQL statement strings |
-| Python (`.py, .pyi`) | Native, full AST (ruff, Python 3 — Python-2-only syntax falls back to lexical): symbols, imports, FastAPI route provides, `requests`/`httpx` consumes (module-level calls plus `Session`/`Client`/`AsyncClient` instances) — v1 scope |
-| Rust (`.rs`) | Native, full AST (syn 2): symbols, imports/`mod` tree (incl. same-workspace crate resolution), axum route provides, `reqwest` consumes — v1 scope |
+| Python (`.py, .pyi`) | Native, full AST (ruff, Python 3 — Python-2-only syntax falls back to lexical): symbols, imports, FastAPI route provides, Django URLconf route provides (`urlpatterns` `url()`/`re_path()`/`path()` entries with cross-file `include('<dotted.module>')` mounts, emitted verb-unknown since the method lives in the view class), `requests`/`httpx` consumes (module-level calls plus `Session`/`Client`/`AsyncClient` instances), SQLModel/SQLAlchemy + Django ORM `db-table` provides and their query-site consumes — v1 scope |
+| Rust (`.rs`) | Native, full AST (syn 2): symbols, imports/`mod` tree (incl. same-workspace crate resolution), axum route provides, `reqwest` consumes, call sites for the whole-repo call graph, extractor-based auth-guard evidence — v1 scope |
 | Go (`.go`) | Native, full CST (tree-sitter-go 0.25): symbols, imports/dep graph (`go.mod` module resolution, package-directory-wide edges), gin + `net/http` route provides (cross-file mount composition — a function-parameter router mounted from another file's call site — incl. Go 1.22 `"METHOD /path"` mux syntax), `net/http` literal egress consumes (package free functions plus bound `http.Client` values) — v1 scope |
 | Java (`.java`) | Native, full CST (tree-sitter-java 0.23.5, Java 21 grammar): symbols (incl. nested types, dot-qualified method names, real visibility), imports/dep graph (`(package, type)`-indexed resolution, glob package-directory-wide edges), Spring MVC route provides (cross-file `extends`-chain + constant-prefix resolution) — v1 scope |
 | C# (`.cs`) | Native, full CST (tree-sitter-c-sharp 0.23.5): symbols (incl. nested types, dot-qualified method names, `public` visibility), imports/dep graph (namespace→files index, `using` package-directory-wide edges), ASP.NET Core route provides (attribute controllers with `[Route("api/[controller]")]` + `[HttpGet]`/… composition, plus same-file Minimal-API `app.MapGet`/`MapGroup`), `HttpClient` literal egress consumes — v1 scope |
@@ -131,8 +231,9 @@ route joins — which has no single-tree equivalent.
 
 Full precision-tier breakdown — exactly what each native parser extracts, Python's v1 scope note, and
 each parser's fingerprint — in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#language-support). (Those
-fingerprints are not in `zzop version`'s output, which prints the bare release number; the surface that
-carries them is `zzop manifest`'s `tool` field.)
+fingerprints are not in `zzop version`'s default output, which prints the bare release number so scripts
+can parse one token; `zzop version --verbose` — and `zzop-mcp version --verbose`, the identical string —
+prints them, and `zzop manifest`'s `tool` field carries the same string inside the artifact.)
 
 A normal-sized file whose extension has no native parser also self-reports in the output's `warnings`
 — naming the extension, a file count, and a path sample — instead of vanishing silently; point it at an
@@ -158,13 +259,24 @@ Semantic Versioning and a maintained changelog begin at `1.0.0`. Full policy:
   per-commit sets)
 - `crates/cache` — per-file IR/findings cache (content hash + parser fingerprint + ruleset
   fingerprint)
-- `crates/facade` — pure-JSON `analyze`/`analyzeTrees`/`analyzeEnvelope`/`validateEnvelopeOnly`/`validateRulePackOnly`/`queryIo`/`version` contract
-  that `crates/host` calls directly — no Node, no native addon in between
+- `crates/facade` — the analysis-meaning contract layer. Its JSON-string-in/JSON-string-out entry points
+  are `analyze`/`analyzeTrees`/`analyzeEnvelope` (the analyses) plus `validateEnvelopeOnly`/
+  `validateRulePackOnly`/`queryIo` (read-only lookups over engine and rule data — the verdict
+  vocabulary, envelope and rule-pack validation). Two more reads answer with no JSON at all: `explain`
+  returns one bundled rule's compiled-in data as human-readable lines, and `version` returns the bare
+  release number. Called by `crates/summary`, no Node and no native addon in between
 - `crates/config` — shared Rust config front end (`zzop.config.jsonc` discovery → JSONC strip →
-  config→facade-request mapper → `trees: "auto"` workspace expansion), used by `crates/host`
-- `crates/host` (`zzop-host`) — lib-only shared dispatch + embedded contract docs consumed by the two
-  Node-free host products: `zzop` (CLI subcommands, package `packages/cli-bin`) and `zzop-mcp` (MCP
-  stdio server, package `packages/mcp`), both built on `zzop-config` + `zzop-summary`
+  config→facade-request mapper → `trees: "auto"` workspace expansion) plus request assembly (which
+  trees a call is about) and host-boundary path absolutization, used by `crates/summary`
+- `crates/summary` — the host-shared answer layer BOTH products call: reply shaping, caps, filters and
+  warning merging, the `facts`/`graph`/`manifest` projections, and the embedded authoring-contract
+  table. It is the only zzop crate either product package ships against: `packages/cli-bin` (→ `zzop`)
+  and `packages/mcp` (→ `zzop-mcp`) each declare exactly `zzop-summary` + `serde_json` as
+  `[dependencies]` and nothing below it (`zzop-config`/`zzop-core` appear only as `[dev-dependencies]`,
+  for test-only pins against those crates' own embeds) — which is what keeps a CLI query and an MCP tool
+  call on one code path
+- `packages/` — the two shipped binaries plus the npm shim and Desktop manifest
+  ([packages/README.md](packages/README.md))
 - `parser/` — parser frontends: source → Common IR, including HTTP route/consume extraction across
   languages and frameworks ([parser/README.md](parser/README.md))
 - `rules/native/` — whole-graph native rules (`rules-graph`, `rules-http`, `rules-cross-layer`, `rules-schema`) plus `rules/dsl/`
@@ -182,7 +294,7 @@ cargo clippy --workspace --all-targets   # kept at 0 warnings
 cargo fmt --all
 ```
 
-See [`crates/host/README.md`](crates/host/README.md) for building/running the `zzop`/`zzop-mcp` binaries
+See [`packages/README.md`](packages/README.md) for building/running the `zzop`/`zzop-mcp` binaries
 (`cargo build -p zzop-cli-bin -p zzop-mcp --release`).
 
 Cold/warm benchmark over a real tree:
@@ -196,7 +308,7 @@ finding counts across 1+ tree roots; set `ZZOP_DUMP_MESSAGES=<n>` to print sampl
 `dep_graph_export` (exports the file-level dependency graph as Graphviz DOT or Mermaid), and
 `fastapi_overlay_adapter` (reference external adapter — a lexical FastAPI/Python router scanner feeding
 `EngineConfig::adapter_overlays`, Mode B; now the reference for what native Python v1 deliberately skips
-— non-literal prefixes, Flask/Django, custom conventions — since native FastAPI extraction covers the
+— non-literal prefixes, Flask, custom conventions — since native FastAPI and Django URLconf extraction cover the
 common literal shapes directly; also reachable via the `adapterOverlays` config field; see
 [`docs/NORMALIZED_AST.md`](docs/NORMALIZED_AST.md)'s "Adapter overlays" section).
 

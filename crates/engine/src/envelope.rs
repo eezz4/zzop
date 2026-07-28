@@ -13,7 +13,7 @@
 //!   instead of "did not run". `SymbolScan`/`IoScan` only read `symbols`/`io`, which a `FileProjection`
 //!   does supply, so `envelope_rule_pack` filters every pack down to just those two matcher kinds.
 //!   Per-file lexical rules belong on the external parser's own side of the boundary.
-//! - **No filesystem root -> no `dead-exports`/call-graph-BFS rules, no git-history analyses.** Those
+//! - **No filesystem root -> no `unimported-export`/call-graph-BFS rules, no git-history analyses.** Those
 //!   need a second disk read or a repository root, which an envelope has neither of; the affected
 //!   `AnalyzeOutput` fields stay at their "git inactive" empty value, and a configured `git` option
 //!   produces one `warnings` entry rather than a panic.
@@ -54,4 +54,4 @@ mod resolve;
 mod tests;
 
 pub use ingest::analyze_envelope;
-pub(crate) use overlay::apply_adapter_overlays;
+pub(crate) use overlay::{apply_adapter_overlays, OverlayApplication};

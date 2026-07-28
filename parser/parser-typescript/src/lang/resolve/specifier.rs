@@ -33,7 +33,7 @@ pub fn resolve_file(
     if let Some(rest) = specifier.strip_prefix("@/") {
         // Root-relative first (tsconfig maps `@/*` to the analysis root), then `src/`-relative — the
         // dominant convention is `"@/*": ["./src/*"]`, so without this fallback every `@/` import
-        // breaks and dead-exports/unreachable analysis misreports the whole `src/` tree as orphaned.
+        // breaks and unimported-export/unreachable analysis misreports the whole `src/` tree as orphaned.
         // tsconfig `paths` isn't read here (yet); this covers the two conventional mappings, root first.
         return try_ext(rest, all_paths).or_else(|| try_ext(&format!("src/{rest}"), all_paths));
     }
@@ -41,7 +41,7 @@ pub fn resolve_file(
     // relies on. It is normally wired through the generated `.svelte-kit/tsconfig.json`, which is absent
     // from a fresh checkout (created by `svelte-kit sync` at build time), so resolve it directly here.
     // Without this, `$lib/*` imports from `.svelte` components and `+page.server.js` routes all fail to
-    // resolve and dead-exports/dead-candidates misreport the whole `src/lib` tree as orphaned.
+    // resolve and unimported-export/dead-candidates misreport the whole `src/lib` tree as orphaned.
     if specifier == "$lib" {
         return try_ext("src/lib", all_paths);
     }

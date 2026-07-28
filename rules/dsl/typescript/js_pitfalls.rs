@@ -64,7 +64,7 @@ fn tofixed_arith_ok_marker_suppresses_the_finding() {
     let f = rule_findings(
         &[(
             "v.js",
-            "export function delta(total) {\n  return total.toFixed(2) - 1; // tofixed-arithmetic-ok: re-quantized intentionally\n}\n",
+            "export function delta(total) {\n  return total.toFixed(2) - 1; // zzop-tofixed-arithmetic-ok: re-quantized intentionally\n}\n",
         )],
         "tofixed-arithmetic",
     );
@@ -246,7 +246,7 @@ fn date_pitfall_ok_marker_suppresses_the_finding() {
     let f = rule_findings(
         &[(
             "v.ts",
-            "// date-pitfalls-ok: server is UTC-only, epoch is confirmed seconds\nexport const d = new Date(1700000000);\n",
+            "// zzop-date-pitfalls-ok: server is UTC-only, epoch is confirmed seconds\nexport const d = new Date(1700000000);\n",
         )],
         "date-pitfalls",
     );
@@ -270,7 +270,7 @@ fn foreach_async_callback_is_flagged() {
 
 #[test]
 fn map_async_callback_does_not_fire_the_foreach_rule() {
-    // Sibling boundary: `.map(async ...)` is a different defect owned by reliability/await-in-map.
+    // Sibling boundary: `.map(async ...)` is a different defect owned by reliability/map-async-no-promise-all.
     let f = rule_findings(
         &[(
             "v.js",
@@ -286,7 +286,7 @@ fn foreach_async_ok_marker_suppresses_the_finding() {
     let f = rule_findings(
         &[(
             "v.js",
-            "export async function run(items) {\n  items.forEach(async (item) => { // foreach-async-callback-ok: fire-and-forget by design\n    await save(item);\n  });\n}\n",
+            "export async function run(items) {\n  items.forEach(async (item) => { // zzop-foreach-async-callback-ok: fire-and-forget by design\n    await save(item);\n  });\n}\n",
         )],
         "foreach-async-callback",
     );
@@ -325,7 +325,7 @@ fn promise_async_exec_ok_marker_suppresses_the_finding() {
     let f = rule_findings(
         &[(
             "v.js",
-            "export function wrap() {\n  // promise-async-executor-ok: rejections are handled by the caller's catch\n  return new Promise(async (resolve) => { resolve(await load()); });\n}\n",
+            "export function wrap() {\n  // zzop-promise-async-executor-ok: rejections are handled by the caller's catch\n  return new Promise(async (resolve) => { resolve(await load()); });\n}\n",
         )],
         "promise-async-executor",
     );
@@ -391,7 +391,7 @@ fn parseint_radix_ok_marker_suppresses_the_finding() {
     let f = rule_findings(
         &[(
             "v.ts",
-            "export function toNum(s: string) {\n  return parseInt(s); // parseint-no-radix-ok: always base-10 caller-controlled input\n}\n",
+            "export function toNum(s: string) {\n  return parseInt(s); // zzop-parseint-no-radix-ok: always base-10 caller-controlled input\n}\n",
         )],
         "parseint-no-radix",
     );

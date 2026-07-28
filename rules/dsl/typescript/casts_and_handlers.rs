@@ -1,8 +1,8 @@
-//! `unhandled-promise-use-effect` + `async-handler-no-try` + `as-cast` + comment-skip/test-path exclusion tests (split from `typescript.rs`).
+//! `use-effect-async-callback` + `async-handler-no-try` + `as-cast` + comment-skip/test-path exclusion tests (split from `typescript.rs`).
 
 use super::*;
 
-// --- unhandled-promise-use-effect ---
+// --- use-effect-async-callback ---
 
 #[test]
 fn use_effect_async_callback_is_flagged() {
@@ -12,7 +12,7 @@ fn use_effect_async_callback_is_flagged() {
     )]);
     let hits: Vec<_> = f
         .iter()
-        .filter(|x| x.rule_id == "typescript/unhandled-promise-use-effect")
+        .filter(|x| x.rule_id == "typescript/use-effect-async-callback")
         .collect();
     assert_eq!(hits.len(), 1, "{f:?}");
     assert_eq!(hits[0].file, "Foo.tsx");
@@ -27,7 +27,7 @@ fn synchronous_use_effect_with_inner_async_iife_is_not_flagged() {
     )]);
     assert!(
         f.iter()
-            .all(|x| x.rule_id != "typescript/unhandled-promise-use-effect"),
+            .all(|x| x.rule_id != "typescript/use-effect-async-callback"),
         "{f:?}"
     );
 }
@@ -36,11 +36,11 @@ fn synchronous_use_effect_with_inner_async_iife_is_not_flagged() {
 fn unhandled_promise_ok_marker_directly_above_use_effect_suppresses_the_finding() {
     let f = analyze(&[(
         "Marked.tsx",
-        "import { useEffect } from \"react\";\nexport function M() {\n  // unhandled-promise-use-effect-ok: one-time bootstrap\n  useEffect(async () => { await x(); }, []);\n}\n",
+        "import { useEffect } from \"react\";\nexport function M() {\n  // zzop-use-effect-async-callback-ok: one-time bootstrap\n  useEffect(async () => { await x(); }, []);\n}\n",
     )]);
     assert!(
         f.iter()
-            .all(|x| x.rule_id != "typescript/unhandled-promise-use-effect"),
+            .all(|x| x.rule_id != "typescript/use-effect-async-callback"),
         "{f:?}"
     );
 }
@@ -86,7 +86,7 @@ fn async_handler_without_await_is_not_detected() {
 fn async_handler_ok_marker_directly_above_suppresses_the_finding() {
     let f = async_handler_findings(&[(
         "Marked.tsx",
-        "export function Btn() {\n  // async-handler-no-try-ok: save() never rejects, error boundary catches the rest\n  return <button onClick={async () => { await save(); }}>x</button>;\n}\n",
+        "export function Btn() {\n  // zzop-async-handler-no-try-ok: save() never rejects, error boundary catches the rest\n  return <button onClick={async () => { await save(); }}>x</button>;\n}\n",
     )]);
     assert!(f.is_empty(), "{f:?}");
 }
@@ -126,7 +126,7 @@ fn as_ok_marker_on_a_line_suppresses_that_as_from_the_count() {
     // that window, so it still counts.
     let f = as_cast_findings(&[(
         "marked.ts",
-        "const safe = raw as any; // as-cast-ok: guaranteed by external API\nconst mid = 1;\nconst unsafe = raw2 as any;\n",
+        "const safe = raw as any; // zzop-as-cast-ok: guaranteed by external API\nconst mid = 1;\nconst unsafe = raw2 as any;\n",
     )]);
     assert_eq!(lines_of(&f), vec![3], "{f:?}");
 }

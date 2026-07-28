@@ -27,7 +27,7 @@ pub struct AnalyzeOutput {
     /// git-gated).
     pub coverage: CoverageCensus,
     /// Per non-relative import specifier: how many files import it + the first importing file. Plumbing
-    /// for `cross-layer/sdk-import-no-visible-consume` (the tree IR drops package imports during dep
+    /// for `cross-layer/untraced-client-import-no-visible-consume` (the tree IR drops package imports during dep
     /// resolution) — not part of the serialized output surface.
     pub package_imports: Vec<PackageImportSummary>,
     /// This tree's assembled entity-attribute store (native producer judgments + Mode B overlay

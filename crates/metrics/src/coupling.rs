@@ -75,6 +75,8 @@ mod tests {
             files: files.iter().map(|s| s.to_string()).collect(),
             tags: vec![],
             date: None,
+            subject: None,
+            labels: vec![],
         }
     }
 

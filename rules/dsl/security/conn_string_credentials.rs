@@ -236,7 +236,7 @@ fn conn_cred_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/db.ts",
-        "// conn-string-credentials-ok: local docker-compose sample connection string, not a real credential\nexport const url = \"postgres://user:hunter2@host:5432/db\";\n",
+        "// zzop-conn-string-credentials-ok: local docker-compose sample connection string, not a real credential\nexport const url = \"postgres://user:hunter2@host:5432/db\";\n",
     );
     let out = scan(&dir);
     assert!(

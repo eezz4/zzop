@@ -1,9 +1,22 @@
 name: ci
 
+# `workflow_call` exists so the RELEASE lane can require this workflow instead of restating it.
+#
+# Until 2026-07-28 a `v*` tag push ran `prebuild.yml` alone, and prebuild's `release`/`publish` jobs
+# wait only on `[build, verify-plugin-version, meta]` — where `build` is `cargo build` with no test
+# step. So the one act that puts bytes in front of users was the one act that ran no test, no guard and
+# no detection benchmark on the ref being shipped. Every other lane in this repo is gated; the
+# shipping lane was not, and it bypassed all of them at once.
+#
+# Called rather than copied ON PURPOSE. Restating the guard list inside prebuild would create a second
+# enumeration of what "checked" means, and a second enumeration is exactly the defect class this repo
+# spent 2026-07-28 removing from sixteen guards — a list nobody remembers to extend stops checking the
+# thing it was written for, silently and green.
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 jobs:
   # One job runs every mechanical guard as a named step, instead of one fresh ubuntu runner per
@@ -13,10 +26,11 @@ jobs:
   # scripts sum to far less than the `test` job's compile, which stays the critical path; we trade
   # unused per-guard parallelism for ~14 fewer runner spin-ups and one checkout instead of fifteen.
   #
-  # Step order MIRRORS `.githooks/pre-commit`'s GUARDS array so CI and the local hook agree. The parser
-  # fingerprint-bump guard is the one CI-only addition (the hook omits it — it diffs against a base
-  # commit): it runs last and is the sole reason this job needs `fetch-depth: 0` (a strict superset of
-  # the shallow checkout the other guards need, which is why the two former drift-guards fold in here).
+  # Step order MIRRORS `.githooks/pre-commit`'s GUARDS array so CI and the local hook agree — the two
+  # lists are now element-for-element identical, parser fingerprint-bump guard included. What differs is
+  # only what that last guard READS: the hook judges the working tree, pre-push and this job judge a
+  # base..head RANGE. The range form is the sole reason this job needs `fetch-depth: 0` (a strict superset
+  # of the shallow checkout the other guards need, which is why the two former drift-guards fold in here).
   #
   # NOTE for maintainers: consolidating renames the required status checks. Any branch-protection rule
   # on `main` listing the old per-guard job names must be updated to `{ guards, test, cli-shim-test }`
@@ -43,6 +57,8 @@ jobs:
         run: bash scripts/check-guards-wired.sh
       - name: rules catalog ↔ site sync guard
         run: bash scripts/check-rules-catalog-sync.sh
+      - name: rule description ↔ matcher token guard
+        run: bash scripts/check-rule-desc-tokens.sh
       - name: docs rule-id ↔ catalog sync guard
         run: bash scripts/check-docs-rule-ids.sh
       - name: docs link-graph guard
@@ -51,6 +67,16 @@ jobs:
         run: bash scripts/check-io-key-vocab.sh
       - name: policy-value census guard
         run: bash scripts/check-policy-census.sh
+      - name: convention-vocabulary declarability ratchet
+        # Reads the census's `convention` axis: a name the PROJECT picks must be declarable in config,
+        # not held as a built-in guess. scripts/convention-vocab-baseline.txt freezes pre-existing debt
+        # and only shrinks — it is not an exemption list.
+        run: bash scripts/check-convention-vocab-declarable.sh
+      - name: example-config convention-vocabulary sync
+        # Every committed examples/ config must declare the SAME vocabulary block the starter template
+        # does. Since an undeclared key is a judgment not made, a fixture that omits it would have the
+        # detection benchmark score a deliberately blinded engine.
+        run: bash scripts/check-example-config-vocabulary.sh
       - name: shell pipe-to-grep-q SIGPIPE seal
         run: bash scripts/check-shell-pipe-sigpipe.sh
       - name: version-string parser-completeness guard
@@ -61,12 +87,36 @@ jobs:
         run: bash scripts/check-deploy-facts-prose.sh
       - name: overclaim prose guard
         run: bash scripts/check-overclaim-prose.sh
+      - name: vendor-token literal guard
+        # Scans the INDEX as well as the working tree (see its header): on a fresh checkout the two are
+        # identical, so here it is reading exactly the blobs this ref would push — which is the surface
+        # GitHub push protection reads and the reason this guard exists.
+        run: bash scripts/check-vendor-token-literals.sh
+      - name: server.json integrity-hash guard
+        # Committed-file mode: server.json must claim NO fileSha256 (the assets it names do not exist
+        # until the release builds them), and its packages[] must still line up with the positional
+        # stamping loop in prebuild.yml. That job runs the same script's --stamped mode as a publish
+        # blocker after stamping.
+        run: bash scripts/check-server-json-hashes.sh
       - name: parser fingerprint bump guard
-        # CI-only (the pre-commit hook omits it): diffs against the PR base / previous commit, which
-        # the `fetch-depth: 0` checkout above is what makes available.
+        # Also runs from `.githooks/pre-commit` (working tree) and `.githooks/pre-push` (outgoing range).
+        # Here it diffs against the PR base / previous commit, which the `fetch-depth: 0` checkout above
+        # is what makes available.
         env:
           FINGERPRINT_DIFF_RANGE: ${{ github.event_name == 'pull_request' && format('origin/{0}...HEAD', github.base_ref) || 'HEAD~1...HEAD' }}
         run: bash scripts/check-parser-fingerprint-bump.sh
+      - name: adapter-kit parity tests
+        # `examples/adapters/adapter-kit` re-implements `zzop_core::io::key`'s normalization in JS, and
+        # that module's header requires the two to stay byte-identical ("their logic must not change here
+        # without changing every mirror"). Until 2026-07-28 nothing ran these — a Rust-side change could
+        # make every copied adapter emit mis-keyed envelopes, which join wrongly and silently.
+        #
+        # Wiring them found the mirror intact and the TEST broken: keys.test.js resolved the shared
+        # fixture one directory short of the repo root, so the whole file aborted on ENOENT and 40 of its
+        # assertions had never executed. A parity suite nobody runs does not decay loudly.
+        #
+        # No Rust build needed, so it rides the guards job rather than paying for a toolchain.
+        run: node --test examples/adapters/adapter-kit/test/*.test.js
 
   test:
     runs-on: ubuntu-latest
@@ -99,3 +149,24 @@ jobs:
         # Glob form (not a bare directory) — `node --test test/` fails on Node v22+ (verified: the
         # bare-directory form throws MODULE_NOT_FOUND on this runner's Node version).
         run: node --test packages/cli/test/*.test.js
+
+  detection-benchmark:
+    # Scores the labeled detection benchmark (cases + its adjudicated EXPECTED.jsonc) and fails
+    # on any FN or FP. Committed 2026-07-26 so CI *could* see these cases; nothing scored them until
+    # 2026-07-28, which meant a 298-line ground truth was documentation rather than a gate.
+    #
+    # Its own job rather than a step in `test`: it needs a --release build (a debug binary makes the
+    # two-axis run over 15 trees several times slower for no extra signal) and Node, and keeping it
+    # separate means a red score reads as "detection regressed", not as "the test job failed".
+    #
+    # Deliberately NOT a scripts/check-*.sh — check-guards-wired.sh would then require it in
+    # .githooks/pre-commit too, and a release build per commit is not a hook's budget.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build native zzop-mcp binary
+        run: cargo build -p zzop-mcp --release
+      - name: Detection benchmark
+        run: bash scripts/measure/detection-gate.sh target/release/zzop-mcp

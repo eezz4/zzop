@@ -138,7 +138,7 @@ fn sql_delete_no_where_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "db.ts",
-        "export async function purge(db: any) {\n  // delete-no-where-ok: admin-only reset endpoint, reviewed\n  return db.query(\"DELETE FROM users\");\n}\n",
+        "export async function purge(db: any) {\n  // zzop-delete-no-where-ok: admin-only reset endpoint, reviewed\n  return db.query(\"DELETE FROM users\");\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -260,7 +260,7 @@ fn sql_update_no_where_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "db.ts",
-        "export async function activateAll(db: any) {\n  // update-no-where-ok: admin-only bulk reactivation, reviewed\n  return db.query(\"UPDATE users SET active = 1\");\n}\n",
+        "export async function activateAll(db: any) {\n  // zzop-update-no-where-ok: admin-only bulk reactivation, reviewed\n  return db.query(\"UPDATE users SET active = 1\");\n}\n",
     );
     let out = scan(&dir);
     assert!(

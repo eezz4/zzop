@@ -5,8 +5,11 @@
 //!
 //! ## Layout
 //! - `lang` — syn AST -> Common-IR LANGUAGE projection: `SourceSymbol` extraction (`symbols`),
-//!   `ImportMap` extraction (`imports`), identifier-reference collection (`used_names`), and the pure
-//!   import-specifier -> candidate-file-path resolver (`resolve`).
+//!   `ImportMap` extraction (`imports`), identifier-reference collection (`used_names`), the pure
+//!   import-specifier -> candidate-file-path resolver (`resolve`), call-site extraction (`calls`), and
+//!   handler-signature extractor evidence (`extractor_guards`). The last two are the pair that lifts
+//!   `.rs` into the shared call graph — see `extractor_guards`' own doc for why a Rust guard is a TYPE
+//!   and not a call, and why shipping one without the other would have been dishonest.
 //! - `adapters` — framework-vocabulary producers emitting cross-layer IO facts: axum router PROVIDES as
 //!   router-mount fragments (`adapters::axum`) and `reqwest` literal egress CONSUMES
 //!   (`adapters::http_clients`).
@@ -33,6 +36,10 @@ pub mod lang;
 
 pub use adapters::axum::extract_axum_router_fragments;
 pub use adapters::http_clients::extract_rust_http_consumes;
+pub use lang::calls::parse_calls;
+pub use lang::extractor_guards::{
+    parse_extractor_guards, RustGuardVocab, RUST_OPTIONAL_EXTRACTOR_PREFIXES,
+};
 pub use lang::imports::parse_imports;
 pub use lang::resolve::rust_import_candidates;
 pub use lang::symbols::parse_symbols;
@@ -44,6 +51,10 @@ pub use lang::used_names::parse_local_identifier_refs;
 ///   `impl` block methods/assoc consts emitted dotted as `Type.member`), imports (`use` trees including
 ///   groups/globs/renames/`pub use`, plus `mod x;` declarations), `used_names`, axum router-mount
 ///   fragments, and `reqwest` literal HTTP egress consumes.
+///
+/// `parse_calls`/`parse_extractor_guards` deliberately do NOT bump this: neither fact enters the cached
+/// per-file `FileArtifact` projection this fingerprint keys (the engine's call-graph pass re-parses off
+/// disk, uncached, by design — `run_callgraph_rules`' own doc), so a cached tree cannot go stale on them.
 pub const PARSER_FINGERPRINT: &str = "rust/syn-2/0.21.0";
 
 /// Parses `text` with `syn`, returning `None` on any syntax error (never panics — unexpected/malformed

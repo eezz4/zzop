@@ -66,6 +66,16 @@ pub(crate) const MIN_PROVIDES_FLOOR: usize = 3;
 /// so S1 now shares it rather than gating on exactly zero. Cheap on the success path: skips the disk
 /// re-read entirely once `http_provides_count >= MIN_PROVIDES_FLOOR`.
 ///
+/// **The other path is not the rare one, and that is accounted for, not assumed away.** Every
+/// frontend-only or library tree sits below the floor by construction (it has no routes at all), so the
+/// candidate scan below re-reads every dispatched TS/Java file from disk on a very ordinary run.
+/// Measured 2026-07-26 (debug build, warm page cache): ~69 µs per file — 206 ms over 3000 files
+/// below the floor, versus ~700 ns for the whole call above it. Against a full `analyze_tree` of a
+/// 1500-file TS tree (3.23 s) that is roughly 3%. Kept as-is deliberately: removing it means retaining
+/// every file's text through assembly to hand it back here, i.e. buying a new pipeline-wide memory and
+/// plumbing surface to save single-digit percent on one phase. Re-open only if a measurement puts the
+/// SUM of the disk-reading tripwires (S1/S3/S5/S7) somewhere that actually matters.
+///
 /// Only line-LEADING decorators count ([`decorator_leads_line`]): a match inside a comment or a string
 /// literal is discounted, so a tree that merely DOCUMENTS or fixtures these decorators (a SAST tool's
 /// own source is the sharp case) no longer inflates the file count into a false silence report.

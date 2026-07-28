@@ -5,26 +5,27 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
-# The `zzop` CLI product: argv dispatch (`analyze`/`cross`/`endpoint`/`contract`/`validate-*`/`version`)
-# over the shared `zzop-host` lib (crates/host) — the same handlers the `zzop-mcp` product (packages/mcp)
-# dispatches to, so a CLI run and an MCP tool call against the same path produce the same analysis
-# through the same code. This crate carries NO shaping/filter/summary logic of its own (that lives in
-# `zzop-summary`, pulled in transitively via `zzop-host`) — just this binary's own argv-parsing/usage/
-# exit-code contract (`cli.rs`).
+# The `zzop` CLI product: argv dispatch (`analyze`/`cross`/`endpoint`/`contract`/`explain`/`validate-*`/
+# `version`) straight onto the shared `zzop-summary` crate (crates/summary) — the same functions the
+# `zzop-mcp` product (packages/mcp) calls from its `tools/call` dispatch, so a CLI run and an MCP tool
+# call against the same path produce the same analysis through the same code. There is no intermediate
+# per-product dispatch layer: a pass-through only the CLI ever traversed was deleted in the 2026-07-26
+# `crates/host` teardown, since a wrapper with one caller is a place for drift rather than a guard
+# against it. This crate carries NO shaping/filter/summary logic of its own — just this binary's own
+# argv-parsing/usage/exit-code contract (the `cli/` module).
 [[bin]]
 name = "zzop"
 path = "src/main.rs"
 
 [dependencies]
-zzop-host = { path = "../../crates/host" }
+zzop-summary = { path = "../../crates/summary" }
 serde_json = { workspace = true }
 
 [dev-dependencies]
 # Integration tests spawn the built `zzop` binary and additionally check the embedded config-surface
-# contract bytes (`contract config-surface`) against zzop-config's own embed — same fixture crate
-# crates/host's tests used before this binary moved out on its own.
+# contract bytes (`contract config-surface`) against zzop-config's own embed.
 zzop-config = { path = "../../crates/config" }
-# `explain`'s meta-test loads every bundled DSL pack the exact same way `zzop_host::explain` does
+# `explain`'s meta-test loads every bundled DSL pack the exact same way `zzop_summary::explain` does
 # (`zzop_core::parse_dsl_pack` over `zzop_config::BUNDLED_PACK_SOURCES`), to assert every shipped rule
 # id is explainable through the real spawned binary — never a hand-copied id list that could drift.
 zzop-core = { path = "../../crates/core" }

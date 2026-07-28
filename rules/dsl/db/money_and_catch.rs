@@ -1,4 +1,4 @@
-//! `float-money-compare` + `empty-catch-on-write` tests (split from `db.rs`).
+//! `float-money-compare` + `empty-catch-and-write` tests (split from `db.rs`).
 
 use super::*;
 
@@ -67,7 +67,7 @@ fn money_ok_marker_directly_above_the_comparison_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "export function isBasicPlanMarked(price: number) {\n  // float-money-compare-ok: price is stored as integer cents already scaled, exact by construction\n  return price === 19.99;\n}\n",
+        "export function isBasicPlanMarked(price: number) {\n  // zzop-float-money-compare-ok: price is stored as integer cents already scaled, exact by construction\n  return price === 19.99;\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -77,7 +77,7 @@ fn money_ok_marker_directly_above_the_comparison_line_suppresses_the_finding() {
     );
 }
 
-// --- empty-catch-on-write ---
+// --- empty-catch-and-write ---
 
 #[test]
 fn empty_catch_around_a_write_call_is_flagged() {
@@ -87,7 +87,7 @@ fn empty_catch_around_a_write_call_is_flagged() {
         "declare const prisma: any;\nexport async function archiveQuietly(id: string) {\n  try {\n    await prisma.order.update({ where: { id }, data: { archived: true } });\n  } catch (e) {}\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "empty-catch-on-write");
+    let h = hits(&out, "empty-catch-and-write");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 5);
 }
@@ -101,7 +101,7 @@ fn catch_that_logs_the_error_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "empty-catch-on-write").is_empty(),
+        hits(&out, "empty-catch-and-write").is_empty(),
         "{:?}",
         out.findings
     );
@@ -112,11 +112,11 @@ fn empty_catch_ok_marker_directly_above_the_catch_line_suppresses_the_finding() 
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const prisma: any;\nexport async function archiveQuietlyMarked(id: string) {\n  try {\n    await prisma.order.update({ where: { id }, data: { archived: true } });\n  // empty-catch-on-write-ok: best-effort archive, failure intentionally ignored\n  } catch (e) {}\n}\n",
+        "declare const prisma: any;\nexport async function archiveQuietlyMarked(id: string) {\n  try {\n    await prisma.order.update({ where: { id }, data: { archived: true } });\n  // zzop-empty-catch-and-write-ok: best-effort archive, failure intentionally ignored\n  } catch (e) {}\n}\n",
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "empty-catch-on-write").is_empty(),
+        hits(&out, "empty-catch-and-write").is_empty(),
         "{:?}",
         out.findings
     );
@@ -138,7 +138,7 @@ fn minified_bundle_with_a_giant_single_line_is_not_flagged() {
     dir.write("src/seed-project/bundle/index.mjs", &content);
     let out = scan(&dir);
     assert!(
-        hits(&out, "empty-catch-on-write").is_empty(),
+        hits(&out, "empty-catch-and-write").is_empty(),
         "{:?}",
         out.findings
     );

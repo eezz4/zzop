@@ -16,7 +16,7 @@
 //! HttpClient-typed (constructor param property or class property) or `inject(HttpClient)`-initialized
 //! in a file that itself imports `@angular/common/http` (see `angular-httpclient-v1` below).
 //! Generated-SDK clients (e.g. oazapfts) are NOT recognized here — that vocabulary lives in an
-//! injection adapter (`examples/oazapfts-adapter`), not the engine (decision: generated SDKs are
+//! injection adapter (a Mode B overlay under `examples/adapters`), not the engine (decision: generated SDKs are
 //! injection adapters, not engine vocab).
 //!
 //! `cond-literal-fanout-v1`: a ternary with two string-literal arms — as the whole URL argument, as a
@@ -66,11 +66,21 @@
 //! is not a gate here: a function-local `const url = …` qualifies like a top-level one, because "bound
 //! exactly once in the file" is what carries the scope argument. Interprocedural resolution (a wrapper
 //! parameter, a component prop) remains out of scope — that is value resolution, not constant reading.
+//!
+//! `same-file-fn-url-v1`: the same file, the same two positions, for a ZERO-ARGUMENT helper CALL —
+//! `fetch(chargesUrl())` at the whole argument, `` `${base()}/charges` `` / `base() + '/charges'` at the
+//! head. The helper must be declared in this file, clear the same three [`binding_census`] gates, take
+//! **no parameters**, be neither `async` nor a generator, and have a body that is exactly one
+//! `return <expr>` whose expression resolves on its own. Those are the whole gate: nothing is inferred
+//! about what a helper computes, only read from the one expression it returns. This closes the
+//! under-count `cross-layer/external-host-fanout` discloses (a host literal returned from a helper left
+//! its calling files uncounted); a helper that takes an argument, lives in another file, branches, or is
+//! `async` still resolves to nothing, so that rule's "at least N" wording stays true.
 
 mod angular;
 mod binding_census;
 mod body_shape;
-mod collector;
+pub mod collector;
 mod concat;
 mod consts;
 mod correlation;
@@ -80,7 +90,7 @@ mod local_consts;
 mod matchers;
 mod object_shape;
 mod react_query;
-mod retry;
+pub mod retry;
 mod url_resolve;
 #[cfg(test)]
 mod url_resolve_tests;

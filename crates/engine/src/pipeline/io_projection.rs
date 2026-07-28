@@ -26,11 +26,12 @@ pub(super) fn project_file_io(
     text: &str,
     degraded: bool,
     config: &EngineConfig,
+    vocab: &crate::vocabulary::ResolvedVocabulary<'_>,
     prisma_io: Option<IoFacts>,
 ) -> Option<IoFacts> {
     match language {
         Some(Language::TypeScript) if !degraded => {
-            crate::io::extract_file_io(rel, text, &config.io)
+            crate::io::extract_file_io(rel, text, &config.io, vocab)
         }
         Some(Language::Java21) => crate::io::extract_java_file_io(rel, text),
         Some(Language::Python) if !degraded => {

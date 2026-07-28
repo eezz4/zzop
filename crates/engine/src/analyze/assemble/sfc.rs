@@ -3,7 +3,7 @@
 //! `dep_graph::merge_sfc_fan_in` (bumps a `.ts` target's fan-in for `dead-candidates`, source-only — see
 //! that function's doc for why the `.vue`/`.svelte` file itself never becomes a dep-graph node) and
 //! `crate::dead_exports::dead_export_findings`'s `sfc_import_pairs` parameter (marks the target's exports
-//! as imported for `dead-exports`).
+//! as imported for `unimported-export`).
 //!
 //! Runs off disk at ASSEMBLE time, exactly like `dead_exports.rs`'s own re-read/re-parse step — this
 //! never extends the cached fused-pipeline `FileArtifact`/`FileIrSlice` projection for the `.vue`/

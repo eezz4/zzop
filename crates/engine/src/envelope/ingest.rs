@@ -169,9 +169,8 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     ));
     // One census, two consumers (see `compute_dsl_scope`): the warning below and `packs_loaded`'s counts.
     let dsl_scope = crate::analyze::compute_dsl_scope(&config.packs, &rels);
-    if let Some(w) = crate::analyze::no_applicable_dsl_rule_warning(&config.packs, &dsl_scope) {
-        warnings.push(w);
-    }
+    // Both of that census's reports are config-derived, so Mode A gets the identical pair Mode B does.
+    warnings.extend(crate::analyze::pack_scope_warnings(config, &dsl_scope));
     // Same disclosure Mode B's native twin makes (`analyze::assemble`) — an uncompilable rule is dead in
     // envelope mode too, and a caller who injected the pack inline never ran `validate-rule-pack` on it.
     warnings.extend(crate::analyze::uncompilable_rule_warnings(&config.packs));
@@ -191,7 +190,7 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         // envelope's own `is_entry`-marked projections ARE the entry set — the Mode A counterpart of the
         // Mode B overlay union in `analyze::assemble` (same contract marker, same exemption). Before
         // this, Mode A silently dropped `is_entry` and every convention-loaded entry file (a crate's
-        // `lib.rs`, a test harness file) read as dead — caught by the rust-parser-adapter example's
+        // `lib.rs`, a test harness file) read as dead — caught by a Mode A envelope example's
         // self-analysis.
         let extra_entries: HashSet<String> = envelope
             .files

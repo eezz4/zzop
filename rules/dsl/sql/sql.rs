@@ -31,6 +31,7 @@ mod destructive_migration;
 mod no_where;
 mod nplus1;
 mod query_logic_density;
+mod raw_sql_check_then_write;
 mod select_like;
 mod suppression;
 mod toctou;

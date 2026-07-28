@@ -54,7 +54,7 @@ fn cookie_ok_marker_above_the_cookie_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/auth.ts",
-        "declare const res: any;\ndeclare const token: string;\nexport function login() {\n  // insecure-cookie-ok: non-sensitive UI preference cookie, not session/auth\n  res.cookie(\"theme\", token);\n}\n",
+        "declare const res: any;\ndeclare const token: string;\nexport function login() {\n  // zzop-insecure-cookie-ok: non-sensitive UI preference cookie, not session/auth\n  res.cookie(\"theme\", token);\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -110,7 +110,7 @@ fn url_key_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/client.ts",
-        "// api-key-in-url-ok: short-lived one-time token for a third-party webhook callback\nexport const url = \"https://api.example.com/data?api_key=abc123\";\n",
+        "// zzop-api-key-in-url-ok: short-lived one-time token for a third-party webhook callback\nexport const url = \"https://api.example.com/data?api_key=abc123\";\n",
     );
     let out = scan(&dir);
     assert!(

@@ -68,9 +68,17 @@ impl Drop for TempDir {
     }
 }
 
+/// The fixture's engine config, declaring zzop's own convention vocabulary.
+///
+/// Declared explicitly since 2026-07-27: `VocabularyConfig::default()` is the empty declaration, which
+/// the engine now reads as "make none of these judgments" rather than "use the built-ins". Two of the
+/// warnings under test (S6's Prisma db-table facts, S7's fetch-wrapper export names) are keyed off that
+/// vocabulary, so a fixture that declared nothing would be testing the wrong tree — the equivalent of a
+/// user who never ran `init`.
 fn config() -> EngineConfig {
     EngineConfig {
         source_id: "coverage-warning-fixture".to_string(),
+        vocabulary: zzop_engine::VocabularyConfig::built_in(),
         ..EngineConfig::default()
     }
 }

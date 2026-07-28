@@ -1,10 +1,10 @@
 //! End-to-end tests for `rules/dsl/redis/redis.json` — exercised via `zzop_engine::analyze_tree` so every rule runs against real fixture trees on disk, same convention as `reliability/reliability.rs`/`sql/sql.rs`/`http/http.rs`.
 //!
-//! Covers all rules in the pack: `line-scan` (`flushall-in-code`, `keys-glob-scan`, `client-no-error-listener`,
+//! Covers all rules in the pack: `line-scan` (`flushall-in-code`, `keys-command-in-code`, `client-no-error-listener`,
 //! `lock-no-ttl`) and `method-scan` (`lock-get-then-set`, `counter-get-set`).
 //!
 //! Each rule has >=1 positive fixture (count + line asserted), >=1 realistic negative, and a `suppress_marker`
-//! case. `keys-glob-scan` additionally guards the documented FP shapes (`Object.keys(x)`, `map.keys()`, a
+//! case. `keys-command-in-code` additionally guards the documented FP shapes (`Object.keys(x)`, `map.keys()`, a
 //! no-arg `.keys()` call) that a naive unscoped `.keys(` pattern would wrongly fire on — the quote-required-
 //! right-after-the-paren anchor is what tells them apart. `client-no-error-listener` additionally guards a
 //! same-named `createClient` from an unrelated library (`@supabase/supabase-js`) via the ioredis/redis import
@@ -97,7 +97,7 @@ fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {
 
 #[test]
 fn java_file_is_out_of_scope_for_flushall_and_keys_glob() {
-    // `flushall-in-code`/`keys-glob-scan` used to include `java` in `file_pattern`, but `keys-glob-scan`'s
+    // `flushall-in-code`/`keys-command-in-code` used to include `java` in `file_pattern`, but `keys-command-in-code`'s
     // bare `.keys(` shape collides with ordinary Java Map/Collection APIs that have nothing to do with Redis.
     // Narrowed to JS/TS-only scope, matching `client-no-error-listener`.
     let dir = TempDir::new("zzop-redis");
@@ -111,7 +111,7 @@ fn java_file_is_out_of_scope_for_flushall_and_keys_glob() {
 
 mod client_no_error_listener;
 mod flushall_in_code;
-mod keys_glob_scan;
+mod keys_command_in_code;
 mod redis_counter_get_set;
 mod redis_lock_get_then_set;
 mod redis_lock_no_ttl;

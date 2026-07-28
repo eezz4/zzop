@@ -28,7 +28,7 @@ third-party pack set, but nesting works too).
 `packsDir` accepts either one directory or an array of directories — each is loaded independently with
 `load_dsl_packs` and then merged by pack `id`: if the same `id` shows up in more than one directory, the
 pack from the LATER directory in the list replaces the earlier one WHOLE (not a per-rule merge). See
-[../modules/facade.md](../modules/facade.md#defaults-zero-config--full-analysis)'s "Defaults" section for how a
+[../modules/facade.md](../modules/facade.md#defaults-a-config-is-required-what-it-does-not-have-to-say)'s "Defaults" section for how a
 host uses this to let a caller add packs alongside the bundled ones instead of replacing them.
 
 A host with no filesystem-resident pack directory at all (e.g. a self-contained binary embedding its
@@ -41,7 +41,7 @@ one more way the finished JSON reaches the engine.
 
 A pack that flags a hardcoded `X-Debug-Token` header value (should come from config/env, not be baked
 into source) — a small but realistic `line-scan` rule. Note there is no `suppress_marker` field: the
-inline marker is derived as `<id>-ok` (here `hardcoded-debug-token-ok`), and the `message` names it so a
+inline marker is derived as `zzop-<id>-ok` (here `zzop-hardcoded-debug-token-ok`), and the `message` names it so a
 reader sees how to silence a vetted case:
 
 ```json
@@ -53,7 +53,7 @@ reader sees how to silence a vetted case:
     {
       "id": "hardcoded-debug-token",
       "severity": "warning",
-      "message": "X-Debug-Token header set to a string literal — this bypasses per-environment config and risks shipping a real token. Read it from env/config instead. Suppress a vetted case with `// hardcoded-debug-token-ok`.",
+      "message": "X-Debug-Token header set to a string literal — this bypasses per-environment config and risks shipping a real token. Read it from env/config instead. Suppress a vetted case with `// zzop-hardcoded-debug-token-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
@@ -69,8 +69,8 @@ reader sees how to silence a vetted case:
 
 - `require_file` is a cheap whole-text pre-skip: most files never mention `X-Debug-Token` at all, so this
   avoids running the real (costlier) pattern against every line of every file.
-- `// hardcoded-debug-token-ok: rotated in CI` on the offending line or the single line directly above it
-  suppresses the finding — the marker is the rule's id plus `-ok`, derived automatically, never declared
+- `// zzop-hardcoded-debug-token-ok: rotated in CI` on the offending line or the single line directly above it
+  suppresses the finding — the marker is `zzop-` plus the rule's id plus `-ok`, derived automatically, never declared
   (see `docs/rules/dsl-reference.md#suppress-marker-semantics`).
 - Drop this into a `RuleContext` (or run it through `zzop_engine::analyze_tree` with `packs` including it)
   and it behaves exactly like any shipped pack — there is no first-party/third-party distinction at the
@@ -98,7 +98,7 @@ hand-written copy. This happens once, before the finding reaches `AnalysisCache:
 hint text is baked into the cached `message` and is not re-appended on a warm cache hit.
 
 **What this means for your `message` field**: write the cause, the fix, and (per the "Message triple"
-contract below) your rule's own derived marker `<id>-ok` — that is the full contract for what you author.
+contract below) your rule's own derived marker `zzop-<id>-ok` — that is the full contract for what you author.
 Do NOT write your own "Disable via config ..." sentence in `message`: the engine adds the hint for you,
 and a hand-written copy renders TWICE in the finding a reader actually sees.
 
@@ -158,7 +158,7 @@ the check needs:
   facts) in isolation; nothing in the DSL contract can see a second file's content. A rule that needs to
   resolve a constant defined in another module, join against a shared `REDIS_KEYS`-style vocabulary
   module, or correlate a route registration in one file with its handler's body in another (`http`
-  pack's `auth-gates`/`route-exposure` already approximate this by folding everything onto one
+  pack's `protected-path-no-auth-evidence`/`dev-path-no-guard-hint` already approximate this by folding everything onto one
   registration line — the real cross-file handler-body check is out of scope for line-scan) needs either
   a whole-graph native rule or a new IR-level join primitive.
 - **Declaration→use / call-graph tracking.** Any check that must follow "handler X is registered at this
@@ -185,7 +185,7 @@ exactly which rule/pack/doc line to fix — do not silence the test, fix the off
 
 What it checks:
 
-- **Derived-marker uniqueness** — markers are derived `<id>-ok`, so presence and the `-ok` shape are
+- **Derived-marker uniqueness** — markers are derived `zzop-<id>-ok`, so presence and the `-ok` shape are
   construction guarantees; what the test still enforces is that no two rules — in any pack — derive the same
   marker (i.e. rule ids are globally unique), since a shared marker would silently co-suppress both.
 - **Message triple** — every DSL rule's `message` names its own derived marker (or, for a disable-only
@@ -234,7 +234,7 @@ through before it ships:
    ```
    "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?)/|\\.(test|spec)\\.|\\.stories\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress)\\.config\\.)"
    ```
-   This is the same string `reliability/debug-true-committed` and `egress/localhost-egress-committed`
+   This is the same string `reliability/debug-true-committed` and `egress/localhost-url-literal-committed`
    already used before the sweep unified every other deployed-surface DSL rule onto it. If a rule already
    has a `file_exclude_pattern` for an unrelated reason (e.g. `reliability/process-exit-in-lib` excludes
    `scripts?/tools/bin` as CLI-entrypoint dirs), leave that alone rather than conflating two different
@@ -258,13 +258,13 @@ through before it ships:
    an attribute the project injects through an overlay, and `require_attr_declared` makes the rule stand
    down — loudly, in `warnings` — when nobody has declared one. See
    [dsl-reference: Attribute gates](dsl-reference.md#attribute-gates-consuming-a-declaration). The trade
-   has to be made deliberately: a zero-config user then gets silence plus a disclosure instead of a
+   has to be made deliberately: a user who declared nothing for it then gets silence plus a disclosure instead of a
    partly-right answer, so this is right only where a wrong answer is worse than none.
    `reliability/env-outside-config` is the shipped example — it previously guessed the config module from
    its basename and from two whole-file syntax shapes, and its own message admitted the decisive gap
    ("a whole-tree fact no file-local matcher can establish").
 4. **Does the message carry problem + fix + suppress?** Every DSL rule's `message` must explain what's wrong,
-   how to fix it, and name its own derived marker `<id>-ok` — already machine-enforced by the "Message triple" check
+   how to fix it, and name its own derived marker `zzop-<id>-ok` — already machine-enforced by the "Message triple" check
    above, but worth checking by eye while drafting: a reviewer should never have to guess how to vet a
    false positive.
 5. **Does the message make a claim about what the matcher does or doesn't flag?** If the message
@@ -283,7 +283,7 @@ through before it ships:
    `\bUPDATE\b`), never a bare word alone. Machine-checked by the `rule_contracts` meta-test's
    `dangerous_bare_words_are_syntax_anchored_not_bare_prose_matches` test (see that test's own doc comment
    for the curated word list and exactly what the check can/cannot prove) — this is the fix that shipped for
-   `perf/api-in-loop` (bare `\bdo\b`) and `security/sql-taint` (bare `UPDATE`).
+   `perf/api-in-loop` (bare `\bdo\b`) and `security/sql-string-concat` (bare `UPDATE`).
 7. **What is the nearest benign lookalike, and is it pinned as a negative fixture?** Before shipping,
    name the most common INNOCENT code that matches the same surface shape the rule keys on, and pin it
    as a negative test in the pack's `.rs` — not a synthetic near-miss, but the real-world idiom a scan

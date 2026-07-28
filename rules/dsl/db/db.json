@@ -5,7 +5,7 @@
     {
       "id": "update-delete-no-where",
       "severity": "critical",
-      "message": "`updateMany`/`deleteMany` called with no `where:` clause anywhere in the enclosing function — a whole-table write, not a filtered subset. Add a `where:` filter that scopes the write, or mark a genuinely full-table write explicitly. Suppress a vetted case with `// update-delete-no-where-ok`.",
+      "message": "`updateMany`/`deleteMany` called with no `where:` clause anywhere in the enclosing function — a whole-table write, not a filtered subset. Add a `where:` filter that scopes the write, or mark a genuinely full-table write explicitly. Suppress a vetted case with `// zzop-update-delete-no-where-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -25,7 +25,7 @@
     {
       "id": "pagination-no-orderby",
       "severity": "warning",
-      "message": "`skip`/`take` pagination used with no `orderBy` in the enclosing function — without a stable sort, page boundaries can shift between requests (rows skipped or duplicated across pages). Add an `orderBy:` on a unique or otherwise stable column. Suppress a vetted case with `// pagination-no-orderby-ok`.",
+      "message": "`skip`/`take` pagination used with no `orderBy` in the enclosing function — without a stable sort, page boundaries can shift between requests (rows skipped or duplicated across pages). Add an `orderBy:` on a unique or otherwise stable column. Suppress a vetted case with `// zzop-pagination-no-orderby-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -43,9 +43,9 @@
       }
     },
     {
-      "id": "client-per-request",
+      "id": "client-new-in-handler",
       "severity": "warning",
-      "message": "`new PrismaClient()` constructed inside a function that looks like a request handler (a `req.`/`request.` member access, or a response-API call like `res.status(...)`/`res.send(...)` — deliberately NOT `res.json(`/`res.text(`, which a fetch `Response` also has, so a handler whose only response evidence is a bare `res.json(x)` is accepted as a miss rather than risking fetch-response false positives) — a fresh client per request exhausts the database connection pool under load. Hoist a single client to a module-level singleton instead. Suppress a vetted case with `// client-per-request-ok`.",
+      "message": "`new PrismaClient()` constructed inside a function that looks like a request handler (a `req.`/`request.` member access, or a response-API call like `res.status(...)`/`res.send(...)` — deliberately NOT `res.json(`/`res.text(`, which a fetch `Response` also has, so a handler whose only response evidence is a bare `res.json(x)` is accepted as a miss rather than risking fetch-response false positives) — a fresh client per request exhausts the database connection pool under load. Hoist a single client to a module-level singleton instead. Suppress a vetted case with `// zzop-client-new-in-handler-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -60,9 +60,9 @@
       }
     },
     {
-      "id": "external-call-in-tx",
+      "id": "external-call-and-tx",
       "severity": "warning",
-      "message": "A network call (`fetch`/`axios`/`got`) appears in the same function as a `$transaction(` — holding a database transaction open across a network round-trip extends lock hold time, and stalls with it if the external call stalls. Move the network call outside the `$transaction` block. Suppress a vetted case with `// external-call-in-tx-ok`.",
+      "message": "A network call (`fetch`/`axios`/`got`) appears in the same function as a `$transaction(` — holding a database transaction open across a network round-trip extends lock hold time, and stalls with it if the external call stalls. Move the network call outside the `$transaction` block. Suppress a vetted case with `// zzop-external-call-and-tx-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -79,7 +79,7 @@
     {
       "id": "unawaited-write",
       "severity": "warning",
-      "message": "A database write (`create`/`update`/`delete`/`upsert`) on a DB-client-shaped receiver (`prisma`/`db`/`tx`/`client`/`repo`) whose promise is neither awaited, returned, nor chained — a failed write looks identical to a successful one. Await the call (or return it, or attach `.then()`/`.catch()`). Suppress a vetted case with `// unawaited-write-ok`.",
+      "message": "A database write (`create`/`update`/`delete`/`upsert`) on a DB-client-shaped receiver (`prisma`/`db`/`tx`/`client`/`repo`) whose promise is neither awaited, returned, nor chained — a failed write looks identical to a successful one. Await the call (or return it, or attach `.then()`/`.catch()`). Suppress a vetted case with `// zzop-unawaited-write-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -93,7 +93,7 @@
     {
       "id": "unbounded-user-limit",
       "severity": "warning",
-      "message": "A `take`/`limit` pagination size is read directly from user input with no upper-bound clamp — a client can force the server to load and serialize an unbounded number of rows (memory/CPU exhaustion). Clamp it against a maximum (e.g. `Math.min(MAX_PAGE_SIZE, Number(req.query.limit))`). Suppress a vetted case with `// unbounded-user-limit-ok`.",
+      "message": "A `take`/`limit` pagination size is read directly from user input with no upper-bound clamp — a client can force the server to load and serialize an unbounded number of rows (memory/CPU exhaustion). Clamp it against a maximum (e.g. `Math.min(MAX_PAGE_SIZE, Number(req.query.limit))`). Suppress a vetted case with `// zzop-unbounded-user-limit-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -108,7 +108,7 @@
     {
       "id": "find-then-create-no-unique",
       "severity": "warning",
-      "message": "A `.create(` call appears LEXICALLY AFTER a `findFirst`/`findOne`/`findUnique` read in the same function, with no `connectOrCreate` or `upsert` anywhere in it — the reported line is the first create that actually follows a read, and \"same function\" means the NEAREST enclosing function, so a read in a sibling closure does not pair. A trigger line that sits inside NO parser-projected function span (a class-property initializer, a top-level statement) is read as ungated, and the pairing there widens back to the whole scanned symbol span. This is a TEXTUAL ORDER claim, not a dataflow one: it does not prove the create writes the row the read looked for, nor that both run on the same control-flow path. When it is the check-then-act shape it names, two concurrent requests can both pass the check and both create a duplicate row. Add a unique constraint and replace the check-then-act with an upsert/`connectOrCreate`; wrapping the read+write in a `$transaction` alone does NOT close this race at the database's default READ COMMITTED isolation level — two concurrent transactions can both read empty and both insert. Suppress a vetted case with `// find-then-create-no-unique-ok`.",
+      "message": "A `.create(` call appears LEXICALLY AFTER a `findFirst`/`findOne`/`findUnique` read in the same function, with no `connectOrCreate` or `upsert` anywhere in it — the reported line is the first create that actually follows a read, and \"same function\" means the NEAREST enclosing function, so a read in a sibling closure does not pair. A trigger line that sits inside NO parser-projected function span (a class-property initializer, a top-level statement) is read as ungated, and the pairing there widens back to the whole scanned symbol span. This is a TEXTUAL ORDER claim, not a dataflow one: it does not prove the create writes the row the read looked for, nor that both run on the same control-flow path. SAME-LINE NESTING RESIDUAL (a disclosed false negative shared by every rule that uses this order gate): on a single line \"after\" is decided by MATCH START OFFSET, so a read nested INSIDE the `.create(` call's own argument list reads as coming AFTER it and does not pair — an inline `prisma.member.create({ data: { orgId: (await prisma.org.findFirst({ where })).id } })` is silently NOT reported; only the multi-line spelling, or a same-line one whose read starts first, fires. When it is the check-then-act shape it names, two concurrent requests can both pass the check and both create a duplicate row. Add a unique constraint and replace the check-then-act with an upsert/`connectOrCreate`; wrapping the read+write in a `$transaction` alone does NOT close this race at the database's default READ COMMITTED isolation level — two concurrent transactions can both read empty and both insert. Suppress a vetted case with `// zzop-find-then-create-no-unique-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -130,7 +130,7 @@
     {
       "id": "float-money-compare",
       "severity": "info",
-      "message": "A money-named identifier (`price`/`amount`/`balance`/`fee`/`cost`) compared with `==`/`===`/`!=`/`!==` against a float literal (e.g. `price === 19.99`) — floating-point rounding error makes strict equality on monetary values unreliable. Represent money as integer minor units (cents) or a decimal library. Suppress a vetted case with `// float-money-compare-ok`.",
+      "message": "A money-named identifier (`price`/`amount`/`balance`/`fee`/`cost`) compared with `==`/`===`/`!=`/`!==` against a float literal (e.g. `price === 19.99`) — floating-point rounding error makes strict equality on monetary values unreliable. Represent money as integer minor units (cents) or a decimal library. Suppress a vetted case with `// zzop-float-money-compare-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -144,16 +144,16 @@
       }
     },
     {
-      "id": "empty-catch-on-write",
+      "id": "empty-catch-and-write",
       "severity": "warning",
-      "message": "A database write (`create`/`update`/`delete`/`upsert`/`updateMany`/`deleteMany`) appears in the same function as an empty `catch {}` block — the write's failure is caught and silently discarded, indistinguishable from success. Log or rethrow the error instead of swallowing it. Suppress a vetted case with `// empty-catch-on-write-ok`.",
+      "message": "A database write — an ORM call (`create`/`update`/`delete`/`upsert`/`updateMany`/`deleteMany`) or a RAW-SQL statement head (`INSERT INTO`, `UPDATE <table> SET`, `DELETE FROM`) opening a string literal or a line, matched UPPERCASE-only so English prose is not mistaken for SQL — appears in the same function as an empty `catch {}` block — the write's failure is caught and silently discarded, indistinguishable from success. Log or rethrow the error instead of swallowing it. Suppress a vetted case with `// zzop-empty-catch-and-write-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
         "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "patterns": [
-          { "pattern": "\\.(create|update|delete|upsert|updateMany|deleteMany)\\s*\\(", "label": "write" },
+          { "pattern": "\\.(create|update|delete|upsert|updateMany|deleteMany)\\s*\\(|(?:^|['\"`])\\s*(?:INSERT\\s+INTO\\b|UPDATE\\s+[\\w\"`.]+\\s+SET\\b|DELETE\\s+FROM\\b)", "label": "write" },
           { "pattern": "catch\\s*(\\([^)]*\\))?\\s*\\{\\s*\\}", "label": "empty-catch" }
         ],
         "trigger": "empty-catch",
@@ -163,21 +163,22 @@
     {
       "id": "multi-write-no-tx",
       "severity": "warning",
-      "message": "Two independent write calls from different verb families — `create`/`createMany`/`insert` and `update`/`updateMany`/`delete`/`deleteMany`/`upsert` — appear in the same function with no transaction wrapping either. This is a co-occurrence heuristic, not proof the two writes depend on each other, but when they do: a failure between the two calls leaves partial state, since the first write already committed and nothing rolls it back if the second throws. Wrap both writes in `$transaction(...)` (or an explicit `BEGIN`/`COMMIT` transaction), or replace the pair with a single write. Suppress a vetted case (e.g. two genuinely independent writes) with `// multi-write-no-tx-ok`.",
+      "message": "Two independent write calls from different verb families — `create`/`createMany`/`insert` and `update`/`updateMany`/`delete`/`deleteMany`/`upsert` — appear in the same function with no transaction wrapping either. Each family also has a RAW-SQL arm: an `INSERT INTO` statement head counts as a create-family write, and an `UPDATE <table> SET`/`DELETE FROM` head as a mutate-family one, so an ORM-free backend (`db.prepare(\"INSERT INTO ...\")`) is no longer silently exempt. Raw-SQL heads are matched UPPERCASE-only and must open a string literal or a line — the gate that separates SQL from English prose (`\"Insert into the notes field\"`), at the cost of not seeing lowercase SQL. This is a co-occurrence heuristic, not proof the two writes depend on each other, but when they do: a failure between the two calls leaves partial state, since the first write already committed and nothing rolls it back if the second throws. Wrap both writes in `$transaction(...)` (or a bare `transaction(...)` call, or an explicit `BEGIN`/`COMMIT` transaction, or a driver batch such as D1's `batch([...])`, all four of which are recognized and veto this finding), or replace the pair with a single write. Suppress a vetted case (e.g. two genuinely independent writes) with `// zzop-multi-write-no-tx-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
         "file_exclude_pattern": "${test-paths}",
         "skip_comment_lines": true,
         "patterns": [
-          { "pattern": "\\b(?:prisma|db|tx|client|repo(?:sitory|sitories)?s?)\\.(?:\\w+\\.)?(?:create|createMany|insert)\\s*\\(", "label": "create-write" },
-          { "pattern": "\\b(?:prisma|db|tx|client|repo(?:sitory|sitories)?s?)\\.(?:\\w+\\.)?(?:update|updateMany|delete|deleteMany|upsert)\\s*\\(", "label": "mutate-write" }
+          { "pattern": "\\b(?:prisma|db|tx|client|repo(?:sitory|sitories)?s?)\\.(?:\\w+\\.)?(?:create|createMany|insert)\\s*\\(|(?:^|['\"`])\\s*INSERT\\s+INTO\\b", "label": "create-write" },
+          { "pattern": "\\b(?:prisma|db|tx|client|repo(?:sitory|sitories)?s?)\\.(?:\\w+\\.)?(?:update|updateMany|delete|deleteMany|upsert)\\s*\\(|(?:^|['\"`])\\s*(?:UPDATE\\s+[\\w\"`.]+\\s+SET\\b|DELETE\\s+FROM\\b)", "label": "mutate-write" }
         ],
         "trigger": "mutate-write",
         "absent": [
           { "pattern": "\\$transaction\\s*\\(", "label": "prisma-tx" },
           { "pattern": "\\btransaction\\s*\\(", "label": "bare-tx-call" },
-          { "pattern": "(?i)(['\"`]BEGIN['\"`]|\\bBEGIN\\s+TRANSACTION\\b)", "label": "sql-begin" }
+          { "pattern": "(?i)(['\"`]BEGIN['\"`]|\\bBEGIN\\s+TRANSACTION\\b)", "label": "sql-begin" },
+          { "pattern": "\\.batch\\s*\\(", "label": "driver-batch" }
         ],
         "snippet_max": 160
       }
@@ -185,7 +186,7 @@
     {
       "id": "non-atomic-counter-update",
       "severity": "warning",
-      "message": "An update that recomputes a field as `<ident> + 1`/`<ident> - 1` appears LEXICALLY AFTER a read (`findUnique`/`findFirst`/`findOne`/`findById`) in the same function — the reported line is the first such arithmetic entry that actually follows a read, and \"same function\" means the NEAREST enclosing function, so a read in a sibling closure does not pair. A trigger line that sits inside NO parser-projected function span (a class-property initializer, a top-level statement) is read as ungated, and the pairing there widens back to the whole scanned symbol span. This is a TEXTUAL ORDER claim, not a dataflow one: it does not prove the arithmetic recomputes the field the read returned. Any `field: value + 1`-shaped object entry that follows the read trips it, even one unrelated to it (e.g. a `take: cursor + 1` pagination bound). When it is the shape it names, read-then-arithmetic-update is not atomic, and two concurrent requests can both read the same starting value and both write the same incremented result, silently losing one of the two increments. Use the ORM's atomic increment/decrement (e.g. Prisma's `{ increment: 1 }`/`{ decrement: 1 }`), a DB-side `$inc`, or a `SELECT ... FOR UPDATE` row lock instead of read-then-write arithmetic. Suppress a vetted case with `// non-atomic-counter-update-ok`.",
+      "message": "An update that recomputes a field as `<ident> + 1`/`<ident> - 1` appears LEXICALLY AFTER a read (`findUnique`/`findFirst`/`findOne`/`findById`) in the same function — the reported line is the first such arithmetic entry that actually follows a read, and \"same function\" means the NEAREST enclosing function, so a read in a sibling closure does not pair. A trigger line that sits inside NO parser-projected function span (a class-property initializer, a top-level statement) is read as ungated, and the pairing there widens back to the whole scanned symbol span. This is a TEXTUAL ORDER claim, not a dataflow one: it does not prove the arithmetic recomputes the field the read returned. Any `field: value + 1`-shaped object entry that follows the read trips it, even one unrelated to it (e.g. a `take: cursor + 1` pagination bound). When it is the shape it names, read-then-arithmetic-update is not atomic, and two concurrent requests can both read the same starting value and both write the same incremented result, silently losing one of the two increments. Use the ORM's atomic increment/decrement (e.g. Prisma's `{ increment: 1 }`/`{ decrement: 1 }`), a DB-side `$inc`, or a `SELECT ... FOR UPDATE` row lock instead of read-then-write arithmetic. Suppress a vetted case with `// zzop-non-atomic-counter-update-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -210,7 +211,7 @@
     {
       "id": "connection-no-release",
       "severity": "warning",
-      "message": "A connection acquired via `pool.connect(`/`getConnection(`/`acquireConnection(` is never released (`.release(`/`.destroy(`/`.end(`) or returned (`return conn`/`connection`/`client`) anywhere in this function — under load, each unreleased connection stays checked out of the pool, and once the pool is exhausted every later request stalls waiting for one to free up. Release it in a `finally` block, use a `using`/`await using` declaration (recognized, does not fire), or use the pool's single-shot query shortcut instead of a manual acquire/release pair. Note the limitation: this only sees the current function's own body — a release happening inside a helper function called from here is invisible to this check and still fires; verify before refactoring, or suppress a vetted case with `// connection-no-release-ok`.",
+      "message": "A connection acquired via `pool.connect(`/`getConnection(`/`acquireConnection(` is never released (`.release(`/`.destroy(`/`.end(`) or returned (`return conn`/`connection`/`client`) anywhere in this function — under load, each unreleased connection stays checked out of the pool, and once the pool is exhausted every later request stalls waiting for one to free up. Release it in a `finally` block, use a `using`/`await using` declaration (recognized, does not fire), or use the pool's single-shot query shortcut instead of a manual acquire/release pair. Note the limitation: this only sees the current function's own body — a release happening inside a helper function called from here is invisible to this check and still fires; verify before refactoring, or suppress a vetted case with `// zzop-connection-no-release-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -231,7 +232,7 @@
     {
       "id": "client-new-in-loop",
       "severity": "warning",
-      "message": "A DB/connection client or pool (`new PrismaClient()`/`new Pool()`/`new Sequelize()`/`new MongoClient()`/`new IORedis()`/`new Redis()`, or a `createPool`/`createClient`/`createConnection` call) is constructed structurally inside a loop body — verified against the parser's projected loop spans (the constructor call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function. To avoid firing on same-named non-database constructs (a worker-pool `new Pool()`, an API `createClient()`, a raw-socket `createConnection()`), the rule only scans files that import a database driver/ORM. Allocating a fresh connection/pool per iteration exhausts the database connection pool under any real iteration count. Hoist the client to a module-level singleton, or construct it once outside the loop and reuse it across iterations. This sharpens `client-per-request` (which fires on request-handler co-occurrence — a `new PrismaClient()` alongside `req.`/`res.` evidence anywhere in the function — rather than on loop containment); a handler that constructs a client inside a loop can trip both rules on the same line, which is expected since they assert different things. Suppress a vetted case with `// client-new-in-loop-ok`.",
+      "message": "A DB/connection client or pool (`new PrismaClient()`/`new Pool()`/`new Sequelize()`/`new MongoClient()`/`new IORedis()`/`new Redis()`, or a `createPool`/`createClient`/`createConnection` call) is constructed structurally inside a loop body — verified against the parser's projected loop spans (the constructor call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function. To avoid firing on same-named non-database constructs (a worker-pool `new Pool()`, an API `createClient()`, a raw-socket `createConnection()`), the rule only scans files that import a database driver/ORM. Allocating a fresh connection/pool per iteration exhausts the database connection pool under any real iteration count. Hoist the client to a module-level singleton, or construct it once outside the loop and reuse it across iterations. This sharpens `client-new-in-handler` (which fires on request-handler co-occurrence — a `new PrismaClient()` alongside `req.`/`res.` evidence anywhere in the function — rather than on loop containment); a handler that constructs a client inside a loop can trip both rules on the same line, which is expected since they assert different things. Suppress a vetted case with `// zzop-client-new-in-loop-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -249,21 +250,22 @@
     {
       "id": "write-in-loop-no-tx",
       "severity": "warning",
-      "message": "A database write (`create`/`createMany`/`update`/`updateMany`/`delete`/`deleteMany`/`upsert`/`insert`/`save`) on a DB-client-shaped receiver (`prisma`/`db`/`tx`/`client`/`repo`/...) executes structurally inside a loop body — verified against the parser's projected loop spans, not mere co-occurrence — while the enclosing function opens no transaction (no `$transaction(`, bare `transaction(` call, or SQL `BEGIN`). Each iteration autocommits independently: a mid-loop failure leaves the already-committed prefix behind with nothing to roll it back, and a caller retry double-applies the rows that already committed. This is the loop-containment-proven sibling of `multi-write-no-tx`, which requires two different write-verb families (a create-family call and a mutate-family call) to co-occur in the same function — it structurally misses a single-verb write repeated once per loop iteration, exactly the shape this rule catches. Wrap the loop body in `$transaction(...)`, or replace the per-row writes with a batch `createMany`/`updateMany` call. Suppress a vetted case with `// write-in-loop-no-tx-ok`.",
+      "message": "A database write — either an ORM call (`create`/`createMany`/`update`/`updateMany`/`delete`/`deleteMany`/`upsert`/`insert`/`save`) on a DB-client-shaped receiver (`prisma`/`db`/`tx`/`client`/`repo`/...), or a RAW-SQL statement head (`INSERT INTO`, `UPDATE <table> SET`, `DELETE FROM`) opening a string literal or a line — executes structurally inside a loop body, verified against the parser's projected loop spans, not mere co-occurrence, while the enclosing function opens no transaction (no `$transaction(`, bare `transaction(` call, SQL `BEGIN`, or driver `batch(`). Raw-SQL heads are matched UPPERCASE-only, the gate that separates SQL from English prose, at the cost of not seeing lowercase SQL. Each iteration autocommits independently: a mid-loop failure leaves the already-committed prefix behind with nothing to roll it back, and a caller retry double-applies the rows that already committed. This is the loop-containment-proven sibling of `multi-write-no-tx`, which requires two different write-verb families (a create-family call and a mutate-family call) to co-occur in the same function — it structurally misses a single-verb write repeated once per loop iteration, exactly the shape this rule catches. Wrap the loop body in `$transaction(...)`, or replace the per-row writes with a batch `createMany`/`updateMany` call. Suppress a vetted case with `// zzop-write-in-loop-no-tx-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
         "file_exclude_pattern": "${test-paths}",
         "skip_comment_lines": true,
         "patterns": [
-          { "pattern": "\\b(?:prisma|db|tx|client|repo(?:sitory|sitories)?s?)\\.(?:\\w+\\.)?(?:create|createMany|update|updateMany|delete|deleteMany|upsert|insert|save)\\s*\\(", "label": "write" }
+          { "pattern": "\\b(?:prisma|db|tx|client|repo(?:sitory|sitories)?s?)\\.(?:\\w+\\.)?(?:create|createMany|update|updateMany|delete|deleteMany|upsert|insert|save)\\s*\\(|(?:^|['\"`])\\s*(?:INSERT\\s+INTO\\b|UPDATE\\s+[\\w\"`.]+\\s+SET\\b|DELETE\\s+FROM\\b)", "label": "write" }
         ],
         "trigger": "write",
         "trigger_in_loop": true,
         "absent": [
           { "pattern": "\\$transaction\\s*\\(", "label": "prisma-tx" },
           { "pattern": "\\btransaction\\s*\\(", "label": "bare-tx-call" },
-          { "pattern": "(?i)(['\"`]BEGIN['\"`]|\\bBEGIN\\s+TRANSACTION\\b)", "label": "sql-begin" }
+          { "pattern": "(?i)(['\"`]BEGIN['\"`]|\\bBEGIN\\s+TRANSACTION\\b)", "label": "sql-begin" },
+          { "pattern": "\\.batch\\s*\\(", "label": "driver-batch" }
         ],
         "snippet_max": 160
       }
@@ -271,7 +273,7 @@
     {
       "id": "check-then-act-in-loop",
       "severity": "warning",
-      "message": "A `.create(`/`.insert(` call whose own line is verified to sit inside a loop body (via the parser's projected loop spans) appears LEXICALLY AFTER a `findFirst`/`findUnique`/`findOne`/`exists` read in the NEAREST enclosing function, and no `connectOrCreate`/`upsert`/`ON CONFLICT`/`ON DUPLICATE KEY` guard appears anywhere in that function. A trigger line that sits inside NO parser-projected function span (a class-property initializer, a top-level statement) is read as ungated, and the pairing there widens back to the whole scanned symbol span. The create is loop-proven and order-proven relative to the read; the read is NOT itself proven to sit in the loop, and the order is textual, not dataflow (nothing proves the create writes the row the read looked for). This is the batch get-or-create shape: two concurrent workers (or an overlapping retry) can both observe \"absent\" for the same key on an iteration and both insert a duplicate row. It sharpens `find-then-create-no-unique` (a whole-function co-occurrence heuristic) by additionally loop-proving the create, and can fire alongside it on the overlapping shape. Add a unique constraint and replace the check-then-act with `upsert`/`connectOrCreate`; a `$transaction` wrap alone does not close this race at the database's default READ COMMITTED isolation level. Suppress a vetted case with `// check-then-act-in-loop-ok`.",
+      "message": "A `.create(`/`.insert(` call whose own line is verified to sit inside a loop body (via the parser's projected loop spans) appears LEXICALLY AFTER a `findFirst`/`findUnique`/`findOne`/`exists` read in the NEAREST enclosing function, and no `connectOrCreate`/`upsert`/`ON CONFLICT`/`ON DUPLICATE KEY` guard appears anywhere in that function. A trigger line that sits inside NO parser-projected function span (a class-property initializer, a top-level statement) is read as ungated, and the pairing there widens back to the whole scanned symbol span. The create is loop-proven and order-proven relative to the read; the read is NOT itself proven to sit in the loop, and the order is textual, not dataflow (nothing proves the create writes the row the read looked for). SAME-LINE NESTING RESIDUAL (a disclosed false negative shared by every rule that uses this order gate): on a single line \"after\" is decided by MATCH START OFFSET, so a read nested INSIDE the `.create(`/`.insert(` call's own argument list reads as coming AFTER it and does not pair — an inline `prisma.member.create({ data: { orgId: (await prisma.org.findFirst({ where })).id } })` inside the loop is silently NOT reported; only the multi-line spelling, or a same-line one whose read starts first, fires. This is the batch get-or-create shape: two concurrent workers (or an overlapping retry) can both observe \"absent\" for the same key on an iteration and both insert a duplicate row. It sharpens `find-then-create-no-unique` (a whole-function co-occurrence heuristic) by additionally loop-proving the create, and can fire alongside it on the overlapping shape. Add a unique constraint and replace the check-then-act with `upsert`/`connectOrCreate`; a `$transaction` wrap alone does not close this race at the database's default READ COMMITTED isolation level. Suppress a vetted case with `// zzop-check-then-act-in-loop-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -292,9 +294,9 @@
       }
     },
     {
-      "id": "idempotency-key-regenerated-per-retry",
+      "id": "idempotency-key-regenerated-in-loop",
       "severity": "warning",
-      "message": "An idempotency key is assigned a FRESH random value (`randomUUID()`/`uuidv4()`/`nanoid()`/`cuid()`/...) on a line that sits structurally inside a loop/retry body — verified against the parser's projected loop spans (the assignment's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — so every attempt carries a DIFFERENT key and the server treats each retry as a brand-new request, defeating the idempotency the key exists to provide. The key is present and correctly named, so this survives ordinary code review. Generate the key ONCE before the loop and reuse it across every attempt, or derive it deterministically from the request payload (e.g. a hash of a stable business id) instead of a random generator. Suppress a vetted case with `// idempotency-key-regenerated-per-retry-ok`.",
+      "message": "An idempotency key is assigned a FRESH random value (`randomUUID()`/`uuidv4()`/`nanoid()`/`cuid()`/...) on a line that sits structurally inside a loop/retry body — verified against the parser's projected loop spans (the assignment's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — so every attempt carries a DIFFERENT key and the server treats each retry as a brand-new request, defeating the idempotency the key exists to provide. The key is present and correctly named, so this survives ordinary code review. Generate the key ONCE before the loop and reuse it across every attempt, or derive it deterministically from the request payload (e.g. a hash of a stable business id) instead of a random generator. Suppress a vetted case with `// zzop-idempotency-key-regenerated-in-loop-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -312,7 +314,7 @@
     {
       "id": "unawaited-transaction",
       "severity": "warning",
-      "message": "A `$transaction(`/`.transaction(` call on a DB-client-shaped receiver (`prisma`/`db`/`client`) whose promise is neither awaited, returned, nor chained — it runs detached, and the handler can send its response before the transaction commits or fails. Await the call (or return it, or attach `.then()`/`.catch()`). Suppress a vetted case with `// unawaited-transaction-ok`.",
+      "message": "A `$transaction(`/`.transaction(` call on a DB-client-shaped receiver (`prisma`/`db`/`client`) whose promise is neither awaited, returned, nor chained — it runs detached, and the handler can send its response before the transaction commits or fails. Await the call (or return it, or attach `.then()`/`.catch()`). Suppress a vetted case with `// zzop-unawaited-transaction-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -326,7 +328,7 @@
     {
       "id": "manual-tx-no-rollback",
       "severity": "warning",
-      "message": "A `BEGIN`/`beginTransaction()`/`startTransaction()` call and a `COMMIT`/`.commit()` call both appear somewhere in the same function — this is a co-occurrence heuristic, not proof COMMIT actually follows BEGIN or that nothing is nested between them, but when it's a genuine manual transaction: no `ROLLBACK`/`.rollback()` appears anywhere in the function either, so an error raised between BEGIN and COMMIT has nothing to release it, and the half-open transaction poisons the pooled connection for whichever request borrows it next. Wrap the work in a try/catch that issues `ROLLBACK` (or `.rollback()`) on error, or use the ORM's managed `$transaction(...)` wrapper instead of manual BEGIN/COMMIT. Suppress a vetted case with `// manual-tx-no-rollback-ok`.",
+      "message": "A `BEGIN`/`beginTransaction()`/`startTransaction()` call and a `COMMIT`/`.commit()` call both appear somewhere in the same function — this is a co-occurrence heuristic, not proof COMMIT actually follows BEGIN or that nothing is nested between them, but when it's a genuine manual transaction: no `ROLLBACK`/`.rollback()` appears anywhere in the function either, so an error raised between BEGIN and COMMIT has nothing to release it, and the half-open transaction poisons the pooled connection for whichever request borrows it next. Wrap the work in a try/catch that issues `ROLLBACK` (or `.rollback()`) on error, or use the ORM's managed `$transaction(...)` wrapper instead of manual BEGIN/COMMIT. Suppress a vetted case with `// zzop-manual-tx-no-rollback-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -344,9 +346,9 @@
       }
     },
     {
-      "id": "tx-swallows-error-commits",
+      "id": "tx-and-empty-catch",
       "severity": "warning",
-      "message": "An empty `catch {}` appears in the same function as a `$transaction(`/`@Transactional`/`beginTransaction()` call — swallowing the error prevents the throw that would trigger a rollback, so a partially-failed transaction can commit as if it succeeded. This is a co-occurrence heuristic: it doesn't prove the empty catch wraps the transaction's body, only that both patterns appear in the same function span. Log the error and rethrow it (or handle rollback explicitly) instead of swallowing it. Suppress a vetted case with `// tx-swallows-error-commits-ok`.",
+      "message": "An empty `catch {}` appears in the same function as a `$transaction(`/`@Transactional`/`beginTransaction()` call — swallowing the error prevents the throw that would trigger a rollback, so a partially-failed transaction can commit as if it succeeded. This is a co-occurrence heuristic: it doesn't prove the empty catch wraps the transaction's body, only that both patterns appear in the same function span. Log the error and rethrow it (or handle rollback explicitly) instead of swallowing it. Suppress a vetted case with `// zzop-tx-and-empty-catch-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -361,9 +363,9 @@
       }
     },
     {
-      "id": "critical-write-default-isolation",
+      "id": "money-tx-no-isolation-level",
       "severity": "info",
-      "message": "A `$transaction(`/`@Transactional` span also matches a money/inventory-named identifier (`balance`/`amount`/`payment`/`wallet`/`ledger`/`charge`/`refund`/`invoice`/`inventory`/`stock`) and a write call (`update`/`create`/`upsert`/`increment`/`decrement`), but sets no explicit isolation level (`isolationLevel`/`Serializable`/`RepeatableRead`) and takes no `FOR UPDATE` row lock — this is a co-occurrence heuristic, not proof the write actually touches the money field or that it runs inside the transaction body, and whether the database's default isolation is actually unsafe here depends on the target engine (e.g. READ COMMITTED on Postgres permits lost updates and write skew for a read-modify-write; other engines and defaults differ). Treat this as a review nudge, not a confirmed defect. Set an explicit isolation level — e.g. `{ isolationLevel: Prisma.TransactionIsolationLevel.Serializable }` — or take a `SELECT ... FOR UPDATE` row lock for the money-critical read-modify-write. Suppress a vetted case with `// critical-write-default-isolation-ok`.",
+      "message": "A `$transaction(`/`@Transactional` span also matches a money/inventory-named identifier (`balance`/`amount`/`payment`/`wallet`/`ledger`/`charge`/`refund`/`invoice`/`inventory`/`stock`) and a write call (`update`/`create`/`upsert`/`increment`/`decrement`), but sets no explicit isolation level (`isolationLevel`/`Serializable`/`RepeatableRead`) and takes no `FOR UPDATE` row lock — this is a co-occurrence heuristic, not proof the write actually touches the money field or that it runs inside the transaction body, and whether the database's default isolation is actually unsafe here depends on the target engine (e.g. READ COMMITTED on Postgres permits lost updates and write skew for a read-modify-write; other engines and defaults differ). Treat this as a review nudge, not a confirmed defect. Set an explicit isolation level — e.g. `{ isolationLevel: Prisma.TransactionIsolationLevel.Serializable }` — or take a `SELECT ... FOR UPDATE` row lock for the money-critical read-modify-write. Suppress a vetted case with `// zzop-money-tx-no-isolation-level-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -382,9 +384,9 @@
       }
     },
     {
-      "id": "tx-in-loop-long-hold",
+      "id": "tx-and-db-call-in-loop",
       "severity": "warning",
-      "message": "A call on the transaction-scoped client (`tx.<model>.<method>(...)`, or a bare `prisma`/`db`/`client`/`repo`-receiver call) executes structurally inside a loop body — verified against the parser's projected loop spans (the call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — while the enclosing function also opens a `$transaction(...)` block. This is a co-occurrence heuristic for the tx-wrapping, same discipline as `external-call-in-tx`: it confirms `$transaction(` appears somewhere in the same function, not that this specific loop sits inside that transaction's own callback body — but when it does, the transaction stays open, and its underlying database locks held, for the entire loop's duration, so lock hold time scales with the number of rows processed inside it: every other transaction contending for the same rows/table queues up for as long as the loop takes to run, and one slow iteration (a large row, a stalled dependency) prolongs the hold for every row already processed. This is the mirror image of `write-in-loop-no-tx` (which fires on the SAME loop-containment shape only when NO enclosing transaction exists) — the two are mutually exclusive on a given line by construction, so they never co-fire. Move per-row reads out of the transaction where the data doesn't need to be read inside it, or replace the per-row calls with a single batch `updateMany`/`createMany`/`findMany` call inside the transaction so the lock is held for one round trip instead of N. Suppress a vetted case (e.g. a bounded, small row count) with `// tx-in-loop-long-hold-ok`.",
+      "message": "A call on the transaction-scoped client (`tx.<model>.<method>(...)`, or a bare `prisma`/`db`/`client`/`repo`-receiver call) executes structurally inside a loop body — verified against the parser's projected loop spans (the call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — while the enclosing function also opens a `$transaction(...)` block. This is a co-occurrence heuristic for the tx-wrapping, same discipline as `external-call-and-tx`: it confirms `$transaction(` appears somewhere in the same function, not that this specific loop sits inside that transaction's own callback body — but when it does, the transaction stays open, and its underlying database locks held, for the entire loop's duration, so lock hold time scales with the number of rows processed inside it: every other transaction contending for the same rows/table queues up for as long as the loop takes to run, and one slow iteration (a large row, a stalled dependency) prolongs the hold for every row already processed. This is the mirror image of `write-in-loop-no-tx` (which fires on the SAME loop-containment shape only when NO enclosing transaction exists) — the two are mutually exclusive on a given line by construction, so they never co-fire. Move per-row reads out of the transaction where the data doesn't need to be read inside it, or replace the per-row calls with a single batch `updateMany`/`createMany`/`findMany` call inside the transaction so the lock is held for one round trip instead of N. Suppress a vetted case (e.g. a bounded, small row count) with `// zzop-tx-and-db-call-in-loop-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",

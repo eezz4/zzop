@@ -30,7 +30,7 @@ should never leak into the public IR).
 A new language does not get its own crate here by default — it arrives via the **external-parser
 envelope protocol** (`docs/NORMALIZED_AST.md`): any out-of-process tool that emits a `NormalizedEnvelope`
 JSON document (validated by `zzop_core::validate_envelope`, consumed by `zzop_engine::analyze_envelope`)
-plugs in without touching this workspace at all. `examples/jsp-envelope.example.json` is a worked example
+plugs in without touching this workspace at all. `examples/adapters/jsp-envelope.example.json` is a worked example
 of exactly that for JSP.
 
 Promotion out of the envelope path happens on the **commonality criterion** that governs zzop's native

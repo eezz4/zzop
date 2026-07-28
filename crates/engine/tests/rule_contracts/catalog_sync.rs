@@ -92,7 +92,7 @@ fn catalog_mentions_every_dsl_pack_id() {
 /// count-preserving rule-id RENAME — exactly what `df78842` did to 7 ids — would ship with the catalog
 /// still naming the old ids and no test objecting. That matters more than an ordinary doc drift: the
 /// catalog is `include_str!`-embedded as the MCP resource `zzop://contract/rule-catalog`
-/// (`crates/host/src/embedded.rs`), and `scripts/check-docs-rule-ids.sh` DERIVES its valid-id universe
+/// (`crates/summary/src/contracts.rs`), and `scripts/check-docs-rule-ids.sh` DERIVES its valid-id universe
 /// from this same file — so one stale id here becomes a stale wire contract AND blesses stale ids in
 /// every other doc the guard checks.
 ///

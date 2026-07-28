@@ -93,7 +93,8 @@ impl<'a> LineCache<'a> {
 /// it — the native `mutating-route-no-auth` rule is enabled, OR some loaded+enabled pack's `IoScan` rule
 /// reads `attr_present`/`attr_absent` (`callgraph/decorator_gate.rs`'s `packs_read_io_scan_attrs`,
 /// computed from `EngineConfig::packs`) — so disabling the native rule alone no longer empties the
-/// minted `auth-guarded` attribute out from under a shipped pack (the http pack's `auth-gates`,
+/// minted `auth-guarded` attribute out from under a shipped pack (the http pack's
+/// `protected-path-no-auth-evidence`,
 /// post-migration). The native rule's own gating (whether `scan_mutating_route_no_auth` itself runs) is
 /// untouched — it still depends solely on `mutating-route-no-auth`'s own enablement. Cost, precisely:
 /// within a callgraph invocation the producers reuse text the pass already holds (no extra reads

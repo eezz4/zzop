@@ -7,6 +7,11 @@
 //! token (looked up with `named: true`, always `0` regardless of whether the token still exists).
 //! `tests::node_kinds_are_pinned_to_the_grammar` / `tests::anonymous_keywords_are_pinned_to_the_grammar`
 //! assert each against the compiled `tree_sitter_java::LANGUAGE`.
+//!
+//! The REVERSE direction — a kind the code matches that never reached this list — is machine-checked
+//! too, by `tests::every_grammar_node_kind_literal_in_this_crate_is_pinned` (added 2026-07-28; it
+//! immediately found `variable_declarator`/`enum_constant`/`field_access`/`superclass`). Without it a
+//! forward-only pin can only ever validate itself.
 pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     // Root-level hopeless-input gate (crate root `parse_tree`/`TOP_LEVEL_DECLARATION_KINDS`)
     "package_declaration",
@@ -37,6 +42,14 @@ pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     "method_invocation",
     "local_variable_declaration",
     "formal_parameter",
+    // Declarator/receiver shapes (`lang::used_names`, `spring_security`)
+    "variable_declarator",
+    "enum_constant",
+    "field_access",
+    // Superclass node (`util`'s own tests walk to it by KIND; `project::collect` reaches the same node
+    // through the `superclass` FIELD, which is a separate grammar vocabulary — see the reverse pin's
+    // field-name stripping)
+    "superclass",
     // Literals/annotations (`util`)
     "string_literal",
     "annotation",

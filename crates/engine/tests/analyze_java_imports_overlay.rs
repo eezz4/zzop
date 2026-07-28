@@ -1,4 +1,4 @@
-//! e2e: the `examples/java-imports-adapter` reference overlay against a natively-parsed Java tree.
+//! e2e: the `examples/adapters/java-imports-adapter` reference overlay against a natively-parsed Java tree.
 //!
 //! History: this example was built against the v0.16-era lexical Java projector, which returned
 //! `imports: None` for every `.java` file — a Java tree carried ZERO dependency edges natively, and
@@ -58,7 +58,7 @@ const CONFIG: &str = "src/main/java/com/example/model/Config.java";
 /// over the same bytes) into a fresh temp dir.
 fn write_fixture_tree() -> TempDir {
     let fixture_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/java-imports-adapter/test/fixture");
+        .join("../../examples/adapters/java-imports-adapter/test/fixture");
     let dir = TempDir::new("zzop-java-imports-overlay");
     for rel in [APP, TEXT_UTIL, CONFIG] {
         let full = dir.path().join(rel);
@@ -72,9 +72,11 @@ fn write_fixture_tree() -> TempDir {
 /// `zzop_core::validate_envelope` path — the same validator `apply_adapter_overlays` re-runs per
 /// overlay, and the same one `zzop validate-envelope` / the MCP `validate_envelope` tool wrap.
 fn example_envelope() -> zzop_core::NormalizedEnvelope {
-    let json = include_str!("../../../examples/java-imports-adapter/test/expected-envelope.json");
-    zzop_core::validate_envelope(json)
-        .expect("examples/java-imports-adapter/test/expected-envelope.json must validate cleanly")
+    let json =
+        include_str!("../../../examples/adapters/java-imports-adapter/test/expected-envelope.json");
+    zzop_core::validate_envelope(json).expect(
+        "examples/adapters/java-imports-adapter/test/expected-envelope.json must validate cleanly",
+    )
 }
 
 #[test]

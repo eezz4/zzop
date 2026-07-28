@@ -13,7 +13,7 @@ use swc_core::ecma::visit::{Visit, VisitWith};
 pub(super) const IDEMPOTENCY_GUARDED_ATTR_KEY: &str = "idempotency-guarded";
 
 /// The idempotency-key header names this recognizer accepts as a witness, already lowercased.
-const IDEMPOTENCY_HEADER_NAMES: &[&str] = &["idempotency-key", "x-idempotency-key"];
+pub(super) const IDEMPOTENCY_HEADER_NAMES: &[&str] = &["idempotency-key", "x-idempotency-key"];
 
 /// Judges whether an inline handler expression's body reads the idempotency-key header.
 ///
@@ -36,8 +36,11 @@ const IDEMPOTENCY_HEADER_NAMES: &[&str] = &["idempotency-key", "x-idempotency-ke
 /// somewhere in the handler body. That literal is the one stable witness across all these call
 /// shapes. Scanning is scoped to the handler body ONLY, never file-wide, so a header literal read
 /// by some unrelated handler elsewhere in the same file can never leak this tag onto this route.
-pub(super) fn inline_handler_reads_idempotency_key(handler: &Expr) -> bool {
-    let mut finder = IdempotencyKeyLiteralFinder { found: false };
+pub(super) fn inline_handler_reads_idempotency_key(handler: &Expr, header_names: &[&str]) -> bool {
+    let mut finder = IdempotencyKeyLiteralFinder {
+        found: false,
+        header_names,
+    };
     match handler {
         Expr::Arrow(arrow) => arrow.visit_with(&mut finder),
         Expr::Fn(f) => f.visit_with(&mut finder),
@@ -50,13 +53,15 @@ pub(super) fn inline_handler_reads_idempotency_key(handler: &Expr) -> bool {
 /// [`IDEMPOTENCY_HEADER_NAMES`]. No early-abort on `found` — a `Visit` walk has no cheap way to
 /// short-circuit, and a single handler body is small enough that the extra visits after the first
 /// match cost nothing worth guarding against.
-struct IdempotencyKeyLiteralFinder {
+struct IdempotencyKeyLiteralFinder<'a> {
     found: bool,
+    /// The run's declared `vocabulary.idempotencyHeaderNames` (default [`IDEMPOTENCY_HEADER_NAMES`]).
+    header_names: &'a [&'a str],
 }
 
-impl Visit for IdempotencyKeyLiteralFinder {
+impl Visit for IdempotencyKeyLiteralFinder<'_> {
     fn visit_str(&mut self, n: &Str) {
-        if is_idempotency_header_literal(n.value.as_str().unwrap_or_default()) {
+        if is_idempotency_header_literal(n.value.as_str().unwrap_or_default(), self.header_names) {
             self.found = true;
         }
     }
@@ -67,7 +72,7 @@ impl Visit for IdempotencyKeyLiteralFinder {
         // literal reads (see e.g. `asset_refs::static_str_arg`).
         if n.exprs.is_empty() && n.quasis.len() == 1 {
             if let Some(text) = n.quasis[0].cooked.as_ref().and_then(|c| c.as_str()) {
-                if is_idempotency_header_literal(text) {
+                if is_idempotency_header_literal(text, self.header_names) {
                     self.found = true;
                 }
             }
@@ -76,6 +81,6 @@ impl Visit for IdempotencyKeyLiteralFinder {
     }
 }
 
-fn is_idempotency_header_literal(value: &str) -> bool {
-    IDEMPOTENCY_HEADER_NAMES.contains(&value.to_ascii_lowercase().as_str())
+fn is_idempotency_header_literal(value: &str, header_names: &[&str]) -> bool {
+    header_names.contains(&value.to_ascii_lowercase().as_str())
 }

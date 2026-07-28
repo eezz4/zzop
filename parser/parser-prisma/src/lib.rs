@@ -24,13 +24,9 @@
 pub const PARSER_FINGERPRINT: &str = "prisma/0.22.0";
 
 mod analysis;
-mod discover;
 mod parse;
 
-pub use analysis::{
-    build_common_ir, model_decl_line, prisma_schema_analysis, DEFAULT_PRISMA_CLIENT_GETTER_FN,
-};
-pub use discover::find_prisma_schemas;
+pub use analysis::{build_common_ir, model_decl_line, DEFAULT_PRISMA_CLIENT_GETTER_FN};
 pub use parse::{parse_schema, parse_schema_enums};
 
 #[cfg(test)]

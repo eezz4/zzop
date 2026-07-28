@@ -100,7 +100,7 @@ fn template_unescaped_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "views/item.ejs",
-        "// template-unescaped-output-ok: widgetHtml is sanitized upstream via DOMPurify\n<%- widgetHtml %>\n",
+        "// zzop-template-unescaped-output-ok: widgetHtml is sanitized upstream via DOMPurify\n<%- widgetHtml %>\n",
     );
     let out = scan(&dir);
     assert!(

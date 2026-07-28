@@ -2,6 +2,13 @@
 use super::*;
 use zzop_core::{FieldAttr, SchemaField};
 
+/// `apply_schema_rules` under the BUILT-IN money vocabulary — every case below is about rule logic, not
+/// about which tokens mean money, so they all go through this one wrapper rather than repeating the
+/// default at 20 call sites. The declared-vocabulary path is sealed separately (engine e2e).
+fn apply_schema_rules_default(models: &[SchemaModel]) -> Vec<SchemaIssue> {
+    apply_schema_rules(models, MONEY_TOKENS)
+}
+
 fn field(
     name: &str,
     ty: &str,
@@ -54,7 +61,7 @@ fn has(issues: &[SchemaIssue], rule: &str, field: &str) -> bool {
 
 #[test]
 fn fk_no_index_hit() {
-    let issues = apply_schema_rules(&[model(
+    let issues = apply_schema_rules_default(&[model(
         "Post",
         vec![id(), f("ownerId"), f("title")],
         vec![],
@@ -65,7 +72,7 @@ fn fk_no_index_hit() {
 
 #[test]
 fn fk_no_index_covered_by_unique() {
-    let issues = apply_schema_rules(&[model(
+    let issues = apply_schema_rules_default(&[model(
         "Share",
         vec![id(), f("itemId")],
         vec![cols(&["itemId"])],
@@ -76,7 +83,7 @@ fn fk_no_index_covered_by_unique() {
 
 #[test]
 fn fk_no_index_leading_composite_member_fully_covered() {
-    let issues = apply_schema_rules(&[model(
+    let issues = apply_schema_rules_default(&[model(
         "ItemUser",
         vec![id(), f("itemId"), f("userId")],
         vec![cols(&["itemId", "userId"])],
@@ -87,7 +94,7 @@ fn fk_no_index_leading_composite_member_fully_covered() {
 
 #[test]
 fn fk_no_index_non_leading_composite_member_gets_info_variant() {
-    let issues = apply_schema_rules(&[model(
+    let issues = apply_schema_rules_default(&[model(
         "Member",
         vec![id(), f("a"), f("guildId")],
         vec![cols(&["a", "guildId"])],
@@ -110,7 +117,7 @@ fn fk_no_index_non_leading_composite_member_gets_info_variant() {
 
 #[test]
 fn missing_timestamps_domain_named_creation_field_with_default_now_satisfies_created_at() {
-    let issues = apply_schema_rules(&[model(
+    let issues = apply_schema_rules_default(&[model(
         "Event",
         vec![
             id(),
@@ -138,7 +145,7 @@ fn missing_timestamps_domain_named_creation_field_with_default_now_satisfies_cre
 
 #[test]
 fn missing_timestamps_domain_named_creation_field_and_updated_at_present_has_no_issue() {
-    let issues = apply_schema_rules(&[model(
+    let issues = apply_schema_rules_default(&[model(
         "Event",
         vec![
             id(),
@@ -161,7 +168,7 @@ fn missing_timestamps_domain_named_creation_field_and_updated_at_present_has_no_
 
 #[test]
 fn missing_timestamps_reports_updated_at() {
-    let issues = apply_schema_rules(&[model(
+    let issues = apply_schema_rules_default(&[model(
         "Log",
         vec![
             id(),
@@ -182,7 +189,8 @@ fn missing_timestamps_reports_updated_at() {
 
 #[test]
 fn missing_timestamps_excludes_lookup() {
-    let issues = apply_schema_rules(&[model("Lookup", vec![id(), f("code")], vec![], vec![])]);
+    let issues =
+        apply_schema_rules_default(&[model("Lookup", vec![id(), f("code")], vec![], vec![])]);
     assert!(!issues.iter().any(|i| i.rule == "missing-timestamps"));
 }
 
@@ -192,13 +200,13 @@ fn god_model_hit() {
     for i in 0..16 {
         fields.push(f(&format!("f{i}")));
     }
-    let issues = apply_schema_rules(&[model("Big", fields, vec![], vec![])]);
+    let issues = apply_schema_rules_default(&[model("Big", fields, vec![], vec![])]);
     assert!(issues.iter().any(|i| i.rule == "god-model"));
 }
 
 #[test]
 fn nullable_fk_hit() {
-    let issues = apply_schema_rules(&[model(
+    let issues = apply_schema_rules_default(&[model(
         "Item",
         vec![
             id(),
@@ -213,7 +221,7 @@ fn nullable_fk_hit() {
 
 #[test]
 fn implicit_fk_hit() {
-    let issues = apply_schema_rules(&[model(
+    let issues = apply_schema_rules_default(&[model(
         "Ref",
         vec![id(), f("userId"), f("name")],
         vec![],
@@ -224,7 +232,7 @@ fn implicit_fk_hit() {
 
 #[test]
 fn implicit_fk_with_relation_no_hit() {
-    let issues = apply_schema_rules(&[model(
+    let issues = apply_schema_rules_default(&[model(
         "X",
         vec![
             id(),
@@ -245,7 +253,7 @@ fn implicit_fk_with_relation_no_hit() {
 
 #[test]
 fn float_money_hit() {
-    let issues = apply_schema_rules(&[model(
+    let issues = apply_schema_rules_default(&[model(
         "Order",
         vec![id(), field("totalAmount", "Float", false, false, &[])],
         vec![],
@@ -256,7 +264,7 @@ fn float_money_hit() {
 
 #[test]
 fn temporal_as_string_hit() {
-    let issues = apply_schema_rules(&[model(
+    let issues = apply_schema_rules_default(&[model(
         "Ev",
         vec![id(), field("startTime", "String", false, false, &[])],
         vec![],

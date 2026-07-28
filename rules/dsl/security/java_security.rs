@@ -73,7 +73,7 @@ fn xxe_ok_marker_in_the_method_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "src/main/java/com/example/XmlParser.java",
-        "public class XmlParser {\n    public Document parse(InputStream in) throws Exception {\n        // xxe-no-guard-ok: guard applied via a shared factory helper not visible in this method\n        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();\n        DocumentBuilder builder = factory.newDocumentBuilder();\n        return builder.parse(in);\n    }\n}\n",
+        "public class XmlParser {\n    public Document parse(InputStream in) throws Exception {\n        // zzop-xxe-no-guard-ok: guard applied via a shared factory helper not visible in this method\n        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();\n        DocumentBuilder builder = factory.newDocumentBuilder();\n        return builder.parse(in);\n    }\n}\n",
     );
     let out = scan(&dir);
     assert!(hits(&out, "xxe-no-guard").is_empty(), "{:?}", out.findings);
@@ -229,7 +229,7 @@ fn trust_all_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "src/main/java/com/example/InsecureSslContext.java",
-        "public class InsecureSslContext {\n    // trust-all-tls-ok: used only in a local dev test harness against a self-signed cert\n    public X509TrustManager trustAllCerts = new TrustAllCerts();\n}\n",
+        "public class InsecureSslContext {\n    // zzop-trust-all-tls-ok: used only in a local dev test harness against a self-signed cert\n    public X509TrustManager trustAllCerts = new TrustAllCerts();\n}\n",
     );
     let out = scan(&dir);
     assert!(hits(&out, "trust-all-tls").is_empty(), "{:?}", out.findings);

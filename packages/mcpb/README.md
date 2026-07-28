@@ -45,7 +45,7 @@ the Desktop lane there is no bundle: `plugin.json`'s `mcpServers` command is
 `${CLAUDE_PLUGIN_DATA}/zzop-mcp`, and a `SessionStart` hook (`.claude-plugin/hooks/bootstrap.sh`) puts
 that file there by downloading the release asset for the running platform. Nothing goes on `PATH`.
 The user-facing steps and the update policy are not restated here — they live in
-[`crates/host/README.md`](../../crates/host/README.md#install-as-a-claude-code-plugin). This section
+[`packages/README.md`](../README.md#install-as-a-claude-code-plugin). This section
 covers only why the packaging has that shape.
 
 **Why a hook rather than a bundle.** Code plugins have no `platform_overrides` equivalent, so one

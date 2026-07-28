@@ -1,20 +1,43 @@
 use super::*;
 
-/// Policy-value pin (same-crate substitute for the cross-crate T2 pin pattern
-/// `crates/engine/tests/policy_value_pins.rs` uses): `VERB_METHODS` (this module) and
-/// `adapters::fastapi::VERB_DECORATORS` encode the identical five-verb vocabulary for two
-/// independent reasons (called HTTP methods here, decorator names there) that happen to agree
-/// one-for-one today — if one changes, this pin forces the other to be re-justified rather than
-/// silently drifting apart.
+/// Policy-value pin, ANCHORED TO THE CORE VOCABULARY — the same shape
+/// `zzop_parser_rust::adapters::axum::tests::axum_verbs_match_http_key_verbs_vocabulary` and
+/// `zzop_parser_java_21::provides::tests::method_annotation_verbs_are_pinned_to_the_core_verb_set`
+/// take. `VERB_METHODS` (this module, CALLED HTTP methods) and `adapters::fastapi::VERB_DECORATORS`
+/// (decorator names) are two independent vocabularies that agree one-for-one today, and both are the
+/// lowercase spelling of `zzop_core::HTTP_KEY_VERBS` — the set that decides which keys the join can
+/// mint at all.
+///
+/// It used to compare the two LOCAL constants to each other and nothing else, which made the pin blind
+/// in the direction that matters: adding the same verb to both sides kept it green while the pair
+/// silently diverged from core (measured 2026-07-28 by planting `"head"` in both — green). Set
+/// equality against core in BOTH directions is what the rust/java siblings assert, so a verb added to
+/// core without reaching python (or to python without reaching core) is now red on both sides.
 #[test]
-fn verb_methods_matches_fastapi_verb_decorators() {
-    assert_eq!(
-            VERB_METHODS,
+fn verb_methods_and_fastapi_verb_decorators_are_the_core_verb_set() {
+    let core: std::collections::BTreeSet<String> = zzop_core::HTTP_KEY_VERBS
+        .iter()
+        .map(|v| v.to_ascii_lowercase())
+        .collect();
+    assert!(
+        !core.is_empty(),
+        "zzop_core::HTTP_KEY_VERBS is empty — an empty subject set must be RED, never a silent pass"
+    );
+    for (name, local) in [
+        ("VERB_METHODS (adapters::http_clients)", VERB_METHODS),
+        (
+            "VERB_DECORATORS (adapters::fastapi)",
             crate::adapters::fastapi::VERB_DECORATORS,
-            "VERB_METHODS (adapters::http_clients) and VERB_DECORATORS (adapters::fastapi) both name \
-             the same five-verb HTTP vocabulary for independent reasons; if one changes, re-justify the \
-             other and update this pin."
+        ),
+    ] {
+        let local_set: std::collections::BTreeSet<String> =
+            local.iter().map(|v| v.to_string()).collect();
+        assert_eq!(
+            local_set, core,
+            "{name} must name the lowercase spelling of zzop_core::HTTP_KEY_VERBS — change the core \
+             set and both python vocabularies together, or say here why this one deliberately diverges"
         );
+    }
 }
 
 fn consumes(text: &str) -> Vec<IoConsume> {

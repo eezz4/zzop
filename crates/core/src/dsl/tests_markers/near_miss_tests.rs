@@ -2,7 +2,7 @@
 //! named in the emitted finding's message (`markers::message_with_near_miss`).
 //!
 //! The measured defect: an author writes `// as-ok:` next to an `as-cast` finding whose honored marker is
-//! `as-cast-ok`. The comment suppresses nothing and zzop said nothing — the worst direction of silence.
+//! `zzop-as-cast-ok`. The comment suppresses nothing and zzop said nothing — the worst direction of silence.
 //! These tests pin both sides: the disclosure fires and names BOTH tokens, the finding still fires, and
 //! ordinary prose ending in `-ok` is never accused of being a typo'd marker.
 
@@ -13,7 +13,7 @@ use super::marker_method_pack;
 /// The rule's own message, unchanged — the baseline every "message unchanged" assertion below compares to.
 const BASE_MESSAGE: &str = "m";
 
-/// The measured defect reproduced: rule id `as-cast` (honored marker `as-cast-ok`) against an author who
+/// The measured defect reproduced: rule id `as-cast` (honored marker `zzop-as-cast-ok`) against an author who
 /// wrote the shorter `// as-ok`. The `line_pattern` deliberately targets a CALL (`widen(`) that no comment
 /// in these fixtures contains, so the comment lines themselves never produce a second finding and each
 /// assertion below is about exactly one finding's message.
@@ -39,7 +39,7 @@ fn wrong_shaped_marker_on_the_anchor_line_is_named_in_the_message() {
     assert_eq!(
         f[0].message,
         "m Note: a comment on this line (or the line directly above it) reads `as-ok`, which does not \
-         suppress this rule — the marker this rule honors is `as-cast-ok`, so this finding still fires.",
+         suppress this rule — the marker this rule honors is `zzop-as-cast-ok`, so this finding still fires.",
         "the message must name BOTH the token found and the marker actually honored"
     );
 }
@@ -54,7 +54,8 @@ fn wrong_shaped_marker_on_the_line_above_is_named_in_the_message() {
     );
     assert_eq!(f.len(), 1, "{f:?}");
     assert!(
-        f[0].message.contains("reads `as-ok`") && f[0].message.contains("honors is `as-cast-ok`"),
+        f[0].message.contains("reads `as-ok`")
+            && f[0].message.contains("honors is `zzop-as-cast-ok`"),
         "a bare marker-shaped comment (no `:`) on the lookback line is still an attempt: {}",
         f[0].message
     );
@@ -65,7 +66,7 @@ fn the_honored_marker_still_suppresses_and_is_never_disclosed_as_a_near_miss() {
     let f = scan_pack(
         &near_miss_line_pack(),
         "f.ts",
-        "const x = widen(y); // as-cast-ok: vetted\n",
+        "const x = widen(y); // zzop-as-cast-ok: vetted\n",
         vec![],
     );
     assert!(
@@ -157,7 +158,7 @@ fn a_dash_dash_near_miss_is_disclosed_only_inside_a_sql_file() {
 
 #[test]
 fn the_accepted_token_alphabet_is_lowercase_digits_and_plus() {
-    // `+` is in the alphabet on purpose: a `n+1`-style rule id derives a `n+1-ok` marker, and an author
+    // `+` is in the alphabet on purpose: a `n+1`-style rule id derives a `zzop-n+1-ok` marker, and an author
     // reaching for it on the WRONG rule must still be disclosed. Uppercase is out — that is a load-bearing
     // half of the prose defense, so both directions are pinned here.
     let plus = scan_pack(
@@ -234,7 +235,8 @@ fn a_method_scan_near_miss_is_disclosed_too() {
     let f = scan_pack(&marker_method_pack(), "f.ts", src, vec![method("f", 1, 5)]);
     assert_eq!(f.len(), 1, "{f:?}");
     assert!(
-        f[0].message.contains("reads `batch-ok`") && f[0].message.contains("honors is `n+1-ok`"),
+        f[0].message.contains("reads `batch-ok`")
+            && f[0].message.contains("honors is `zzop-n+1-ok`"),
         "{}",
         f[0].message
     );

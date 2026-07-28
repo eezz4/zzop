@@ -108,7 +108,7 @@ fn jwt_none_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/auth.ts",
-        "import jwt from \"jsonwebtoken\";\nexport function verify(token: string) {\n  // jwt-none-algorithm-ok: local attack-simulation test harness, never runs against a real service\n  return jwt.verify(token, \"\", { algorithms: [\"none\"] });\n}\n",
+        "import jwt from \"jsonwebtoken\";\nexport function verify(token: string) {\n  // zzop-jwt-none-algorithm-ok: local attack-simulation test harness, never runs against a real service\n  return jwt.verify(token, \"\", { algorithms: [\"none\"] });\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -187,7 +187,7 @@ fn jwt_verify_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/auth.ts",
-        "import jwt from \"jsonwebtoken\";\nexport function verify(token: string) {\n  // jwt-verify-bypass-ok: dedicated expired-token regression test, not production code\n  return jwt.verify(token, \"secret\", { ignoreExpiration: true });\n}\n",
+        "import jwt from \"jsonwebtoken\";\nexport function verify(token: string) {\n  // zzop-jwt-verify-bypass-ok: dedicated expired-token regression test, not production code\n  return jwt.verify(token, \"secret\", { ignoreExpiration: true });\n}\n",
     );
     let out = scan(&dir);
     assert!(

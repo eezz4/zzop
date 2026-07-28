@@ -1,8 +1,11 @@
-# The config front-end shared by every native host: zzop.config.jsonc discovery -> JSONC stripping ->
-# the config->facade-request mapper -> `trees: "auto"` workspace expansion. A shared rlib so every
-# native host maps configs identically — the zzop-mcp binary today, and the binary's own CLI surface
-# as it grows (mcp-distribution decision, "MCP-first, CLI later"). Originally ported from the removed
-# JS front-end; the emitted request JSON is pinned against the committed
+# The config front-end shared by both native host products: zzop.config.jsonc discovery -> JSONC
+# stripping -> the config->facade-request mapper -> `trees: "auto"` workspace expansion, plus REQUEST
+# ASSEMBLY (`src/trees.rs`, `src/paths.rs`) — which trees a call is about and the host-boundary path
+# absolutization every tree root crosses. A shared rlib so both hosts map configs identically: the
+# `zzop` CLI (`packages/cli-bin`, whose multi-tree subcommands take `--config` — its main.rs argv
+# dispatch is the canonical list; the fixed-arity `analyze` is not one of them) and the `zzop-mcp`
+# server (`packages/mcp`, whose tools take `configPath`). Originally
+# ported from the removed JS front-end; the emitted request JSON is pinned against the committed
 # docs/contracts/config-parity.fixture.json golden by tests/config_parity.rs.
 [package]
 name = "zzop-config"
@@ -19,3 +22,11 @@ serde_json = { workspace = true }
 # owns the store, rather than a matching literal in each. No cache code runs here; this front-end still
 # only ever produces request JSON.
 zzop-cache = { path = "../cache" }
+# For `zzop_engine::VocabularyConfig::built_in()` only — the mapper's `vocabulary` default. Same one-value-
+# one-definition reasoning as `zzop-cache` above, applied to the convention vocabulary: the engine (and the
+# rule crates it re-exports from) owns what zzop assumes a project calls its guards, API segments and
+# source roots, so this front end READS those symbols to build the injected default instead of restating
+# them. A restated copy here would be a second answer to the same question, and the starter template's
+# "writing this file changes nothing" contract would silently stop holding. No analysis runs here; this
+# front end still only ever produces request JSON.
+zzop-engine = { path = "../engine" }

@@ -1,0 +1,298 @@
+{
+  // Detection-benchmark ground truth — ADJUDICATED, not auto-calibrated.
+  //
+  // Rebuilt 2026-07-25 at commit c3069ec (binary sha256 391fd747d15ad17c, built in an
+  // isolated worktree so no other agent's rebuild could move it mid-run). The previous file predated the
+  // v0.23.0 rule renaming and could not be scored at all.
+  //
+  // KEY FORMAT: "<sourceId>/<tree-relative path>:<line>" -> [ruleId, ...]. The sourceId prefix is
+  // load-bearing (see scripts/measure/benchmark.mjs): tree-relative keys collapse locations in different
+  // trees onto one key, silently turning a miss in one tree into a hit from another.
+  //
+  // 2026-07-26 KEY CHANGE -- THE "<cross>/..." BUCKET IS GONE. It used to hold all 17 relational
+  // cross-layer findings, because benchmark.mjs derived a finding's tree from `data.source` and only the
+  // single-tree cross-layer rules emit that field. benchmark.mjs now walks a documented fallback chain
+  // (`data.source` -> `consumeSource` -> `patternSource` -> the site entry matching the anchor's
+  // file:line -> `sources[0]`; see `attributeCross` there for why each step names the ANCHOR's tree and
+  // not the other side of the join). 15 of the 17 now carry a real sourceId prefix and were re-keyed
+  // below; 2 remained unattributable and moved to an explicit "<unattributed>/" bucket that benchmark.mjs
+  // PRINTS with its reason on every run, so a score can never read as "everything was attributed":
+  //   * cross-layer/external-shadow-internal -- data named only `matchedProvide.source`, the PROVIDE
+  //     side; the anchor is the CONSUME site, whose source the payload never emitted.
+  //   * cross-layer/external-host-fanout -- `exampleFiles` were bare paths with no source at all.
+  // Both were rule-side gaps (each rule HAD the value in hand: `c.source` in external_shadow_internal.rs,
+  // `site.source` in external_host_fanout.rs) -- routed to rules-owner.
+  // CLOSED in the v0.24.0 batch: both rules now emit the anchor's source, the fallback chain resolves
+  // both, and the "<unattributed>/" bucket is EMPTY (see the re-keying note above the first entry). The
+  // bucket and benchmark.mjs's printing of it stay, so a future attribution gap still announces itself.
+  //
+  // The re-keying is itself evidence the collision risk was live rather than theoretical: FOUR of the
+  // 15 landed on a key that ALREADY existed and had to be merged into it --
+  // xfe/consumes.ts:7, xfe/consumes.ts:8, xbe2/provides.ts:13, api/src/queries.ts:22.
+  //
+  // HOW THIS WAS ADJUDICATED (the point of the file -- "it fires, so it is correct" is forbidden):
+  //   * 69 findings landed in per-rule modules whose FILENAME declares the rule under test
+  //     (trees/<repo>/{rules,api,services}/<pack>.<rule>.ts). Each was confirmed by reading the anchored
+  //     source line and checking it sits in the module's `bad` export, not its `good` control. The
+  //     filename is independent evidence: it states the planted defect and predates the run.
+  //   * 74 findings (cross-layer, graph, callgraph, schema, and cross-module co-fires) were confirmed
+  //     against the anchored source line directly; the corpus's own inline comments state the intended
+  //     verdict at most of those anchors and were checked to agree.
+  //   * A `good` export is a negative control for THAT MODULE'S rule only. Four findings land in a
+  //     `good` region under a DIFFERENT rule and are kept as true positives, because each verdict is
+  //     independently correct there: sql/select-star at raw-query-interpolation.ts:14 (the safe
+  //     `$queryRaw` tagged template still selects `*`), and cross-layer/unconsumed-endpoint on the
+  //     good routes of protected-path-no-auth-evidence/get-route-no-cache-marker/dev-path-no-guard-hint
+  //     (those routes really have no consumer).
+  //
+  // RESOLVED 2026-07-26 -- THE ONE WITHHELD FIRING IS GONE. `http/protected-path-no-auth-evidence` used to
+  // fire inside `export function good()` of api/api/http.protected-path-no-auth-evidence.ts, and was
+  // deliberately kept OUT of this file so it
+  // scored as a false positive instead of becoming truth. The root cause was a CORPUS gap, not a rule bug:
+  // that `good` tried to clear the rule by naming its handler `requireAdminListUsers`, while the matcher
+  // (rules/dsl/http/http.json) is an io-scan over `provides` keyed on `/(admin|internal)/` with
+  // `attr_absent: "auth-guarded"` that never reads a handler identifier. The only clearing mechanism is an
+  // injected `auth-guarded` attribute, and nothing in the corpus injected one. The module now carries two
+  // real negative controls fed by the Mode B adapter overlay this corpus already wires up
+  // (zzop-attributes.json, declared BOTH in trees/api-be/zzop.config.jsonc for the analyze_repo axis and in
+  // the outer zzop.config.jsonc for the join): an exact `ioKey` target on `GET /admin/reports` and a
+  // `pathScope` target on prefix `/admin/audit`. Both go silent; the bad route still fires. This rule's
+  // precision is now measured rather than assumed.
+  //
+  // STILL OPEN, FOR rules-owner (recorded here because the corpus is where it surfaced):
+  // `protected-path-no-auth-evidence` and `dev-path-no-guard-hint` are siblings in one pack, matched with
+  // the same io-scan shape over the same registration lines, but they accept DIFFERENT clear-mechanisms --
+  // dev-path-no-guard-hint reads the source LINE (`anchor_exclude_pattern` guard-hint keywords, plus a
+  // suppress marker), protected-path-no-auth-evidence reads ONLY injected
+  // attributes. A corpus author reasonably expects the same escape hatch from both, which is precisely the
+  // mistake the old `good` encoded. Intended, or an inconsistency worth closing?
+  //
+  // NOT RESTORED -- 2 expectations from the old file are gone by design, not by regression:
+  //   cross-layer/unconsumed-endpoint at callgraph/writeEndpoint.ts:11 and xbe/provides.ts:8. Both are
+  //   write routes, and cross-layer/unconsumed-mutation-endpoint (which still fires at both anchors) is a
+  //   strict specialization that REPLACES the generic rule on the routes it reports -- stated in
+  //   rules/native/rules-cross-layer/src/cross_layer/unconsumed_endpoint.rs:10-15 and
+  //   .../unconsumed_mutation_endpoint.rs:9. Re-adding them would manufacture two permanent false negatives.
+  //
+  // REGENERATING: do NOT run `--write-expected` against a fresh binary and commit the result. That
+  // converts the benchmark into a machine that re-confirms current output, and its regression-detection
+  // value goes to zero. Re-adjudicate changed anchors by hand.
+
+  // RE-KEYED 2026-07-26 (v0.24.0 batch): the "<unattributed>/" bucket is now EMPTY. Both rule-side gaps
+  // named in the header note were closed in that batch -- `external_shadow_internal.rs` now emits the
+  // CONSUME side's `source`, and `external_host_fanout.rs` now carries `(source, file)` per site -- so
+  // benchmark.mjs's fallback chain resolves both anchors to a real tree. Re-measured, not regenerated:
+  // the anchors (file:line) are byte-identical to round 7, only the tree attribution improved, and the
+  // external-host-fanout entry MERGED into the api key that already existed at the same anchor.
+  "api/api/be-reliability.fetch-no-timeout.ts:9": ["cross-layer/external-host-fanout","reliability/fetch-no-timeout"],
+  // Re-keyed 2026-07-26: the module grew two attribute-cleared negative controls, so every anchor shifted
+  // down (bad 8->14, good 12->19) and a third route (25) was added. That rule now fires ONLY on the
+  // bad route -- the standing false positive is gone, see the header note.
+  "api/api/http.dev-path-no-guard-hint.ts:12": ["cross-layer/unconsumed-endpoint"],
+  "api/api/http.dev-path-no-guard-hint.ts:8": ["cross-layer/unconsumed-endpoint","http/dev-path-no-guard-hint"],
+  "api/api/http.get-route-no-cache-marker.ts:11": ["cross-layer/unconsumed-endpoint"],
+  "api/api/http.get-route-no-cache-marker.ts:7": ["cross-layer/unconsumed-endpoint","http/get-route-no-cache-marker"],
+  "api/api/http.protected-path-no-auth-evidence.ts:14": ["cross-layer/unconsumed-endpoint","http/protected-path-no-auth-evidence"],
+  "api/api/http.protected-path-no-auth-evidence.ts:19": ["cross-layer/unconsumed-endpoint"],
+  "api/api/http.protected-path-no-auth-evidence.ts:25": ["cross-layer/unconsumed-endpoint"],
+  "api/api/sql.count-in-loop.ts:8": ["sql/count-in-loop","sql/nplus1"],
+  "api/api/sql.nplus1.ts:8": ["sql/nplus1"],
+  "api/api/sql.race-condition-toctou.ts:13": ["db/find-then-create-no-unique", "sql/race-condition-toctou"],
+  "api/prisma/schema.prisma:14": ["schema/unreferenced-field-name","schema/fk-no-index","schema/float-money","schema/missing-timestamps","schema/nullable-fk","schema/temporal-as-string"],
+  "api/prisma/schema.prisma:22": ["schema/unreferenced-field-name"],
+  "api/prisma/schema.prisma:35": ["schema/unreferenced-model-name"],
+  "api/prisma/schema.prisma:45": ["schema/unreferenced-model-name"],
+  "api/services/be-db.client-per-request.ts:10": ["db/client-new-in-handler"],
+  "api/services/be-db.external-call-in-tx.ts:8": ["db/external-call-and-tx"],
+  "api/services/be-db.float-money-compare.ts:3": ["db/float-money-compare"],
+  "api/services/be-db.pagination-no-orderby.ts:5": ["db/pagination-no-orderby"],
+  "api/services/be-db.unawaited-write.ts:6": ["db/unawaited-write"],
+  "api/services/be-db.unbounded-user-limit.ts:5": ["db/unbounded-user-limit"],
+  "api/services/be-db.update-delete-no-where.ts:6": ["db/update-delete-no-where"],
+  "api/services/be-reliability.async-route-no-catch.ts:7": ["reliability/async-route-no-catch"],
+  "api/services/be-reliability.await-in-map.ts:6": ["reliability/map-async-no-promise-all"],
+  "api/services/be-reliability.body-limit-missing.ts:6": ["reliability/body-limit-missing"],
+  "api/services/be-reliability.console-in-be.ts:5": ["reliability/console-in-be"],
+  "api/services/be-reliability.debug-true-committed.ts:2": ["reliability/debug-true-committed"],
+  "api/services/be-reliability.env-nonnull-assert.ts:4": ["reliability/env-nonnull-assert","reliability/env-outside-config"],
+  "api/services/be-reliability.env-outside-config.ts:4": ["reliability/env-outside-config"],
+  "api/services/be-reliability.interval-no-clear.ts:7": ["reliability/interval-no-clear"],
+  "api/services/be-reliability.json-parse-no-try.ts:7": ["reliability/json-parse-no-try"],
+  "api/services/be-reliability.process-exit-in-lib.ts:5": ["reliability/process-exit-in-lib"],
+  "api/services/be-reliability.promise-all-writes.ts:7": ["reliability/promise-all-and-writes"],
+  "api/services/be-reliability.sync-fs-in-handler.ts:8": ["reliability/sync-fs-in-handler"],
+  "api/services/be-security.api-key-in-url.ts:4": ["security/api-key-in-url"],
+  "api/services/be-security.cors-credentials-wildcard.ts:4": ["security/cors-credentials-wildcard","security/cors-wildcard"],
+  "api/services/be-security.cors-wildcard.ts:2": ["security/cors-wildcard"],
+  "api/services/be-security.error-leak-to-client.ts:7": ["security/error-leak-to-client"],
+  // NOT IN A FRESH CLONE -- this is the one expectation whose fixture file is deliberately absent from
+  // the tracked tree, and it is listed in the `untracked` array at the bottom of this file so
+  // benchmark.mjs can say so next to the FN it produces instead of leaving a red score unexplained.
+  // `security/vendor-token-committed` only fires on a CONTIGUOUS live vendor-token literal, so its fixture
+  // must contain the exact string shape that GitHub push protection rejects and that
+  // scripts/check-vendor-token-literals.sh (no escape hatch, by design) blocks at commit time. Splitting
+  // the literal was measured, not assumed: it silences BOTH rules on this line. Full reasoning and the two
+  // ways out are in `.gitignore`, which is what actually excludes the file -- do not re-derive them here.
+  // CONSEQUENCE, measured 2026-07-27 rather than assumed: scoring this corpus FROM INSIDE THIS REPOSITORY
+  // reports 2 FN on this line and benchmark.mjs exits nonzero -- and not only on a fresh clone. The
+  // analyzer honors .gitignore (crates/engine/src/pipeline/walking.rs), so recreating the file at this path
+  // does NOT restore the score; the same corpus copied outside the repo, with the file present, scores
+  // 143/143 clean. That is a harness state, not an engine result.
+  "api/services/be-security.hardcoded-secret.ts:3": ["security/hardcoded-secret","security/vendor-token-committed"],
+  "api/services/be-security.insecure-cookie.ts:5": ["security/insecure-cookie"],
+  "api/services/be-security.jwt-no-expiry.ts:5": ["security/jwt-no-expiry"],
+  "api/services/be-security.mass-assignment.ts:8": ["security/mass-assignment"],
+  "api/services/be-security.open-redirect.ts:6": ["security/open-redirect"],
+  "api/services/be-security.path-traversal.ts:9": ["security/path-traversal"],
+  "api/services/be-security.raw-query-interpolation.ts:10": ["security/raw-query-unsafe-api","sql/select-star"],
+  "api/services/be-security.raw-query-interpolation.ts:14": ["sql/select-star"],
+  "api/services/be-security.ssrf-user-url.ts:7": ["security/ssrf-user-url"],
+  "api/services/be-security.timing-unsafe-compare.ts:5": ["security/timing-unsafe-compare"],
+  "api/services/be-security.weak-password-hash.ts:6": ["security/weak-password-hash"],
+  "api/services/be-security.weak-token-random.ts:5": ["security/weak-token-random"],
+  "api/services/fullstack.localhost-egress-committed.ts:3": ["egress/localhost-url-literal-committed"],
+  "api/services/fullstack.ws-no-auth.ts:6": ["egress/ws-no-auth"],
+  "api/services/perf.api-in-loop.ts:6": ["perf/api-in-loop"],
+  "api/services/security.taint-flow.ts:8": ["security/taint-flow"],
+  "api/services/sql.app-side-aggregation-filter-length.ts:11": ["sql/app-side-aggregation-filter-length"],
+  "api/services/sql.app-side-aggregation-reduce.ts:10": ["sql/app-side-aggregation-reduce"],
+  "api/services/sql.query-logic-density.ts:3": ["sql/query-logic-density"],
+  "api/src/queries.ts:12": ["soft-delete-bypass"],
+  "api/src/queries.ts:17": ["enum-string-drift"],
+  // MERGED KEY (was "<cross>/src/queries.ts:22"): the db-table-name-in-multiple-sources anchor is this exact line. `table:order`
+  // is consumed by both `api` and `worker`; the rule anchors at the alphabetically-first source's first site.
+  "api/src/queries.ts:22": ["cross-layer/db-table-name-in-multiple-sources","orderby-unindexed"],
+  "callgraph/readEndpoint.ts:12": ["cross-layer/unconsumed-endpoint"],
+  "callgraph/readEndpoint.ts:8": ["unsafe-read-endpoint"],
+  "callgraph/writeEndpoint.ts:11": ["cross-layer/unconsumed-mutation-endpoint","mutating-route-no-auth"],
+  "callgraph/writeEndpoint.ts:8": ["non-idempotent-write"],
+  "graph/circularA.ts:1": ["circular"],
+  "graph/duplicateRoute.ts:6": ["cross-layer/unconsumed-endpoint"],
+  "graph/duplicateRoute.ts:7": ["cross-layer/unconsumed-endpoint","duplicate-route"],
+  "graph/routeShadowing.ts:10": ["cross-layer/unconsumed-endpoint"],
+  "graph/routeShadowing.ts:11": ["cross-layer/unconsumed-endpoint","route-shadowing"],
+  "island/deadA.ts:1": ["circular","unreachable"],
+  "island/deadB.ts:1": ["unreachable"],
+  "island/orphan.ts:1": ["unreachable"],
+  "java/src/main/java/com/example/svc/UnsafeController.java:19": ["security/sql-string-concat"],
+  "java/src/main/java/com/example/svc/UnsafeController.java:25": ["security/weak-crypto"],
+  "java/src/main/java/com/example/svc/UnsafeController.java:30": ["security/cmd-injection"],
+  "java/src/main/java/com/example/svc/UnsafeController.java:35": ["security/hardcoded-password"],
+  "java/src/main/java/com/example/svc/UnsafeController.java:40": ["security/xxe-no-guard"],
+  "java/src/main/java/com/example/svc/UnsafeController.java:46": ["security/unsafe-deserialization"],
+  "java/src/main/java/com/example/svc/UnsafeController.java:51": ["security/java-path-traversal"],
+  "java/src/main/java/com/example/svc/UnsafeController.java:56": ["security/weak-random"],
+  "java/src/main/java/com/example/svc/UnsafeController.java:62": ["security/stacktrace-to-response"],
+  "java/src/main/java/com/example/svc/UnsafeController.java:68": ["security/trust-all-tls"],
+  "java/src/main/java/com/example/svc/UserRepository.java:8": ["security/annotation-sql-concat"],
+  "sdk/billingPage.ts:1": ["cross-layer/untraced-client-import-no-visible-consume"],
+  "trpc/router.ts:9": ["cross-layer/unconsumed-procedure"],
+  "unresolved/gateway.ts:8": ["cross-layer/unresolved-consume-ratio"],
+  "unresolved/gateway.ts:9": ["cross-layer/method-mismatch"],
+  "web/rules/be-security.localstorage-jwt.ts:6": ["security/localstorage-jwt"],
+  "web/rules/be-security.secret-env-in-fe.tsx:3": ["reliability/env-outside-config","security/secret-env-in-fe"],
+  "web/rules/browser.no-document-write.ts:3": ["browser/no-document-write"],
+  "web/rules/browser.no-system-dialogs.ts:5": ["browser/no-system-dialogs"],
+  "web/rules/dead.orphan.tsx:1": ["dead-candidates"],
+  "web/rules/dead.orphan.tsx:4": ["unimported-export"],
+  "web/rules/fullstack.get-with-body.ts:5": ["egress/get-and-body"],
+  "web/rules/fullstack.mixed-content-egress.ts:2": ["egress/http-url-literal"],
+  "web/rules/typescript.as-cast.tsx:2": ["typescript/as-cast","typescript/no-explicit-any"],
+  "web/rules/typescript.async-handler-no-try.tsx:6": ["typescript/async-handler-no-try"],
+  "web/rules/typescript.no-explicit-any.ts:2": ["typescript/no-explicit-any"],
+  "web/rules/typescript.unhandled-promise-use-effect.tsx:8": ["typescript/use-effect-async-callback"],
+  "xbe/provides.ts:12": ["cross-layer/unconsumed-endpoint"],
+  "xbe/provides.ts:18": ["cross-layer/external-host-in-multiple-sources"],
+  "xbe/provides.ts:6": ["cross-layer/duplicate-route"],
+  "xbe/provides.ts:7": ["cross-layer/unconsumed-endpoint"],
+  "xbe/provides.ts:8": ["cross-layer/unconsumed-mutation-endpoint","mutating-route-no-auth"],
+  // MERGED KEY (was "<cross>/provides.ts:13"): route-shadowing anchors at xbe2's PATTERN provide site,
+  // which is this same line. Under the old "<cross>" bucket this key was one line number away from
+  // colliding with xbe/provides.ts -- both trees have a `provides.ts`.
+  "xbe2/provides.ts:13": ["cross-layer/route-shadowing","cross-layer/unconsumed-endpoint"],
+  "xbe2/provides.ts:17": ["cross-layer/unconsumed-endpoint"],
+  "xfe/consumes.ts:10": ["cross-layer/external-shadow-internal"],
+  "xfe/consumes.ts:11": ["cross-layer/ambiguous-consume"],
+  "xfe/consumes.ts:12": ["cross-layer/path-near-miss"],
+  "xfe/consumes.ts:16": ["cross-layer/external-base-url-drift"],
+  "xfe/consumes.ts:19": ["cross-layer/external-version-inconsistent"],
+  "xfe/consumes.ts:5": ["cross-layer/method-mismatch","cross-layer/unprovided-mutation-call"],
+  "xfe/consumes.ts:6": ["cross-layer/version-skew"],
+  // MERGED KEYS (were "<cross>/consumes.ts:{7,8}"): the cross-layer external-* rule and the per-tree rule
+  // land on the same consume line -- 10.0.0.5 is both an IP literal and private-range egress; the vendor
+  // URL carries both a secret query param (cross) and an api key (per-tree).
+  "xfe/consumes.ts:7": ["cross-layer/external-ip-literal","egress/localhost-url-literal-committed"],
+  "xfe/consumes.ts:8": ["cross-layer/external-secret-in-url","security/api-key-in-url"],
+  "xfe/consumes.ts:9": ["cross-layer/unprovided-mutation-call"],
+
+  // CONTROL FILES: ANY finding at one of these paths counts as a false positive, whatever the rule.
+  //
+  // Populated 2026-07-26 with the `decoy` tree (36 files, ~70 near-miss cases). Before that this array was
+  // EMPTY and precision was measured almost entirely by the per-module `good` exports -- i.e. "does the
+  // rule stay quiet on the line right next to the planted defect", which is a much weaker question than
+  // "does it stay quiet across a file of ordinary code that RESEMBLES what it looks for".
+  //
+  // The invariant that makes these worth anything is IN-SCOPE-NESS: every rule here is gated by
+  // file_pattern / file_exclude_pattern / require_file, and a decoy that fails any gate was never
+  // evaluated -- its silence would inflate precision for free. Each file's header states which gate it
+  // satisfies and how, and trees/decoy/README.md collects the reasoning. The strongest of them are the
+  // ones whose line_pattern DOES match and whose exclude_pattern / require_file_absent is what produces
+  // the silence (interval-no-clear, body-limit-missing, no-system-dialogs, timing-unsafe-compare,
+  // sql.no-where, db.unawaited-write): those exercise the veto arms, which is the half of a matcher most
+  // likely to rot without anyone noticing.
+  //
+  // Two rules DID fire here on the first run -- sql/app-side-aggregation-{reduce,filter-length}, because
+  // the first draft put a `findMany()` and the `.reduce(` in one method, which is precisely the pattern
+  // those rules target. That was adjudicated as a BAD DECOY, not a rule defect: the file was rewritten to
+  // split fetch from aggregation (so it now probes method-scoping instead), rather than the firings being
+  // labeled into truth. Recording it here because "a decoy fired, so relabel it" is the exact failure mode
+  // this array has to resist.
+  "benign": [
+    "decoy/api/reliability.console-in-be.decoy.ts",
+    "decoy/api/sql.nplus1.decoy.ts",
+    "decoy/api/sql.race-condition-toctou.decoy.ts",
+    "decoy/index.ts",
+    "decoy/lib/browser.no-document-write.decoy.ts",
+    "decoy/lib/browser.no-system-dialogs.decoy.ts",
+    "decoy/lib/db.float-money-compare.decoy.ts",
+    "decoy/lib/db.unawaited-write.decoy.ts",
+    "decoy/lib/db.update-delete-no-where.decoy.ts",
+    "decoy/lib/dead.dynamic-import.decoy.ts",
+    "decoy/lib/dead.dynamic-loader.ts",
+    "decoy/lib/dead.reexport-chain.decoy.ts",
+    "decoy/lib/egress.http-url-literal.decoy.ts",
+    "decoy/lib/reexports.ts",
+    "decoy/lib/reliability.body-limit-missing.decoy.ts",
+    "decoy/lib/reliability.interval-no-clear.decoy.ts",
+    "decoy/lib/security.api-key-in-url.decoy.ts",
+    "decoy/lib/security.conn-string-credentials.decoy.ts",
+    "decoy/lib/security.cors-wildcard.decoy.ts",
+    "decoy/lib/security.eval-dynamic-code.decoy.ts",
+    "decoy/lib/security.hardcoded-secret.decoy.ts",
+    "decoy/lib/security.jwt-none-algorithm.decoy.ts",
+    "decoy/lib/security.localstorage-jwt.decoy.ts",
+    "decoy/lib/security.raw-query-unsafe-api.decoy.ts",
+    "decoy/lib/security.shell-exec-interpolation.decoy.ts",
+    "decoy/lib/security.timing-unsafe-compare.decoy.ts",
+    "decoy/lib/security.weak-password-hash.decoy.ts",
+    "decoy/lib/security.weak-token-random.decoy.ts",
+    "decoy/lib/sql.app-side-aggregation.decoy.ts",
+    "decoy/lib/sql.no-where.decoy.ts",
+    "decoy/lib/sql.select-star.decoy.ts",
+    "decoy/lib/typescript.as-cast.decoy.ts",
+    "decoy/lib/typescript.parseint-no-radix.decoy.ts",
+    "decoy/services/reliability.fetch-no-timeout.decoy.ts",
+    "decoy/services/reliability.json-parse-no-try.decoy.ts",
+    "decoy/web/security.secret-env-in-fe.decoy.ts"
+  ],
+
+  // Expectations anchored in files deliberately kept OUT of the tracked tree, as "<sourceId>/<path>"
+  // (same shape as `benign`). benchmark.mjs reads this list and, when one of these produces a false
+  // negative, prints WHY next to it -- so a fresh clone's red score cannot be misread as an engine
+  // regression. The expectations stay in place and still count: the miss is real for whoever is running,
+  // it just has a known non-engine cause. `.gitignore` is the authority on which files these are and why;
+  // this list only names them so the score can point at that reason.
+  "untracked": [
+    "api/services/be-security.hardcoded-secret.ts"
+  ]
+}

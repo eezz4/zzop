@@ -7,10 +7,24 @@ use serde::{Deserialize, Serialize};
 
 use zzop_core::{SchemaModel, Severity};
 
-/// Version token for `apply_schema_rules`'s output shape, folded into the ruleset cache fingerprint so
-/// a stale cache doesn't keep serving old `schema/*` findings. Restamp with the current `CARGO_PKG_VERSION`
-/// when the output shape changes (2026-07-22 version reform: cache-bust tokens are package-version stamps).
-pub const STRUCTURAL_RULES_VERSION: &str = "0.22.0";
+/// Version token for what this crate's rules EMIT, folded into the ruleset cache fingerprint so a stale
+/// cache doesn't keep serving old `schema/*` findings. Restamp with the current `CARGO_PKG_VERSION`
+/// (2026-07-22 version reform: cache-bust tokens are package-version stamps).
+///
+/// TWO LANES, ONE TOKEN — decide a bump on the lane, not on the crate:
+/// - CACHED: `structural.rs`'s rules run in the fused per-file pass (`engine`'s `pipeline::schema_findings`)
+///   and their findings are WRITTEN to and served verbatim from the per-file findings cache entry. Any change
+///   that alters what they emit — a rule body, a threshold, or the shared MESSAGE text in `message.rs` —
+///   needs a bump here, or a warm cache keeps serving the old finding for byte-identical source.
+/// - NOT CACHED: `usage.rs`'s rules run from `analyze::assemble`'s whole-tree stage
+///   (`pipeline::schema_usage_findings`) and are recomputed every run, so a usage-only change needs no bump.
+///
+/// The trap is `message.rs`: it is shared by both lanes, so "usage isn't cached, no bump" does NOT
+/// generalize to it. The 0.22.0 -> 0.24.0 bump was exactly that case — `family_disable_hint` became
+/// `issue_disable_hint`, changing the message text of every cached STRUCTURAL finding. The guard
+/// (`scripts/check-parser-fingerprint-bump.sh`, and its `[no-projection-change: rules-schema]` /
+/// `FINGERPRINT_NO_PROJECTION_CHANGE` waiver) scopes the whole crate as one and cannot tell the lanes apart.
+pub const STRUCTURAL_RULES_VERSION: &str = "0.24.0";
 
 /// A structural schema issue (source-agnostic; from a single model/field). `camelCase` here matches
 /// every other output-facing type, since this struct serializes verbatim into `Finding.data`.
@@ -50,7 +64,7 @@ const GOD_THRESHOLD: usize = 15;
 const LOOKUP_FIELD_MAX: usize = 3;
 
 /// Field-name tokens denoting a whole monetary amount (matched as a case-insensitive substring).
-const MONEY_TOKENS: &[&str] = &[
+pub const MONEY_TOKENS: &[&str] = &[
     "price",
     "amount",
     "cost",
@@ -93,7 +107,7 @@ const MONEY_TOKENS: &[&str] = &[
 
 /// Analyze schema models -> issues + per-model risk. Structural-only path (usage rules require a code scan).
 pub fn analyze_schema(models: Vec<SchemaModel>) -> SchemaAnalysis {
-    let issues = apply_schema_rules(&models);
+    let issues = apply_schema_rules(&models, MONEY_TOKENS);
     let mut model_risk: HashMap<String, i64> = models.iter().map(|m| (m.name.clone(), 0)).collect();
     for issue in &issues {
         *model_risk.entry(issue.model.clone()).or_insert(0) += severity_points(issue.severity);
@@ -105,14 +119,17 @@ pub fn analyze_schema(models: Vec<SchemaModel>) -> SchemaAnalysis {
     }
 }
 
-pub fn apply_schema_rules(models: &[SchemaModel]) -> Vec<SchemaIssue> {
+/// `money_tokens` is the run's declared `vocabulary.moneyTokens` — what a project calls its money
+/// columns is its own convention, so `float-money` judges against a declared list ([`MONEY_TOKENS`] is
+/// only its default).
+pub fn apply_schema_rules(models: &[SchemaModel], money_tokens: &[&str]) -> Vec<SchemaIssue> {
     let mut issues = Vec::new();
     for model in models {
         rule_god_model(model, &mut issues);
         rule_missing_timestamps(model, &mut issues);
         rule_redundant_index(model, &mut issues);
         for field in &model.fields {
-            rule_float_money(model, field, &mut issues);
+            rule_float_money(model, field, money_tokens, &mut issues);
             rule_stale_updated_at(model, field, &mut issues);
             rule_temporal_as_string(model, field, &mut issues);
             if !is_fk_candidate(field) {

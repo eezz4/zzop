@@ -1,4 +1,4 @@
-//! `cross-layer/shared-db-table` (warning) — the same `db-table` key CONSUMED by 2+ distinct sources.
+//! `cross-layer/db-table-name-in-multiple-sources` (warning) — the same `db-table` key CONSUMED by 2+ distinct sources.
 //! Consumes are the signal; provides don't matter here (unlike `duplicate_route`, which is about who
 //! PROVIDES a key) — a table is "shared" when multiple sources read/write it, regardless of which source
 //! declares its schema. Signal is pulled from three places — `edges` (kind `db-table`, consumer side),
@@ -6,7 +6,10 @@
 //!
 //! Two sources merely consuming the same table-key string is only evidence of a naming coincidence, not
 //! proof of a shared physical database (an unrelated repo providing its own same-named table lands in
-//! `ambiguous_consumes` instead, via join integrity) — the finding message says so explicitly.
+//! `ambiguous_consumes` instead, via join integrity) — the finding message says so explicitly, which is
+//! why the id names the table NAME rather than a shared table. Renamed from
+//! `cross-layer/shared-db-table`, whose message already denied it ("not that they physically share one
+//! database"); the old id is recorded in `VERSIONING.md`.
 
 use std::collections::BTreeSet;
 
@@ -70,10 +73,10 @@ pub fn shared_db_table_findings(cross_layer: &CrossLayerResult) -> Vec<Finding> 
              databases are expected in your stack.",
             sources_list.len(),
             sources_list.join(", "),
-            disable_hint("cross-layer/shared-db-table"),
+            disable_hint("cross-layer/db-table-name-in-multiple-sources"),
         );
         out.push(Finding {
-            rule_id: "cross-layer/shared-db-table".to_string(),
+            rule_id: "cross-layer/db-table-name-in-multiple-sources".to_string(),
             severity: Severity::Warning,
             file: first_file,
             line: first_line,
@@ -150,7 +153,10 @@ mod tests {
         };
         let out = shared_db_table_findings(&cl);
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].rule_id, "cross-layer/shared-db-table");
+        assert_eq!(
+            out[0].rule_id,
+            "cross-layer/db-table-name-in-multiple-sources"
+        );
         assert_eq!(out[0].severity, Severity::Warning);
         assert_eq!(out[0].file, "a.ts");
         assert_eq!(out[0].line, 3);

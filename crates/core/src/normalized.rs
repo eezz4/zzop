@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize};
 use crate::io::IoFacts;
 use crate::ir::{ImportMap, ReExport, SourceSymbol};
 
+mod hints;
+
+pub use hints::envelope_hints;
+
 /// The exact `format` string every conforming envelope must carry (`docs/NORMALIZED_AST.md`'s Envelope
 /// section).
 pub const NORMALIZED_AST_FORMAT: &str = "zzop-normalized-ast";
@@ -156,6 +160,11 @@ pub struct FileProjection {
 /// uses for a directory of packs). Returns `Ok(envelope)` only when the JSON parses AND every semantic
 /// check passes; a JSON parse failure short-circuits with a single-element `Vec` (there is no partial
 /// envelope to inspect for further issues in that case).
+///
+/// This is the VALIDITY axis only. Shapes that are valid but almost certainly not what the producer
+/// meant (an absolute `files[].path`, a non-normalized `http` key) are the separate ADVISORY axis —
+/// [`envelope_hints`], returned alongside this result by [`validate_envelope_verdict`]. A caller that
+/// only needs "may I analyze this" keeps using this function unchanged.
 // Note: `const_map_fragment`/`procedure_router_fragments`/`router_mount_fragments` presence is never
 // validated here — any fragment content a producer emits is accepted as-is (empty is always valid,
 // per their `#[serde(default)]`). An unresolvable `Ref`/`Mount` specifier is a composition-time
@@ -163,6 +172,54 @@ pub struct FileProjection {
 // guessed" per this crate's convention, but also never a hard error for a shape this validator cannot
 // know is wrong.
 pub fn validate_envelope(json: &str) -> Result<NormalizedEnvelope, Vec<String>> {
+    validate_envelope_verdict(json).result
+}
+
+/// Both axes of envelope judgment for one JSON text: [`validate_envelope`]'s VALIDITY result plus the
+/// advisory [`envelope_hints`] pass, which is why the two are computed in one place — an authoring
+/// surface (`zzop validate-envelope`, the `validate_envelope` MCP tool) wants both from one read, and
+/// getting them from two entry points would deserialize the same text twice.
+///
+/// The two axes are deliberately SEPARATE fields and must stay so: `result` decides acceptance
+/// (`valid`, the CLI's exit code, whether `analyze_envelope` proceeds) and is computed from the
+/// structural issues ALONE — no hint can ever reach it. A hint says "accepted, but this is probably not
+/// what you meant"; promoting one to a rejection would break the frozen v1 contract for envelopes that
+/// conform to it.
+///
+/// `hints` is empty whenever the text did not deserialize at all (there is no envelope to inspect), and
+/// otherwise carries every hint the pass found — INCLUDING when `result` is `Err`, so a producer fixing
+/// a structural issue sees the semantic ones in the same round-trip rather than one per fix.
+pub struct EnvelopeVerdict {
+    /// The validity verdict — exactly what [`validate_envelope`] returns.
+    pub result: Result<NormalizedEnvelope, Vec<String>>,
+    /// Advisory hints (see [`envelope_hints`]). Never affects `result`.
+    pub hints: Vec<String>,
+}
+
+pub fn validate_envelope_verdict(json: &str) -> EnvelopeVerdict {
+    let envelope = match parse_envelope(json) {
+        Ok(envelope) => envelope,
+        Err(errors) => {
+            return EnvelopeVerdict {
+                result: Err(errors),
+                hints: Vec::new(),
+            }
+        }
+    };
+    let issues = structural_issues(&envelope);
+    let hints = envelope_hints(&envelope);
+    EnvelopeVerdict {
+        result: if issues.is_empty() {
+            Ok(envelope)
+        } else {
+            Err(issues)
+        },
+        hints,
+    }
+}
+
+/// Deserialization half — everything that must succeed before there is an envelope to judge at all.
+fn parse_envelope(json: &str) -> Result<NormalizedEnvelope, Vec<String>> {
     // A JSON ARRAY root is a special case: serde's derived `Deserialize` for a struct accepts a
     // sequence as well as a map (the positional-fields fallback other serde formats rely on), so a
     // top-level array is NOT rejected as "wrong shape" the way a string/number/bool/null root already
@@ -180,9 +237,12 @@ pub fn validate_envelope(json: &str) -> Result<NormalizedEnvelope, Vec<String>> 
             "expected a JSON object envelope, got an array".to_string()
         ]);
     }
-    let envelope: NormalizedEnvelope =
-        serde_json::from_str(json).map_err(|e| vec![format!("invalid JSON: {e}")])?;
+    serde_json::from_str(json).map_err(|e| vec![format!("invalid JSON: {e}")])
+}
 
+/// The VALIDITY pass: every semantic check whose failure makes the envelope unusable. Kept apart from
+/// [`envelope_hints`] because the two answer different questions — this one rejects, that one advises.
+fn structural_issues(envelope: &NormalizedEnvelope) -> Vec<String> {
     let mut errors = Vec::new();
 
     if envelope.format != NORMALIZED_AST_FORMAT {
@@ -217,12 +277,10 @@ pub fn validate_envelope(json: &str) -> Result<NormalizedEnvelope, Vec<String>> 
         }
     }
 
-    if errors.is_empty() {
-        Ok(envelope)
-    } else {
-        Err(errors)
-    }
+    errors
 }
 
+#[cfg(test)]
+mod hints_tests;
 #[cfg(test)]
 mod tests;

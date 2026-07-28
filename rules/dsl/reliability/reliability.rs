@@ -1,6 +1,6 @@
 //! End-to-end tests for `rules/dsl/reliability/reliability.json` — exercised via `zzop_engine::analyze_tree` so `Matcher::MethodScan` rules run against real parser-derived `SourceSymbol` body spans (not hand-built spans), same convention as `sql/sql.rs`/`http/http.rs`.
 //!
-//! Covers all rules in the pack: `async-route-no-catch`, `sync-fs-in-handler`, `await-in-map`, `promise-all-writes`, `json-parse-no-try`, `fetch-no-timeout`, `process-exit-in-lib`, `emitter-async-listener`, `promise-race-resource-leak`, `fs-check-then-use`, `stream-open-no-close-in-loop`, `listener-subscribe-in-loop` (method-scan; the last two via `trigger_in_loop` loop-span containment — see `perf/api-in-loop`'s convention); `env-nonnull-assert`, `debug-true-committed`, `body-limit-missing`, `console-in-be`, `interval-no-clear` (line-scan, uses the `require_file_absent` DSL extension), `env-outside-config`, `await-inside-promise-all-array` (line-scan).
+//! Covers all rules in the pack: `async-route-no-catch`, `sync-fs-in-handler`, `map-async-no-promise-all`, `promise-all-and-writes`, `json-parse-no-try`, `fetch-no-timeout`, `process-exit-in-lib`, `emitter-async-listener`, `promise-race-no-cancel`, `fs-check-then-use`, `stream-open-no-close-in-loop`, `listener-subscribe-in-loop` (method-scan; the last two via `trigger_in_loop` loop-span containment — see `perf/api-in-loop`'s convention); `env-nonnull-assert`, `debug-true-committed`, `body-limit-missing`, `console-in-be`, `interval-no-clear` (line-scan, uses the `require_file_absent` DSL extension), `env-outside-config`, `await-inside-promise-all-array` (line-scan).
 //!
 //! `fetch-no-timeout` scopes to backend files via a content-based `require_file` pre-gate (server-framework import / server-runtime API / Workers module shape / D1 prepared-statement call) rather than a path heuristic, so a standalone backend repo with no `be`/`api`/`server`-ish path segment is still in scope.
 //!
@@ -104,7 +104,7 @@ fn scan_with(dir: &TempDir, overlay: zzop_core::NormalizedEnvelope) -> AnalyzeOu
 ///
 /// The envelope carries a single synthetic file entry, because `AttributeStore::from_parts` flattens
 /// `files[].attributes` tree-wide and never cares which file emitted them — the same shape
-/// `examples/auth-overlay-adapter` emits.
+/// `examples/adapters/auth-overlay-adapter` emits.
 fn env_config_overlay(prefixes: &[&str]) -> zzop_core::NormalizedEnvelope {
     overlay_with_attributes(
         prefixes

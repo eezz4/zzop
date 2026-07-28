@@ -1,23 +1,22 @@
-//! `assemble` — the tree-wide assembly orchestrator, split into sequential phases (each a `mod` below,
-//! in the order it runs): [`collect`] the fused per-file pass's output into per-tree substrates,
-//! [`provides`] compose whole-tree PROVIDE/CONSUME facts from them, [`dep_graph`] build the dependency
-//! graph + run git-history-dependent collection, [`rules`] run every whole-graph/call-graph-BFS native
-//! analysis (plus its own whole-tree `Matcher::IoScan` DSL sub-phase), [`warnings`] run the
-//! framework-silence self-report, [`metrics`] compute git-history-dependent scores/health/critical/seams.
-//! Glue only — no analysis logic of its own beyond wiring each phase into the final `AnalyzeOutput`.
+//! `assemble` — the tree-wide assembly orchestrator, split into sequential phases (each a `mod` below, in
+//! run order): [`collect`] per-tree substrates out of the fused per-file pass, [`provides`] whole-tree
+//! PROVIDE/CONSUME facts, [`dep_graph`] dep graph + git-history collection, [`rules`] every whole-graph/
+//! call-graph-BFS native analysis (plus its own whole-tree `Matcher::IoScan` DSL sub-phase), [`warnings`]
+//! framework-silence self-report, [`metrics`] git-dependent scores. Glue only — no analysis logic here.
 
 use zzop_core::{merge_findings, CommonIr, IoFacts, MinimalIr};
 
 use crate::analyze::diagnostics::{
-    compute_dsl_scope, minified_files_warning, no_applicable_dsl_rule_warning,
-    rule_overrides_applied, run_diagnostics, uncompilable_rule_warnings,
-    unmatched_global_exclude_warnings, unmatched_suppression_warnings, unparsed_extension_warning,
+    compute_dsl_scope, minified_files_warning, pack_scope_warnings, rule_overrides_applied,
+    run_diagnostics, uncompilable_rule_warnings, unmatched_global_exclude_warnings,
+    unmatched_suppression_warnings, unparsed_extension_warning,
 };
 use crate::{pipeline::FileArtifact, AnalyzeOutput, EngineConfig};
 
 mod collect;
 mod dep_graph;
-mod helpers;
+// `pub(in crate::analyze)`: `native_rules::callgraph`'s python/rust arms share these predicates and resolvers — the one agreement point outside this mod, reached as `assemble::helpers::*`.
+pub(in crate::analyze) mod helpers;
 mod metrics;
 mod orm;
 mod provides;
@@ -28,13 +27,13 @@ mod warnings;
 /// Consumes the fused pass's per-file artifacts and produces the final `AnalyzeOutput`. `artifacts` must
 /// already be sorted by `rel` (`pipeline::run_file_pass`'s invariant), which is what makes `ir.ir.symbols`
 /// deterministic. `root` is only used for the optional git collection and the phases below that read from
-/// disk (Java project pass, file-convention routes, framework-silence probes). `overlay_covered_paths` is
-/// `envelope::apply_adapter_overlays`' own return value — see [`collect`]'s own use of it.
+/// disk (Java project pass, file-convention routes, framework-silence probes). `overlay_applied` is
+/// `envelope::apply_adapter_overlays`' return value — see [`collect`] and [`rules::GraphInputs`].
 pub(crate) fn assemble(
     root: &std::path::Path,
     artifacts: Vec<FileArtifact>,
     config: &EngineConfig,
-    overlay_covered_paths: &std::collections::HashSet<String>,
+    overlay_applied: &crate::envelope::OverlayApplication,
 ) -> AnalyzeOutput {
     let collect::Collected {
         file_count,
@@ -72,7 +71,7 @@ pub(crate) fn assemble(
         java_index,
         csharp_index,
         sfc_rels,
-    } = collect::collect(root, artifacts, config, overlay_covered_paths);
+    } = collect::collect(root, artifacts, config, &overlay_applied.covered_paths);
 
     let sfc_import_pairs = sfc::collect_sfc_import_pairs(root, &sfc_rels);
     let provides::ProvidesResult {
@@ -134,14 +133,20 @@ pub(crate) fn assemble(
     let global_findings = rules::run(
         root,
         config,
-        &cycles,
-        &nodes,
-        &dep,
+        &rules::GraphInputs {
+            cycles: &cycles,
+            nodes: &nodes,
+            dep: &dep,
+            sfc_targets: &sfc_targets,
+            asset_targets: &asset_targets,
+            overlay_entry_paths: &overlay_applied.entry_paths,
+        },
         &pkg_scan,
         &tsconfigs,
         &ts_paths,
         &ts_import_pairs,
         &java_rels,
+        &rust_workspace,
         &all_symbols,
         &dead_export_names_by_file,
         &prisma_rels,
@@ -152,8 +157,6 @@ pub(crate) fn assemble(
         &io_consumes,
         &mut rule_time,
         &sfc_import_pairs,
-        &sfc_targets,
-        &asset_targets,
         &mut per_file_findings,
         &mut warnings,
     );
@@ -174,9 +177,7 @@ pub(crate) fn assemble(
     warnings.extend(unparsed_extension_warning(&unparsed_extensions));
     warnings.extend(unmatched_suppression_warnings(config, &rels));
     warnings.extend(unmatched_global_exclude_warnings(config, &rels));
-    if let Some(w) = no_applicable_dsl_rule_warning(&config.packs, &dsl_scope) {
-        warnings.push(w);
-    }
+    warnings.extend(pack_scope_warnings(config, &dsl_scope));
     warnings.extend(uncompilable_rule_warnings(&config.packs)); // dead rule != quiet rule
     helpers::sort_io_provides(&mut io_provides);
     helpers::sort_io_consumes(&mut io_consumes);
@@ -189,8 +190,8 @@ pub(crate) fn assemble(
         &java_rels,
         &package_import_files,
         &loc_by_path,
+        &config.vocabulary.resolve().fetch_wrapper_export_names,
     ));
-
     let io = if io_provides.is_empty() && io_consumes.is_empty() {
         None
     } else {
@@ -223,9 +224,8 @@ pub(crate) fn assemble(
     warnings.extend(diagnostics_report.warnings);
     let config_warnings = diagnostics_report.config_warnings;
 
-    // `root.is_dir()` gates this so it doesn't duplicate `analyze_tree`'s more specific "root does not exist
-    // / is not a directory" self-report (`lib.rs`'s `scope_warnings`), which states the cause when the root
-    // itself is invalid; a root that exists but matched no analyzable files gets no such self-report.
+    // `root.is_dir()` gates this so it doesn't duplicate `analyze_tree`'s more specific "root missing / not
+    // a directory" self-report (`lib.rs`'s `scope_warnings`); an existing-but-empty root gets no such one.
     if file_count == 0 && root.is_dir() {
         warnings.push(
             "root produced 0 analyzable files — check the path exists and contains supported source files".to_string(),
@@ -238,9 +238,9 @@ pub(crate) fn assemble(
 
     let ir = CommonIr {
         source: config.source_id.clone(),
-        // Multiple parser frontends (TypeScript + Prisma, v1 scope) are fused into one tree-wide IR here —
-        // no single `parser` id is accurate the way it is for a single-frontend `build_common_ir` call, so
-        // this is a zzop-only tag naming the fused engine itself rather than one frontend.
+        // Multiple parser frontends (TypeScript + Prisma, v1 scope) fuse into one tree-wide IR here, so no
+        // single `parser` id is accurate the way it is for a single-frontend `build_common_ir` call — this
+        // is a zzop-only tag naming the fused engine itself rather than one frontend.
         parser: "engine".to_string(),
         ir: MinimalIr {
             dep,
@@ -252,8 +252,8 @@ pub(crate) fn assemble(
 
     let coverage = crate::CoverageCensus::compute(file_count, source_files, &ir, degraded.len());
 
-    // Gated exactly like `scores`/`health`/`critical`/`seams`: `Some` only when git collection actually
-    // ran, so a consumer never sees a window echoed for numbers that stayed empty.
+    // Gated like `scores`/`health`/`critical`/`seams`: `Some` only when git collection actually ran, so no
+    // consumer sees a window echoed for numbers that stayed empty.
     let git_window = git_active
         .then_some(config.git.as_ref())
         .flatten()
@@ -266,7 +266,7 @@ pub(crate) fn assemble(
         .into_iter()
         .map(|(specifier, files)| crate::PackageImportSummary {
             file_count: files.len(),
-            // BTreeSet iteration is sorted — first() is the lexicographically first importing file.
+            // BTreeSet iteration is sorted -> the lexicographically first importing file, deterministic.
             example_file: files.into_iter().next().unwrap_or_default(),
             specifier,
         })

@@ -44,6 +44,11 @@ pub(super) fn resolve_url_variants(
             None => locals.whole_url_for(arg).unwrap_or_default().to_vec(),
         },
         Expr::Bin(_) => resolve_concat_variants(arg, consts, locals, cm),
+        // `same-file-fn-url-v1`: `fetch(chargesUrl())` — a zero-argument call on a same-file helper whose
+        // whole body is one `return <resolvable expr>`. Gated entirely in [`super::binding_census`] and
+        // [`LocalConsts`]; a call with arguments, a method call, or an imported helper resolves to
+        // nothing here exactly as before.
+        Expr::Call(_) => locals.whole_url_for(arg).unwrap_or_default().to_vec(),
         _ => Vec::new(),
     }
 }

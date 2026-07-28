@@ -31,7 +31,7 @@ fn redirect_ok_marker_above_the_redirect_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/auth.ts",
-        "declare const res: any;\nexport function handleRedirect(req: any) {\n  const target = req.query.next;\n  // open-redirect-ok: target validated against an internal allow-list above\n  res.redirect(target);\n}\n",
+        "declare const res: any;\nexport function handleRedirect(req: any) {\n  const target = req.query.next;\n  // zzop-open-redirect-ok: target validated against an internal allow-list above\n  res.redirect(target);\n}\n",
     );
     let out = scan(&dir);
     assert!(hits(&out, "open-redirect").is_empty(), "{:?}", out.findings);
@@ -159,7 +159,7 @@ fn sendfile_ok_marker_above_the_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/files.ts",
-        "declare const res: any;\nexport function download(req: any) {\n  // sendfile-from-request-ok: filename validated against an internal allow-list above\n  res.sendFile(req.params.filename);\n}\n",
+        "declare const res: any;\nexport function download(req: any) {\n  // zzop-sendfile-from-request-ok: filename validated against an internal allow-list above\n  res.sendFile(req.params.filename);\n}\n",
     );
     let out = scan(&dir);
     assert!(

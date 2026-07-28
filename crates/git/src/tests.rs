@@ -429,3 +429,213 @@ fn collect_on_a_missing_path_returns_a_typed_error_without_panicking() {
     let result = collect(&dir, &CollectOptions::default());
     assert!(matches!(result, Err(GitError::NotAGitRepository { .. })));
 }
+
+// --- commit subject preservation + declared-pattern labels -----------------------------------------
+
+/// Seals that the parse carries the subject WHOLE and unmodified, including the punctuation/quoting that
+/// a derived field would have normalized away — `tags`/`labels` are lossy views, this is not. Scope: this
+/// starts from a `&str`, i.e. DOWNSTREAM of the decode boundary; what happens to non-UTF-8 bytes before
+/// that is pinned by `decode_boundary_tests` below.
+#[test]
+fn the_commit_subject_is_carried_whole_and_unmodified() {
+    let subject = "Revert \"feat(api): add /v2 users\" — see PROJ-42";
+    let log = format!(
+        "{}\n1\t0\tsrc/a.ts\n",
+        header("sha1", "2026-01-01T00:00:00Z", "a@x.com", subject)
+    );
+    let result = parse_git_log(&log, &opts(), FAR_FUTURE_NOW_MS);
+    assert_eq!(result.commits[0].subject.as_deref(), Some(subject));
+}
+
+/// Seals that subject preservation and `[TAG]` extraction BOTH happen on the same commit — the two are
+/// independent readings of one subject, so adding the raw field must not consume or alter the tag path
+/// (and the tag path must not truncate the raw field to the untagged remainder).
+#[test]
+fn a_bracket_tagged_subject_keeps_both_its_tags_and_its_raw_text() {
+    let subject = "[FIX][PERF] tighten the cache key";
+    let log = format!(
+        "{}\n1\t0\tsrc/a.ts\n",
+        header("sha1", "2026-01-01T00:00:00Z", "a@x.com", subject)
+    );
+    let result = parse_git_log(&log, &opts(), FAR_FUTURE_NOW_MS);
+    let c = &result.commits[0];
+    assert_eq!(c.tags, vec!["FIX".to_string(), "PERF".to_string()]);
+    assert_eq!(c.subject.as_deref(), Some(subject));
+}
+
+/// Seals never-guess end to end through the parser: with NO declared subject patterns, subjects that any
+/// plausible built-in convention would have labelled get zero labels — the subject is preserved, and
+/// nothing is inferred from it.
+#[test]
+fn without_a_declaration_no_commit_is_labelled() {
+    let log = format!(
+        "{}\n1\t0\tsrc/a.ts\n{}\n1\t0\tsrc/b.ts\n",
+        header(
+            "sha1",
+            "2026-01-01T00:00:00Z",
+            "a@x.com",
+            "Revert \"add caching\""
+        ),
+        header(
+            "sha2",
+            "2026-01-02T00:00:00Z",
+            "a@x.com",
+            "hotfix: PROJ-42 null deref"
+        )
+    );
+    let result = parse_git_log(&log, &opts(), FAR_FUTURE_NOW_MS);
+    assert!(
+        result.commits.iter().all(|c| c.labels.is_empty()),
+        "an undeclared axis must classify nothing, got: {:?}",
+        result.commits.iter().map(|c| &c.labels).collect::<Vec<_>>()
+    );
+    assert!(result.commits.iter().all(|c| c.subject.is_some()));
+}
+
+/// Seals that a DECLARED table really labels, that several declarations can apply to one subject, and
+/// that the order is the table's declaration order (not match position) — the determinism the labels
+/// riding in any output depends on.
+#[test]
+fn declared_subject_patterns_label_in_declaration_order() {
+    let o = CollectOptions {
+        commit_subject_patterns: vec![
+            (r"PROJ-\d+".to_string(), "ticket".to_string()),
+            (r"^Revert\b".to_string(), "revert".to_string()),
+        ],
+        ..CollectOptions::default()
+    };
+    let log = format!(
+        "{}\n1\t0\tsrc/a.ts\n{}\n1\t0\tsrc/b.ts\n",
+        header(
+            "sha1",
+            "2026-01-01T00:00:00Z",
+            "a@x.com",
+            "Revert \"PROJ-42 add caching\""
+        ),
+        header("sha2", "2026-01-02T00:00:00Z", "a@x.com", "tidy imports")
+    );
+    let result = parse_git_log(&log, &o, FAR_FUTURE_NOW_MS);
+    assert_eq!(
+        result.commits[0].labels,
+        vec!["ticket".to_string(), "revert".to_string()]
+    );
+    assert!(result.commits[1].labels.is_empty());
+}
+
+/// Seals that the declared-label axis and the commit-TYPE axis are independent: a `[TAG]` bracket does
+/// not suppress labels (it DOES suppress the keyword classifier — that asymmetry is deliberate), and a
+/// declared label never lands in `tags`.
+#[test]
+fn declared_labels_and_bracket_tags_are_independent_axes() {
+    let o = CollectOptions {
+        commit_subject_patterns: vec![(r"PROJ-\d+".to_string(), "ticket".to_string())],
+        ..CollectOptions::default()
+    };
+    let log = format!(
+        "{}\n1\t0\tsrc/a.ts\n",
+        header(
+            "sha1",
+            "2026-01-01T00:00:00Z",
+            "a@x.com",
+            "[FIX] PROJ-42 null deref"
+        )
+    );
+    let result = parse_git_log(&log, &o, FAR_FUTURE_NOW_MS);
+    let c = &result.commits[0];
+    assert_eq!(c.tags, vec!["FIX".to_string()]);
+    assert_eq!(c.labels, vec!["ticket".to_string()]);
+}
+
+/// Seals that an empty subject stays `None` rather than becoming `Some("")` — "this commit has no
+/// subject" and "the subject is the empty string" must not be told apart by accident downstream.
+#[test]
+fn an_empty_subject_is_none_not_an_empty_string() {
+    let log = format!(
+        "{}\n1\t0\tsrc/a.ts\n",
+        header("sha1", "2026-01-01T00:00:00Z", "a@x.com", "")
+    );
+    let result = parse_git_log(&log, &opts(), FAR_FUTURE_NOW_MS);
+    assert_eq!(result.commits[0].subject, None);
+}
+
+// --- the decode boundary (bytes -> String), which every test above starts downstream of -------------
+
+/// Every test above hands `parse_git_log` a `&str`, so none of them can see what happens to git's raw
+/// BYTES — the step where `process::decode_git_output` turns stdout into that `&str`. These pin the
+/// boundary itself: what a non-UTF-8 byte becomes, and what that does to declared-pattern matching.
+mod decode_boundary_tests {
+    use super::*;
+
+    /// `git log %s` output for a subject written in latin-1 by a commit object with no `encoding`
+    /// header: git re-encodes only when that header is present, so the raw `0xE9` reaches us as-is.
+    const LATIN1_SUBJECT: &[u8] = b"caf\xe9 legacy subject";
+
+    /// One commit's raw `git log --numstat` stdout, subject spliced in as BYTES (not `&str`), so the
+    /// fixture can carry a sequence that is not valid UTF-8 at all.
+    fn raw_log_bytes(subject: &[u8]) -> Vec<u8> {
+        let mut out = Vec::from(&b"__C__sha1\x1f2026-01-01T00:00:00Z\x1fa@x.com\x1f"[..]);
+        out.extend_from_slice(subject);
+        out.extend_from_slice(b"\n1\t0\tsrc/a.ts\n");
+        out
+    }
+
+    /// Seals WHAT the decode boundary does to a non-UTF-8 byte: it is replaced by U+FFFD, never
+    /// preserved and never an error (`from_utf8_lossy` is the deliberate never-fail choice).
+    #[test]
+    fn a_non_utf8_subject_byte_is_replaced_by_u_fffd_not_carried_and_not_an_error() {
+        let raw = raw_log_bytes(LATIN1_SUBJECT);
+        assert!(
+            raw.contains(&0xE9),
+            "fixture must actually be invalid UTF-8 before decoding, else this test never crosses \
+             the boundary it exists to pin"
+        );
+        let decoded = crate::process::decode_git_output(&raw);
+        assert!(
+            !decoded.as_bytes().contains(&0xE9),
+            "the raw byte must not survive decoding: {decoded:?}"
+        );
+        assert!(
+            decoded.contains('\u{FFFD}'),
+            "the non-UTF-8 byte must become U+FFFD: {decoded:?}"
+        );
+    }
+
+    /// Seals what the PARSE therefore sees: the preserved subject is the post-replacement text, not
+    /// git's bytes — the concrete counterexample to "verbatim, exactly as `git log %s` emitted it".
+    #[test]
+    fn the_preserved_subject_is_the_lossily_decoded_text_not_gits_bytes() {
+        let decoded = crate::process::decode_git_output(&raw_log_bytes(LATIN1_SUBJECT));
+        let result = parse_git_log(&decoded, &opts(), FAR_FUTURE_NOW_MS);
+        assert_eq!(
+            result.commits[0].subject.as_deref(),
+            Some("caf\u{FFFD} legacy subject")
+        );
+    }
+
+    /// Seals the user-visible consequence: a declared pattern spelled with the ORIGINAL non-ASCII text
+    /// can never match such a subject (the character it targets no longer exists by match time), while
+    /// the ASCII part of the very same subject still labels normally — so the commit is present and
+    /// labellable, and only the encoding-dependent pattern is inert.
+    #[test]
+    fn a_declared_pattern_with_the_original_non_ascii_text_cannot_match_after_lossy_decode() {
+        let decoded = crate::process::decode_git_output(&raw_log_bytes(LATIN1_SUBJECT));
+        let o = CollectOptions {
+            commit_subject_patterns: vec![
+                ("café".to_string(), "cafe".to_string()),
+                ("legacy".to_string(), "legacy".to_string()),
+            ],
+            ..CollectOptions::default()
+        };
+        let result = parse_git_log(&decoded, &o, FAR_FUTURE_NOW_MS);
+        assert_eq!(result.commits[0].labels, vec!["legacy".to_string()]);
+    }
+
+    /// Seals that the boundary is lossy ONLY for invalid input: a valid-UTF-8 non-ASCII subject
+    /// survives it byte for byte, so the replacement above is not the decoder mangling everything.
+    #[test]
+    fn a_valid_utf8_non_ascii_subject_survives_the_decode_boundary_unchanged() {
+        let decoded = crate::process::decode_git_output(&raw_log_bytes("café résumé".as_bytes()));
+        let result = parse_git_log(&decoded, &opts(), FAR_FUTURE_NOW_MS);
+        assert_eq!(result.commits[0].subject.as_deref(), Some("café résumé"));
+    }
+}

@@ -125,7 +125,7 @@ fn toctou_ok_marker_directly_above_the_write_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "api/createMarkedHandlers.ts",
-        "declare const likeStore: any;\nexport async function toggle() {\n  const existing = await likeStore.findOne((l: any) => l.id === \"x\");\n  if (existing) {\n    await likeStore.delete(existing.id);\n  } else {\n    // race-condition-toctou-ok: intentional single-writer admin path\n    await likeStore.create({ id: \"y\" });\n  }\n}\n",
+        "declare const likeStore: any;\nexport async function toggle() {\n  const existing = await likeStore.findOne((l: any) => l.id === \"x\");\n  if (existing) {\n    await likeStore.delete(existing.id);\n  } else {\n    // zzop-race-condition-toctou-ok: intentional single-writer admin path\n    await likeStore.create({ id: \"y\" });\n  }\n}\n",
     );
     let out = scan(&dir);
     assert!(

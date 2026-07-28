@@ -49,6 +49,7 @@ mod io;
 mod output;
 mod pipeline;
 mod trees;
+mod vocabulary;
 
 use std::path::Path;
 
@@ -64,6 +65,7 @@ pub use output::{AnalyzeOutput, CacheStats, GitWindow, PackLoaded, RuleOverrides
 pub use trees::{
     analyze_trees, MultiAnalyzeOutput, PackageImportSummary, MIN_PARALLEL_IMPL_SIGNALS,
 };
+pub use vocabulary::VocabularyConfig;
 
 /// Composes every crate's own `register_native_analyses` into one `RuleRegistry` — the engine aggregator
 /// half of the extensibility contract (`rules/README.md`'s "Adding a rule" section). The kernel
@@ -114,11 +116,13 @@ pub fn analyze_tree(root: &Path, config: &EngineConfig) -> AnalyzeOutput {
         ));
     }
     let mut overlay_warnings = Vec::new();
-    // `overlay_covered_paths` is the apply loop's OWN verdict on which files an overlay really parsed
-    // (validation passed AND the projection carried a fact) — `assemble` uses it as the "no native parser"
-    // disclosure's exclusion set. Empty when there are no overlays: nothing to exclude.
-    let overlay_covered_paths = if config.adapter_overlays.is_empty() {
-        std::collections::HashSet::new()
+    // `overlay_applied` is the apply loop's OWN verdict on what each overlay really did (validation
+    // passed AND the projection carried a fact): `covered_paths` feeds the "no native parser" disclosure's
+    // exclusion set, `entry_paths` feeds `dead-candidates`' entry exemption. Both must come from HERE and
+    // not from a re-read of `config.adapter_overlays`, which cannot see the validation verdict. Default
+    // (both empty) when there are no overlays: nothing to exclude, nothing to exempt.
+    let overlay_applied = if config.adapter_overlays.is_empty() {
+        envelope::OverlayApplication::default()
     } else {
         envelope::apply_adapter_overlays(
             &mut artifacts,
@@ -127,7 +131,7 @@ pub fn analyze_tree(root: &Path, config: &EngineConfig) -> AnalyzeOutput {
             &mut overlay_warnings,
         )
     };
-    let mut output = analyze::assemble(root, artifacts, config, &overlay_covered_paths);
+    let mut output = analyze::assemble(root, artifacts, config, &overlay_applied);
 
     // Scope warnings lead: they qualify every other line ("about nothing"), so a reader hits them first.
     if !scope_warnings.is_empty() {

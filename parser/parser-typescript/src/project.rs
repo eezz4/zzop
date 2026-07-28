@@ -33,6 +33,8 @@ pub fn build_common_ir(source_id: &str, files: &[(String, String)]) -> CommonIr 
         &all_paths,
     );
     // Project the IO this tree consumes (HTTP egress) so the cross-layer linker can join it to BE providers.
+    // Whole-tree projection has no config to read, so it takes the built-in retry vocabulary — the same
+    // default `parse_symbols` applies for the write-site vocabulary above.
     let consumes = adapters::egress::extract_http_egress(files);
     let io = if consumes.is_empty() {
         None

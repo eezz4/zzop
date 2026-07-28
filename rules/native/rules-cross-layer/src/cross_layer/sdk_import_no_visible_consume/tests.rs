@@ -18,7 +18,10 @@ fn sdk_import_with_no_visible_consumes_fires_once_per_tree() {
     let totals = vec![("web".to_string(), 0)];
     let out = sdk_import_no_visible_consume_findings(&imports, &totals);
     assert_eq!(out.len(), 1);
-    assert_eq!(out[0].rule_id, "cross-layer/sdk-import-no-visible-consume");
+    assert_eq!(
+        out[0].rule_id,
+        "cross-layer/untraced-client-import-no-visible-consume"
+    );
     assert_eq!(out[0].file, "src/lib/api.ts");
     let data = out[0].data.as_ref().unwrap();
     assert_eq!(data["visibleHttpConsumes"], 0);
@@ -141,19 +144,68 @@ fn opaque_client_at_or_above_the_ratio_rule_floor_hands_off_instead_of_firing() 
     assert!(sdk_import_no_visible_consume_findings(&imports, &totals).is_empty());
 }
 
-/// Cross-crate contract pin (T2 — `rules/**` cannot depend on `zzop_parser_typescript`, so no shared
-/// symbol): `OPAQUE_HTTP_CLIENT_PATTERN` must stay DISJOINT from the HTTP clients the parser's egress
-/// extractor (`adapters::egress::matchers::match_http_call`) recognizes natively — `axios`/`ky`/
-/// `fetch`/`$fetch`. If a recognized client ALSO matched the opaque pattern, its calls would be both
-/// join-visible AND counted as an opaque blind spot (double-count / false blindness report). This is a
-/// mirror of that recognized set — keep it in sync if the extractor learns a new client name.
+/// The parser's own recognized-client names, READ OUT OF THE PARSER — every `client: ...` value
+/// `adapters::egress::matchers::match_http_call` stamps on an `IoConsume`, which IS the set of clients
+/// whose calls the join can already see.
+///
+/// Why a text read rather than a shared symbol: T2 — `rules/**` must not depend on
+/// `zzop_parser_typescript` (the layering forbids it), so there is no constant to import. The
+/// alternative this replaced was a hand-copied mirror whose own comment admitted it ("keep it in sync
+/// if the extractor learns a new client name") — and, measured 2026-07-28, deleting an entry from that
+/// mirror kept the test green, so the mirror was the only thing the pin ever checked. Reading the
+/// shipped source is the same route `packages/cli-bin/src/cli/help/tests.rs` and
+/// `crates/engine/tests/rule_contracts/surface_parity.rs` take for the same reason.
+///
+/// The parse is deliberately dumb: on every line that assigns `client:`, take the quoted literals
+/// (the two-branch forms `client: if obj == "axios" { "axios" } else { "ky" }` are the reason it is
+/// per-line rather than per-literal-after-the-colon). A dumb parse can only fail by finding too
+/// little, and the caller below asserts a non-empty result first.
+fn parser_recognized_http_clients() -> std::collections::BTreeSet<String> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../parser/parser-typescript/src/adapters/egress/matchers.rs");
+    // A moved/renamed matcher module is a HARD failure, never a silent empty set.
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "cannot read the parser's egress matchers at {}: {e} — if that module moved, re-point \
+             this pin rather than dropping it",
+            path.display()
+        )
+    });
+    let mut out = std::collections::BTreeSet::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("//") || !trimmed.contains("client:") {
+            continue;
+        }
+        let mut rest = &trimmed[trimmed.find("client:").expect("checked above") + 7..];
+        while let Some(i) = rest.find('"') {
+            rest = &rest[i + 1..];
+            let Some(end) = rest.find('"') else { break };
+            out.insert(rest[..end].to_string());
+            rest = &rest[end + 1..];
+        }
+    }
+    out
+}
+
+/// Cross-crate contract pin (T2): `OPAQUE_HTTP_CLIENT_PATTERN` must stay DISJOINT from the HTTP clients
+/// the parser's egress extractor recognizes natively. If a recognized client ALSO matched the opaque
+/// pattern, its calls would be both join-visible AND counted as an opaque blind spot (double-count /
+/// false blindness report). The recognized set is derived from the parser's own source rather than
+/// mirrored here, so an extractor that learns a new client name is checked the moment it ships.
 #[test]
 fn opaque_pattern_is_disjoint_from_natively_recognized_http_clients() {
+    let recognized = parser_recognized_http_clients();
+    assert!(
+        recognized.len() >= 3,
+        "the parser scan found {recognized:?} — it has stopped matching `matchers.rs`, so this test \
+         would vouch for nothing",
+    );
     let opaque = regex::Regex::new(OPAQUE_HTTP_CLIENT_PATTERN).unwrap();
-    for recognized in ["axios", "ky", "fetch", "$fetch"] {
+    for client in &recognized {
         assert!(
-            !opaque.is_match(recognized),
-            "`{recognized}` is recognized by the parser's egress extractor — it must not also match \
+            !opaque.is_match(client),
+            "`{client}` is recognized by the parser's egress extractor — it must not also match \
              OPAQUE_HTTP_CLIENT_PATTERN (would double-count as an opaque blind spot)",
         );
     }

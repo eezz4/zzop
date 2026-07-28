@@ -8,7 +8,7 @@ use super::builtin_fetch::builtin_fetch_lexical_warning;
 use super::client_library_import::client_library_import_warning;
 use super::committed_spec_io_silence::{committed_spec_io_silence_warning, IO_NEAR_ZERO_FLOOR};
 use super::controller_silence::{controller_silence_warning, MIN_PROVIDES_FLOOR};
-use super::fetch_wrapper::fetch_wrapper_call_site_warning;
+use super::fetch_wrapper::{fetch_wrapper_call_site_warning, WRAPPER_EXPORT_NAMES};
 use super::orm_schema_silence::orm_schema_silence_warning;
 use super::server_framework_import::{provide_blind_sources, server_framework_import_warning};
 
@@ -913,7 +913,7 @@ fn wrapper_module_with_enough_cross_file_call_sites_fires() {
         "src/routes/a.js".to_string(),
         "src/routes/b.js".to_string(),
     ];
-    let warning = fetch_wrapper_call_site_warning(dir.path(), &rels, 0);
+    let warning = fetch_wrapper_call_site_warning(dir.path(), &rels, 0, WRAPPER_EXPORT_NAMES);
     assert!(
         warning
             .as_deref()
@@ -935,7 +935,12 @@ fn healthy_keyed_consumes_short_circuit_without_even_reading_files_s7() {
     // Paths don't exist on disk — verifies the cheap short-circuit path returns `None` once the keyed
     // consume count clears the shared S5/S7 floor, same style as S5's own short-circuit test.
     let rels = vec!["does/not/exist/api.js".to_string()];
-    let warning = fetch_wrapper_call_site_warning(Path::new("."), &rels, MIN_PROVIDES_FLOOR);
+    let warning = fetch_wrapper_call_site_warning(
+        Path::new("."),
+        &rels,
+        MIN_PROVIDES_FLOOR,
+        WRAPPER_EXPORT_NAMES,
+    );
     assert!(warning.is_none());
 }
 
@@ -957,7 +962,7 @@ fn wrapper_call_sites_below_the_floor_stay_silent() {
         "src/routes/b.js".to_string(),
     ];
     // 4 total cross-file call sites — one short of FETCH_CALL_SITES_MIN (5).
-    let warning = fetch_wrapper_call_site_warning(dir.path(), &rels, 0);
+    let warning = fetch_wrapper_call_site_warning(dir.path(), &rels, 0, WRAPPER_EXPORT_NAMES);
     assert!(warning.is_none(), "got: {warning:?}");
 }
 
@@ -975,7 +980,7 @@ fn no_wrapper_export_names_stays_silent() {
         "import { helper } from '../lib/util';\nhelper('a'); helper('b'); helper('c'); helper('d'); helper('e');\n",
     );
     let rels = vec!["src/lib/util.js".to_string(), "src/routes/a.js".to_string()];
-    let warning = fetch_wrapper_call_site_warning(dir.path(), &rels, 0);
+    let warning = fetch_wrapper_call_site_warning(dir.path(), &rels, 0, WRAPPER_EXPORT_NAMES);
     assert!(warning.is_none(), "got: {warning:?}");
 }
 
@@ -991,7 +996,7 @@ fn class_methods_named_like_the_vocab_are_not_exported_bindings() {
         "export class ArticlesService {\n  ping() { return fetch('/health'); }\n  get(id) { return this.raw(id); }\n  post(x) { return this.raw(x); }\n}\n",
     );
     let rels = vec!["src/app/articles.service.ts".to_string()];
-    let warning = fetch_wrapper_call_site_warning(dir.path(), &rels, 0);
+    let warning = fetch_wrapper_call_site_warning(dir.path(), &rels, 0, WRAPPER_EXPORT_NAMES);
     assert!(warning.is_none(), "got: {warning:?}");
 }
 
@@ -1011,6 +1016,6 @@ get({}, 'a'); get({}, 'b'); get({}, 'c'); get({}, 'd'); get({}, 'e');\n",
         "src/lib/api.js".to_string(),
         "src/unrelated/map-utils.js".to_string(),
     ];
-    let warning = fetch_wrapper_call_site_warning(dir.path(), &rels, 0);
+    let warning = fetch_wrapper_call_site_warning(dir.path(), &rels, 0, WRAPPER_EXPORT_NAMES);
     assert!(warning.is_none(), "got: {warning:?}");
 }

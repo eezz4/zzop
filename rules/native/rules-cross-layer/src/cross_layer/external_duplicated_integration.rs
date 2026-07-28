@@ -1,4 +1,4 @@
-//! `cross-layer/external-duplicated-integration` (warning) — the same external host is called directly from
+//! `cross-layer/external-host-in-multiple-sources` (warning) — the same external host is called directly from
 //! 2+ distinct source trees. Each tree likely built its own client for the same third-party integration —
 //! duplicated auth/retry/failure-mode handling — so a vendor-side change (base URL, auth scheme) has to be
 //! applied in multiple places instead of one. Anchored at the first site; the fix is to centralize behind
@@ -6,6 +6,10 @@
 //!
 //! Consume sites in test-path files (`zzop_core::is_test_file`) are skipped, including from the
 //! per-host source-tree count — a test mocking a vendor API is not deployed egress.
+//!
+//! The id names the observation (one external host, 2+ sources), not the conclusion: this matcher never
+//! inspects a client, so "each tree built its own client" stays a hypothesis the message states as one.
+//! Renamed from `cross-layer/external-duplicated-integration`; the old id is recorded in `VERSIONING.md`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -75,10 +79,10 @@ pub fn external_duplicated_integration_findings(
             first.file,
             first.line,
             first.source,
-            disable_hint("cross-layer/external-duplicated-integration"),
+            disable_hint("cross-layer/external-host-in-multiple-sources"),
         );
         out.push(Finding {
-            rule_id: "cross-layer/external-duplicated-integration".to_string(),
+            rule_id: "cross-layer/external-host-in-multiple-sources".to_string(),
             severity: Severity::Warning,
             file: first.file.to_string(),
             line: first.line,
@@ -136,7 +140,7 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(
             out[0].rule_id,
-            "cross-layer/external-duplicated-integration"
+            "cross-layer/external-host-in-multiple-sources"
         );
         assert_eq!(out[0].severity, Severity::Warning);
         assert_eq!(out[0].file, "Client.java");

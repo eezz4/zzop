@@ -3,16 +3,29 @@
 use super::*;
 use crate::test_support::TempDir;
 
+/// The reversal of the founding zero-config default (2026-07-27): a directory with no config is
+/// refused outright rather than analyzed on assumed conventions. Pins the two properties the message
+/// has to have beyond "it failed" — it names the missing file's full path, and it names an ARTIFACT
+/// rather than either host's command, since the identical message reaches a terminal and an MCP client.
 #[test]
-fn load_for_root_absent_config_produces_the_zero_config_request() {
+fn load_for_root_absent_config_is_refused_and_names_the_template_document() {
     let dir = TempDir::new("zzop-config-lib-absent");
-    let loaded = load_for_root(dir.path()).unwrap();
-    assert!(loaded.config_path.is_none());
-    assert_eq!(loaded.method, Method::Analyze);
-    let req = loaded.request.as_object().unwrap();
-    assert_eq!(req["root"], dir.path().to_string_lossy().into_owned());
-    assert_eq!(req["git"], serde_json::json!({}));
-    assert_eq!(req["packDefs"].as_array().unwrap().len(), 12);
+    let err = load_for_root(dir.path()).unwrap_err();
+    assert!(
+        err.0.contains(
+            &dir.path()
+                .join(DEFAULT_CONFIG_FILENAME)
+                .display()
+                .to_string()
+        ),
+        "the refusal must name the file it looked for: {}",
+        err.0
+    );
+    assert!(
+        err.0.contains("`config-template` contract document"),
+        "the refusal must point at the artifact both hosts can serve: {}",
+        err.0
+    );
 }
 
 #[test]
@@ -37,22 +50,30 @@ fn load_for_root_present_config_is_discovered_and_mapped() {
 
 // --- single-tree-over-a-workspace disclosure ---------------------------------------------
 //
-// The measured silent hole (22-package pnpm monorepo, no zzop.config.jsonc): `config = null,
-// configWarnings = []` — the run degraded to one tree, so the cross-layer join never ran, and not
-// one word said so. The trigger is the RESOLVED TREE COUNT, not config absence, so a config that
-// exists but never declares `trees` (a real second way into the same trap: no `trees` means no
-// expansion, hence no expansion report to speak in its place) is disclosed too, while an author who
-// explicitly declared `trees` is never second-guessed. These pin both variants, every silence
-// condition, and that the run itself is unchanged (see the determinism test at the end).
+// The measured silent hole (22-package pnpm monorepo): `config = null, configWarnings = []` — the run
+// degraded to one tree, so the cross-layer join never ran, and not one word said so. The trigger is the
+// RESOLVED TREE COUNT: a config that exists but never declares `trees` falls into the trap (no `trees`
+// means no expansion, hence no expansion report to speak in its place), while an author who explicitly
+// declared `trees` is never second-guessed. These pin every silence condition and that the run itself is
+// unchanged.
+//
+// There used to be a second, config-less variant of each of these. It went away with the config-less run
+// (2026-07-27): a directory with no config is now refused, so "analyzed quietly as one tree" is no longer
+// a state that can be reached without a config file.
 
-/// A root with `pnpm-workspace.yaml` matching two package dirs, and no config file.
-fn pnpm_monorepo_without_config(prefix: &str) -> TempDir {
+/// A root with `pnpm-workspace.yaml` matching two package dirs. Callers add the config themselves —
+/// which config (trees-less, `"auto"`, explicit array) is exactly what each test is about.
+fn pnpm_monorepo(prefix: &str) -> TempDir {
     let dir = TempDir::new(prefix);
     dir.write("pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n");
     dir.write("packages/fe/package.json", r#"{"name": "fe"}"#);
     dir.write("packages/be/package.json", r#"{"name": "be"}"#);
     dir
 }
+
+/// The minimal config that reaches the disclosure: it exists (so the run is allowed) and declares no
+/// `trees` (so exactly one tree results).
+const TREES_LESS_CONFIG: &str = r#"{ "rules": { "toctou": "off" } }"#;
 
 fn workspace_warnings(loaded: &LoadedRequest) -> Vec<&String> {
     loaded
@@ -62,49 +83,23 @@ fn workspace_warnings(loaded: &LoadedRequest) -> Vec<&String> {
         .collect()
 }
 
+/// The manifest LABEL is read off the file that was really opened, so a repo using npm `workspaces`
+/// is never told to look at a `pnpm-workspace.yaml` it does not have. (The pnpm spelling is pinned
+/// byte-for-byte by `a_config_that_never_declares_trees_gets_the_same_disclosure_worded_for_its_own_remedy`;
+/// this test exists for the other manifest.)
 #[test]
-fn zero_config_over_a_pnpm_workspace_root_discloses_the_join_it_could_not_run() {
-    let dir = pnpm_monorepo_without_config("zzop-config-ws-pnpm");
-    let loaded = load_for_root(dir.path()).unwrap();
-    assert!(loaded.config_path.is_none());
-    // The exact text, byte for byte — this string is the product's disclosure contract.
-    assert_eq!(
-        loaded.warnings.first().map(String::as_str),
-        Some(
-            format!(
-                "no zzop.config.jsonc at {} — pnpm-workspace.yaml is present there and resolves to \
-                 2 workspace packages, but this run analyzed the root as a SINGLE tree: the \
-                 cross-layer join needs >= 2 trees with distinct sourceIds to fire, so it did not \
-                 run. Create a zzop.config.jsonc at that root containing {{\"trees\": \"auto\"}} to \
-                 analyze those 2 packages as separate trees.",
-                dir.path().display()
-            )
-            .as_str()
-        ),
-        "got: {:?}",
-        loaded.warnings
-    );
-    // The remedy must be copy-pasteable verbatim, and the manifest named must be the real one.
-    let warning = &loaded.warnings[0];
-    assert!(warning.contains("{\"trees\": \"auto\"}"));
-    assert!(warning.contains("pnpm-workspace.yaml"));
-    assert!(!warning.contains("package.json"));
-}
-
-#[test]
-fn zero_config_over_an_npm_workspaces_root_names_that_manifest_instead() {
+fn a_trees_less_config_over_an_npm_workspaces_root_names_that_manifest_instead() {
     let dir = TempDir::new("zzop-config-ws-npm");
     dir.write("package.json", r#"{"workspaces": ["apps/*"]}"#);
     dir.write("apps/one/package.json", r#"{"name": "one"}"#);
     dir.write("apps/two/package.json", r#"{"name": "two"}"#);
+    dir.write(DEFAULT_CONFIG_FILENAME, TREES_LESS_CONFIG);
     let loaded = load_for_root(dir.path()).unwrap();
     let warnings = workspace_warnings(&loaded);
     assert_eq!(warnings.len(), 1, "got: {:?}", loaded.warnings);
     assert!(
-        warnings[0].contains(
-            "package.json \"workspaces\" is present there and resolves to 2 \
-             workspace packages"
-        ),
+        warnings[0].contains("package.json \"workspaces\" at ")
+            && warnings[0].contains("resolves to 2 workspace packages"),
         "got: {}",
         warnings[0]
     );
@@ -114,7 +109,7 @@ fn zero_config_over_an_npm_workspaces_root_names_that_manifest_instead() {
 fn a_config_declaring_trees_auto_suppresses_the_disclosure() {
     // The author answered "which trees?" with `"auto"`, and the expansion prints its own positive
     // report — a second nag here would be duplicate, not honesty.
-    let dir = pnpm_monorepo_without_config("zzop-config-ws-configured");
+    let dir = pnpm_monorepo("zzop-config-ws-configured");
     dir.write(DEFAULT_CONFIG_FILENAME, r#"{ "trees": "auto" }"#);
     let loaded = load_for_root(dir.path()).unwrap();
     assert!(loaded.config_path.is_some());
@@ -134,7 +129,7 @@ fn a_config_declaring_trees_auto_suppresses_the_disclosure() {
 fn an_explicit_single_entry_trees_array_is_a_stated_choice_and_stays_silent() {
     // One tree results, and the manifest names two packages — but the author NAMED that tree, so
     // this is a decision, not an oversight. `Method::AnalyzeTrees` keeps it out of the disclosure.
-    let dir = pnpm_monorepo_without_config("zzop-config-ws-explicit-one");
+    let dir = pnpm_monorepo("zzop-config-ws-explicit-one");
     dir.write(
         DEFAULT_CONFIG_FILENAME,
         r#"{ "trees": [{ "root": "packages/fe", "sourceId": "fe" }] }"#,
@@ -152,7 +147,7 @@ fn an_explicit_single_entry_trees_array_is_a_stated_choice_and_stays_silent() {
 fn a_config_that_never_declares_trees_gets_the_same_disclosure_worded_for_its_own_remedy() {
     // Backlog item S: `{"rules": {...}}` at a monorepo root is the identical trap — one tree, no
     // join — but its author reasonably believes having a config means the analysis was configured.
-    let dir = pnpm_monorepo_without_config("zzop-config-ws-trees-less");
+    let dir = pnpm_monorepo("zzop-config-ws-trees-less");
     dir.write(
         DEFAULT_CONFIG_FILENAME,
         r#"{ "rules": { "toctou": "off" } }"#,
@@ -188,7 +183,7 @@ fn a_config_that_never_declares_trees_gets_the_same_disclosure_worded_for_its_ow
 fn the_trees_less_config_disclosure_reaches_the_explicit_load_config_file_entry_too() {
     // `load_config_file` is its own public entry (check_endpoint's `configPath` mode reaches it
     // directly, not through `load_for_root`) — the two loaders must not drift.
-    let dir = pnpm_monorepo_without_config("zzop-config-ws-explicit-entry");
+    let dir = pnpm_monorepo("zzop-config-ws-explicit-entry");
     dir.write(DEFAULT_CONFIG_FILENAME, "{}");
     let loaded = load_config_file(dir.path()).unwrap();
     let warnings = workspace_warnings(&loaded);
@@ -219,7 +214,7 @@ fn a_trees_less_config_over_a_non_workspace_repo_stays_silent() {
 fn a_multi_root_config_stays_silent_because_the_join_actually_ran() {
     // Two roots => two trees => `Method::AnalyzeTrees` => the join fired. Claiming it "did not run"
     // here would be the one thing worse than silence.
-    let dir = pnpm_monorepo_without_config("zzop-config-ws-multi-root");
+    let dir = pnpm_monorepo("zzop-config-ws-multi-root");
     dir.write(
         DEFAULT_CONFIG_FILENAME,
         r#"{ "roots": ["packages/fe", "packages/be"] }"#,
@@ -239,6 +234,7 @@ fn an_ordinary_single_package_repo_is_never_nagged() {
     let dir = TempDir::new("zzop-config-ws-plain");
     dir.write("package.json", r#"{"name": "just-an-app"}"#);
     dir.write("src/index.ts", "export const x = 1;\n");
+    dir.write(DEFAULT_CONFIG_FILENAME, TREES_LESS_CONFIG);
     let loaded = load_for_root(dir.path()).unwrap();
     assert!(
         workspace_warnings(&loaded).is_empty(),
@@ -254,6 +250,7 @@ fn a_manifest_resolving_to_one_package_stays_silent_because_auto_would_not_help(
     let dir = TempDir::new("zzop-config-ws-one-pkg");
     dir.write("pnpm-workspace.yaml", "packages:\n  - 'packages/*'\n");
     dir.write("packages/only/package.json", r#"{"name": "only"}"#);
+    dir.write(DEFAULT_CONFIG_FILENAME, TREES_LESS_CONFIG);
     let loaded = load_for_root(dir.path()).unwrap();
     assert!(
         workspace_warnings(&loaded).is_empty(),
@@ -268,6 +265,7 @@ fn an_empty_manifest_package_list_stays_silent() {
     // is no honest remedy to offer.
     let dir = TempDir::new("zzop-config-ws-empty-list");
     dir.write("pnpm-workspace.yaml", "packages:\n");
+    dir.write(DEFAULT_CONFIG_FILENAME, TREES_LESS_CONFIG);
     let loaded = load_for_root(dir.path()).unwrap();
     assert!(
         workspace_warnings(&loaded).is_empty(),
@@ -276,27 +274,12 @@ fn an_empty_manifest_package_list_stays_silent() {
     );
 }
 
-#[test]
-fn the_disclosure_is_deterministic_and_does_not_change_what_gets_analyzed() {
-    let dir = pnpm_monorepo_without_config("zzop-config-ws-determinism");
-    let first = load_for_root(dir.path()).unwrap();
-    let second = load_for_root(dir.path()).unwrap();
-    assert_eq!(first.warnings, second.warnings);
-    // Same input, byte-identical request: the warning is DISCLOSURE only — same method, same single
-    // root, same injected packs as the manifest-free zero-config run.
-    assert_eq!(first.request, second.request);
-    assert_eq!(first.method, Method::Analyze);
-    assert_eq!(
-        first.request["root"],
-        dir.path().to_string_lossy().into_owned()
-    );
-    assert!(first.request.get("trees").is_none());
-    assert_eq!(first.request["packDefs"].as_array().unwrap().len(), 12);
-}
+// (The config-less twin of the determinism pin below is gone with the config-less run itself; the
+// trees-less-config form is now the only way to reach this disclosure, so one test covers it.)
 
 #[test]
 fn the_trees_less_config_disclosure_is_deterministic_and_changes_nothing_about_the_run() {
-    let dir = pnpm_monorepo_without_config("zzop-config-ws-determinism-cfg");
+    let dir = pnpm_monorepo("zzop-config-ws-determinism-cfg");
     dir.write(
         DEFAULT_CONFIG_FILENAME,
         r#"{ "rules": { "toctou": "off" } }"#,
@@ -373,12 +356,36 @@ fn load_config_file_missing_reports_the_adapted_error_text() {
     assert!(err
         .0
         .starts_with(&format!("No config file at {}.", missing.display())));
-    assert!(err
-        .0
-        .contains("Create a zzop.config.jsonc there, or pass a directory that has one."));
-    // The JS-CLI-only hint (`zzop init`, `--config`) must NOT survive the port.
+    // The remedy names the ARTIFACT both hosts can serve — the `config-template` contract document —
+    // and, since 2026-07-27, also says WHY a config is required at all rather than just that one is
+    // missing: the convention vocabulary has no built-in default behind it any more.
+    assert!(err.0.contains("`config-template` contract document"));
+    assert!(err.0.contains("has no built-in default"));
+    // Both assertions now stand on ONE live reason, and it is no longer the "JS-CLI-only ghost, must
+    // not survive the port" rationale they were written under: WIRE NEUTRALITY. This error is raised by
+    // the SHARED library, and each host reaches this same line by a different spelling — so naming
+    // either one here would be wrong for the other, and the remedy stays spelling-free ("Create a
+    // zzop.config.jsonc there, or pass a directory that has one", pinned above) while each product's own
+    // usage text owns its own words. The ghost reading died twice, on the same day (2026-07-26):
+    //  - `--config` is a real flag on five `zzop` subcommands (`cross`/`endpoint`/`manifest`/`facts`/
+    //    `graph`), while the `zzop-mcp` caller passes `configPath`, not a flag.
+    //  - `zzop init` is a real subcommand too, as of the CLI-restoration batch — it writes the starter
+    //    config document. That is exactly why the pin must NOT be deleted as "a ghost that came back":
+    //    the MCP caller reaching this line cannot run a subcommand at all (it reads the same document as
+    //    the `config-template` resource), so a library sentence telling it to run `zzop init` would be
+    //    advice it cannot take. A real spelling in the wrong mouth is the same defect as a dead one.
     assert!(!err.0.contains("zzop init"));
     assert!(!err.0.contains("--config"));
+    // WIDENED 2026-07-27. This assertion pair guarded ONE message while five siblings drifted the other
+    // way and shipped — a multi-tree config telling a CLI user to "use the cross_repo tool with
+    // configPath", a single-tree config saying "use analyze_repo for it", EVERY paths-mode run's
+    // configWarnings saying "pass configPath to honor it", a capped edge list naming check_endpoint, and
+    // a blank envelope FILE reporting "envelopeJson is empty". A pin on one point does not defend a
+    // class, so the class now has its own machine contract:
+    // `crates/engine/tests/rule_contracts/host_vocabulary.rs` scans every user-facing string literal in
+    // `crates/summary/src` + `crates/config/src` for MCP-only vocabulary. This test stays because it is
+    // the tighter, message-specific half (it also covers the CLI direction, which the class contract
+    // does not).
 }
 
 #[test]
@@ -441,4 +448,147 @@ fn load_config_file_comments_and_trailing_commas_are_stripped_before_parsing() {
     let loaded = load_config_file(dir.path()).unwrap();
     let req = loaded.request.as_object().unwrap();
     assert_eq!(req["root"], dir.path().to_string_lossy().into_owned());
+}
+
+/// `config-surface.json`'s `_docs.configPaths` claims the list is derived from `configKeys`. This is
+/// what makes that claim true instead of aspirational: it REGENERATES the list here and compares.
+///
+/// The gap it closes is a false NEGATIVE, which no consumer could have noticed. `configPaths` is a
+/// whitelist — a message may name a dotted config path only if it appears here — so a nested scope
+/// present in `configKeys` but missing from `configPaths` does not make anything fail loudly; it just
+/// makes a real, valid config path unsayable. `configKeys.mount`/`route` sat in exactly that state
+/// (audited 2026-07-26) while the derivation claim was already written down.
+///
+/// The per-scope prefix table below is the derivation rule, and it is EXHAUSTIVE by construction: a
+/// scope added to `configKeys` with no entry here fails this test with the question it needs answered
+/// ("what does this scope look like when an author writes it in a sentence?"), rather than silently
+/// contributing nothing.
+#[test]
+fn config_paths_are_derived_from_config_keys() {
+    use std::collections::BTreeSet;
+
+    let surface: serde_json::Value = serde_json::from_str(CONFIG_SURFACE_JSON).unwrap();
+    let config_keys = surface["configKeys"].as_object().unwrap();
+
+    // Scope -> the prefix its child keys carry when written out. `None` = this scope contributes no
+    // dotted spelling at all, with the reason stated (see `_docs.configPaths`, which says the same two).
+    let dotted_prefix = |scope: &str| -> Option<Option<&'static str>> {
+        Some(match scope {
+            // A top-level key IS its own spelling; it is checked against `configKeys.top` directly.
+            "top" => None,
+            // `rules.<id>.severity` — `<id>` is an open-keyed rule id, not enumerable.
+            "ruleObject" => None,
+            "packs" => Some("packs."),
+            "git" => Some("git."),
+            "vocabulary" => Some("vocabulary."),
+            // The first NESTED scope under `vocabulary` (2026-07-27). Its four keys answer one question
+            // ("what is your FSD layout?") and are meaningless apart, which is what the nesting says;
+            // replacement granularity stays the LEAF, exactly as `packs.` and `git.` already work.
+            "fsd" => Some("vocabulary.fsd."),
+            "parsers" => Some("parsers."),
+            "globOverride" => Some("parsers.globOverrides[]."),
+            "report" => Some("report."),
+            "tree" => Some("trees[]."),
+            "mount" => Some("trees[].topology.mounts[]."),
+            "topology" => Some("trees[].topology."),
+            "route" => Some("trees[].routes[]."),
+            _ => return None,
+        })
+    };
+
+    let mut expected: BTreeSet<String> = BTreeSet::new();
+    for (scope, keys) in config_keys {
+        let prefix = dotted_prefix(scope).unwrap_or_else(|| {
+            panic!(
+                "config-surface.json's configKeys gained the scope \"{scope}\", which this derivation \
+                 does not know how to spell as a dotted path. Add it to the table in this test (with \
+                 its `<parent>.`/`<parent>[].` prefix), or record it there as deliberately un-dotted \
+                 with the reason — do not leave it silently contributing nothing."
+            )
+        });
+        let Some(prefix) = prefix else { continue };
+        for key in keys.as_array().unwrap() {
+            expected.insert(format!("{prefix}{}", key.as_str().unwrap()));
+        }
+    }
+
+    let actual: BTreeSet<String> = surface["configPaths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+
+    assert_eq!(
+        actual, expected,
+        "config-surface.json's configPaths must be exactly the dotted spellings its configKeys imply"
+    );
+}
+
+/// The on-disk two-way split is only real if git treats the two directories differently, and the two
+/// spellings are ONE character apart (`.zzop/` derived and ignored, `zzop/` authored and committed).
+/// A `zzop*` glob in an ignore file — the obvious-looking way to write the first rule — silently
+/// swallows the second, taking every custom rule pack out of version control with no error anywhere.
+/// That failure is invisible to reading: `**/.zzop/` and `zzop*` look equally reasonable in a diff.
+/// So this asks git itself, against THIS repo's real `.gitignore`, replayed into a scratch repo so the
+/// answer depends on that file alone (not on the developer's global excludes or the current index).
+#[test]
+fn the_repo_ignore_rules_hide_the_derived_zzop_dir_and_keep_the_authored_one_tracked() {
+    use std::process::Command;
+
+    let git_ok = Command::new("git")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !git_ok {
+        return; // no git on PATH — the same tolerance `crates/facade`'s git-backed tests use.
+    }
+
+    let repo_gitignore = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../.gitignore")
+        .canonicalize()
+        .expect("the repo's own .gitignore must exist");
+    let rules = std::fs::read_to_string(&repo_gitignore).expect("readable .gitignore");
+
+    let dir = TempDir::new("zzop-config-ignore-split");
+    let run = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir.path())
+            .output()
+            .expect("git must spawn")
+    };
+    assert!(run(&["init"]).status.success());
+    dir.write(".gitignore", &rules);
+    dir.write(
+        &format!("{}/my-pack.json", crate::DEFAULT_AUTHORED_PACKS_DIR),
+        "{}",
+    );
+    dir.write("packages/api/zzop/rules/my-pack.json", "{}");
+    dir.write(".zzop/cache/ir/entry.bin", "x");
+    dir.write("packages/api/.zzop/cache/ir/entry.bin", "x");
+
+    // `git check-ignore` exits 0 when a path IS ignored and 1 when it is not — the answer itself, and
+    // the reason this asks git rather than re-implementing gitignore semantics and testing the copy.
+    // Deliberately flagless: nothing is ever staged in this scratch repo, so there is no index for the
+    // check to disagree with, and the reference-validation contract reads every `--flag`-shaped token
+    // in this crate's source against the real CLI surface — a git flag spelled here would trip it.
+    let ignored = |rel: &str| run(&["check-ignore", rel]).status.success();
+
+    assert!(
+        !ignored("zzop/rules/my-pack.json"),
+        "an authored zzop/ pack must stay tracked — a zzop* glob would have swallowed it"
+    );
+    assert!(
+        !ignored("packages/api/zzop/rules/my-pack.json"),
+        "the authored directory stays tracked in a sub-tree too, not only at the repo root"
+    );
+    assert!(
+        ignored(".zzop/cache/ir/entry.bin"),
+        "the derived .zzop/ must be ignored at the root"
+    );
+    assert!(
+        ignored("packages/api/.zzop/cache/ir/entry.bin"),
+        "the derived .zzop/ must be ignored in every sub-tree — a per-path run creates one per base"
+    );
 }

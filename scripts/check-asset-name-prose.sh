@@ -34,7 +34,7 @@
 #   - literal placeholders `zzop-cli-<platform>` / `zzop-mcp-<platform>` — these need NO special
 #     handling: the rule's own extraction regex requires an alphanumeric right after the second
 #     dash, so `<` breaks the match before it starts. Every scanned file today (README.md,
-#     VERSIONING.md, crates/host/README.md, docs/getting-started.md, docs/modules/mcp.md,
+#     VERSIONING.md, packages/README.md, docs/getting-started.md, docs/modules/mcp.md,
 #     packages/cli/README.md, packages/mcpb/README.md, site/usage.html via its
 #     `&lt;platform&gt;` entity encoding) uses exactly this placeholder form and is unaffected.
 #   - glob forms ending in a literal `*` (e.g. `zzop-mcp-linux-*`) — unlike the placeholder case,
@@ -48,8 +48,8 @@
 #     zzop-cli-bin`) — this is the one real false positive the raw rule regex produces: it matches
 #     `zzop-cli-` + `[A-Za-z0-9]` = `bin`, but `zzop-cli-bin` is a *crate name*, never a release
 #     asset name (the asset is `zzop-cli-<platform>[.exe]`, built FROM that crate). It appears this
-#     way in CONTRIBUTING.md, crates/host/README.md, docs/modules/mcp.md,
-#     examples/rust-parser-adapter/README.md, packages/cli/README.md, and README.md — always after
+#     way in CONTRIBUTING.md, packages/README.md, docs/modules/mcp.md,
+#     examples/adapters/adapter-kit/README.md, packages/cli/README.md, and README.md — always after
 #     `-p ` or inside backticks naming the package, never as a downloadable file. Allowlisted by
 #     exact string match; a different, genuinely wrong asset-shaped token must still fail.
 # Any other token is a hard failure: report the file, line, and wrong token rather than silently

@@ -15,6 +15,17 @@ cd "$(dirname "$0")/../.."
 
 BE_CTRL="corpus/oss/be-express/src/app/routes/auth/auth.controller.ts"
 
+# Preconditions this repo does NOT ship (see docs/demo/break-a-route.md): `corpus/oss/` is gitignored, so
+# the two trees must be supplied locally. Checked up front so a missing corpus is reported as a missing
+# corpus, not misdiagnosed further down as a build/toolchain failure.
+for tree in corpus/oss/fe-vite corpus/oss/be-express; do
+  if [ ! -d "$tree" ]; then
+    echo "!! missing '$tree' — this demo needs two frontend/backend trees you supply under corpus/oss/." >&2
+    echo "   'corpus/oss/' is gitignored and nothing here fetches it; see docs/demo/break-a-route.md." >&2
+    exit 1
+  fi
+done
+
 # Always restore the corpus, even if the analysis fails or the script is interrupted.
 restore() { git checkout -- "$BE_CTRL" 2>/dev/null || true; }
 trap restore EXIT
@@ -24,7 +35,8 @@ trap restore EXIT
 dump() {
   if ! cargo run --release -q -p zzop-engine --example xlayer_dump -- \
         corpus/oss/fe-vite corpus/oss/be-express 2>/dev/null; then
-    echo "!! 'cargo run --example xlayer_dump' failed to build/run — check your Rust toolchain." >&2
+    echo "!! 'cargo run --example xlayer_dump' failed to build/run — this needs a SOURCE CHECKOUT with a" >&2
+    echo "   working Rust toolchain (a released zzop binary cannot run this example)." >&2
     exit 1
   fi
 }

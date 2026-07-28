@@ -5,18 +5,22 @@
 //! points at the old API version" drift precisely, rather than lump it into the more general near-miss
 //! bucket.
 
-use regex::Regex;
-
 use zzop_core::io::TaggedConsume;
 use zzop_core::{disable_hint, Finding, Severity};
 
-use super::{path_segments, split_key, HttpProvideSite, VERSION_SEGMENT_PATTERN};
+use super::vocab::version_segment_re;
+use super::{path_segments, split_key, HttpProvideSite};
 
+/// `version_segment_pattern`: the run's declared `vocabulary.apiVersionSegmentPattern`, or `None` when
+/// the author declared none (or declared one that will not parse). `None` means no segment is a version
+/// segment, so no two paths are ever judged version-skewed — see [`super::vocab::version_segment_re`] for
+/// why an absent declaration is never replaced with ours.
 pub fn version_skew_findings(
     unprovided_consumes: &[TaggedConsume],
     all_provides: &[HttpProvideSite],
+    version_segment_pattern: Option<&str>,
 ) -> Vec<Finding> {
-    let version_re = Regex::new(VERSION_SEGMENT_PATTERN).unwrap();
+    let version_re = version_segment_re(version_segment_pattern);
 
     let mut out = Vec::new();
     for c in unprovided_consumes
@@ -63,7 +67,10 @@ pub fn version_skew_findings(
             };
             let cs = consume_segs[i];
             let ps = provide_segs[i];
-            if version_re.is_match(cs) && version_re.is_match(ps) {
+            if version_re
+                .as_ref()
+                .is_some_and(|re| re.is_match(cs) && re.is_match(ps))
+            {
                 matches.push((p, cs, ps));
             }
         }
@@ -110,6 +117,7 @@ pub fn version_skew_findings(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cross_layer::VERSION_SEGMENT_PATTERN;
 
     fn consume(
         kind: &str,
@@ -153,7 +161,11 @@ mod tests {
             5,
         )];
         let provides = vec![provide("GET /api/v2/users", "be", "Api.java", 30)];
-        let out = version_skew_findings(&unprovided_consumes, &provides);
+        let out = version_skew_findings(
+            &unprovided_consumes,
+            &provides,
+            Some(VERSION_SEGMENT_PATTERN),
+        );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].rule_id, "cross-layer/version-skew");
         assert_eq!(out[0].severity, Severity::Warning);
@@ -176,7 +188,12 @@ mod tests {
             5,
         )];
         let provides = vec![provide("GET /api/v2/accounts", "be", "Api.java", 30)];
-        assert!(version_skew_findings(&unprovided_consumes, &provides).is_empty());
+        assert!(version_skew_findings(
+            &unprovided_consumes,
+            &provides,
+            Some(VERSION_SEGMENT_PATTERN)
+        )
+        .is_empty());
     }
 
     #[test]
@@ -189,7 +206,12 @@ mod tests {
             5,
         )];
         let provides = vec![provide("GET /api/v2/users", "be", "Api.java", 30)];
-        assert!(version_skew_findings(&unprovided_consumes, &provides).is_empty());
+        assert!(version_skew_findings(
+            &unprovided_consumes,
+            &provides,
+            Some(VERSION_SEGMENT_PATTERN)
+        )
+        .is_empty());
     }
 
     #[test]
@@ -197,7 +219,47 @@ mod tests {
         // "users" vs "orders" differ but neither looks like a version segment.
         let unprovided_consumes = vec![consume("http", Some("GET /api/users"), "fe", "Ctx.tsx", 5)];
         let provides = vec![provide("GET /api/orders", "be", "Api.java", 30)];
-        assert!(version_skew_findings(&unprovided_consumes, &provides).is_empty());
+        assert!(version_skew_findings(
+            &unprovided_consumes,
+            &provides,
+            Some(VERSION_SEGMENT_PATTERN)
+        )
+        .is_empty());
+    }
+
+    /// Seals the declared-pattern contract from both ends: a project vocabulary that spells versions
+    /// `rel-1` sees the skew the built-in cannot, and a declaration that will not compile as a regex falls
+    /// back to the built-in instead of panicking.
+    #[test]
+    fn a_declared_version_vocabulary_is_honored_and_an_uncompilable_one_falls_back() {
+        let unprovided_consumes = vec![consume(
+            "http",
+            Some("GET /api/rel-1/users"),
+            "fe",
+            "Ctx.tsx",
+            5,
+        )];
+        let provides = vec![provide("GET /api/rel-2/users", "be", "Api.java", 30)];
+        assert!(version_skew_findings(
+            &unprovided_consumes,
+            &provides,
+            Some(VERSION_SEGMENT_PATTERN)
+        )
+        .is_empty());
+        let declared = r"(?i)^rel-[0-9]+$";
+        assert_eq!(
+            version_skew_findings(&unprovided_consumes, &provides, Some(declared)).len(),
+            1
+        );
+        assert!(
+            version_skew_findings(&unprovided_consumes, &provides, Some("(unclosed")).is_empty(),
+            "an uncompilable declaration must match nothing — never panic, never match everything, \
+             and never quietly become zzop's own pattern"
+        );
+        assert!(
+            version_skew_findings(&unprovided_consumes, &provides, None).is_empty(),
+            "with no declaration there is no version segment, so there is no skew to report"
+        );
     }
 
     #[test]
@@ -210,6 +272,11 @@ mod tests {
             5,
         )];
         let provides = vec![provide("GET /api/v2/users", "be", "Api.java", 30)];
-        assert!(version_skew_findings(&unprovided_consumes, &provides).is_empty());
+        assert!(version_skew_findings(
+            &unprovided_consumes,
+            &provides,
+            Some(VERSION_SEGMENT_PATTERN)
+        )
+        .is_empty());
     }
 }

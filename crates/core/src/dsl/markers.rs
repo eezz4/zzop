@@ -3,8 +3,8 @@
 //! reported rather than silently skipped; the markers here are DERIVED from the rule id, so they have no
 //! author-facing field name to report and stay plain `Option` returns.
 
-/// Builds the regex for the derived `RuleDef::suppress_marker()` (`<id>-ok`) — matches a `//` comment
-/// naming the marker (regex-escaped; derived markers are `<kebab-id>-ok` with no metacharacters, so the
+/// Builds the regex for the derived `RuleDef::suppress_marker()` (`zzop-<id>-ok`) — matches a `//` comment
+/// naming the marker (regex-escaped; derived markers are `zzop-<kebab-id>-ok` with no metacharacters, so the
 /// escape is defensive), optionally followed by `:` and free text.
 pub(super) fn compile_marker(marker: &str) -> Option<regex::Regex> {
     regex::Regex::new(&format!(r"//\s*{}\b", regex::escape(marker))).ok()
@@ -19,7 +19,7 @@ pub(super) fn compile_marker_sql(marker: &str) -> Option<regex::Regex> {
 
 /// Line-comment-neutral marker for the whole-tree io-scan pass, whose anchor lines span every language
 /// an `http` provide can come from: accepts `//` (TS/JS/Java/Go/C#) AND `#` (Python) comment leaders —
-/// a `# auth-gates-ok` on a FastAPI route line suppresses exactly like `// auth-gates-ok` on an Express
+/// a `# zzop-protected-path-no-auth-evidence-ok` on a FastAPI route line suppresses exactly like `// zzop-protected-path-no-auth-evidence-ok` on an Express
 /// one. `--` is deliberately NOT included (no `.sql` file produces route provides; see
 /// `compile_marker_sql`'s isolation note). `#` cannot false-fire in JS/TS: a marker contains `-`, which
 /// no `#private` field or hex literal continues with.

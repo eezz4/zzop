@@ -684,7 +684,7 @@ fn the_marker_window_phrase_is_identical_in_the_finding_and_the_published_docs()
 
 /// The three published pages that must carry this module's LANGUAGE SIGHTLINE, in the same shape as
 /// [`MARKER_WINDOW_PROSE_PAGES`] above. `docs/rules/catalog.md` is additionally embedded in the shipped
-/// binary (`crates/host/src/embedded.rs`'s `rule-catalog` resource), so its copy is what an MCP client
+/// binary (`crates/summary/src/contracts.rs`'s `rule-catalog` resource), so its copy is what an MCP client
 /// reads without a source checkout.
 const SIGHTLINE_PROSE_PAGES: [&str; 3] = [
     "../../../docs/rules/catalog.md",

@@ -350,7 +350,7 @@ fn overlay_import_from_a_synthetic_projection_gives_a_native_target_fan_in() {
     );
 
     let mut cfg = config();
-    cfg.adapter_overlays = vec![overlay("svelte-adapter/1", vec![view])];
+    cfg.adapter_overlays = vec![overlay("view-overlay-adapter/1", vec![view])];
     let out = analyze_tree(dir.path(), &cfg);
 
     // The overlay edge is real dep-graph data, not just a suppression side effect.
@@ -459,7 +459,7 @@ fn overlay_import_onto_a_degraded_on_disk_file_gives_a_target_fan_in() {
         },
     );
     let mut cfg = config();
-    cfg.adapter_overlays = vec![overlay("svelte-adapter/1", vec![view])];
+    cfg.adapter_overlays = vec![overlay("view-overlay-adapter/1", vec![view])];
     let out = analyze_tree(dir.path(), &cfg);
 
     assert!(

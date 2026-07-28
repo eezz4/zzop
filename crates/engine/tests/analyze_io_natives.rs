@@ -426,7 +426,28 @@ fn nestjs_forroutes_with_a_non_auth_middleware_does_not_exempt() {
 
 /// `CommentsApi.deleteComment`-shaped: a `RequestMapping(method = RequestMethod.DELETE)` handler whose
 /// inline guard (`AuthorizationService.canWriteComment(...)`) sits inside a `.map(lambda -> {...})` body.
+///
+/// Writes TWO files, and the second one is load-bearing: `AuthorizationService` must be DECLARED
+/// somewhere in the tree, exactly as `corpus/oss/be-spring` declares it. This fixture used to write the
+/// handler alone, and on 2026-07-27 that omission is what made it go red — the rule stopped accepting a
+/// guard qualifier that names no declared symbol (a phantom `#SessionDep.add` was clearing
+/// unauthenticated FastAPI routes). A fixture in a SUPPRESSION path that drops a line the real corpus
+/// has does not test a smaller case; it tests a different one, and the difference is the defect.
 fn java_comments_api_fixture(dir: &TempDir) {
+    // `corpus/oss/be-spring/src/main/java/io/spring/core/service/AuthorizationService.java`, trimmed to
+    // the one static method this handler calls. Its package/type path is what the Java import resolver
+    // walks to reach the guard.
+    dir.write(
+        "src/main/java/io/spring/core/service/AuthorizationService.java",
+        concat!(
+            "package io.spring.core.service;\n\n",
+            "public class AuthorizationService {\n",
+            "  public static boolean canWriteComment(User user, Article article, Comment comment) {\n",
+            "    return user.getId().equals(comment.getUserId());\n",
+            "  }\n",
+            "}\n"
+        ),
+    );
     dir.write(
         "src/main/java/io/spring/api/CommentsApi.java",
         concat!(
@@ -920,4 +941,274 @@ fn three_or_more_foreign_unmatched_consumes_fold_into_one_aggregate_finding_end_
         assert!(found[0].message.contains(key), "missing {key} in message");
     }
     assert!(found[0].message.contains("disabled_rules"));
+}
+
+// --- Python call-graph coverage (CALL_GRAPH_COVERED_EXTENSIONS lift) -------------------------
+//
+// Real-shape regressions distilled from the two FastAPI checkouts in `corpus/oss` — the ground truth
+// `mutating_route_no_auth`'s module doc names for the Python `RawCall` wiring
+// (`zzop_parser_python_3::lang::calls::parse_calls` + `run_callgraph_rules`'s Python loop) and for its
+// inseparable other half, the `Depends(...)` guard producer
+// (`zzop_parser_python_3::extract_fastapi_guarded_lines`).
+//
+// MEASURED, not assumed: with the guard producer neutralized, `corpus/oss/be-fastapi` reports 9
+// `mutating-route-no-auth` findings and `corpus/oss/be-fastapi-fs` reports 14; with it, 0 and 3. Every
+// one of the 20 suppressed routes carries a real `Depends` guard. The fixtures below are the shapes
+// behind those numbers.
+
+/// `articles_resource.py`-shaped (`corpus/oss/be-fastapi/app/api/routes/articles/articles_resource.py`):
+/// a `POST` route guarded ONLY by a signature `Depends(get_current_user_authorizer())` and a `PUT` route
+/// guarded ONLY by a decorator `dependencies=[Depends(check_article_modification_permissions)]`. Neither
+/// guard is a call the handler body makes, so ONLY the `decorator_guarded` exemption can clear them.
+fn python_fastapi_guarded_fixture(dir: &TempDir) {
+    dir.write(
+        "app/api/routes/articles/articles_resource.py",
+        concat!(
+            "from fastapi import APIRouter, Body, Depends\n",
+            "from app.api.dependencies.articles import check_article_modification_permissions\n",
+            "from app.api.dependencies.authentication import get_current_user_authorizer\n\n",
+            "router = APIRouter()\n\n",
+            "@router.post(\"\")\n",
+            "async def create_new_article(\n",
+            "    user: User = Depends(get_current_user_authorizer()),\n",
+            ") -> ArticleInResponse:\n",
+            "    slug = get_slug_for_article(article_create.title)\n",
+            "    return slug\n\n",
+            "@router.put(\n",
+            "    \"/{slug}\",\n",
+            "    dependencies=[Depends(check_article_modification_permissions)],\n",
+            ")\n",
+            "async def update_article_by_slug(\n",
+            "    articles_repo: ArticlesRepository = Depends(get_repository(ArticlesRepository)),\n",
+            ") -> ArticleInResponse:\n",
+            "    return None\n"
+        ),
+    );
+}
+
+/// `private.py`-shaped (`corpus/oss/be-fastapi-fs/backend/app/api/routes/private.py`): the ONE mutating
+/// FastAPI route in either checkout with no auth evidence anywhere — a `POST /private/users` that
+/// creates a user. The true positive the lift exists to find.
+fn python_fastapi_unguarded_fixture(dir: &TempDir) {
+    dir.write(
+        "backend/app/api/routes/private.py",
+        concat!(
+            "from fastapi import APIRouter\n",
+            "from app.core.security import get_password_hash\n\n",
+            "router = APIRouter(tags=[\"private\"], prefix=\"/private\")\n\n",
+            "@router.post(\"/users/\")\n",
+            "def create_user(user_in: PrivateUserCreate, session: SessionDep):\n",
+            "    user = User(email=user_in.email)\n",
+            "    session.add(user)\n",
+            "    session.commit()\n",
+            "    return user\n"
+        ),
+    );
+}
+
+#[test]
+fn python_fastapi_route_with_no_auth_evidence_is_flagged() {
+    // Proves the LIFT half on its own: before `.py` entered `CALL_GRAPH_COVERED_EXTENSIONS` this route
+    // was exempted before the BFS and the rule was structurally silent on every Python tree.
+    let dir = TempDir::new("zzop-mutating-no-auth-python-private");
+    python_fastapi_unguarded_fixture(&dir);
+    let out = scan(&dir);
+    let found = hits(&out, "mutating-route-no-auth");
+    assert_eq!(found.len(), 1, "{:?}", out.findings);
+    assert_eq!(found[0].file, "backend/app/api/routes/private.py");
+    assert_eq!(found[0].data.as_ref().unwrap()["method"], "POST");
+}
+
+#[test]
+fn python_fastapi_depends_guards_exempt_both_the_signature_and_the_decorator_shape() {
+    // Proves the GUARD half end-to-end through the real engine (parser producer + `run_callgraph_rules`
+    // wiring + the rule's `decorator_guarded` exemption). Neither the signature `Depends` nor the
+    // decorator `dependencies=[...]` is a call edge — the BFS structurally cannot see either — so if
+    // this producer regresses, BOTH routes fire. This is the Python parallel of the Java `@PreAuthorize`
+    // and NestJS `@UseGuards` end-to-end tests.
+    let dir = TempDir::new("zzop-mutating-no-auth-python-depends");
+    python_fastapi_guarded_fixture(&dir);
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "mutating-route-no-auth").is_empty(),
+        "FastAPI Depends guards should exempt both routes: {:?}",
+        out.findings
+    );
+}
+
+/// The `deps.py` half of `corpus/oss/be-fastapi-fs/backend/app/api/deps.py`, written at `path` — the
+/// tree-wide `Annotated` guard alias that shape 4 of the FastAPI guard producer resolves across files.
+fn python_fastapi_deps_alias(dir: &TempDir, path: &str, guarded: bool) {
+    let injected = if guarded {
+        "get_current_user"
+    } else {
+        "get_db"
+    };
+    dir.write(
+        path,
+        &format!(
+            concat!(
+                "from typing import Annotated\n",
+                "from fastapi import Depends\n\n",
+                "SessionDep = Annotated[Session, Depends(get_db)]\n",
+                "CurrentUser = Annotated[User, Depends({injected})]\n"
+            ),
+            injected = injected
+        ),
+    );
+}
+
+/// A mutating route annotated `current_user: CurrentUser` — `items.py`-shaped
+/// (`corpus/oss/be-fastapi-fs/backend/app/api/routes/items.py`). `import_from` is `None` for the case
+/// where the route module never binds the name at all.
+fn python_fastapi_alias_route(dir: &TempDir, path: &str, import_from: Option<&str>) {
+    let import_line = import_from
+        .map(|m| format!("from {m} import CurrentUser\n"))
+        .unwrap_or_default();
+    dir.write(
+        path,
+        &format!(
+            concat!(
+                "from fastapi import APIRouter\n",
+                "{import_line}",
+                "router = APIRouter(prefix=\"/items\")\n\n",
+                "@router.post(\"/\")\n",
+                "def create_item(current_user: CurrentUser, item_in: ItemCreate):\n",
+                "    return item_in\n"
+            ),
+            import_line = import_line
+        ),
+    );
+}
+
+#[test]
+fn python_fastapi_annotated_alias_resolves_across_files_and_clears_the_route() {
+    // The positive path shape 4 exists for: the alias is declared once in `deps.py`, the route module
+    // imports it, and nothing about the route itself says "guard" — only the cross-file resolution can
+    // clear it.
+    let dir = TempDir::new("zzop-mutating-no-auth-python-alias-ok");
+    python_fastapi_deps_alias(&dir, "backend/app/api/deps.py", true);
+    python_fastapi_alias_route(
+        &dir,
+        "backend/app/api/routes/items.py",
+        Some("app.api.deps"),
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "mutating-route-no-auth").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn python_fastapi_alias_never_bound_in_the_route_module_clears_nothing() {
+    // Same tree, minus the import: `CurrentUser` here is whatever THIS module means by it (typically a
+    // same-named pydantic body model). A bare-name match against the tree-wide union cleared it anyway,
+    // which made the union monotone toward suppression — one file's alias silencing the whole tree.
+    let dir = TempDir::new("zzop-mutating-no-auth-python-alias-unbound");
+    python_fastapi_deps_alias(&dir, "backend/app/api/deps.py", true);
+    python_fastapi_alias_route(&dir, "backend/app/api/routes/items.py", None);
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "mutating-route-no-auth").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn python_fastapi_two_packages_disagreeing_about_one_alias_name_clear_nothing() {
+    // The by-NAME join's conflict rule, FastAPI edition — the same drop the Django verdicts get. Two
+    // packages both declare `CurrentUser`; one injects a guard, one injects `get_db`. The name is
+    // undecidable tree-wide, so it resolves to nothing and BOTH routes fire (recall lost, precision
+    // kept — the only safe direction for evidence that suppresses findings).
+    let dir = TempDir::new("zzop-mutating-no-auth-python-alias-conflict");
+    python_fastapi_deps_alias(&dir, "svc_a/api/deps.py", true);
+    python_fastapi_deps_alias(&dir, "svc_b/api/deps.py", false);
+    python_fastapi_alias_route(&dir, "svc_a/api/routes.py", Some("svc_a.api.deps"));
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "mutating-route-no-auth").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn python_call_graph_lift_leaves_the_unguarded_route_visible_alongside_guarded_ones() {
+    // Both fixtures in one tree: the guarded routes stay silent and the unguarded one still fires, so
+    // the guard producer's exemption is route-scoped, not tree-wide. Also proves `.py` joining the
+    // covered set does not disturb the separate `resolve_handler_scoped` ambiguity gate — every handler
+    // name here is unique tree-wide.
+    let dir = TempDir::new("zzop-mutating-no-auth-python-both");
+    python_fastapi_guarded_fixture(&dir);
+    python_fastapi_unguarded_fixture(&dir);
+    let out = scan(&dir);
+    let found = hits(&out, "mutating-route-no-auth");
+    assert_eq!(found.len(), 1, "{:?}", out.findings);
+    assert_eq!(found[0].file, "backend/app/api/routes/private.py");
+}
+
+#[test]
+fn python_call_graph_lift_finds_a_guard_the_handler_body_actually_calls() {
+    // The other half of the lift: a guard the BFS CAN see. `check_permissions` is called from the
+    // handler body, so the Python `RawCall` extractor + `build_symbol_graph` must produce the edge —
+    // with no `Depends` evidence anywhere, only the call graph can clear this route.
+    let dir = TempDir::new("zzop-mutating-no-auth-python-bfs");
+    dir.write(
+        "app/routes.py",
+        concat!(
+            "from fastapi import APIRouter\n\n",
+            "router = APIRouter()\n\n",
+            "def check_permissions(user):\n",
+            "    raise HTTPException(status_code=403)\n\n",
+            "@router.delete(\"/widgets/{id}\")\n",
+            "def remove_widget(id: str):\n",
+            "    check_permissions(id)\n",
+            "    return None\n"
+        ),
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "mutating-route-no-auth").is_empty(),
+        "a guard called from the handler body must be reachable through the Python call graph: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn call_graph_language_gap_is_disclosed_for_a_language_the_bfs_cannot_walk() {
+    // The disclosure half of the same batch (tripwire S8): a tree whose routes are in a language with no
+    // `RawCall` producer must SAY SO — naming the language, the silenced rule id, and a way to open it.
+    // Python must NOT appear in that list any more, which is what makes this pin bidirectional.
+    let dir = TempDir::new("zzop-callgraph-language-gap");
+    dir.write(
+        "internal/api/handler.go",
+        concat!(
+            "package api\n\n",
+            "import \"github.com/gin-gonic/gin\"\n\n",
+            "func Register(r *gin.Engine) {\n",
+            "\tr.POST(\"/widgets\", createWidget)\n",
+            "}\n"
+        ),
+    );
+    dir.write("go.mod", "module example.com/app\n\ngo 1.22\n");
+    python_fastapi_unguarded_fixture(&dir);
+    let out = scan(&dir);
+    let gap: Vec<&String> = out
+        .warnings
+        .iter()
+        .filter(|w| w.starts_with("Call-graph coverage gap"))
+        .collect();
+    assert_eq!(gap.len(), 1, "warnings: {:?}", out.warnings);
+    assert!(gap[0].contains(".go ("), "{}", gap[0]);
+    assert!(gap[0].contains("mutating-route-no-auth"), "{}", gap[0]);
+    assert!(
+        !gap[0].contains(".py ("),
+        "Python is call-graph-covered now and must not be listed as a gap: {}",
+        gap[0]
+    );
 }

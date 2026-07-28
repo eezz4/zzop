@@ -19,19 +19,30 @@
 
 use zzop_core::{IoConsume, IoFacts, IoProvide};
 
+/// The router identifiers this recognizer assumes when a project declares none — the value
+/// `vocabulary.routerNames` replaces, and the ONE place the name lives (`VocabularyConfig::built_in`
+/// reads this symbol rather than re-spelling it, the same T1 single-definition rule
+/// `zzop_cache::DEFAULT_CACHE_DIR` follows).
+///
+/// It was an inline `vec!["apiRoutes"]` inside `IoOptions::default` until 2026-07-27, and that form is
+/// why it went unnoticed for so long: the policy-value census reads `const` declarations, so a name
+/// vocabulary written as a struct-field default was invisible to it AND unreachable from any config —
+/// an "escape hatch" (this type's own words) with no door. Naming it fixes both halves at once.
+pub const DEFAULT_ROUTER_NAMES: &[&str] = &["apiRoutes"];
+
 /// Config for the fused per-file pass's BE route adapter. Route file *paths* aren't a separate config
 /// concern: under per-file fusion every file is its own sole candidate (see [`extract_file_io`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IoOptions {
     /// Escape-hatch identifier allowlist for the router-mount recognizer — vocabulary-agnostic ROUTE rules only (`.get/.post/.put/.patch/.delete/.all`, `.route()`), not just Hono-style.
-    /// It does NOT confer `.use()` mounting: that is gated on `is_express`, which only the AST recognizer sets (`express()`/`express.Router()`/an imported `Router`). Default: `["apiRoutes"]`.
+    /// It does NOT confer `.use()` mounting: that is gated on `is_express`, which only the AST recognizer sets (`express()`/`express.Router()`/an imported `Router`). Declared through `vocabulary.routerNames`; [`DEFAULT_ROUTER_NAMES`] is what `zzop init` writes.
     pub router_names: Vec<String>,
 }
 
 impl Default for IoOptions {
     fn default() -> Self {
         IoOptions {
-            router_names: vec!["apiRoutes".to_string()],
+            router_names: DEFAULT_ROUTER_NAMES.iter().map(|s| s.to_string()).collect(),
         }
     }
 }
@@ -79,10 +90,16 @@ pub(crate) fn extract_csharp_file_io(rel: &str, text: &str, degraded: bool) -> O
 /// The controller-decorator adapter (`zzop_parser_typescript::extract_controller_provides`) stays
 /// per-file because a NestJS- or `@n8n/decorators`-style route decorator is entirely self-contained
 /// within one file's own class/method AST — there is no cross-file indirection to resolve.
-pub(crate) fn extract_file_io(rel: &str, text: &str, opts: &IoOptions) -> Option<IoFacts> {
+pub(crate) fn extract_file_io(
+    rel: &str,
+    text: &str,
+    opts: &IoOptions,
+    vocab: &crate::vocabulary::ResolvedVocabulary<'_>,
+) -> Option<IoFacts> {
     let files = [(rel.to_string(), text.to_string())];
 
-    let mut consumes: Vec<IoConsume> = zzop_parser_typescript::extract_http_egress(&files);
+    let mut consumes: Vec<IoConsume> =
+        zzop_parser_typescript::extract_http_egress_with_vocab(&files, &vocab.retry_wrappers);
     // tRPC client-call consumes (kind "trpc"): already fully keyed at extraction time, so no
     // late-resolution pass is needed for this kind.
     consumes.extend(zzop_parser_typescript::extract_trpc_consumes(rel, text));
@@ -94,8 +111,14 @@ pub(crate) fn extract_file_io(rel: &str, text: &str, opts: &IoOptions) -> Option
     ));
     // db-table consumes (kind "db-table"): a Prisma `getPrisma().<model>` or bare `prisma.<model>`
     // access, keyed at extraction time in the PARSER (not re-lexed in a rule) — io facts project during
-    // parsing, before AST drop. Feeds the linker so `cross-layer/shared-db-table` fires across trees.
-    consumes.extend(zzop_parser_typescript::extract_db_table_consumes(rel, text));
+    // parsing, before AST drop. Feeds the linker so `cross-layer/db-table-name-in-multiple-sources` fires across trees.
+    consumes.extend(
+        zzop_parser_typescript::extract_db_table_consumes_with_vocab(
+            rel,
+            text,
+            vocab.prisma_client_getter,
+        ),
+    );
     // Raw-SQL db-table consumes (kind "db-table"): the table names a SQL statement STRING in this file
     // reads or writes, keyed at extraction time through `zzop_parser_sql` — the ORM-less arm of the same
     // channel, for stacks (Cloudflare D1, better-sqlite3, pg, mysql2) whose tables appear only inside

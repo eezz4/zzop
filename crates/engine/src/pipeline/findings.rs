@@ -63,7 +63,7 @@ pub(super) fn eval_packs(
         io,
     };
     let files = std::slice::from_ref(&file);
-    let ctx = RuleContext { files, ir: None };
+    let ctx = RuleContext { files };
     let mut out = Vec::new();
     let mut timings = Vec::new();
     for pack in packs {
@@ -105,24 +105,30 @@ pub(super) fn schema_findings_eligible(language: Option<Language>, degraded: boo
 
 /// Wires `zzop_rules_schema::apply_schema_rules` into the fused per-file pass for Prisma files:
 /// re-parses this file's `SchemaModel`s (cheap — same scan `parse_prisma` already ran) and converts
-/// each `SchemaIssue` into a `zzop_core::Finding`, gated behind native id `"schema-structural"`.
-/// `rule_id` is `"schema/{issue.rule}"`, a fresh namespace since this is native logic, not a DSL pack.
+/// each `SchemaIssue` into a `zzop_core::Finding`. TWO gates, both `is_enabled`: the FAMILY id
+/// `"schema-structural"` (checked first, so a disabled family costs no parse), then each finding's own
+/// `"schema/<label>"` id — a registered native analysis id since the label promotion, so the id a user
+/// copies out of `ruleId` disables exactly the rule it names. Cache-safe: `disabled_rules` is an
+/// ingredient of `cache::ruleset_fingerprint`, so a config that changes either gate misses the per-file
+/// findings entry rather than serving one filtered under the old config.
 pub(super) fn schema_findings(
     rule_config: &zzop_core::RuleConfig,
     rel: &str,
     text: &str,
+    money_tokens: &[&str],
 ) -> Vec<zzop_core::Finding> {
     if !registry::is_enabled(rule_config, "schema-structural") {
         return Vec::new();
     }
     let models = zzop_parser_prisma::parse_schema(text, Some(rel), None);
-    zzop_rules_schema::apply_schema_rules(&models)
+    zzop_rules_schema::apply_schema_rules(&models, money_tokens)
         .iter()
         .map(|issue| schema_issue_to_finding(rel, text, issue))
+        .filter(|finding| registry::is_enabled(rule_config, &finding.rule_id))
         .collect()
 }
 
-/// The usage counterpart of `schema_findings`: wires the usage cross-check (dead-model / dead-field /
+/// The usage counterpart of `schema_findings`: wires the usage cross-check (unreferenced-model-name / unreferenced-field-name /
 /// schema-churn) via `zzop_rules_schema::cross_check_schema`/`apply_churn_rule`. Unlike `schema_findings`
 /// this is a whole-tree pass — usage evidence (identifier presence) spans every source file, so it runs
 /// from `analyze::assemble`'s global stage and is recomputed each run, never entering the per-file
@@ -133,15 +139,17 @@ pub(super) fn schema_findings(
 /// `field_usage_tokens` (populated in the fused per-file pass) — no filesystem re-walk. `attrs` is the
 /// generic entity-attribute channel (`zzop_core::AttributeStore`) — store-binding and migration-churn are
 /// no longer typed `SchemaUsage` slots, they're Symbol-keyed attributes (`bound-model`/`model-churn`) a
-/// Mode-B producer injects; empty under native analysis, so `cross_check_schema`'s dead-model keys on the
+/// Mode-B producer injects; empty under native analysis, so `cross_check_schema`'s unreferenced-model-name keys on the
 /// generic `identifier_counts` presence signal alone, and `apply_churn_rule` fires only when a producer
 /// injects churn (previously it could never fire). Degraded `.prisma` files are excluded by the caller;
 /// unreadable schema files are skipped.
 pub(crate) fn schema_usage_findings(
+    rule_config: &zzop_core::RuleConfig,
     root: &Path,
     prisma_rels: &[String],
     attrs: &zzop_core::AttributeStore,
     used_names: &std::collections::HashSet<String>,
+    skip_field_names: &[&str],
 ) -> Vec<zzop_core::Finding> {
     if prisma_rels.is_empty() {
         return Vec::new();
@@ -161,7 +169,8 @@ pub(crate) fn schema_usage_findings(
     let usage = zzop_core::SchemaUsage {
         identifier_counts: used_names.iter().map(|name| (name.clone(), 1u32)).collect(),
     };
-    let mut issues = zzop_rules_schema::cross_check_schema(&models, &usage, attrs);
+    let mut issues =
+        zzop_rules_schema::cross_check_schema(&models, &usage, attrs, skip_field_names);
     issues.extend(zzop_rules_schema::apply_churn_rule(&models, attrs));
     issues
         .iter()
@@ -181,6 +190,9 @@ pub(crate) fn schema_usage_findings(
                 .unwrap_or_default();
             schema_issue_to_finding(rel, text, issue)
         })
+        // Per-issue gate, the whole-tree twin of `schema_findings`'s: the caller already checked the
+        // `"schema-usage"` family id, this checks each finding's own registered `"schema/<label>"` id.
+        .filter(|finding| registry::is_enabled(rule_config, &finding.rule_id))
         .collect()
 }
 
@@ -188,6 +200,12 @@ pub(crate) fn schema_usage_findings(
 /// `SchemaIssue` carries no line number of its own (only `model`/`field` names). `data` embeds the
 /// full `SchemaIssue` so a structured consumer can recover `field`/`params` without re-parsing
 /// `message`.
+///
+/// `rule_id` goes through `zzop_rules_schema::schema_issue_rule_id` rather than a local
+/// `format!("schema/{}", ...)`: that function is also what `register_native_analyses` registers from, so
+/// the composed id and the registered id are the same string by construction. They used not to be — the
+/// composition lived here and nothing registered its output, which is how `schema/god-model` became a
+/// `ruleId` no id-aware surface recognized.
 ///
 /// This glue stays in this engine rather than `zzop-rules-schema`: it needs
 /// `zzop_parser_prisma::model_decl_line`, and `zzop-rules-schema` deliberately does not depend on
@@ -198,7 +216,7 @@ fn schema_issue_to_finding(
     issue: &zzop_rules_schema::SchemaIssue,
 ) -> zzop_core::Finding {
     zzop_core::Finding {
-        rule_id: format!("schema/{}", issue.rule),
+        rule_id: zzop_rules_schema::schema_issue_rule_id(&issue.rule),
         severity: issue.severity,
         file: rel.to_string(),
         line: zzop_parser_prisma::model_decl_line(text, &issue.model),

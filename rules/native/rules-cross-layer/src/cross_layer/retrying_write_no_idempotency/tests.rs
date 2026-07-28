@@ -289,3 +289,80 @@ fn the_retry_sightline_is_identical_in_the_finding_and_the_docs() {
         );
     }
 }
+
+/// Seals the tree attribution on both sides of the join — the anchor (consume) side is what
+/// `dedupe_by_consume_site` keys on, and `provideFile`/`provideLine` used to name a tree-less path.
+#[test]
+fn payload_names_the_tree_on_both_sides_of_the_join() {
+    let edges = vec![edge(
+        "POST /api/orders",
+        ("fe", "src/checkout.ts", 42),
+        ("be", "src/orders.controller.ts", 10),
+        true,
+    )];
+    let retry: BTreeSet<RetrySite> = [site("fe", "src/checkout.ts", 42)].into();
+    let f = retrying_write_no_idempotency_findings(&edges, &retry, &no_attrs());
+    assert_eq!(f.len(), 1);
+    let data = f[0].data.as_ref().unwrap();
+    assert_eq!(data["consumeSource"], "fe");
+    assert_eq!(data["provideSource"], "be");
+}
+
+/// Seals the dedupe key: two TREES whose retrying write sits at the same relative path and line,
+/// against the same provider route, are two real CRITICAL findings. The old tree-blind
+/// `(file, line, message)` key silently dropped one of them.
+#[test]
+fn two_trees_at_the_same_relative_path_and_line_are_not_deduped_into_one() {
+    let edges = vec![
+        edge(
+            "POST /api/orders",
+            ("xfe", "src/consumes.ts", 7),
+            ("be", "src/orders.controller.ts", 10),
+            true,
+        ),
+        edge(
+            "POST /api/orders",
+            ("xbe2", "src/consumes.ts", 7),
+            ("be", "src/orders.controller.ts", 10),
+            true,
+        ),
+    ];
+    let retry: BTreeSet<RetrySite> = [
+        site("xfe", "src/consumes.ts", 7),
+        site("xbe2", "src/consumes.ts", 7),
+    ]
+    .into();
+    let f = retrying_write_no_idempotency_findings(&edges, &retry, &no_attrs());
+    assert_eq!(f.len(), 2);
+    let mut sources: Vec<&str> = f
+        .iter()
+        .map(|x| x.data.as_ref().unwrap()["consumeSource"].as_str().unwrap())
+        .collect();
+    sources.sort_unstable();
+    assert_eq!(sources, vec!["xbe2", "xfe"]);
+}
+
+/// The other half of the same key: a genuine fan-out (ONE call site, byte-identical findings) must
+/// still collapse to one.
+#[test]
+fn one_call_site_producing_byte_identical_findings_still_dedupes_to_one() {
+    let edges = vec![
+        edge(
+            "POST /api/orders",
+            ("fe", "src/checkout.ts", 42),
+            ("be", "src/orders.controller.ts", 10),
+            true,
+        ),
+        edge(
+            "POST /api/orders",
+            ("fe", "src/checkout.ts", 42),
+            ("be", "src/orders.controller.ts", 10),
+            true,
+        ),
+    ];
+    let retry: BTreeSet<RetrySite> = [site("fe", "src/checkout.ts", 42)].into();
+    assert_eq!(
+        retrying_write_no_idempotency_findings(&edges, &retry, &no_attrs()).len(),
+        1
+    );
+}

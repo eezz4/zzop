@@ -14,9 +14,9 @@ use crate::EngineConfig;
 
 /// Runs the 25 `cross-layer/*` native rules (`zzop_rules_cross_layer::cross_layer`) over `cross_layer`, returning their merged, sorted findings.
 ///
-/// ## disabledRules gating and severity overrides
-/// Both union across trees — see `merge_config::union_configs` for the exclude-only gating rationale and
-/// the first-declarer conflict rule.
+/// ## disabledRules gating, severity overrides and the run vocabulary
+/// All three derive across trees — see `merge_config` for the exclude-only gating rationale and the
+/// first-declarer conflict rule it shares with the per-key `union_vocabulary` merge.
 ///
 /// ## The provide-key universe
 /// `method_mismatch`/`version_skew`/`path_near_miss` need every `http` provide across every tree, not just
@@ -40,11 +40,14 @@ pub(crate) fn compute_cross_layer_findings(
     attribute_stores: &BTreeMap<String, &zzop_core::AttributeStore>,
 ) -> Vec<Finding> {
     let (gate, merge_config) = merge_config::union_configs(trees);
+    let run_vocabulary = merge_config::union_vocabulary(trees);
+    let vocab = run_vocabulary.resolve();
 
     let extraction_blindness_caveat = blindness_caveat::build(source_ios);
 
     // Verb-unknown routes (`UNKNOWN_VERB` sentinel: `pages/api` serve-all / pathname-dispatch / Go
-    // `HandleFunc` pinning no method) lift OUT of the exact-key join to a served-set — `http_provides` drops
+    // `HandleFunc` pinning no method / every Django URLconf entry, verb-unknown by construction) lift
+    // OUT of the exact-key join to a served-set — `http_provides` drops
     // them (never dead), `unprovided_filtered` drops consumes they serve (no FP); surface via `unknown-verb-route`.
     let verb_unknown_sites = partition::verb_unknown_sites(source_ios);
     let verb_unknown_paths = partition::served_path_set(&verb_unknown_sites);
@@ -127,6 +130,7 @@ pub(crate) fn compute_cross_layer_findings(
         &near_miss_targets,
         trpc_participating_sources,
         &extraction_blindness_caveat,
+        &vocab.externally_fetched_paths,
     );
     sources.push(unconsumed_findings);
     if zzop_core::is_enabled(&gate, "cross-layer/method-mismatch") {
@@ -139,6 +143,7 @@ pub(crate) fn compute_cross_layer_findings(
         sources.push(zzop_rules_cross_layer::version_skew_findings(
             &unprovided_filtered,
             &http_provides,
+            vocab.api_version_segment_pattern,
         ));
     }
     if zzop_core::is_enabled(&gate, "cross-layer/path-near-miss") {
@@ -167,7 +172,7 @@ pub(crate) fn compute_cross_layer_findings(
             sources.push(result.findings);
         }
     }
-    if zzop_core::is_enabled(&gate, "cross-layer/shared-db-table") {
+    if zzop_core::is_enabled(&gate, "cross-layer/db-table-name-in-multiple-sources") {
         sources.push(zzop_rules_cross_layer::shared_db_table_findings(
             cross_layer,
         ));
@@ -184,9 +189,10 @@ pub(crate) fn compute_cross_layer_findings(
     if zzop_core::is_enabled(&gate, "cross-layer/external-secret-in-url") {
         sources.push(zzop_rules_cross_layer::external_secret_in_url_findings(
             &cross_layer.external_consumes,
+            &vocab.secret_param_names,
         ));
     }
-    if zzop_core::is_enabled(&gate, "cross-layer/external-duplicated-integration") {
+    if zzop_core::is_enabled(&gate, "cross-layer/external-host-in-multiple-sources") {
         sources.push(
             zzop_rules_cross_layer::external_duplicated_integration_findings(
                 &cross_layer.external_consumes,
@@ -207,6 +213,7 @@ pub(crate) fn compute_cross_layer_findings(
         sources.push(
             zzop_rules_cross_layer::external_version_inconsistent_findings(
                 &cross_layer.external_consumes,
+                vocab.api_version_segment_pattern,
             ),
         );
     }
@@ -255,7 +262,10 @@ pub(crate) fn compute_cross_layer_findings(
             &http_consume_totals,
         ));
     }
-    if zzop_core::is_enabled(&gate, "cross-layer/sdk-import-no-visible-consume") {
+    if zzop_core::is_enabled(
+        &gate,
+        "cross-layer/untraced-client-import-no-visible-consume",
+    ) {
         sources.push(
             zzop_rules_cross_layer::sdk_import_no_visible_consume_findings(
                 package_imports,

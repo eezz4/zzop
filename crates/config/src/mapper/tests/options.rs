@@ -40,6 +40,85 @@ fn packs_extra_dirs_resolve_against_base_dir_and_are_omitted_when_empty() {
         .is_none());
 }
 
+// --- default discovery of the user-authored `zzop/rules/` ------------------------------------
+
+/// The authored half of the on-disk split: a repo that simply puts its packs in `zzop/rules/` gets
+/// them loaded with no config key at all — the point of the default. `.zzop/` (derived) is one
+/// character away and must never be what gets discovered, so the negative half is pinned here too.
+#[test]
+fn an_undeclared_extra_dirs_discovers_the_authored_zzop_rules_directory() {
+    let dir = TempDir::new("zzop-config-authored-packs");
+    dir.mkdir(crate::DEFAULT_AUTHORED_PACKS_DIR);
+    // The derived sibling exists at the same time — discovery must not confuse the two.
+    dir.mkdir(".zzop/cache");
+
+    let mapped = config_to_request(&json!({"roots": ["."]}), dir.path()).unwrap();
+    let dirs = analyze_request(&mapped.request)["packsDir"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        dirs,
+        &[serde_json::Value::String(path_to_string(&resolve_path(
+            dir.path(),
+            crate::DEFAULT_AUTHORED_PACKS_DIR
+        )))]
+    );
+}
+
+/// Missing directory => nothing emitted AND nothing said. Almost every repo is in this state, so a
+/// disclosure here would be a warning on every run of every project that authored no packs.
+#[test]
+fn a_base_without_an_authored_packs_directory_is_silent_not_warned() {
+    let dir = TempDir::new("zzop-config-authored-packs-absent");
+    let mapped = config_to_request(&json!({"roots": ["."]}), dir.path()).unwrap();
+    assert!(analyze_request(&mapped.request).get("packsDir").is_none());
+    assert!(
+        !mapped.warnings.iter().any(|w| w.contains("zzop/rules")),
+        "got: {:?}",
+        mapped.warnings
+    );
+}
+
+/// Fallback, never a merge — the "no second source of truth" constraint. A declared `extraDirs` is the
+/// SOLE origin of `packsDir` even when the authored directory is sitting right there, so "where did
+/// this pack come from" always has one answer. The empty array is the same rule, read as the explicit
+/// opt-out it is: declaring nothing is not the same as declaring none.
+#[test]
+fn a_declared_extra_dirs_wins_over_the_authored_default_and_never_merges() {
+    let dir = TempDir::new("zzop-config-authored-packs-explicit");
+    dir.mkdir(crate::DEFAULT_AUTHORED_PACKS_DIR);
+    dir.mkdir("vendor-packs");
+
+    let mapped = config_to_request(
+        &json!({"roots": ["."], "packs": {"extraDirs": ["./vendor-packs"]}}),
+        dir.path(),
+    )
+    .unwrap();
+    let dirs = analyze_request(&mapped.request)["packsDir"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        dirs,
+        &[serde_json::Value::String(path_to_string(&resolve_path(
+            dir.path(),
+            "./vendor-packs"
+        )))],
+        "an explicit extraDirs must be the only origin, not the authored default merged with it"
+    );
+
+    let opted_out = config_to_request(
+        &json!({"roots": ["."], "packs": {"extraDirs": []}}),
+        dir.path(),
+    )
+    .unwrap();
+    assert!(
+        analyze_request(&opted_out.request)
+            .get("packsDir")
+            .is_none(),
+        "an empty extraDirs is an explicit \"no pack directories\", not an omission to fill"
+    );
+}
+
 // --- git / cacheDir / sizeCap passthrough + withDefaults ------------------------------------
 
 #[test]
@@ -214,6 +293,16 @@ fn representative_config_maps_to_the_expected_request_shape() {
     let mut actual = mapped.request.clone();
     let pack_defs_len = actual["packDefs"].as_array().unwrap().len();
     actual.as_object_mut().unwrap().remove("packDefs");
+    // Nothing is injected here any more (2026-07-27): a config that declares no `vocabulary` sends an
+    // EMPTY one, and the engine reads that as "these judgments are not made" rather than as a request
+    // for zzop's own names. Asserted rather than merely dropped, because a re-introduced injection would
+    // otherwise pass this whole shape test silently. The values a user does get come from the starter
+    // template, pinned against the owning constants in `template_tests.rs`.
+    assert_eq!(
+        actual.as_object_mut().unwrap().remove("vocabulary"),
+        Some(json!({})),
+        "a config declaring no vocabulary must forward an empty one, never zzop's built-ins"
+    );
 
     let expected = json!({
         "root": path_to_string(dir.path()),
@@ -248,4 +337,31 @@ fn resolve_path_normalizes_dot_and_dot_dot_segments() {
     assert_eq!(resolve_path(base, "./x"), base.join("x"));
     assert_eq!(resolve_path(base, "../sibling"), Path::new("/base/sibling"));
     assert_eq!(resolve_path(base, "a/../b"), base.join("b"));
+}
+
+/// Seals that `git.commitSubjectPatterns` is a RECOGNIZED key that reaches the engine request: it must
+/// draw no unknown-key drift warning (the knob dictionary lists it) and must ride through the `git`
+/// pass-through verbatim, entry shape included. A key that warned, or that was accepted and forwarded
+/// nowhere, is the "recognized but unwired" silent failure this dictionary exists to prevent.
+#[test]
+fn git_commit_subject_patterns_is_recognized_and_passes_through_verbatim() {
+    let dir = TempDir::new("zzop-config-commit-subject-patterns");
+    let git = json!({
+        "commitSubjectPatterns": [
+            {"pattern": r"^Revert\b", "label": "revert"},
+            {"pattern": r"PROJ-\d+", "label": "ticket"}
+        ]
+    });
+    let config = json!({"roots": ["."], "git": git.clone()});
+
+    let mapped = config_to_request(&config, dir.path()).unwrap();
+    assert_eq!(mapped.request["git"], git);
+    assert!(
+        mapped
+            .warnings
+            .iter()
+            .all(|w| !w.contains("unknown config key")),
+        "a dictionary-listed key must not drift-warn: {:?}",
+        mapped.warnings
+    );
 }

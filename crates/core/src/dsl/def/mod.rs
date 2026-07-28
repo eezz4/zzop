@@ -244,16 +244,32 @@ pub struct RuleDef {
 }
 
 impl RuleDef {
-    /// Inline ok-marker for this rule, DERIVED as `<id>-ok` (never stored on the rule) — e.g. rule
-    /// `float-money-compare` suppresses on `// float-money-compare-ok`. Applied uniformly to `LineScan` and
-    /// `MethodScan` findings: a finding is suppressed when its own line, or the line directly above it
-    /// (`MARKER_LOOKBACK_LINES`), carries a `//`-comment naming this marker (`// <id>-ok` or
-    /// `// <id>-ok: reason` both suppress). For a file whose extension is `.sql` (case-insensitive, see
-    /// `is_sql_file`), a `--`-comment naming the marker suppresses identically (`-- <id>-ok`) — `--` is a
-    /// line comment in SQL but not in JS/TS (`--x` is a decrement there), so that recognition is gated to
-    /// `.sql` files only. Deriving (vs storing a per-rule string) means the marker is always predictable
-    /// from the id and can never drift out of the `-ok` convention.
+    /// Inline ok-marker for this rule, DERIVED as `zzop-<id>-ok` (never stored on the rule) — e.g. rule
+    /// `float-money-compare` suppresses on `// zzop-float-money-compare-ok`. Applied uniformly to
+    /// `LineScan` and `MethodScan` findings: a finding is suppressed when its own line, or the line
+    /// directly above it (`MARKER_LOOKBACK_LINES`), carries a `//`-comment naming this marker
+    /// (`// zzop-<id>-ok` or `// zzop-<id>-ok: reason` both suppress). For a file whose extension is
+    /// `.sql` (case-insensitive, see `is_sql_file`), a `--`-comment naming the marker suppresses
+    /// identically (`-- zzop-<id>-ok`) — `--` is a line comment in SQL but not in JS/TS (`--x` is a
+    /// decrement there), so that recognition is gated to `.sql` files only. Deriving (vs storing a
+    /// per-rule string) means the marker is always predictable from the id and can never drift out of the
+    /// convention.
+    ///
+    /// The `zzop-` TOOL PREFIX is deliberate and matches what every neighbouring tool does — ESLint's
+    /// `eslint-disable-*`, TypeScript's `@ts-ignore`. Without it a suppression comment could not be
+    /// grepped as a class, and a reader finding one in a diff could not tell WHOSE checker it silenced.
+    /// The `-ok` suffix is kept (rather than `-skip`/`-ignore`) because it asserts something stronger and
+    /// more specific: a human looked at this finding and vetted it, which `eslint-disable` does not claim.
     pub fn suppress_marker(&self) -> String {
-        format!("{}-ok", self.id)
+        Self::suppress_marker_for_id(&self.id)
+    }
+
+    /// The same derivation reached by id alone, for callers that must spell the marker form without a
+    /// loaded rule — notably the MCP `rule-catalog` resource description, which ships the spelling to
+    /// agent clients that have no source checkout. Exists so those surfaces can PIN against the
+    /// derivation instead of hardcoding a copy of it: the 2026-07-26 prefix change migrated every doc
+    /// but left one shipped description advertising the retired bare form.
+    pub fn suppress_marker_for_id(id: &str) -> String {
+        format!("zzop-{id}-ok")
     }
 }

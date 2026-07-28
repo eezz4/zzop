@@ -1,11 +1,25 @@
 name: Deploy site
 
+# GATED on `ci` finishing green, rather than firing straight off the push.
+#
+# Until 2026-07-28 this ran on `push: branches:[main], paths:[site/**]` with no `needs:` anywhere, so a
+# main push deployed the public site while `ci` was still running beside it — the guards that actually
+# validate this directory (catalog<->site sync, docs link graph, overclaim prose, english-source, rule
+# id and io-key vocabulary) had no say in whether the bytes went out. Same shape as the release lane's
+# missing gate, one size down.
+#
+# `workflow_run` rather than `uses: ./.github/workflows/ci.yml`: `ci` has NO path filter, so every main
+# push already runs it. Calling it from here would run the whole suite a second time on the same commit
+# for nothing. This waits on the run that is happening anyway.
+#
+# The cost is honest and worth naming: `workflow_run` takes no `paths`, so this now fires after every
+# green main CI, not only site-touching ones. Re-uploading identical bytes is idempotent, so the price
+# is a runner, and the alternative was keeping a path filter that gated nothing.
 on:
-  push:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
     branches: [main]
-    paths:
-      - "site/**"
-      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -19,12 +33,23 @@ concurrency:
 
 jobs:
   deploy:
+    # A `workflow_run` fires on completion of ANY conclusion — failure and cancellation included — so
+    # without this the gate would be decoration: the site would still deploy after a red CI, just
+    # later. `workflow_dispatch` has no `workflow_run` payload, hence the explicit first arm.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # The COMMIT CI ACTUALLY CHECKED, not whatever main points at now. A `workflow_run` job defaults
+      # to the default branch's tip, which drifts the moment another push lands while this one is
+      # queued — and then the gate would have vouched for a different tree than the one published.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

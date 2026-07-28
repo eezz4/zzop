@@ -161,6 +161,59 @@ fn analyze_json_top_level_key_set_is_pinned_exactly() {
     );
 }
 
+/// The same exact pin for the ONE conditionally-present top-level field: `ruleOverridesApplied` is
+/// omitted entirely when the caller requested no `disabledRules`/`severityOverrides` (see
+/// `analyze_json_omits_rule_overrides_applied_when_nothing_was_requested`), so the pin above — whose
+/// fixture requests neither — can never see it. That is not a cosmetic omission: that pin is also the
+/// truth source `crates/engine/tests/rule_contracts/surface_parity.rs` parses to decide which fields
+/// the surface-parity registry must have a row for, so a field invisible here was a field with NO
+/// parity row and no drift coupling at all. This second pin, with an override requested, is what makes
+/// the 21st field visible to both. Added 2026-07-26, replacing that test's self-declared blind spot.
+#[test]
+fn analyze_json_top_level_key_set_with_rule_overrides_is_pinned_exactly() {
+    let dir = cycle_fixture();
+    let config = format!(
+        r#"{{"root": {:?}, "sourceId": "t", "disabledRules": ["circular"]}}"#,
+        dir.path().display()
+    );
+    let out = analyze_json(&config).expect("analyze_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+    let keys: Vec<&str> = value
+        .as_object()
+        .expect("root object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "cache",
+            "configWarnings",
+            "coverage",
+            "critical",
+            "degraded",
+            "disclosure",
+            "fileCount",
+            "findings",
+            "folders",
+            "gitWindow",
+            "health",
+            "ir",
+            "layerCoChurn",
+            "nodes",
+            "packsLoaded",
+            "recommendations",
+            "ruleOverridesApplied",
+            "ruleTimings",
+            "scores",
+            "seams",
+            "warnings",
+        ],
+        "single-tree (overrides requested) output root keys drifted — pin the new/renamed field here, \
+         in analyze_json_top_level_key_set_is_pinned_exactly, AND in its own test"
+    );
+}
+
 #[test]
 fn analyze_trees_json_top_level_key_set_is_pinned_exactly() {
     let dir = cycle_fixture();
@@ -524,9 +577,16 @@ fn analyze_json_rejects_a_file_path_as_root() {
         err.contains(&format!("root is not a directory: {}", file_path.display())),
         "got: {err}"
     );
+    // Spelling-free on purpose: this message is built in a shared crate, so a CLI user and an MCP
+    // client read the same sentence and only one of them has a `validate_envelope` to call. Contract 15
+    // (crates/engine/tests/rule_contracts/host_vocabulary.rs) now scans this crate for exactly that.
     assert!(
-        err.contains("validate_envelope's input, not an analysis root"),
+        err.contains("the envelope validator's input, not an analysis root"),
         "got: {err}"
+    );
+    assert!(
+        !err.contains("validate_envelope"),
+        "the shared message must name no host's spelling: {err}"
     );
 }
 

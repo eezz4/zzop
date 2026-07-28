@@ -79,8 +79,8 @@ pub fn committed_spec_io_silence_warning(
             "a committed OpenAPI/Swagger spec exists at {rel} but this tree contributed almost no \
 joinable io ({io_provides_count} provide(s) / {io_consumes_keyed_count} keyed consume(s)) — if the app \
 talks through a GENERATED client (SDK class/methods) rather than direct calls, native extraction cannot \
-see those calls; project the generated client with the Mode B openapi-sdk-adapter (see the adapter \
-examples for its generated class-method client support) to restore cross-layer visibility: a partial \
+see those calls; project the generated client with a Mode B overlay adapter (examples/adapters holds a \
+worked one and the shared adapter-kit) to restore cross-layer visibility: a partial \
 envelope covering just the missing io channel is enough; contract: MCP resource \
 `zzop://contract/envelope-guide` on MCP hosts (`zzop contract envelope-guide` with the CLI binary), \
 docs/NORMALIZED_AST.md in the repo."

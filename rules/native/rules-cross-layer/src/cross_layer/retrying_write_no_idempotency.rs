@@ -147,7 +147,8 @@ pub fn retrying_write_no_idempotency_findings(
              (timeout, dropped response, 5xx) the request is replayed, and a non-idempotent handler applies \
              the write twice (double charge, duplicate order). Make the handler idempotent, or if it already \
              is, inject the attribute on the provider tree (paste-ready stub in this finding's \
-             `data.injectionStub`; contract: MCP resource `zzop://contract/envelope-guide` on MCP hosts, \n             `zzop contract envelope-guide` with the CLI binary). {} {}",
+             `data.injectionStub`; contract: MCP resource `zzop://contract/envelope-guide` on MCP hosts, \
+             `zzop contract envelope-guide` with the CLI binary). {} {}",
             edge.to.file,
             edge.to.line,
             disable_hint("cross-layer/retrying-write-no-idempotency"),
@@ -163,6 +164,12 @@ pub fn retrying_write_no_idempotency_findings(
             data: Some(serde_json::json!({
                 "method": method,
                 "path": path,
+                // Both sides of the join, each with its tree — `Finding::file` is TREE-RELATIVE, so
+                // without `consumeSource` two trees' call sites at the same relative path and line are
+                // one key, and `provideFile`/`provideLine` named a path belonging to no stated tree.
+                // `dedupe_by_consume_site` reads `consumeSource` back out; keep it unconditional.
+                "consumeSource": edge.from.source,
+                "provideSource": edge.to.source,
                 "provideFile": edge.to.file,
                 "provideLine": edge.to.line,
                 "crossSource": edge.cross_source,
@@ -171,15 +178,11 @@ pub fn retrying_write_no_idempotency_findings(
         });
     }
     // A fan-out consume (one call site legally matching the same key in 2+ provider trees) can yield
-    // byte-identical findings — dedupe on (file, line, message), same convention as `body_field_drift`.
-    out.sort_by(|a, b| {
-        a.file
-            .cmp(&b.file)
-            .then(a.line.cmp(&b.line))
-            .then(a.message.cmp(&b.message))
-    });
-    out.dedup_by(|a, b| a.file == b.file && a.line == b.line && a.message == b.message);
-    out
+    // byte-identical findings — dedupe on (consumeSource, file, line, message), the shared
+    // `body_field_drift::dedupe_by_consume_site` helper. The tree is IN the key because `Finding::file`
+    // is tree-relative: two trees whose retrying write sits at the same relative path and line, against
+    // the same provider route, are two real CRITICAL findings and the old tree-blind key dropped one.
+    super::body_field_drift::dedupe_by_consume_site(out)
 }
 
 #[cfg(test)]

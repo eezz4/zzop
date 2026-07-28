@@ -98,6 +98,20 @@ pub struct EngineConfig {
     /// link time (see `zzop_core::LinkOptions::internal_hosts`) — plumbed in from every tree's own
     /// `hosts` by `analyze_trees`. Empty (the default) declares no hosts.
     pub hosts: Vec<String>,
+    /// Declared convention vocabulary — the names this PROJECT picks for its own guards, API segments and
+    /// source roots, rather than names a framework fixed. An unset field makes no judgment at all (see
+    /// `VocabularyConfig`'s module doc for the per-key whole-replacement rule and why an empty declaration
+    /// is never read as "use ours"), so [`EngineConfig::default`] seeds this with
+    /// `VocabularyConfig::built_in()` — the visible, replaceable starting point a library embedder gets,
+    /// exactly as `zzop init`'s starter file is the one a config author gets.
+    ///
+    /// The two are separate paths and do not interfere: `zzop-facade` assigns this field from the request
+    /// unconditionally, so a request that declared nothing carries nothing, and this default never leaks
+    /// into a product run.
+    ///
+    /// `vocabulary.skipDirs` is the one entry that does NOT live here: it lands in `dispatch.skip_dirs`,
+    /// which already owned that list.
+    pub vocabulary: crate::VocabularyConfig,
 }
 
 /// One deployment-topology mount (`EngineConfig::mounts`): `at` is prepended to the key of every `http`
@@ -126,6 +140,7 @@ impl Default for EngineConfig {
             adapter_overlays: Vec::new(),
             mounts: Vec::new(),
             hosts: Vec::new(),
+            vocabulary: crate::VocabularyConfig::built_in(),
         }
     }
 }
@@ -150,6 +165,15 @@ pub struct GitOptions {
     /// naming any such pattern, since a silently-inert custom pattern is exactly the narrowed-scope
     /// degradation this codebase's self-report contract exists for).
     pub commit_type_patterns: Option<Vec<(String, String)>>,
+    /// DECLARED subject-pattern table (regex source, label pairs, in declaration order) — the
+    /// config-file wire path for `git.commitSubjectPatterns`. `None` or an empty vec means NO commit
+    /// is labelled: unlike `commit_type_patterns` above there is NOTHING to fall back to, by design.
+    /// A revert/ticket/hotfix subject convention is per-project, so a built-in table would be the
+    /// engine guessing at a convention it cannot know and silently mislabelling every project that
+    /// spells it differently — this axis reads declarations or stays silent. See
+    /// `analyze::diagnostics::collect_git` for where it is applied (including the warning naming any
+    /// pattern that fails to compile, and the one naming a declared table that matched nothing).
+    pub commit_subject_patterns: Option<Vec<(String, String)>>,
 }
 
 impl Default for GitOptions {
@@ -158,6 +182,7 @@ impl Default for GitOptions {
             since: None,
             recent_days: 30,
             commit_type_patterns: None,
+            commit_subject_patterns: None,
         }
     }
 }

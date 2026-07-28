@@ -12,12 +12,14 @@ mod error;
 mod iso_date;
 mod parse;
 mod process;
+mod subject;
 mod tags;
 
 use std::path::Path;
 
 pub use error::GitError;
 pub use parse::parse_git_log;
+pub use subject::compile_commit_subject_pattern;
 
 use zzop_core::{CommitFileSet, GitStats};
 
@@ -71,6 +73,13 @@ pub struct CollectOptions {
     /// supplies `zzop_metrics::default_commit_type_patterns()` here (as `zzop_engine::analyze::collect_git`
     /// does), or its own project-specific vocabulary.
     pub commit_type_patterns: Vec<(String, String)>,
+    /// Ordered `(regex, label)` DECLARATIONS matched against the raw commit subject — config
+    /// `git.commitSubjectPatterns`. Default: empty, and empty means every `CommitFileSet::labels` is
+    /// empty: there is no default table for this axis and there never will be one, because a
+    /// revert/ticket/hotfix convention is per-project and a built-in guess would mislabel silently.
+    /// Unlike `commit_type_patterns` this is not first-match-wins and injects no regex flags — see
+    /// the `subject` module's doc.
+    pub commit_subject_patterns: Vec<(String, String)>,
 }
 
 impl Default for CollectOptions {
@@ -79,6 +88,7 @@ impl Default for CollectOptions {
             since: None,
             recent_days: 30,
             commit_type_patterns: Vec::new(),
+            commit_subject_patterns: Vec::new(),
         }
     }
 }

@@ -56,13 +56,14 @@ pub fn fetch_wrapper_census(
     all_rels: &[String],
     keyed_by_root: &BTreeMap<String, usize>,
     app_roots: &[String],
+    wrapper_export_names: &[&str],
 ) -> Vec<String> {
     if app_roots.len() == 1 && app_roots[0].is_empty() {
         let keyed = keyed_by_root.get("").copied().unwrap_or(0);
         if keyed >= MIN_PROVIDES_FLOOR {
             return Vec::new();
         }
-        return fetch_wrapper_call_site_warning(root, all_rels, keyed)
+        return fetch_wrapper_call_site_warning(root, all_rels, keyed, wrapper_export_names)
             .into_iter()
             .collect();
     }
@@ -72,7 +73,8 @@ pub fn fetch_wrapper_census(
         .map(String::as_str)
         .filter(|rel| is_js_ts_family(rel))
         .collect();
-    let Some((wrapper_rel, matched_names)) = find_wrapper(root, &js_rels) else {
+    let Some((wrapper_rel, matched_names)) = find_wrapper(root, &js_rels, wrapper_export_names)
+    else {
         return Vec::new();
     };
     let wrapper_stem = wrapper_stem_of(wrapper_rel);

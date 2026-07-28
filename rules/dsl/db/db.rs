@@ -2,7 +2,7 @@
 //! `Matcher::MethodScan` rules run against real parser-derived `SourceSymbol` body spans (not hand-built
 //! spans). See `db.json` for each rule's exact trigger/veto shape and message.
 //!
-//! `client-per-request` needs a negative fixture proving a module-top-level singleton is never scanned at
+//! `client-new-in-handler` needs a negative fixture proving a module-top-level singleton is never scanned at
 //! all: `MethodScan` only evaluates `SourceFile::symbols` body spans, and a top-level statement has no
 //! enclosing function span — see `module_top_level_singleton_prisma_client_is_not_flagged`.
 //!
@@ -93,5 +93,6 @@ mod client_lifecycle;
 mod money_and_catch;
 mod queries;
 mod races;
+mod raw_sql_writes;
 mod transactions;
 mod writes;

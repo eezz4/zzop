@@ -51,6 +51,40 @@ fn absolute_url_matching_an_internal_route_is_flagged_anchored_at_the_consume() 
     assert_eq!(data["host"], "app.internal.example.com");
     assert_eq!(data["normalizedKey"], "GET /api/users");
     assert_eq!(data["otherProvideCount"], 0);
+    // Seals that the payload names BOTH sides of the join: the consuming tree (the anchor) and the
+    // provider it matched. Before this, only `matchedProvide.source` shipped, so a consumer keying on
+    // `<source>/<file>:<line>` collapsed two trees' identical relative paths onto one key.
+    assert_eq!(data["consumeSource"], "fe");
+    assert_eq!(data["matchedProvide"]["source"], "be");
+}
+
+/// Seals the collision the `consumeSource` field exists to prevent: two trees whose consume sites share
+/// a relative path AND a line produce two findings whose only distinguishing datum is `consumeSource`.
+#[test]
+fn two_trees_with_the_same_consume_path_and_line_stay_distinguishable_by_consume_source() {
+    let external = vec![
+        consume(
+            Some("GET https://app.internal.example.com/api/users"),
+            "xfe",
+            "src/consumes.ts",
+            7,
+        ),
+        consume(
+            Some("GET https://app.internal.example.com/api/users"),
+            "xbe2",
+            "src/consumes.ts",
+            7,
+        ),
+    ];
+    let provides = vec![provide("GET /api/users", "be", "Api.java", 20)];
+    let out = external_shadow_internal_findings(&external, &provides);
+    assert_eq!(out.len(), 2);
+    let mut sources: Vec<&str> = out
+        .iter()
+        .map(|f| f.data.as_ref().unwrap()["consumeSource"].as_str().unwrap())
+        .collect();
+    sources.sort_unstable();
+    assert_eq!(sources, vec!["xbe2", "xfe"]);
 }
 
 #[test]

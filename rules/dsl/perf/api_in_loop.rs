@@ -95,7 +95,7 @@ fn comment_inside_the_function_body_documenting_a_loop_plus_fetch_example_is_not
 fn api_in_loop_ok_marker_above_the_call_whitelists_it() {
     let f = scan(
         "svc.ts",
-        "declare const ids: string[];\nexport async function f() {\n  for (const id of ids) {\n    // api-in-loop-ok: bounded admin list, sequential by design\n    await fetch(\"/api/\" + id);\n  }\n}\n",
+        "declare const ids: string[];\nexport async function f() {\n  for (const id of ids) {\n    // zzop-api-in-loop-ok: bounded admin list, sequential by design\n    await fetch(\"/api/\" + id);\n  }\n}\n",
     );
     assert!(f.is_empty(), "{f:?}");
 }

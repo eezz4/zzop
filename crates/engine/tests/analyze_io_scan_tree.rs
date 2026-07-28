@@ -14,10 +14,10 @@
 //! - `attr_absent` veto via engine-MINTED decorator-guard evidence — a NestJS `@UseGuards` route, whose
 //!   guard the call-graph BFS itself cannot see, is exempted the same way once `analyze::assemble::rules`
 //!   mints `auth-guarded` from `run_callgraph_rules`' exported `decorator_guarded` set.
-//! - Suppress-marker recognition (`marker-scan`) via the native `anchor_line` channel: a `// my-rule-ok`
+//! - Suppress-marker recognition (`marker-scan`) via the native `anchor_line` channel: a `// zzop-my-rule-ok`
 //!   comment on the route's own registration line suppresses; its absence fires.
 //! - Envelope mode (`envelope-idempotency-scan`): `attr_absent` honors an envelope-injected attribute, and
-//!   the derived `<id>-ok` suppress marker has no effect (envelope mode's `anchor_line` is always `None` —
+//!   the derived `zzop-<id>-ok` suppress marker has no effect (envelope mode's `anchor_line` is always `None` —
 //!   no source text to check).
 //! - `disabled_rules` gates an `IoScan` rule exactly like every other rule id.
 //!
@@ -74,8 +74,8 @@ impl Drop for TempDir {
 }
 
 fn io_scan_rule(id: &str, m: IoScan) -> RuleDef {
-    // Suppress marker is derived `<id>-ok` (see `RuleDef::suppress_marker`), so the rule's id alone
-    // determines the marker text a fixture comment must carry — e.g. `marker-scan` -> `// marker-scan-ok`.
+    // Suppress marker is derived `zzop-<id>-ok` (see `RuleDef::suppress_marker`), so the rule's id alone
+    // determines the marker text a fixture comment must carry — e.g. `marker-scan` -> `// zzop-marker-scan-ok`.
     RuleDef {
         id: id.to_string(),
         severity: Severity::Warning,
@@ -320,7 +320,7 @@ fn suppress_marker_on_the_registration_line_suppresses_without_it_fires() {
     let marked = TempDir::new("zzop-io-scan-tree-marker-present");
     marked.write(
         "routes/api.ts",
-        "const app = express();\napp.post('/orders', createOrder); // marker-scan-ok\n",
+        "const app = express();\napp.post('/orders', createOrder); // zzop-marker-scan-ok\n",
     );
     marked.write(
         "routes/handlers.ts",
@@ -329,7 +329,7 @@ fn suppress_marker_on_the_registration_line_suppresses_without_it_fires() {
     let out = analyze_tree(marked.path(), &config());
     assert!(
         hits(&out, "marker-scan").is_empty(),
-        "the // marker-scan-ok comment on the registration line must suppress: {:?}",
+        "the // zzop-marker-scan-ok comment on the registration line must suppress: {:?}",
         out.findings
     );
 
@@ -392,7 +392,7 @@ fn envelope_mode_attr_absent_honors_injected_attribute_and_ignores_the_inert_sup
         parser: "io-scan-e2e-adapter/1".to_string(),
         source: "test".to_string(),
         files: vec![
-            // No injected attribute — fires, and the rule's own derived marker `envelope-idempotency-scan-ok`
+            // No injected attribute — fires, and the rule's own derived marker `zzop-envelope-idempotency-scan-ok`
             // has no effect (envelope mode's `anchor_line` is always `None` — no source text to check).
             envelope_projection("routes/a.json", "POST /orders", Vec::new()),
             // Injected `idempotent` attribute on this exact route — attr_absent clears it.
@@ -466,6 +466,124 @@ fn disabled_rules_gates_an_io_scan_rule_id_like_any_other() {
     assert!(
         hits(&out, "admin-route-scan").is_empty(),
         "disabled_rules must gate an IoScan rule id: {:?}",
+        out.findings
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// (c2) MINTED decorator-guard evidence, Django edition — a guard that is neither a call NOR a line
+// ---------------------------------------------------------------------------------------------
+
+/// Django is the shape that forced the Python guard producer to have TWO halves. Its route anchor lives
+/// in `urls.py` while the auth evidence (`permission_classes`) lives on the VIEW CLASS in `views.py`, so
+/// the evidence cannot be a `(file, line)` the way FastAPI's `Depends` is — it is joined to the provide
+/// by the provide's own `symbol` (`callgraph::python_guard::apply_django_view_guards`).
+///
+/// This is also the ONLY way to observe that join: a Django URLconf registers a PATH bound to a view,
+/// never a METHOD, so every Django provide carries the `UNKNOWN_VERB` sentinel and the native
+/// `mutating-route-no-auth` rule (which gates on write METHODS) is structurally out of reach for it. The
+/// minted `auth-guarded` attribute an `IoScan` rule reads is the channel that is live for Django.
+///
+/// SHAPE FROM CORPUS: `corpus/oss/be-django/conduit/apps/articles/{urls,views}.py` — `ArticlesFeedAPIView`
+/// (`IsAuthenticated`) and `TagListAPIView` (`AllowAny`), registered side by side in one URLconf.
+fn django_permission_classes_tree(dir: &TempDir) {
+    dir.write(
+        "conduit/apps/articles/urls.py",
+        concat!(
+            "from django.conf.urls import url\n\n",
+            "from .views import ArticlesFeedAPIView, TagListAPIView\n\n",
+            "urlpatterns = [\n",
+            "    url(r'^articles/feed$', ArticlesFeedAPIView.as_view()),\n",
+            "    url(r'^tags$', TagListAPIView.as_view()),\n",
+            "]\n"
+        ),
+    );
+    dir.write(
+        "conduit/apps/articles/views.py",
+        concat!(
+            "from rest_framework import generics\n",
+            "from rest_framework.permissions import AllowAny, IsAuthenticated\n\n",
+            "class ArticlesFeedAPIView(generics.ListAPIView):\n",
+            "    permission_classes = (IsAuthenticated,)\n\n",
+            "class TagListAPIView(generics.ListAPIView):\n",
+            "    permission_classes = (AllowAny,)\n"
+        ),
+    );
+}
+
+#[test]
+fn django_permission_classes_mint_auth_guarded_only_for_the_authenticated_view() {
+    let dir = TempDir::new("zzop-io-scan-tree-django-permissions");
+    django_permission_classes_tree(&dir);
+    let out = analyze_tree(dir.path(), &config());
+    let found = hits(&out, "unguarded-mutation-scan");
+    let keys: Vec<&str> = found.iter().map(|f| snippet(f)).collect();
+    // `AllowAny` is not auth evidence, so that route stays unguarded and fires; `IsAuthenticated` mints
+    // `auth-guarded` on the OTHER route's key and vetoes it. Both routes exist — the difference is the
+    // attribute, not extraction.
+    assert_eq!(keys, vec!["? /tags"], "{:?}", out.findings);
+}
+
+/// Seals the by-NAME join's ambiguity drop against the case the producer's own verdicts CANNOT see: a
+/// second app declaring a same-named view that declares no `permission_classes` at all. Absence is not
+/// evidence of absence of auth, so that class is correctly absent from the producer's output — which
+/// means it never registered as a verdict DISAGREEMENT, and the one app that did declare a guard exempted
+/// the other app's route too. Django's default layout makes this ordinary: one `UserDetailView` per app.
+///
+/// SHAPE FROM CORPUS: `corpus/oss/be-django/conduit/apps/{articles,profiles}/` — the per-app
+/// `urls.py` + `views.py` pair this checkout repeats for every app.
+#[test]
+fn a_same_named_view_in_a_second_app_is_ambiguous_and_clears_nothing() {
+    let dir = TempDir::new("zzop-io-scan-tree-django-same-name");
+    dir.write(
+        "conduit/apps/articles/urls.py",
+        concat!(
+            "from django.conf.urls import url\n\n",
+            "from .views import UserDetailView\n\n",
+            "urlpatterns = [\n",
+            "    url(r'^articles/author$', UserDetailView.as_view()),\n",
+            "]\n"
+        ),
+    );
+    dir.write(
+        "conduit/apps/articles/views.py",
+        concat!(
+            "from rest_framework import generics\n",
+            "from rest_framework.permissions import IsAuthenticated\n\n",
+            "class UserDetailView(generics.RetrieveAPIView):\n",
+            "    permission_classes = (IsAuthenticated,)\n"
+        ),
+    );
+    dir.write(
+        "conduit/apps/profiles/urls.py",
+        concat!(
+            "from django.conf.urls import url\n\n",
+            "from .views import UserDetailView\n\n",
+            "urlpatterns = [\n",
+            "    url(r'^profiles/me$', UserDetailView.as_view()),\n",
+            "]\n"
+        ),
+    );
+    // Declares NO permission_classes — so the producer reports nothing for it, and the name is decided
+    // only by the OTHER app's class unless the join notices the collision.
+    dir.write(
+        "conduit/apps/profiles/views.py",
+        concat!(
+            "from rest_framework import generics\n\n",
+            "class UserDetailView(generics.RetrieveAPIView):\n",
+            "    queryset = None\n"
+        ),
+    );
+    let out = analyze_tree(dir.path(), &config());
+    let mut keys: Vec<&str> = hits(&out, "unguarded-mutation-scan")
+        .iter()
+        .map(|f| snippet(f))
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec!["? /articles/author", "? /profiles/me"],
+        "{:?}",
         out.findings
     );
 }

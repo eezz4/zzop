@@ -42,7 +42,7 @@ pub(in crate::analyze::assemble) struct Collected {
     pub(in crate::analyze::assemble) minified: Vec<String>,
     pub(in crate::analyze::assemble) io_provides: Vec<IoProvide>,
     pub(in crate::analyze::assemble) io_consumes: Vec<IoConsume>,
-    /// `dead-exports`' per-file "used names" input — collected unconditionally (cheap, already cached by
+    /// `unimported-export`' per-file "used names" input — collected unconditionally (cheap, already cached by
     /// the fused pass); the `is_enabled` gate in `super::rules` decides whether the more expensive
     /// second pass runs.
     pub(in crate::analyze::assemble) dead_export_names_by_file:
@@ -64,7 +64,7 @@ pub(in crate::analyze::assemble) struct Collected {
     /// `rule_timings`, summed per `rule_id` in the loop below. Stays empty when profiling is off.
     pub(in crate::analyze::assemble) rule_time: HashMap<String, (u128, usize)>,
     /// Per-package (non-relative specifier) importing-file sets — summarized into
-    /// `AnalyzeOutput::package_imports` for `cross-layer/sdk-import-no-visible-consume` (the tree IR
+    /// `AnalyzeOutput::package_imports` for `cross-layer/untraced-client-import-no-visible-consume` (the tree IR
     /// drops package imports during dep resolution, so this is the one place the data still exists).
     pub(in crate::analyze::assemble) package_import_files:
         std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
@@ -145,7 +145,7 @@ pub(in crate::analyze::assemble) struct Collected {
     /// frontend) AND whose extension is `.vue`/`.svelte`. `super::sfc::collect_sfc_import_pairs` reads
     /// each one off disk (uncached, assemble-time — same pattern `dead_exports.rs`'s re-read does) to
     /// extract `<script>`-block imports, so a `.ts` symbol imported ONLY inside an SFC's script block
-    /// still gets real fan-in for `dead-exports`/`dead-candidates` instead of false-firing. See
+    /// still gets real fan-in for `unimported-export`/`dead-candidates` instead of false-firing. See
     /// `zzop_parser_typescript::extract_sfc_script_imports`'s doc for why this needs no cache bump.
     pub(in crate::analyze::assemble) sfc_rels: Vec<String>,
 }

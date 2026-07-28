@@ -1,0 +1,50 @@
+// Prisma schema fixture — plants schema-structural issues (float-as-money, missing timestamps, nullable
+// FK, FK with no index, temporal-as-string). Parsed by zzop-parser-prisma; drives the native schema-*
+// analyses.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Order {
+  id      Int    @id @default(autoincrement())
+  price   Float
+  userId  Int?
+  user    User?  @relation(fields: [userId], references: [id])
+  dueDate String
+}
+
+model User {
+  id     Int     @id @default(autoincrement())
+  orders Order[]
+}
+
+enum TicketState {
+  OPEN
+  CLOSED
+}
+
+// Soft-delete model — `getPrisma().ticket.findMany(...)` that omits `deletedAt` leaks tombstoned rows
+// into a "live" read → soft-delete-bypass. Kept structurally clean (timestamps present) so it plants
+// only the join-rule signal.
+model Ticket {
+  id        Int       @id @default(autoincrement())
+  open      Boolean
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+// Carries an enum field with a name (`state`) unique across models → a `state: 'Literal'` query literal
+// that isn't an enum member resolves to this enum → enum-string-drift.
+model Job {
+  id        Int         @id @default(autoincrement())
+  state     TicketState
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+}

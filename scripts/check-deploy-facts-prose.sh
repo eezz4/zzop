@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check-deploy-facts-prose.sh — guards against the "an inventory COUNT was written into prose in
 # several places, one copy changed, the rest rotted" defect class. Hit at least three times:
-#   - the bundled DSL pack count read "15" in docs/modules/mcp.md, "14" in crates/host/src/embedded.rs
+#   - the bundled DSL pack count read "15" in docs/modules/mcp.md, "14" in crates/summary/src/contracts.rs
 #     and "14" in rules/README.md while the truth was 12 (fixed 2026-07-24; the wire-visible copy in
 #     embedded.rs is now pinned by a unit test, every prose copy was not pinned by anything);
 #   - the bundled `security` pack's rule count read 2 against a truth of 44 in two facade test
@@ -32,7 +32,7 @@
 #
 # Scan surface: TRACKED `*.md`, `*.html` AND `*.rs`. `*.rs` is deliberately IN scope, unlike
 # check-asset-name-prose.sh's md/html-only surface: two of the three confirmed instances of this defect
-# class lived in Rust, not Markdown — `crates/host/src/embedded.rs`'s `rule-catalog` description (which
+# class lived in Rust, not Markdown — `crates/summary/src/contracts.rs`'s `rule-catalog` description (which
 # ships over MCP `resources/list`, i.e. a reader's only pack-count signal without a checkout) and
 # `crates/facade/src/packs_tests.rs`'s shadow-warning comments/assertions. A doc comment or a test
 # comment stating an inventory count rots exactly like a README does. Generated/vendored trees
@@ -61,14 +61,15 @@
 # through; no surface writes one, and it would be self-evidently wrong to any reader.
 #
 # Known-uncovered (documented, not silently ignored):
-#   - `45 native analysis ids` (docs/rules/catalog.md's totals line). Derivable only from
+#   - `57 native analysis ids` (docs/rules/catalog.md's totals line). Derivable only from
 #     `zzop_engine::register_all_native`, i.e. only by BUILDING; a shell guard cannot see it. Already
 #     pinned by `crates/engine/tests/rule_contracts/`'s `catalog_totals_match_loaded_rule_and_analysis_counts`,
 #     which also re-pins the pack/rule totals this guard checks — this guard's value there is catching them
 #     in pre-commit, seconds instead of a full workspace test run.
 #   - `all six tools` (docs/modules/mcp.md). Spelled as an English word, not a digit, and the tool set has
-#     no declarative registry to count — `crates/host/src/tools.rs` exposes them as plain `pub fn`s, so any
-#     future public helper would silently change the derived number. Deriving it would be guessing.
+#     no declarative registry to count — `packages/mcp/src/tools.rs` dispatches them as plain match arms
+#     over `zzop_summary` calls, so any future public helper would silently change the derived number.
+#     Deriving it would be guessing.
 #   - `All 12 ship rules.` (docs/rules/catalog.md, same sentence as the totals). A bare digit with no
 #     anchoring noun; matching it would mean matching every bare number in the repo.
 #   - illustrative output-format examples such as `` `typescript: 12 rules` `` (crates/engine/src/output.rs,

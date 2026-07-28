@@ -20,6 +20,30 @@ use crate::analyze::record_native_timing;
 
 mod io_scan;
 
+/// The whole-graph inputs the three graph analyses (`circular`, `unreachable`, `dead-candidates`) read,
+/// grouped so [`run`] stays readable — it took 21 positional parameters before this, and threading the
+/// overlay entry set as a 22nd would have made the signature itself the defect. Every field here is
+/// consumed only inside those three gates.
+pub(super) struct GraphInputs<'a> {
+    pub(super) cycles: &'a [Vec<String>],
+    pub(super) nodes: &'a [zzop_core::FileNode],
+    pub(super) dep: &'a zzop_core::ir::DepGraph,
+    /// `.ts` targets imported ONLY by a `.vue`/`.svelte` SFC — seeded as `unreachable` entries.
+    pub(super) sfc_targets: &'a std::collections::HashSet<String>,
+    /// Runtime asset-URL targets (worklet/worker/`importScripts`/`new URL`) — same `unreachable` seed.
+    pub(super) asset_targets: &'a std::collections::HashSet<String>,
+    /// Paths an APPLIED Mode B adapter overlay declared `is_entry: true`
+    /// (`envelope::OverlayApplication::entry_paths`), unioned into `dead-candidates`' `extra_entries`.
+    ///
+    /// It comes from the apply loop's verdict and NOT from `EngineConfig::adapter_overlays`, which is
+    /// what this field exists to fix: reading the config directly honored the `is_entry` of an overlay
+    /// `apply_adapter_overlays` had REJECTED (failed `validate_envelope`, or failed to serialize), so a
+    /// file behind a rejected overlay stayed exempt from `dead-candidates` — a dead file going unnamed.
+    /// Under-detection, so it survived a long time; still wrong. Same "applied, not declared" rule
+    /// `covered_paths` already enforces for the "no native parser" disclosure.
+    pub(super) overlay_entry_paths: &'a std::collections::HashSet<String>,
+}
+
 /// Runs every whole-graph/call-graph-BFS native analysis in the same order (and under the same
 /// `is_enabled` gates) the pre-split monolithic `assemble` did, then the two whole-tree DSL sub-phases —
 /// [`io_scan`] (which PRODUCES findings) and [`gate_file_findings`] (which FILTERS the per-file pass's,
@@ -33,14 +57,13 @@ mod io_scan;
 pub(super) fn run(
     root: &std::path::Path,
     config: &EngineConfig,
-    cycles: &[Vec<String>],
-    nodes: &[zzop_core::FileNode],
-    dep: &zzop_core::ir::DepGraph,
+    graph: &GraphInputs<'_>,
     pkg_scan: &PackageJsonScan,
     tsconfigs: &std::collections::BTreeMap<String, zzop_parser_typescript::TsconfigPaths>,
     ts_paths: &std::collections::HashSet<String>,
     ts_import_pairs: &[(String, ImportMap)],
     java_rels: &[String],
+    rust_workspace: &crate::pipeline::RustWorkspaceMap,
     all_symbols: &[zzop_core::ir::SourceSymbol],
     dead_export_names_by_file: &std::collections::HashMap<
         String,
@@ -54,18 +77,18 @@ pub(super) fn run(
     io_consumes: &[zzop_core::IoConsume],
     rule_time: &mut std::collections::HashMap<String, (u128, usize)>,
     sfc_import_pairs: &[(String, ImportMap)],
-    sfc_targets: &std::collections::HashSet<String>,
-    asset_targets: &std::collections::HashSet<String>,
     per_file_findings: &mut Vec<Finding>,
     warnings: &mut Vec<String>,
 ) -> Vec<Finding> {
     // `profile` mirrors `dsl::eval_pack_impl`'s no-op-sink convention: `Instant::now()` is only ever called
     // when profiling is on, so a non-profiled `analyze_tree` call pays zero cost for the wrapping below.
     let profile = config.profile_rules;
+    // The run's declared convention vocabulary, resolved once for every whole-tree rule below.
+    let vocab = config.vocabulary.resolve();
     let mut global_findings = Vec::new();
     if is_enabled(&config.rule_config, "circular") {
         let t0 = profile.then(Instant::now);
-        let found = circular_findings(cycles);
+        let found = circular_findings(graph.cycles);
         record_native_timing(rule_time, t0, "circular", found.len());
         global_findings.extend(found);
     }
@@ -94,47 +117,47 @@ pub(super) fn run(
         // `dep` edge points at it (the SFC is not a graph node), so it would read as a false `unreachable`
         // island. A framework-mounted component is effectively an entrypoint, so seed what it imports as
         // reachable — the same "loaded by a mechanism this graph can't see" contract as the cargo targets.
-        unreachable_entries.extend(sfc_targets.iter().cloned());
+        unreachable_entries.extend(graph.sfc_targets.iter().cloned());
         // Same contract for runtime asset-URL targets (worklet/worker/importScripts/`new URL`): a
         // `public/*.js` worklet has real fan-in (via `merge_asset_ref_fan_in`) but no incoming `dep`
         // edge, so it too would read as a false `unreachable` island without being seeded as an entry —
         // it IS an entrypoint, loaded by the browser's asset loader this graph can't see.
-        unreachable_entries.extend(asset_targets.iter().cloned());
-        let found = unreachable_findings(nodes, dep, &unreachable_entries);
+        unreachable_entries.extend(graph.asset_targets.iter().cloned());
+        let found = unreachable_findings(graph.nodes, graph.dep, &unreachable_entries);
         record_native_timing(rule_time, t0, "unreachable", found.len());
         global_findings.extend(found);
     }
     if is_enabled(&config.rule_config, "dead-candidates") {
         // `extra_entries`: package.json-referenced files (manifest entry fields + lexically-scanned
         // `scripts` path tokens) — real entry points loaded by Node/bundlers/npm directly, never via
-        // `import`, so `fan_in == 0` on them is expected, not dead-code signal — UNIONED with every Mode
-        // B adapter-overlay `FileProjection` marked `is_entry: true` (`EngineConfig::adapter_overlays`),
-        // the overlay counterpart of a manifest entry: a framework-loaded file (SvelteKit `hooks.*`/
-        // `+page`, a `.vue` route, ...) an adapter declares reachable by convention rather than import.
-        // Overlays are applied post-cache (`envelope::apply_adapter_overlays`, called from `analyze_tree`
-        // before this function runs) and never merged into `pkg_scan` itself (a filesystem-only scan), so
-        // this reads `config.adapter_overlays` directly rather than threading a new parameter through.
+        // `import`, so `fan_in == 0` on them is expected, not dead-code signal — UNIONED with every
+        // APPLIED Mode B adapter-overlay `FileProjection` marked `is_entry: true`, the overlay
+        // counterpart of a manifest entry: a framework-loaded file (SvelteKit `hooks.*`/`+page`, a
+        // `.vue` route, ...) an adapter declares reachable by convention rather than import. Overlays
+        // are applied post-cache (`envelope::apply_adapter_overlays`, called from `analyze_tree` before
+        // this function runs) and never merged into `pkg_scan` itself (a filesystem-only scan), so the
+        // apply loop hands its OWN entry set down through `GraphInputs::overlay_entry_paths` — see that
+        // field's doc for why re-reading `config.adapter_overlays` here was wrong.
         let t0 = profile.then(Instant::now);
         let mut extra_entries = pkg_scan.extra_entries.clone();
-        extra_entries.extend(
-            config
-                .adapter_overlays
-                .iter()
-                .flat_map(|overlay| overlay.files.iter())
-                .filter(|file| file.is_entry)
-                .map(|file| file.path.clone()),
-        );
-        // Drop candidates on author-declared generated files, mirroring `dead-exports`' exemption: a
+        extra_entries.extend(graph.overlay_entry_paths.iter().cloned());
+        // Drop candidates on author-declared generated files, mirroring `unimported-export`' exemption: a
         // generated file is regenerated, not hand-edited, so "delete this unused file" is non-actionable
         // there. Reads only the (few) candidate files' heads. Same `has_generated_banner` detector.
-        let found: Vec<_> = dead_candidate_findings(nodes, dep, &extra_entries)
+        let found: Vec<_> = dead_candidate_findings(graph.nodes, graph.dep, &extra_entries)
             .into_iter()
-            .filter(|f| !crate::generated_banner::file_has_generated_banner(root, &f.file))
+            .filter(|f| {
+                !crate::generated_banner::file_has_generated_banner(
+                    root,
+                    &f.file,
+                    &vocab.generated_file_markers,
+                )
+            })
             .collect();
         record_native_timing(rule_time, t0, "dead-candidates", found.len());
         global_findings.extend(found);
     }
-    if is_enabled(&config.rule_config, "dead-exports") {
+    if is_enabled(&config.rule_config, "unimported-export") {
         let t0 = profile.then(Instant::now);
         let found = crate::dead_exports::dead_export_findings(
             root,
@@ -145,18 +168,21 @@ pub(super) fn run(
             &pkg_scan.workspace_pkgs,
             tsconfigs,
             sfc_import_pairs,
+            &vocab.generated_file_markers,
         );
-        record_native_timing(rule_time, t0, "dead-exports", found.len());
+        record_native_timing(rule_time, t0, "unimported-export", found.len());
         global_findings.extend(found);
     }
 
     if is_enabled(&config.rule_config, "schema-usage") {
         let t0 = profile.then(Instant::now);
         let found = crate::pipeline::schema_usage_findings(
+            &config.rule_config,
             root,
             prisma_rels,
             attribute_store,
             field_usage_tokens,
+            &vocab.schema_usage_skip_fields,
         );
         record_native_timing(rule_time, t0, "schema-usage", found.len());
         global_findings.extend(found);
@@ -199,8 +225,12 @@ pub(super) fn run(
     // without which this single-tree surface vetoes a call the multi-tree join reports.
     if is_enabled(&config.rule_config, "unprovided-consume") {
         let t0 = profile.then(Instant::now);
-        let found =
-            zzop_rules_http::unprovided_consume_findings(io_provides, io_consumes, &config.hosts);
+        let found = zzop_rules_http::unprovided_consume_findings(
+            io_provides,
+            io_consumes,
+            &config.hosts,
+            vocab.api_segment_pattern,
+        );
         record_native_timing(rule_time, t0, "unprovided-consume", found.len());
         global_findings.extend(found);
     }
@@ -214,6 +244,7 @@ pub(super) fn run(
         ts_paths,
         ts_import_pairs,
         java_rels,
+        rust_workspace,
         all_symbols,
         profile,
         rule_time,
@@ -236,35 +267,25 @@ pub(super) fn run(
         rule_time,
     ));
 
-    gate_file_findings(config, attribute_store, per_file_findings, warnings);
-
-    global_findings
-}
-
-/// The `line-scan` counterpart of the [`io_scan`] sub-phase: applies every enabled `line-scan` rule's
-/// `attr_present`/`attr_absent`/`require_attr_declared` gates to the FUSED PER-FILE pass's own findings,
-/// in place, and pushes the §0 disclosure for any rule an undeclared key silenced.
-///
-/// Runs LAST in [`run`], so it lands after every native pass and before `super::assemble`'s
-/// `merge_findings` — a gated-away finding is therefore never a severity-override or suppression input.
-///
-/// WHY IT IS A POST-FILTER AND NOT A CHECK INSIDE THE PER-FILE PASS: a per-file finding is cached under
-/// `(content_hash, parser_fingerprint, scope, ruleset_fingerprint)` and the attribute set is none of
-/// those, so gating inside the cached unit would freeze a declaration into entries that outlive it —
-/// edit `zzop.config.jsonc` and warm files would keep serving findings judged against the old one. The
-/// cache stores UNGATED findings and this recomputes every run, the same placement
-/// `severity_overrides`/`suppressions` already use. Full reasoning, and what the placement costs a pack
-/// author, in `zzop_core::dsl::apply_attr_gates`' module doc.
-fn gate_file_findings(
-    config: &EngineConfig,
-    attribute_store: &zzop_core::AttributeStore,
-    per_file_findings: &mut Vec<Finding>,
-    warnings: &mut Vec<String>,
-) {
+    // The `line-scan` counterpart of the `io_scan` sub-phase: applies every enabled `line-scan` rule's
+    // `attr_present`/`attr_absent`/`require_attr_declared` gates to the FUSED PER-FILE pass's own
+    // findings, in place, and pushes the §0 disclosure for any rule an undeclared key silenced. LAST, so
+    // it lands after every native pass and before `super::assemble`'s `merge_findings` — a gated-away
+    // finding is therefore never a severity-override or suppression input.
+    //
+    // WHY IT IS A POST-FILTER AND NOT A CHECK INSIDE THE PER-FILE PASS: a per-file finding is cached
+    // under `(content_hash, parser_fingerprint, scope, ruleset_fingerprint)` and the attribute set is
+    // none of those, so gating inside the cached unit would freeze a declaration into entries that
+    // outlive it — edit `zzop.config.jsonc` and warm files would keep serving findings judged against the
+    // old one. The cache stores UNGATED findings and this recomputes every run, the same placement
+    // `severity_overrides`/`suppressions` already use. Full reasoning, and what the placement costs a
+    // pack author, in `zzop_core::dsl::apply_attr_gates`' module doc.
     warnings.extend(zzop_core::apply_attr_gates(
         &config.packs,
         &config.rule_config,
         attribute_store,
         per_file_findings,
     ));
+
+    global_findings
 }

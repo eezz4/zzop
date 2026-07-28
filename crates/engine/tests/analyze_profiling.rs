@@ -49,7 +49,7 @@ impl Drop for TempDir {
 }
 
 /// The real `rules/dsl/security/security.json`, filtered to the three Java security-concern rules
-/// (`sql-taint`/`weak-crypto`/`cmd-injection`) that moved into `security` when the language-named
+/// (`sql-string-concat`/`weak-crypto`/`cmd-injection`) that moved into `security` when the language-named
 /// `java-security` pack was dissolved (v0.15) — all three share a `.java`-ish `file_pattern`, so every one
 /// of them gets evaluated, and therefore timed, against any `.java` file the pack applies to (see
 /// `zzop_core::pack_loader::applies_to`'s "any rule matches" semantics). Filtering to exactly these three
@@ -63,17 +63,21 @@ fn security_java_pack() -> RulePackDef {
     // Goes through `zzop_core::parse_dsl_pack` (not a raw `serde_json::from_str`) so this pack's
     // `${NAME}` fragment refs resolve exactly like they do at real load time.
     let mut pack: RulePackDef = zzop_core::parse_dsl_pack(&text).expect("parse security.json");
-    pack.rules
-        .retain(|r| matches!(r.id.as_str(), "sql-taint" | "weak-crypto" | "cmd-injection"));
+    pack.rules.retain(|r| {
+        matches!(
+            r.id.as_str(),
+            "sql-string-concat" | "weak-crypto" | "cmd-injection"
+        )
+    });
     pack
 }
 
 /// A circular TS import pair (exercises the `circular` native analysis id) plus a Java file matching
-/// `security/sql-taint` (exercises a DSL finding; `weak-crypto`/`cmd-injection` still run against this
+/// `security/sql-string-concat` (exercises a DSL finding; `weak-crypto`/`cmd-injection` still run against this
 /// same file — they just don't fire, since the file has no weak-crypto/exec pattern). No git history is
 /// configured, so `scores`/`health`/`recommendations`/`criticality`/`seams` never run (see
 /// `analyze::assemble`'s git-gating) — this keeps the expected native-analysis-id set to exactly the
-/// analyses `is_enabled`-gated unconditionally: `circular`/`unreachable`/`dead-candidates`/`dead-exports`/
+/// analyses `is_enabled`-gated unconditionally: `circular`/`unreachable`/`dead-candidates`/`unimported-export`/
 /// `schema-usage`/`duplicate-route`/`route-shadowing`/`unprovided-consume`. This fixture has no HTTP
 /// routes at all, so `unsafe-read-endpoint`/`non-idempotent-write`/`mutating-route-no-auth` — every rule gated
 /// behind `run_callgraph_rules`'s `api_endpoints.is_empty()` early return — never run and never appear here.
@@ -107,12 +111,12 @@ const EXPECTED_IDS: &[&str] = &[
     "circular",
     "unreachable",
     "dead-candidates",
-    "dead-exports",
+    "unimported-export",
     "schema-usage",
     "duplicate-route",
     "route-shadowing",
     "unprovided-consume",
-    "security/sql-taint",
+    "security/sql-string-concat",
     "security/weak-crypto",
     "security/cmd-injection",
 ];
@@ -162,7 +166,7 @@ fn profiling_does_not_change_findings_or_ir_versus_an_unprofiled_run() {
     assert_eq!(unprofiled.file_count, profiled.file_count);
     assert!(
         !profiled.findings.is_empty(),
-        "sanity: the fixture tree should still produce findings (circular + sql-taint)"
+        "sanity: the fixture tree should still produce findings (circular + sql-string-concat)"
     );
 }
 
@@ -188,8 +192,8 @@ fn sql_taint_dsl_rule_timing_reflects_the_finding_it_produced() {
     let timings = out.rule_timings.expect("profiling on -> Some(timings)");
     let sql_taint = timings
         .iter()
-        .find(|t| t.rule_id == "security/sql-taint")
-        .expect("sql-taint timing present");
+        .find(|t| t.rule_id == "security/sql-string-concat")
+        .expect("sql-string-concat timing present");
     assert_eq!(sql_taint.findings, 1, "{sql_taint:?}");
 
     // weak-crypto/cmd-injection still ran (same pack, same file) but matched nothing in this fixture.

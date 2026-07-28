@@ -46,7 +46,7 @@ fn mass_assignment_ok_marker_above_the_write_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/users.ts",
-        "declare const prisma: any;\nexport async function updateUser(req: any) {\n  // mass-assignment-ok: internal admin-only migration endpoint, body pre-validated upstream\n  return prisma.user.update({ data: req.body });\n}\n",
+        "declare const prisma: any;\nexport async function updateUser(req: any) {\n  // zzop-mass-assignment-ok: internal admin-only migration endpoint, body pre-validated upstream\n  return prisma.user.update({ data: req.body });\n}\n",
     );
     let out = scan(&dir);
     assert!(

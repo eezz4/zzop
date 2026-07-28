@@ -8,7 +8,7 @@ use crate::ir::{SourceSymbol, SourceSymbolKind};
 use super::ir_scan::{eval_pack_io_scan, IoScanTreeContext};
 use super::{eval_pack, RuleContext, RulePackDef, SourceFile};
 
-/// The three Java security-concern rules (`sql-taint`/`weak-crypto`/`cmd-injection`) that moved into
+/// The three Java security-concern rules (`sql-string-concat`/`weak-crypto`/`cmd-injection`) that moved into
 /// `security` when the language-named `java-security` pack was dissolved (v0.15). We load the real
 /// `security.json` and filter to just those three so the fixture stays a small, fully-`.java`-applicable
 /// set. Goes through `crate::parse_dsl_pack` (not a raw `serde_json::from_str`) so this pack's `${NAME}`
@@ -19,8 +19,12 @@ pub(super) fn pack() -> RulePackDef {
     let mut p: RulePackDef =
         crate::parse_dsl_pack(include_str!("../../../../rules/dsl/security/security.json"))
             .expect("parse security.json");
-    p.rules
-        .retain(|r| matches!(r.id.as_str(), "sql-taint" | "weak-crypto" | "cmd-injection"));
+    p.rules.retain(|r| {
+        matches!(
+            r.id.as_str(),
+            "sql-string-concat" | "weak-crypto" | "cmd-injection"
+        )
+    });
     p
 }
 
@@ -33,10 +37,7 @@ pub(super) fn scan(src: &str, rel: &str) -> Vec<Finding> {
         symbols: vec![],
         io: None,
     }];
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
-    };
+    let ctx = RuleContext { files: &files };
     eval_pack(&pack(), &ctx)
 }
 
@@ -66,10 +67,7 @@ pub(super) fn scan_methods(src: &str, symbols: Vec<SourceSymbol>) -> Vec<Finding
         symbols,
         io: None,
     }];
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
-    };
+    let ctx = RuleContext { files: &files };
     eval_pack(&pack(), &ctx)
 }
 
@@ -127,10 +125,7 @@ pub(super) fn scan_symbols(
         symbols,
         io: None,
     }];
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
-    };
+    let ctx = RuleContext { files: &files };
     eval_pack(&symbol_scan_pack(matcher_json), &ctx)
 }
 
@@ -221,10 +216,7 @@ pub(super) fn scan_pack(
         symbols,
         io: None,
     }];
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
-    };
+    let ctx = RuleContext { files: &files };
     eval_pack(pack, &ctx)
 }
 
@@ -245,10 +237,7 @@ pub(super) fn scan_pack_loops(
         symbols,
         io: None,
     }];
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
-    };
+    let ctx = RuleContext { files: &files };
     eval_pack(pack, &ctx)
 }
 
@@ -271,9 +260,6 @@ pub(super) fn scan_pack_fns(
         symbols,
         io: None,
     }];
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
-    };
+    let ctx = RuleContext { files: &files };
     eval_pack(pack, &ctx)
 }

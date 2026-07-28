@@ -25,7 +25,11 @@ mod tests;
 pub use bucket_keys::DEFAULT_BUCKET_KEYS_LIMIT;
 pub(crate) use bucket_keys::{bucket_keys, KEY_BUCKETS};
 
-/// Caller-facing filters for a findings list, straight from tool arguments.
+/// Caller-facing filters for a findings list. Two constructors, one validation vocabulary:
+/// [`FindingFilters::new`] is WIRE-NEUTRAL (already-parsed values — what the CLI has after argv
+/// parsing) and [`FindingFilters::from_args`] reads an MCP `tools/call` `arguments` object. `new` is the
+/// core; `from_args` is the JSON front door onto it, so the two can never disagree about what a valid
+/// `severity`/`limit` is.
 #[derive(Debug)]
 pub struct FindingFilters {
     /// Minimum severity (`"info"` < `"warning"` < `"critical"`). `None` = no severity filter.
@@ -37,6 +41,45 @@ pub struct FindingFilters {
 }
 
 impl FindingFilters {
+    /// WIRE-NEUTRAL constructor: already-parsed values in, the same validation vocabulary applied.
+    /// This is what a host that does NOT speak JSON calls — the `zzop` CLI has `severity`/`rule`/`limit`
+    /// as argv strings/numbers and must never have to fabricate an MCP `tools/call` object to reach the
+    /// shared filters (a host assembling a foreign wire shape to talk to the shared layer is a protocol
+    /// leak into a protocol-free crate, and it made the CLI's filter lane look like it needed an MCP
+    /// dependency it does not have).
+    ///
+    /// Same rejections as [`from_args`](Self::from_args), by construction rather than by copy: an
+    /// unrecognized `min_severity` is a named error with the valid vocabulary, and a `limit` above
+    /// `MAX_LIMIT` is a named range error. `None` means "no filter" for all three — the only way to say
+    /// it here, since a wire-neutral caller has no `null` to distinguish.
+    ///
+    /// `FindingFilters::new(None, None, None)` is the unfiltered default view (what `zzop analyze`
+    /// prints today), and it cannot fail — but the signature still returns `Result`, so a caller that
+    /// later starts passing real user input is not tempted to `unwrap` a validation away.
+    pub fn new(
+        min_severity: Option<&str>,
+        rule: Option<&str>,
+        limit: Option<usize>,
+    ) -> Result<Self, String> {
+        if let Some(severity) = min_severity {
+            if severity_rank(severity) == 0 {
+                return Err(unknown_severity_error(&serde_json::Value::String(
+                    severity.to_string(),
+                )));
+            }
+        }
+        if let Some(n) = limit {
+            if n > MAX_LIMIT {
+                return Err(limit_range_error(&serde_json::Value::from(n)));
+            }
+        }
+        Ok(FindingFilters {
+            min_severity: min_severity.map(str::to_string),
+            rule: rule.map(str::to_string),
+            limit,
+        })
+    }
+
     /// Parses the shared `severity`/`rule`/`limit` tool arguments. A live-fire boundary-value round
     /// found every one of these silently ignored the WRONG JSON type instead of rejecting it: a
     /// `severity` NUMBER fell through `as_str()` to "no filter" the same way an absent key would, and a
@@ -87,10 +130,15 @@ fn unknown_severity_error(v: &serde_json::Value) -> String {
 fn parse_limit(v: &serde_json::Value) -> Result<usize, String> {
     match v.as_i64() {
         Some(n) if (0..=MAX_LIMIT as i64).contains(&n) => Ok(n as usize),
-        _ => Err(format!(
-            "limit must be an integer between 0 and {MAX_LIMIT} (got {v})"
-        )),
+        _ => Err(limit_range_error(v)),
     }
+}
+
+/// `limit must be an integer between 0 and <MAX> (got <value>)` — shared by [`parse_limit`] (the JSON
+/// lane, where the value can also be the wrong TYPE) and `FindingFilters::new`'s range check, so both
+/// constructors reject an over-cap limit with the identical message.
+fn limit_range_error(v: &serde_json::Value) -> String {
+    format!("limit must be an integer between 0 and {MAX_LIMIT} (got {v})")
 }
 
 /// `critical` > `warning` > `info` > anything else (unknown severities rank 0: shown last unfiltered,
@@ -167,7 +215,7 @@ pub(crate) fn shape_findings(
         out["truncated"] = truncation(
             limit,
             total_matching,
-            "narrow with the severity/rule tool arguments or raise limit",
+            "narrow by severity or rule, or raise the limit",
         );
     }
     // Zero-match rule-filter disclosure: `shown: []` from a real rule with zero findings this run is
@@ -179,9 +227,17 @@ pub(crate) fn shape_findings(
     if let Some(rule) = &filters.rule {
         if total_matching == 0 && !by_rule.contains_key(rule.as_str()) {
             out["note"] = serde_json::Value::String(format!(
+                // Names the DOCUMENT, not a route to it. This sentence used to end "read it via the
+                // zzop://contract/rule-catalog resource or `zzop contract rule-catalog`" — one route
+                // per host, which is better than naming only one but still worse than naming neither:
+                // every host serves `rule-catalog` by that name, so the name IS the answer on both,
+                // and a route list has to grow every time a surface does. Same call the starter config
+                // took when the host-vocabulary contract caught two lines in it. This message was
+                // invisible to that contract until 2026-07-28 — the scan truncated the file at a
+                // `#[cfg(test)] mod` DECLARATION, hiding 91% of it.
                 "rule filter '{rule}' matched no findings and is not among this run's fired rule ids — \
-                 check the id (byRule lists what fired; the `rule-catalog` contract lists all ids — \
-                 read it via the zzop://contract/rule-catalog resource or `zzop contract rule-catalog`)"
+                 check the id (byRule lists what fired; the `rule-catalog` contract document lists all \
+                 of them, and every zzop surface serves it under that name)"
             ));
         }
     }

@@ -254,5 +254,7 @@ fn original_of<'a>(name: &'a str, fns: &'a DjangoFns) -> &'a str {
 mod convert_path;
 use convert_path::{path_to_key, regex_to_key};
 
+pub mod guard;
+
 #[cfg(test)]
 mod tests;

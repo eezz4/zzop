@@ -27,13 +27,26 @@ pub(in crate::analyze) fn collect_git(
         }
         _ => zzop_metrics::default_commit_type_patterns(),
     };
+    // The DECLARED subject-pattern axis, by contrast, has no default table to fall back to and never
+    // will: absent/empty stays absent/empty, so a repo whose config says nothing gets no labels rather
+    // than labels from a convention nobody declared. This is the whole point of the key.
+    let commit_subject_patterns = git_opts.commit_subject_patterns.clone().unwrap_or_default();
+    warn_on_invalid_commit_subject_patterns(&commit_subject_patterns, warnings);
     let opts = zzop_git::CollectOptions {
         since: git_opts.since.clone(),
         recent_days: git_opts.recent_days,
         commit_type_patterns,
+        commit_subject_patterns: commit_subject_patterns.clone(),
     };
     match zzop_git::collect(root, &opts) {
-        Ok(collection) => (collection.stats, collection.commits, true),
+        Ok(collection) => {
+            warn_on_inert_commit_subject_patterns(
+                &commit_subject_patterns,
+                &collection.commits,
+                warnings,
+            );
+            (collection.stats, collection.commits, true)
+        }
         Err(e) => {
             warnings.push(format!(
                 "git collection skipped for {}: {e}",
@@ -71,6 +84,79 @@ fn warn_on_invalid_commit_type_patterns(patterns: &[(String, String)], warnings:
         bad.len(),
         bad.join(", ")
     ));
+}
+
+/// The `git.commitSubjectPatterns` twin of `warn_on_invalid_commit_type_patterns` — same contract, same
+/// reason, and deliberately compiled through [`zzop_git::compile_commit_subject_pattern`] rather than
+/// `compile_commit_type_pattern`: the two axes do NOT share compile semantics (the subject axis injects
+/// no `(?i)`), so validating one with the other's compiler would be the exact drift the shared-function
+/// rule exists to prevent, only in a subtler form — a `(?i)`-dependent pattern would pass validation
+/// here and then match nothing in `zzop_git`.
+fn warn_on_invalid_commit_subject_patterns(
+    patterns: &[(String, String)],
+    warnings: &mut Vec<String>,
+) {
+    let bad: Vec<&str> = patterns
+        .iter()
+        .filter(|(pattern, _)| zzop_git::compile_commit_subject_pattern(pattern).is_err())
+        .map(|(pattern, _)| pattern.as_str())
+        .collect();
+    if bad.is_empty() {
+        return;
+    }
+    warnings.push(format!(
+        "git.commitSubjectPatterns has {} invalid regex pattern(s), skipped (matches nothing): {} — check for unescaped regex metacharacters.",
+        bad.len(),
+        bad.join(", ")
+    ));
+}
+
+/// A DECLARED subject-pattern table that labelled zero commits self-reports, the same way an unmatched
+/// suppression does. This axis is opt-in with no fallback, so "no labels anywhere" is ambiguous from the
+/// outside — it reads identically whether the author declared nothing (correct silence) or declared a
+/// table whose regexes never fire against this repo's real subjects (a dead knob). Only the second is a
+/// problem, and only this layer can tell them apart, so only this layer can say it. One line, naming the
+/// declared labels in declaration order (deterministic); never an error, and the analysis is unaffected.
+///
+/// A second sentence rides along ONLY when a U+FFFD is actually observed (see
+/// [`subjects_show_lossy_decoding`]): the bare line leaves the declared pattern as the only suspect, when
+/// the cause may be that `zzop_git`'s `String::from_utf8_lossy` decode of git's stdout already replaced
+/// the non-UTF-8 bytes the pattern was written against. Phrased as a possibility, never a verdict — a
+/// U+FFFD can also be genuinely part of the original subject, and this layer cannot tell the two apart.
+fn warn_on_inert_commit_subject_patterns(
+    patterns: &[(String, String)],
+    commits: &[zzop_core::CommitFileSet],
+    warnings: &mut Vec<String>,
+) {
+    if patterns.is_empty() || commits.iter().any(|c| !c.labels.is_empty()) {
+        return;
+    }
+    let mut labels: Vec<&str> = Vec::new();
+    for (_, label) in patterns {
+        if !labels.contains(&label.as_str()) {
+            labels.push(label.as_str());
+        }
+    }
+    let lossy_hint = if subjects_show_lossy_decoding(commits) {
+        " Note: some collected subjects contain U+FFFD (the Unicode replacement character), which is what a non-UTF-8 byte becomes when git's output is decoded — subjects from legacy-encoded history may have lost characters before matching, so a non-ASCII pattern can be unable to match text that looks correct in `git log`. (U+FFFD may also be genuinely part of the original subject.)"
+    } else {
+        ""
+    };
+    warnings.push(format!(
+        "git.commitSubjectPatterns declared {} pattern(s) ({}) but none matched any of the {} collected commit subject(s) — nothing was labelled.{lossy_hint}",
+        patterns.len(),
+        labels.join(", "),
+        commits.len()
+    ));
+}
+
+/// Whether any collected subject carries the Unicode replacement character — the only evidence this layer
+/// has that collection's `from_utf8_lossy` may have dropped bytes. Observation, not inference.
+fn subjects_show_lossy_decoding(commits: &[zzop_core::CommitFileSet]) -> bool {
+    commits
+        .iter()
+        .filter_map(|c| c.subject.as_deref())
+        .any(|s| s.contains('\u{FFFD}'))
 }
 
 /// Twin-compile-path pin (see `warn_on_invalid_commit_type_patterns`'s own doc). Historically this
@@ -167,5 +253,47 @@ mod compile_coupling_tests {
              list), got: {tags:?} — a mismatch here means the validator rejects patterns zzop_git \
              actually still accepts (or vice versa)"
         );
+    }
+}
+
+/// Evidence gate on the inert warning's encoding sentence (see `warn_on_inert_commit_subject_patterns`):
+/// disclosed only when a U+FFFD is actually observed, never guessed at from a bare zero-match outcome.
+#[cfg(test)]
+mod lossy_subject_disclosure_tests {
+    use super::warn_on_inert_commit_subject_patterns;
+
+    /// The single inert warning produced for one collected commit carrying `subject`.
+    fn inert_warning_for(subject: &str) -> String {
+        let commits = vec![zzop_core::CommitFileSet {
+            sha: "sha1".to_string(),
+            files: vec!["a.ts".to_string()],
+            tags: Vec::new(),
+            date: None,
+            subject: Some(subject.to_string()),
+            labels: Vec::new(),
+        }];
+        let mut warnings = Vec::new();
+        warn_on_inert_commit_subject_patterns(
+            &[("café".to_string(), "cafe".to_string())],
+            &commits,
+            &mut warnings,
+        );
+        warnings.remove(0)
+    }
+
+    /// Seals that an observed U+FFFD is disclosed, so a zero-match report points at the encoding as a
+    /// possible cause instead of leaving the declared pattern as the only suspect.
+    #[test]
+    fn an_observed_replacement_character_is_disclosed_in_the_inert_warning() {
+        let w = inert_warning_for("caf\u{FFFD} legacy subject");
+        assert!(w.contains("U+FFFD"), "{w}");
+    }
+
+    /// Seals never-guess: with no U+FFFD anywhere in the collected subjects, the warning stays exactly
+    /// the plain zero-match line — no speculation about encodings that were never observed.
+    #[test]
+    fn a_clean_subject_produces_the_plain_warning_with_no_encoding_speculation() {
+        let w = inert_warning_for("perfectly ordinary subject");
+        assert!(!w.contains("U+FFFD"), "{w}");
     }
 }

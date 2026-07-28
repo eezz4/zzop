@@ -5,7 +5,24 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+# The host-shared answer layer both zzop products call: shaping/caps/filters/warning-merge, the
+# facts/graph/manifest projections, and the embedded authoring-contract table. Nothing below
+# `zzop-facade`/`zzop-config` is a shipped dependency — a host needs only this crate (the facade entry
+# points a product still uses verbatim are re-exported from `src/lib.rs`, never wrapped).
 [dependencies]
 zzop-facade = { path = "../facade" }
 zzop-config = { path = "../config" }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+# Test-only, for ONE derivation: `contracts.rs`'s pin that the `rule-catalog` resource description spells
+# the real suppress-marker form derives it from `zzop_core::RuleDef::suppress_marker_for_id` rather than
+# from a literal, so a future marker change cannot leave the shipped description behind. No shipped code
+# in this crate reaches below `zzop-facade`/`zzop-config`.
+zzop-core = { path = "../core" }
+# Same shape, same reason (T2 — the layering above forbids a SHIPPED dependency, so the relation is
+# sealed by a test instead): `graph/posture.rs` must draw exactly the verbs `mutating-route-no-auth`
+# gates on, and its local list is pinned equal to the rule's own `WRITE_HTTP_METHODS`. Added 2026-07-28
+# after a release audit measured the drift live — widening the rule's set left every test in the
+# workspace green while this diagram silently kept covering the old four.
+zzop-rules-http = { path = "../../rules/native/rules-http" }

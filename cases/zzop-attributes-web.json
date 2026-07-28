@@ -1,0 +1,21 @@
+{
+  "format": "zzop-normalized-ast",
+  "version": 1,
+  "parser": "benchmark-attrs/1",
+  "source": "benchmark-attrs-web",
+  "files": [
+    {
+      "path": "config/env.ts",
+      "loc": 5,
+      "symbols": [],
+      "imports": {},
+      "re_exports": [],
+      "used_names": [],
+      "io": { "provides": [], "consumes": [] },
+      "degraded": false,
+      "attributes": [
+        { "target": { "file": { "path": "config/env.ts" } }, "key": "env-config-module", "value": true }
+      ]
+    }
+  ]
+}

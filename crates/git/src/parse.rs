@@ -20,6 +20,7 @@
 //!   milliseconds (`iso_date.rs`, offset-aware) because it's a numeric threshold comparison against
 //!   `now_ms - recent_days`, not a min/max over a fixed set of already-comparable strings.
 
+mod commit;
 mod rename;
 
 use std::collections::BTreeMap;
@@ -27,9 +28,11 @@ use std::collections::BTreeMap;
 use zzop_core::{CommitFileSet, GitPathStats, GitStats};
 
 use crate::iso_date::parse_iso_to_ms;
-use crate::process::{COMMIT_MARKER, FIELD_SEP};
-use crate::tags::{extract_tags, CommitClassifiers};
+use crate::process::COMMIT_MARKER;
+use crate::subject::SubjectMatchers;
+use crate::tags::CommitClassifiers;
 use crate::{CollectOptions, GitCollection, GitWindow};
+use commit::{flush_commit, parse_commit_header, CommitCtx};
 use rename::parse_path;
 
 const MS_PER_DAY: i64 = 24 * 60 * 60 * 1000;
@@ -39,6 +42,7 @@ const MS_PER_DAY: i64 = 24 * 60 * 60 * 1000;
 /// `now_ms` (epoch milliseconds) drives the recent-window boundary.
 pub fn parse_git_log(output: &str, opts: &CollectOptions, now_ms: i64) -> GitCollection {
     let classifiers = CommitClassifiers::compile(&opts.commit_type_patterns);
+    let matchers = SubjectMatchers::compile(&opts.commit_subject_patterns);
     let recent_cutoff_ms = now_ms - i64::from(opts.recent_days) * MS_PER_DAY;
 
     let mut acc: BTreeMap<String, Acc> = BTreeMap::new();
@@ -48,7 +52,7 @@ pub fn parse_git_log(output: &str, opts: &CollectOptions, now_ms: i64) -> GitCol
     for line in output.split('\n') {
         if let Some(rest) = line.strip_prefix(COMMIT_MARKER) {
             flush_commit(&mut ctx, &mut commits);
-            parse_commit_header(rest, &classifiers, &mut ctx);
+            parse_commit_header(rest, &classifiers, &matchers, &mut ctx);
             continue;
         }
         if line.trim().is_empty() {
@@ -88,38 +92,6 @@ impl Acc {
             ..Default::default()
         }
     }
-}
-
-#[derive(Debug, Default)]
-struct CommitCtx {
-    sha: String,
-    date: String,
-    author: String,
-    tags: Vec<String>,
-    files: Vec<String>,
-}
-
-fn parse_commit_header(rest: &str, classifiers: &CommitClassifiers, ctx: &mut CommitCtx) {
-    let mut parts = rest.splitn(4, FIELD_SEP);
-    ctx.sha = parts.next().unwrap_or("").to_string();
-    ctx.date = parts.next().unwrap_or("").to_string();
-    ctx.author = parts.next().unwrap_or("").to_string();
-    let subject = parts.next().unwrap_or("");
-    ctx.tags = extract_tags(subject, classifiers);
-    ctx.files.clear();
-}
-
-fn flush_commit(ctx: &mut CommitCtx, commits: &mut Vec<CommitFileSet>) {
-    if ctx.sha.is_empty() || ctx.files.is_empty() {
-        return;
-    }
-    let date = std::mem::take(&mut ctx.date);
-    commits.push(CommitFileSet {
-        sha: std::mem::take(&mut ctx.sha),
-        files: std::mem::take(&mut ctx.files),
-        tags: std::mem::take(&mut ctx.tags),
-        date: if date.is_empty() { None } else { Some(date) },
-    });
 }
 
 fn process_numstat_line(

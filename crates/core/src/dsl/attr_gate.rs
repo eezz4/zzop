@@ -179,7 +179,7 @@ fn undeclared_disclosure(rule_id: &str, key: &str, suppressed: usize) -> String 
          (embedders: `adapterOverlays`), whose file is a normalized-AST envelope carrying \
          `{{\"target\": {{\"pathScope\": {{\"prefix\": \"<dir>\"}}}}, \"key\": \"{key}\", \"value\": true}}` \
          in a file entry's `attributes` (an exact `{{\"file\": {{\"path\": \"<path>\"}}}}` target overrides a \
-         covering scope; see examples/auth-overlay-adapter for a complete envelope). To leave it off \
+         covering scope; see examples/adapters/auth-overlay-adapter for a complete envelope). To leave it off \
          instead, say so: `rules: {{\"{rule_id}\": \"off\"}}` (embedders: `disabled_rules`)."
     )
 }

@@ -110,7 +110,7 @@ pub struct IoScanTreeContext<'a> {
 ///    an entry with no resolved key has nothing to look up (fails `attr_present`, satisfies `attr_absent`).
 /// 7. `anchor_exclude_pattern` — regex against `ctx.anchor_line(entry.file, entry.line)`; a `None` callback
 ///    result means the exclusion does not apply.
-/// 8. Suppress-marker: `rule.suppress_marker()` (derived `<id>-ok`), checked via `ctx.anchor_line` against
+/// 8. Suppress-marker: `rule.suppress_marker()` (derived `zzop-<id>-ok`), checked via `ctx.anchor_line` against
 ///    the anchor line's own text and the line directly above it (the one-line lookback `line_scan`/
 ///    `method_scan` share). A marker-SHAPED token there that is NOT this rule's marker suppresses nothing
 ///    and is disclosed in the emitted message — see `markers::message_with_near_miss`.

@@ -1,10 +1,10 @@
 //! Schema pins (`tools/list`) and `tools/call` dispatch tests — the MCP-surface half of this crate's
-//! tool-surface coverage. `zzop-host`'s own `tools/tests.rs` (crates/host/src/tools/tests.rs) pins the
-//! shared `analyze`/`cross_repo`/`check_endpoint`/`validate_*` handlers directly (the functions the CLI
-//! twin subcommands also call); this file drives the same handlers only through the real MCP `tools/
-//! call` dispatch (`super::call`) and the `tools/list` schema (`super::list`), so the wire-shape
-//! boundary itself — argument-name mapping, `isError` framing, schema `required`/`oneOf` — gets covered
-//! end to end, not just the handler logic underneath it.
+//! tool-surface coverage. `zzop-summary`'s own `tests/host_dispatch.rs` pins the
+//! shared `analyze_summary`/`cross_summary`/`endpoint_summary`/validator entry points directly (the
+//! functions the CLI twin subcommands also call); this file drives the same handlers only through the
+//! real MCP `tools/call` dispatch (`super::call`) and the `tools/list` schema (`super::list`), so the
+//! wire-shape boundary itself — argument-name mapping, `isError` framing, schema `required`/`oneOf` —
+//! gets covered end to end, not just the handler logic underneath it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,6 +35,16 @@ impl TempDir {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(full, content).unwrap();
+    }
+
+    /// Drops the starter config into this fixture — the same bytes `zzop init` writes and the
+    /// `config-template` resource serves. Every analysis lane requires a config as of 2026-07-27, on
+    /// BOTH hosts (that identical entry behaviour is the point), so an analyzable fixture needs one.
+    fn write_starter_config(&self) {
+        self.write(
+            zzop_config::DEFAULT_CONFIG_FILENAME,
+            zzop_config::template::CONFIG_TEMPLATE_JSONC,
+        );
     }
 }
 
@@ -81,6 +91,7 @@ fn tools_list_pins_names_required_arrays_and_source_exclusivity() {
         [
             "analyze_repo",
             "cross_repo",
+            "check_file",
             "check_endpoint",
             "analyze_envelope",
             "validate_envelope",
@@ -94,9 +105,14 @@ fn tools_list_pins_names_required_arrays_and_source_exclusivity() {
             .unwrap_or_else(|| panic!("tool {name} listed"))["inputSchema"]
     };
 
+    // analyze_repo: `path` XOR `configPath` since 2026-07-27 (the CLI twin's `zzop analyze --config`
+    // arrived in the same change), so like cross_repo it has NO top-level `required` — neither source
+    // is individually required — and the exclusivity rides `oneOf` instead.
+    let analyze = schema("analyze_repo");
+    assert!(analyze.get("required").is_none());
     assert_eq!(
-        schema("analyze_repo")["required"],
-        serde_json::json!(["path"])
+        analyze["oneOf"],
+        serde_json::json!([{ "required": ["path"] }, { "required": ["configPath"] }])
     );
     assert_eq!(
         schema("analyze_envelope")["required"],
@@ -135,6 +151,20 @@ fn tools_list_pins_names_required_arrays_and_source_exclusivity() {
     // (`zzop-facade`'s queryIo() rejects an empty pattern), the schema just never said so.
     assert_eq!(endpoint["properties"]["pattern"]["minLength"], 1);
 
+    // check_file: `target` always, plus exactly ONE of path/paths/configPath — the same shape
+    // check_endpoint uses, because it is the same kind of question with a different target axis.
+    let file = schema("check_file");
+    assert_eq!(file["required"], serde_json::json!(["target"]));
+    assert_eq!(
+        file["oneOf"],
+        serde_json::json!([
+            { "required": ["target", "path"] },
+            { "required": ["target", "paths"] },
+            { "required": ["target", "configPath"] }
+        ])
+    );
+    assert_eq!(file["properties"]["target"]["minLength"], 1);
+
     // `limit`'s schema minimum is 0 (not 1): `limit: 0` is a legal "counts only" query.
     assert_eq!(schema("analyze_repo")["properties"]["limit"]["minimum"], 0);
     assert_eq!(
@@ -143,7 +173,7 @@ fn tools_list_pins_names_required_arrays_and_source_exclusivity() {
     );
 }
 
-/// README-vs-tools-list drift pin: the tools table in `crates/host/README.md` (the shared reference
+/// README-vs-tools-list drift pin: the tools table in `packages/README.md` (the shared reference
 /// doc every host's tool surface is documented against) went stale once (`analyze_envelope` shipped
 /// without a row) with nothing to catch it — closes the same drift class the surface-parity registry
 /// closes for output fields. Kept a simple name-presence substring check (like the surface-parity JS
@@ -151,17 +181,14 @@ fn tools_list_pins_names_required_arrays_and_source_exclusivity() {
 /// the README fails the build," not byte-parity with the markdown table.
 #[test]
 fn every_tool_name_from_tools_list_appears_in_the_readme() {
-    const README: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../crates/host/README.md"
-    ));
+    const README: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../README.md"));
     let list = super::list();
     let tools = list["tools"].as_array().expect("tools array");
     for tool in tools {
         let name = tool["name"].as_str().expect("tool name is a string");
         assert!(
             README.contains(name),
-            "tool `{name}` from tools/list is missing from crates/host/README.md's tools table — \
+            "tool `{name}` from tools/list is missing from packages/README.md's tools table — \
              add a row (or the README will silently drift stale again)"
         );
     }
@@ -277,8 +304,8 @@ fn check_endpoint_rejects_non_string_pattern_path_and_config_path() {
 }
 
 /// `docs/NORMALIZED_AST.md`'s worked example (also served as the `example-envelope` MCP contract
-/// resource, `zzop_host::embedded`) — a minimal, valid, one-file v1 envelope.
-const EXAMPLE_ENVELOPE: &str = include_str!("../../../../examples/jsp-envelope.example.json");
+/// resource, `zzop_summary::contracts`) — a minimal, valid, one-file v1 envelope.
+const EXAMPLE_ENVELOPE: &str = include_str!("../../../../docs/contracts/example-envelope.json");
 
 #[test]
 fn analyze_envelope_tool_runs_mode_a_end_to_end_through_the_real_tool_call() {
@@ -327,6 +354,7 @@ fn validate_envelope_and_validate_rule_pack_reject_non_string_json_arguments() {
 #[test]
 fn analyze_repo_rejects_an_out_of_range_or_wrong_type_limit_and_a_non_string_severity() {
     let dir = TempDir::new("zzop-mcp-arg-sweep-limit");
+    dir.write_starter_config();
     dir.write("a.ts", "export const a = 1;\n");
     let path = dir.path().display().to_string();
 
@@ -371,6 +399,7 @@ fn analyze_repo_rejects_an_out_of_range_or_wrong_type_limit_and_a_non_string_sev
 #[test]
 fn analyze_repo_rule_filter_zero_match_note_fires_end_to_end_through_the_real_tool_call() {
     let dir = TempDir::new("zzop-mcp-rule-note-e2e");
+    dir.write_starter_config();
     dir.write("a.ts", "export const a = 1;\n");
     let reply = call_tool(
         "analyze_repo",
@@ -383,4 +412,52 @@ fn analyze_repo_rule_filter_zero_match_note_fires_end_to_end_through_the_real_to
         .as_str()
         .unwrap_or_else(|| panic!("note must be present end-to-end through tools/call, got: {v}"));
     assert!(note.contains("nonexistent-xyz"), "got: {note}");
+}
+
+/// Every tool `tools/list` advertises must have a `call()` dispatch arm.
+///
+/// # Why this is its own test, and why nothing caught the gap
+/// `list()` and `call()` are two hand-maintained enumerations of the same set — a schema table in
+/// `definitions.rs` and a `match name` in `tools.rs`. Nothing tied them together. The D22 sweep
+/// (2026-07-28) planted a tool into `list()` alone and ran the whole crate's suite: the README-parity
+/// test and one hand-list schema pin failed for their own unrelated reasons, and **the missing
+/// dispatch itself went unreported by every test in the repo**. An agent reading `tools/list` would
+/// have called a tool the server advertises and been told it does not exist.
+///
+/// # The discriminator
+/// `call()`'s fallthrough arm is the only place that produces `unknown tool: <name>`; every real arm
+/// fails, if at all, on its own argument validation. So calling each advertised tool with NO arguments
+/// and asserting the reply is not that one string separates "no dispatch arm" from "arm exists and
+/// rejected my empty arguments" — without needing valid arguments for seven different tools.
+///
+/// The subject set is `list()` itself, never a list spelled here: a tool absent from a hand-typed
+/// table is a tool nobody checks, which is the whole defect class this test was written during.
+#[test]
+fn every_advertised_tool_has_a_call_dispatch_arm() {
+    let listed = super::list();
+    let names: Vec<&str> = listed["tools"]
+        .as_array()
+        .expect("tools/list must return a tools array")
+        .iter()
+        .map(|t| t["name"].as_str().expect("every tool has a name"))
+        .collect();
+    assert!(
+        !names.is_empty(),
+        "tools/list advertised nothing — this test would then vouch for nothing"
+    );
+
+    let mut undispatched = Vec::new();
+    for name in &names {
+        let reply = super::call(Some(&serde_json::json!({ "name": name, "arguments": {} })));
+        let text = reply["content"][0]["text"].as_str().unwrap_or_default();
+        if text.contains(&format!("unknown tool: {name}")) {
+            undispatched.push(*name);
+        }
+    }
+    assert!(
+        undispatched.is_empty(),
+        "these tools are advertised by tools/list but have no arm in `call()`'s match, so calling one \
+         answers `unknown tool`: {undispatched:?}. A tool the server offers and then denies is worse \
+         than an absent tool — the client has no way to tell the refusal from a bug in its own request."
+    );
 }

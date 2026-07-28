@@ -812,7 +812,7 @@ fn unconfigured_deployment_prefix_surfaces_a_near_miss_naming_the_topology_remed
             )
         });
     assert!(
-        hit.message.contains("deployment topology") && hit.message.contains("mounts"),
+        hit.message.contains("deployment topology") && hit.message.contains("trees[].topology"),
         "near-miss must name the deployment-topology remedy: {}",
         hit.message
     );

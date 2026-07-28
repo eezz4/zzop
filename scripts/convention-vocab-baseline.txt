@@ -1,0 +1,25 @@
+# Convention vocabulary that is NOT yet declarable from a zzop.config.jsonc — DEBT, not permission.
+#
+# Every line is a name vocabulary the policy census classifies as `convention` (a name the PROJECT
+# picks, not one a framework fixed) that the engine still holds as a built-in literal. Holding it
+# built-in means the engine is guessing what a project calls its own guards, secrets, money fields
+# or ignored directories, and silently misclassifying the projects that name them differently.
+#
+# THE LIST IS EMPTY AND THE FILE STAYS. This file existed so the ratchet could be switched on before
+# the debt was paid, and the debt reached zero on 2026-07-27 — the last entry (parser-prisma's
+# discover.rs SKIP_DIRS) was retired by DELETION rather than by wiring: the sole reader of that
+# constant was a schema-discovery walk with zero callers workspace-wide, so giving it a config key
+# would have declared a knob nothing could reach. An empty baseline is not a finished guard, it is the
+# floor this ratchet holds. The direction is what mattered all along: any NEW convention vocabulary
+# that is not declarable is red on its first commit, and --update-baseline refuses to ADD. Deleting
+# the file would not retire the guard, it would BREAK it (a missing baseline exits 1) — and an empty
+# file states the real remaining debt where a deleted one is indistinguishable from a lost one.
+#
+# An entry is retired by giving the vocabulary a config key (crates/config/config-surface.json)
+# and naming that key in the starter template (crates/config/src/template.rs), then adding
+# `-> <configPath>` after the axis on that constant's scripts/policy-census.txt line — at which
+# point this guard reports the baseline entry as STALE and it is deleted. Tracked as backlog item
+# D14 ("convention vocabulary is declared, not guessed; built-ins ship as template defaults").
+#
+# An entry here is NOT an exemption and NOT permanent. Maintained by
+# scripts/check-convention-vocab-declarable.sh --update-baseline, which only shrinks.

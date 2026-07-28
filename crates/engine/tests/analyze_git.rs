@@ -704,3 +704,114 @@ fn git_enabled_on_a_non_git_root_degrades_to_a_warning_without_panicking() {
     // nodes still built (dep-graph + LOC only, since git collection failed).
     assert!(out.nodes.iter().any(|n| n.path == "a.ts"));
 }
+
+// --- git.commitSubjectPatterns (the DECLARED subject-label axis) -----------------------------------
+
+/// Seals never-guess at the engine seam: with no declaration the engine adds no fallback table of its
+/// own (unlike the commit-TYPE axis, where an absent table means `zzop_metrics`'s default) — so nothing
+/// is labelled, and nothing is warned about either (silence is the correct outcome, not a self-report).
+#[test]
+fn no_declared_subject_patterns_means_no_labels_and_no_warning() {
+    if !git_available() {
+        eprintln!(
+            "skipping no_declared_subject_patterns_means_no_labels_and_no_warning: git not on PATH"
+        );
+        return;
+    }
+    let dir = git_fixture_repo();
+    let out = analyze_tree(dir.path(), &config_with_git());
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("git.commitSubjectPatterns")),
+        "an undeclared axis must say nothing at all: {:?}",
+        out.warnings
+    );
+}
+
+/// Seals the positive path end to end through config -> engine -> zzop_git: a declared pattern that DOES
+/// match the fixture's real subjects labels them, and therefore produces no "matched nothing" warning.
+#[test]
+fn a_declared_subject_pattern_that_matches_produces_no_inert_warning() {
+    if !git_available() {
+        eprintln!(
+            "skipping a_declared_subject_pattern_that_matches_produces_no_inert_warning: git not on PATH"
+        );
+        return;
+    }
+    let dir = git_fixture_repo();
+    let cfg = EngineConfig {
+        source_id: "fixture".to_string(),
+        git: Some(GitOptions {
+            commit_subject_patterns: Some(vec![(r"^\[FIX\]".to_string(), "bugfix".to_string())]),
+            ..GitOptions::default()
+        }),
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &cfg);
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("git.commitSubjectPatterns")),
+        "a pattern that matched real subjects must not be reported as inert: {:?}",
+        out.warnings
+    );
+}
+
+/// Seals the dead-knob self-report: a declared table that matches NOTHING is indistinguishable from an
+/// undeclared one when you only look at the labels, so the engine says so out loud rather than leaving
+/// the author to wonder. The warning names the declared labels.
+#[test]
+fn a_declared_subject_pattern_that_never_matches_self_reports() {
+    if !git_available() {
+        eprintln!(
+            "skipping a_declared_subject_pattern_that_never_matches_self_reports: git not on PATH"
+        );
+        return;
+    }
+    let dir = git_fixture_repo();
+    let cfg = EngineConfig {
+        source_id: "fixture".to_string(),
+        git: Some(GitOptions {
+            commit_subject_patterns: Some(vec![(r"^NOPE-\d+".to_string(), "ticket".to_string())]),
+            ..GitOptions::default()
+        }),
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &cfg);
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains("git.commitSubjectPatterns") && w.contains("ticket")),
+        "expected an inert-declaration warning naming the declared label: {:?}",
+        out.warnings
+    );
+}
+
+/// Seals that a malformed declaration degrades exactly like its commit-type sibling — one warning naming
+/// the offending pattern, no panic, analysis still completes.
+#[test]
+fn invalid_declared_subject_pattern_is_skipped_with_a_warning_not_a_panic() {
+    if !git_available() {
+        eprintln!("skipping invalid_declared_subject_pattern_is_skipped_with_a_warning_not_a_panic: git not on PATH");
+        return;
+    }
+    let dir = git_fixture_repo();
+    let cfg = EngineConfig {
+        source_id: "fixture".to_string(),
+        git: Some(GitOptions {
+            commit_subject_patterns: Some(vec![("[unclosed".to_string(), "bad".to_string())]),
+            ..GitOptions::default()
+        }),
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &cfg);
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains("git.commitSubjectPatterns") && w.contains("[unclosed")),
+        "expected an invalid-pattern warning naming git.commitSubjectPatterns: {:?}",
+        out.warnings
+    );
+    assert!(out.nodes.iter().any(|n| n.path == "a.ts"));
+}

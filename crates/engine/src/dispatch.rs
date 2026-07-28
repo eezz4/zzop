@@ -33,10 +33,13 @@
 
 use std::path::Path;
 
-/// A source language this engine has a parser frontend for. `TypeScript`/`Prisma`/`Python`/`Rust`/`Go`/
-/// `Java21` are all real structural parsers (`Java21` — `zzop_parser_java_21`, tree-sitter-backed — see
-/// module doc). JSP has no parser crate in this workspace at all: files that would route to it get no
-/// `Language` match.
+/// A source language this engine has a parser frontend for — one variant per `parser/` crate, and the
+/// variant list below IS that inventory. Deliberately not restated in prose here: the sentence that used
+/// to sit on this line named six of the eight (it predated `Sql` and `CSharp`), which is how a
+/// hand-listed inventory sitting next to a compiler-enforced one always ends. Each variant's precision
+/// tier (full AST / full CST / lexical) and the crate behind it are in `docs/ARCHITECTURE.md`'s
+/// "Language support" table; this module's own doc covers the dispatch route. JSP has no parser crate in
+/// this workspace at all: files that would route to it get no `Language` match.
 ///
 /// **Serialization invariant**: `Language` derives no `Serialize`/`Deserialize` and is never written into
 /// `zzop_cache::FileIrSlice`, the cache envelope, or any wire-format enum, so renaming a variant is
@@ -72,7 +75,7 @@ pub enum Language {
 ///
 /// The user-authored sibling `zzop/` (no dot — custom rule packs, adapter overlays) is deliberately NOT
 /// here: that is source a human wrote and wants analyzed.
-const DEFAULT_SKIP_DIRS: &[&str] = &[
+pub(crate) const DEFAULT_SKIP_DIRS: &[&str] = &[
     "node_modules",
     "dist",
     "build",
@@ -256,6 +259,8 @@ fn matches_glob(path: &str, glob: &str) -> bool {
         .map(|re| re.is_match(path))
         .unwrap_or(false)
 }
+
+mod wire;
 
 #[cfg(test)]
 mod tests;

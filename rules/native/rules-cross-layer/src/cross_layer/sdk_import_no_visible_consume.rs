@@ -1,4 +1,4 @@
-//! `cross-layer/sdk-import-no-visible-consume` (info) — a tree that imports an SDK-shaped package
+//! `cross-layer/untraced-client-import-no-visible-consume` (info) — a tree that imports an SDK-shaped package
 //! (`@scope/sdk`, `*-sdk`, `openapi*`, `*api-client*`) from several files, OR an opaque HTTP client
 //! library (`superagent`, `got`, `node-fetch`, ...) that the egress extractor cannot trace at all, while
 //! having almost no statically visible `http` consumes. A tree consuming its API exclusively through such
@@ -14,16 +14,31 @@
 //!   (parser-typescript's egress extractor) does not recognize at all (unlike axios/ky/fetch, which ARE
 //!   recognized and must stay excluded from this pattern to avoid FPs on normal trees). Generated-SDK
 //!   clients such as oazapfts belong here too: the engine deliberately does not recognize them (decision:
-//!   generated SDKs are injection adapters, not engine vocab — see `examples/oazapfts-adapter`), so an
+//!   generated SDKs are injection adapters, not engine vocab — see the Mode B overlay examples under `examples/adapters`), so an
 //!   unadapted oazapfts import is exactly the same join-blind shape as a hand-rolled opaque client. These
 //!   are credible from a single importing file (`MIN_OPAQUE_CLIENT_IMPORTING_FILES`) since the common idiom
 //!   is exactly one central client module wrapping the library for the whole tree.
 //!
-//! The rule id stays `sdk-import-no-visible-consume` even though the scope is now broader than "SDK" —
-//! kept for compatibility with existing `disabled_rules` configs and dashboards.
+//! The id says `untraced-client-import`, not `sdk-import`, because "SDK" names only the first of the two
+//! classes above: the second is a list of ordinary HTTP client libraries (`got`, `node-fetch`, `undici`,
+//! `request`, `needle`, `phin`, `bent`), none of which is an SDK. What both classes share — and all this
+//! matcher checks — is that the egress extractor cannot trace calls made through them. Renamed from
+//! `cross-layer/sdk-import-no-visible-consume`; the old id is recorded in `VERSIONING.md`.
 //!
 //! Fires only below `unresolved_consume_ratio`'s `MIN_TOTAL_CONSUMES` floor — the two rules partition the
 //! blind-spot space and never co-fire on the same tree.
+//!
+//! ## Disclosed blind spot: this rule only sees PACKAGE imports
+//! `package_imports` is built from non-relative specifiers only — a relative one returns before the census
+//! (`crates/engine/src/analyze/assemble/collect/candidates.rs`'s `starts_with('.')` guard) — and both
+//! patterns above are package-specifier regexes. A generated client that lives INSIDE the tree and is
+//! imported as `./client` therefore cannot make this rule fire, no matter how many files import it.
+//! That is deliberate, not an oversight to route around here: a tree-local module's name is not evidence
+//! of anything (`./client` is as likely a UI client component as an API SDK), so the honest fix is on the
+//! EXTRACTION side — recognize the generated client's own call shape so the tree stops being blind at all,
+//! which is what parser-typescript's `generated_client` arms do for the three generator families they
+//! cover. A fourth generator writing a fourth call shape stays invisible to both sides until its shape is
+//! added there; this rule will not cover for it.
 
 use std::collections::BTreeMap;
 
@@ -136,10 +151,10 @@ pub fn sdk_import_no_visible_consume_findings(
                 .join(", "),
             if file_count_total == 1 { "" } else { "s" },
             if visible == 1 { "" } else { "s" },
-            disable_hint("cross-layer/sdk-import-no-visible-consume"),
+            disable_hint("cross-layer/untraced-client-import-no-visible-consume"),
         );
         out.push(Finding {
-            rule_id: "cross-layer/sdk-import-no-visible-consume".to_string(),
+            rule_id: "cross-layer/untraced-client-import-no-visible-consume".to_string(),
             severity: Severity::Info,
             file: first.example_file.clone(),
             line: 1,

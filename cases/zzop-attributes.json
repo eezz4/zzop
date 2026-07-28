@@ -1,0 +1,56 @@
+{
+  "format": "zzop-normalized-ast",
+  "version": 1,
+  "parser": "benchmark-attrs/1",
+  "source": "benchmark-attrs",
+  "files": [
+    {
+      "path": "config/env.ts",
+      "loc": 6,
+      "symbols": [],
+      "imports": {},
+      "re_exports": [],
+      "used_names": [],
+      "io": { "provides": [], "consumes": [] },
+      "degraded": false,
+      "attributes": [
+        {
+          "target": { "file": { "path": "config/env.ts" } },
+          "key": "env-config-module",
+          "value": true
+        }
+      ]
+    },
+    {
+      "// why": [
+        "Mode B adapter-overlay injection of the `auth-guarded` attribute — the ONLY mechanism that clears",
+        "`http/protected-path-no-auth-evidence` (its io-scan matcher reads `attr_absent: auth-guarded` and never looks at the",
+        "handler identifier). Without this the rule had NO working negative control anywhere in the corpus",
+        "and fired on its own `good` export, which stood as the benchmark's single standing false positive.",
+        "Two targets on purpose, covering both AttributeStore::route_attr resolution shapes: the exact IoKey",
+        "and the covering PathScope. The PathScope prefix is `/admin/audit`, NOT `/admin` — a `/admin` scope",
+        "would also cover the module's `bad` route and silently delete the positive case."
+      ],
+      "path": "api/http.protected-path-no-auth-evidence.ts",
+      "loc": 26,
+      "symbols": [],
+      "imports": {},
+      "re_exports": [],
+      "used_names": [],
+      "io": { "provides": [], "consumes": [] },
+      "degraded": false,
+      "attributes": [
+        {
+          "target": { "ioKey": { "kind": "http", "key": "GET /admin/reports" } },
+          "key": "auth-guarded",
+          "value": true
+        },
+        {
+          "target": { "pathScope": { "prefix": "/admin/audit" } },
+          "key": "auth-guarded",
+          "value": true
+        }
+      ]
+    }
+  ]
+}

@@ -341,7 +341,7 @@ fn hof_wrapper_last_arg_without_guard_vocabulary_does_not_judge_the_verb() {
     // whose name merely CONTAINS an authz noun (`createRoleHandler` — the over-recognition this
     // widening is shape-gated to avoid), a pure narrowing adverb (`adminOnly`, dropped because
     // `nodeEnvOnly` rode the same suffix), and rejection verbs on the ENV axis, which gates WHERE
-    // code runs, not WHO may call it — `route-exposure`'s question, not this attribute's.
+    // code runs, not WHO may call it — `dev-path-no-guard-hint`'s question, not this attribute's.
     for callee in [
         "asyncHandler",
         "catchAsync",

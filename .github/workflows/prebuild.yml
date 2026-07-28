@@ -1,5 +1,5 @@
 # Prebuild + release for the two Node-free binaries (`zzop` CLI from package `zzop-cli-bin` +
-# `zzop-mcp` MCP server from package `zzop-mcp`, both thin binaries over the shared `zzop-host` lib
+# `zzop-mcp` MCP server from package `zzop-mcp`, both thin binaries over the shared `zzop-summary` lib
 # crate) and the 6-package npm distribution (5 `@zzop/cli-<platform>`
 # sub-packages + `@zzop/cli`, published via npm OIDC "trusted publishing" — no NPM_TOKEN secret).
 # `@zzop/cli` is a zero-logic shim that spawns the native `zzop` binary shipped in its own platform
@@ -86,8 +86,10 @@ jobs:
             # registry — but a human (or an agent) reading the repo sees them and takes them for the
             # shipped version. Keeping them honest costs one bump per release; leaving them stale cost a
             # dogfooding session (2026-07-24: committed 0.21.1 read as "the version", against 0.22.0
-            # everywhere else). Only `version` is gated: `fileSha256` genuinely cannot be known before
-            # the assets exist.
+            # everywhere else). Only `version` is gated here: `fileSha256` genuinely cannot be known
+            # before the assets exist, so the committed file declares NO fileSha256 at all rather than
+            # a placeholder that reads as an integrity guarantee — scripts/check-server-json-hashes.sh
+            # holds that line in pre-commit/CI, and its --stamped mode blocks the publish below.
             SERVER_VERSIONS=$(jq -r '[.version] + [.packages[].version] | unique | join(",")' server.json)
             if [ "$SERVER_VERSIONS" != "$VERSION" ]; then
               echo "::error::server.json declares version(s) [$SERVER_VERSIONS] but Cargo.toml [workspace.package] is $VERSION — bump server.json's top-level \"version\" and every packages[].version (and their download URLs) in the same commit; a mismatch blocks the autotag."
@@ -159,7 +161,7 @@ jobs:
       - name: Build the zzop + zzop-mcp binaries
         # The binaries report `CARGO_PKG_VERSION` (the workspace version) directly — no tag-stamping env
         # (2026-07-22 version reform). `-p zzop-cli-bin -p zzop-mcp` builds both product bins (`zzop`
-        # CLI + `zzop-mcp` server, each its own Cargo package over the shared `zzop-host` lib) in one
+        # CLI + `zzop-mcp` server, each its own Cargo package over the shared `zzop-summary` lib) in one
         # invocation.
         shell: bash
         run: cargo build -p zzop-cli-bin -p zzop-mcp --release --target ${{ matrix.target }}
@@ -245,8 +247,21 @@ jobs:
   # `zzop-mcp-<platform>[.exe]` binaries (PATH install / Claude Code plugin) AND 5 per-platform
   # `zzop-mcp-<platform>.mcpb` one-click Desktop bundles to the GitHub release. Runs alongside `publish`
   # (npm), not merged into it.
+  # THE SHIPPING GATE. Calls `ci.yml` — every mechanical guard, the whole workspace test suite, the
+  # cli-shim test and the labeled detection benchmark — on the exact ref being published, and both
+  # `release` and `publish` wait on it below.
+  #
+  # Added 2026-07-28, after an audit walked the trigger graph: `ci.yml` fires on `push: branches:[main]`
+  # and `pull_request`, NEITHER of which a tag push matches, while prebuild fires on `tags: [v*]`.
+  # Its `build` job is `cargo build` with no test step. So `git push origin v0.25.0` published npm, MCPB
+  # and the MCP registry from a ref on which nothing had ever run. Not a hypothetical: it is how every
+  # release to date shipped, and it made all 23 guards optional at the only moment they matter.
+  #
+  # It is a NEEDS edge rather than a copy of the steps — see ci.yml's own `workflow_call` comment.
+  gate:
+    uses: ./.github/workflows/ci.yml
   release:
-    needs: [build, verify-plugin-version, meta]
+    needs: [build, verify-plugin-version, meta, gate]
     if: needs.meta.outputs.release == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -305,7 +320,7 @@ jobs:
   # pointing at this repo and this workflow file (packages/cli/README.md "Publishing"). Runs alongside
   # `release` (GitHub release + MCPB), not merged into it.
   publish:
-    needs: [build, verify-plugin-version, meta]
+    needs: [build, verify-plugin-version, meta, gate]
     if: needs.meta.outputs.release == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -391,8 +406,9 @@ jobs:
   # same shape as npm's OIDC publish in `publish` above. The committed `server.json` is NOT
   # authoritative for a release: this job overwrites every `version`/`identifier`/`fileSha256`
   # from `needs.meta.outputs.version` plus the freshly-hashed release assets before publishing
-  # (only `fileSha256` is a literal all-zeros placeholder in the committed file; the committed
-  # version strings are whatever release last touched them and may read stale mid-cycle), so
+  # (`fileSha256` is ABSENT from the committed file — no hash of a not-yet-built asset can be
+  # committed honestly, and a placeholder would read as an integrity guarantee it is not; the
+  # committed version strings are whatever release last touched them and may read stale mid-cycle), so
   # (like `publish`'s "Set version from meta" step) there is no separate "bump server.json before
   # tagging" step to forget. Runs alongside `release`/`publish`, not merged into either — this job
   # failing does not affect them.
@@ -420,6 +436,8 @@ jobs:
         # as the `build` matrix's `platform` values), the release-tag-specific download URL and that
         # exact asset's SHA-256 — the registry does not itself validate this hash, but MCP clients do
         # before install, so a stale/placeholder hash here would silently fail every client install.
+        # `fileSha256` is absent from the committed file; jq's assignment creates the key, so this
+        # loop is unchanged by that. The step after this one refuses to publish if it did not.
         env:
           VERSION: ${{ needs.meta.outputs.version }}
         run: |
@@ -435,6 +453,14 @@ jobs:
               server.json > server.tmp && mv server.tmp server.json
           done
           cat server.json
+      - name: Refuse to publish a server.json with a missing or placeholder integrity hash
+        # PUBLISH BLOCKER, deliberately between stamping and publishing. The loop above writes
+        # `.packages[$i]` by POSITION off a hardcoded `platforms` array; jq assigning past the end of
+        # that array is not an error, so a sixth package entry or a reordered packages[] would ship
+        # unstamped or mis-stamped with `set -euo pipefail` none the wiser. This asserts one
+        # well-formed, non-all-zeros fileSha256 per package and that packages[] still lines up with
+        # the array — see the script's header for what it does and does not prove.
+        run: bash scripts/check-server-json-hashes.sh --stamped
       - name: Authenticate to the MCP Registry (GitHub OIDC, io.github.eezz4 namespace)
         run: ./mcp-publisher login github-oidc
       - name: Publish server.json to the MCP Registry

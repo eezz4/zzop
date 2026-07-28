@@ -255,7 +255,7 @@ fn an_env_read_in_a_private_helper_of_a_route_file_fires() {
 fn env_access_ok_marker_above_the_line_suppresses_the_finding() {
     exempt(
         "src/handler.ts",
-        "const NAME = \"svc\";\n\nexport function getPort() {\n  // env-outside-config-ok: legacy call site, migration tracked in JIRA-123\n  return `${NAME}:${process.env.PORT}`;\n}\n",
+        "const NAME = \"svc\";\n\nexport function getPort() {\n  // zzop-env-outside-config-ok: legacy call site, migration tracked in JIRA-123\n  return `${NAME}:${process.env.PORT}`;\n}\n",
     );
 }
 

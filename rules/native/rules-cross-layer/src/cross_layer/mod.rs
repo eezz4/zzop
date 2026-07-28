@@ -26,7 +26,7 @@
 //!   findings (`retain_non_subsumed`) — a replacement, not silent suppression: the aggregate enumerates
 //!   every folded route. Structurally derived, so it only fires when `route-near-miss` is enabled.
 //! - [`shared_db_table`]: `shared_db_table_findings` — the same `db-table` key consumed by 2+ distinct
-//!   source trees (`cross-layer/shared-db-table`, warning).
+//!   source trees (`cross-layer/db-table-name-in-multiple-sources`, warning).
 //! - [`duplicate_route`]: `cross_layer_duplicate_route_findings` — the same `http` `(method, path)` key
 //!   PROVIDED by 2+ distinct source trees (`cross-layer/duplicate-route`, warning) — distinct from the
 //!   existing single-tree `zzop_rules_http::duplicate_route` rule (different id, different join scope: this one only
@@ -39,7 +39,7 @@
 //!   (`cross-layer/external-shadow-internal`, warning).
 //! - [`external_secret_in_url`]: a secret-named query parameter in an external URL (`cross-layer/external-secret-in-url`, warning).
 //! - [`external_duplicated_integration`]: the same external host called directly from 2+ distinct trees
-//!   (`cross-layer/external-duplicated-integration`, warning).
+//!   (`cross-layer/external-host-in-multiple-sources`, warning).
 //! - [`external_host_fanout`]: the same external host called directly from 3+ distinct files (`cross-layer/external-host-fanout`, info).
 //! - [`external_base_url_drift`]: the same external path consumed against 2+ different hosts
 //!   (`cross-layer/external-base-url-drift`, info).
@@ -64,7 +64,7 @@
 //!   (`cross-layer/unresolved-consume-ratio`, info).
 //! - [`sdk_import_no_visible_consume`]: a tree importing an SDK-shaped package from several files while
 //!   having fewer visible http consumes than even `unresolved_consume_ratio`'s floor — the
-//!   not-even-visible half of the blind-spot partition (`cross-layer/sdk-import-no-visible-consume`, info).
+//!   not-even-visible half of the blind-spot partition (`cross-layer/untraced-client-import-no-visible-consume`, info).
 //!   A tree that calls its API entirely through a generated SDK client can show zero visible http
 //!   consumes, leaving every consume-ratio-based blind-spot rule silent — this rule catches that case.
 //! - [`unconsumed_procedure`] (kind="trpc"): a tRPC procedure (composed by the engine from
@@ -88,7 +88,7 @@
 //! existing native rules in this crate do it: `duplicate_route`/`route_shadowing`/`unprovided_consume`
 //! carry no marker support either, and `mutating_route_no_auth`'s own message says so explicitly ("this
 //! rule has no inline suppression marker") — DERIVED markers (`zzop_core::dsl::RuleDef::suppress_marker`,
-//! `<id>-ok`) are DSL-only, never wired into a native `Finding`. Not the same as "no native rule reads a
+//! `zzop-<id>-ok`) are DSL-only, never wired into a native `Finding`. Not the same as "no native rule reads a
 //! comment", though: `zzop_rules_http`'s `non-idempotent-write`/`unsafe-read-endpoint` honor a HAND-WRITTEN
 //! `// idempotent-ok:` literal (`rules-http/src/http_scan.rs`) matching no id. No rule in THIS crate does.
 //! Every rule here is disable-only via `RuleConfig::disabled_rules` (message text says so).
@@ -138,9 +138,10 @@ pub mod unprovided_mutation_call;
 pub mod unresolved_consume_ratio;
 pub mod version_skew;
 
-// Split out for file size; re-exported below (see each module's own doc).
+// Split out for file size (see each module's own doc); the route/URL pair is re-exported below.
 mod external_url;
 mod trpc_mount;
+mod vocab;
 
 pub use ambiguous_consume::ambiguous_consume_findings;
 pub use body_field_drift::body_field_drift_findings;
@@ -223,7 +224,7 @@ pub(crate) fn is_all_slot_path(segments: &[&str]) -> bool {
 
 /// A version-shaped path segment: `v1`, `V2`, `v1.2`, ... — shared by `version_skew` (dangling-vs-provide
 /// skew) and `external_version_inconsistent` (versioned/versionless mix against one external host).
-pub(crate) const VERSION_SEGMENT_PATTERN: &str = r"(?i)^v[0-9]+(?:\.[0-9]+)*$";
+pub const VERSION_SEGMENT_PATTERN: &str = r"(?i)^v[0-9]+(?:\.[0-9]+)*$";
 
 /// Trees below this many total `http` consumes are too small for a ratio claim — shared floor between
 /// `unresolved_consume_ratio` (fires at/above it) and `sdk_import_no_visible_consume` (fires below it),
@@ -289,11 +290,9 @@ pub struct PackageImportSite {
     pub example_file: String,
 }
 
-/// The HTTP methods that mutate state. Deliberately the write-verb list only — HEAD/OPTIONS never appear in
-/// egress extraction (only the 5 verbs `parser-typescript/src/egress.rs` recognizes reach a consume key).
-pub(crate) fn is_write_method(method: &str) -> bool {
-    matches!(method, "POST" | "PUT" | "PATCH" | "DELETE")
-}
+pub mod write_methods;
+pub(crate) use write_methods::is_write_method;
+pub use write_methods::CROSS_LAYER_WRITE_METHODS;
 
 #[cfg(test)]
 mod shared_tests;

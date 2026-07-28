@@ -113,7 +113,7 @@ fn fetch_timeout_ok_marker_above_the_call_in_a_server_file_suppresses_the_findin
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/app.ts",
-        "import express from \"express\";\n\nexport async function getRates() {\n  // fetch-no-timeout-ok: axios instance configured with a global timeout in http-client.ts\n  const res = await fetch(\"https://api.example.com/rates\");\n  return res.json();\n}\n",
+        "import express from \"express\";\n\nexport async function getRates() {\n  // zzop-fetch-no-timeout-ok: axios instance configured with a global timeout in http-client.ts\n  const res = await fetch(\"https://api.example.com/rates\");\n  return res.json();\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -225,7 +225,7 @@ fn process_exit_ok_marker_above_the_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/cli.ts",
-        "export function main(code: number) {\n  // process-exit-in-lib-ok: this is the CLI entrypoint, exiting here is intentional\n  process.exit(code);\n}\n",
+        "export function main(code: number) {\n  // zzop-process-exit-in-lib-ok: this is the CLI entrypoint, exiting here is intentional\n  process.exit(code);\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -291,7 +291,7 @@ fn emitter_async_ok_marker_above_the_listener_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/pipeline.ts",
-        "import { EventEmitter } from \"events\";\ndeclare function save(chunk: unknown): Promise<void>;\n\nconst emitter = new EventEmitter();\n\nexport function registerListeners() {\n  // emitter-async-listener-ok: rejections are caught inside save() and never propagate\n  emitter.on(\"data\", async (chunk: unknown) => {\n    await save(chunk);\n  });\n}\n",
+        "import { EventEmitter } from \"events\";\ndeclare function save(chunk: unknown): Promise<void>;\n\nconst emitter = new EventEmitter();\n\nexport function registerListeners() {\n  // zzop-emitter-async-listener-ok: rejections are caught inside save() and never propagate\n  emitter.on(\"data\", async (chunk: unknown) => {\n    await save(chunk);\n  });\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -301,7 +301,7 @@ fn emitter_async_ok_marker_above_the_listener_suppresses_the_finding() {
     );
 }
 
-// --- promise-race-resource-leak ---
+// --- promise-race-no-cancel ---
 
 #[test]
 fn promise_race_with_no_cancellation_is_flagged() {
@@ -311,7 +311,7 @@ fn promise_race_with_no_cancellation_is_flagged() {
         "declare const url: string;\ndeclare function timeout(ms: number): Promise<never>;\n\nexport async function fetchWithTimeout() {\n  return await Promise.race([fetch(url), timeout(5000)]);\n}\n",
     );
     let out = scan(&dir);
-    let h = hits(&out, "promise-race-resource-leak");
+    let h = hits(&out, "promise-race-no-cancel");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 5);
 }
@@ -328,7 +328,7 @@ fn promise_race_with_an_abort_controller_signal_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "promise-race-resource-leak").is_empty(),
+        hits(&out, "promise-race-no-cancel").is_empty(),
         "{:?}",
         out.findings
     );
@@ -339,11 +339,11 @@ fn promise_race_ok_marker_above_the_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/fetchWithTimeout.ts",
-        "declare const url: string;\ndeclare function timeout(ms: number): Promise<never>;\n\nexport async function fetchWithTimeout() {\n  // promise-race-resource-leak-ok: timeout() is a plain in-memory timer, nothing to cancel\n  return await Promise.race([fetch(url), timeout(5000)]);\n}\n",
+        "declare const url: string;\ndeclare function timeout(ms: number): Promise<never>;\n\nexport async function fetchWithTimeout() {\n  // zzop-promise-race-no-cancel-ok: timeout() is a plain in-memory timer, nothing to cancel\n  return await Promise.race([fetch(url), timeout(5000)]);\n}\n",
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "promise-race-resource-leak").is_empty(),
+        hits(&out, "promise-race-no-cancel").is_empty(),
         "{:?}",
         out.findings
     );

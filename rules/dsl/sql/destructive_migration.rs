@@ -68,7 +68,7 @@ fn sql_destructive_migration_dash_dash_ok_marker_in_a_sql_migration_file_suppres
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "migrations/003_drop_reviewed.sql",
-        "-- destructive-migration-ok: reviewed in PR #482, table fully migrated off\nDROP TABLE legacy_orders;\n",
+        "-- zzop-destructive-migration-ok: reviewed in PR #482, table fully migrated off\nDROP TABLE legacy_orders;\n",
     );
     let out = scan(&dir);
     assert!(
@@ -83,7 +83,7 @@ fn sql_destructive_migration_ok_marker_in_a_js_migration_file_suppresses_the_fin
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "migrations/004_drop_reviewed.js",
-        "// destructive-migration-ok: reviewed in PR #482, table fully migrated off\nexports.up = (knex) => knex.raw(\"DROP TABLE legacy_orders\");\n",
+        "// zzop-destructive-migration-ok: reviewed in PR #482, table fully migrated off\nexports.up = (knex) => knex.raw(\"DROP TABLE legacy_orders\");\n",
     );
     let out = scan(&dir);
     assert!(
@@ -101,7 +101,7 @@ fn sql_destructive_migration_dash_dash_marker_text_in_a_js_migration_file_does_n
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "migrations/005_drop_reviewed.js",
-        "-- destructive-migration-ok: reviewed in PR #482, table fully migrated off\nexports.up = (knex) => knex.raw(\"DROP TABLE legacy_orders\");\n",
+        "-- zzop-destructive-migration-ok: reviewed in PR #482, table fully migrated off\nexports.up = (knex) => knex.raw(\"DROP TABLE legacy_orders\");\n",
     );
     let out = scan(&dir);
     assert_eq!(
@@ -119,7 +119,7 @@ fn sql_destructive_migration_dash_dash_marker_above_the_drop_line_in_sql_also_su
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "migrations/006_drop_reviewed.sql",
-        "-- destructive-migration-ok: reviewed in PR #499\nDROP TABLE stale_sessions;\n",
+        "-- zzop-destructive-migration-ok: reviewed in PR #499\nDROP TABLE stale_sessions;\n",
     );
     let out = scan(&dir);
     assert!(

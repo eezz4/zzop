@@ -3,7 +3,7 @@
 //! Sibling of `trigger_in_loop`'s containment gate. Two things are pinned here: the trigger only counts
 //! when the ordering label precedes it textually, and the finding's LINE moves to the first trigger that
 //! actually follows — the anchor fix that motivated the field (measured: 9 of a 15-finding
-//! `react/setstate-after-await-unmounted` sample anchored on a setter before the first `await`).
+//! `react/setstate-after-async-unguarded` sample anchored on a setter before the first `await`).
 
 use super::test_support::{method, rule_pack, scan_pack};
 use super::RulePackDef;

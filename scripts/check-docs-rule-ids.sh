@@ -58,18 +58,51 @@ catalog="$repo_root/docs/rules/catalog.md"
 
 [ -f "$catalog" ] || { echo "check-docs-rule-ids: missing $catalog" >&2; exit 1; }
 
-# Default file list is the four real user-facing surfaces. ZZOP_CHECK_DOCS_RULE_IDS_FILES overrides it
-# (newline-separated paths) for self-testing against fixtures — never used by the shipped CI step.
+# Default file list: the TWO user-facing surfaces that still carry `rules:`-shaped config examples —
+# docs/getting-started.md and site/usage.html. It said "the four real user-facing surfaces" while
+# listing two, uncorrected across the removals that took the other two away (the JS front-end's init
+# template went with the JS CLI on 2026-07-20; README's config block was distilled out). Counted
+# 2026-07-26. The count is stated once, right here, next to the list it counts — a scope claim that
+# lives away from its own list is a scope claim nobody re-reads when the list changes. The OK line at
+# the bottom prints the ACTUAL count, so the two can be compared without trusting this comment.
+# ZZOP_CHECK_DOCS_RULE_IDS_FILES overrides the list (newline-separated paths) for self-testing against
+# fixtures — never used by the shipped CI step.
 if [ -n "${ZZOP_CHECK_DOCS_RULE_IDS_FILES:-}" ]; then
   files="$ZZOP_CHECK_DOCS_RULE_IDS_FILES"
 else
-  files="$repo_root/docs/getting-started.md
-$repo_root/site/usage.html"
+  # DERIVED, not hand-listed. Two hardcoded paths sat here until 2026-07-28 — and this script's own
+  # header already recorded that the list had rotted once ("It said 'the four real user-facing
+  # surfaces' while listing two, uncorrected across the removals"). Measured that day: a bare DSL id
+  # (`no-explicit-any` instead of `typescript/no-explicit-any`) planted in README.md — a real
+  # user-facing surface outside the list — left this guard GREEN. A guard whose SCANNED SET is
+  # hand-typed cannot see a surface nobody remembered to add, and the header proves nobody does.
+  #
+  # The subject is now every tracked .md/.html, PREFILTERED to the files that could possibly carry a
+  # finding. The three passes below only ever fire on a severity token, a `"severity"` field, or a
+  # `disabledRules` array, so a file with none of those three is provably a no-op — and per-file cost
+  # here is process spawns, which dominate under msys (the widened scan measured 55s over all 43 files
+  # and 25s over the 19 that match). The prefilter is deliberately LOOSER than the passes (bare words,
+  # no anchoring, entity form included): it may only over-include, never under-include, because a
+  # prefilter that drops a real candidate is a silent false green — the exact failure this whole sweep
+  # is about. If a pass ever grows a fourth trigger, widen this regex in the same edit.
+  files="$(git -C "$repo_root" ls-files -- '*.md' '*.html' \
+    | sed "s|^|$repo_root/|" \
+    | xargs grep -lE 'severity|disabledRules|"(off|none|disable|disabled|critical|error|err|high|warning|warn|medium|info|information|note|low)"' 2>/dev/null || true)"
 fi
 
+scanned=0
 for f in $files; do
   [ -f "$f" ] || { echo "check-docs-rule-ids: missing $f" >&2; exit 1; }
+  scanned=$((scanned + 1))
 done
+# An empty subject set is a broken enumeration, not a repo with no docs — the sibling failure this
+# repo has already paid for twice (a scan root pointing at a deleted directory, green while reading
+# nothing). Load-bearing now that the list is a glob rather than two literal paths.
+if [ "$scanned" -eq 0 ]; then
+  echo "check-docs-rule-ids: FAILED -- ZERO files to scan. The surface enumeration matched nothing, so" >&2
+  echo "no doc was checked against the catalog. This repo ships docs; a zero here is a broken scan." >&2
+  exit 1
+fi
 
 # --- Build the SSOT id set from docs/rules/catalog.md ---------------------------------------------------
 # DSL rule ids are prefixed with their owning pack's heading (`<pack>/<id>`); native analysis ids
@@ -126,13 +159,14 @@ severity_key_allowlist="severity
 failOn"
 
 # Pass-B allowlist: structural config keys that legitimately take an OBJECT value without being a rule
-# id. Source: crates/config/config-surface.json's `configKeys.top` — of its 12 top-level keys, exactly
-# these four take an object literal (`rules`, `packs`, `git`, `report`); the rest take strings/arrays/
-# scalars and can never match pass B's `"<key>": {` shape.
+# id. Source: crates/config/config-surface.json's `configKeys.top` — exactly these take an object
+# literal (`rules`, `packs`, `git`, `report`, `vocabulary`); the rest take strings/arrays/scalars and
+# can never match pass B's `"<key>": {` shape.
 object_key_allowlist="rules
 packs
 git
-report"
+report
+vocabulary"
 
 # Severity/disable token vocabulary — see header comment for sources.
 severity_tokens='off|none|disable|disabled|critical|error|err|high|warning|warn|medium|info|information|note|low'
@@ -163,13 +197,44 @@ check_file() {
   done <<< "$simple"
 
   # --- Pass B: object form — "<key>": {   (body may span lines; exclude-only entries included) ---
+  #
+  # A key in OBJECT form is a rule id only when its object is a rule CONFIG, and the one thing that
+  # makes it one is a `severity` field (crates/config's `ruleObject`). Without that discriminator this
+  # pass treats every `"key": {` in the repo as a candidate id — survivable while the scanned surface
+  # was two curated config-example files, and 28 false positives the moment the surface became derived
+  # (2026-07-28): envelope shapes, MCP server configs, DSL matcher docs. The alternative on offer was
+  # growing `object_key_allowlist` to hold them, and an allowlist that grows is how a guard stops
+  # guarding — the reason check-vendor-token-literals.sh never got an escape hatch. Anchor on meaning.
+  #
+  # ONE awk pass, not a per-match `sed` window: the obvious spelling (spawn a sed per candidate to slice
+  # the lookahead) measured 2m21s on 43 files under msys, where process creation dominates — the same
+  # trap check-max-file-lines.sh's header records for its own census. A guard nobody can afford to run
+  # in a pre-commit hook is a guard that gets moved to CI and then skipped.
   local objform
-  objform="$(printf '%s\n' "$content" \
-    | grep -noE '"[A-Za-z][A-Za-z0-9/_.-]*"[[:space:]]*:[[:space:]]*[{]' || true)"
-  while IFS=: read -r lineno match; do
+  objform="$(printf '%s\n' "$content" | awk '
+    { line[NR] = $0 }
+    END {
+      for (i = 1; i <= NR; i++) {
+        win = ""
+        for (j = i; j <= i + 4 && j <= NR; j++) win = win line[j]
+        if (win !~ /"severity"/) continue
+        # EVERY match on the line, not just the first. A single-line example
+        # (`{ "rules": { "bad-id": { "severity": "off" } } }`) puts the allowlisted `rules` key and the
+        # real candidate on one line; stopping at the first match finds only `rules`, skips it as
+        # structural, and passes. Measured 2026-07-28 — this loop was a bare `match()` for one revision
+        # and a planted bare id went undetected, which is how the grep this replaced behaved correctly
+        # by accident (`grep -oE` emits all matches per line).
+        rest = line[i]
+        while (match(rest, /"[A-Za-z][A-Za-z0-9\/_.-]*"[ \t]*:[ \t]*\{/)) {
+          key = substr(rest, RSTART + 1)
+          sub(/".*/, "", key)
+          print i ":" key
+          rest = substr(rest, RSTART + RLENGTH)
+        }
+      }
+    }' || true)"
+  while IFS=: read -r lineno key; do
     [ -z "$lineno" ] && continue
-    local key
-    key="$(printf '%s' "$match" | sed -E 's/^"([^"]+)".*/\1/')"
     is_in "$key" "$object_key_allowlist" && continue
     is_valid_id "$key" && continue
     echo "check-docs-rule-ids: $file:$lineno: object-form key \"$key\" is not a cataloged rule/analysis id" >&2

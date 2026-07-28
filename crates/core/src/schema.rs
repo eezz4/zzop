@@ -63,15 +63,15 @@ pub struct SchemaModel {
 }
 
 /// Usage signal a producer extracts from BE code, cross-checked against the schema-IR by
-/// `zzop_rules_schema::analyze_schema_with_usage` (dead-field, and dead-model's "is the name referenced
+/// `zzop_rules_schema::analyze_schema_with_usage` (unreferenced-field-name, and unreferenced-model-name's "is the name referenced
 /// anywhere" half). A producer with no code access can omit this entirely and only the structural rules
 /// run (`zzop_rules_schema::analyze_schema`).
 ///
 /// Store-binding and migration-churn signals no longer live here — they're injected via the generic
 /// entity-attribute channel instead (`zzop_core::AttributeStore`, Symbol-keyed `bound-model`/`model-churn`),
-/// which dead-model and schema-churn read directly.
+/// which unreferenced-model-name and schema-churn read directly.
 #[derive(Debug, Clone, Default)]
 pub struct SchemaUsage {
-    /// Identifier name -> total occurrences in BE source (comments/strings stripped). Drives dead-field.
+    /// Identifier name -> total occurrences in BE source (comments/strings stripped). Drives unreferenced-field-name.
     pub identifier_counts: HashMap<String, u32>,
 }

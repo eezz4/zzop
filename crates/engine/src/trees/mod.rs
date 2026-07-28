@@ -75,7 +75,7 @@ pub struct MultiAnalyzeOutput {
     pub cross_layer: zzop_core::CrossLayerResult,
     /// The 23 `cross-layer/*` native rules run over `cross_layer` — see `compute_cross_layer_findings`'s
     /// doc for the gating/derivation/sort contract. Always populated: even a single-tree `analyze_trees`
-    /// call runs these (most find nothing, since e.g. `shared-db-table`/`duplicate-route` need 2+
+    /// call runs these (most find nothing, since e.g. `db-table-name-in-multiple-sources`/`duplicate-route` need 2+
     /// distinct source trees to ever fire).
     pub cross_layer_findings: Vec<Finding>,
     /// Run-level self-reports that belong to the JOIN itself, not any one tree — currently only the

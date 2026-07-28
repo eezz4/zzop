@@ -22,7 +22,13 @@
 //!   `cacheDir` joins that set (`options::build_shared_options`), defaulting to
 //!   `zzop_cache::DEFAULT_CACHE_DIR` — this one has NO JS counterpart (the JS CLI shipped `.zzop-cache`
 //!   only as an `init` template value, so an author who never wrote the key ran cold forever).
-//! - CLI-presentation keys (`failOn`/`format`/`report.*`) are NOT forwarded into the request.
+//!   `packs.extraDirs` joins that set from the other direction: an UNDECLARED `extraDirs` falls back to
+//!   the authored `zzop/rules/` directory when it exists (`crate::DEFAULT_AUTHORED_PACKS_DIR`), a
+//!   fallback that a declared `extraDirs` — the empty array included — always overrides outright.
+//! - The former CLI-presentation keys (`failOn`/`format`/`report.*`) are gone from the recognized
+//!   surface entirely (2026-07-26). They used to be accepted and forwarded nowhere, which meant setting
+//!   one was a silent no-op; they now take the unknown-key path with a retirement notice
+//!   (`warnings::RETIRED_KEYS`).
 //!
 //! Deliberate deviation (documented in the crate doc): `root`/`cacheDir`/`packsDir` resolve against
 //! `base_dir` (the config file's directory) instead of the process cwd.
@@ -46,6 +52,7 @@
 mod options;
 mod paths;
 mod severity;
+mod topology;
 mod validation;
 mod warnings;
 
@@ -58,10 +65,7 @@ use crate::{ConfigError, Method};
 
 use options::build_shared_options;
 use paths::{path_to_string, resolve_path};
-use validation::{
-    resolve_overlays_for_root, validate_hosts_array, validate_mount_at, validate_mounts_array,
-    validate_overlays_array, validate_routes_array,
-};
+use validation::{resolve_overlays_for_root, validate_overlays_array, validate_routes_array};
 use warnings::{collect_config_warnings, parse_pack_defs};
 
 /// The result of mapping one config object: the facade request value (with defaults injected),
@@ -174,24 +178,8 @@ pub fn config_to_request(
                 tree_request.insert("adapterOverlays".to_string(), Value::Array(overlays));
             }
 
-            // Connection topology — `trees[]` entries only (the `roots` shorthand below never reads
-            // these keys at all).
-            if let Some(v) = tree_obj.get("mountedAt") {
-                let s = validate_mount_at(v, &format!("trees[{i}].mountedAt"))?;
-                tree_request.insert("mountedAt".to_string(), Value::String(s));
-            }
-            if let Some(v) = tree_obj.get("mounts") {
-                let arr = validate_mounts_array(v, &format!("trees[{i}].mounts"))?;
-                if !arr.is_empty() {
-                    tree_request.insert("mounts".to_string(), Value::Array(arr));
-                }
-            }
-            if let Some(v) = tree_obj.get("hosts") {
-                let arr = validate_hosts_array(v, &format!("trees[{i}].hosts"))?;
-                if !arr.is_empty() {
-                    tree_request.insert("hosts".to_string(), Value::Array(arr));
-                }
-            }
+            topology::apply_topology(tree_obj, &mut tree_request, i)?;
+
             // Lightweight route-fact injection — expanded into a synthetic adapter overlay by the facade.
             if let Some(v) = tree_obj.get("routes") {
                 let arr = validate_routes_array(v, &format!("trees[{i}].routes"))?;

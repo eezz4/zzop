@@ -1,6 +1,6 @@
 use crate::{scan, TempDir};
 
-// --- unsanitized-markdown-html ---
+// --- markdown-and-html-sink-unsanitized ---
 
 #[test]
 fn marked_output_into_inner_html_with_no_sanitizer_is_flagged() {
@@ -13,7 +13,7 @@ fn marked_output_into_inner_html_with_no_sanitizer_is_flagged() {
     let hits: Vec<_> = out
         .findings
         .iter()
-        .filter(|f| f.rule_id == "browser/unsanitized-markdown-html")
+        .filter(|f| f.rule_id == "browser/markdown-and-html-sink-unsanitized")
         .collect();
     assert_eq!(hits.len(), 1, "{:?}", out.findings);
 }
@@ -29,7 +29,7 @@ fn markdown_it_render_into_dangerously_set_inner_html_with_no_sanitizer_is_flagg
     let hits: Vec<_> = out
         .findings
         .iter()
-        .filter(|f| f.rule_id == "browser/unsanitized-markdown-html")
+        .filter(|f| f.rule_id == "browser/markdown-and-html-sink-unsanitized")
         .collect();
     assert_eq!(hits.len(), 1, "{:?}", out.findings);
 }
@@ -45,7 +45,7 @@ fn marked_output_sanitized_with_dompurify_before_inner_html_is_not_flagged() {
     assert!(
         out.findings
             .iter()
-            .all(|f| f.rule_id != "browser/unsanitized-markdown-html"),
+            .all(|f| f.rule_id != "browser/markdown-and-html-sink-unsanitized"),
         "{:?}",
         out.findings
     );
@@ -64,7 +64,7 @@ fn marked_as_a_plain_english_word_in_a_string_is_not_flagged() {
     assert!(
         out.findings
             .iter()
-            .all(|f| f.rule_id != "browser/unsanitized-markdown-html"),
+            .all(|f| f.rule_id != "browser/markdown-and-html-sink-unsanitized"),
         "{:?}",
         out.findings
     );
@@ -83,7 +83,7 @@ fn marked_render_and_sink_in_different_functions_does_not_co_fire() {
     assert!(
         out.findings
             .iter()
-            .all(|f| f.rule_id != "browser/unsanitized-markdown-html"),
+            .all(|f| f.rule_id != "browser/markdown-and-html-sink-unsanitized"),
         "{:?}",
         out.findings
     );
@@ -103,7 +103,7 @@ fn marked_and_v_html_in_the_same_vue_sfc_does_not_co_fire_no_span_support() {
     assert!(
         out.findings
             .iter()
-            .all(|f| f.rule_id != "browser/unsanitized-markdown-html"),
+            .all(|f| f.rule_id != "browser/markdown-and-html-sink-unsanitized"),
         "{:?}",
         out.findings
     );
@@ -114,13 +114,13 @@ fn markdown_html_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-browser");
     dir.write(
         "vetted-md.tsx",
-        "import { marked } from 'marked';\ndeclare const el: HTMLElement;\ndeclare const article: { body: string };\nexport function render() {\n  // unsanitized-markdown-html-ok: sanitize option enabled in marked config\n  const html = marked(article.body);\n  el.innerHTML = html;\n}\n",
+        "import { marked } from 'marked';\ndeclare const el: HTMLElement;\ndeclare const article: { body: string };\nexport function render() {\n  // zzop-markdown-and-html-sink-unsanitized-ok: sanitize option enabled in marked config\n  const html = marked(article.body);\n  el.innerHTML = html;\n}\n",
     );
     let out = scan(&dir);
     assert!(
         out.findings
             .iter()
-            .all(|f| f.rule_id != "browser/unsanitized-markdown-html"),
+            .all(|f| f.rule_id != "browser/markdown-and-html-sink-unsanitized"),
         "{:?}",
         out.findings
     );
@@ -137,7 +137,7 @@ fn unsanitized_markdown_html_inside_a_test_fixture_path_is_not_flagged() {
     assert!(
         out.findings
             .iter()
-            .all(|f| f.rule_id != "browser/unsanitized-markdown-html"),
+            .all(|f| f.rule_id != "browser/markdown-and-html-sink-unsanitized"),
         "{:?}",
         out.findings
     );

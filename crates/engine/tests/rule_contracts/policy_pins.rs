@@ -4,9 +4,11 @@
 //! third mirror to drift). Two boundaries so far: pack↔pack (a DSL rule cannot reference another pack's
 //! pattern) and crate↔pack (a JSON pack cannot reference a Rust constant).
 
+use std::collections::BTreeSet;
+
 use regex::Regex;
 
-use zzop_core::{Matcher, RuleDef, RulePackDef};
+use zzop_core::{LabeledPattern, Matcher, RuleDef, RulePackDef};
 use zzop_parser_typescript::PROMISE_CONTINUATION_METHODS;
 
 use crate::load_all_packs;
@@ -44,34 +46,82 @@ fn method_scan_pattern_by_label<'a>(rule: &'a RuleDef, label: &str) -> &'a str {
     }
 }
 
-/// Policy pin: `reliability/sync-fs-in-handler` and `db/client-per-request` both approximate "this
-/// function looks like a request handler" with a `patterns[]` entry labeled `handler-context` — the SAME
-/// evidence definition, deliberately duplicated across the two packs (a DSL rule can't reference another
-/// pack's pattern). Nothing else stops one pack's copy drifting from the other's during an unrelated edit —
-/// each pack's own fixtures only exercise its own copy, so a silent fork of what counts as "handler context"
-/// (e.g. one pack keeping the naive `res` bare-word evidence a mono-hub 0.10.0 field review found false-
-/// positives on, while the other adopts the tightened one) would ship unnoticed. This test loads both
-/// shipped DSL packs fresh (via `load_dsl_packs`, same helper every other contract here uses — never a hand-
-/// copied inline fixture), extracts each rule's own `handler-context` pattern string, and asserts they are
-/// byte-identical, so a future edit to one without the other fails loudly here instead of drifting unnoticed.
+/// The label under which the "this function looks like a request handler" evidence policy is spelled,
+/// in every pack that spells it. The label is the SUBJECT of the pin below — not a list of rules.
+const HANDLER_CONTEXT_LABEL: &str = "handler-context";
+
+/// Every `(pack/rule, pattern)` in every LOADED pack whose labeled pattern carries `label`, in pack ->
+/// rule -> declaration order. Both places a `LabeledPattern` can live are read (`LineScan::any` and
+/// `MethodScan::patterns`), so a policy that migrates from one matcher kind to the other stays in
+/// this pin's subject set instead of dropping out of it.
+fn patterns_labeled(packs: &[RulePackDef], label: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for pack in packs {
+        for rule in &pack.rules {
+            let patterns: Vec<&LabeledPattern> = match &rule.matcher {
+                Matcher::LineScan(m) => m.any.iter().flatten().collect(),
+                Matcher::MethodScan(m) => m.patterns.iter().collect(),
+                Matcher::SymbolScan(_) | Matcher::IoScan(_) => Vec::new(),
+            };
+            for lp in patterns {
+                if lp.label == label {
+                    out.push((format!("{}/{}", pack.id, rule.id), lp.pattern.clone()));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Policy pin: every rule that approximates "this function looks like a request handler" spells that
+/// evidence as a labeled pattern named `handler-context`, and all of those spellings must be
+/// byte-identical. Today it is `reliability/sync-fs-in-handler` and `db/client-new-in-handler`, the
+/// SAME evidence definition deliberately duplicated across two packs (a DSL rule can't reference
+/// another pack's pattern). Nothing else stops one pack's copy drifting from the other's during an
+/// unrelated edit — each pack's own fixtures only exercise its own copy, so a silent fork of what
+/// counts as "handler context" (e.g. one pack keeping the naive `res` bare-word evidence a mono-hub
+/// 0.10.0 field review found false-positives on, while the other adopts the tightened one) would ship
+/// unnoticed.
+///
+/// # The subject set is DISCOVERED, never listed (2026-07-28)
+///
+/// This test named its two rules and their two packs in code until that date, and the consequence was
+/// measured, not argued: a THIRD rule carrying a `handler-context` label with a completely different
+/// pattern was planted, and this pin stayed GREEN. It compared the one pair it knew about and was
+/// structurally blind to the policy spreading — which is the only way this policy ever gets into
+/// trouble, since two copies that a human is already watching are the safe case. It now reads every
+/// loaded pack, collects every pattern carrying the label, and asserts ONE distinct spelling across
+/// however many it finds; a third rule joins the pin by being authored, not by being listed.
+///
+/// Fewer than two found is a failure in its own right: this pin exists because the policy is
+/// duplicated, so a single (or zero) spelling means either the label was renamed out from under it —
+/// leaving the duplicates un-pinned under a new name — or the duplication ended, in which case the pin
+/// should be deleted deliberately rather than left vouching for nothing. Same non-emptiness doctrine
+/// `every_after_in_same_function_rule_publishes_the_order_gate_residual` states below.
 #[test]
-fn handler_context_pattern_is_identical_across_reliability_and_db() {
+fn every_handler_context_pattern_is_byte_identical_across_every_pack_that_spells_one() {
     let packs = load_all_packs();
-    let reliability = find_pack(&packs, "reliability");
-    let db = find_pack(&packs, "db");
+    let spellings = patterns_labeled(&packs, HANDLER_CONTEXT_LABEL);
 
-    let sync_fs_rule = find_rule(reliability, "sync-fs-in-handler");
-    let client_per_request_rule = find_rule(db, "client-per-request");
+    assert!(
+        spellings.len() >= 2,
+        "found {} shipped pattern(s) labeled `{HANDLER_CONTEXT_LABEL}` ({:?}) — this pin exists \
+         because that evidence policy is DUPLICATED across packs that cannot share a symbol, so fewer \
+         than two means either the label was renamed (re-point this pin, or the copies go unguarded \
+         under the new name) or the duplication is over (delete this pin deliberately instead of \
+         leaving it green over nothing)",
+        spellings.len(),
+        spellings.iter().map(|(who, _)| who).collect::<Vec<_>>(),
+    );
 
-    let sync_fs_pattern = method_scan_pattern_by_label(sync_fs_rule, "handler-context");
-    let client_per_request_pattern =
-        method_scan_pattern_by_label(client_per_request_rule, "handler-context");
-
+    let distinct: BTreeSet<&str> = spellings.iter().map(|(_, p)| p.as_str()).collect();
     assert_eq!(
-        sync_fs_pattern, client_per_request_pattern,
-        "reliability/sync-fs-in-handler and db/client-per-request's `handler-context` patterns have \
-         drifted — they encode the same handler-evidence policy and must stay byte-identical (see this \
-         test's own doc comment)"
+        distinct.len(),
+        1,
+        "the `{HANDLER_CONTEXT_LABEL}` evidence policy has FORKED across {} spellings — every rule \
+         carrying this label encodes the same \"is this a request handler\" judgment and they must \
+         stay byte-identical (see this test's own doc comment): {spellings:#?}",
+        distinct.len(),
     );
 }
 
@@ -98,7 +148,7 @@ fn property_alternation_members(rule_id: &str, pattern: &str) -> Vec<String> {
 }
 
 /// Policy pin (T2 — the boundary admits no shared symbol): the TypeScript parser's
-/// `PROMISE_CONTINUATION_METHODS` and the continuation arm of `react/setstate-after-await-unmounted`'s
+/// `PROMISE_CONTINUATION_METHODS` and the continuation arm of `react/setstate-after-async-unguarded`'s
 /// `async-boundary` pattern are ONE policy — "which member calls take a callback that runs on the RESUMED
 /// continuation" — spelled twice only because a JSON pack cannot reference a Rust crate's constant.
 ///
@@ -123,7 +173,7 @@ fn property_alternation_members(rule_id: &str, pattern: &str) -> Vec<String> {
 fn the_promise_continuation_vocabulary_is_identical_in_the_parser_and_the_react_pack() {
     let packs = load_all_packs();
     let react = find_pack(&packs, "react");
-    let rule = find_rule(react, "setstate-after-await-unmounted");
+    let rule = find_rule(react, "setstate-after-async-unguarded");
     let boundary = method_scan_pattern_by_label(rule, "async-boundary");
 
     let mut from_pack = property_alternation_members(&rule.id, boundary);
@@ -136,7 +186,7 @@ fn the_promise_continuation_vocabulary_is_identical_in_the_parser_and_the_react_
 
     assert_eq!(
         from_pack, from_parser,
-        "the promise-continuation vocabulary has forked: react/setstate-after-await-unmounted's \
+        "the promise-continuation vocabulary has forked: react/setstate-after-async-unguarded's \
          `async-boundary` pattern accepts {from_pack:?} as continuation boundaries while the TypeScript \
          parser's PROMISE_CONTINUATION_METHODS merges {from_parser:?} — a token the rule accepts but the \
          parser does not merge leaves the continuation callback in its own function span, so \
@@ -163,7 +213,7 @@ const ORDER_GATE_RESIDUAL: &str = "A trigger line that sits inside NO parser-pro
 /// into NO function span reads as "no gate on this line", never as "no pair", so the floor drops to 0 and
 /// every earlier ordering match in the scanned symbol span is readmitted — the pre-gate scope. It degrades
 /// per LINE, not per file: a file WITH spans still has lines outside all of them (a class-property
-/// initializer, a top-level statement), which `rules/dsl/react/setstate_after_await_unmounted.rs`'s
+/// initializer, a top-level statement), which `rules/dsl/react/setstate_after_async_unguarded.rs`'s
 /// `a_class_property_setter_outside_every_function_span_keeps_the_pre_gate_pairing` pins as live, intended
 /// behavior.
 ///
@@ -172,7 +222,7 @@ const ORDER_GATE_RESIDUAL: &str = "A trigger line that sits inside NO parser-pro
 /// wider than the matcher proves, and a reader holding one finding cannot falsify it. Nothing else would
 /// catch the drift: a rule's own fixtures assert findings, never the sentence describing them.
 ///
-/// Why a byte-identical sentence spliced seven times instead of one shared symbol: a rule `message` is not
+/// Why a byte-identical sentence spliced eight times instead of one shared symbol: a rule `message` is not
 /// a pattern-bearing field, so the fragment mechanism structurally cannot reach it
 /// (`docs/contracts/rule-pack.schema.json` — a fragment reference resolves only in fields whose
 /// description ends "fragment reference supported"), and the rules live in five separate packs that share
@@ -180,7 +230,7 @@ const ORDER_GATE_RESIDUAL: &str = "A trigger line that sits inside NO parser-pro
 /// straddles, same remedy: spell it out on each side and pin the RELATIONSHIP here.
 ///
 /// Two-sided by construction: the subject set is DISCOVERED from the shipped matchers, never listed here,
-/// so an eighth rule that switches the gate on and keeps a silent message fails on its first run.
+/// so a ninth rule that switches the gate on and keeps a silent message fails on its first run.
 #[test]
 fn every_after_in_same_function_rule_publishes_the_order_gate_residual() {
     let packs = load_all_packs();
@@ -215,4 +265,60 @@ fn every_after_in_same_function_rule_publishes_the_order_gate_residual() {
          sentence VERBATIM into each message — see this test's own doc for why it is spelled out rather \
          than shared: {ORDER_GATE_RESIDUAL}"
     );
+}
+
+/// The write-verb vocabulary, pinned across every boundary that respells it (T2).
+///
+/// # Why this pin exists
+/// Found by the v0.25.0 release audit (2026-07-28): "the HTTP methods that mutate" was spelled in FIVE
+/// places, each doc claiming to be pinned, and **not one comparison existed**. The owner
+/// (`zzop_rules_http::WRITE_HTTP_METHODS`) was `pub(crate)`, so no downstream copy could have been
+/// compared to it even in principle. Verified rather than argued: widening the owner's array to five
+/// verbs and running `zzop-summary`, `zzop-engine` and `zzop-rules-http` together left **every test in
+/// the workspace green** — the disclosure, the posture diagram and the egress tagger would each have
+/// silently kept covering the old four. Narrowing it was caught, but only by fixtures that happen to
+/// spell `DELETE`; that is luck, not a guard.
+///
+/// # Which copies are pinned here and which are gone
+/// Two respellings survive, both because their crate genuinely cannot depend on the rule crate — a
+/// parser (parsers do not depend on rule crates) and `rules-cross-layer` (it depends on `zzop-core`
+/// alone). Those are the T2 cases, and this is their pin. The other two copies were DELETED rather than
+/// pinned, because their crates could always have imported the symbol: `framework_silence::rust_router_layer`
+/// now uses it directly, and `zzop-summary`'s posture diagram — which is layered above the rule crates
+/// and may not ship a dependency on them — pins in its own tests via a dev-dependency.
+///
+/// Set equality, not order: the owner spells them PUT/DELETE/POST/PATCH and both copies POST/PUT/PATCH/DELETE.
+#[test]
+fn every_respelling_of_the_write_verb_set_equals_the_rule_crates_own() {
+    let sorted = |v: &[&str]| {
+        let mut v: Vec<String> = v.iter().map(|s| s.to_ascii_uppercase()).collect();
+        v.sort();
+        v
+    };
+    let owner = sorted(&zzop_rules_http::WRITE_HTTP_METHODS);
+    assert!(
+        !owner.is_empty(),
+        "the owning set is empty — this pin would then vouch for nothing, the same failure mode the \
+         `after_in_same_function` pin above guards against"
+    );
+
+    for (who, respelling) in [
+        (
+            "zzop_parser_typescript::RETRY_WRITE_VERBS (egress retry tagging)",
+            sorted(&zzop_parser_typescript::RETRY_WRITE_VERBS),
+        ),
+        (
+            "zzop_rules_cross_layer::CROSS_LAYER_WRITE_METHODS",
+            sorted(&zzop_rules_cross_layer::CROSS_LAYER_WRITE_METHODS),
+        ),
+    ] {
+        assert_eq!(
+            respelling, owner,
+            "{who} drifted from `zzop_rules_http::WRITE_HTTP_METHODS`. A verb the rule gates on but \
+             this set omits is a call site that silently loses its write classification; the reverse \
+             classifies one the rule never judged. If the divergence is DELIBERATE, it is a T3 case — \
+             move it out of this pin and write down why the two must differ, the way \
+             `egress/body_shape.rs` already does."
+        );
+    }
 }

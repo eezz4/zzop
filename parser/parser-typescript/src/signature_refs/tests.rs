@@ -1,5 +1,5 @@
 //! Coverage for `parse_exported_signature_names`. The three anchor cases are the measured shapes
-//! from the `dead-exports` noise sample: the false positive this fact exists to kill, and the two
+//! from the `unimported-export` noise sample: the false positive this fact exists to kill, and the two
 //! true positives that MUST survive it.
 use super::parse_exported_signature_names;
 

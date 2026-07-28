@@ -70,7 +70,7 @@ fn sql_truncate_app_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "src/cleanup.ts",
-        "export async function reset(db: any) {\n  // truncate-in-app-code-ok: dedicated nightly cache-reset job\n  return db.exec(`TRUNCATE TABLE users`);\n}\n",
+        "export async function reset(db: any) {\n  // zzop-truncate-in-app-code-ok: dedicated nightly cache-reset job\n  return db.exec(`TRUNCATE TABLE users`);\n}\n",
     );
     let out = scan(&dir);
     assert!(

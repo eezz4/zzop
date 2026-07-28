@@ -602,3 +602,124 @@ fn a_literal_const_from_another_file_is_never_resolved() {
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].key.as_deref(), Some("GET /users"));
 }
+
+// --- same-file zero-argument helper returns (`same-file-fn-url-v1`) ---
+
+#[test]
+fn a_zero_arg_helper_returning_a_literal_resolves_as_the_whole_url_argument() {
+    // The gap `cross-layer/external-host-fanout` discloses: a host literal returned from a helper left
+    // the calling file uncounted, because `resolve_url_variants` had no call arm at all.
+    let out = extract_http_egress(&files(&[(
+        "a.ts",
+        "function chargesUrl() { return 'https://api.vendor.com/v1/charges'; }\naxios.get(chargesUrl());",
+    )]));
+    assert_eq!(out.len(), 1);
+    assert_eq!(
+        out[0].key.as_deref(),
+        Some("GET https://api.vendor.com/v1/charges")
+    );
+}
+
+#[test]
+fn a_zero_arg_arrow_helper_returning_a_literal_resolves() {
+    let out = extract_http_egress(&files(&[(
+        "a.ts",
+        "const itemsUrl = () => '/api/items';\naxios.get(itemsUrl());",
+    )]));
+    assert_eq!(out[0].key.as_deref(), Some("GET /api/items"));
+}
+
+#[test]
+fn a_zero_arg_arrow_helper_with_a_block_body_resolves() {
+    let out = extract_http_egress(&files(&[(
+        "a.ts",
+        "const itemsUrl = () => { return '/api/items'; };\naxios.get(itemsUrl());",
+    )]));
+    assert_eq!(out[0].key.as_deref(), Some("GET /api/items"));
+}
+
+#[test]
+fn a_zero_arg_helper_return_is_read_at_the_concat_head() {
+    // The head slot's whole point: without it the base is dropped and the third-party call is filed as
+    // an internal route (`GET /charges`).
+    let out = extract_http_egress(&files(&[(
+        "a.ts",
+        "function base() { return 'https://api.vendor.com'; }\naxios.get(base() + '/charges');",
+    )]));
+    assert_eq!(
+        out[0].key.as_deref(),
+        Some("GET https://api.vendor.com/charges")
+    );
+}
+
+#[test]
+fn a_zero_arg_helper_return_is_read_at_the_template_head() {
+    let out = extract_http_egress(&files(&[(
+        "a.ts",
+        "function base() { return 'https://api.vendor.com'; }\naxios.get(`${base()}/charges`);",
+    )]));
+    assert_eq!(
+        out[0].key.as_deref(),
+        Some("GET https://api.vendor.com/charges")
+    );
+}
+
+#[test]
+fn a_helper_whose_return_needs_an_argument_stays_unresolved() {
+    // The call carries an argument, so nothing about the returned string is visible at the call site.
+    let out = extract_http_egress(&files(&[(
+        "a.ts",
+        "function itemUrl(id) { return '/api/items/' + id; }\naxios.get(itemUrl(3));",
+    )]));
+    assert_eq!(out.len(), 1);
+    assert!(out[0].key.is_none(), "got: {:?}", out[0].key);
+}
+
+#[test]
+fn an_imported_zero_arg_helper_is_never_resolved() {
+    // Scope gate: the map is built from ONE file's own AST, exactly like the two same-file const rules.
+    let out = extract_http_egress(&files(&[
+        (
+            "urls.ts",
+            "export function base() { return 'https://a.example.com/x'; }",
+        ),
+        (
+            "call.ts",
+            "import { base } from './urls';\naxios.get(base());",
+        ),
+    ]));
+    assert_eq!(out.len(), 1);
+    assert!(out[0].key.is_none(), "got: {:?}", out[0].key);
+}
+
+#[test]
+fn a_helper_name_bound_twice_in_the_file_is_dropped() {
+    let out = extract_http_egress(&files(&[(
+        "a.ts",
+        "function base() { return 'https://a.example.com/x'; }\nfunction wrap(base) { return axios.get(base()); }",
+    )]));
+    assert_eq!(out.len(), 1);
+    assert!(out[0].key.is_none(), "got: {:?}", out[0].key);
+}
+
+#[test]
+fn a_helper_body_that_is_not_a_single_return_is_dropped() {
+    let out = extract_http_egress(&files(&[(
+        "a.ts",
+        "function base() { log(); return 'https://a.example.com/x'; }\naxios.get(base());",
+    )]));
+    assert_eq!(out.len(), 1);
+    assert!(out[0].key.is_none(), "got: {:?}", out[0].key);
+}
+
+#[test]
+fn a_helper_returning_a_protocol_relative_base_is_refused() {
+    // `admits_substitution`'s one refusal, applied to the fn maps too: `//cdn.example.com/x` is
+    // `/`-headed, so it would key a third-party HOST as an internal path SEGMENT.
+    let out = extract_http_egress(&files(&[(
+        "a.ts",
+        "function cdn() { return '//cdn.example.com'; }\naxios.get(cdn() + '/asset.js');",
+    )]));
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].key.as_deref(), Some("GET /asset.js"));
+}

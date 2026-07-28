@@ -29,7 +29,7 @@ fn body_limit_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/app.ts",
-        "// body-limit-missing-ok: internal admin endpoint, payload size bounded upstream by the LB\napp.use(bodyParser.json());\n",
+        "// zzop-body-limit-missing-ok: internal admin endpoint, payload size bounded upstream by the LB\napp.use(bodyParser.json());\n",
     );
     let out = scan(&dir);
     assert!(
@@ -64,7 +64,7 @@ fn console_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/api/handler.ts",
-        "// console-in-be-ok: temporary trace, removed before merge\nconsole.log(\"hit\");\n",
+        "// zzop-console-in-be-ok: temporary trace, removed before merge\nconsole.log(\"hit\");\n",
     );
     let out = scan(&dir);
     assert!(hits(&out, "console-in-be").is_empty(), "{:?}", out.findings);
@@ -105,7 +105,7 @@ fn interval_ok_marker_above_the_set_interval_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/poller.ts",
-        "export function startPolling() {\n  // interval-no-clear-ok: cleared by the host process's own lifecycle hook\n  const id = setInterval(() => {\n    console.log(\"tick\");\n  }, 1000);\n  return id;\n}\n",
+        "export function startPolling() {\n  // zzop-interval-no-clear-ok: cleared by the host process's own lifecycle hook\n  const id = setInterval(() => {\n    console.log(\"tick\");\n  }, 1000);\n  return id;\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -168,7 +168,7 @@ fn stream_in_loop_ok_marker_directly_above_the_open_call_suppresses_the_finding(
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/copy.ts",
-        "declare const paths: string[];\ndeclare const dst: any;\ndeclare const fs: any;\nexport function copyAllMarked() {\n  for (const p of paths) {\n    // stream-open-no-close-in-loop-ok: bounded fixture list, process exits right after\n    const s = fs.createReadStream(p);\n    s.pipe(dst);\n  }\n}\n",
+        "declare const paths: string[];\ndeclare const dst: any;\ndeclare const fs: any;\nexport function copyAllMarked() {\n  for (const p of paths) {\n    // zzop-stream-open-no-close-in-loop-ok: bounded fixture list, process exits right after\n    const s = fs.createReadStream(p);\n    s.pipe(dst);\n  }\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -231,7 +231,7 @@ fn listener_in_loop_ok_marker_directly_above_the_subscribe_call_suppresses_the_f
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/subscribe.ts",
-        "import { EventEmitter } from \"events\";\ndeclare const channels: string[];\ndeclare const emitter: EventEmitter;\ndeclare function handler(msg: any): void;\nexport function subscribeAllMarked() {\n  for (const ch of channels) {\n    // listener-subscribe-in-loop-ok: bounded fixture channel list, process exits right after\n    emitter.on(\"message\", handler);\n  }\n}\n",
+        "import { EventEmitter } from \"events\";\ndeclare const channels: string[];\ndeclare const emitter: EventEmitter;\ndeclare function handler(msg: any): void;\nexport function subscribeAllMarked() {\n  for (const ch of channels) {\n    // zzop-listener-subscribe-in-loop-ok: bounded fixture channel list, process exits right after\n    emitter.on(\"message\", handler);\n  }\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -341,7 +341,7 @@ fn fs_loop_serial_ok_marker_directly_above_the_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "src/ingest.ts",
-        "import fs from \"fs\";\ndeclare const paths: string[];\nexport async function readAllMarked() {\n  const out: string[] = [];\n  for (const p of paths) {\n    // fs-in-loop-serial-ok: deliberately sequential, must preserve on-disk read order\n    const content = await fs.promises.readFile(p, \"utf8\");\n    out.push(content);\n  }\n  return out;\n}\n",
+        "import fs from \"fs\";\ndeclare const paths: string[];\nexport async function readAllMarked() {\n  const out: string[] = [];\n  for (const p of paths) {\n    // zzop-fs-in-loop-serial-ok: deliberately sequential, must preserve on-disk read order\n    const content = await fs.promises.readFile(p, \"utf8\");\n    out.push(content);\n  }\n  return out;\n}\n",
     );
     let out = scan(&dir);
     assert!(

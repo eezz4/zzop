@@ -80,9 +80,67 @@ fn method_call_re() -> &'static Regex {
     })
 }
 
-fn orm_receiver_re() -> &'static Regex {
+fn default_orm_receiver_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| Regex::new(DEFAULT_ORM_RECEIVER_PATTERN).unwrap())
+}
+
+/// The two write-site vocabularies a project may declare (`vocabulary.ormReceiverPattern` /
+/// `vocabulary.ormWriteMethods`): what its data-access receivers are NAMED, and which method names on
+/// them count as a write. Both are conventions — `Repository$`/`Store$`/`prisma`/`db` is one house
+/// style among many, and a project whose repository objects are called `*Gateway` gets no `write_sites`
+/// at all today, silently.
+///
+/// Borrowed, and carried as one value rather than two positional `&str`/`&[&str]` parameters, because
+/// the compiled form below has to be built ONCE per parse and handed down — a per-symbol
+/// `Regex::new` on a declared pattern would pay compilation for every symbol in the file.
+/// `orm_receiver_pattern` is `None` when the caller declared none, which means the receiver-name
+/// judgment is not made and NO call site is a write site — never "fall back to ours".
+#[derive(Clone, Copy)]
+pub struct WriteSiteVocab<'a> {
+    pub orm_receiver_pattern: Option<&'a str>,
+    pub write_methods: &'a [&'a str],
+}
+
+impl WriteSiteVocab<'static> {
+    /// zzop's own suggested values — the one place they are assembled, so `zzop_engine`'s
+    /// `VocabularyConfig::built_in` (which writes them into the user's starter config) and this crate's
+    /// own no-vocab convenience path read the same two constants.
+    pub fn built_in() -> Self {
+        WriteSiteVocab {
+            orm_receiver_pattern: Some(DEFAULT_ORM_RECEIVER_PATTERN),
+            write_methods: DEFAULT_WRITE_METHODS,
+        }
+    }
+}
+
+/// A [`WriteSiteVocab`] with its receiver pattern compiled, or `None` when there is no judgment to make.
+///
+/// Two ways to get `None`, and they are deliberately the same outcome: the caller declared no pattern, or
+/// declared one that does not compile. Neither may quietly become zzop's pattern — substituting a default
+/// for an unusable declaration is exactly the guessing this vocabulary exists to remove — and neither may
+/// panic. A `None` matches no receiver, so the safe direction holds: an unusable pattern under-reports
+/// write sites rather than turning every receiver into one. An uncompilable declaration is reported to
+/// the author by `zzop-config`'s vocabulary validation, which sees the config before a parse starts.
+pub struct CompiledWriteSiteVocab<'a> {
+    orm_re: Option<std::borrow::Cow<'static, Regex>>,
+    write_methods: &'a [&'a str],
+}
+
+impl<'a> CompiledWriteSiteVocab<'a> {
+    pub fn compile(vocab: &WriteSiteVocab<'a>) -> Self {
+        let orm_re = match vocab.orm_receiver_pattern {
+            None => None,
+            Some(p) if p == DEFAULT_ORM_RECEIVER_PATTERN => {
+                Some(std::borrow::Cow::Borrowed(default_orm_receiver_re()))
+            }
+            Some(p) => Regex::new(p).ok().map(std::borrow::Cow::Owned),
+        };
+        CompiledWriteSiteVocab {
+            orm_re,
+            write_methods: vocab.write_methods,
+        }
+    }
 }
 
 /// Joins `text`'s lines `body_start..=body_end` (1-based) into one block, plus `body_start` for `line_at`.
@@ -171,6 +229,20 @@ fn classify(method: &str, block: &str, args_start: usize) -> Option<NonIdempoten
 /// span, position-sorted (SQL wins an exact-position tie, matching the old scan's `<=` precedence). Empty
 /// when `sym` has no body span (type/interface symbols, or a degraded parse) or the span is empty.
 pub fn write_sites_for_symbol(sym: &SourceSymbol, text: &str) -> Vec<WriteSite> {
+    write_sites_for_symbol_with_vocab(
+        sym,
+        text,
+        &CompiledWriteSiteVocab::compile(&WriteSiteVocab::built_in()),
+    )
+}
+
+/// [`write_sites_for_symbol`] with the run's DECLARED write-site vocabulary, already compiled (the
+/// caller compiles once per parse, not once per symbol).
+pub fn write_sites_for_symbol_with_vocab(
+    sym: &SourceSymbol,
+    text: &str,
+    vocab: &CompiledWriteSiteVocab<'_>,
+) -> Vec<WriteSite> {
     let (Some(start), Some(end)) = (sym.body_start, sym.body_end) else {
         return Vec::new();
     };
@@ -178,7 +250,7 @@ pub fn write_sites_for_symbol(sym: &SourceSymbol, text: &str) -> Vec<WriteSite> 
     if block.is_empty() {
         return Vec::new();
     }
-    let orm_re = orm_receiver_re();
+    let orm_re = &vocab.orm_re;
 
     let mut sites: Vec<(usize, WriteSite)> = Vec::new();
 
@@ -196,13 +268,16 @@ pub fn write_sites_for_symbol(sym: &SourceSymbol, text: &str) -> Vec<WriteSite> 
 
     for caps in method_call_re().captures_iter(&block) {
         let base = &caps[1];
-        if !orm_re.is_match(base) {
+        // No declared receiver pattern means no name can be a data-access receiver, so this whole arm is
+        // skipped. The SQL-literal arm above is a FACT (the `INSERT`/`UPDATE` keywords), not a
+        // convention, so it keeps firing regardless.
+        if !orm_re.as_ref().is_some_and(|re| re.is_match(base)) {
             continue;
         }
         let method = &caps[2];
         let m0 = caps.get(0).unwrap();
         let kind = classify(method, &block, m0.end());
-        let in_default_vocab = DEFAULT_WRITE_METHODS.contains(&method);
+        let in_default_vocab = vocab.write_methods.contains(&method);
         if kind.is_none() && !in_default_vocab {
             continue; // neither the generic write vocab nor a non-idempotent classification — not a write
         }

@@ -82,7 +82,7 @@ fn private_key_ok_marker_above_the_header_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "config/keys.ts",
-        "// private-key-committed-ok: throwaway key generated only for this test, never used against a real service\nexport const key = `-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAx1n...\n-----END RSA PRIVATE KEY-----`;\n",
+        "// zzop-private-key-committed-ok: throwaway key generated only for this test, never used against a real service\nexport const key = `-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAx1n...\n-----END RSA PRIVATE KEY-----`;\n",
     );
     let out = scan(&dir);
     assert!(

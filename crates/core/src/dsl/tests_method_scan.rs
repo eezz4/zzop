@@ -187,3 +187,56 @@ fn method_scan_require_file_absent_skips_the_file_when_the_absent_pattern_is_pre
     );
     assert!(f.is_empty(), "{f:?}");
 }
+
+// --- trigger-line count (`triggerLines`) ---
+
+/// Two `patterns`, trigger = `call`; no ordering or containment gate, so every matching line counts.
+fn count_pack() -> RulePackDef {
+    rule_pack(
+        r#"{"id":"cnt","severity":"warning","message":"m","matcher":{"type":"method-scan","file_pattern":"\\.ts$","patterns":[{"pattern":"\\bawait\\b","label":"boundary"},{"pattern":"\\bexec\\s*\\(","label":"call"}],"trigger":"call"}}"#,
+    )
+}
+
+#[test]
+fn a_single_trigger_line_reports_a_count_of_one() {
+    let src = "function run() {\n  await x();\n  exec(a);\n}\n";
+    let f = scan_pack(&count_pack(), "f.ts", src, vec![method("run", 1, 4)]);
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].data.as_ref().unwrap()["triggerLines"], 1);
+}
+
+#[test]
+fn repeated_trigger_lines_in_one_span_are_counted_not_discarded() {
+    // One finding per span is the contract and stays; what changes is that the reader can tell a
+    // one-off from a method that does the same risky thing four times.
+    let src = "function run() {\n  await x();\n  exec(a);\n  exec(b);\n  exec(c);\n  exec(d);\n}\n";
+    let f = scan_pack(&count_pack(), "f.ts", src, vec![method("run", 1, 7)]);
+    assert_eq!(f.len(), 1, "one finding per span: {f:?}");
+    assert_eq!(
+        f[0].line, 3,
+        "the anchor is still the FIRST qualifying trigger"
+    );
+    assert_eq!(f[0].data.as_ref().unwrap()["triggerLines"], 4);
+}
+
+#[test]
+fn a_line_matching_the_trigger_twice_counts_once() {
+    // The count is LINES, not match occurrences — the honest reading of what the scan visits.
+    let src = "function run() {\n  await x();\n  exec(a); exec(b);\n}\n";
+    let f = scan_pack(&count_pack(), "f.ts", src, vec![method("run", 1, 4)]);
+    assert_eq!(f[0].data.as_ref().unwrap()["triggerLines"], 1);
+}
+
+#[test]
+fn a_trigger_line_the_order_gate_rejects_is_not_counted() {
+    // Every counted line clears the SAME gates the anchor cleared — a pre-boundary setter neither
+    // anchors nor inflates the count.
+    let ordered = rule_pack(
+        r#"{"id":"cnt2","severity":"warning","message":"m","matcher":{"type":"method-scan","file_pattern":"\\.ts$","patterns":[{"pattern":"\\bawait\\b","label":"boundary"},{"pattern":"\\bexec\\s*\\(","label":"call"}],"trigger":"call","after":"boundary"}}"#,
+    );
+    let src = "function run() {\n  exec(before);\n  await x();\n  exec(a);\n  exec(b);\n}\n";
+    let f = scan_pack(&ordered, "f.ts", src, vec![method("run", 1, 6)]);
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].line, 4);
+    assert_eq!(f[0].data.as_ref().unwrap()["triggerLines"], 2);
+}

@@ -82,10 +82,28 @@ if [ -f "$BASELINE" ]; then
 fi
 
 declare -A current
+counted=0
 while read -r f n; do
   [ -n "$f" ] || continue
   current["$f"]=$n
+  counted=$((counted + 1))
 done <<< "$all_counts"
+
+# An empty census is a broken scan, not a repo with no Rust. Measured 2026-07-28: with the scope glob
+# redirected, this printed "clean (0 grandfathered files remaining)" and exited 0. The STALE-baseline
+# check further down would normally notice a collapsed census (a baseline entry with no current[]
+# counterpart), but it CANNOT right now — the ratchet reached zero entries on 2026-07-27, so there is
+# nothing left to go stale and that safety net is empty exactly when this one would be needed.
+# A plain counter, not ${#current[@]} — under `set -u` an empty associative array is an UNBOUND
+# VARIABLE error, which does exit non-zero but reports "current: unbound variable" instead of the
+# reason. A guard that fails for the right reason with the wrong message costs the next reader the
+# whole diagnosis.
+if [ "$counted" -eq 0 ]; then
+  echo "max-file-lines guard: FAILED -- counted ZERO source files. The scan matched nothing, so no file"
+  echo "was measured against the ${LIMIT}-line limit. This repo is Rust; a zero here is a broken"
+  echo "enumeration, never a clean tree."
+  exit 1
+fi
 
 if [ "${1:-}" = "--update-baseline" ]; then
   refused=0

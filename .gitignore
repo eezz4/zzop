@@ -3,21 +3,56 @@
 **/*.rs.bk
 *.pdb
 
-# All local-only measurement material in ONE place (never shipped):
+# corpus/ is now ONLY what we cannot commit — third-party code and machine-local config:
 #   corpus/oss/       — dogfood corpus checkouts (cloned OSS repos with embedded .git;
 #                       re-acquisition commands live in the internal context docs)
-#   corpus/benchmark/ — labeled detection-benchmark fixture (its own README)
-#   corpus/*.json*    — local e2e configs/overlays
-/corpus
+#   corpus/*.json*    — local e2e configs/overlays (machine-specific absolute paths)
+# The line that used to be here ignored `/corpus` wholesale, which also swallowed the labeled
+# detection benchmark. That fixture is 100% our own synthetic code — no third-party source, no
+# embedded .git, ~150 files / ~120 KB — so "we cannot ship it" was never true of it. It moved to
+# `cases/` (tracked, committed) 2026-07-26, moved out of `examples/` 2026-07-28; the split line is now authorship, not location:
+# what WE wrote lives under examples/ and ships, what SOMEONE ELSE wrote stays here and does not.
+/corpus/oss/
+/corpus/*.json
+/corpus/*.jsonc
+
+# The ONE file the promotion above could not carry, and it is not an authorship question.
+# `security/vendor-token-committed` only fires on a CONTIGUOUS live vendor-token literal, so its
+# benchmark fixture must contain a real `sk_live_`-shaped string — which is exactly what GitHub push
+# protection rejects at push time, and what scripts/check-vendor-token-literals.sh (no escape hatch,
+# by design) blocks at commit time. Verified 2026-07-26 rather than assumed: splitting the literal
+# (`'sk_li' + 've_...'`) makes BOTH `vendor-token-committed` and `hardcoded-secret` go silent — the
+# matcher is a text shape with no concat folding — so the `concat!` convention that fixes this for
+# Rust fixtures has no TypeScript equivalent. That guard's own header already prescribed this outcome
+# for a non-Rust file: keep the fixture out of the tracked tree.
+#
+# CONSEQUENCE, stated because it is a real hole and not a detail: scoring the benchmark reports 2 false
+# negatives on `api/services/be-security.hardcoded-secret.ts:3` and `benchmark.mjs` exits nonzero. This
+# is NOT limited to a fresh clone — measured 2026-07-27: the analyzer honors .gitignore
+# (crates/engine/src/pipeline/walking.rs, ancestor ignores included), so THIS LINE ITSELF is what hides
+# the fixture, and recreating the file at that path changes nothing. The same corpus copied outside the
+# repo, fixture present, scores 143/143 with zero FP. The symptom is disclosed where it appears rather
+# than only here: the expectation is listed in EXPECTED.jsonc's `untracked` array, and benchmark.mjs
+# prints that reason next to the FN it produces. The rule itself is NOT unmeasured —
+# rules/dsl/security/vendor_token_committed.rs covers it with split literals written to a temp dir at
+# test time. Open question for whoever wires the CI gate: synthesize this file OUTSIDE the ignored path
+# before a run (copying the corpus to a temp dir works — an in-place recreate does not), or drop the
+# expectation and accept the coverage loss.
+/cases/trees/api-be/services/be-security.hardcoded-secret.ts
 
 # zzop's own derived artifacts inside an analyzed tree — today `.zzop/cache/` (the default `cacheDir`,
 # `zzop_cache::DEFAULT_CACHE_DIR`), created on the first run of any zero-config analysis, this repo's
 # own dogfooding included. Pure derived state: safe to delete, regenerated next run.
 #
-# ANCHORED, and never a `zzop*` glob: the user-authored `zzop/` (custom rule packs, adapter overlays) is
-# ONE character away and must stay committed. This one line replaces the removed JS CLI's
-# `zzop-report.*/` + `/zzop-reports/` pair — that CLI is gone and nothing writes those names any more.
-/.zzop/
+# `**/.zzop/`, not the root-anchored `/.zzop/` it replaced: the default `cacheDir` resolves against the
+# BASE DIRECTORY of the run, and a config-free multi-path run (`zzop cross a b c`, the MCP `paths` mode)
+# gives every path its own base — so cache directories appear beside each analyzed package, not only at
+# the repo root, and root-anchoring left those untracked-but-unignored.
+#
+# Still never a `zzop*` glob: the user-authored `zzop/` (custom rule packs, adapter overlays) is ONE
+# character away and must stay committed. This one line replaces the removed JS CLI's `zzop-report.*/` +
+# `/zzop-reports/` pair — that CLI is gone and nothing writes those names any more.
+**/.zzop/
 
 # Working scratch: measurement harness + per-agent task files + `runs/<label>/` outputs.
 # Local-only by the same rule as /corpus — never shipped. Listed explicitly because a bare

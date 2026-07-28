@@ -4,6 +4,28 @@ A short orientation for making sense of the `analyze`/`analyzeTrees` output — 
 shapes are in [modules/facade.md](modules/facade.md#the-zzop-facade-json-contract); this page just explains
 what's actually happening underneath so the output makes sense.
 
+**Which output you are reading.** Everything below describes what the ENGINE computes, which is what a
+direct `zzop-facade` embedding receives verbatim. What the two shipped binaries print is one layer
+above: `zzop-summary` (`crates/summary`) owns every bit of shaping between the facade output and a
+product's answer — the caps and their truncation disclosures, the findings filters, the warning merge,
+and the `facts`/`graph`/`manifest` projections. Both `zzop` and `zzop-mcp` call it and neither
+reimplements any of it, so for the lanes both surfaces expose — `analyze`/`cross`/`endpoint`/`file`/
+`analyze-envelope` and the two offline validators — a CLI run and an MCP tool call against the same path
+give the identical answer. The findings-list knobs (`severity`, `rule`, `limit`) are declared on the MCP
+tools (`packages/mcp/src/tools/definitions.rs`) AND on their CLI twins as `--severity`/`--rule`/`--limit`
+(`packages/cli-bin/src/cli/args.rs`), both parsed into the one shared `FindingFilters` — so an MCP call
+passing `limit: 5` and `zzop analyze --limit 5` return the same shorter list over the same tree, with the
+full counts unaffected either way. The three projections named
+above are further not paired at all: `facts`, `graph` and `manifest` (with `diff`) are CLI-only lanes
+with **no MCP tool twin**, and `docs/contracts/surface-parity.json`'s `_cliOnlyLanes` records the reason
+for each lane it declares — that registry's own keys are the list, never this sentence. `explain` has no
+MCP twin either, and as of 2026-07-27 it IS declared there: it is a lookup over compiled-in rule data
+rather than a projection of an analysis, and MCP already reaches the same data through the
+`zzop://contract/rule-catalog` resource. `init` is the one unpaired lane deliberately left OUT of the
+registry — a subcommand whose only implementation is argv parsing plus a file write, over bytes MCP
+already serves as the `config-template` resource, so there is no projection for the registry to name.
+Where either surface differs from the raw facade output, that same registry names the field and the reason.
+
 ## The IR your `ir` field contains
 
 Every analyzed file is parsed and projected into a language-neutral intermediate representation
@@ -37,9 +59,9 @@ producer of a Normalized AST envelope that either stands in for an entire tree (
 cross-cutting annotations a rule consumes by key, e.g. an `auth-guarded` marker) — onto a
 natively-parsed tree (Mode B, the Rust
 `EngineConfig::adapter_overlays` field, also reachable via any host's `adapterOverlays` config field —
-a direct `zzop-facade` embedding, or the `zzop-mcp` host (package `packages/mcp`, over the shared
-`crates/host` lib) through `zzop.config.jsonc`'s `overlays` key, mapped by the shared `zzop-config`
-crate) — see
+a direct `zzop-facade` embedding, or either shipped product (`packages/cli-bin`'s `zzop`,
+`packages/mcp`'s `zzop-mcp`) through `zzop.config.jsonc`'s `overlays` key, mapped by the shared
+`zzop-config` crate) — see
 [NORMALIZED_AST.md](NORMALIZED_AST.md)'s "Adapter overlays" section and
 `crates/engine/examples/fastapi_overlay_adapter/main.rs` for a runnable FastAPI/Python demo. A native
 producer can emit the same generic entity attributes directly, with no overlay involved at all — the
@@ -84,8 +106,8 @@ because each tier stands behind a different, honestly-scoped set of structural f
 | Language | Tier | Extension(s) | What it extracts |
 |---|---|---|---|
 | TypeScript / JavaScript | Full AST (native, swc) | `.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts` | Symbols, imports/dep graph, calls, HTTP provides/consumes across Express/Hono/NestJS/Next.js/tRPC and more, router-mount fragments, middleware guard attributes, ORM `db-table` facts (Prisma client accessors and TypeORM `@Entity` classes / `@InjectRepository`/`getRepository` references), and ORM-LESS `db-table` consumes — the tables named inside a raw SQL statement string (`env.DB.prepare("SELECT … FROM ledger")`, `` sql`…` ``), read through `parser-sql` so the key matches the migration-side provide. Recognition needs the string to OPEN a statement head with UPPERCASE keywords: that is the only thing separating a query from English prose like "Select a date from the list", which is a structurally valid `SELECT`. Lower-case SQL is therefore not recognized (a silent under-report, never a claim of "no table access"), and an interpolated table name (`` `… FROM ${t}` ``) is dropped rather than guessed |
-| Python | Full AST (native, ruff) | `.py, .pyi` | **Python 3** syntax (ruff's parser linked as a Rust library — no Python runtime required; Python-2-only syntax degrades to the lexical fallback like any parse failure; the crate path (`parser-python-3`) names that supported major version, the same convention as `parser-java-21`). Symbols (`def`/`class`/methods, `__all__`-aware exports), imports/dep graph (incl. relative `from .x import y`), FastAPI route provides (decorators, `APIRouter` literal prefix, cross-file `include_router` composition), `requests`/`httpx` literal egress consumes (module-level calls plus `Session`/`Client`/`AsyncClient` instances bound by assignment or a `with`/`async with` block), and ORM `db-table` facts — SQLModel/SQLAlchemy model classes (`table=True` or a `__tablename__`) and Django models (field-driven, through any abstract base) project `db-table` provides, and their query sites (`select(X)`/`session.get(X)`; `X.objects…`) project `db-table` consumes resolved cross-file against the model class |
-| Rust | Full AST (native, syn 2) | `.rs` | Symbols (top-level fn/struct/enum/trait/type-alias/const/static/union, plus `impl` block methods/assoc consts), imports/dep graph (`use`/`mod` items, `crate::`/`super::`/`self::` module-path resolution, plus same-workspace crate resolution via `Cargo.toml` manifest scan), axum router provides (builder chains, `.nest`/`.merge` cross-file composition), `reqwest` literal egress consumes |
+| Python | Full AST (native, ruff) | `.py, .pyi` | **Python 3** syntax (ruff's parser linked as a Rust library — no Python runtime required; Python-2-only syntax degrades to the lexical fallback like any parse failure; the crate path (`parser-python-3`) names that supported major version, the same convention as `parser-java-21`). Symbols (`def`/`class`/methods, `__all__`-aware exports), imports/dep graph (incl. relative `from .x import y`), FastAPI route provides (decorators, `APIRouter` literal prefix, cross-file `include_router` composition), Django URLconf route provides (a top-level `urlpatterns` list's `url()`/`re_path()`/`path()` entries, with `include('<dotted.module>')` composed cross-file through the same router-mount pass FastAPI uses; the HTTP method lives in the view class, not the URLconf, so every such route is emitted verb-unknown rather than guessed — it drives the `cross-layer/unknown-verb-route` disclosure and never joins by exact method), `requests`/`httpx` literal egress consumes (module-level calls plus `Session`/`Client`/`AsyncClient` instances bound by assignment or a `with`/`async with` block), CALL SITES for the whole-repo call graph (so the handler-reachability rules run on Python routes — see the `mutating-route-no-auth` row in [rules/catalog.md](rules/catalog.md)), AUTH-GUARD evidence (FastAPI `Depends(...)` in a route decorator's `dependencies=`, a parameter default, an `Annotated[..., Depends(...)]` parameter, or an `Annotated` alias that is BOUND in the route's own file and resolved tree-wide; Django REST Framework `permission_classes` on a view class, joined to its URLconf route by view name. In every shape the injected callable's NAME must read as a guard — see the not-recognized list below), and ORM `db-table` facts — SQLModel/SQLAlchemy model classes (`table=True` or a `__tablename__`) and Django models (field-driven, through any abstract base) project `db-table` provides, and their query sites (`select(X)`/`session.get(X)`; `X.objects…`) project `db-table` consumes resolved cross-file against the model class |
+| Rust | Full AST (native, syn 2) | `.rs` | Symbols (top-level fn/struct/enum/trait/type-alias/const/static/union, plus `impl` block methods/assoc consts), imports/dep graph (`use`/`mod` items, `crate::`/`super::`/`self::` module-path resolution, plus same-workspace crate resolution via `Cargo.toml` manifest scan), axum router provides (builder chains, `.nest`/`.merge` cross-file composition), `reqwest` literal egress consumes, CALL SITES for the whole-repo call graph (resolved crate-locally AND across same-workspace crates, so the handler-reachability rules run on Rust routes), and AUTH-GUARD evidence in the shape Rust actually uses — a request EXTRACTOR in the handler signature (`async fn create(user: AuthUser, ..)`) is projected as a call-graph edge out of the handler, so the ordinary guard-name vocabulary matches it; an OPTIONAL extractor (`vocabulary.rustOptionalExtractorPrefixes`, default `maybe`/`optional`) never counts. Auth applied at the ROUTER level (a tower `.route_layer`/`.wrap`) is NOT visible — every run whose Rust routes are in range discloses that gap in its own `warnings` |
 | Go | Full CST (native, tree-sitter-go 0.25) | `.go` | Symbols (top-level func/method/type/const/var, grouped declarations expanded one symbol per spec-name), imports/dep graph (`import` declarations, `go.mod` `module` directive resolution — an import path resolves to its whole PACKAGE directory, so every file directly in that package gets a real dep-graph edge, not just one guessed file), gin and `net/http` router provides (route groups, cross-file mount composition — a router received as a function parameter is mounted from a call site in another file, including a multi-argument call resolved when exactly one argument is a mountable receiver — Go 1.22 `"METHOD /path"` mux pattern syntax), `net/http` literal egress consumes (package free functions plus the same convenience methods on a bound `http.Client` value, including `fmt.Sprintf`-reassembled path literals), and GORM ORM `db-table` facts (a `gorm.Model`-embedding or `gorm:`-tagged struct projects a `db-table` provide named by `TableName()` or GORM's default; a model composite-literal in a query method projects a `db-table` consume resolved cross-file against the struct); an ERROR CST region is never guessed past — extraction stops at the boundary of what actually parsed |
 | Java | Full CST (native, tree-sitter-java 0.23.5) | `.java` | Symbols (top-level + nested class/interface/enum/record/annotation-type declarations, methods/constructors as dot-qualified `Outer.Inner.method` with body spans, `static final`/interface-constant fields), imports/dep graph (`import` declarations — plain/glob/static — resolved via an in-tree `(package, type)` index; a glob import fans out to every file in the target package, the same package-directory-wide fanout Go's own resolver uses), Spring MVC HTTP route provides (`@RestController`/`@Controller`, class + method-level `@RequestMapping`/`@GetMapping`/etc., cross-file `extends`-chain and constant-prefix resolution via the whole-corpus project pass) — Java 21 grammar coverage (records/sealed classes/pattern-switch parse as ordinary CST, though sealed-permits and pattern-switch carry no dedicated symbol extraction of their own in v1); the crate path (`parser-java-21`) names the pinned grammar version, the representative Java release this frontend targets, not a hard floor on the source dialect it can parse |
 | C# | Full CST (native, tree-sitter-c-sharp 0.23.5) | `.cs` | Symbols (top-level + nested class/interface/struct/enum/record/delegate as dot-qualified `Outer.Inner` names, methods/constructors/properties with body spans, `const`/`static readonly` fields; `public`-modifier exports), imports/dep graph (`using` directives incl. `static`/alias/`global`, resolved by a namespace→files index — a `using Foo.Bar;` fans out to every file declaring namespace `Foo.Bar`, the same package-directory-fanout honesty Go/Java use), ASP.NET Core HTTP route provides (`[ApiController]`/`[Controller]` attribute controllers with class `[Route("api/[controller]")]` + method `[HttpGet]`/`[HttpPost("{id}")]`/… composition and the `[controller]` token, plus same-file Minimal-API `app.MapGet`/`MapGroup` literal routes), `HttpClient` literal HTTP egress consumes (`GetAsync`/`PostAsync`/`GetFromJsonAsync`/… with `$"…"` interpolation reassembly) |
@@ -98,9 +120,22 @@ extension in the "everything else" row with no adapter attached) still gets the 
 fallback**: line count and `line-scan` DSL rules run against the raw text rather than a hard failure —
 see "Degraded files" above.
 
-Python's v1 scope is deliberate, not an oversight: Flask/Django routes and FastAPI `Depends` auth
-attributes are roadmap (SQLModel/SQLAlchemy and Django ORM *table* facts now ship — see the Python row
-above). (`requests`/`httpx` `Session`/`Client`/
+Python's v1 scope is deliberate, not an oversight: Flask routes are roadmap (Django URLconf routes,
+SQLModel/SQLAlchemy and Django ORM *table* facts, the call graph, and FastAPI `Depends` / DRF
+`permission_classes` auth evidence now ship — see the Python row above). Within the auth evidence that
+ships, these shapes are deliberately NOT recognized and leave the finding firing rather than clearing it
+silently: a router-level `APIRouter(dependencies=[...])`, `fastapi.Security(...)`, a guard applied by a
+custom decorator, DRF's project-wide `DEFAULT_PERMISSION_CLASSES` setting, `permission_classes` inherited
+from a base view, a runtime `get_permissions()`, and the `@login_required`/`@permission_classes([...])`
+function-view decorators. Three more shapes are recognized-but-REFUSED, which is a different statement
+and the one most likely to surprise: a `Depends(...)` whose injected callable's NAME does not read as an
+authorization check (`Depends(get_db)` is dependency injection, not a guard — and so, deliberately, is
+`Depends(ensure_member)`, because the vocabulary is precision-first and would rather miss a guard than
+erase a finding); a dependency FACTORY called with its own anonymous switch off
+(`Depends(get_current_user_authorizer(required=False))` returns `None` for a tokenless caller, so it
+gates nothing, and a non-literal switch is refused too); and an `Annotated` alias whose name is not bound
+in the route's own file, or that two modules declare with disagreeing verdicts. All of these leave the
+finding firing. (`requests`/`httpx` `Session`/`Client`/
 `AsyncClient` INSTANCES are now recognized — a name bound to a client constructor via assignment or a
 `with`/`async with` binding has its `.get()`/`.post()`/… keyed as egress, so the idiomatic async
 `async with httpx.AsyncClient() as c: await c.get(url)` lands natively.) The Mode-B overlay path already
@@ -168,8 +203,9 @@ begins with a stable technique+grammar-version stem — `zzop-parser-python-3`'s
 `vN` and a chain of `+feature-vN` tags that grows with each projection-changing extraction bump (so a
 literal copy here would go stale on the next bump — deliberately elided). The TypeScript, Prisma, Python,
 Java, Rust, Go, C#, and SQL fingerprints are each carried in full by `zzop_facade::version_string()`,
-which reaches a user surface as the `tool` field of `zzop manifest` — so a given build's actual parser
-identity is machine-checkable there, not asserted by this table. `zzop --version` prints the bare
+which reaches a user surface as the `tool` field of `zzop manifest` and as what `zzop version --verbose`
+(and `zzop-mcp version --verbose`, byte-identical) prints — so a given build's actual parser identity is
+machine-checkable there, not asserted by this table. Plain `zzop version`/`--version` prints the bare
 release number only, and carries no fingerprints.
 
 A normal-sized file whose extension has no native parser is not counted in `degraded` (that's a
@@ -178,27 +214,78 @@ size-cap/parse-failure fact, not a coverage one) — instead it self-reports as 
 config knob. An oversized file of that same unparsed extension gets both: it still lands in `degraded`
 and still names its extension in the per-extension warning — the two facts are orthogonal.
 
+## On-disk layout
+
+zzop touches exactly two directory names inside a tree it analyzes, and they differ by one leading dot:
+
+| Path | Owner | Contents today | Version control |
+|---|---|---|---|
+| `.zzop/` | zzop | `.zzop/cache/` (the default `cacheDir`, below) | **Ignored.** Pure derived state; deleting it costs a warm cache and nothing else. |
+| `zzop/` | you | `zzop/rules/` (custom DSL rule packs), `zzop/adapters/` (Normalized-AST adapter overlays) | **Committed.** These are source, and losing them loses work. |
+
+Nothing zzop ships ever writes into `zzop/`; it only ever reads from it. Everything zzop writes goes
+under `.zzop/`. That is the whole rule, and the two names are deliberately near-identical so the
+directory listing reads as one tool's footprint.
+
+The near-identity has one sharp edge worth stating explicitly: **ignore rules must be anchored, never
+globbed.** `**/.zzop/` (what this repo's own `.gitignore` uses) matches only the derived directory;
+`zzop*` matches both and would silently drop every rule pack you wrote out of version control — no error
+from git, no warning from zzop, and nothing in a diff that looks wrong. The anchoring is not stylistic.
+
+`zzop/rules/` is additionally a **default discovery location**: a config that does not declare
+`packs.extraDirs` picks it up automatically when it exists. Declaring `packs.extraDirs` replaces the
+default outright rather than merging with it, so a run's pack directories always have exactly one
+origin; declaring it as `[]` is the explicit opt-out. A tree with no `zzop/rules/` produces no warning.
+`zzop/adapters/` is a naming convention only — overlays are loaded from the paths your `overlays` key
+names, wherever they are.
+
 ## Caching
 
-`cacheDir` stores per-file IR and per-file rule findings, keyed by content hash plus parser and
-rule-pack fingerprints. It's safe to delete at any time — it's pure derived state. A rule-pack or
-config change invalidates only the cache entries it actually affects; whole-tree passes (dependency
-graph, scores, cross-layer joins) are always recomputed fresh and are never cached.
+`cacheDir` stores per-file IR and per-file rule findings, keyed by content hash plus the file's own
+path, the parser fingerprint, the declared **convention vocabulary**, and the rule-pack fingerprint.
+It's safe to delete at any time — it's pure derived state. A rule-pack or config change invalidates
+only the cache entries it actually affects; whole-tree passes (dependency graph, scores, cross-layer
+joins) are always recomputed fresh and are never cached.
+
+**Editing `vocabulary` re-analyzes.** The names you declare there are not report-time filters — they
+decide what gets extracted (which calls are write sites, which routes count as guarded, which schema
+fields are money). So the whole `vocabulary` object is part of both cache keys: change any key in it and
+the affected files are re-parsed rather than answered from entries written under the previous
+vocabulary. The trade is deliberate: a broader-than-necessary invalidation costs one slower run, while a
+narrower one would hand you a stale answer.
+
+**Nothing is ever evicted.** Entries are immutable and addressed by a digest of their own key, so an
+entry that stops being asked for is orphaned, never stale — editing a file, upgrading zzop, or changing
+`vocabulary` all leave the previous generation on disk unread. There is no background GC: the directory
+grows until you delete it (which is always safe), or until the schema version it was written under stops
+matching, which wipes it once and starts clean.
+
+**Every release wipes it once.** The schema version is derived from the release version, so upgrading
+zzop always changes it. That is what keeps the directory from growing without bound: each upgrade
+reclaims the generation the previous release left behind. The visible cost is one cold run right after
+an upgrade — the first analysis re-parses everything, and every run after it is warm again. Nothing else
+about the upgrade depends on it, and deleting `.zzop/cache` yourself has exactly the same effect at any
+time.
 
 **Where it lands, and who decides.** The value is a directory, and two dialects answer "what if I don't
 set one?" differently — the split is deliberate, so read the one you are in:
 
 - **`zzop` / `zzop-mcp` / any `zzop.config.jsonc` run** (the config front end, `crates/config`): an
-  absent `cacheDir` defaults to **`.zzop/cache`**, resolved against the config file's own directory —
-  or, with no config file, against the analyzed root. **This means a first run creates a directory
-  inside the tree you point zzop at.** Add an anchored **`/.zzop/`** to that repo's `.gitignore`; do
-  not reach for a `zzop*` glob, which would also swallow an authored `zzop/` rule-pack directory one
-  character away. The whole `.zzop/` tree is derived state — deleting it costs you a warm cache and
-  nothing else.
+  absent `cacheDir` defaults to **`.zzop/cache`**, resolved against the config file's own directory
+  (there is always one — an analysis lane refuses a tree with no config). **This means a first run
+  creates a directory inside the tree you point zzop at.** How many directories that is follows from that base: one config
+  file means ONE cache directory however many trees it declares (`trees: "auto"` included — the default
+  is resolved once, against the config's own directory, then shared by every tree). A multi-PATH run (`zzop cross a b c`, or the MCP `paths`
+  argument) has no single base — each path carries its own config and is its own analyzed root, so each
+  gets its own `.zzop/`. Ignore it with `**/.zzop/` in that repo's
+  `.gitignore`: the leading `**/` is what covers those per-path directories, which a root-anchored
+  `/.zzop/` leaves unignored — and never with a `zzop*` glob, for the reason
+  [On-disk layout](#on-disk-layout) gives above. The whole `.zzop/` tree is derived state — deleting it
+  costs you a warm cache and nothing else.
 - **An embedder calling `zzop-facade`/`zzop-engine` directly**: no default is injected at all. Omitting
   `cacheDir` runs uncached, and nothing is ever written into the caller's tree unasked. Default
   injection is the product front end's job, never the library's — see
-  [modules/facade.md](modules/facade.md#defaults-zero-config--full-analysis).
+  [modules/facade.md](modules/facade.md#defaults-a-config-is-required-what-it-does-not-have-to-say).
 
 **Turning it off** is the same key: a JSON-falsy `cacheDir` disables caching entirely and writes
 nothing. `null` is the canonical spelling. `""` is accepted as the same intent rather than taken
@@ -267,7 +354,7 @@ The join itself carries four integrity gates on top of the raw `(kind, key)` mat
 - **Low confidence**: an edge whose key matches an injected "generic path" pattern (e.g. `/health`, which
   many unrelated services legitimately share) is still emitted, but tagged so a consumer can discount it.
 
-A per-tree deployment-topology declaration (`mountedAt`/`mounts`/`hosts` — see
+A per-tree deployment-topology declaration (config: `trees[].topology`; embedder request fields stay flat — see
 [modules/facade.md](modules/facade.md#functions)'s `AnalyzeRequest` field table) supplies the one class of join
 information that lives only in infra, not in either repo's source: a gateway/ingress mount prefix, and
 which hosts a tree owns. Mounts apply as the last provide-key transform, stacking on top of any
@@ -287,7 +374,7 @@ handful of routes, the lightweight per-tree `routes: [{ key, role }]` declaratio
 [modules/facade.md](modules/facade.md#functions)'s `AnalyzeRequest` field table), which expands into a
 synthetic overlay and joins through the identical path. **Deployment-config routing is the same boundary**: zzop does **not** read
 deployment config files (`next.config` `rewrites`/`redirects`, `vercel.json`, nginx/ingress). A uniform
-gateway/ingress prefix or host is injected via the `mountedAt`/`mounts`/`hosts` declaration above; an
+gateway/ingress prefix or host is injected via the `trees[].topology` declaration above; an
 arbitrary path-rewrite map (`/legacy/* → /v2/*`) is **not** modeled in v1 — a deployment that rewrites
 paths this way can surface a near-miss/unprovided finding that the unseen rewrite would explain, so treat
 cross-layer route findings as "verify against your deployment topology," not ground truth.

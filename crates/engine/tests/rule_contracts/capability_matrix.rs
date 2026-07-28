@@ -107,6 +107,7 @@
 //! confusion than the drift it would catch. **If a second language ever learns `function_spans`, revisit
 //! this**: at two producers the column earns its fixtures.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -544,6 +545,51 @@ fun main() {}
     ]
 }
 
+/// The three canary tests below only ever iterate `canary_files()`. That makes the FIXTURE LIST, not
+/// the declared table, their subject set — so an `ENVIRONMENTS` row with no canary is a capability
+/// claim nobody has ever measured, and the three tests stay green while saying nothing about it.
+///
+/// Measured 2026-07-28 (D22 sweep): deleting the `java-21` tuple from `canary_files()` AND flipping
+/// that row's `io_consumes` from the correct `false` to a wrong `true` left **all five tests in this
+/// file green**. The consequence is worse than an unverified row. `capabilities_for()` feeds
+/// `every_shipped_rule_matcher_only_admits_environments_whose_required_channel_this_engine_projects`,
+/// whose own doc calls its negative claim STRONG and machine-certain — so a wrong row does not merely
+/// go unchecked, it makes that sweep **bless a forever-silent rule as reachable**.
+///
+/// Today the two sets match exactly (9/9). Nothing kept them that way, which is the whole finding: the
+/// sibling `environments_table_has_exactly_one_row_per_zzop_parser_token_in_version_string` pin forces
+/// `ENVIRONMENTS` to have a row per shipped parser, and nothing then forces that row to be MEASURED.
+#[test]
+fn every_declared_environment_has_a_canary_that_measures_it() {
+    let declared: BTreeSet<&str> = ENVIRONMENTS.iter().map(|(e, _)| *e).collect();
+    let measured: BTreeSet<&str> = canary_files().into_iter().map(|(e, _, _)| e).collect();
+
+    assert!(
+        !declared.is_empty() && !measured.is_empty(),
+        "capability_matrix: declared={} measured={} — an empty side makes this pin vouch for nothing",
+        declared.len(),
+        measured.len()
+    );
+
+    let unmeasured: Vec<&&str> = declared.difference(&measured).collect();
+    assert!(
+        unmeasured.is_empty(),
+        "capability_matrix: these ENVIRONMENTS rows have NO canary fixture, so their declared \
+         capabilities have never been compared against a real engine run: {unmeasured:?}. Add a \
+         `canary_files()` entry that exercises the channels the row claims. A row that is only \
+         asserted is worse than absent here, because `capabilities_for()` hands it to the rule-side \
+         sweep as machine-certain ground truth."
+    );
+
+    let undeclared: Vec<&&str> = measured.difference(&declared).collect();
+    assert!(
+        undeclared.is_empty(),
+        "capability_matrix: these canary fixtures name an environment with no ENVIRONMENTS row: \
+         {undeclared:?}. `capabilities_for()` would panic on them at run time; declare the row (with \
+         its justification) or drop the fixture."
+    );
+}
+
 fn write_canary_files(dir: &TempDir) {
     for (_, filename, content) in canary_files() {
         dir.write(filename, content);
@@ -821,7 +867,7 @@ const REPRESENTATIVE_FILES: &[(&str, &str)] = &[
 /// admitting a channel-lacking environment with NO allowlist entry fails the sweep, forcing either a
 /// pattern fix or a reviewed, commented addition here).
 const ALLOWLIST: &[(&str, &str)] = &[
-    // `browser/unsanitized-markdown-html`'s MethodScan `file_pattern` admits `.vue`, but this engine has
+    // `browser/markdown-and-html-sink-unsanitized`'s MethodScan `file_pattern` admits `.vue`, but this engine has
     // no symbol/span parser for `.vue` (dispatch_by_extension has no "vue" arm -> lexical fallback ->
     // method_spans absent). Case (iii) from this contract's adjudication guide: a DELIBERATE broad
     // pattern, already self-disclosed in the rule's OWN shipped message ("It also cannot see across
@@ -830,7 +876,7 @@ const ALLOWLIST: &[(&str, &str)] = &[
     // rules/dsl/browser/browser.json). The TS/JS lane still works; `.vue` silently never fires — exactly
     // the silent-partial-coverage class this test exists to surface, not hide. Surfaced here (not fixed
     // here — rule-pattern changes are this test's SUBJECT, not this test's job).
-    ("browser", "unsanitized-markdown-html"),
+    ("browser", "markdown-and-html-sink-unsanitized"),
 ];
 
 /// The channel(s) `rule.matcher` requires, or `None` for `Matcher::LineScan` (needs only the universal

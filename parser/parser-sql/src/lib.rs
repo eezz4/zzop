@@ -10,7 +10,7 @@
 //!
 //! Line/regex-level extraction of `CREATE TABLE` statements from
 //! `.sql` files into `db-table` io PROVIDEs, so the core cross-layer linker can surface
-//! `cross-layer/shared-db-table` (a table declared by a DDL migration and touched by application code
+//! `cross-layer/db-table-name-in-multiple-sources` (a table declared by a DDL migration and touched by application code
 //! elsewhere) and dead-provide detection (`cross-layer/unconsumed-endpoint`-style) for a declared table
 //! nothing reads. Join key: `(kind="db-table", key="table:<name>")` — the same generic contract shape
 //! `zzop_parser_typescript::adapters::db_table_consume` already produces on the CONSUME side (see that

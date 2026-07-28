@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# pre-push — runs the RANGE-based guard(s) that pre-commit structurally cannot.
+# pre-push — asks the RANGE-shaped version of the fingerprint question, which pre-commit cannot.
 #
-# pre-commit scans the working tree per commit; check-parser-fingerprint-bump instead diffs a
-# base..head RANGE (it asks "did a parser's src change without a PARSER_FINGERPRINT bump anywhere in
-# this range?"). That question is only well-formed once you know the range being pushed — which is
+# pre-commit runs check-parser-fingerprint-bump too, but over the WORKING TREE — the bytes a commit is
+# about to create. Here the same script diffs a base..head RANGE instead (it asks "did a parser's src
+# change without a PARSER_FINGERPRINT bump anywhere in this range?"). That question is only well-formed
+# once you know the range being pushed — which is
 # exactly what pre-push receives. Running it here makes "push, then watch CI fail on fingerprint
 # drift" impossible: the same check CI runs (ci.yml's `guards` job, HEAD~1...HEAD on a push) is run
 # locally over the outgoing range first. Squash releases are the trap this closes — a per-commit

@@ -7,7 +7,7 @@
 //!   `ConfigError` telling the user to write an explicit `trees` array — never a silent single-tree
 //!   fallback.
 //! - Glob expansion: segment-by-segment against real directories, `*`/`?`/`**` (depth cap 40),
-//!   `node_modules` and `.git` never descended, `!`-negatives applied as a whole-path anchored
+//!   the config's declared `vocabulary.workspaceSkipDirs` never descended, `!`-negatives applied as a whole-path anchored
 //!   filter; a match is kept only if it contains a `package.json`; results sorted alphabetically
 //!   (the determinism guarantee).
 //! - `sourceId` = the package's own `name` field, else the relative dir; duplicate sourceIds are a
@@ -37,9 +37,29 @@ mod tests;
 use glob::resolve_workspace_dirs;
 use manifest::{read_npm_workspace_packages, read_package_name, read_pnpm_workspace_packages};
 
-/// Directories never descended into while expanding a `**` glob, and never returned as workspace
-/// packages: scanning them is both wasteful and wrong for workspace detection.
-const SKIP_DIRS: [&str; 2] = ["node_modules", ".git"];
+/// The directories `trees: "auto"` discovery refuses to walk, for THIS config: exactly the declared
+/// `vocabulary.workspaceSkipDirs`. Which directories hold vendored/derived content is a name a project
+/// picks (a repo that vendors into `third_party/` gets no help from a list that only knows
+/// `node_modules`), so it is declared rather than guessed — the convention-vocabulary contract, applied
+/// to the one vocabulary this front end consumes itself.
+///
+/// No fallback (2026-07-27, with the rest of the class): an absent or empty declaration skips nothing.
+/// This one is the loudest key to leave out — discovery would descend into `node_modules` and `.git` and
+/// return junk packages — and that is the point of it being loud rather than a default applied silently.
+/// The starter config `zzop init` writes declares `["node_modules", ".git"]`, which is the only place
+/// zzop's own answer is stated — there is no second copy here to drift from it.
+fn workspace_skip_dirs(config: &Value) -> Vec<String> {
+    config
+        .get("vocabulary")
+        .and_then(|v| v.get("workspaceSkipDirs"))
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 /// Hard cap on `**` recursion depth — a backstop against a pathological symlink cycle or an
 /// absurdly deep tree. Far below any real monorepo nesting.
@@ -61,6 +81,8 @@ pub fn expand_auto_trees(
         return Ok((config, Vec::new()));
     }
 
+    let skip_dirs = workspace_skip_dirs(&config);
+
     // `trees_is_auto` can only be true when `config.as_object()` above succeeded.
     let mut map = match config {
         Value::Object(m) => m,
@@ -76,7 +98,7 @@ pub fn expand_auto_trees(
         )));
     };
 
-    let dirs = resolve_workspace_dirs(base_dir, &patterns);
+    let dirs = resolve_workspace_dirs(base_dir, &patterns, &skip_dirs);
     if dirs.is_empty() {
         let joined = patterns.join(", ");
         let patterns_display = if joined.is_empty() {
@@ -165,14 +187,15 @@ fn read_workspace_manifest(base_dir: &Path) -> Option<(Vec<String>, &'static str
 /// exactly like a complete analysis (measured on a 22-package pnpm monorepo: `config = null,
 /// configWarnings = []`).
 ///
-/// `config_path` selects which of the two ways into that trap the caller hit, and only changes the
-/// opener and the remedy — never the shared middle, so the two variants read as one message:
-/// - `None` — no `zzop.config.jsonc` at all (remedy: create one with `{"trees": "auto"}`).
-/// - `Some(p)` — a config EXISTS at `p` and declares no `trees` (remedy: add `"trees": "auto"` to
-///   it). This second case is why the trigger is the resolved tree count rather than config absence:
-///   a config carrying only `{"rules": {...}}` lands in the identical trap while its author
-///   reasonably believes having a config means the analysis was configured, and — unlike
-///   `trees: "auto"` — there is no expansion, hence no expansion report, hence pure silence.
+/// There is exactly ONE way into that trap now: a config EXISTS at `config_path` and declares no
+/// `trees` (remedy: add `"trees": "auto"` to it). That is why the trigger is the resolved tree count
+/// rather than config absence — a config carrying only `{"rules": {...}}` lands in the trap while its
+/// author reasonably believes having a config means the analysis was configured, and, unlike
+/// `trees: "auto"`, there is no expansion, hence no expansion report, hence pure silence.
+///
+/// A second variant used to exist for "no config file at all". It went away with the config-less run
+/// itself (2026-07-27): that state is now a refusal, not a quieter analysis, so a warning describing it
+/// would describe something unreachable.
 ///
 /// DELIBERATELY SILENT for an explicit `trees: [...]` (the caller passes `Method::AnalyzeTrees`, so
 /// this is never called): naming the tree set IS the author's answer to "which trees?", and zzop
@@ -191,41 +214,29 @@ fn read_workspace_manifest(base_dir: &Path) -> Option<(Vec<String>, &'static str
 /// `{"trees": "auto"}` could not deliver the join either and the advice would be false.
 pub fn single_tree_workspace_warning(
     base_dir: &Path,
-    config_path: Option<&Path>,
+    config_path: &Path,
+    config: &Value,
 ) -> Option<String> {
     let (patterns, source) = read_workspace_manifest(base_dir)?;
     if patterns.is_empty() {
         return None;
     }
-    let package_count = resolve_workspace_dirs(base_dir, &patterns).len();
+    // The count must be the one `trees: "auto"` would really produce, so it is expanded with the SAME
+    // declared skip list that expansion would use — reading the config here rather than assuming
+    // the built-in list is what keeps the promised number true for a project that declared its own.
+    let package_count =
+        resolve_workspace_dirs(base_dir, &patterns, &workspace_skip_dirs(config)).len();
     if package_count < 2 {
         return None;
     }
-    let config_filename = crate::DEFAULT_CONFIG_FILENAME;
-    let (opener, remedy) = match config_path {
-        None => (
-            format!(
-                "no {config_filename} at {} — {source} is present there and resolves to \
-                 {package_count} workspace packages, but this run analyzed the root as a SINGLE \
-                 tree",
-                base_dir.display()
-            ),
-            format!("Create a {config_filename} at that root containing {{\"trees\": \"auto\"}}"),
-        ),
-        // `base_dir` is named separately from the config path here: a config may point `roots` at a
-        // subdirectory, so the analyzed tree is not necessarily the directory holding the manifest.
-        Some(path) => (
-            format!(
-                "the config at {} declares no \"trees\" — {source} at {} resolves to \
-                 {package_count} workspace packages, but this run analyzed a SINGLE tree",
-                path.display(),
-                base_dir.display()
-            ),
-            "Add \"trees\": \"auto\" to that config".to_string(),
-        ),
-    };
+    // `base_dir` is named separately from the config path: a config may point `roots` at a
+    // subdirectory, so the analyzed tree is not necessarily the directory holding the manifest.
     Some(format!(
-        "{opener}: the cross-layer join needs >= 2 trees with distinct sourceIds to fire, so it did \
-         not run. {remedy} to analyze those {package_count} packages as separate trees."
+        "the config at {} declares no \"trees\" — {source} at {} resolves to {package_count} \
+         workspace packages, but this run analyzed a SINGLE tree: the cross-layer join needs >= 2 \
+         trees with distinct sourceIds to fire, so it did not run. Add \"trees\": \"auto\" to that \
+         config to analyze those {package_count} packages as separate trees.",
+        config_path.display(),
+        base_dir.display()
     ))
 }

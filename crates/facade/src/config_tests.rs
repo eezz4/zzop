@@ -211,6 +211,60 @@ fn analyze_request_git_without_commit_type_patterns_leaves_it_none() {
 }
 
 #[test]
+fn analyze_request_git_commit_subject_patterns_flow_into_engine_config() {
+    // Seals the wire shape of the DECLARED subject-label axis: `{ pattern, label }` (not `{ pattern,
+    // tag }` — the two axes must stay tellable apart at the config surface) deserializes into
+    // `GitOptionsRequest::commit_subject_patterns` and survives `build_engine_config` into
+    // `GitOptions::commit_subject_patterns` as ordered `(String, String)` pairs. Behavior (what a
+    // declared pattern actually labels) is pinned in `crates/engine/tests/analyze_git.rs`.
+    let config_json = r#"{
+        "root": "unused",
+        "sourceId": "t",
+        "git": {
+            "commitSubjectPatterns": [
+                { "pattern": "^Revert\\b", "label": "revert" },
+                { "pattern": "PROJ-\\d+", "label": "ticket" }
+            ]
+        }
+    }"#;
+    let req: AnalyzeRequest = serde_json::from_str(config_json).expect("valid AnalyzeRequest JSON");
+    let git_req = req.git.as_ref().expect("expected git to deserialize");
+    let patterns = git_req
+        .commit_subject_patterns
+        .as_ref()
+        .expect("expected commitSubjectPatterns to deserialize");
+    assert_eq!(patterns.len(), 2);
+    assert_eq!(patterns[0].label, "revert");
+
+    let mut warnings = Vec::new();
+    let config = build_engine_config(&req, &mut warnings);
+    let git_cfg = config.git.expect("expected EngineConfig::git to be Some");
+    assert_eq!(
+        git_cfg.commit_subject_patterns,
+        Some(vec![
+            ("^Revert\\b".to_string(), "revert".to_string()),
+            ("PROJ-\\d+".to_string(), "ticket".to_string()),
+        ])
+    );
+}
+
+#[test]
+fn analyze_request_git_without_commit_subject_patterns_leaves_it_none() {
+    // Seals never-guess at the wire seam: absence must stay absent. Unlike `commitTypePatterns`, where
+    // `None` means "use the default table", `None` here means "there is no table" — so a shape that
+    // quietly materialized an empty/default vec would be the guess this key exists to refuse.
+    let config_json = r#"{"root": "unused", "sourceId": "t", "git": {}}"#;
+    let req: AnalyzeRequest = serde_json::from_str(config_json).expect("valid AnalyzeRequest JSON");
+    let git_req = req.git.as_ref().expect("expected git to deserialize");
+    assert!(git_req.commit_subject_patterns.is_none());
+
+    let mut warnings = Vec::new();
+    let config = build_engine_config(&req, &mut warnings);
+    let git_cfg = config.git.expect("expected EngineConfig::git to be Some");
+    assert!(git_cfg.commit_subject_patterns.is_none());
+}
+
+#[test]
 fn analyze_request_mounted_at_mounts_hosts_flow_into_engine_config() {
     // Plumbing-only, same spirit as `analyze_request_adapter_overlays_flow_into_engine_config`: proves
     // `mountedAt`/`mounts`/`hosts` deserialize and that `build_engine_config` folds every `mounts[]`
@@ -285,4 +339,53 @@ fn analyze_request_defaults_mounted_at_mounts_hosts_to_empty() {
     let config = build_engine_config(&req, &mut warnings);
     assert!(config.mounts.is_empty());
     assert!(config.hosts.is_empty());
+}
+
+#[test]
+fn analyze_request_vocabulary_flows_into_engine_config_and_skip_dirs_splits_off() {
+    // Seals the wire seam for the convention vocabulary: the camelCase `vocabulary` object deserializes
+    // into `AnalyzeRequest::vocabulary` and lands on `EngineConfig::vocabulary` — EXCEPT `skipDirs`, which
+    // is routed to `DispatchConfig::skip_dirs` (the list that already owned the walker's skip set, so a
+    // declared value and the built-in can never both be live). The behavior each key buys is covered
+    // end-to-end by `crates/engine/tests/analyze_vocabulary_config.rs`; this test is the plumbing half.
+    let config_json = r#"{
+        "root": "unused",
+        "sourceId": "t",
+        "vocabulary": {
+            "authGuardPattern": "(?i)ensureSession",
+            "skipDirs": ["vendored"]
+        }
+    }"#;
+    let req: AnalyzeRequest = serde_json::from_str(config_json).expect("valid AnalyzeRequest JSON");
+
+    let mut warnings = Vec::new();
+    let config = build_engine_config(&req, &mut warnings);
+    assert_eq!(
+        config.vocabulary.auth_guard_pattern.as_deref(),
+        Some("(?i)ensureSession")
+    );
+    assert_eq!(config.dispatch.skip_dirs, vec!["vendored".to_string()]);
+    // A key the author did not name keeps its built-in — per-key replacement, never a blanket wipe.
+    assert!(config.vocabulary.api_segment_pattern.is_none());
+}
+
+/// The wire's half of the no-fallback rule (2026-07-27): a request that declares no vocabulary produces
+/// an engine config that declares no vocabulary — including an EMPTY walker skip list. This test used to
+/// assert the opposite for `skipDirs` ("an absent vocabulary must not blank the walker's skip list"),
+/// which was `DispatchConfig::default()` reaching back in behind the author. It is inverted rather than
+/// deleted because this seam is where such a fallback would silently return.
+///
+/// A real run never lands here: the config front end is what fills these in, from the starter file
+/// `zzop init` writes, and no analysis lane runs without one.
+#[test]
+fn analyze_request_without_a_vocabulary_declares_nothing_including_the_skip_list() {
+    let config_json = r#"{"root": "unused", "sourceId": "t"}"#;
+    let req: AnalyzeRequest = serde_json::from_str(config_json).expect("valid AnalyzeRequest JSON");
+    let mut warnings = Vec::new();
+    let config = build_engine_config(&req, &mut warnings);
+    assert_eq!(config.vocabulary, zzop_engine::VocabularyConfig::default());
+    assert!(
+        config.dispatch.skip_dirs.is_empty(),
+        "an absent `skipDirs` declaration must reach the walker as empty, not as zzop's own list"
+    );
 }

@@ -3,6 +3,16 @@
 use super::*;
 use zzop_core::{Attribute, EntityRef, FieldAttr, SchemaField};
 
+/// `cross_check_schema` under the BUILT-IN skip-field vocabulary — every case below is about the usage
+/// cross-check's logic, not about which field names a project treats as boilerplate.
+fn cross_check_default(
+    models: &[SchemaModel],
+    usage: &SchemaUsage,
+    attrs: &AttributeStore,
+) -> Vec<SchemaIssue> {
+    cross_check_schema(models, usage, attrs, SKIP_FIELD_NAMES)
+}
+
 // --- fieldUsageTokens ---
 
 #[test]
@@ -136,51 +146,51 @@ fn churn_attrs(pairs: &[(&str, u32)]) -> AttributeStore {
 
 #[test]
 fn cross_check_dead_model_no_store_binding_reported() {
-    let issues = cross_check_schema(
+    let issues = cross_check_default(
         &[model("Orphan", &["id", "payload"])],
         &usage(&[]),
         &AttributeStore::default(),
     );
     assert!(issues
         .iter()
-        .any(|i| i.rule == "dead-model" && i.model == "Orphan"));
+        .any(|i| i.rule == "unreferenced-model-name" && i.model == "Orphan"));
 }
 
 #[test]
 fn cross_check_dead_model_bound_model_not_reported() {
-    let issues = cross_check_schema(
+    let issues = cross_check_default(
         &[model("User", &["id", "nickname"])],
         &usage(&[("nickname", 5)]),
         &bound_attrs(&["User"]),
     );
-    assert!(!issues.iter().any(|i| i.rule == "dead-model"));
+    assert!(!issues.iter().any(|i| i.rule == "unreferenced-model-name"));
 }
 
 #[test]
 fn cross_check_dead_field_zero_occurrences_reported() {
-    let issues = cross_check_schema(
+    let issues = cross_check_default(
         &[model("User", &["id", "nickname", "ghostField"])],
         &usage(&[("nickname", 3)]),
         &bound_attrs(&["User"]),
     );
     assert!(issues
         .iter()
-        .any(|i| i.rule == "dead-field" && i.field.as_deref() == Some("ghostField")));
+        .any(|i| i.rule == "unreferenced-field-name" && i.field.as_deref() == Some("ghostField")));
     assert!(!issues
         .iter()
-        .any(|i| i.rule == "dead-field" && i.field.as_deref() == Some("nickname")));
+        .any(|i| i.rule == "unreferenced-field-name" && i.field.as_deref() == Some("nickname")));
 }
 
 #[test]
 fn cross_check_dead_field_excludes_id_created_updated_at() {
-    let issues = cross_check_schema(
+    let issues = cross_check_default(
         &[model("X", &["id", "createdAt", "updatedAt", "name"])],
         &usage(&[]),
         &bound_attrs(&["X"]),
     );
     let dead_fields: Vec<&str> = issues
         .iter()
-        .filter(|i| i.rule == "dead-field")
+        .filter(|i| i.rule == "unreferenced-field-name")
         .map(|i| i.field.as_deref().unwrap())
         .collect();
     assert_eq!(dead_fields, vec!["name"]);
@@ -188,24 +198,30 @@ fn cross_check_dead_field_excludes_id_created_updated_at() {
 
 #[test]
 fn cross_check_dead_field_excludes_short_names() {
-    let issues = cross_check_schema(
+    let issues = cross_check_default(
         &[model("Y", &["id", "ab", "name"])],
         &usage(&[]),
         &bound_attrs(&["Y"]),
     );
     assert!(!issues
         .iter()
-        .any(|i| i.rule == "dead-field" && i.field.as_deref() == Some("ab")));
+        .any(|i| i.rule == "unreferenced-field-name" && i.field.as_deref() == Some("ab")));
 }
 
 #[test]
 fn cross_check_dead_field_not_reported_when_parent_is_dead_model() {
-    let issues = cross_check_schema(
+    let issues = cross_check_default(
         &[model("Q", &["id", "name", "payload"])],
         &usage(&[]),
         &AttributeStore::default(),
     );
-    assert_eq!(issues.iter().filter(|i| i.rule == "dead-field").count(), 0);
+    assert_eq!(
+        issues
+            .iter()
+            .filter(|i| i.rule == "unreferenced-field-name")
+            .count(),
+        0
+    );
 }
 
 // --- applyChurnRule ---
@@ -308,8 +324,11 @@ fn analyze_with_usage_signals_add_dead_model_field_and_churn_issues() {
         Some(SchemaUsage::default()),
         &churn_attrs(&[("Ghost", 12)]),
     );
-    // Ghost is unbound -> dead-model; churn 12 -> schema-churn critical. dead-field is skipped under dead-model.
-    assert!(analysis.issues.iter().any(|i| i.rule == "dead-model"));
+    // Ghost is unbound -> unreferenced-model-name; churn 12 -> schema-churn critical. unreferenced-field-name is skipped under unreferenced-model-name.
+    assert!(analysis
+        .issues
+        .iter()
+        .any(|i| i.rule == "unreferenced-model-name"));
     assert!(analysis
         .issues
         .iter()
@@ -323,5 +342,8 @@ fn analyze_with_usage_no_usage_runs_only_structural_rules() {
         None,
         &AttributeStore::default(),
     );
-    assert!(!analysis.issues.iter().any(|i| i.rule == "dead-model"));
+    assert!(!analysis
+        .issues
+        .iter()
+        .any(|i| i.rule == "unreferenced-model-name"));
 }

@@ -3,14 +3,15 @@
 #
 # The drift class (bitten 2026-07-16): docs/modules/mcp.md shipped in v0.16.0 but the docs hub
 # (docs/README.md) never gained a row, and examples/README.md's index listed only 6 of 9 entries
-# (auth-overlay-adapter, oazapfts-adapter, adapter-kit missing) — new pages were un-discoverable
+# (auth-overlay-adapter, adapter-kit missing) — new pages were un-discoverable
 # from the surface readers actually start at.
 #
 # Two containment checks (asymmetric, token-level — same idiom as the other sync guards):
 #   1. every tracked docs/**/*.md (except the hub itself) must be referenced by its docs-relative
 #      path (e.g. `modules/mcp.md`, `adapters/README.md`) somewhere in docs/README.md.
-#   2. every entry directly under examples/ (directory or file, except README.md) must be
-#      referenced by name somewhere in examples/README.md.
+#   2. every entry directly under an examples hub — examples/ and examples/adapters/ (directory or
+#      file, except that hub's own README.md) — must be referenced by name somewhere in that hub's
+#      README.md.
 # Hub prose quality is NOT checked — only that a reference exists at all.
 #
 # Check 3 (added 2026-07-25) is the other half: reachability is worth nothing if the link that
@@ -47,19 +48,26 @@ if [ -n "$orphans" ]; then
   fail=1
 fi
 
-# --- Check 2: examples/* entries all referenced from examples/README.md ---
-exhub=examples/README.md
-[ -f "$exhub" ] || { echo "check-docs-link-graph: missing $exhub" >&2; exit 1; }
-orphans=""
-while IFS= read -r entry; do
-  [ "$entry" = "README.md" ] && continue
-  grep -qF "$entry" "$exhub" || orphans="$orphans $entry"
-done < <(git ls-files -- 'examples/*' 'examples/**' | sed 's|^examples/||; s|/.*||' | sort -u)
-if [ -n "$orphans" ]; then
-  echo "check-docs-link-graph: examples entries not referenced from examples/README.md:" >&2
-  printf '    %s\n' $orphans >&2
-  fail=1
-fi
+# --- Check 2: every entry directly under an examples hub is referenced from that hub's README ---
+# Two hubs, not one, since examples/ split into adapters/ + cases/ (2026-07-26): checking only the
+# top level would ask nothing but "are `adapters` and `cases` mentioned", and the nine adapter
+# entries this check exists for — the 2026-07-16 drift was examples/README.md listing 6 of 9 —
+# would silently stop being guarded. cases/ is deliberately NOT a hub: its entries are fixture data
+# (trees/, EXPECTED.jsonc, config), not pages a reader navigates to.
+for exhub in examples/README.md examples/adapters/README.md; do
+  exdir="${exhub%/README.md}"
+  [ -f "$exhub" ] || { echo "check-docs-link-graph: missing $exhub" >&2; exit 1; }
+  orphans=""
+  while IFS= read -r entry; do
+    [ "$entry" = "README.md" ] && continue
+    grep -qF "$entry" "$exhub" || orphans="$orphans $entry"
+  done < <(git ls-files -- "$exdir/*" "$exdir/**" | sed "s|^$exdir/||; s|/.*||" | sort -u)
+  if [ -n "$orphans" ]; then
+    echo "check-docs-link-graph: $exdir entries not referenced from $exhub:" >&2
+    printf '    %s\n' $orphans >&2
+    fail=1
+  fi
+done
 
 # --- Check 3: every local Markdown link resolves — target file exists, #fragment names a heading ---
 # One awk pass over every tracked *.md (a per-file loop costs minutes under Windows msys process

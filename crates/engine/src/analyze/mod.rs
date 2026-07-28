@@ -33,7 +33,7 @@ pub(crate) use compose::{
 // diagnostics parity with `assemble` — a `disabled_rules` typo / dead exclude filter self-reports on
 // both entry points).
 pub(crate) use diagnostics::{
-    compute_dsl_scope, no_applicable_dsl_rule_warning, rule_overrides_applied, run_diagnostics,
+    compute_dsl_scope, pack_scope_warnings, rule_overrides_applied, run_diagnostics,
     uncompilable_rule_warnings, unmatched_global_exclude_warnings, unmatched_suppression_warnings,
     zero_packs_warning,
 };

@@ -28,6 +28,7 @@ fn scoped_key(content: &str, parser: &str, scope: &str, ruleset: &str) -> CacheK
         content_hash: AnalysisCache::content_hash(content.as_bytes()),
         parser_fingerprint: parser.to_string(),
         scope: scope.to_string(),
+        vocabulary_fingerprint: "vocab1".to_string(),
         ruleset_fingerprint: ruleset.to_string(),
     }
 }
@@ -257,7 +258,7 @@ fn corrupted_ir_entry_is_treated_as_miss_not_panic() {
     let dir = scratch_dir("corrupt-ir");
     let cache = AnalysisCache::open(&dir, "v1").unwrap();
     let k = key("content", "parser1", "ruleset1");
-    let path = cache.ir_path(&k);
+    let path = cache.ir_path(&IrKey::from(&k));
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(&path, b"{ not valid json at all").unwrap();
 
@@ -272,18 +273,54 @@ fn key_mismatch_inside_entry_is_treated_as_miss() {
     let dir = scratch_dir("key-mismatch");
     let cache = AnalysisCache::open(&dir, "v1").unwrap();
     let k = key("content", "parser1", "ruleset1");
-    let path = cache.ir_path(&k);
+    let path = cache.ir_path(&IrKey::from(&k));
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     let wrong_entry = IrEntry {
         format_version: FORMAT_VERSION,
-        content_hash: "not-the-right-hash".to_string(),
-        parser_fingerprint: "parser1".to_string(),
-        scope: "a.ts".to_string(),
+        key: IrKey {
+            content_hash: "not-the-right-hash".to_string(),
+            parser_fingerprint: "parser1".to_string(),
+            scope: "a.ts".to_string(),
+            vocabulary_fingerprint: "vocab1".to_string(),
+        },
         ir: sample_ir(1),
     };
     fs::write(&path, serde_json::to_vec(&wrong_entry).unwrap()).unwrap();
 
     assert!(cache.get_ir(&k).is_none());
+}
+
+/// The stored entry's on-disk JSON is FLAT — the key's fields sit beside `format_version`/`ir`, not
+/// nested under a `key` object. `IrEntry`/`FindingsEntry` hold a key VALUE (so the read-path comparison
+/// is a `PartialEq` that no new field can escape) and reach that layout via `#[serde(flatten)]`; this
+/// pins that the refactor was shape-preserving, i.e. that entries written before it still load and that
+/// no `CACHE_SCHEMA_VERSION` bump was owed.
+#[test]
+fn stored_entries_keep_the_flat_on_disk_key_layout() {
+    let dir = scratch_dir("flat-layout");
+    let cache = AnalysisCache::open(&dir, "v1").unwrap();
+    let k = key("content", "parser1", "ruleset1");
+    cache.put_ir(&k, &sample_ir(3)).unwrap();
+    cache.put_findings(&k, &sample_findings()).unwrap();
+
+    for (path, extra) in [
+        (cache.ir_path(&IrKey::from(&k)), None),
+        (cache.findings_path(&k), Some("ruleset_fingerprint")),
+    ] {
+        let raw: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).expect("entry must be valid JSON");
+        let obj = raw.as_object().expect("entry must be a JSON object");
+        assert!(obj.get("key").is_none(), "the key must not be nested");
+        for field in [
+            "format_version",
+            "content_hash",
+            "parser_fingerprint",
+            "scope",
+        ] {
+            assert!(obj.contains_key(field), "{field} must sit at the top level");
+        }
+        assert_eq!(obj.contains_key("ruleset_fingerprint"), extra.is_some());
+    }
 }
 
 #[test]

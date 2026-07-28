@@ -17,6 +17,7 @@ fn tiny_synthetic_vocab() -> ConfigSurface {
             top: vec!["rules".to_string(), "git".to_string()],
             packs: vec![],
             git: vec!["since".to_string()],
+            vocabulary: vec![],
             report: vec![],
             tree: vec![],
             rule_object: vec![],

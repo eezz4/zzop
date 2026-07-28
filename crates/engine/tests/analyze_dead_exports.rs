@@ -1,4 +1,4 @@
-//! End-to-end tests for the `dead-exports` native analysis (`zzop_engine::dead_exports` wiring around
+//! End-to-end tests for the `unimported-export` native analysis (`zzop_engine::dead_exports` wiring around
 //! `zzop_rules_graph::find_dead_exports`) — the symbol-level companion to the file-level `dead-candidates` analysis.
 //! Unlike `rules/native/rules-graph/src/dead_exports.rs`'s unit tests (hand-built `DeadExportInputFile`s, no parsing
 //! involved), these tests exercise the whole real pipeline — real TS source on disk, through
@@ -56,7 +56,7 @@ fn config() -> EngineConfig {
 
 #[test]
 fn unused_export_produces_a_dead_exports_finding_at_its_declaration_line() {
-    let dir = TempDir::new("zzop-engine-dead-exports-unused");
+    let dir = TempDir::new("zzop-engine-unimported-export-unused");
     dir.write(
         "lib/util.ts",
         "export function used() { return 1; }\nexport function unused() { return 2; }\n",
@@ -69,24 +69,25 @@ fn unused_export_produces_a_dead_exports_finding_at_its_declaration_line() {
     let hit = out
         .findings
         .iter()
-        .find(|f| f.rule_id == "dead-exports" && f.file == "lib/util.ts");
+        .find(|f| f.rule_id == "unimported-export" && f.file == "lib/util.ts");
     assert!(
         hit.is_some(),
-        "expected a dead-exports finding for lib/util.ts, got: {:?}",
+        "expected a unimported-export finding for lib/util.ts, got: {:?}",
         out.findings
     );
     let hit = hit.unwrap();
     assert_eq!(hit.line, 2); // `unused`'s declaration line
     assert!(hit.message.contains("unused"));
     // The imported `used` export must NOT be flagged.
-    assert!(!out.findings.iter().any(
-        |f| f.rule_id == "dead-exports" && f.data.as_ref().is_some_and(|d| d["name"] == "used")
-    ));
+    assert!(
+        !out.findings.iter().any(|f| f.rule_id == "unimported-export"
+            && f.data.as_ref().is_some_and(|d| d["name"] == "used"))
+    );
 }
 
 #[test]
 fn entry_index_file_exports_are_exempt_even_when_unimported() {
-    let dir = TempDir::new("zzop-engine-dead-exports-entry");
+    let dir = TempDir::new("zzop-engine-unimported-export-entry");
     // `index.ts` is an entry/barrel file per zzop's ENTRY_PATTERNS — its exports are public API surface and
     // must never be flagged, even with zero in-repo importers.
     dir.write(
@@ -94,12 +95,15 @@ fn entry_index_file_exports_are_exempt_even_when_unimported() {
         "export function publicApi() { return 1; }\n",
     );
     let out = analyze_tree(dir.path(), &config());
-    assert!(!out.findings.iter().any(|f| f.rule_id == "dead-exports"));
+    assert!(!out
+        .findings
+        .iter()
+        .any(|f| f.rule_id == "unimported-export"));
 }
 
 #[test]
 fn barrel_re_export_from_an_entry_file_is_a_live_root() {
-    let dir = TempDir::new("zzop-engine-dead-exports-barrel");
+    let dir = TempDir::new("zzop-engine-unimported-export-barrel");
     dir.write("src/impl.ts", "export function impl() { return 1; }\n");
     // `index.ts` (an entry file) re-exports `impl` — no in-repo consumer imports it through the barrel, but
     // it is public API surface (zzop: "entry re-export is a live root even with no consumer").
@@ -108,7 +112,7 @@ fn barrel_re_export_from_an_entry_file_is_a_live_root() {
     assert!(
         !out.findings
             .iter()
-            .any(|f| f.rule_id == "dead-exports" && f.file == "src/impl.ts"),
+            .any(|f| f.rule_id == "unimported-export" && f.file == "src/impl.ts"),
         "impl should be a live root via the entry re-export, got: {:?}",
         out.findings
     );
@@ -116,18 +120,18 @@ fn barrel_re_export_from_an_entry_file_is_a_live_root() {
 
 #[test]
 fn export_referenced_only_within_its_own_file_is_flagged_in_file_only() {
-    let dir = TempDir::new("zzop-engine-dead-exports-in-file-only");
+    let dir = TempDir::new("zzop-engine-unimported-export-in-file-only");
     dir.write(
         "lib/helper.ts",
         "export const HELPER = 1;\nexport function use() { return HELPER; }\n",
     );
     let out = analyze_tree(dir.path(), &config());
     let hit = out.findings.iter().find(|f| {
-        f.rule_id == "dead-exports" && f.data.as_ref().is_some_and(|d| d["name"] == "HELPER")
+        f.rule_id == "unimported-export" && f.data.as_ref().is_some_and(|d| d["name"] == "HELPER")
     });
     assert!(
         hit.is_some(),
-        "expected an in-file-only dead-exports finding for HELPER, got: {:?}",
+        "expected an in-file-only unimported-export finding for HELPER, got: {:?}",
         out.findings
     );
     let reason = hit.unwrap().data.as_ref().unwrap()["reason"].clone();
@@ -136,14 +140,17 @@ fn export_referenced_only_within_its_own_file_is_flagged_in_file_only() {
 
 #[test]
 fn disabling_dead_exports_removes_the_finding() {
-    let dir = TempDir::new("zzop-engine-dead-exports-disabled");
+    let dir = TempDir::new("zzop-engine-unimported-export-disabled");
     dir.write("lib/orphan.ts", "export function orphan() { return 1; }\n");
     let mut cfg = config();
     cfg.rule_config
         .disabled_rules
-        .push("dead-exports".to_string());
+        .push("unimported-export".to_string());
     let out = analyze_tree(dir.path(), &cfg);
-    assert!(!out.findings.iter().any(|f| f.rule_id == "dead-exports"));
+    assert!(!out
+        .findings
+        .iter()
+        .any(|f| f.rule_id == "unimported-export"));
 }
 
 // ---- Public-signature exemption, end to end -------------------------------------------------
@@ -154,7 +161,7 @@ fn disabling_dead_exports_removes_the_finding() {
 
 #[test]
 fn type_in_an_exported_signature_is_not_reported() {
-    let dir = TempDir::new("zzop-engine-dead-exports-signature");
+    let dir = TempDir::new("zzop-engine-unimported-export-signature");
     // The measured shape: no in-repo importer for XState, but it IS `useX`'s public return type.
     dir.write(
         "lib/useX.ts",
@@ -168,7 +175,8 @@ fn type_in_an_exported_signature_is_not_reported() {
     let out = analyze_tree(dir.path(), &config());
     assert!(
         !out.findings.iter().any(|f| {
-            f.rule_id == "dead-exports" && f.data.as_ref().is_some_and(|d| d["name"] == "XState")
+            f.rule_id == "unimported-export"
+                && f.data.as_ref().is_some_and(|d| d["name"] == "XState")
         }),
         "XState is part of useX's public API and must not be reported: {:?}",
         out.findings
@@ -177,7 +185,7 @@ fn type_in_an_exported_signature_is_not_reported() {
 
 #[test]
 fn type_used_only_inside_a_body_is_still_reported() {
-    let dir = TempDir::new("zzop-engine-dead-exports-body-only");
+    let dir = TempDir::new("zzop-engine-unimported-export-body-only");
     // TRUE POSITIVE: `useX` has NO annotated return type, so XState is genuinely private.
     dir.write(
         "lib/useY.ts",
@@ -191,7 +199,7 @@ fn type_used_only_inside_a_body_is_still_reported() {
     );
     let out = analyze_tree(dir.path(), &config());
     let hit = out.findings.iter().find(|f| {
-        f.rule_id == "dead-exports" && f.data.as_ref().is_some_and(|d| d["name"] == "XState")
+        f.rule_id == "unimported-export" && f.data.as_ref().is_some_and(|d| d["name"] == "XState")
     });
     assert!(
         hit.is_some(),
@@ -202,7 +210,7 @@ fn type_used_only_inside_a_body_is_still_reported() {
 
 #[test]
 fn type_annotating_only_an_unexported_declaration_is_still_reported() {
-    let dir = TempDir::new("zzop-engine-dead-exports-unexported-props");
+    let dir = TempDir::new("zzop-engine-unimported-export-unexported-props");
     // TRUE POSITIVE: `Props` is NOT exported, so XThing never reaches the public surface.
     dir.write(
         "lib/Card.ts",
@@ -215,7 +223,8 @@ fn type_annotating_only_an_unexported_declaration_is_still_reported() {
     let out = analyze_tree(dir.path(), &config());
     assert!(
         out.findings.iter().any(|f| {
-            f.rule_id == "dead-exports" && f.data.as_ref().is_some_and(|d| d["name"] == "XThing")
+            f.rule_id == "unimported-export"
+                && f.data.as_ref().is_some_and(|d| d["name"] == "XThing")
         }),
         "XThing only annotates an unexported declaration and must still report: {:?}",
         out.findings
@@ -230,7 +239,7 @@ fn type_annotating_only_an_unexported_declaration_is_still_reported() {
 
 #[test]
 fn declaration_re_exported_under_an_alias_and_imported_by_that_alias_is_not_reported() {
-    let dir = TempDir::new("zzop-engine-dead-exports-alias-live");
+    let dir = TempDir::new("zzop-engine-unimported-export-alias-live");
     // The measured mono-hub shape (`ui/MortgageInputs.tsx`): the declaration is `State`, the public
     // name is `MortgageState`, and every consumer writes the public name.
     dir.write(
@@ -254,7 +263,8 @@ fn declaration_re_exported_under_an_alias_and_imported_by_that_alias_is_not_repo
     let out = analyze_tree(dir.path(), &config());
     assert!(
         !out.findings.iter().any(|f| {
-            f.rule_id == "dead-exports" && f.data.as_ref().is_some_and(|d| d["name"] == "State")
+            f.rule_id == "unimported-export"
+                && f.data.as_ref().is_some_and(|d| d["name"] == "State")
         }),
         "State is published as MortgageState and imported under that name: {:?}",
         out.findings
@@ -265,7 +275,7 @@ fn declaration_re_exported_under_an_alias_and_imported_by_that_alias_is_not_repo
 fn declaration_re_exported_under_an_alias_nobody_imports_is_still_reported() {
     // NEGATIVE FIXTURE, end to end: tracking the rename must not turn "has a public name" into
     // "has a consumer". With no importer anywhere, this stays an un-export candidate.
-    let dir = TempDir::new("zzop-engine-dead-exports-alias-dead");
+    let dir = TempDir::new("zzop-engine-unimported-export-alias-dead");
     dir.write(
         "ui/Inputs.tsx",
         // `State` deliberately reaches only an UNEXPORTED `Props` field, so the public-signature
@@ -281,7 +291,8 @@ fn declaration_re_exported_under_an_alias_nobody_imports_is_still_reported() {
         .findings
         .into_iter()
         .find(|f| {
-            f.rule_id == "dead-exports" && f.data.as_ref().is_some_and(|d| d["name"] == "State")
+            f.rule_id == "unimported-export"
+                && f.data.as_ref().is_some_and(|d| d["name"] == "State")
         });
     assert!(
         hit.is_some(),

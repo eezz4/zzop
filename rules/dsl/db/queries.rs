@@ -90,7 +90,7 @@ fn pagination_ok_marker_directly_above_the_pagination_line_suppresses_the_findin
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const prisma: any;\nexport async function listUsersMarked(page: number) {\n  // pagination-no-orderby-ok: single-admin dashboard, deterministic dataset snapshot\n  return prisma.user.findMany({ skip: page * 20, take: 20 });\n}\n",
+        "declare const prisma: any;\nexport async function listUsersMarked(page: number) {\n  // zzop-pagination-no-orderby-ok: single-admin dashboard, deterministic dataset snapshot\n  return prisma.user.findMany({ skip: page * 20, take: 20 });\n}\n",
     );
     let out = scan(&dir);
     assert!(
@@ -152,7 +152,7 @@ fn limit_ok_marker_directly_above_the_take_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-db");
     dir.write(
         "src/service.ts",
-        "declare const prisma: any;\ndeclare const req: any;\nexport async function listUsersMarked() {\n  // unbounded-user-limit-ok: internal admin tool, request volume trusted\n  return prisma.user.findMany({ take: Number(req.query.limit) });\n}\n",
+        "declare const prisma: any;\ndeclare const req: any;\nexport async function listUsersMarked() {\n  // zzop-unbounded-user-limit-ok: internal admin tool, request volume trusted\n  return prisma.user.findMany({ take: Number(req.query.limit) });\n}\n",
     );
     let out = scan(&dir);
     assert!(

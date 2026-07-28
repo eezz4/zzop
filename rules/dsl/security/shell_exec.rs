@@ -132,7 +132,7 @@ fn shell_exec_ok_marker_above_the_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/tools.ts",
-        "import { exec } from \"child_process\";\nexport function run(name: string) {\n  // shell-exec-interpolation-ok: name is validated against an internal allow-list above\n  exec(`ls ${name}`);\n}\n",
+        "import { exec } from \"child_process\";\nexport function run(name: string) {\n  // zzop-shell-exec-interpolation-ok: name is validated against an internal allow-list above\n  exec(`ls ${name}`);\n}\n",
     );
     let out = scan(&dir);
     assert!(

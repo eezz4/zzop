@@ -26,38 +26,45 @@ fn disable_hint_tail(id: &str) -> String {
         .to_string()
 }
 
-/// Builds the "whole family" disable-hint sentence appended to every structural/usage message
-/// (`schema_structural_disable_hint`/`schema_usage_disable_hint` below): reworded around the fact that
-/// these two gate ids disable a whole rule FAMILY, not one finding.
-fn family_disable_hint(gate_id: &str) -> String {
-    let tail = disable_hint_tail(gate_id);
+/// Builds the disable-hint sentence appended to every structural/usage message. Two ids, because there are
+/// two real knobs: the issue's OWN registered id (`schema/god-model`, ... — see
+/// [`crate::schema_issue_rule_id`]; honored by `is_enabled` at both schema call sites and by
+/// `apply_severity_override` on the finding) and the FAMILY gate that switches the whole pass off. Naming
+/// only the family — which is what this sentence did while the issue ids were unregistered labels — now
+/// understates what the config accepts.
+fn issue_disable_hint(label: &str, gate_id: &str) -> String {
+    let own = disable_hint_tail(&crate::schema_issue_rule_id(label));
+    let family = disable_hint_tail(gate_id);
     format!(
-        " Disable the whole family {tail}; to drop just this one finding, use config `exclude` (or a \
-         per-rule `exclude`) on its file path instead."
+        " Disable this one rule {own}, or its whole family {family}; to drop a single finding, use config \
+         `exclude` (or a per-rule `exclude`) on its file path instead."
     )
 }
 
-/// `structural.rs`'s issue ids (`god-model`, `missing-timestamps`, `redundant-index`, `float-money`,
-/// `stale-updated-at`, `temporal-as-string`, `fk-no-index`, `nullable-fk`, `implicit-fk`) are NOT
-/// individually disableable — they're gated as one family behind the native analysis id
+/// `structural.rs`'s issue ids ([`crate::SCHEMA_STRUCTURAL_ISSUE_LABELS`]) each report under
+/// `schema/<label>` and are additionally gated as one family behind the native analysis id
 /// `"schema-structural"` (`crates/engine/src/pipeline.rs`'s `schema_findings`). Appended to every
 /// structural message by `schema_issue_message`.
-fn schema_structural_disable_hint() -> String {
-    family_disable_hint("schema-structural")
+fn schema_structural_disable_hint(label: &str) -> String {
+    issue_disable_hint(label, "schema-structural")
 }
 
-/// `usage.rs`'s issue ids (`dead-model`, `dead-field`, `schema-churn`) are gated as one family behind the
-/// native analysis id `"schema-usage"` (`crates/engine/src/pipeline.rs`'s `schema_usage_findings`,
-/// `crates/engine/src/analyze/mod.rs`'s `is_enabled(&config.rule_config, "schema-usage")` call site).
-/// Appended to every usage message by `schema_issue_message`.
-fn schema_usage_disable_hint() -> String {
-    family_disable_hint("schema-usage")
+/// `usage.rs`'s issue ids ([`crate::SCHEMA_USAGE_ISSUE_LABELS`]) each report under `schema/<label>` and are
+/// additionally gated as one family behind the native analysis id `"schema-usage"`
+/// (`crates/engine/src/pipeline.rs`'s `schema_usage_findings`, `crates/engine/src/analyze/mod.rs`'s
+/// `is_enabled(&config.rule_config, "schema-usage")` call site). Appended to every usage message by
+/// `schema_issue_message`.
+fn schema_usage_disable_hint(label: &str) -> String {
+    issue_disable_hint(label, "schema-usage")
 }
 
 /// `SchemaIssue` itself carries no message — this is the one place that prose is authored. Falls back to a
 /// generic (still informative) message for any rule id not recognized below, so an unmatched `issue.rule`
-/// never panics. Every structural/usage message ends with a disable hint naming the REAL gate — `god-model`,
-/// `fk-no-index`, `dead-model`, etc. are not disableable ids of their own (see the two hint constants' docs).
+/// never panics. Every structural/usage message ends with a disable hint naming BOTH the issue's own
+/// registered id (`schema/god-model`, ...) and its family gate. Family membership is read off
+/// [`crate::SCHEMA_STRUCTURAL_ISSUE_LABELS`]/[`crate::SCHEMA_USAGE_ISSUE_LABELS`] — the same two lists
+/// `register_native_analyses` registers from, so a label can neither be registered without a message nor
+/// carry a message without being registered.
 pub fn schema_issue_message(issue: &SchemaIssue) -> String {
     let field = issue.field.as_deref().unwrap_or("?");
     let param = |key: &str| -> Option<String> {
@@ -67,12 +74,13 @@ pub fn schema_issue_message(issue: &SchemaIssue) -> String {
             .and_then(|p| p.get(key))
             .map(|v| v.to_string())
     };
-    let hint = match issue.rule.as_str() {
-        "god-model" | "missing-timestamps" | "redundant-index" | "float-money"
-        | "stale-updated-at" | "temporal-as-string" | "fk-no-index" | "nullable-fk"
-        | "implicit-fk" => schema_structural_disable_hint(),
-        "dead-model" | "dead-field" | "schema-churn" => schema_usage_disable_hint(),
-        _ => String::new(),
+    let label = issue.rule.as_str();
+    let hint = if crate::SCHEMA_STRUCTURAL_ISSUE_LABELS.contains(&label) {
+        schema_structural_disable_hint(label)
+    } else if crate::SCHEMA_USAGE_ISSUE_LABELS.contains(&label) {
+        schema_usage_disable_hint(label)
+    } else {
+        String::new()
     };
     let body = match issue.rule.as_str() {
         "god-model" => format!(
@@ -167,13 +175,15 @@ pub fn schema_issue_message(issue: &SchemaIssue) -> String {
             "Model {} field {field} looks like a foreign key with no @relation — the relation is implicit/unmodeled.",
             issue.model
         ),
-        "dead-model" => format!(
-            "Model {} is not bound to any store/repository in code — it may be dead schema. {}",
+        "unreferenced-model-name" => format!(
+            "Model {}'s name never appears as an identifier in source, and no `bound-model` attribute \
+             was injected for it — the model may be unused. {}",
             issue.model,
             field_usage_sightline()
         ),
-        "dead-field" => format!(
-            "Model {} field {field} never appears as an identifier in source — it may be dead schema. {}",
+        "unreferenced-field-name" => format!(
+            "Model {} field {field}'s name never appears as an identifier in source — the field may be \
+             unused. {}",
             issue.model,
             field_usage_sightline()
         ),

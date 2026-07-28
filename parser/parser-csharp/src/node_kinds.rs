@@ -6,6 +6,11 @@
 //! [`PINNED_ANONYMOUS_KEYWORDS`] — `tree_sitter::Language::id_for_node_kind`'s `named` parameter
 //! distinguishes the two lookups, so one combined list would silently pass a renamed anonymous token
 //! (looked up with `named: true`, always `0` regardless of whether the token still exists).
+//!
+//! The REVERSE direction — a kind the code matches that never reached this list — is machine-checked
+//! too, by `tests::every_grammar_node_kind_literal_in_this_crate_is_pinned` (added 2026-07-28). This
+//! crate's list was already complete; its Go and Java siblings' were not, which is exactly why a
+//! forward-only pin is not enough: it can only ever validate itself.
 pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     // Root-level hopeless-input gate (crate root `parse_tree`/`TOP_LEVEL_DECLARATION_KINDS`)
     "using_directive",

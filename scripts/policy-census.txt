@@ -1,132 +1,258 @@
-crates/core/src/dsl/markers.rs:MARKER_LOOKBACK_LINES
-crates/core/src/dsl/source.rs:BLOB_LINE
-crates/core/src/dsl/source.rs:LONG_LINE
-crates/core/src/dsl/tests_fragments/name_census.rs:CENSUSED_FRAGMENTS
-crates/core/src/file_nodes.rs:HOTSPOT_MIN_CHANGES
-crates/core/src/io/key.rs:HTTP_KEY_VERBS
-crates/core/src/node.rs:DEFAULT_RECENT_THRESHOLD_DAYS
-crates/core/src/node.rs:MS_PER_DAY
-crates/core/src/normalized.rs:SUPPORTED_NORMALIZED_AST_VERSION
-crates/core/src/pack_loader.rs:SUPPORTED_DSL_SCHEMA_VERSION
-crates/engine/src/analyze/assemble/helpers.rs:RUST_STD_CRATE_FAMILY
-crates/engine/src/analyze/assemble/helpers/csharp.rs:CSHARP_STD_IMPORT_HEADS
-crates/engine/src/analyze/assemble/helpers/java.rs:JAVA_STD_IMPORT_HEADS
-crates/engine/src/analyze/diagnostics.rs:SAMPLE
-crates/engine/src/analyze/diagnostics/capability.rs:ON_RAMP_EXT_SAMPLE
-crates/engine/src/disclosure/tests.rs:EXPECTED
-crates/engine/src/dispatch.rs:DEFAULT_SKIP_DIRS
-crates/engine/src/dispatch.rs:NON_SOURCE_EXTENSIONS
-crates/engine/src/dispatch/tests.rs:EXPECTED
-crates/engine/src/file_routes/mod.rs:HTTP_VERB_EXPORTS
-crates/engine/src/framework_silence/builtin_fetch.rs:FETCH_CALL_SITES_MIN
-crates/engine/src/framework_silence/builtin_fetch.rs:MAX_SAMPLES
-crates/engine/src/framework_silence/client_library_import.rs:HTTP_CLIENT_SPECIFIERS
-crates/engine/src/framework_silence/committed_spec_io_silence.rs:IO_NEAR_ZERO_FLOOR
-crates/engine/src/framework_silence/committed_spec_io_silence.rs:MAX_SPEC_PROBES
-crates/engine/src/framework_silence/controller_silence.rs:MAX_SAMPLES
-crates/engine/src/framework_silence/controller_silence.rs:MIN_FILES
-crates/engine/src/framework_silence/controller_silence.rs:MIN_PROVIDES_FLOOR
-crates/engine/src/framework_silence/egress_intent.rs:ARG_SCAN_CAP
-crates/engine/src/framework_silence/fetch_wrapper.rs:MAX_EXAMPLES
-crates/engine/src/framework_silence/fetch_wrapper.rs:WRAPPER_EXPORT_NAMES
-crates/engine/src/framework_silence/orm_schema_silence.rs:MAX_EXAMPLES
-crates/engine/src/framework_silence/orm_schema_silence.rs:ORM_SCHEMA_SPECIFIERS
-crates/engine/src/framework_silence/server_framework_import.rs:SERVER_FRAMEWORK_SPECIFIERS
-crates/engine/src/generated_banner.rs:MARKERS
-crates/engine/src/lib.rs:DEFAULT_SIZE_CAP
-crates/engine/src/pipeline/rust_workspace.rs:TARGET_SECTIONS
-crates/engine/src/trees/parallel_impl.rs:MIN_PARALLEL_IMPL_SIGNALS
-crates/summary/src/analyze/tests.rs:RAW_FACADE_ONLY_FIELDS
-crates/summary/src/manifest/mod.rs:RELATIONS
-crates/summary/src/output/bucket_keys.rs:DEFAULT_BUCKET_KEYS_LIMIT
-crates/summary/src/output/bucket_keys.rs:KEY_BUCKETS
-crates/summary/src/output/mod.rs:DEFAULT_DEGRADED_LIMIT
-crates/summary/src/output/mod.rs:DEFAULT_EDGES_LIMIT
-crates/summary/src/output/mod.rs:DEFAULT_FINDINGS_LIMIT
-crates/summary/src/output/mod.rs:MAX_LIMIT
-crates/summary/src/siblings.rs:MAX_NAMED_SIBLINGS
-crates/summary/src/suggest.rs:BUCKETS
-crates/summary/src/suggest.rs:SUGGESTIONS_LIMIT
-parser/parser-csharp/src/adapters/http_clients.rs:HTTP_CLIENT_SPECIFIERS
-parser/parser-csharp/src/adapters/http_clients.rs:VERB_METHODS
-parser/parser-csharp/src/adapters/provides/attribute_controller.rs:METHOD_ATTRIBUTES
-parser/parser-csharp/src/adapters/provides/minimal_api.rs:MAP_METHODS
-parser/parser-csharp/src/lang/used_names.rs:DECLARES_NAME_FIELD
-parser/parser-csharp/src/lib.rs:TOP_LEVEL_DECLARATION_KINDS
-parser/parser-csharp/src/node_kinds.rs:PINNED_ANONYMOUS_KEYWORDS
-parser/parser-csharp/src/node_kinds.rs:PINNED_NODE_KINDS
-parser/parser-go/src/adapters/gin.rs:GIN_VERB_METHODS
-parser/parser-go/src/adapters/gin/cross_file.rs:GIN_RECEIVER_TYPES
-parser/parser-go/src/adapters/gorm.rs:QUERY_METHODS
-parser/parser-go/src/adapters/http_clients.rs:VERB_METHODS
-parser/parser-go/src/adapters/net_http.rs:VERB_METHODS
-parser/parser-go/src/lang/used_names.rs:DECLARES_NAME_FIELD
-parser/parser-go/src/lib.rs:TOP_LEVEL_DECLARATION_KINDS
-parser/parser-go/src/node_kinds.rs:PINNED_NODE_KINDS
-parser/parser-java-21/src/lang/used_names.rs:DECLARES_NAME_FIELD
-parser/parser-java-21/src/lib.rs:TOP_LEVEL_DECLARATION_KINDS
-parser/parser-java-21/src/node_kinds.rs:PINNED_ANONYMOUS_KEYWORDS
-parser/parser-java-21/src/node_kinds.rs:PINNED_NODE_KINDS
-parser/parser-java-21/src/provides/annotations.rs:METHOD_ANNOTATIONS
-parser/parser-java-21/src/provides/annotations.rs:REQUEST_METHOD_NAMES
-parser/parser-java-21/src/security.rs:SECURITY_ANNOTATIONS
-parser/parser-java-21/src/spring_security.rs:AUTHZ_ENTRYPOINTS
-parser/parser-java-21/src/spring_security.rs:CLOSED_TERMINALS
-parser/parser-java-21/src/spring_security.rs:MATCHER_METHODS
-parser/parser-prisma/src/discover.rs:SKIP_DIRS
-parser/parser-python-3/src/adapters/fastapi.rs:VERB_DECORATORS
-parser/parser-python-3/src/adapters/http_clients.rs:VERB_METHODS
-parser/parser-python-3/src/adapters/http_clients/instances.rs:CLIENT_CTORS
-parser/parser-python-3/src/adapters/sqlalchemy.rs:FIRST_ARG_VERBS
-parser/parser-python-3/src/adapters/sqlalchemy.rs:MULTI_MODEL_VERBS
-parser/parser-rust/src/adapters/axum.rs:VERB_METHODS
-parser/parser-rust/src/adapters/http_clients.rs:VERB_METHODS
-parser/parser-typescript/src/adapters/controller_decorators/context.rs:CONTROLLER_CLASS_GATES
-parser/parser-typescript/src/adapters/controller_decorators/method_facts.rs:METHOD_DECORATORS
-parser/parser-typescript/src/adapters/db_table_consume.rs:QUERY_METHODS
-parser/parser-typescript/src/adapters/egress/body_shape.rs:BODY_POSITION_VERBS
-parser/parser-typescript/src/adapters/egress/react_query.rs:QUERY_HOOKS
-parser/parser-typescript/src/adapters/egress/retry.rs:RETRY_WRAPPERS
-parser/parser-typescript/src/adapters/router_mounts/guard.rs:ENV_AXIS_VETO_SUBSTRINGS
-parser/parser-typescript/src/adapters/router_mounts/guard.rs:MIDDLEWARE_GUARD_CALLEES
-parser/parser-typescript/src/adapters/router_mounts/guard.rs:ROUTER_NAME_VETO_SUFFIXES
-parser/parser-typescript/src/adapters/router_mounts/guard.rs:WRAPPER_GUARD_PREFIXES
-parser/parser-typescript/src/adapters/router_mounts/idempotency.rs:IDEMPOTENCY_HEADER_NAMES
-parser/parser-typescript/src/lang/resolve/specifier.rs:RESOLVE_EXTS
-parser/parser-typescript/src/lang/write_site.rs:ATOMIC_OP_KEYS
-parser/parser-typescript/src/lang/write_site.rs:COUNTER_METHODS
-parser/parser-typescript/src/lang/write_site.rs:CREATE_METHODS
-parser/parser-typescript/src/lang/write_site.rs:DEFAULT_WRITE_METHODS
-parser/parser-typescript/src/lang/write_site.rs:UPDATE_METHODS
-parser/parser-typescript/src/lang/write_site.rs:WRITE_LABEL_TOKEN_COUNT
-parser/parser-typescript/src/lib.rs:ARRAY_ITERATION_METHODS
-parser/parser-typescript/src/lib.rs:PROMISE_CONTINUATION_METHODS
-rules/native/rules-cross-layer/src/cross_layer/ambiguous_consume.rs:MAX_CANDIDATES
-rules/native/rules-cross-layer/src/cross_layer/external_host_fanout.rs:FANOUT_MIN_FILES
-rules/native/rules-cross-layer/src/cross_layer/external_secret_in_url.rs:SECRET_PARAM_NAMES
-rules/native/rules-cross-layer/src/cross_layer/mod.rs:MIN_TOTAL_CONSUMES
-rules/native/rules-cross-layer/src/cross_layer/prefix_drift.rs:MIN_PREFIX_DRIFT_GROUP
-rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs:MIN_OPAQUE_CLIENT_IMPORTING_FILES
-rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs:MIN_SDK_IMPORTING_FILES
-rules/native/rules-cross-layer/src/cross_layer/unconsumed_endpoint.rs:EXTERNALLY_FETCHED_PATHS
-rules/native/rules-graph/src/dead_candidates.rs:DEAD_MAX_CHANGES
-rules/native/rules-http/src/http_scan.rs:OK_MARKER_LOOKBACK_ABOVE
-rules/native/rules-http/src/http_scan.rs:OK_MARKER_LOOKBACK_LINES
-rules/native/rules-http/src/http_scan.rs:SAFE_METHODS
-rules/native/rules-http/src/http_scan.rs:WRITE_HTTP_METHODS
-rules/native/rules-http/src/http_scan.rs:WRITE_SITE_COVERED_EXTENSIONS
-rules/native/rules-http/src/http_scan/tests.rs:MARKER_WINDOW_PROSE_PAGES
-rules/native/rules-http/src/http_scan/tests.rs:SIGHTLINE_PROSE_PAGES
-rules/native/rules-http/src/mutating_route_no_auth.rs:CALL_GRAPH_COVERED_EXTENSIONS
-rules/native/rules-http/src/mutating_route_no_auth/qualifier.rs:QUALIFIER_GUARD_TOKENS
-rules/native/rules-http/src/route_shadowing.rs:FIRST_MATCH_ROUTER_EXTENSIONS
-rules/native/rules-http/src/unprovided_consume.rs:MIN_FOREIGN_UNPROVIDED_GROUP
-rules/native/rules-schema/src/message/tests.rs:SIGHTLINE_PROSE_PAGES
-rules/native/rules-schema/src/structural.rs:GOD_THRESHOLD
-rules/native/rules-schema/src/structural.rs:LOOKUP_FIELD_MAX
-rules/native/rules-schema/src/structural.rs:MONEY_TOKENS
-rules/native/rules-schema/src/usage.rs:CHURN_CRITICAL_THRESHOLD
-rules/native/rules-schema/src/usage.rs:CHURN_WARNING_THRESHOLD
-rules/native/rules-schema/src/usage.rs:FIELD_USAGE_SCAN_EXTENSIONS
-rules/native/rules-schema/src/usage.rs:MIN_FIELD_NAME_LEN
-rules/native/rules-schema/src/usage.rs:SKIP_FIELD_NAMES
+crates/config/src/lib.rs:CONFIG_SURFACE_JSON internal
+crates/config/src/lib.rs:DEFAULT_AUTHORED_PACKS_DIR internal # zzop's own on-disk layout; already overridable via packs.extraDirs
+crates/config/src/lib.rs:DEFAULT_CONFIG_FILENAME internal
+crates/config/src/lib_tests.rs:TREES_LESS_CONFIG test # fixture config body for the single-tree-over-a-workspace disclosure tests
+crates/config/src/mapper/options.rs:FRONT_END_ONLY_VOCABULARY_KEYS internal # zzop's own config keys the front end consumes rather than forwards
+crates/config/src/mapper/severity.rs:SEVERITY_ALIASES internal # zzop's own accepted severity tokens (off/critical/warn/...)
+crates/config/src/mapper/warnings.rs:RETIRED_KEYS internal # config keys zzop itself retired
+crates/config/src/template.rs:CONFIG_TEMPLATE_JSONC internal
+crates/config/src/workspaces.rs:MAX_GLOB_DEPTH cap
+crates/core/src/dsl/fragments.rs:SHARED_FRAGMENTS_JSON internal # embedded DSL bundle; fragment NAMES are censused separately in Rust
+crates/core/src/dsl/markers.rs:MARKER_LOOKBACK_LINES cap
+crates/core/src/dsl/markers.rs:NEAR_MISS_MARKER_TOKEN_PATTERN internal # grammar of zzop's own <id>-ok suppression marker
+crates/core/src/dsl/source.rs:BLOB_LINE cap
+crates/core/src/dsl/source.rs:LONG_LINE cap
+crates/core/src/dsl/tests_fragments/name_census.rs:CENSUSED_FRAGMENTS test
+crates/core/src/dsl/tests_fragments/name_census.rs:SHARED_BUNDLE test
+crates/core/src/dsl/tests_fragments/superset.rs:BASE test
+crates/core/src/dsl/tests_http_conventions.rs:HTTP_CONVENTIONS_JSON test
+crates/core/src/dsl/tests_markers/near_miss_tests.rs:BASE_MESSAGE test
+crates/core/src/dsl/tests_method_scan_same_fn.rs:SIBLING_CLOSURES test
+crates/core/src/file_nodes.rs:HOTSPOT_MIN_CHANGES cap
+crates/core/src/io/key.rs:HTTP_KEY_VERBS fact # HTTP method tokens, fixed by RFC
+crates/core/src/io/key.rs:UNKNOWN_VERB internal
+crates/core/src/node.rs:DAY_MS test
+crates/core/src/node.rs:DEFAULT_RECENT_THRESHOLD_DAYS cap
+crates/core/src/node.rs:DEFAULT_WEIGHTS cap # numeric risk-score weights, not a name
+crates/core/src/node.rs:MS_PER_DAY internal # unit arithmetic, not a name at all
+crates/core/src/node.rs:NOW test
+crates/core/src/normalized.rs:NORMALIZED_AST_FORMAT internal
+crates/core/src/normalized.rs:SUPPORTED_NORMALIZED_AST_VERSION internal
+crates/core/src/pack_loader.rs:SUPPORTED_DSL_SCHEMA_VERSION internal
+crates/engine/src/analyze/assemble/helpers.rs:RUST_STD_CRATE_FAMILY fact # Rust's own std crate names
+crates/engine/src/analyze/assemble/helpers/csharp.rs:CSHARP_STD_IMPORT_HEADS fact # .NET BCL namespace roots
+crates/engine/src/analyze/assemble/helpers/java.rs:JAVA_STD_IMPORT_HEADS fact # JDK package roots
+crates/engine/src/analyze/compose/client_base.rs:SENTINEL_KIND internal # alias of zzop's own sentinel kind
+crates/engine/src/analyze/compose/global_prefix.rs:SENTINEL_KIND internal # alias of zzop's own sentinel kind
+crates/engine/src/analyze/diagnostics.rs:SAMPLE cap
+crates/engine/src/analyze/diagnostics/capability.rs:ON_RAMP_EXT_SAMPLE cap
+crates/engine/src/cache.rs:CACHE_SCHEMA_VERSION internal
+crates/engine/src/cache.rs:DSL_INTERPRETER_FINGERPRINT internal
+crates/engine/src/cache.rs:LEXICAL_FALLBACK_FINGERPRINT internal
+crates/engine/src/dead_exports.rs:NON_TS_CALL_GRAPH_EXTENSIONS fact # file extensions fixed by the languages
+crates/engine/src/disclosure.rs:ANALYSIS_DARK internal
+crates/engine/src/disclosure.rs:BLINDNESS_REGISTRY internal # zzop's own disclosure-class registry (ids, groups, prose)
+crates/engine/src/disclosure.rs:EXTRACTION_BLIND internal
+crates/engine/src/disclosure.rs:INPUT_CONFIG internal
+crates/engine/src/disclosure.rs:TRUST_CALIBRATION internal
+crates/engine/src/disclosure/tests.rs:EXPECTED test
+crates/engine/src/dispatch.rs:DEFAULT_SKIP_DIRS convention -> vocabulary.skipDirs # dist/build/.next/target are build-output names a project picks; decides what is never analyzed at all
+crates/engine/src/dispatch.rs:NON_SOURCE_EXTENSIONS fact # extensions fixed by the file formats
+crates/engine/src/dispatch/tests.rs:EXPECTED test
+crates/engine/src/file_routes/mod.rs:HTTP_VERB_EXPORTS fact # Next.js App Router requires these exact export names
+crates/engine/src/framework_silence/builtin_fetch.rs:FETCH_CALL_SITES_MIN cap
+crates/engine/src/framework_silence/builtin_fetch.rs:FUNNEL_TAIL internal # warning prose zzop emits
+crates/engine/src/framework_silence/builtin_fetch.rs:MAX_SAMPLES cap
+crates/engine/src/framework_silence/call_graph_language.rs:MAX_EXAMPLES cap
+crates/engine/src/framework_silence/call_graph_language.rs:SILENCED_RULE_ID internal # zzop rule id
+crates/engine/src/framework_silence/client_library_import.rs:HTTP_CLIENT_SPECIFIERS fact # published package names
+crates/engine/src/framework_silence/committed_spec_io_silence.rs:IO_NEAR_ZERO_FLOOR cap
+crates/engine/src/framework_silence/committed_spec_io_silence.rs:MAX_SPEC_PROBES cap
+crates/engine/src/framework_silence/controller_silence.rs:MAX_SAMPLES cap
+crates/engine/src/framework_silence/controller_silence.rs:MIN_FILES cap
+crates/engine/src/framework_silence/controller_silence.rs:MIN_PROVIDES_FLOOR cap
+crates/engine/src/framework_silence/egress_intent.rs:ARG_SCAN_CAP cap
+crates/engine/src/framework_silence/fetch_wrapper.rs:MAX_EXAMPLES cap
+crates/engine/src/framework_silence/fetch_wrapper.rs:WRAPPER_EXPORT_NAMES convention -> vocabulary.fetchWrapperExportNames # binding names a project's own hand-rolled http wrapper module exports (api, http, client, del)
+crates/engine/src/framework_silence/fetch_wrapper.rs:WRAPPER_FUNNEL_TAIL internal # warning prose zzop emits
+crates/engine/src/framework_silence/orm_schema_silence.rs:MAX_EXAMPLES cap
+crates/engine/src/framework_silence/orm_schema_silence.rs:ORM_SCHEMA_SPECIFIERS fact # published package names
+crates/engine/src/framework_silence/rust_router_layer.rs:AFFECTED_RULE_ID internal # zzop rule id
+crates/engine/src/framework_silence/rust_router_layer.rs:MAX_EXAMPLES cap
+crates/engine/src/framework_silence/server_framework_import.rs:SERVER_FRAMEWORK_SPECIFIERS fact # published package names
+crates/engine/src/framework_silence/unknown_verb_range.rs:MAX_EXAMPLES cap
+crates/engine/src/framework_silence/unknown_verb_range.rs:SILENCED_RULE_ID internal # zzop rule id
+crates/engine/src/generated_banner.rs:MARKERS convention -> vocabulary.generatedFileMarkers # generated-file banner text; a codegen tool or a team can word its banner any way
+crates/engine/src/io.rs:DEFAULT_ROUTER_NAMES convention -> vocabulary.routerNames # the identifier a project gives its own router value; its own doc called it an escape hatch while nothing could reach it
+crates/engine/src/lib.rs:DEFAULT_SIZE_CAP cap
+crates/engine/src/pipeline/rust_workspace.rs:TARGET_SECTIONS fact # Cargo.toml section headers fixed by Cargo
+crates/engine/src/tests.rs:DERIVED_SCHEMA_GATE test
+crates/engine/src/trees/parallel_impl.rs:MIN_PARALLEL_IMPL_SIGNALS cap
+crates/engine/src/vocabulary.rs:DEFAULT_JAVA_SOURCE_ROOT convention -> vocabulary.javaSourceRoot # the Maven/Gradle layout is a source root a project can relocate (moved here from decorator_gate.rs SRC_ROOT, whose one reader now takes it as an argument)
+crates/metrics/src/recommendations/enrich.rs:DOUBLE_STAR_PLACEHOLDER internal # in-band placeholder for ** while a glob is rewritten; parsing mechanics, not a name
+crates/metrics/src/scores/config.rs:DEFAULT_HIERARCHY_SHARED_DIRS convention -> vocabulary.hierarchySharedDirs # cross-cutting dirs exempted from layering violations
+crates/metrics/src/scores/config/fsd.rs:DEFAULT_FSD_BASE_DIRS convention -> vocabulary.fsd.baseDirs # FSD base-layer dir name
+crates/metrics/src/scores/config/fsd.rs:DEFAULT_FSD_ENTRY convention -> vocabulary.fsd.entry # FSD entry-layer dir names; a project using views/screens scores against a layout it never adopted
+crates/metrics/src/scores/config/fsd.rs:DEFAULT_FSD_SHARED convention -> vocabulary.fsd.shared # FSD shared-layer dir names
+crates/metrics/src/scores/config/fsd.rs:DEFAULT_FSD_SLICE_CONTAINERS convention -> vocabulary.fsd.sliceContainers # modules is as common as features and would score as cross-slice
+crates/metrics/src/scores/config/fsd.rs:NEVER internal # unsatisfiable regex used when an FSD layer list is empty; parsing mechanics, not a name
+crates/summary/src/analyze/tests.rs:CONDITIONAL_UNDER_ITS_OWN_NAME test # which surface-parity carry-conditional rows ride under their own reply key; fail-closed whitelist for a derived pin
+crates/summary/src/analyze/tests.rs:EXAMPLE_ENVELOPE test
+crates/summary/src/analyze/tests.rs:SHAPER_INVENTED_KEYS test # reply keys the shaper invents (no AnalyzeOutputView row); fail-closed whitelist for a derived pin
+crates/summary/src/contracts.rs:CONFIG_TEMPLATE_FILENAME internal
+crates/summary/src/contracts.rs:CONFIG_TEMPLATE_NAME internal
+crates/summary/src/graph/dep.rs:DEFAULT_DEP_TOP cap # node cap for the dep diagram; readability threshold, overridable with --top
+crates/summary/src/graph/mermaid.rs:CLASS_DEFS internal # mermaid classDef names and colours zzop emits
+crates/summary/src/graph/mod.rs:DEFAULT_GRAPH_TOP cap
+crates/summary/src/graph/mod.rs:WIRE_NAMES internal # zzop's own --domain spellings, not names a project picks
+crates/summary/src/graph/model.rs:CONSUME internal # zzop graph edge label
+crates/summary/src/graph/model.rs:PROVIDE internal # zzop graph edge label
+crates/summary/src/graph/posture.rs:DEFAULT_POSTURE_TOP cap # per-tree route cap for the posture diagram; readability threshold, overridable with --top
+crates/summary/src/graph/posture.rs:WRITE_METHODS fact # HTTP method TOKENS fixed by RFC, mirroring http_scan.rs WRITE_HTTP_METHODS - not names a project picks
+crates/summary/src/graph/risk.rs:DEFAULT_RISK_TOP cap # per-kind node cap for the risk diagram; readability threshold, overridable with --top
+crates/summary/src/manifest/mod.rs:RELATIONS internal # zzop manifest relation names
+crates/summary/src/output/bucket_keys.rs:DEFAULT_BUCKET_KEYS_LIMIT cap
+crates/summary/src/output/bucket_keys.rs:KEY_BUCKETS internal # zzop's own output bucket names
+crates/summary/src/output/mod.rs:DEFAULT_DEGRADED_LIMIT cap
+crates/summary/src/output/mod.rs:DEFAULT_EDGES_LIMIT cap
+crates/summary/src/output/mod.rs:DEFAULT_FINDINGS_LIMIT cap
+crates/summary/src/output/mod.rs:MAX_LIMIT cap
+crates/summary/src/siblings.rs:MAX_NAMED_SIBLINGS cap
+crates/summary/src/suggest.rs:BUCKETS internal # zzop's own suggestion bucket names
+crates/summary/src/suggest.rs:SUGGESTIONS_LIMIT cap
+parser/parser-csharp/src/adapters/http_clients.rs:HTTP_CLIENT_SPECIFIERS fact # .NET namespaces
+parser/parser-csharp/src/adapters/http_clients.rs:VERB_METHODS fact # read the decl - GetAsync/PostAsJsonAsync are System.Net.Http.HttpClient's own method names
+parser/parser-csharp/src/adapters/http_clients/tests.rs:IMPORT test
+parser/parser-csharp/src/adapters/provides/attribute_controller.rs:METHOD_ATTRIBUTES fact # ASP.NET Core attribute names
+parser/parser-csharp/src/adapters/provides/minimal_api.rs:MAP_METHODS fact # ASP.NET Minimal API MapGet/MapPost builder methods
+parser/parser-csharp/src/lang/used_names.rs:DECLARES_NAME_FIELD fact # tree-sitter node kinds
+parser/parser-csharp/src/lib.rs:PARSER_FINGERPRINT internal
+parser/parser-csharp/src/lib.rs:TOP_LEVEL_DECLARATION_KINDS fact # tree-sitter node kinds
+parser/parser-csharp/src/node_kinds.rs:PINNED_ANONYMOUS_KEYWORDS fact # C# keywords
+parser/parser-csharp/src/node_kinds.rs:PINNED_NODE_KINDS fact # tree-sitter node kinds
+parser/parser-go/src/adapters/gin.rs:GIN_VERB_METHODS fact # aliases HTTP_KEY_VERBS - gin's router methods are the verb names
+parser/parser-go/src/adapters/gin/cross_file.rs:GIN_RECEIVER_TYPES fact # gin's own exported type names
+parser/parser-go/src/adapters/gorm.rs:QUERY_METHODS fact # read the decl - Model/Where/Preload/FirstOrCreate are GORM's own chainable API; the decl doc reasons about gorm's API surface explicitly
+parser/parser-go/src/adapters/gorm/tests.rs:IMPORT test
+parser/parser-go/src/adapters/http_clients.rs:VERB_METHODS fact # net/http client method names
+parser/parser-go/src/adapters/net_http.rs:VERB_METHODS fact # HandleFunc/Handle are net/http's own registration functions
+parser/parser-go/src/lang/resolve/tests.rs:MODULE test
+parser/parser-go/src/lang/used_names.rs:DECLARES_NAME_FIELD fact # tree-sitter node kinds
+parser/parser-go/src/lib.rs:PARSER_FINGERPRINT internal
+parser/parser-go/src/lib.rs:TOP_LEVEL_DECLARATION_KINDS fact # tree-sitter node kinds
+parser/parser-go/src/node_kinds.rs:PINNED_NODE_KINDS fact # tree-sitter node kinds
+parser/parser-java-21/src/lang/used_names.rs:DECLARES_NAME_FIELD fact # tree-sitter node kinds
+parser/parser-java-21/src/lib.rs:PARSER_FINGERPRINT internal
+parser/parser-java-21/src/lib.rs:TOP_LEVEL_DECLARATION_KINDS fact # tree-sitter node kinds
+parser/parser-java-21/src/node_kinds.rs:PINNED_ANONYMOUS_KEYWORDS fact # Java keywords
+parser/parser-java-21/src/node_kinds.rs:PINNED_NODE_KINDS fact # tree-sitter node kinds
+parser/parser-java-21/src/provides/annotations.rs:METHOD_ANNOTATIONS fact # Spring's @GetMapping family - the canonical example in the vocabulary decision
+parser/parser-java-21/src/provides/annotations.rs:REQUEST_METHOD_NAMES fact # Spring's RequestMethod enum constants
+parser/parser-java-21/src/security.rs:SECURITY_ANNOTATIONS fact # Spring Security / JSR-250 annotation names
+parser/parser-java-21/src/spring_security.rs:AUTHZ_ENTRYPOINTS fact # Spring Security DSL method names
+parser/parser-java-21/src/spring_security.rs:CLOSED_TERMINALS fact # Spring Security DSL method names
+parser/parser-java-21/src/spring_security.rs:MATCHER_METHODS fact # Spring Security DSL method names
+parser/parser-java-21/src/spring_security/tests.rs:BE_SPRING test
+parser/parser-prisma/src/analysis.rs:DEFAULT_PRISMA_CLIENT_GETTER_FN convention -> vocabulary.prismaClientGetter # getPrisma is a name each project invents for its client accessor; the DEFAULT_ prefix already concedes it
+parser/parser-prisma/src/lib.rs:PARSER_FINGERPRINT internal
+parser/parser-prisma/src/tests.rs:ENUM_SAMPLE test
+parser/parser-prisma/src/tests.rs:SAMPLE test
+parser/parser-python-3/src/adapters/django/tests.rs:IMPORT test
+parser/parser-python-3/src/adapters/fastapi.rs:VERB_DECORATORS fact # FastAPI's own @app.get/@app.post decorator names
+parser/parser-python-3/src/adapters/fastapi/guard/depends.rs:ANONYMOUS_SWITCH_KEYWORDS fact # auto_error/required are fastapi.security constructor kwargs
+parser/parser-python-3/src/adapters/fastapi/guard/depends.rs:SECURITY_SCHEME_CLASSES fact # fastapi.security class names
+parser/parser-python-3/src/adapters/guard_vocab.rs:ANONYMOUS_VETO_SUBSTRINGS convention -> vocabulary.pythonGuardAnonymousVetoSubstrings # substrings of PROJECT-authored dependency names (optional, maybe, anonymous)
+parser/parser-python-3/src/adapters/guard_vocab.rs:GUARD_SUBSTRINGS convention -> vocabulary.pythonGuardSubstrings # how a project spells its own auth dependency functions - the Python twin of DEFAULT_AUTH_GUARD_PATTERN
+parser/parser-python-3/src/adapters/guard_vocab.rs:REPORT_VETO_PREFIXES convention -> vocabulary.pythonGuardReportVetoPrefixes # verb heads of project-authored function names
+parser/parser-python-3/src/adapters/guard_vocab.rs:REPORT_VETO_SUFFIXES convention -> vocabulary.pythonGuardReportVetoSuffixes # noun tails of project-authored function names
+parser/parser-python-3/src/adapters/http_clients.rs:VERB_METHODS fact # requests/httpx module-level verb functions
+parser/parser-python-3/src/adapters/http_clients/instances.rs:CLIENT_CTORS fact # requests.Session / httpx.Client / httpx.AsyncClient class names
+parser/parser-python-3/src/adapters/sqlalchemy.rs:FIRST_ARG_VERBS fact # SQLAlchemy API function names
+parser/parser-python-3/src/adapters/sqlalchemy.rs:MULTI_MODEL_VERBS fact # SQLAlchemy API function names
+parser/parser-python-3/src/adapters/sqlalchemy/tests.rs:IMPORT test
+parser/parser-python-3/src/lib.rs:PARSER_FINGERPRINT internal
+parser/parser-rust/src/adapters/axum.rs:VERB_METHODS fact # axum::routing's own get/post handler constructors
+parser/parser-rust/src/adapters/http_clients.rs:VERB_METHODS fact # reqwest Client's own verb methods
+parser/parser-rust/src/lang/extractor_guards.rs:RUST_OPTIONAL_EXTRACTOR_PREFIXES convention -> vocabulary.rustOptionalExtractorPrefixes # how a project spells its own OPTIONAL request extractor (MaybeAuthUser, OptionalUser) - the Rust twin of pythonGuardAnonymousVetoSubstrings
+parser/parser-rust/src/lib.rs:PARSER_FINGERPRINT internal
+parser/parser-sql/src/extract.rs:SEGMENT fact # SQL identifier-quoting syntax fixed by the dialects
+parser/parser-sql/src/lib.rs:PARSER_FINGERPRINT internal
+parser/parser-typescript/src/adapters/client_base.rs:CLIENT_BASE_PREFIX_KIND internal # zzop sentinel kind
+parser/parser-typescript/src/adapters/controller_decorators/context.rs:CONTROLLER_CLASS_GATES fact # @Controller/@RestController decorator names fixed by Nest/Spring
+parser/parser-typescript/src/adapters/controller_decorators/method_facts.rs:METHOD_DECORATORS fact # Nest's @Get/@Post decorator names
+parser/parser-typescript/src/adapters/db_table_consume.rs:PRISMA_CLIENT_GETTER convention -> vocabulary.prismaClientGetter # getPrisma is a project-invented accessor name (sibling of parser-prisma's DEFAULT_PRISMA_CLIENT_GETTER_FN)
+parser/parser-typescript/src/adapters/db_table_consume.rs:QUERY_METHODS fact # read the decl - findMany/findFirst/findUnique/count are Prisma Client's own delegate methods
+parser/parser-typescript/src/adapters/egress/body_shape.rs:BODY_POSITION_VERBS fact # HTTP method tokens
+parser/parser-typescript/src/adapters/egress/react_query.rs:QUERY_HOOKS fact # TanStack Query's exported hook names
+parser/parser-typescript/src/adapters/egress/react_query.rs:RQ test
+parser/parser-typescript/src/adapters/egress/retry.rs:RETRY_WRAPPERS convention -> vocabulary.retryWrappers # AMBIGUOUS - these are the libraries' documented default export names, but they are default IMPORT BINDINGS a consumer renames at will
+parser/parser-typescript/src/adapters/egress/retry.rs:RETRY_WRAPPER_PACKAGES fact # published npm package names
+parser/parser-typescript/src/adapters/egress/retry.rs:RETRY_WRITE_VERBS fact # HTTP method TOKENS fixed by RFC, not names a project picks. T2 - pinned equal to rules-http WRITE_HTTP_METHODS in engine policy_pins.rs (parsers may not depend on rule crates)
+parser/parser-typescript/src/adapters/global_prefix.rs:NEST_GLOBAL_PREFIX_KIND internal # zzop sentinel kind
+parser/parser-typescript/src/adapters/nest_middleware/tests.rs:BE_NEST_SHAPE test
+parser/parser-typescript/src/adapters/raw_sql.rs:PLACEHOLDER internal # zzop's own template-hole token
+parser/parser-typescript/src/adapters/router_mounts/guard.rs:AUTH_GUARDED_ATTR_KEY internal # zzop producer/consumer attribute key
+parser/parser-typescript/src/adapters/router_mounts/guard.rs:ENV_AXIS_VETO_SUBSTRINGS convention -> vocabulary.envAxisVetoSubstrings # substrings of project-authored middleware names
+parser/parser-typescript/src/adapters/router_mounts/guard.rs:MIDDLEWARE_GUARD_CALLEES convention -> vocabulary.middlewareGuardCallees # AMBIGUOUS - passport.authenticate/clerkMiddleware are library API, but requiresAuth/ensureLoggedIn/checkJwt are names a project writes itself
+parser/parser-typescript/src/adapters/router_mounts/guard.rs:ROUTER_NAME_VETO_SUFFIXES convention -> vocabulary.routerNameVetoSuffixes # suffixes of project-authored router/service/module identifiers
+parser/parser-typescript/src/adapters/router_mounts/guard.rs:WRAPPER_GUARD_PREFIXES convention -> vocabulary.wrapperGuardPrefixes # require/ensure/protect/restrict are prefixes of project-authored wrapper functions
+parser/parser-typescript/src/adapters/router_mounts/idempotency.rs:IDEMPOTENCY_GUARDED_ATTR_KEY internal # zzop producer/consumer attribute key
+parser/parser-typescript/src/adapters/router_mounts/idempotency.rs:IDEMPOTENCY_HEADER_NAMES convention -> vocabulary.idempotencyHeaderNames # AMBIGUOUS - Idempotency-Key is an IETF draft header, but the x- variant and any house header name are the project's choice
+parser/parser-typescript/src/lang/resolve/specifier.rs:EXTENSION_FALLBACKS fact # NodeNext .js -> .ts mapping fixed by TypeScript/Node resolution
+parser/parser-typescript/src/lang/resolve/specifier.rs:RESOLVE_EXTS fact # TS/JS extensions fixed by the language and its resolver
+parser/parser-typescript/src/lang/write_site.rs:ATOMIC_OP_KEYS fact # Prisma atomic-update operation keys
+parser/parser-typescript/src/lang/write_site.rs:COUNTER_METHODS fact # Redis command names (incr/incrby/decr/decrby)
+parser/parser-typescript/src/lang/write_site.rs:CREATE_METHODS fact # Prisma/TypeORM/Knex API method names
+parser/parser-typescript/src/lang/write_site.rs:DEFAULT_ORM_RECEIVER_PATTERN convention -> vocabulary.ormReceiverPattern # Repository/Store suffixes and bare db/tx/orm handles are names a project gives its own ORM receivers; the DEFAULT_ prefix already concedes it
+parser/parser-typescript/src/lang/write_site.rs:DEFAULT_WRITE_METHODS convention -> vocabulary.ormWriteMethods # AMBIGUOUS - read the decl - most entries are Prisma/TypeORM API, but it backs a generic "any write" check, so a hand-rolled repository spelling writes persist/store/commit is silently missed
+parser/parser-typescript/src/lang/write_site.rs:UPDATE_METHODS fact # Prisma/TypeORM API method names
+parser/parser-typescript/src/lang/write_site.rs:WRITE_LABEL_TOKEN_COUNT cap
+parser/parser-typescript/src/lib.rs:ARRAY_ITERATION_METHODS fact # ECMAScript Array.prototype method names
+parser/parser-typescript/src/lib.rs:PARSER_FINGERPRINT internal
+parser/parser-typescript/src/lib.rs:PROMISE_CONTINUATION_METHODS fact # ECMAScript Promise method names
+rules/native/rules-cross-layer/src/cross_layer/ambiguous_consume.rs:MAX_CANDIDATES cap
+rules/native/rules-cross-layer/src/cross_layer/external_host_fanout.rs:FANOUT_MIN_FILES cap
+rules/native/rules-cross-layer/src/cross_layer/external_secret_in_url.rs:SECRET_PARAM_NAMES convention -> vocabulary.secretParamNames # query-parameter names a project chooses - the secret-param class of the vocabulary decision
+rules/native/rules-cross-layer/src/cross_layer/mod.rs:MIN_TOTAL_CONSUMES cap
+rules/native/rules-cross-layer/src/cross_layer/mod.rs:VERSION_SEGMENT_PATTERN convention -> vocabulary.apiVersionSegmentPattern # AMBIGUOUS - /v1/ is a widespread URL convention, not a standard; date-versioned APIs (/2024-01/) are invisible to it
+rules/native/rules-cross-layer/src/cross_layer/prefix_drift.rs:MIN_PREFIX_DRIFT_GROUP cap
+rules/native/rules-cross-layer/src/cross_layer/retrying_write_no_idempotency.rs:IDEMPOTENCY_GUARDED_ATTR internal # zzop producer/consumer attribute key
+rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs:MIN_OPAQUE_CLIENT_IMPORTING_FILES cap
+rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs:MIN_SDK_IMPORTING_FILES cap
+rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs:OPAQUE_HTTP_CLIENT_PATTERN fact # published npm package names
+rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs:SDK_SPECIFIER_PATTERN fact # published npm package names plus their segment shapes
+rules/native/rules-cross-layer/src/cross_layer/unconsumed_endpoint.rs:EXTERNALLY_FETCHED_PATHS convention -> vocabulary.externallyFetchedPaths # AMBIGUOUS - /robots.txt and /favicon.ico are standards, but /health, /healthz, /livez are ops conventions each project names itself
+rules/native/rules-cross-layer/src/cross_layer/unconsumed_endpoint.rs:MAX_LISTED_PER_SOURCE cap
+rules/native/rules-cross-layer/src/cross_layer/unconsumed_endpoint.rs:WELL_KNOWN_PREFIX fact # /.well-known/ is fixed by RFC 8615
+rules/native/rules-cross-layer/src/cross_layer/unconsumed_mutation_endpoint.rs:RULE_ID internal # zzop rule id
+rules/native/rules-cross-layer/src/cross_layer/write_methods.rs:CROSS_LAYER_WRITE_METHODS fact # HTTP method TOKENS fixed by RFC, not names a project picks. T2 - pinned equal to rules-http WRITE_HTTP_METHODS in engine policy_pins.rs (this crate depends on zzop-core alone)
+rules/native/rules-graph/src/cache_lane_file_read.rs:DEFAULT_FILE_READ_CALLEES convention -> vocabulary.fileReadCallees # stdlib read spellings, not names a project picks - declarable so a tree whose read_to_string means something else can narrow it
+rules/native/rules-graph/src/cache_lane_file_read/tests.rs:ANCHOR test
+rules/native/rules-graph/src/cache_lane_file_read/tests.rs:READS test
+rules/native/rules-graph/src/dead_candidates.rs:DEAD_MAX_CHANGES cap
+rules/native/rules-http/src/http_scan.rs:NEAR_MISS_STEM_PATTERN internal # grammar of zzop's own marker
+rules/native/rules-http/src/http_scan.rs:OK_MARKER_LOOKBACK_ABOVE cap
+rules/native/rules-http/src/http_scan.rs:OK_MARKER_LOOKBACK_LINES cap
+rules/native/rules-http/src/http_scan.rs:OK_MARKER_SPELLING internal # spelling of zzop's own suppression marker
+rules/native/rules-http/src/http_scan.rs:SAFE_METHODS fact # HTTP method tokens
+rules/native/rules-http/src/http_scan.rs:WRITE_HTTP_METHODS fact # read the decl - HTTP method TOKENS, not method NAMES a project picks
+rules/native/rules-http/src/http_scan.rs:WRITE_SITE_COVERED_EXTENSIONS fact # file extensions fixed by the languages
+rules/native/rules-http/src/http_scan/tests.rs:MARKER_WINDOW_PROSE_PAGES test
+rules/native/rules-http/src/http_scan/tests.rs:SIGHTLINE_PROSE_PAGES test
+rules/native/rules-http/src/mutating_route_no_auth.rs:AUTH_GUARDED_ATTR internal # zzop producer/consumer attribute key
+rules/native/rules-http/src/mutating_route_no_auth.rs:CALL_GRAPH_COVERED_EXTENSIONS fact # file extensions fixed by the languages
+rules/native/rules-http/src/mutating_route_no_auth.rs:DEFAULT_AUTH_GUARD_PATTERN convention -> vocabulary.authGuardPattern # how a project spells its own guard functions - the headline case of the vocabulary decision; DEFAULT_ already concedes it
+rules/native/rules-http/src/mutating_route_no_auth/qualifier.rs:QUALIFIER_GUARD_TOKENS convention -> vocabulary.authGuardQualifierTokens # camel tokens of project-authored guard CLASS names; its own doc admits a finance SecurityRepository false-clear
+rules/native/rules-http/src/mutating_route_no_auth/vocab.rs:AUTH_ACQUISITION_CONDITIONAL_PATTERN convention -> vocabulary.authAcquisitionConditionalPattern # URL path segments a project names (/register, /otp, /refresh)
+rules/native/rules-http/src/mutating_route_no_auth/vocab.rs:AUTH_ACQUISITION_STANDALONE_PATTERN convention -> vocabulary.authAcquisitionStandalonePattern # URL path segments a project names (/login, /signin)
+rules/native/rules-http/src/mutating_route_no_auth/vocab.rs:AUTH_FAMILY_PATH_PATTERN convention -> vocabulary.authFamilyPathPattern # URL path segments a project names
+rules/native/rules-http/src/route_shadowing.rs:FIRST_MATCH_ROUTER_EXTENSIONS fact # file extensions fixed by the languages
+rules/native/rules-http/src/unprovided_consume.rs:ALWAYS_VETO_EXTENSION_PATTERN fact # asset file extensions fixed by the formats
+rules/native/rules-http/src/unprovided_consume.rs:ASSET_DIR_GATED_EXTENSION_PATTERN fact # file extensions fixed by the formats
+rules/native/rules-http/src/unprovided_consume.rs:MIN_FOREIGN_UNPROVIDED_GROUP cap
+rules/native/rules-http/src/unprovided_consume/vocab.rs:API_SEGMENT_PATTERN convention -> vocabulary.apiSegmentPattern # /api, /rpc, /v1 are URL segment names each project chooses
+rules/native/rules-schema/src/lib.rs:SCHEMA_ISSUE_NAMESPACE internal # zzop rule-id namespace
+rules/native/rules-schema/src/lib.rs:SCHEMA_STRUCTURAL_ISSUE_LABELS internal # zzop issue labels
+rules/native/rules-schema/src/lib.rs:SCHEMA_USAGE_ISSUE_LABELS internal # zzop issue labels
+rules/native/rules-schema/src/message/tests.rs:SIGHTLINE_PROSE_PAGES test
+rules/native/rules-schema/src/structural.rs:GOD_THRESHOLD cap
+rules/native/rules-schema/src/structural.rs:LOOKUP_FIELD_MAX cap
+rules/native/rules-schema/src/structural.rs:MONEY_TOKENS convention -> vocabulary.moneyTokens # money field names a project chooses - the amount-field class of the vocabulary decision
+rules/native/rules-schema/src/structural.rs:STRUCTURAL_RULES_VERSION internal
+rules/native/rules-schema/src/usage.rs:BOUND_MODEL_ATTR internal # zzop producer/consumer attribute key
+rules/native/rules-schema/src/usage.rs:CHURN_CRITICAL_THRESHOLD cap
+rules/native/rules-schema/src/usage.rs:CHURN_WARNING_THRESHOLD cap
+rules/native/rules-schema/src/usage.rs:FIELD_USAGE_SCAN_EXTENSIONS fact # file extensions fixed by the languages
+rules/native/rules-schema/src/usage.rs:MIN_FIELD_NAME_LEN cap
+rules/native/rules-schema/src/usage.rs:MODEL_CHURN_ATTR internal # zzop producer/consumer attribute key
+rules/native/rules-schema/src/usage.rs:SKIP_FIELD_NAMES convention -> vocabulary.schemaUsageSkipFields # id/createdAt/updatedAt are schema field names a project chooses (created_at, inserted_at)

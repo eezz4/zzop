@@ -11,12 +11,25 @@
 use std::io::{BufRead, Write};
 
 /// The version this binary reports as MCP `serverInfo.version` — re-exported from the shared
-/// `zzop-host` crate (`CARGO_PKG_VERSION` there, the workspace `[workspace.package] version`, the
-/// release SSOT since the 2026-07-22 version reform) so this server and the `zzop` CLI's `version`
-/// subcommand can never disagree. CI verifies the pushed `v*` tag and `.claude-plugin/plugin.json`
+/// `zzop-summary` crate, whose own re-export reaches the single owner `zzop_facade::version`
+/// (`CARGO_PKG_VERSION` there, the workspace `[workspace.package] version`, the release SSOT since the
+/// 2026-07-22 version reform) so this server and the `zzop` CLI's `version` subcommand can never
+/// disagree. CI verifies the pushed `v*` tag and `.claude-plugin/plugin.json`
 /// both match it, so a released build's reported version equals the release tag and the plugin's
 /// published version by construction.
-pub use zzop_host::server::version;
+pub use zzop_summary::version;
+
+/// The DIAGNOSTIC version form this binary prints for `zzop-mcp version --verbose`: the same release
+/// version plus every parser's `PARSER_FINGERPRINT`. Re-exported from the same shared crate the bare
+/// form comes from, reaching the same single owner (`zzop_facade::version_string`), and byte-identical
+/// to what `zzop version --verbose` prints — the parity half of that CLI knob, so "which parser build
+/// produced this analysis?" is answerable from either product rather than the CLI alone.
+///
+/// It is NOT on the MCP wire: `serverInfo` is a spec-shaped `{name, version}` object and every
+/// `resources/read` document this server serves is a static embedded contract, so a runtime fingerprint
+/// string would have to invent a new resource class to ride there. The operator question it answers
+/// ("which build is this?") is already answered on this binary's own stderr banner and this subcommand.
+pub use zzop_summary::version_string;
 
 /// MCP protocol versions this server actually supports, newest first. All three listed revisions
 /// are genuinely supported, not aspirational: this server's surface (`initialize`, `tools/list`/

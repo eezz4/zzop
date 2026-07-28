@@ -2,7 +2,19 @@
 
 zzop joins a frontend and a backend on the **HTTP/DB contract** they share — `METHOD /path`, `table:name` — even when the two are **separate repositories that never import each other**. This demo changes one backend route and shows zzop pinpoint the resulting drift on *both* sides, while the frontend keeps compiling and its tests keep passing.
 
-Reproduce it end to end (restores the corpus on exit):
+This page is a **narrated walkthrough**: every command and the output it produced are written out below,
+so it reads end to end without running anything.
+
+**Reproducing it yourself needs two things this repository does not ship:**
+
+- a **source checkout** with a working Rust toolchain — the run builds a `cargo` example
+  (`zzop-engine`'s `xlayer_dump`), so a released binary is not enough; and
+- the **two corpus trees**, at `corpus/oss/fe-vite` and `corpus/oss/be-express`. `corpus/oss/` is
+  gitignored and no lane in this repo fetches it — bring your own pair, the way
+  [CONTRIBUTING.md](../../CONTRIBUTING.md) describes. Any independently-authored frontend/backend pair
+  demonstrates the same thing; those two paths are simply what the script hardcodes.
+
+With both in place, the script replays the whole sequence (and restores the corpus on exit):
 
 ```bash
 bash docs/demo/break-a-route.sh

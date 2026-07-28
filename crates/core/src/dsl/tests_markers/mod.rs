@@ -22,7 +22,7 @@ fn suppress_marker_on_the_same_line_suppresses_line_scan_finding() {
     let f = scan_pack(
         &marker_line_pack(),
         "f.ts",
-        "const x = y as Foo; // as-ok: guaranteed by caller\n",
+        "const x = y as Foo; // zzop-as-ok: guaranteed by caller\n",
         vec![],
     );
     assert!(f.is_empty(), "{f:?}");
@@ -33,7 +33,7 @@ fn suppress_marker_on_the_line_above_suppresses_line_scan_finding() {
     let f = scan_pack(
         &marker_line_pack(),
         "f.ts",
-        "// as-ok: guaranteed by caller\nconst x = y as Foo;\n",
+        "// zzop-as-ok: guaranteed by caller\nconst x = y as Foo;\n",
         vec![],
     );
     assert!(f.is_empty(), "{f:?}");
@@ -44,7 +44,7 @@ fn suppress_marker_two_lines_above_does_not_suppress() {
     let f = scan_pack(
         &marker_line_pack(),
         "f.ts",
-        "// as-ok: guaranteed by caller\nfunction f() {\n  return (\n    y as Foo);\n}\n",
+        "// zzop-as-ok: guaranteed by caller\nfunction f() {\n  return (\n    y as Foo);\n}\n",
         vec![],
     );
     assert_eq!(f.len(), 1, "{f:?}");
@@ -55,7 +55,7 @@ fn suppress_marker_four_lines_above_does_not_suppress() {
     let f = scan_pack(
         &marker_line_pack(),
         "f.ts",
-        "// as-ok: too far\nfunction f() {\n  const a = 1;\n  return (\n    y as Foo);\n}\n",
+        "// zzop-as-ok: too far\nfunction f() {\n  const a = 1;\n  return (\n    y as Foo);\n}\n",
         vec![],
     );
     assert_eq!(f.len(), 1, "{f:?}");
@@ -66,7 +66,7 @@ fn suppress_marker_does_not_reach_a_sibling_finding_two_lines_below_it() {
     let f = scan_pack(
         &marker_line_pack(),
         "f.ts",
-        "// as-ok: vetted for the next line only\nconst a = x as Foo;\nconst b = y as Bar;\n",
+        "// zzop-as-ok: vetted for the next line only\nconst a = x as Foo;\nconst b = y as Bar;\n",
         vec![],
     );
     assert_eq!(f.len(), 1, "{f:?}");
@@ -103,7 +103,7 @@ fn dash_dash_marker_on_the_same_line_suppresses_line_scan_finding_in_a_sql_file(
     let f = scan_pack(
         &marker_line_pack_sql(),
         "f.sql",
-        "SELECT id as x; -- as-ok: guaranteed by caller\n",
+        "SELECT id as x; -- zzop-as-ok: guaranteed by caller\n",
         vec![],
     );
     assert!(f.is_empty(), "{f:?}");
@@ -114,7 +114,7 @@ fn dash_dash_marker_on_the_line_above_suppresses_line_scan_finding_in_a_sql_file
     let f = scan_pack(
         &marker_line_pack_sql(),
         "f.sql",
-        "-- as-ok: guaranteed by caller\nSELECT id as x;\n",
+        "-- zzop-as-ok: guaranteed by caller\nSELECT id as x;\n",
         vec![],
     );
     assert!(f.is_empty(), "{f:?}");
@@ -130,7 +130,7 @@ fn dash_dash_marker_is_not_recognized_outside_a_sql_file() {
     let f = scan_pack(
         &pack,
         "f.ts",
-        "const x = y as Foo; -- as-ok: nope\n",
+        "const x = y as Foo; -- zzop-as-ok: nope\n",
         vec![],
     );
     assert_eq!(f.len(), 1, "{f:?}");
@@ -143,7 +143,7 @@ fn slash_slash_marker_still_suppresses_in_a_sql_file() {
     let f = scan_pack(
         &marker_line_pack_sql(),
         "f.sql",
-        "SELECT id as x; // as-ok: guaranteed by caller\n",
+        "SELECT id as x; // zzop-as-ok: guaranteed by caller\n",
         vec![],
     );
     assert!(f.is_empty(), "{f:?}");
@@ -168,7 +168,7 @@ fn marker_method_pack_sql() -> RulePackDef {
 
 #[test]
 fn dash_dash_marker_suppresses_method_scan_finding_in_a_sql_file() {
-    let src = "async function f(ids) {\n  for (const id of ids) {\n    -- n+1-ok: batched elsewhere\n    await t.findOne(id);\n  }\n}\n";
+    let src = "async function f(ids) {\n  for (const id of ids) {\n    -- zzop-n+1-ok: batched elsewhere\n    await t.findOne(id);\n  }\n}\n";
     let f = scan_pack(
         &marker_method_pack_sql(),
         "f.sql",
@@ -199,7 +199,7 @@ fn marker_method_pack() -> RulePackDef {
 
 #[test]
 fn suppress_marker_with_regex_metacharacters_suppresses_method_scan_finding() {
-    let src = "async function f(ids) {\n  for (const id of ids) {\n    // n+1-ok: batched elsewhere\n    await t.findOne(id);\n  }\n}\n";
+    let src = "async function f(ids) {\n  for (const id of ids) {\n    // zzop-n+1-ok: batched elsewhere\n    await t.findOne(id);\n  }\n}\n";
     let f = scan_pack(&marker_method_pack(), "f.ts", src, vec![method("f", 1, 5)]);
     assert!(f.is_empty(), "{f:?}");
 }

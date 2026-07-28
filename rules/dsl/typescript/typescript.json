@@ -6,7 +6,7 @@
     {
       "id": "no-explicit-any",
       "severity": "info",
-      "message": "`any` type used — defeats TypeScript's type checking for this value. Replace with a concrete type, a generic parameter, or `unknown` plus a type guard if the shape is genuinely dynamic. Suppress a vetted case with `// no-explicit-any-ok`.",
+      "message": "`any` type used — defeats TypeScript's type checking for this value. Replace with a concrete type, a generic parameter, or `unknown` plus a type guard if the shape is genuinely dynamic. Suppress a vetted case with `// zzop-no-explicit-any-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
@@ -19,7 +19,7 @@
     {
       "id": "as-cast",
       "severity": "info",
-      "message": "`as any` / `as unknown as` cast — a hard escape from type checking (`as any` disables it, `as unknown as X` force-casts through an incompatible type). Prefer a type guard, a properly-typed API, or `unknown` plus a narrowing check. Plain `as X` to a compatible type is not flagged. Suppress a vetted case with `// as-cast-ok`.",
+      "message": "`as any` / `as unknown as` cast — a hard escape from type checking (`as any` disables it, `as unknown as X` force-casts through an incompatible type). Prefer a type guard, a properly-typed API, or `unknown` plus a narrowing check. Plain `as X` to a compatible type is not flagged. Suppress a vetted case with `// zzop-as-cast-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
@@ -31,9 +31,9 @@
       }
     },
     {
-      "id": "unhandled-promise-use-effect",
+      "id": "use-effect-async-callback",
       "severity": "warning",
-      "message": "useEffect callback declared async — React ignores the returned Promise and no cleanup function can be returned; a rejection becomes unhandled. Move the async work into an inner async function or IIFE: `useEffect(() => { void doAsync(); }, deps)`. Suppress a vetted case with `// unhandled-promise-use-effect-ok`.",
+      "message": "useEffect callback declared async — React ignores the returned Promise and no cleanup function can be returned; a rejection becomes unhandled. Move the async work into an inner async function or IIFE: `useEffect(() => { void doAsync(); }, deps)`. Suppress a vetted case with `// zzop-use-effect-async-callback-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
@@ -46,7 +46,7 @@
     {
       "id": "async-handler-no-try",
       "severity": "warning",
-      "message": "An `on<Event>={async ...}` JSX handler (or `on<Event>: async ...` handler-map property) has an `await` but no try/catch — a rejection becomes an unhandled promise rejection. Add try/catch (or `.catch()`) inside the handler. Suppress a vetted case with `// async-handler-no-try-ok`.",
+      "message": "An `on<Event>={async ...}` JSX handler (or `on<Event>: async ...` handler-map property) has an `await` but no try/catch — a rejection becomes an unhandled promise rejection. Add try/catch (or `.catch()`) inside the handler. Suppress a vetted case with `// zzop-async-handler-no-try-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
@@ -67,7 +67,7 @@
     {
       "id": "float-equality",
       "severity": "warning",
-      "message": "A decimal-fraction or negative-exponent numeric literal compared with `==`/`===`/`!=`/`!==` — IEEE754 floats don't represent most decimal fractions exactly, so equality on a computed value is unreliable even against an exactly-written literal (`0.1 + 0.2 !== 0.3`; SonarQube's S1244 flags all float equality for the same reason). Use an epsilon comparison (`Math.abs(a - b) < eps`), integer minor units, or a decimal library instead. Money-named comparisons (`price`/`amount`/`balance`/`fee`/`cost`) are covered separately by `db/float-money-compare` and are not double-flagged here. Suppress a vetted case with `// float-equality-ok`.",
+      "message": "A decimal-fraction or negative-exponent numeric literal compared with `==`/`===`/`!=`/`!==` — IEEE754 floats don't represent most decimal fractions exactly, so equality on a computed value is unreliable even against an exactly-written literal (`0.1 + 0.2 !== 0.3`; SonarQube's S1244 flags all float equality for the same reason). Use an epsilon comparison (`Math.abs(a - b) < eps`), integer minor units, or a decimal library instead. Money-named comparisons (`price`/`amount`/`balance`/`fee`/`cost`) are covered separately by `db/float-money-compare` and are not double-flagged here. Suppress a vetted case with `// zzop-float-equality-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
@@ -82,9 +82,9 @@
       }
     },
     {
-      "id": "always-false-comparison",
+      "id": "always-constant-comparison",
       "severity": "warning",
-      "message": "A constant-result comparison: `x === NaN`/`x == NaN` is always false and `x !== NaN`/`x != NaN` is always true (NaN never equals anything, including itself — use `Number.isNaN(x)`), and strict `x === []`/`x === {}` compares object identity against a freshly-allocated literal, so it is always false (`!==` always true — use `.length === 0` / `Object.keys(x).length === 0`). Loose `x == []` is deliberately NOT matched (coercion can make it true — `0 == []` is true). Core ESLint's `use-isnan` covers the NaN half when ESLint is configured — zzop's value here is catching it with zero lint config. Suppress a vetted case with `// always-false-comparison-ok`.",
+      "message": "A constant-result comparison: `x === NaN`/`x == NaN` is always false and `x !== NaN`/`x != NaN` is always true (NaN never equals anything, including itself — use `Number.isNaN(x)`), and strict `x === []`/`x === {}` compares object identity against a freshly-allocated literal, so it is always false (`!==` always true — use `.length === 0` / `Object.keys(x).length === 0`). Loose `x == []` is deliberately NOT matched (coercion can make it true — `0 == []` is true). Core ESLint's `use-isnan` covers the NaN half when ESLint is configured — zzop's value here is catching it with zero lint config. Suppress a vetted case with `// zzop-always-constant-comparison-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
@@ -101,7 +101,7 @@
     {
       "id": "numeric-string-comparison",
       "severity": "warning",
-      "message": "A numeric-looking string literal compared with `<`/`>`/`<=`/`>=` — string comparison is lexicographic, not numeric (`'10' < '9'` is `true`; `'10.0.0' < '9.0.0'` is `true`). Convert both sides with `Number(...)` first, or use a semver library for version strings. Suppress a vetted case with `// numeric-string-comparison-ok`.",
+      "message": "A numeric-looking string literal compared with `<`/`>`/`<=`/`>=` — string comparison is lexicographic, not numeric (`'10' < '9'` is `true`; `'10.0.0' < '9.0.0'` is `true`). Convert both sides with `Number(...)` first, or use a semver library for version strings. Suppress a vetted case with `// zzop-numeric-string-comparison-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
@@ -117,7 +117,7 @@
     {
       "id": "tofixed-arithmetic",
       "severity": "warning",
-      "message": ".toFixed() returns a STRING — using its result in `-`/`*`/`/`/`%` arithmetic silently coerces back to a number and loses the rounding/formatting intent (string concatenation via `+` is a separate, usually-intentional display case and is NOT flagged here). Do the arithmetic first and call `.toFixed()` last, for display only, or wrap in `Number(x.toFixed(2))` if re-quantizing is genuinely intended. Suppress a vetted case with `// tofixed-arithmetic-ok`.",
+      "message": ".toFixed() returns a STRING — using its result in `-`/`*`/`/`/`%` arithmetic silently coerces back to a number and loses the rounding/formatting intent (string concatenation via `+` is a separate, usually-intentional display case and is NOT flagged here). Do the arithmetic first and call `.toFixed()` last, for display only, or wrap in `Number(x.toFixed(2))` if re-quantizing is genuinely intended. Suppress a vetted case with `// zzop-tofixed-arithmetic-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
@@ -134,7 +134,7 @@
     {
       "id": "date-pitfalls",
       "severity": "info",
-      "message": "A timezone/epoch pitfall in `Date` handling: a date-only ISO string (`new Date('2024-01-15')`) parses as UTC midnight while the slash form (`new Date('2024/01/15')`) parses in local time — the two disagree by a day near timezone boundaries; a 10-digit literal passed to `new Date(...)` is a UNIX-SECONDS timestamp, but `Date` expects milliseconds and silently yields a 1970 date; and a day-length constant (`86400000`, `24*60*60*1000`) appearing as the RIGHT-hand operand of a `+`/`-` inside `new Date(...)` — the shape `new Date(<expr> + 86400000)` — shifts that value by exactly 24 hours, which is not a calendar day across DST transitions (23/25-hour days), and is an outright `Date`-to-string coercion bug when `<expr>` is itself a `Date`. The epoch veto is STRUCTURAL, not a token blocklist: no closing paren may appear between `new Date(` and the operator, so an operand that is a call result (`Date.now()`, `.getTime()`, `Date.parse(...)`, `Date.UTC(...)`, `.valueOf()`, `Number(...)`) or a parenthesized subexpression (`new Date((a + b) + 86400000)`) cannot match at all. Also out of scope: the mirrored operand order (`86400000 + d`), a multiplicative days-to-ms conversion (`* 86400000`), and any day arithmetic with no `new Date(` head (`Date.now() - 7 * 86400000`) — epoch/UTC milliseconds are DST-safe by construction, and all six measured findings of the earlier, wider form were exactly those shapes. Two residuals, stated honestly: a bare identifier that happens to hold epoch ms (`new Date(startMs + 86400000)`) is file-locally indistinguishable from a `Date`-valued one; and the unary-coercion form `new Date(+d + 86400000)` carries no closing paren, so it still fires even though `+d` is epoch ms exactly as `.getTime()` is. Use a date library's `addDays`, or keep the whole computation in epoch/UTC space. Suppress a vetted case with `// date-pitfalls-ok`.",
+      "message": "A timezone/epoch pitfall in `Date` handling: a date-only ISO string (`new Date('2024-01-15')`) parses as UTC midnight while the slash form (`new Date('2024/01/15')`) parses in local time — the two disagree by a day near timezone boundaries; a 10-digit literal passed to `new Date(...)` is a UNIX-SECONDS timestamp, but `Date` expects milliseconds and silently yields a 1970 date; and a day-length constant (`86400000`, `24*60*60*1000`) appearing as the RIGHT-hand operand of a `+`/`-` inside `new Date(...)` — the shape `new Date(<expr> + 86400000)` — shifts that value by exactly 24 hours, which is not a calendar day across DST transitions (23/25-hour days), and is an outright `Date`-to-string coercion bug when `<expr>` is itself a `Date`. The epoch veto is STRUCTURAL, not a token blocklist: no closing paren may appear between `new Date(` and the operator, so an operand that is a call result (`Date.now()`, `.getTime()`, `Date.parse(...)`, `Date.UTC(...)`, `.valueOf()`, `Number(...)`) or a parenthesized subexpression (`new Date((a + b) + 86400000)`) cannot match at all. Also out of scope: the mirrored operand order (`86400000 + d`), a multiplicative days-to-ms conversion (`* 86400000`), and any day arithmetic with no `new Date(` head (`Date.now() - 7 * 86400000`) — epoch/UTC milliseconds are DST-safe by construction, and all six measured findings of the earlier, wider form were exactly those shapes. Two residuals, stated honestly: a bare identifier that happens to hold epoch ms (`new Date(startMs + 86400000)`) is file-locally indistinguishable from a `Date`-valued one; and the unary-coercion form `new Date(+d + 86400000)` carries no closing paren, so it still fires even though `+d` is epoch ms exactly as `.getTime()` is. Use a date library's `addDays`, or keep the whole computation in epoch/UTC space. Suppress a vetted case with `// zzop-date-pitfalls-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
@@ -151,7 +151,7 @@
     {
       "id": "foreach-async-callback",
       "severity": "warning",
-      "message": "`.forEach(async ...)` — `forEach` ignores the promises its callback returns: the loop call itself resolves before any callback body finishes, callback errors become unhandled promise rejections, and there is no way to await completion. Use a `for...of` loop with `await`, or `Promise.all(items.map(async ...))` if the iterations are independent. `.map(async ...)` is a related but different defect (an unawaited array of promises) covered separately by `reliability/await-in-map`. Suppress a vetted case with `// foreach-async-callback-ok`.",
+      "message": "`.forEach(async ...)` — `forEach` ignores the promises its callback returns: the loop call itself resolves before any callback body finishes, callback errors become unhandled promise rejections, and there is no way to await completion. Use a `for...of` loop with `await`, or `Promise.all(items.map(async ...))` if the iterations are independent. `.map(async ...)` is a related but different defect (an unawaited array of promises) covered separately by `reliability/map-async-no-promise-all`. Suppress a vetted case with `// zzop-foreach-async-callback-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
@@ -165,7 +165,7 @@
     {
       "id": "promise-async-executor",
       "severity": "warning",
-      "message": "`new Promise(async (resolve, reject) => ...)` — an async executor function's own thrown errors/rejections are swallowed, because the `Promise` constructor never observes the promise the async executor itself returns; it also usually signals a redundant wrapper, since the async function already returns a promise. Core ESLint's `no-async-promise-executor` already covers this when configured — zzop's value here is catching it with zero lint config. Suppress a vetted case with `// promise-async-executor-ok`.",
+      "message": "`new Promise(async (resolve, reject) => ...)` — an async executor function's own thrown errors/rejections are swallowed, because the `Promise` constructor never observes the promise the async executor itself returns; it also usually signals a redundant wrapper, since the async function already returns a promise. Core ESLint's `no-async-promise-executor` already covers this when configured — zzop's value here is catching it with zero lint config. Suppress a vetted case with `// zzop-promise-async-executor-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
@@ -179,7 +179,7 @@
     {
       "id": "parseint-no-radix",
       "severity": "info",
-      "message": "`parseInt(...)` called with a single argument — the radix parameter documents intent and guards against legacy surprises (`'0x10'` auto-parses as hex; old engines treated a leading-zero string as octal). Pass an explicit radix, e.g. `parseInt(x, 10)`. This scan only looks at the literal argument span up to the closing `)`; a nested call (`parseInt(getVal())`) is not flagged — a documented miss rather than a guess. Core ESLint's `radix` rule covers this too but is not in its `recommended` config. Suppress a vetted case with `// parseint-no-radix-ok`.",
+      "message": "`parseInt(...)` called with a single argument — the radix parameter documents intent and guards against legacy surprises (`'0x10'` auto-parses as hex; old engines treated a leading-zero string as octal). Pass an explicit radix, e.g. `parseInt(x, 10)`. This scan only looks at the literal argument span up to the closing `)`; a nested call (`parseInt(getVal())`) is not flagged — a documented miss rather than a guess. Core ESLint's `radix` rule covers this too but is not in its `recommended` config. Suppress a vetted case with `// zzop-parseint-no-radix-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",

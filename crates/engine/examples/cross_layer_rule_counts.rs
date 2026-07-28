@@ -37,7 +37,7 @@ fn main() {
 
     // ZZOP_OVERLAYS="sourceId=path.json;sourceId2=path2.json": load a Mode B adapter-overlay envelope
     // onto the matching tree's `EngineConfig::adapter_overlays`, for before/after measurement of an
-    // out-of-tree adapter (e.g. examples/react-query-adapter) without wiring a dedicated harness per
+    // out-of-tree adapter (any Mode B overlay under examples/adapters) without wiring a dedicated harness per
     // adapter. This is measurement tooling, not a production path — a bad entry fails loud (exit 2)
     // rather than silently running the "before" numbers under an "after" label.
     if let Ok(spec) = std::env::var("ZZOP_OVERLAYS") {

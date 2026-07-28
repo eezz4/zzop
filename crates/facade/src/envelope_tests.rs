@@ -1,7 +1,7 @@
-//! Unit tests for the envelope entry points (`crate::envelope`) and `version_string`.
+//! Unit tests for the envelope entry points (`crate::envelope`).
 
 use crate::test_support::tiny_envelope_json;
-use crate::{analyze_envelope_json, validate_envelope_only_json, version_string};
+use crate::{analyze_envelope_json, validate_envelope_only_json};
 
 #[test]
 fn analyze_envelope_json_suppressions_drop_a_finding() {
@@ -216,26 +216,84 @@ fn validate_envelope_only_json_never_fails_on_unparseable_input() {
         .any(|i| i.as_str().unwrap().contains("invalid JSON")));
 }
 
+/// Seals the wire shape: `hints` is a THIRD, always-present field on every envelope validate reply —
+/// valid, invalid and unparseable alike. An authoring surface that omitted it when empty would be
+/// indistinguishable from a build with no hint pass at all.
 #[test]
-fn version_string_includes_parser_fingerprints() {
-    let v = version_string();
-    assert!(v.contains("zzop-parser-typescript="));
-    assert!(v.contains("zzop-parser-prisma="));
-    assert!(v.contains("zzop-parser-python-3="));
-    assert!(v.contains("zzop-parser-java-21="));
-    assert!(v.contains("zzop-parser-rust="));
-    assert!(v.contains("zzop-parser-go="));
-    assert!(v.contains("zzop-parser-sql="));
-    assert!(v.contains("zzop-parser-csharp="));
+fn validate_envelope_only_json_always_carries_a_hints_array() {
+    for input in [
+        tiny_envelope_json(),
+        tiny_envelope_json().replace("zzop-normalized-ast", "bogus-format"),
+        "not json".to_string(),
+        "[1,2,3]".to_string(),
+    ] {
+        let out = validate_envelope_only_json(&input);
+        let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+        assert!(
+            value["hints"].is_array(),
+            "missing hints array for {input}: {value}"
+        );
+    }
+    // The shipped fixture is hint-clean, not merely valid.
+    let value: serde_json::Value =
+        serde_json::from_str(&validate_envelope_only_json(&tiny_envelope_json())).unwrap();
+    assert_eq!(value["hints"].as_array().unwrap().len(), 0, "{value}");
 }
 
-// The version segment is `CARGO_PKG_VERSION` = the workspace `[workspace.package] version` (release SSOT
-// since the 2026-07-22 version reform — no `ZZOP_RELEASE_VERSION` env). CI verifies the tag matches it.
+/// THE PIN of the hint axis at the wire: a semantically suspicious but structurally conforming
+/// envelope stays `"valid": true` while reporting hints. `valid` (and therefore the
+/// `zzop validate-envelope` exit code, and whether `analyze_envelope_json` proceeds) is read off the
+/// validity result alone — a hint may never flip it.
 #[test]
-fn version_string_reports_cargo_pkg_version() {
-    let v = version_string();
+fn hints_are_reported_without_making_a_valid_envelope_invalid() {
+    // Absolute path + a non-normalized `http` provide key: both join with nothing, neither is a v1
+    // contract violation.
+    let suspicious = tiny_envelope_json()
+        .replace(
+            "\"path\": \"legacy/UserController.jsp\"",
+            "\"path\": \"/srv/legacy/UserController.jsp\"",
+        )
+        .replace("GET /legacy/user.jsp", "get legacy/user.jsp");
+    let out = validate_envelope_only_json(&suspicious);
+    let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+    assert_eq!(value["valid"], true, "hints must not reject: {value}");
+    assert_eq!(value["issues"].as_array().unwrap().len(), 0, "{value}");
+    let hints = value["hints"].as_array().expect("hints array");
+    assert_eq!(hints.len(), 2, "{value}");
     assert!(
-        v.starts_with(concat!("zzop/", env!("CARGO_PKG_VERSION"), " ")),
-        "expected the CARGO_PKG_VERSION in the version segment, got: {v}"
+        hints[0].as_str().unwrap().contains("absolute path"),
+        "{value}"
     );
+    assert!(
+        hints[1].as_str().unwrap().contains("GET /legacy/user.jsp"),
+        "the hint names the canonical key to emit instead: {value}"
+    );
+    // And the analysis entry point still accepts it — the two axes really are independent.
+    assert!(analyze_envelope_json(&suspicious, r#"{"sourceId": "legacy"}"#).is_ok());
+}
+
+/// Seals the axis split on an INVALID envelope: issues and hints are both reported in one round-trip,
+/// so a producer does not have to fix one class, re-run, and only then learn about the other.
+#[test]
+fn an_invalid_envelope_still_reports_its_hints() {
+    let bad = tiny_envelope_json()
+        .replace("\"version\": 1", "\"version\": 99")
+        .replace(
+            "\"path\": \"legacy/UserController.jsp\"",
+            "\"path\": \"/srv/x.jsp\"",
+        );
+    let out = validate_envelope_only_json(&bad);
+    let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+    assert_eq!(value["valid"], false);
+    assert_eq!(value["issues"].as_array().unwrap().len(), 1, "{value}");
+    assert_eq!(value["hints"].as_array().unwrap().len(), 1, "{value}");
+}
+
+/// Seals the sibling surface: `validate_rule_pack` has no hint pass, so its reply must NOT grow an
+/// always-empty `hints` field — an empty array there would claim a judgment that was never made.
+#[test]
+fn the_rule_pack_validate_reply_does_not_gain_a_hints_field() {
+    let out = crate::validate_rule_pack_json(r#"{"id":"p","rules":[]}"#);
+    let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+    assert!(value.get("hints").is_none(), "{value}");
 }

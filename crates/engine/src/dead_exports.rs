@@ -1,12 +1,12 @@
 //! Wires `zzop_rules_graph::find_dead_exports` into the whole-graph assembly pass
-//! (`analyze::assemble`), gated behind the native analysis id `"dead-exports"` — the symbol-granularity
+//! (`analyze::assemble`), gated behind the native analysis id `"unimported-export"` — the symbol-granularity
 //! companion to the file-level `"dead-candidates"` analysis. See `zzop_rules_graph::dead_exports`'s
 //! module doc for what counts as a "use" and which files/exports are exempted.
 //!
 //! `FileArtifact` carries `symbols`/`imports`/`used_names` but not re-exports, dynamic imports, or
 //! local export aliases, all three needed for complete coverage (barrel chains, entry-re-export live
 //! roots, dynamic-import wildcarding, `export { X as Y }` renames). So this function runs a second,
-//! uncached pass: when `"dead-exports"` is enabled, it re-reads and re-parses every dispatched
+//! uncached pass: when `"unimported-export"` is enabled, it re-reads and re-parses every dispatched
 //! TypeScript file directly off disk rather than extending the cached fused pass — it never consults
 //! `zzop_cache::AnalysisCache`.
 //!
@@ -54,7 +54,7 @@ pub(crate) fn is_ts_source_ext(rel: &str) -> bool {
     )
 }
 
-/// One file's name evidence for `dead-exports`. Two sets, one carrier: they are collected together,
+/// One file's name evidence for `unimported-export`. Two sets, one carrier: they are collected together,
 /// travel together, and are consumed by exactly one rule — and pairing them keeps the difference
 /// between them impossible to miss. `used` is FLAT and position-blind (an identifier occurs
 /// somewhere in the file); `signature` is position-AWARE (a name occurs in some exported
@@ -92,6 +92,7 @@ pub(crate) fn dead_export_findings(
     workspace_pkgs: &HashMap<String, WorkspacePkg>,
     tsconfigs: &std::collections::BTreeMap<String, TsconfigPaths>,
     sfc_import_pairs: &[(String, ImportMap)],
+    generated_file_markers: &[&str],
 ) -> Vec<Finding> {
     if ts_paths.is_empty() {
         return Vec::new();
@@ -120,7 +121,7 @@ pub(crate) fn dead_export_findings(
                 let text = String::from_utf8_lossy(&bytes).into_owned();
                 (
                     zzop_parser_typescript::parse_dead_export_facts(rel, &text),
-                    crate::generated_banner::has_generated_banner(&text),
+                    crate::generated_banner::has_generated_banner(&text, generated_file_markers),
                 )
             }
             // Unreadable (deleted/permission race) — treat as no re-exports/dynamic-imports/
@@ -196,8 +197,9 @@ pub(crate) fn dead_export_findings(
 
 /// T2 policy-value pin (rule-quality.md §6 substitute for a T1 shared symbol): `rules-http`'s
 /// `mutating_route_no_auth::CALL_GRAPH_COVERED_EXTENSIONS` is a hand-maintained duplicate of
-/// [`is_ts_source_ext`]'s accepted extension set, plus `"java"` (that crate depends on `zzop_core`
-/// only, so it cannot call this private fn directly — its own doc says as much). Lives here, not in
+/// [`is_ts_source_ext`]'s accepted extension set, plus the NON-TS languages whose parsers now feed the
+/// shared call graph — `"java"`, Python's `"py"`/`"pyi"`, and `"rs"` (that crate depends on `zzop_core` only, so
+/// it cannot call this private fn directly — its own doc says as much). Lives here, not in
 /// `crates/engine/tests/`, because [`is_ts_source_ext`] is `pub(crate)`: an external integration-test
 /// crate cannot see it, only a unit test inside this same module can. If this fails, either
 /// `is_ts_source_ext` grew/shrank an extension and the rule's list needs the same edit, or the rule's
@@ -206,17 +208,24 @@ pub(crate) fn dead_export_findings(
 mod call_graph_covered_extensions_pin {
     use super::is_ts_source_ext;
 
+    /// The deliberate, documented additions beyond [`is_ts_source_ext`] — kept as one list so a future
+    /// lift edits ONE place here and one place in the rule crate, and the two pins below both read it.
+    /// Order matters: it is the order they appear in the rule's own constant.
+    const NON_TS_CALL_GRAPH_EXTENSIONS: &[&str] = &["java", "py", "pyi", "rs"];
+
     #[test]
-    fn call_graph_covered_extensions_equals_is_ts_source_ext_plus_java() {
+    fn call_graph_covered_extensions_equals_is_ts_source_ext_plus_non_ts_lifts() {
         let rule_list = zzop_rules_http::mutating_route_no_auth::CALL_GRAPH_COVERED_EXTENSIONS;
-        assert!(
-            rule_list.contains(&"java"),
-            "the rule's list must still carry its one deliberate addition beyond \
-             is_ts_source_ext, got: {rule_list:?}"
-        );
+        for ext in NON_TS_CALL_GRAPH_EXTENSIONS {
+            assert!(
+                rule_list.contains(ext),
+                "the rule's list must still carry its deliberate addition {ext:?} beyond \
+                 is_ts_source_ext, got: {rule_list:?}"
+            );
+        }
         for ext in rule_list {
-            if *ext == "java" {
-                continue; // the one deliberate, documented addition beyond is_ts_source_ext
+            if NON_TS_CALL_GRAPH_EXTENSIONS.contains(ext) {
+                continue; // deliberate, documented additions beyond is_ts_source_ext
             }
             assert!(
                 is_ts_source_ext(&format!("x.{ext}")),
@@ -237,20 +246,22 @@ mod call_graph_covered_extensions_pin {
 
     /// The SECOND hand-kept duplicate of the same set, and the narrower one:
     /// `http_scan::WRITE_SITE_COVERED_EXTENSIONS` names the languages whose parser actually fills
-    /// `SourceSymbol::write_sites`, which is exactly [`is_ts_source_ext`] with NO `"java"` — Java feeds
-    /// the shared call graph but no Java write sites. `unsafe-read-endpoint`/`non-idempotent-write`
-    /// publish that list in their finding messages, so a drift here would publish a false sightline
-    /// (claiming a language is covered when its write-site list is structurally empty) — the exact
-    /// silent-failure the sightline exists to close.
+    /// `SourceSymbol::write_sites`, which is exactly [`is_ts_source_ext`] with NONE of the
+    /// [`NON_TS_CALL_GRAPH_EXTENSIONS`] — Java and Python feed the shared call graph but no write sites.
+    /// `unsafe-read-endpoint`/`non-idempotent-write` publish that list in their finding messages, so a
+    /// drift here would publish a false sightline (claiming a language is covered when its write-site
+    /// list is structurally empty) — the exact silent-failure the sightline exists to close.
     #[test]
-    fn write_site_covered_extensions_equals_is_ts_source_ext_with_no_java() {
+    fn write_site_covered_extensions_equals_is_ts_source_ext_with_no_call_graph_lifts() {
         let write_list = zzop_rules_http::http_scan::WRITE_SITE_COVERED_EXTENSIONS;
-        assert!(
-            !write_list.contains(&"java"),
-            "write_sites is produced by the TypeScript parser alone — listing java here would publish \
-             a sightline claiming Java routes are checked when parser-java-21 stubs write_sites: \
-             {write_list:?}"
-        );
+        for ext in NON_TS_CALL_GRAPH_EXTENSIONS {
+            assert!(
+                !write_list.contains(ext),
+                "write_sites is produced by the TypeScript parser alone — listing {ext:?} here would \
+                 publish a sightline claiming that language's routes are checked when its parser stubs \
+                 write_sites: {write_list:?}"
+            );
+        }
         for ext in write_list {
             assert!(
                 is_ts_source_ext(&format!("x.{ext}")),
@@ -267,18 +278,19 @@ mod call_graph_covered_extensions_pin {
                  UNDER-claims and would tell a user their own files are dark: {write_list:?}"
             );
         }
-        // The two rule-side lists differ by exactly `"java"` — the difference the sightline prose
-        // calls out ("the sibling rule covers Java, this one does not").
+        // The two rule-side lists differ by exactly the call-graph lifts — the difference the sightline
+        // prose calls out ("the sibling rule covers Java/Python, this one does not").
         let call_graph = zzop_rules_http::mutating_route_no_auth::CALL_GRAPH_COVERED_EXTENSIONS;
-        let only_in_call_graph: Vec<&&str> = call_graph
+        let only_in_call_graph: Vec<&str> = call_graph
             .iter()
             .filter(|e| !write_list.contains(e))
+            .copied()
             .collect();
         assert_eq!(
-            only_in_call_graph,
-            vec![&"java"],
-            "the call-graph-covered set must exceed the write-site-covered set by exactly \"java\"; \
-             any other difference means one of the two published sightlines is now wrong"
+            only_in_call_graph, NON_TS_CALL_GRAPH_EXTENSIONS,
+            "the call-graph-covered set must exceed the write-site-covered set by exactly the \
+             documented non-TS lifts; any other difference means one of the two published sightlines \
+             is now wrong"
         );
     }
 }

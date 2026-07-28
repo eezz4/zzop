@@ -132,8 +132,9 @@
 //! grouped body is also the branch body for the `symbol` rule above — every case path in a group
 //! is genuinely served by it, so sharing its derived symbol is not cross-contamination.
 //!
-//! Exact-duplicate `(key, line, symbol)` triples are deduped; output order is deterministic
-//! (occurrence order).
+//! Exact-duplicate `(key, line, symbol)` triples are deduped; output order is deterministic — paths
+//! in occurrence order, and within one branch's path the verbs SORTED (`routes::sort_verbs`, which
+//! carries the reason: the emission order survives into the finding report's tie order).
 //!
 //! ## Pre-gate deviation
 //! The pre-gate checks for the bare substring `"pathname"`, not a literal `".pathname"`. The

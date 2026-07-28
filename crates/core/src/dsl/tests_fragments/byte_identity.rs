@@ -86,7 +86,7 @@ fn pattern_bearing_field_values(rule: &RuleDef) -> Vec<(&'static str, &str)> {
 /// still visible for this check to see — and asserts every `pattern_bearing_field_values` entry containing
 /// the substring `"${"` is EXACTLY a whole-value `${NAME}` reference (`fragment_ref_name` returns `Some`),
 /// never a partial/substring occurrence. `message`/`id`/`label` are out of scope (see
-/// `pattern_bearing_field_values`'s doc) — `security/shell-exec` and `sql/delete-no-where`'s
+/// `pattern_bearing_field_values`'s doc) — `security/shell-exec-interpolation` and `sql/delete-no-where`'s
 /// messages legitimately describe `${...}` template-literal/placeholder syntax in prose. Paired with
 /// `real_dsl_tree_loads_with_zero_errors` below, which proves every real reference actually resolves (an
 /// unknown name is a hard load error, not a silent skip) — together the two prove expansion is total AND

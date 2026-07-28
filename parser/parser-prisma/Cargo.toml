@@ -6,10 +6,14 @@ publish = false
 
 [dependencies]
 zzop-core = { path = "../../crates/core" }
-# Deliberate exception to the usual "rules depend on parser" direction — see
-# `zzop_rules_schema`'s crate doc ("Dependency direction") for why: this crate's own
-# `prisma_schema_analysis`/`prisma_schema_analysis_with_usage` capability calls
-# `analyze_schema`/`analyze_schema_with_usage` directly, and `zzop-rules-schema` depends on `zzop-core`
-# only (never on this crate), so the reverse edge here does not create a cycle.
-zzop-rules-schema = { path = "../../rules/native/rules-schema" }
 regex = { workspace = true }
+
+# `zzop-rules-schema` used to be a real dependency here, for this crate's own
+# `prisma_schema_analysis` capability (parse the tree's schema files, then run the rules on them).
+# That entry point had zero callers and was deleted 2026-07-27, taking the production edge with it —
+# the engine owns the parse -> rules wiring. What remains is one vertical-slice UNIT test
+# (`tests::parse_then_analyze_vertical_slice`) pinning that this crate's `parse_schema` output is what
+# `analyze_schema` actually accepts, so the edge is dev-only now. `zzop-rules-schema` depends on
+# `zzop-core` alone (never on this crate), so it never created a cycle either way.
+[dev-dependencies]
+zzop-rules-schema = { path = "../../rules/native/rules-schema" }

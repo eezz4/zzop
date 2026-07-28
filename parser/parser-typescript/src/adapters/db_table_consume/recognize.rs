@@ -7,8 +7,6 @@ use std::collections::HashSet;
 use swc_core::common::Span;
 use swc_core::ecma::ast::{CallExpr, Callee, Expr, MemberProp};
 
-use super::PRISMA_CLIENT_GETTER;
-
 /// One `<base>.<accessor>.<method>` match, shared by both collectors in the parent module — `<base>`
 /// may be either anchor form `match_prisma_model_call` recognizes.
 pub(super) struct PrismaModelCall {
@@ -59,19 +57,29 @@ fn match_member_chain(call: &CallExpr) -> Option<MemberChain<'_>> {
     })
 }
 
-/// Matches `<getter>().<accessor>.<method>(...)` (a zero-arg call to [`PRISMA_CLIENT_GETTER`]) OR
+/// Matches `<getter>().<accessor>.<method>(...)` (a zero-arg call to [`super::PRISMA_CLIENT_GETTER`]) OR
 /// `<receiver>.<accessor>.<method>(...)` where `<receiver>` is a plain identifier in `receivers` — see
 /// the parent module doc for both anchor forms, and `super::receivers::prisma_bound_receivers` for how
 /// the second form's evidence is gathered.
+///
+/// `client_getter` is the run's declared `vocabulary.prismaClientGetter` — the accessor function name is
+/// a project's own convention (`getPrisma`, `db()`, `client()`), so it is declared rather than guessed;
+/// [`super::PRISMA_CLIENT_GETTER`] is only its default.
 pub(super) fn match_prisma_model_call(
     call: &CallExpr,
     receivers: &HashSet<String>,
+    client_getter: Option<&str>,
 ) -> Option<PrismaModelCall> {
     let chain = match_member_chain(call)?;
     let anchored = match chain.base {
+        // Only this arm is a CONVENTION (what the project named its client getter), so only this arm
+        // goes silent when nothing is declared. The `receivers` arm below is a FACT — it is anchored on
+        // the `PrismaClient` constructor, which no project can rename — and keeps matching regardless.
         Expr::Call(base) => {
-            base.args.is_empty()
-                && matches!(&base.callee, Callee::Expr(c) if matches!(unwrap_expr(c), Expr::Ident(id) if id.sym == PRISMA_CLIENT_GETTER))
+            client_getter.is_some_and(|getter| {
+                base.args.is_empty()
+                    && matches!(&base.callee, Callee::Expr(c) if matches!(unwrap_expr(c), Expr::Ident(id) if id.sym.as_str() == getter))
+            })
         }
         Expr::Ident(id) => receivers.contains(id.sym.as_str()),
         _ => false,

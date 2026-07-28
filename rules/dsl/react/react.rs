@@ -2,12 +2,12 @@
 //! `Matcher::MethodScan` rules run against real parser-derived `SourceSymbol` body spans (not hand-built
 //! spans).
 //!
-//! `setstate-after-await-unmounted` flags a `setX(...)` state setter co-occurring with an `await` in the
+//! `setstate-after-async-unguarded` flags a `setX(...)` state setter co-occurring with an `await` in the
 //! same function, gated on the file looking like React (`useEffect`/`useState`/`from 'react'`) and vetoed
 //! by any unmount/abort guard token (`AbortController`/`AbortSignal`/`isMounted`/`mountedRef`/`signal:`/
 //! `cancelled`/`didCancel`) anywhere in that function's body. This is a co-occurrence heuristic, not proof
 //! of order or of unmount risk — see the rule's own message and the fixtures below for the accepted
-//! false-positive/false-negative shapes. `// setstate-after-await-unmounted-ok` suppresses it.
+//! false-positive/false-negative shapes. `// zzop-setstate-after-async-unguarded-ok` suppresses it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -89,4 +89,4 @@ fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {
 }
 
 // Test modules (split by rule/theme; the fixtures above are shared via `use super::*;`).
-mod setstate_after_await_unmounted;
+mod setstate_after_async_unguarded;

@@ -21,6 +21,44 @@ pub(super) fn json_stringify(value: &serde_json::Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "null".to_string())
 }
 
+/// The `vocabulary` keys this FRONT END consumes itself and therefore never forwards. `workspaceSkipDirs`
+/// steers `trees: "auto"` workspace discovery (`crate::workspaces`), which has already run by the time a
+/// request is built — forwarding it would put a key in the request that no engine surface reads, the exact
+/// "recognized but wired nowhere" defect `warnings::RETIRED_KEYS` had to clean up.
+const FRONT_END_ONLY_VOCABULARY_KEYS: &[&str] = &["workspaceSkipDirs"];
+
+/// The `vocabulary` object a request carries: exactly what the author declared, and nothing else.
+///
+/// This is deliberately NOT a `withDefaults`-class injection, and it is the one option in this file that
+/// is not. Until 2026-07-27 it started from `zzop_engine::VocabularyConfig::built_in()` and laid the
+/// author's keys over it, which meant a config that named no `vocabulary` still got zzop's guesses about
+/// what the project calls its own guards, its own generated files, its own data-access receivers. Those
+/// guesses are load-bearing — measured over `corpus/oss`, removing them changes 69 findings across 17
+/// trees — so a user who never saw them could not have judged them. Now they reach a run only by being
+/// written into the user's own file: `zzop init` renders `built_in()` into the starter config, so the
+/// values are identical but the AUTHOR is the config, not the binary. An undeclared key makes no judgment
+/// at all (`zzop_engine::vocabulary`), which is safe to spell only because a config is mandatory for every
+/// analysis lane.
+///
+/// A key the author named is the whole list/pattern — never an element-wise merge, matching
+/// `packs.extraDirs` and `git.commitTypePatterns`, because a merged vocabulary has two authors and neither
+/// can say what the effective set is.
+fn build_vocabulary(config: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+
+    let mut out = serde_json::Map::new();
+    let Some(declared) = config.get("vocabulary").and_then(Value::as_object) else {
+        return Value::Object(out);
+    };
+    for (key, value) in declared {
+        if FRONT_END_ONLY_VOCABULARY_KEYS.contains(&key.as_str()) {
+            continue;
+        }
+        out.insert(key.clone(), value.clone());
+    }
+    Value::Object(out)
+}
+
 pub(super) fn build_shared_options(
     config: &serde_json::Value,
     base_dir: &Path,
@@ -46,8 +84,13 @@ pub(super) fn build_shared_options(
 
     // --- packs.extraDirs -> packsDir (user dirs only; the bundled packs ride separately as inline
     // `packDefs`, injected later by the `withDefaults` step at the end of `config_to_request`). ---
+    // Tracked separately from "did we end up emitting a packsDir": the default-discovery fallback
+    // below keys on whether the author DECLARED the key, so `extraDirs: []` reads as a deliberate "no
+    // pack directories" rather than as an omission the default is free to fill.
+    let mut extra_dirs_declared = false;
     if let Some(packs) = packs_obj {
         if let Some(extra_dirs) = packs.get("extraDirs") {
+            extra_dirs_declared = true;
             let arr = extra_dirs.as_array().ok_or_else(|| {
                 ConfigError("packs.extraDirs must be an array of directory paths.".to_string())
             })?;
@@ -76,6 +119,28 @@ pub(super) fn build_shared_options(
                     "packs.disabled must be an array of pack ids.".to_string(),
                 ));
             }
+        }
+    }
+
+    // --- Default discovery for USER-AUTHORED rule packs: `zzop/rules/` under the mapping base (the
+    // authored half of the on-disk two-way split — `.zzop/` is what the tool derives, `zzop/` is what
+    // the user wrote and commits). See `crate::DEFAULT_AUTHORED_PACKS_DIR` for the contract; the two
+    // properties worth restating at the call site:
+    //   * FALLBACK, NOT A MERGE. Gated on `extra_dirs_declared`, so a config that names `extraDirs`
+    //     keeps sole authority over the pack directories — including `extraDirs: []`, the explicit
+    //     opt-out. A merge would leave "where did this pack come from" ambiguous, which is the second
+    //     source of truth this default exists to avoid.
+    //   * A MISSING DIRECTORY IS NOT AN EVENT. `is_dir()` false => nothing emitted, nothing warned.
+    //     Almost every repo has no `zzop/rules/`; a disclosure there would be noise on every run.
+    // The existence check is the only filesystem access this function makes (overlay resolution in
+    // `super::validation` already reads real files, so the mapper is not otherwise pure either).
+    if !extra_dirs_declared {
+        let authored = resolve_path(base_dir, crate::DEFAULT_AUTHORED_PACKS_DIR);
+        if authored.is_dir() {
+            shared.insert(
+                "packsDir".to_string(),
+                Value::Array(vec![Value::String(path_to_string(&authored))]),
+            );
         }
     }
 
@@ -217,6 +282,15 @@ pub(super) fn build_shared_options(
     }
     if let Some(size_cap_val) = config.get("sizeCap") {
         shared.insert("sizeCap".to_string(), size_cap_val.clone());
+    }
+
+    shared.insert("vocabulary".to_string(), build_vocabulary(config));
+    // `parsers` passes through untouched: its only path-shaped content is a GLOB, which is matched
+    // against tree-RELATIVE paths (`dispatch::matches_glob`) and so must not be absolutized the way
+    // `overlays`/`cacheDir` are. Forwarded only when declared, so an absent key stays absent in the
+    // request rather than arriving as an empty object that reads like a deliberate opt-out.
+    if let Some(parsers) = config.get("parsers") {
+        shared.insert("parsers".to_string(), parsers.clone());
     }
 
     Ok(shared)

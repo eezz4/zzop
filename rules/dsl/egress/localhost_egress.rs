@@ -1,8 +1,8 @@
-//! `localhost-egress-committed` tests, including the additional false-positive shapes (split from `egress.rs`).
+//! `localhost-url-literal-committed` tests, including the additional false-positive shapes (split from `egress.rs`).
 
 use super::*;
 
-// --- localhost-egress-committed ---
+// --- localhost-url-literal-committed ---
 
 #[test]
 fn committed_localhost_endpoint_is_flagged() {
@@ -12,7 +12,7 @@ fn committed_localhost_endpoint_is_flagged() {
         "export function load() { return fetch(\"http://localhost:3000/api\"); }\n",
     );
     let out = scan(&dir);
-    let found = hits(&out, "localhost-egress-committed");
+    let found = hits(&out, "localhost-url-literal-committed");
     assert_eq!(found.len(), 1, "{:?}", out.findings);
     assert_eq!(found[0].line, 1);
 }
@@ -25,7 +25,7 @@ fn committed_private_ip_endpoint_is_flagged() {
         "export function load() { return fetch(\"https://192.168.1.10:8080/api\"); }\n",
     );
     let out = scan(&dir);
-    let found = hits(&out, "localhost-egress-committed");
+    let found = hits(&out, "localhost-url-literal-committed");
     assert_eq!(found.len(), 1, "{:?}", out.findings);
 }
 
@@ -38,7 +38,7 @@ fn public_host_endpoint_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "localhost-egress-committed").is_empty(),
+        hits(&out, "localhost-url-literal-committed").is_empty(),
         "{:?}",
         out.findings
     );
@@ -54,7 +54,7 @@ fn localhost_endpoint_in_a_playwright_e2e_config_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "localhost-egress-committed").is_empty(),
+        hits(&out, "localhost-url-literal-committed").is_empty(),
         "{:?}",
         out.findings
     );
@@ -70,7 +70,7 @@ fn root_level_playwright_config_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "localhost-egress-committed").is_empty(),
+        hits(&out, "localhost-url-literal-committed").is_empty(),
         "{:?}",
         out.findings
     );
@@ -85,7 +85,7 @@ fn nested_vitest_config_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "localhost-egress-committed").is_empty(),
+        hits(&out, "localhost-url-literal-committed").is_empty(),
         "{:?}",
         out.findings
     );
@@ -99,7 +99,7 @@ fn localhost_endpoint_in_src_still_fires() {
         "export const apiBase = \"http://localhost:4000/api\";\n",
     );
     let out = scan(&dir);
-    let found = hits(&out, "localhost-egress-committed");
+    let found = hits(&out, "localhost-url-literal-committed");
     assert_eq!(found.len(), 1, "{:?}", out.findings);
 }
 
@@ -113,7 +113,7 @@ fn localhost_inside_a_jsdoc_style_block_comment_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "localhost-egress-committed").is_empty(),
+        hits(&out, "localhost-url-literal-committed").is_empty(),
         "{:?}",
         out.findings
     );
@@ -128,7 +128,7 @@ fn localhost_inside_a_headerless_block_comment_continuation_line_still_fires() {
         "/*\nSee \"http://localhost:3000/api\" for local dev.\n*/\nexport function load() {}\n",
     );
     let out = scan(&dir);
-    let found = hits(&out, "localhost-egress-committed");
+    let found = hits(&out, "localhost-url-literal-committed");
     assert_eq!(found.len(), 1, "{:?}", out.findings);
     assert_eq!(found[0].line, 2);
 }
@@ -138,17 +138,17 @@ fn localhost_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-egress");
     dir.write(
         "src/client.ts",
-        "export function load() { return fetch(\"http://localhost:3000/api\"); } // localhost-egress-committed-ok\n",
+        "export function load() { return fetch(\"http://localhost:3000/api\"); } // zzop-localhost-url-literal-committed-ok\n",
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "localhost-egress-committed").is_empty(),
+        hits(&out, "localhost-url-literal-committed").is_empty(),
         "{:?}",
         out.findings
     );
 }
 
-// --- localhost-egress-committed: additional false-positive shapes ---
+// --- localhost-url-literal-committed: additional false-positive shapes ---
 
 #[test]
 fn env_override_fallback_is_not_flagged() {
@@ -160,7 +160,7 @@ fn env_override_fallback_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "localhost-egress-committed").is_empty(),
+        hits(&out, "localhost-url-literal-committed").is_empty(),
         "{:?}",
         out.findings
     );
@@ -175,7 +175,7 @@ fn is_production_ternary_fallback_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "localhost-egress-committed").is_empty(),
+        hits(&out, "localhost-url-literal-committed").is_empty(),
         "{:?}",
         out.findings
     );
@@ -190,7 +190,7 @@ fn localhost_endpoint_with_no_env_fallback_still_fires() {
         "export const apiUrl = \"http://localhost:3000\";\n",
     );
     let out = scan(&dir);
-    let found = hits(&out, "localhost-egress-committed");
+    let found = hits(&out, "localhost-url-literal-committed");
     assert_eq!(found.len(), 1, "{:?}", out.findings);
 }
 
@@ -204,7 +204,7 @@ fn new_url_dummy_base_argument_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "localhost-egress-committed").is_empty(),
+        hits(&out, "localhost-url-literal-committed").is_empty(),
         "{:?}",
         out.findings
     );
@@ -220,7 +220,7 @@ fn equality_comparison_against_localhost_literal_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "localhost-egress-committed").is_empty(),
+        hits(&out, "localhost-url-literal-committed").is_empty(),
         "{:?}",
         out.findings
     );
@@ -236,7 +236,7 @@ fn nestjs_e2e_spec_file_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "localhost-egress-committed").is_empty(),
+        hits(&out, "localhost-url-literal-committed").is_empty(),
         "{:?}",
         out.findings
     );
@@ -251,7 +251,7 @@ fn packages_testing_helper_dir_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "localhost-egress-committed").is_empty(),
+        hits(&out, "localhost-url-literal-committed").is_empty(),
         "{:?}",
         out.findings
     );
@@ -266,7 +266,7 @@ fn vite_config_basename_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(
-        hits(&out, "localhost-egress-committed").is_empty(),
+        hits(&out, "localhost-url-literal-committed").is_empty(),
         "{:?}",
         out.findings
     );

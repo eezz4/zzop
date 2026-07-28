@@ -44,10 +44,7 @@ fn prefilter_matches_unoptimized_findings_across_the_moved_java_rules() {
             io: None,
         },
     ];
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
-    };
+    let ctx = RuleContext { files: &files };
     let pack = pack();
     let optimized = eval_pack(&pack, &ctx);
     let unoptimized = eval_pack_no_prefilter(&pack, &ctx);
@@ -97,10 +94,7 @@ fn prefilter_respects_require_file_cheap_skip_semantics_unchanged() {
             io: None,
         },
     ];
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
-    };
+    let ctx = RuleContext { files: &files };
     let optimized = eval_pack(&pack, &ctx);
     let unoptimized = eval_pack_no_prefilter(&pack, &ctx);
     assert_eq!(findings_as_json(&optimized), findings_as_json(&unoptimized));
@@ -131,10 +125,7 @@ fn eval_pack_profiled_findings_match_eval_pack_exactly() {
             io: None,
         },
     ];
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
-    };
+    let ctx = RuleContext { files: &files };
     let pack = pack();
     let plain = eval_pack(&pack, &ctx);
     let (profiled, timings) = eval_pack_profiled(&pack, &ctx);
@@ -161,10 +152,7 @@ fn eval_pack_profiled_on_empty_pack_yields_no_timings() {
         rules: vec![],
     };
     let files = vec![];
-    let ctx = RuleContext {
-        files: &files,
-        ir: None,
-    };
+    let ctx = RuleContext { files: &files };
     let (findings, timings) = eval_pack_profiled(&pack, &ctx);
     assert!(findings.is_empty());
     assert!(timings.is_empty());

@@ -7,13 +7,13 @@ publish = false
 
 # The `zzop-mcp` product: the MCP server over stdio (newline-delimited JSON-RPC 2.0) — `initialize`,
 # `tools/*` (schemas in `src/tools/definitions.rs`, dispatch in `src/tools.rs`), `resources/*` (the
-# embedded authoring contracts, via the shared `zzop-host` crate's `embedded` module). A thin lib +
-# bin split (like the former `zzop-host` crate) so `src/tests/*` unit tests AND external integration
-# tests (`tests/surface_prose.rs`, reading this crate's `tools::list()` as a library call) both work.
-# THIS CRATE IS ALSO A THIN PROTOCOL FACADE: no shaping/filter/summary logic lives here — every
+# embedded authoring contracts, via the shared `zzop-summary` crate's `contracts` module). A thin lib +
+# bin split so `src/**` unit tests AND external integration tests (`tests/surface_prose.rs`, reading
+# this crate's `tools::list()` as a library call) both work.
+# THIS CRATE IS A THIN PROTOCOL FACADE: no shaping/filter/summary logic lives here — every
 # `tools/call` handler extracts its arguments (`zzop_summary::args`) and calls the shared
-# `zzop-summary` crate, exactly like the `zzop` CLI (package `zzop-cli-bin`) does through
-# `zzop-host`'s own `tools.rs`, so a CLI query and an MCP tool call give the identical answer.
+# `zzop-summary` crate, and the `zzop` CLI (package `zzop-cli-bin`) calls those same functions from its
+# own argv dispatch, so a CLI query and an MCP tool call give the identical answer.
 [lib]
 name = "zzop_mcp"
 path = "src/lib.rs"
@@ -23,7 +23,14 @@ name = "zzop-mcp"
 path = "src/bin/zzop-mcp.rs"
 
 [dependencies]
-zzop-host = { path = "../../crates/host" }
 zzop-summary = { path = "../../crates/summary" }
-zzop-config = { path = "../../crates/config" }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+# Test-only, for two pins against this crate's own embeds: the `config-surface` resource's bytes must
+# equal `zzop_config::CONFIG_SURFACE_JSON` (`src/resources.rs`), and `validate_rule_pack`'s
+# happy-path fixture is a real bundled pack from `zzop_config::BUNDLED_PACK_SOURCES`
+# (`src/tools/tests.rs`) rather than a hand-written one that could drift. No shipped code here
+# reaches below `zzop-summary` — the config front end is called for this product through
+# `zzop-summary`'s handlers, never directly.
+zzop-config = { path = "../../crates/config" }

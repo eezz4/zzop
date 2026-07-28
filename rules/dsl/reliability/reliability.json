@@ -5,7 +5,7 @@
     {
       "id": "async-route-no-catch",
       "severity": "warning",
-      "message": "Async Express/router handler with no surrounding try/catch, `next(err)`, or `.catch()` — on Express 4, an unhandled rejection in an async handler crashes or hangs the process; Express 5 forwards async rejections to error-handling middleware automatically, so there it's a style/consistency concern rather than a crash bug. Wrap in try/catch and call `next(err)`, or attach `.catch(next)`. A route wrapped by error-handling middleware like `express-async-handler` or `express-async-errors` is also safe, but that wrapping isn't visible in the handler body this rule scans — the rule's biggest real-world false-positive source. Suppress a vetted case with `// async-route-no-catch-ok`.",
+      "message": "Async Express/router handler with no surrounding try/catch, `next(err)`, or `.catch()` — on Express 4, an unhandled rejection in an async handler crashes or hangs the process; Express 5 forwards async rejections to error-handling middleware automatically, so there it's a style/consistency concern rather than a crash bug. Wrap in try/catch and call `next(err)`, or attach `.catch(next)`. A route wrapped by error-handling middleware like `express-async-handler` or `express-async-errors` is also safe, but that wrapping isn't visible in the handler body this rule scans — the rule's biggest real-world false-positive source. Suppress a vetted case with `// zzop-async-route-no-catch-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -25,7 +25,7 @@
     {
       "id": "sync-fs-in-handler",
       "severity": "warning",
-      "message": "Synchronous fs/child_process call (`readFileSync`, `execSync`, etc.) alongside request-handler evidence (a `req.`/`request.` member access, or a response-API call like `res.status(...)`/`res.send(...)` — deliberately NOT `res.json(`/`res.text(`, which a fetch `Response` also has, so a handler whose only response evidence is a bare `res.json(x)` is accepted as a miss rather than risking fetch-response false positives) — a blocking call on the request path stalls Node's event loop for every concurrent request. Use the async `fs.promises`/`child_process` APIs, or move CPU-heavy work to a worker thread. Suppress a vetted case with `// sync-fs-in-handler-ok`.",
+      "message": "Synchronous fs/child_process call (`readFileSync`, `execSync`, etc.) alongside request-handler evidence (a `req.`/`request.` member access, or a response-API call like `res.status(...)`/`res.send(...)` — deliberately NOT `res.json(`/`res.text(`, which a fetch `Response` also has, so a handler whose only response evidence is a bare `res.json(x)` is accepted as a miss rather than risking fetch-response false positives) — a blocking call on the request path stalls Node's event loop for every concurrent request. Use the async `fs.promises`/`child_process` APIs, or move CPU-heavy work to a worker thread. Suppress a vetted case with `// zzop-sync-fs-in-handler-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -39,9 +39,9 @@
       }
     },
     {
-      "id": "await-in-map",
+      "id": "map-async-no-promise-all",
       "severity": "warning",
-      "message": "`.map(async ...)` used without wrapping the result in `Promise.all`/`Promise.allSettled` — `.map` returns pending Promises, so a rejection becomes unhandled and any ordering/completion guarantee is lost. Wrap the call in `Promise.all(...)` (or `Promise.allSettled(...)` for expected partial failures). Suppress a vetted case with `// await-in-map-ok`.",
+      "message": "`.map(async ...)` used without wrapping the result in `Promise.all`/`Promise.allSettled` — `.map` returns pending Promises, so a rejection becomes unhandled and any ordering/completion guarantee is lost. Wrap the call in `Promise.all(...)` (or `Promise.allSettled(...)` for expected partial failures). Suppress a vetted case with `// zzop-map-async-no-promise-all-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -59,7 +59,7 @@
     {
       "id": "env-nonnull-assert",
       "severity": "warning",
-      "message": "`process.env.X!` non-null assertion — bypasses the null check and defers the crash from startup to first use, wherever that happens to be. Validate required env vars once at startup (a config module that throws if any are missing) and reference the validated value elsewhere. Suppress a vetted case with `// env-nonnull-assert-ok`.",
+      "message": "`process.env.X!` non-null assertion — bypasses the null check and defers the crash from startup to first use, wherever that happens to be. Validate required env vars once at startup (a config module that throws if any are missing) and reference the validated value elsewhere. Suppress a vetted case with `// zzop-env-nonnull-assert-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.tsx?$",
@@ -71,7 +71,7 @@
     {
       "id": "debug-true-committed",
       "severity": "warning",
-      "message": "Debug flag or disabled TLS verification (`debug: true`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `rejectUnauthorized: false`) committed to source — ships a dev backdoor or TLS bypass to production if deployed unchanged. Remove the flag or gate it behind an environment check (e.g. `NODE_ENV !== 'production'`). Suppress a vetted line with `// debug-true-committed-ok`.",
+      "message": "Debug flag or disabled TLS verification (`debug: true`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `rejectUnauthorized: false`) committed to source — ships a dev backdoor or TLS bypass to production if deployed unchanged. Remove the flag or gate it behind an environment check (e.g. `NODE_ENV !== 'production'`). Suppress a vetted line with `// zzop-debug-true-committed-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -85,9 +85,9 @@
       }
     },
     {
-      "id": "promise-all-writes",
+      "id": "promise-all-and-writes",
       "severity": "warning",
-      "message": "`Promise.all(...)` used with DB write calls on a DB-client-shaped receiver (`prisma`/`db`/`tx`/`client`/`repo`) — non-atomic: some writes land and others don't when one rejects, with no rollback for what committed. Wrap the writes in a transaction, or use `Promise.allSettled(...)` with compensation logic. Co-occurrence heuristic, not proof — it flags a `Promise.all(...)` and a write call in the same function, not that the writes are actually inside the `Promise.all(...)` array; confirm before acting. Suppress a vetted case with `// promise-all-writes-ok`.",
+      "message": "`Promise.all(...)` used with DB write calls on a DB-client-shaped receiver (`prisma`/`db`/`tx`/`client`/`repo`) — non-atomic: some writes land and others don't when one rejects, with no rollback for what committed. Wrap the writes in a transaction, or use `Promise.allSettled(...)` with compensation logic. Co-occurrence heuristic, not proof — it flags a `Promise.all(...)` and a write call in the same function, not that the writes are actually inside the `Promise.all(...)` array; confirm before acting. Suppress a vetted case with `// zzop-promise-all-and-writes-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -103,7 +103,7 @@
     {
       "id": "json-parse-no-try",
       "severity": "warning",
-      "message": "`JSON.parse(...)` called directly on apparent external input (`req`/`body`/`params`/`query`/`payload`/`event`) without a surrounding `try` — malformed input throws, turning a bad request into a 500 or a process crash. Wrap the parse in try/catch and return a proper 4xx on failure. Suppress a vetted case with `// json-parse-no-try-ok`.",
+      "message": "`JSON.parse(...)` called directly on apparent external input (`req`/`body`/`params`/`query`/`payload`/`event`) without a surrounding `try` — malformed input throws, turning a bad request into a 500 or a process crash. Wrap the parse in try/catch and return a proper 4xx on failure. Suppress a vetted case with `// zzop-json-parse-no-try-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -121,7 +121,7 @@
     {
       "id": "fetch-no-timeout",
       "severity": "warning",
-      "message": "Outbound HTTP call (`fetch`/`axios`/`got`) in server/worker code with no timeout or `AbortController` visible in the same function — `fetch` has no default timeout, so a hung upstream hangs the request and can exhaust the connection pool. Pass an explicit timeout (e.g. `AbortSignal.timeout(...)`) or wire up an `AbortController`. A timeout set on a shared client instance in another file (e.g. `axios.create({ timeout })` in a helper module) isn't visible to this per-function check — this is the rule's biggest real-world false-positive vector. Suppress a vetted case with `// fetch-no-timeout-ok`.",
+      "message": "Outbound HTTP call (`fetch`/`axios`/`got`) in server/worker code with no timeout or `AbortController` visible in the same function — `fetch` has no default timeout, so a hung upstream hangs the request and can exhaust the connection pool. Pass an explicit timeout (e.g. `AbortSignal.timeout(...)`) or wire up an `AbortController`. A timeout set on a shared client instance in another file (e.g. `axios.create({ timeout })` in a helper module) isn't visible to this per-function check — this is the rule's biggest real-world false-positive vector. Suppress a vetted case with `// zzop-fetch-no-timeout-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -141,7 +141,7 @@
     {
       "id": "process-exit-in-lib",
       "severity": "warning",
-      "message": "`process.exit(...)` called inside a function — skips pending I/O flushes and cleanup handlers, killing the entire process, not just the current request. Throw (or reject) instead and let a top-level handler decide; legitimate only in a CLI entrypoint or a signal-handling module. Suppress a vetted case with `// process-exit-in-lib-ok`.",
+      "message": "`process.exit(...)` called inside a function — skips pending I/O flushes and cleanup handlers, killing the entire process, not just the current request. Throw (or reject) instead and let a top-level handler decide; legitimate only in a CLI entrypoint or a signal-handling module. Suppress a vetted case with `// zzop-process-exit-in-lib-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -158,7 +158,7 @@
     {
       "id": "body-limit-missing",
       "severity": "info",
-      "message": "Body parser (`express.json`/`urlencoded`, `bodyParser.json`/`urlencoded`) configured without an explicit `limit` — the code relies on the implicit 100kb default, which is too small for some legitimate endpoints and simply unexamined for the rest. Set an explicit `limit` (e.g. `{ limit: '1mb' }`) sized to the endpoint's needs. Suppress a vetted case with `// body-limit-missing-ok`.",
+      "message": "Body parser (`express.json`/`urlencoded`, `bodyParser.json`/`urlencoded`) configured without an explicit `limit` — the code relies on the implicit 100kb default, which is too small for some legitimate endpoints and simply unexamined for the rest. Set an explicit `limit` (e.g. `{ limit: '1mb' }`) sized to the endpoint's needs. Suppress a vetted case with `// zzop-body-limit-missing-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -171,7 +171,7 @@
     {
       "id": "console-in-be",
       "severity": "info",
-      "message": "`console.*` call in backend-path source (`api/`, `server/`, `backend/`, `be/`, `routes/`, `controllers/`, `services/`) — console writes are synchronous and unstructured. Use the project's structured logger instead so output is queryable, non-blocking, and carries request context. Suppress a vetted case with `// console-in-be-ok`.",
+      "message": "`console.*` call in backend-path source (`api/`, `server/`, `backend/`, `be/`, `routes/`, `controllers/`, `services/`) — console writes are synchronous and unstructured. Use the project's structured logger instead so output is queryable, non-blocking, and carries request context. Suppress a vetted case with `// zzop-console-in-be-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)(^|/)(api|server|backend|be|routes|controllers|services)/.*\\.(ts|js|mjs|cjs)$",
@@ -183,7 +183,7 @@
     {
       "id": "interval-no-clear",
       "severity": "warning",
-      "message": "`setInterval(...)` with no matching `clearInterval(...)` anywhere in this file — a leaked timer keeps the process (or page) alive and re-fires forever, since nothing cancels it. Store the return value in a handle and call `clearInterval(handle)` during teardown/cleanup. Suppress a vetted case with `// interval-no-clear-ok`.",
+      "message": "`setInterval(...)` with no matching `clearInterval(...)` anywhere in this file — a leaked timer keeps the process (or page) alive and re-fires forever, since nothing cancels it. Store the return value in a handle and call `clearInterval(handle)` during teardown/cleanup. Suppress a vetted case with `// zzop-interval-no-clear-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -196,7 +196,7 @@
     {
       "id": "env-outside-config",
       "severity": "info",
-      "message": "`process.env.X` is read outside the env-config module(s) declared for this project — scattering env parsing and validation across the codebase, so nothing can state what the app actually depends on or validate it at startup. WHICH paths are the config module is a fact about the project, not something the source says, so this rule does not guess it: it runs only when an `env-config-module` attribute is declared, and a file covered by a truthy one is exempt. An exact `{\"file\": {\"path\": ...}}` target overrides a covering `{\"pathScope\": {\"prefix\": ...}}`, so one file can be carved out of a directory declared wholesale. Declare it with `overlays: [\"./zzop-attributes.json\"]` in zzop.config.jsonc (embedders: `adapterOverlays`), whose envelope carries the attribute on a file entry — examples/auth-overlay-adapter is a complete working one. With nothing declared this rule does not run at all, and the run's warnings say so along with how many sites it left unjudged; it does not fall back to flagging every read. Two consequences worth stating rather than discovering: the exemption is whole-FILE, so every env read in a declared file is exempt including ones unrelated to config; and the declaration is taken on trust — nothing here verifies that a declared module validates, caches, or re-exports what it reads, only that you said it is the place. Test, spec, story and Storybook paths are excluded outright, independently of any declaration. Centralize env reads in a declared config module and import the validated value elsewhere. Suppress a vetted case with `// env-outside-config-ok`.",
+      "message": "`process.env.X` is read outside the env-config module(s) declared for this project — scattering env parsing and validation across the codebase, so nothing can state what the app actually depends on or validate it at startup. WHICH paths are the config module is a fact about the project, not something the source says, so this rule does not guess it: it runs only when an `env-config-module` attribute is declared, and a file covered by a truthy one is exempt. An exact `{\"file\": {\"path\": ...}}` target overrides a covering `{\"pathScope\": {\"prefix\": ...}}`, so one file can be carved out of a directory declared wholesale. Declare it with `overlays: [\"./zzop-attributes.json\"]` in zzop.config.jsonc (embedders: `adapterOverlays`), whose envelope carries the attribute on a file entry — examples/adapters/auth-overlay-adapter is a complete working one. With nothing declared this rule does not run at all, and the run's warnings say so along with how many sites it left unjudged; it does not fall back to flagging every read. Two consequences worth stating rather than discovering: the exemption is whole-FILE, so every env read in a declared file is exempt including ones unrelated to config; and the declaration is taken on trust — nothing here verifies that a declared module validates, caches, or re-exports what it reads, only that you said it is the place. Test, spec, story and Storybook paths are excluded outright, independently of any declaration. Centralize env reads in a declared config module and import the validated value elsewhere. Suppress a vetted case with `// zzop-env-outside-config-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -210,7 +210,7 @@
     {
       "id": "stream-open-no-close-in-loop",
       "severity": "warning",
-      "message": "A file/stream handle (`fs.createReadStream(`/`fs.createWriteStream(`/`fs.open(`/`fs.openSync(`) is opened structurally inside a loop body — verified against the parser's projected loop spans (the open call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — and the enclosing function never closes it (`.close(`/`.destroy(`/`pipeline(`/`finished(` anywhere in the function). Under a fan-out, the file descriptors accumulate across iterations and the process eventually hits `EMFILE: too many open files`. Note honestly: the close-absence check is whole-function scoped and matches `.close(`/`.destroy(`/`pipeline(`/`finished(` on ANY object — so a close inside a sibling branch or a callee is invisible here and the finding still fires (false positive), while an unrelated `res.close()`/`conn.destroy()` elsewhere in the function vetoes a genuine stream leak (false negative); verify before refactoring. Close the handle in a `finally` block, or use `pipeline(...)`, which closes both ends automatically. Suppress a vetted case with `// stream-open-no-close-in-loop-ok`.",
+      "message": "A file/stream handle (`fs.createReadStream(`/`fs.createWriteStream(`/`fs.open(`/`fs.openSync(`) is opened structurally inside a loop body — verified against the parser's projected loop spans (the open call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — and the enclosing function never closes it (`.close(`/`.destroy(`/`pipeline(`/`finished(` anywhere in the function). Under a fan-out, the file descriptors accumulate across iterations and the process eventually hits `EMFILE: too many open files`. Note honestly: the close-absence check is whole-function scoped and matches `.close(`/`.destroy(`/`pipeline(`/`finished(` on ANY object — so a close inside a sibling branch or a callee is invisible here and the finding still fires (false positive), while an unrelated `res.close()`/`conn.destroy()` elsewhere in the function vetoes a genuine stream leak (false negative); verify before refactoring. Close the handle in a `finally` block, or use `pipeline(...)`, which closes both ends automatically. Suppress a vetted case with `// zzop-stream-open-no-close-in-loop-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -231,7 +231,7 @@
     {
       "id": "listener-subscribe-in-loop",
       "severity": "warning",
-      "message": "An EventEmitter listener (`.on('event',…)`/`.once(`/`.addListener(`/`.prependListener(`, anchored on a string event-name argument) is registered structurally inside a loop body — verified against the parser's projected loop spans (the subscribe call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — with no matching removal (`.off(`/`.removeListener(`/`.removeAllListeners(`) anywhere in the enclosing function. To avoid firing on same-shaped non-EventEmitter `.on('...')` calls (a frontend DOM/jQuery `$(el).on('click', …)`, a knex join builder, a D3 selection), the rule only scans files that use a Node event-emitter/server library (an `events`/`net`/`http`/`ws`/`socket.io`/... import, or a `.setMaxListeners(` call). This is the event-listener sibling of `interval-no-clear` (which covers `setInterval`): listeners pile up on every iteration, Node warns `MaxListenersExceeded`, and each event then fires the handler N times (duplicate side effects, unbounded memory growth). Note honestly: the removal-absence check is whole-function scoped — a teardown living in a different function (or an unrelated `.off(` on another object) either misses a real fix or vetoes a real leak; verify before refactoring. Register the listener once outside the loop, or collect the listeners and remove them during teardown. Suppress a vetted case with `// listener-subscribe-in-loop-ok`.",
+      "message": "An EventEmitter listener (`.on('event',…)`/`.once(`/`.addListener(`/`.prependListener(`, anchored on a string event-name argument) is registered structurally inside a loop body — verified against the parser's projected loop spans (the subscribe call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — with no matching removal (`.off(`/`.removeListener(`/`.removeAllListeners(`) anywhere in the enclosing function. To avoid firing on same-shaped non-EventEmitter `.on('...')` calls (a frontend DOM/jQuery `$(el).on('click', …)`, a knex join builder, a D3 selection), the rule only scans files that use a Node event-emitter/server library (an `events`/`net`/`http`/`ws`/`socket.io`/... import, or a `.setMaxListeners(` call). This is the event-listener sibling of `interval-no-clear` (which covers `setInterval`): listeners pile up on every iteration, Node warns `MaxListenersExceeded`, and each event then fires the handler N times (duplicate side effects, unbounded memory growth). Note honestly: the removal-absence check is whole-function scoped — a teardown living in a different function (or an unrelated `.off(` on another object) either misses a real fix or vetoes a real leak; verify before refactoring. Register the listener once outside the loop, or collect the listeners and remove them during teardown. Suppress a vetted case with `// zzop-listener-subscribe-in-loop-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -252,7 +252,7 @@
     {
       "id": "await-inside-promise-all-array",
       "severity": "warning",
-      "message": "`await` used directly inside a `Promise.all(...)`/`Promise.allSettled(...)`/`Promise.race(...)` array literal — each awaited element resolves before the next element of the array is even evaluated, so the calls run one after another instead of concurrently, silently defeating the whole point of `Promise.all`. This is syntax-proven where it fires: an `await` textually between the array's `[` and `]` on the SAME line always serializes that element against the next (the line-scan only sees the single-line form — a multi-line array with each `await` on its own line is not flagged). Move the `await` out — build the array of un-awaited promises first, then await the combinator once (e.g. `Promise.all([getA(), getB()])`, or `await Promise.all(items.map((i) => getA(i)))`). Suppress a vetted case with `// await-inside-promise-all-array-ok`.",
+      "message": "`await` used directly inside a `Promise.all(...)`/`Promise.allSettled(...)`/`Promise.race(...)` array literal — each awaited element resolves before the next element of the array is even evaluated, so the calls run one after another instead of concurrently, silently defeating the whole point of `Promise.all`. This is syntax-proven where it fires: an `await` textually between the array's `[` and `]` on the SAME line always serializes that element against the next (the line-scan only sees the single-line form — a multi-line array with each `await` on its own line is not flagged). Move the `await` out — build the array of un-awaited promises first, then await the combinator once (e.g. `Promise.all([getA(), getB()])`, or `await Promise.all(items.map((i) => getA(i)))`). Suppress a vetted case with `// zzop-await-inside-promise-all-array-ok`.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs)$",
@@ -265,7 +265,7 @@
     {
       "id": "emitter-async-listener",
       "severity": "warning",
-      "message": "An `async` callback registered as an EventEmitter listener (`.on`/`.once`/`.addListener`/`.prependListener`) — the emitter fires it and discards the returned promise, so a rejection inside the handler becomes an unhandled promise rejection, which crashes the process on Node 15+ (and is a silent swallow on older Node). The rule only scans files that use a Node event-emitter/server library (an `events`/`net`/`http`/`ws`/... import, or a `.setMaxListeners(` call), so a frontend DOM `el.on('click', async …)` is not flagged. Wrap the handler body in try/catch and log/handle the error there, or wrap the callback so its promise is observed (e.g. a small `catchAsync(fn)` helper). Suppress a vetted case with `// emitter-async-listener-ok`.",
+      "message": "An `async` callback registered as an EventEmitter listener (`.on`/`.once`/`.addListener`/`.prependListener`) — the emitter fires it and discards the returned promise, so a rejection inside the handler becomes an unhandled promise rejection, which crashes the process on Node 15+ (and is a silent swallow on older Node). The rule only scans files that use a Node event-emitter/server library (an `events`/`net`/`http`/`ws`/... import, or a `.setMaxListeners(` call), so a frontend DOM `el.on('click', async …)` is not flagged. Wrap the handler body in try/catch and log/handle the error there, or wrap the callback so its promise is observed (e.g. a small `catchAsync(fn)` helper). Suppress a vetted case with `// zzop-emitter-async-listener-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -279,9 +279,9 @@
       }
     },
     {
-      "id": "promise-race-resource-leak",
+      "id": "promise-race-no-cancel",
       "severity": "info",
-      "message": "`Promise.race([...])` with no `AbortController`/`AbortSignal`/`clearTimeout`/`.abort()` visible in the same function — the operation(s) that lose the race are never cancelled, so their socket/timer/handle stays alive after the race settles, and a later rejection from a loser becomes an unhandled rejection. Wire an `AbortController` (or equivalent cancellation) through to every raced operation and abort the losers once the race settles. Heuristic, not proof: some raced operations (e.g. a plain in-memory timer promise) hold no cancellable resource, so this can over-flag. Suppress a vetted case with `// promise-race-resource-leak-ok`.",
+      "message": "`Promise.race([...])` with no `AbortController`/`AbortSignal`/`clearTimeout`/`.abort()` visible in the same function — the operation(s) that lose the race are never cancelled, so their socket/timer/handle stays alive after the race settles, and a later rejection from a loser becomes an unhandled rejection. Wire an `AbortController` (or equivalent cancellation) through to every raced operation and abort the losers once the race settles. Heuristic, not proof: some raced operations (e.g. a plain in-memory timer promise) hold no cancellable resource, so this can over-flag. Suppress a vetted case with `// zzop-promise-race-no-cancel-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -299,7 +299,7 @@
     {
       "id": "fs-check-then-use",
       "severity": "warning",
-      "message": "A create/write call (`fs.writeFile`/`fs.open`/`fs.rename`/...) appears LEXICALLY AFTER a filesystem existence/permission check (`fs.existsSync`/`fs.access`/`fs.stat`/...) in the NEAREST enclosing function, with no exclusive-create flag (`wx`/`O_EXCL`) visible anywhere in it — CWE-367 TOCTOU: between the check and the use, the path can be swapped out from under it (e.g. via a symlink) or another writer can win the race, so the check is stale by the time the write happens. A trigger line that sits inside NO parser-projected function span (a class-property initializer, a top-level statement) is read as ungated, and the pairing there widens back to the whole scanned symbol span. The order is TEXTUAL, and path identity is not checked at all: it does not confirm the check and the write target the same path, nor that both run on the same control-flow path (`fs.existsSync(a)` followed by `fs.writeFile(b)` still fires). Prefer opening with an exclusive-create flag (`{ flag: 'wx' }` in Node, `O_EXCL` at the syscall level), which fails atomically if the path already exists instead of trusting a separate check. Suppress a vetted case with `// fs-check-then-use-ok`.",
+      "message": "A create/write call (`fs.writeFile`/`fs.open`/`fs.rename`/...) appears LEXICALLY AFTER a filesystem existence/permission check (`fs.existsSync`/`fs.access`/`fs.stat`/...) in the NEAREST enclosing function, with no exclusive-create flag (`wx`/`O_EXCL`) visible anywhere in it — CWE-367 TOCTOU: between the check and the use, the path can be swapped out from under it (e.g. via a symlink) or another writer can win the race, so the check is stale by the time the write happens. A trigger line that sits inside NO parser-projected function span (a class-property initializer, a top-level statement) is read as ungated, and the pairing there widens back to the whole scanned symbol span. The order is TEXTUAL, and path identity is not checked at all: it does not confirm the check and the write target the same path, nor that both run on the same control-flow path (`fs.existsSync(a)` followed by `fs.writeFile(b)` still fires). SAME-LINE NESTING RESIDUAL (a disclosed false negative shared by every rule that uses this order gate): on a single line \"after\" is decided by MATCH START OFFSET, so a check nested INSIDE the write call's own argument list reads as coming AFTER it and does not pair — `fs.writeFileSync(p, data, { flag: fs.existsSync(p) ? 'a' : 'w' });` is silently NOT reported, while the ordinary one-liner `if (!fs.existsSync(p)) fs.writeFileSync(p, data);` (check first) fires. Prefer opening with an exclusive-create flag (`{ flag: 'wx' }` in Node, `O_EXCL` at the syscall level), which fails atomically if the path already exists instead of trusting a separate check. Suppress a vetted case with `// zzop-fs-check-then-use-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
@@ -321,7 +321,7 @@
     {
       "id": "fs-in-loop-serial",
       "severity": "warning",
-      "message": "An `await`ed Node `fs`/`fs.promises` call (`readFile`/`writeFile`/`appendFile`/`unlink`/`rename`/`copyFile`/`mkdir`/`rm`/`readdir`/`stat`/`access`/... — deliberately excluding `open`/`createReadStream`/`createWriteStream`, which `stream-open-no-close-in-loop` already covers for the handle-leak angle) executes structurally inside a loop body — verified against the parser's projected loop spans (the call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — with no `Promise.all`/`Promise.allSettled` anywhere in the enclosing function. Each iteration's disk I/O waits for the previous one to finish before starting, serializing work the filesystem would otherwise run concurrently; over many files this adds up to iteration-count times the single-call latency. This generalizes `await-in-map` (which only catches the `.map(async ...)` callback shape) to the ordinary `for`/`for-of`/`for-in`/`while` loop forms, scoped to `fs` I/O specifically — database calls in a loop are `sql/nplus1`'s territory and outbound network calls are `perf/api-in-loop`'s, both already covering their own receivers, so this rule only anchors on an `fs`/`fsPromises`/`fsp`/`fs.promises`-shaped receiver to stay out of their way. Gather the paths up front and run the calls concurrently with `Promise.all(...)` (bounded by a concurrency limiter if the fan-out is large), or use a single directory-level/batch operation where the API allows it. Suppress a vetted case (e.g. deliberately sequential writes to preserve on-disk ordering) with `// fs-in-loop-serial-ok`.",
+      "message": "An `await`ed Node `fs`/`fs.promises` call (`readFile`/`writeFile`/`appendFile`/`unlink`/`rename`/`copyFile`/`mkdir`/`rm`/`readdir`/`stat`/`access`/... — deliberately excluding `open`/`createReadStream`/`createWriteStream`, which `stream-open-no-close-in-loop` already covers for the handle-leak angle) executes structurally inside a loop body — verified against the parser's projected loop spans (the call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — with no `Promise.all`/`Promise.allSettled` anywhere in the enclosing function. Each iteration's disk I/O waits for the previous one to finish before starting, serializing work the filesystem would otherwise run concurrently; over many files this adds up to iteration-count times the single-call latency. This generalizes `map-async-no-promise-all` (which only catches the `.map(async ...)` callback shape) to the ordinary `for`/`for-of`/`for-in`/`while` loop forms, scoped to `fs` I/O specifically — database calls in a loop are `sql/nplus1`'s territory and outbound network calls are `perf/api-in-loop`'s, both already covering their own receivers, so this rule only anchors on an `fs`/`fsPromises`/`fsp`/`fs.promises`-shaped receiver to stay out of their way. Gather the paths up front and run the calls concurrently with `Promise.all(...)` (bounded by a concurrency limiter if the fan-out is large), or use a single directory-level/batch operation where the API allows it. Suppress a vetted case (e.g. deliberately sequential writes to preserve on-disk ordering) with `// zzop-fs-in-loop-serial-ok`.",
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",

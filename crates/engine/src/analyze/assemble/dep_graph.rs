@@ -59,7 +59,7 @@ pub(super) fn build(
     // `circular_from_dep_excluding`'s doc): a pair present here is contributed ONLY by edges excludable
     // from cycle detection — type-only bindings/re-exports, or a dynamic `import()` (Defect 2) — so
     // `circular_findings` in `super::rules` must not count it as a cycle edge even though `dep` itself
-    // (fan-in/dead-exports/every other metric) still includes it.
+    // (fan-in/unimported-export/every other metric) still includes it.
     let (mut dep, type_only_edges): (DepGraph, HashSet<(String, String)>) =
         zzop_parser_typescript::build_dep_with_workspace(
             ts_import_pairs,

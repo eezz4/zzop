@@ -1,10 +1,23 @@
 use super::*;
 
+/// `parse_typescript` under the BUILT-IN write-site vocabulary — every case below is about parse
+/// failure/degrade behaviour, not about which receivers a project calls its own.
+fn parse_typescript_default(
+    rel: &str,
+    text: &str,
+) -> (Vec<SourceSymbol>, Option<ImportMap>, u32, bool, Vec<String>) {
+    parse_typescript(
+        rel,
+        text,
+        &zzop_parser_typescript::WriteSiteVocab::built_in(),
+    )
+}
+
 // --- parse_typescript's real parse-failure signal (zzop_parser_typescript::parse_ok) ---
 
 #[test]
 fn parse_typescript_does_not_degrade_balanced_well_formed_file() {
-    let (symbols, _imports, _loc, degraded, _used_names) = parse_typescript(
+    let (symbols, _imports, _loc, degraded, _used_names) = parse_typescript_default(
         "x.ts",
         "export function foo(a: { x: number }) {\n  return [a.x, (a.x + 1)];\n}\n",
     );
@@ -15,7 +28,7 @@ fn parse_typescript_does_not_degrade_balanced_well_formed_file() {
 #[test]
 fn parse_typescript_degrades_unbalanced_brace() {
     let (symbols, imports, loc, degraded, used_names) =
-        parse_typescript("b.ts", "function foo( {\n  return 1;\n");
+        parse_typescript_default("b.ts", "function foo( {\n  return 1;\n");
     assert!(degraded);
     assert!(symbols.is_empty());
     assert_eq!(imports, Some(ImportMap::new()));
@@ -26,13 +39,13 @@ fn parse_typescript_degrades_unbalanced_brace() {
 #[test]
 fn parse_typescript_degrades_stray_closing_brace() {
     let (_symbols, _imports, _loc, degraded, _used_names) =
-        parse_typescript("s.ts", "}\nfunction foo() {}\n");
+        parse_typescript_default("s.ts", "}\nfunction foo() {}\n");
     assert!(degraded);
 }
 
 #[test]
 fn parse_typescript_does_not_degrade_braces_inside_strings_and_comments() {
-    let (_symbols, _imports, _loc, degraded, _used_names) = parse_typescript(
+    let (_symbols, _imports, _loc, degraded, _used_names) = parse_typescript_default(
         "c.ts",
         "const s = \"{ unmatched\"; // } also unmatched\nfunction f() {}\n",
     );
@@ -44,7 +57,7 @@ fn parse_typescript_degrades_a_balanced_but_syntactically_invalid_file() {
     // Braces/parens are balanced (there are none), but `const x: = 1;` is not valid TypeScript —
     // a brace-balance-only check would misclassify this as a legitimately empty file.
     let (symbols, imports, _loc, degraded, _used_names) =
-        parse_typescript("t.ts", "const x: = 1;\n");
+        parse_typescript_default("t.ts", "const x: = 1;\n");
     assert!(degraded);
     assert!(symbols.is_empty());
     assert_eq!(imports, Some(ImportMap::new()));
@@ -52,7 +65,7 @@ fn parse_typescript_degrades_a_balanced_but_syntactically_invalid_file() {
 
 #[test]
 fn parse_typescript_does_not_degrade_a_legitimately_empty_file() {
-    let (symbols, imports, _loc, degraded, used_names) = parse_typescript("e.ts", "");
+    let (symbols, imports, _loc, degraded, used_names) = parse_typescript_default("e.ts", "");
     assert!(!degraded);
     assert!(symbols.is_empty());
     assert!(imports.unwrap().is_empty());
@@ -61,7 +74,7 @@ fn parse_typescript_does_not_degrade_a_legitimately_empty_file() {
 
 #[test]
 fn parse_typescript_collects_used_names_alongside_symbols() {
-    let (_symbols, _imports, _loc, degraded, used_names) = parse_typescript(
+    let (_symbols, _imports, _loc, degraded, used_names) = parse_typescript_default(
         "x.ts",
         "const X = 1;\nfunction foo() { return X + Y; }\nexport { foo };\n",
     );
@@ -88,7 +101,7 @@ fn garbage_ts_input_does_not_panic_parse_symbols_or_parse_imports() {
 #[test]
 fn parse_typescript_degrades_garbage_input() {
     let garbage = "@#$%^&*( ) => => => 123abc <<< >>> \u{0}\u{1}";
-    let (symbols, imports, loc, degraded, used_names) = parse_typescript("g.ts", garbage);
+    let (symbols, imports, loc, degraded, used_names) = parse_typescript_default("g.ts", garbage);
     assert!(degraded);
     assert!(symbols.is_empty());
     assert_eq!(imports, Some(ImportMap::new()));
@@ -99,7 +112,7 @@ fn parse_typescript_degrades_garbage_input() {
 #[test]
 fn parse_typescript_succeeds_on_well_formed_file() {
     let (symbols, imports, _loc, degraded, _used_names) =
-        parse_typescript("ok.ts", "export function foo() { return 1; }\n");
+        parse_typescript_default("ok.ts", "export function foo() { return 1; }\n");
     assert!(!degraded);
     assert_eq!(symbols.len(), 1);
     assert!(imports.unwrap().is_empty());
