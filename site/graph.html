@@ -34,7 +34,17 @@
   background: var(--bg-deep); border: 1px solid var(--border);
   border-radius: var(--radius); overflow: hidden;
 }
-.graph-stage canvas { display: block; position: absolute; inset: 0; cursor: grab; touch-action: none; }
+/* `width`/`height` are NOT optional here, and `inset: 0` cannot replace them. A <canvas> is a
+   REPLACED element: when its width/height compute to `auto`, an absolutely positioned box takes its
+   INTRINSIC size (canvas defaults to 300x150) and the over-constrained `right`/`bottom` are simply
+   dropped — the rule that stretches a <div> to its containing block does not apply. Measured on the
+   published page: the stage was 1272x720 while the canvas stayed 300x150, so all 1,137 nodes were
+   drawn into a corner tile that the controls panel then covered. The viewer was never at fault; it
+   fits to `cv.clientWidth/clientHeight` and was told the picture was 300x150. */
+.graph-stage canvas {
+  display: block; position: absolute; inset: 0; width: 100%; height: 100%;
+  cursor: grab; touch-action: none;
+}
 .graph-stage canvas.is-dragging { cursor: grabbing; }
 
 .graph-controls, .graph-legend {
@@ -107,8 +117,9 @@
 
 @media (max-width: 780px) {
   .graph-page { padding: 28px 16px 56px; }
-  /* The controls stop floating over a small canvas and sit above it, so the picture keeps its
-     whole width. The stage keeps a real height — a graph in a 200px strip is not a graph. */
+  /* The controls stop floating over a small canvas and drop into the flow beneath it, so the
+     picture keeps its whole width. The stage keeps a real height — a graph in a 200px strip is
+     not a graph. */
   .graph-controls {
     position: static; width: auto; max-height: none;
     border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
@@ -118,7 +129,11 @@
   .graph-controls fieldset + fieldset { border-top: 0; border-left: 1px solid var(--border-subtle); }
   .graph-controls .graph-find, .graph-controls .graph-detail { grid-column: 1 / -1; }
   .graph-stage { height: auto; min-height: 0; }
-  .graph-stage canvas { height: 62vh; min-height: 320px; }
+  /* In flow, not absolute: this branch gives the stage `height: auto` so it is sized by its
+     children, and an absolutely positioned canvas contributes no height at all — it would overlay
+     the now-static controls instead of sitting under them, which is the opposite of what the
+     comment above asks for. */
+  .graph-stage canvas { position: static; width: 100%; height: 62vh; min-height: 320px; }
   .graph-zoom { top: auto; bottom: 14px; right: 14px; }
   .graph-zoom button { width: 40px; height: 40px; font-size: 18px; }
   .graph-legend {

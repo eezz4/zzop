@@ -73,7 +73,23 @@
 #     a machine-backed source (a struct field, a contract test) is for on the next read.
 #   - a `100%` inside an inline `style=` attribute would fire and need an allowlist entry. No page uses
 #     inline styles today (the site ships one external stylesheet); the escape hatch exists if that
-#     changes.
+#     changes. An HTML `<style>` BLOCK is a different matter and is skipped outright — see below.
+#
+# ---------------------------------------------------------------------------------------------------
+# `<style>` blocks are not prose (2026-07-29)
+# ---------------------------------------------------------------------------------------------------
+# Lines inside an HTML `<style>` element are excluded from the claim scan. CSS is not a promise made to
+# a reader, and `width: 100%` is not the `100%` this guard is looking for. The rule was already in force
+# for the site's external stylesheet — `*.css` is not in the scan surface at all, and site/assets/site.css
+# carries four `100%` declarations nobody has ever had to allowlist. site/graph.html then landed a
+# page-scoped `<style>` block, and the identical declaration in the identical role fired three times
+# purely because of which FILE it lived in. Allowlisting it would have recorded a CSS length as a
+# "vetted claim about the product", which is worse than the gap: the allowlist's entries are supposed to
+# be sentences someone can go and check.
+#
+# Deliberately NOT extended to `<script>`: a string literal in a script can be user-facing text (a
+# tooltip, an empty-state message), and this page's viewer proves it — `showDetail`'s EMPTY constant is
+# a sentence shown to a reader. Script bodies stay in scope.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -208,6 +224,11 @@ for _ in "${ALLOWLIST[@]}"; do used+=(0); done
 # so a file is loaded once and every match in it is served from that load.
 cached_file=""
 cached_lines=()
+# Index-parallel to cached_lines: 1 where that line sits inside a `<style>` element. Built in the same
+# pass that loads the file, so a skipped CSS declaration costs no extra process (see the header for why
+# CSS is out of scope at all). Boundary lines are marked too — a claim sharing a line with `<style>` or
+# `</style>` is CSS-adjacent enough that reading it as prose would be the same category error.
+cached_in_style=()
 negators_re="(^|[^A-Za-z])($negators)([^A-Za-z]|$)"
 
 fail=0
@@ -229,6 +250,21 @@ while IFS= read -r row; do
   if [ "$file" != "$cached_file" ]; then
     mapfile -t cached_lines < "$file"
     cached_file="$file"
+    cached_in_style=()
+    _in_style=0
+    _n=0
+    while [ "$_n" -lt "${#cached_lines[@]}" ]; do
+      _l="${cached_lines[$_n],,}"
+      case "$_l" in *"<style"*) _in_style=1 ;; esac
+      cached_in_style[$_n]=$_in_style
+      case "$_l" in *"</style"*) _in_style=0 ;; esac
+      _n=$((_n + 1))
+    done
+  fi
+  # A CSS declaration is not a claim. Checked before the negation window so a `<style>` line never
+  # consults the allowlist either — an entry vetting a length would be noise in a list of sentences.
+  if [ "${cached_in_style[$((lineno - 1))]:-0}" = 1 ]; then
+    continue
   fi
   # mapfile is 0-indexed; grep line numbers are 1-based. The `:-` is not decoration: under `set -u`
   # an out-of-range index is an "unbound variable" abort, and the `sed -n "${lineno}p"` this replaced
