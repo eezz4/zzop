@@ -33,6 +33,25 @@
  *   3. Velocity decays each tick AND is clamped, so no single step can fling a node out of the world.
  * The aspect-ratio assertion at the bottom is the regression test for that bug: it throws rather than
  * writing a squashed picture back into the page.
+ *
+ * WHY DEGREE-0 FILES ARE PLACED RATHER THAN SIMULATED
+ * This graph is not connected — measured on this repository, 1,137 files fall into 136 components, of
+ * which 109 are a SINGLE file that imports nothing and is imported by nothing. A force layout has no
+ * signal for such a node: repulsion is cut off at CUTOFF (it must be, or every tick is O(n^2)), so once
+ * an isolated node is further than that from anything it feels only the weak CENTRE pull, drifts in
+ * until the core's outer shell repels it, and settles. The result was a halo at roughly twice the core's
+ * radius (measured mean radius 446 against 224 for connected nodes) at whatever ANGLE the golden-angle
+ * seed happened to give it, because nothing in the simulation acts tangentially. So every one of those
+ * 107 nodes occupied a position that encoded NOTHING, spread across the whole frame — the seven
+ * scripts/*.mjs files landed at seven unrelated bearings and read as scatter.
+ *
+ * A picture whose positions are partly meaningful and partly noise is worse than one that admits which
+ * is which. So the layout is two phases: the simulation runs over the connected nodes only, and the
+ * degree-0 nodes are then PLACED on a band outside it, grouped into one arc per top-level area. Their
+ * position now says what it can honestly say — "no imports, and here is which area it belongs to" —
+ * and nothing is dropped, which matters because this page's whole claim is that it draws everything.
+ * The alternative of pulling every node toward its folder's centroid was rejected: it would make the
+ * coordinates encode directory structure as much as imports, on a page titled "import graph".
  */
 import fs from 'fs';
 import path from 'path';
@@ -75,21 +94,33 @@ const L = links.map(([a, b]) => ({
   bias: (deg[a] || 1) / ((deg[a] || 1) + (deg[b] || 1)),
 }));
 
+// Phase 1 simulates the CONNECTED nodes only — see the header. `active` is index-parallel to nothing;
+// it is just the subset the loops below iterate, and the isolated nodes keep their slot in `N` so the
+// emitted rows stay in input order.
+const active = [];
+const isolated = [];
+for (let i = 0; i < N.length; i++) (deg[i] > 0 ? active : isolated).push(i);
+
+if (active.length === 0) {
+  throw new Error('layout: no connected nodes — every file is degree 0, so phase 1 would simulate nothing');
+}
+
 // Golden-angle spiral seed: deterministic, and evenly spread so the first ticks do useful work
 // instead of untangling a pile.
-const R0 = Math.sqrt(N.length) * 14;
-N.forEach((n, i) => {
-  const t = i * 2.399963229728653, r = R0 * Math.sqrt((i + 0.5) / N.length);
-  n.x = Math.cos(t) * r; n.y = Math.sin(t) * r;
+const R0 = Math.sqrt(active.length) * 14;
+active.forEach((gi, i) => {
+  const t = i * 2.399963229728653, r = R0 * Math.sqrt((i + 0.5) / active.length);
+  N[gi].x = Math.cos(t) * r; N[gi].y = Math.sin(t) * r;
 });
+const A = active.map(i => N[i]);
 
 const ITER = 600;
 const REPEL = 190, CUTOFF = 190, CELL = CUTOFF, CUTOFF2 = CUTOFF * CUTOFF;
 const REST = 26;
-// This graph is NOT connected — the repository's files fall into hundreds of components, many of them
-// single files with no import at all. Repulsion has a cutoff (it must, or this is O(n^2) per tick), so
-// separate components feel nothing from each other and would drift apart forever. This weak pull is
-// what holds them in one frame.
+// Even with the degree-0 files taken out, what remains is NOT one connected graph — this repository's
+// connected nodes still fall into dozens of components. Repulsion has a cutoff (it must, or this is
+// O(n^2) per tick), so separate components feel nothing from each other and would drift apart forever.
+// This weak pull is what holds them in one frame.
 const CENTRE = 0.0009;
 const DECAY = 0.6, VMAX = 18;
 const alphaDecay = 1 - Math.pow(0.001, 1 / ITER);
@@ -97,12 +128,12 @@ const alphaDecay = 1 - Math.pow(0.001, 1 / ITER);
 let alpha = 1;
 for (let step = 0; step < ITER; step++) {
   const grid = new Map();
-  for (const n of N) {
+  for (const n of A) {
     const key = Math.floor(n.x / CELL) + ',' + Math.floor(n.y / CELL);
     let c = grid.get(key); if (!c) grid.set(key, c = []);
     c.push(n);
   }
-  for (const n of N) {
+  for (const n of A) {
     const cx = Math.floor(n.x / CELL), cy = Math.floor(n.y / CELL);
     for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
       const c = grid.get((cx + dx) + ',' + (cy + dy));
@@ -127,7 +158,7 @@ for (let step = 0; step < ITER; step++) {
     l.b.vx -= dx * f * l.bias;       l.b.vy -= dy * f * l.bias;
     l.a.vx += dx * f * (1 - l.bias); l.a.vy += dy * f * (1 - l.bias);
   }
-  for (const n of N) {
+  for (const n of A) {
     n.vx -= n.x * CENTRE; n.vy -= n.y * CENTRE;
     n.vx *= DECAY; n.vy *= DECAY;
     const v = Math.hypot(n.vx, n.vy);
@@ -135,6 +166,46 @@ for (let step = 0; step < ITER; step++) {
     n.x += n.vx; n.y += n.vy;   // alpha scales force, NOT this line — see the header.
   }
   alpha -= alpha * alphaDecay;
+}
+
+/* Phase 2 — the degree-0 band. One arc per top-level area, outside whatever radius phase 1 settled on,
+   so the reader can see at a glance which areas carry files nothing imports. Ordering is by group size
+   then name (the same order the page's legend uses) and within a group by path, so this is a pure
+   function of the input like the rest of the file. */
+if (isolated.length) {
+  const areaOf = i => (folders[rows[i][1]] || '').split('/')[0] || '.';
+  const pathOf = i => (folders[rows[i][1]] ? folders[rows[i][1]] + '/' : '') + rows[i][0];
+  const byArea = new Map();
+  for (const i of isolated) {
+    const a = areaOf(i);
+    if (!byArea.has(a)) byArea.set(a, []);
+    byArea.get(a).push(i);
+  }
+  const groups = [...byArea.entries()]
+    .sort((x, y) => y[1].length - x[1].length || (x[0] < y[0] ? -1 : 1));
+  for (const [, members] of groups) {
+    members.sort((p, q) => (pathOf(p) < pathOf(q) ? -1 : pathOf(p) > pathOf(q) ? 1 : 0));
+  }
+
+  // Slot spacing along the arc, plus blank slots between groups so the areas read as separate runs
+  // rather than one undifferentiated necklace.
+  const SLOT = 30, GROUP_GAP = 3;
+  const totalSlots = isolated.length + groups.length * GROUP_GAP;
+  let coreR = 0;
+  for (const n of A) coreR = Math.max(coreR, Math.hypot(n.x, n.y));
+  // Whichever is larger: clear of the core, or big enough that the slots do not overlap.
+  const BAND_R = Math.max(coreR + 80, (totalSlots * SLOT) / (2 * Math.PI));
+
+  let slot = 0;
+  for (const [, members] of groups) {
+    for (const i of members) {
+      const t = (slot / totalSlots) * 2 * Math.PI;
+      N[i].x = Math.cos(t) * BAND_R;
+      N[i].y = Math.sin(t) * BAND_R;
+      slot++;
+    }
+    slot += GROUP_GAP;
+  }
 }
 
 const xs = N.map(n => n.x), ys = N.map(n => n.y);
@@ -207,6 +278,12 @@ const proseSites = [
     what: 'canvas aria-label',
     re: /zzop repository: \d+ files, \d+ imports/,
     to: `zzop repository: ${nodeCount} files, ${linkCount} imports`,
+  },
+  {
+    file: PAGE,
+    what: 'outer-ring note, degree-0 count',
+    re: /There are [\d,]+ of them here/,
+    to: `There are ${commas(isolated.length)} of them here`,
   },
   {
     file: ARCH,
