@@ -135,10 +135,17 @@ button {
   color: var(--text);
 }
 
+/* `min-width: 0` is load-bearing, not tidying. A flex item's min-width defaults to `auto`, which
+   floors it at its CONTENT width — so `flex: 1` could grow this nav but never shrink it, and below
+   ~470px the header pushed the whole document wider than the viewport on every page (measured
+   2026-07-29: 552px scrollWidth against a 469px client width, on graph, index and usage alike, with
+   this nav as the widest offender). With the floor removed the nav can shrink, and the narrow branch
+   below turns the leftover into a scroll rather than a clip. */
 .site-nav {
   display: flex;
   gap: 24px;
   flex: 1;
+  min-width: 0;
 }
 
 .site-nav__link {
@@ -283,6 +290,11 @@ button {
   max-width: 520px;
 }
 
+/* The `min-width: auto` floor is DELIBERATELY left in place here, and zeroed only in the single-column
+   branch below. On the two-column desktop hero the floor is what keeps the code panel at its natural
+   width; removing it unconditionally makes the grid honour its declared 1.05fr/0.95fr, which is
+   narrower than the shell lines and clips them behind a scrollbar nobody asked for (measured, and
+   reverted). Below 960px the grid is one column and the same floor is a defect — see that branch. */
 .hero__code {
   position: sticky;
   top: 96px;
@@ -970,8 +982,18 @@ h3 code {
     padding: 96px 24px 64px;
   }
 
+  /* One column now, so the code panel no longer sits beside the prose — and the `min-width: auto`
+     floor that sized it on desktop becomes the thing that sizes the PAGE. `.code-block` already asks
+     to scroll its own overflow; the floor on this grid item and on the flex item inside it meant the
+     request never reached it, and the widest shell line set the document width instead: 805px inside
+     a 469px viewport, on the landing page, measured 2026-07-29. */
   .hero__code {
     position: static;
+    min-width: 0;
+  }
+
+  .hero__code .code-panel {
+    min-width: 0;
   }
 
   .docs-layout {
@@ -1001,6 +1023,31 @@ h3 code {
 }
 
 @media (max-width: 640px) {
+  /* Six nav links do not fit a phone, and the two ways to make them fit both lose something: a
+     hamburger hides every destination behind a tap, and dropping links makes pages unreachable from
+     the page you are on. Scrolling keeps all six reachable and costs only the discovery of a swipe —
+     the brand and the GitHub button stay pinned because they are not part of the scroller. The
+     scrollbar is hidden because a 3px bar under a 40px header reads as a rendering artifact, not a
+     control; the content is still reachable by swipe, wheel and keyboard. */
+  .site-header__inner {
+    padding-inline: 16px;
+    gap: 14px;
+  }
+
+  .site-nav {
+    gap: 18px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .site-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .site-nav__link {
+    white-space: nowrap;
+  }
+
   .hero__title {
     font-size: 2.75rem;
   }
