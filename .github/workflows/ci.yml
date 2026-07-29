@@ -98,6 +98,13 @@ jobs:
         # stamping loop in prebuild.yml. That job runs the same script's --stamped mode as a publish
         # blocker after stamping.
         run: bash scripts/check-server-json-hashes.sh
+      - name: release-version propagation guard
+        # Every committed version on the release surface (plugin.json, server.json's version fields and
+        # its packages[] download URLs) must equal Cargo.toml's [workspace.package] version. prebuild's
+        # `meta` and `verify-plugin-version` jobs ask the same question, but both run AFTER the push that
+        # creates the tag — v0.26.0 shipped with server.json at 0.25.0 for exactly that reason. This one
+        # runs on every commit, in pre-commit as well, so the bump and its propagation cannot separate.
+        run: bash scripts/check-release-version-propagation.sh
       - name: license shipping guard
         # Every distribution root must carry the root LICENSE, every workspace Cargo.toml must declare a
         # license, and THIRD-PARTY-NOTICES.md must still be the file its generator would produce. MIT

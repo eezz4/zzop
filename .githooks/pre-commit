@@ -43,6 +43,7 @@ GUARDS=(
   check-overclaim-prose
   check-vendor-token-literals
   check-server-json-hashes
+  check-release-version-propagation
   check-license-shipping
 )
 
