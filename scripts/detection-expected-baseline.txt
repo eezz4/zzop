@@ -1,0 +1,44 @@
+# Detection-benchmark COVERAGE FLOOR — how much cases/EXPECTED.jsonc is required to claim, per tree.
+# This is not debt and not an exemption list: it is the previous value of a file that regenerates
+# itself, which is the one thing that file cannot hold about itself.
+#
+# Columns: <sourceId> <expectations> <benign> <gap>
+#   expectations — labeled key x ruleId pairs anchored in that tree (NOT locations: dropping one rule
+#                  id from a key that keeps its others is a lost detection).
+#   benign       — whole-file negative controls in that tree, where any finding is a false positive.
+#   gap          — labeled shapes that SHOULD fire once a known capability lands and do not today.
+#                  Counted for a stronger reason than the other two: an expectation or a control
+#                  defends itself in the score, but a gap is exit-zero while open, so the score is
+#                  identical whether it is in the ground truth or not. This column is the only thing
+#                  that notices one being deleted.
+# `untracked` is deliberately not counted; see the ratchet header in scripts/measure/benchmark.mjs
+# for that and for why a per-tree COUNT rather than a hash of the ground truth.
+#
+# Every number here is DERIVED from cases/EXPECTED.jsonc by the same code that scores it, and the
+# check is equality in both directions — a number too low is a surrendered detection, a number too
+# high or a missing row is an unrecorded one, and both are red. So this file cannot silently drift out
+# of agreement with the ground truth the way a hand-kept list can.
+#
+# Maintained by: node scripts/measure/benchmark.mjs --expected cases/EXPECTED.jsonc --update-baseline
+# That mode GROWS ONLY. Lowering a number, or removing a row, is a hand edit — on purpose, so that
+# giving up a detection is an act with an author and a reason in the diff, never a side effect of
+# regenerating the answer key against a degraded engine.
+api 76 0 0
+callgraph 5 0 0
+cata 4 0 0
+catb 4 0 0
+decoy 0 36 0
+feaxios 2 0 0
+fecat 1 0 0
+fegensdk 2 0 0
+graph 7 0 0
+island 4 0 0
+java 16 0 0
+sdk 1 0 0
+trpc 1 0 0
+unresolved 2 0 0
+web 14 0 0
+worker 1 0 0
+xbe 6 0 0
+xbe2 4 0 0
+xfe 14 0 0

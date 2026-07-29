@@ -17,10 +17,17 @@ fn severity_rank(s: Severity) -> u8 {
 }
 
 /// Merges findings from every rule source (native analyses, DSL packs) into one
-/// deterministically ordered list: drops suppressed findings (`is_suppressed`), applies severity overrides
+/// deterministically ordered list: drops suppressed findings (`is_suppressed`), redacts excluded EVIDENCE
+/// paths from the survivors (`redact_excluded_evidence`), applies severity overrides
 /// (`apply_severity_override`), then sorts by severity (critical < warning < info), then file, then line,
 /// then rule id (see `severity_rank` doc for the sort's provenance/design-call note). Pure — no I/O, no
 /// dependency on which layer produced a given `Vec<Finding>`.
+///
+/// **The drop and the redact are the same config key doing the same thing to two different ROLES** — the
+/// anchor is the subject, an evidence path is a mention. See `super::redact`'s module doc for why that is
+/// one key rather than two, and `Finding::evidence_paths` for why the paths are a typed field rather than
+/// a per-rule table of `data` keys. Ordering is load-bearing: the drop runs FIRST, so a finding whose
+/// anchor is excluded is gone before anything looks at its evidence.
 ///
 /// **No folding happens here, and it is not an omission** (2026-07-26 judgment, recorded where the
 /// determinism contract lives so the question is not re-opened blind). A general "collapse repeated
@@ -39,6 +46,10 @@ pub fn merge_findings(sources: Vec<Vec<Finding>>, config: &RuleConfig) -> Vec<Fi
         .flatten()
         .filter(|f| !is_suppressed(config, &f.rule_id, Some(f.file.as_str())))
         .map(|f| apply_severity_override(config, f))
+        .map(|mut f| {
+            super::redact::redact_excluded_evidence(config, &mut f);
+            f
+        })
         .collect();
     merged.sort_by(|a, b| {
         severity_rank(a.severity)

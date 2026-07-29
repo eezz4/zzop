@@ -7,6 +7,7 @@
 
 mod body_refs;
 mod client_base;
+mod config_client_base;
 mod config_mounts;
 mod const_map;
 mod controller_prefix;
@@ -17,6 +18,7 @@ mod wrapper_consumes;
 
 pub(crate) use body_refs::resolve_provide_body_refs;
 pub(crate) use client_base::apply_client_base_prefixes;
+pub(crate) use config_client_base::apply_config_client_base;
 pub(crate) use config_mounts::apply_config_mounts;
 pub(crate) use const_map::{late_resolve_cross_file_consumes, merge_const_map_fragments};
 pub(crate) use controller_prefix::compose_controller_prefix_provides;

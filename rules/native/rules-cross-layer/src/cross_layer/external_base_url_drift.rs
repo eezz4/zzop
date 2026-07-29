@@ -146,6 +146,15 @@ pub fn external_base_url_drift_findings(external_consumes: &[TaggedConsume]) -> 
             file: first.file.to_string(),
             line: first.line,
             message,
+            // The other call sites this finding prints via `exampleSites`.
+            evidence_paths: sites
+                .iter()
+                .map(|s| s.file)
+                .filter(|f| *f != first.file)
+                .map(str::to_string)
+                .collect::<std::collections::BTreeSet<String>>()
+                .into_iter()
+                .collect(),
             data: Some(serde_json::json!({
                 "path": path,
                 "hosts": hosts_sorted,

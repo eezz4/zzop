@@ -32,13 +32,30 @@ cd "$(dirname "$0")/.."
 
 violations=0
 
+# ## Subject-set floor (2026-07-29) — see check-swc-isolation.sh's identical block for the full
+# rationale. Short form: tracked_files_matching returns the same empty string for "no violations" and
+# for "the pathspec matched nothing", so without this the clean line cannot tell the two apart.
+# Measured 2026-07-29 by redirecting both pathspecs in a scratch copy: printed "ruff isolation guard:
+# clean." and exited 0. The glob arrays are the single owner of each scan's scope — the count and the
+# scan below read the same array.
+CARGO_GLOBS=('Cargo.toml' '*/Cargo.toml')
+RS_GLOBS=('*.rs')
+cargo_scanned="$(git ls-files -- "${CARGO_GLOBS[@]}" | grep -c . || true)"
+rs_scanned="$(git ls-files -- "${RS_GLOBS[@]}" | grep -c . || true)"
+if [ "$cargo_scanned" -eq 0 ] || [ "$rs_scanned" -eq 0 ]; then
+  echo "ruff isolation guard: FAILED -- enumerated $cargo_scanned Cargo.toml file(s) and $rs_scanned .rs"
+  echo "file(s). A zero on either axis means that pathspec matched nothing, so this run proved nothing"
+  echo "about where ruff is used. An empty subject set is a broken guard, never a clean tree."
+  exit 1
+fi
+
 echo "ruff isolation guard: checking Cargo.toml dependency declarations..."
 DEP_PATTERN='^\s*ruff[_-][A-Za-z0-9_-]*\s*='
 # The enumeration call is kept OUTSIDE the `|| true` below on purpose: tracked_files_matching's own
 # failure must still trip `set -e` and abort loud (see its header comment); only its allowlisted
 # false-positives (this guard's own Cargo.toml, parser-python-3's own) are safe to swallow via
 # `|| true`.
-cargo_matches=$(tracked_files_matching "$DEP_PATTERN" 'Cargo.toml' '*/Cargo.toml')
+cargo_matches=$(tracked_files_matching "$DEP_PATTERN" "${CARGO_GLOBS[@]}")
 cargo_files=$(grep -v -x 'Cargo.toml' <<< "$cargo_matches" \
   | grep -v -x 'parser/parser-python-3/Cargo.toml' || true)
 
@@ -52,7 +69,7 @@ fi
 
 echo "ruff isolation guard: checking .rs source usage..."
 USE_PATTERN='ruff_python_[A-Za-z0-9_]*::|use\s+ruff_'
-rs_matches=$(tracked_files_matching "$USE_PATTERN" '*.rs')
+rs_matches=$(tracked_files_matching "$USE_PATTERN" "${RS_GLOBS[@]}")
 rs_files=$(grep -v '^parser/parser-python-3/src/' <<< "$rs_matches" || true)
 
 if [ -n "$rs_files" ]; then
@@ -71,4 +88,4 @@ if [ "$violations" -ne 0 ]; then
   exit 1
 fi
 
-echo "ruff isolation guard: clean."
+echo "ruff isolation guard: clean ($cargo_scanned Cargo.toml + $rs_scanned .rs files scanned)."

@@ -362,6 +362,14 @@ code-extracted prefix (e.g. NestJS's `setGlobalPrefix`); a declared host re-keys
 consume to an internal joinable key before the external-egress gate above ever applies. Both self-disclose
 via a `warnings` entry when they turn out to have zero effect on the join.
 
+The same declaration answers the CALLING side. `trees[].topology.clientBase` states the prefix a tree's own
+outbound calls carry — the case where the base is real but unreadable, assigned from a cross-file constant
+(`axios.defaults.baseURL = settings.baseApiUrl`) that the never-guess extractor leaves alone, so the calls
+key `GET /articles` while the provider serves `GET /api/articles` and *nothing* joins. It is prepended to
+every keyed relative http consume of the tree and, unlike a mount, **warns when it stacks** on a base zzop
+already read from a literal: on the serving side a second prefix is a real second layer (a gateway sits
+outside the app), while on the calling side it is usually the same base declared twice.
+
 Routing is resolved from **visible code literals on two axes — path and HTTP method (verb)**. A dynamic
 route on either axis is an injection boundary, never guessed. A computed/opaque URL path stays an
 unresolved consume (surfaced as a near-miss with a "verify manually" caveat); a route whose handler serves

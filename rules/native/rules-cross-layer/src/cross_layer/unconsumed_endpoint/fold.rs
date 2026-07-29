@@ -44,11 +44,13 @@ pub(super) fn fold_per_source(
                  one finding because a tree where every route is unconsumed by construction (a backend-only \
                  or framework-package repo whose callers are not in this run) reports a census, not a \
                  to-do list. Nothing is dropped: the full, UNCAPPED list is `crossLayer.unconsumedProvides` \
-                 (`zzop facts`), and the same caveats apply to every folded route as to the listed ones — \
+                 (`zzop facts` with the CLI binary; MCP hosts get the same array on the `cross_repo` \
+                 reply), and the same caveats apply to every folded route as to the listed ones — \
                  including the {unresolved_http} unresolved dynamic-URL http consume(s) this run could not \
                  statically match. {} to silence the whole rule.",
                 disable_hint("cross-layer/unconsumed-endpoint")
             ),
+            evidence_paths: Vec::new(),
             data: Some(serde_json::json!({
                 "source": source,
                 "foldedEndpointCount": count,

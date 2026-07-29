@@ -34,9 +34,8 @@ pub fn hotspot_score(change_count: u32, loc: u32) -> u64 {
 // ---------------------------------------------------------------------------------------------
 // DepStats / GitStats: minimal plain-data input this builder needs, declared locally here rather
 // than depending on a shared parser output type, since no dep-graph/git-log parser exists in this
-// workspace yet (precedent: `ActionUse` in aggregates.rs). Unify these with the real parser output
-// types once dep-graph/git-log parsing lands — the field names and semantics here are the intended
-// target shape.
+// workspace yet. Unify these with the real parser output types once dep-graph/git-log parsing
+// lands — the field names and semantics here are the intended target shape.
 //
 // BTreeMap/BTreeSet are used here (rather than a hash-based map/set) so iteration is deterministic
 // regardless of construction order.

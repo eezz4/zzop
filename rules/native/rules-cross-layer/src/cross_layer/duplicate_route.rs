@@ -10,6 +10,12 @@
 //! flags 2+ registrations of a route WITHIN one tree; this one only fires when the duplicates span 2+
 //! DIFFERENT trees. Different id, so both can be registered/disabled independently.
 //!
+//! **ONE FINDING PER PROVIDING SOURCE, each anchored in that source's own tree** (2026-07-29), following
+//! `shared_db_table`'s precedent — read its module doc for the full argument. In short: `exclude` applies
+//! to the ANCHOR, so a single representative made WHICH tree could silence an N-tree fact an accident of
+//! sorting, and that tree excluding its own paths deleted the half about the other trees. Every copy still
+//! lists the full source set and every site, so nothing is lost.
+//!
 //! Provider sites in test-path files (`zzop_core::is_test_file`) are skipped, same policy as
 //! `mutating-route-no-auth`. A dead multi-tree route also yields per-provider
 //! `cross-layer/unconsumed-endpoint` info findings — the overlap is intentional (different questions: "who
@@ -68,33 +74,60 @@ pub fn cross_layer_duplicate_route_findings(cross_layer: &CrossLayerResult) -> V
         if distinct_sources.len() < 2 {
             continue;
         }
-        let (first_source, first_file, first_line) = sites[0].clone();
         let sites_desc: Vec<String> = sites
             .iter()
             .map(|(s, f, l)| format!("{s}:{f}:{l}"))
             .collect();
-        let message = format!(
-            "route `{key}` is provided by {} distinct sources ({}) — first at {first_file}:{first_line} (source \
-             `{first_source}`). A caller cannot deterministically tell which source's handler serves a request \
-             for this route; if these sources are ever deployed behind the same host/gateway, whichever one \
-             wins is a deploy-order accident, not a design decision. Merge the handlers, or namespace the \
-             routes apart (a path prefix, a different host). {} if these are intentionally separate services \
-             on different hosts that happen to share a route shape.",
-            distinct_sources.len(),
-            sites_desc.join(", "),
-            disable_hint("cross-layer/duplicate-route"),
-        );
-        out.push(Finding {
-            rule_id: "cross-layer/duplicate-route".to_string(),
-            severity: Severity::Warning,
-            file: first_file,
-            line: first_line,
-            message,
-            data: Some(serde_json::json!({
-                "key": key,
-                "sites": sites_desc,
-            })),
-        });
+        let sources_list: Vec<&str> = distinct_sources.iter().copied().collect();
+        // ONE COPY PER PROVIDING SOURCE, each anchored in its own tree — see the module doc. `sites` is
+        // sorted, so each source's first match is deterministic.
+        for source in &distinct_sources {
+            let Some((_, file, line)) = sites.iter().find(|(s, _, _)| s == source) else {
+                continue;
+            };
+            let others: Vec<&str> = sources_list
+                .iter()
+                .copied()
+                .filter(|s| s != source)
+                .collect();
+            let message = format!(
+                "route `{key}` is provided by this source (`{source}`, first at {file}:{line}) and by {} \
+                 other analyzed source(s) ({}). A caller cannot deterministically tell which source's \
+                 handler serves a request for this route; if these sources are ever deployed behind the \
+                 same host/gateway, whichever one wins is a deploy-order accident, not a design decision. \
+                 Merge the handlers, or namespace the routes apart (a path prefix, a different host). All \
+                 sites: {}. Each providing source gets its own copy of this finding, anchored in its own \
+                 tree, so excluding one source's paths never silences the others. {} if these are \
+                 intentionally separate services on different hosts that happen to share a route shape.",
+                others.len(),
+                others.join(", "),
+                sites_desc.join(", "),
+                disable_hint("cross-layer/duplicate-route"),
+            );
+            out.push(Finding {
+                rule_id: "cross-layer/duplicate-route".to_string(),
+                severity: Severity::Warning,
+                file: file.clone(),
+                line: *line,
+                message,
+                // Every OTHER site this copy prints in `sites`/`sites_desc`. Deduped and sorted so the
+                // field is deterministic when two sources collide in one file.
+                evidence_paths: sites
+                    .iter()
+                    .map(|(_, f, _)| f)
+                    .filter(|f| *f != file)
+                    .cloned()
+                    .collect::<BTreeSet<String>>()
+                    .into_iter()
+                    .collect(),
+                data: Some(serde_json::json!({
+                    "key": key,
+                    "provideSource": source,
+                    "sources": sources_list,
+                    "sites": sites_desc,
+                })),
+            });
+        }
     }
     out.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
     out
@@ -130,14 +163,19 @@ mod tests {
             ..Default::default()
         };
         let out = cross_layer_duplicate_route_findings(&cl);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].rule_id, "cross-layer/duplicate-route");
-        assert_eq!(out[0].severity, Severity::Warning);
-        assert_eq!(out[0].file, "a.ts");
-        assert_eq!(out[0].line, 3);
-        assert!(out[0].message.contains("svc-a"));
-        assert!(out[0].message.contains("svc-b"));
-        assert!(out[0].message.contains("disabled_rules"));
+        // One copy PER PROVIDING SOURCE, each anchored in its own tree (2026-07-29) — see the module doc.
+        assert_eq!(out.len(), 2);
+        let sites: Vec<(&str, u32)> = out.iter().map(|f| (f.file.as_str(), f.line)).collect();
+        assert_eq!(sites, vec![("a.ts", 3), ("b.ts", 9)]);
+        for f in &out {
+            assert_eq!(f.rule_id, "cross-layer/duplicate-route");
+            assert_eq!(f.severity, Severity::Warning);
+            assert!(f.message.contains("svc-a"), "{}", f.message);
+            assert!(f.message.contains("svc-b"), "{}", f.message);
+            assert!(f.message.contains("disabled_rules"), "{}", f.message);
+        }
+        assert_eq!(out[0].data.as_ref().unwrap()["provideSource"], "svc-a");
+        assert_eq!(out[1].data.as_ref().unwrap()["provideSource"], "svc-b");
     }
 
     #[test]
@@ -180,11 +218,14 @@ mod tests {
             ..Default::default()
         };
         let out = cross_layer_duplicate_route_findings(&cl);
-        assert_eq!(out.len(), 1);
+        assert_eq!(out.len(), 2, "one per providing source");
         assert_eq!(out[0].file, "svc-a/health.ts");
         assert_eq!(out[0].line, 3);
-        assert!(out[0].message.contains("svc-a"));
-        assert!(out[0].message.contains("svc-b"));
+        assert_eq!(out[1].file, "svc-b/health.ts");
+        for f in &out {
+            assert!(f.message.contains("svc-a"), "{}", f.message);
+            assert!(f.message.contains("svc-b"), "{}", f.message);
+        }
     }
 
     #[test]

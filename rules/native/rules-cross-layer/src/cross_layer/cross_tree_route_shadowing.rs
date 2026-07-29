@@ -150,6 +150,7 @@ pub fn cross_tree_route_shadowing_findings(
             file: pattern.file.clone(),
             line: pattern.line,
             message,
+            evidence_paths: shadowed.iter().map(|s| s.file.clone()).collect(),
             data: Some(serde_json::json!({
                 "patternKey": pattern.key,
                 "patternSource": pattern.source,

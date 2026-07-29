@@ -211,7 +211,11 @@ pub fn dispatch(rel_path: &str, config: &DispatchConfig) -> Option<Language> {
     dispatch_by_extension(rel_path)
 }
 
-fn dispatch_by_extension(rel_path: &str) -> Option<Language> {
+/// The extension map alone, with no `glob_overrides` consulted. `pub(crate)` so
+/// [`crate::dead_exports::is_ts_source_ext`] can BE this table rather than hand-copy its TypeScript
+/// arm — the copy sat here unpinned until 2026-07-29, the widest of the extension-set duplicates and
+/// the only one between a root and its own clone.
+pub(crate) fn dispatch_by_extension(rel_path: &str) -> Option<Language> {
     let ext = Path::new(rel_path)
         .extension()
         .and_then(|e| e.to_str())?

@@ -225,6 +225,26 @@ fn every_rule_contracts_source_file_is_mod_registered() {
     );
 }
 
+/// Whether a path is TEST source rather than shipped source: any `tests` directory component, or a
+/// file named `tests.rs` / `*_test.rs` / `*_tests.rs`. A fixture that mimics a shipped emission spells
+/// the shipped literals on purpose; counting those as emissions made a guard dictate what a test may
+/// name its own variables, which is not a contract.
+///
+/// Shared (rather than re-spelled per contract file) because two contracts now subtract the same set
+/// from a [`collect_rs_files`] walk — `surface_parity`'s MCP-lane haystack and `markers`' native-rule
+/// scan — and two copies of "what counts as a test file" is how one of them silently starts scanning a
+/// fixture the other ignores.
+fn is_test_source(path: &Path) -> bool {
+    if path.components().any(|c| c.as_os_str() == "tests") {
+        return true;
+    }
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    name == "tests.rs" || name.ends_with("_test.rs") || name.ends_with("_tests.rs")
+}
+
 fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;

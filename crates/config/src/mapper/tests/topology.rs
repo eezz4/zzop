@@ -46,6 +46,58 @@ fn mounted_at_gate_error_texts() {
     );
 }
 
+/// `clientBase` is the calling side's mirror and reuses `mountedAt`'s validator verbatim — the pin is that
+/// it reports under its OWN path, because "must start with /" pointing at the wrong key is how an author
+/// edits the wrong line.
+#[test]
+fn client_base_gate_error_texts_name_their_own_key() {
+    let run = |v: serde_json::Value| {
+        config_to_request(
+            &json!({"trees": [{"root": ".", "topology": {"clientBase": v}}]}),
+            Path::new("/base"),
+        )
+        .unwrap_err()
+        .0
+    };
+    assert_eq!(
+        run(json!(5)),
+        "trees[0].topology.clientBase must be a string."
+    );
+    assert_eq!(
+        run(json!("api")),
+        "trees[0].topology.clientBase must start with \"/\"."
+    );
+    assert_eq!(
+        run(json!("/api/{}")),
+        "trees[0].topology.clientBase must not contain a path-param placeholder (\"{}\")."
+    );
+    assert_eq!(
+        run(json!("/api://oops")),
+        "trees[0].topology.clientBase must not contain a scheme (\"://\") — it is a path prefix, not a full URL."
+    );
+}
+
+/// Unlike its three siblings, `clientBase` was born under `topology` (2026-07-29) and has no legacy flat
+/// spelling to refuse. A bare `trees[].clientBase` is therefore an unknown key — a WARNING, not the hard
+/// "moved to" error the other three raise; treating it as moved would claim a history that never happened.
+#[test]
+fn a_flat_client_base_is_an_unknown_key_warning_not_a_moved_key_error() {
+    let mapped = config_to_request(
+        &json!({"trees": [{"root": ".", "clientBase": "/api"}]}),
+        Path::new("/base"),
+    )
+    .expect("a flat clientBase must not be a hard error");
+    assert!(
+        mapped
+            .warnings
+            .iter()
+            .any(|w| w.contains("unknown config key \"trees[0].clientBase\"")),
+        "got: {:?}",
+        mapped.warnings
+    );
+    assert!(mapped.request["trees"][0].get("clientBase").is_none());
+}
+
 #[test]
 fn mounts_gate_error_texts() {
     let run = |v: serde_json::Value| {
@@ -113,6 +165,7 @@ fn well_formed_mounted_at_mounts_hosts_flow_into_the_tree_request() {
             "root": ".",
             "topology": {
                 "mountedAt": "/gateway",
+                "clientBase": "/api",
                 "mounts": [{"dir": "apps/api", "at": "/api"}],
                 "hosts": ["internal.example.com"]
             }
@@ -125,6 +178,7 @@ fn well_formed_mounted_at_mounts_hosts_flow_into_the_tree_request() {
     // an author's file are allowed to differ; what must not differ is what they mean.
     let tree = &mapped.request["trees"][0];
     assert_eq!(tree["mountedAt"], "/gateway");
+    assert_eq!(tree["clientBase"], "/api");
     assert_eq!(tree["mounts"][0]["dir"], "apps/api");
     assert_eq!(tree["hosts"][0], "internal.example.com");
 }

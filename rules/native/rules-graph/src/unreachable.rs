@@ -95,6 +95,7 @@ pub fn unreachable_findings(
                 u.fan_in,
                 disable_hint("unreachable")
             ),
+            evidence_paths: Vec::new(),
             data: Some(serde_json::json!({ "loc": u.loc, "fan_in": u.fan_in })),
         })
         .collect()

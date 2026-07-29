@@ -68,7 +68,7 @@
       }
     },
     {
-      "name": "multi-tree with sourceIds, mountedAt, mounts and hosts (sourceId defaults to the raw root)",
+      "name": "multi-tree with sourceIds, mountedAt, clientBase, mounts and hosts (sourceId defaults to the raw root)",
       "config": {
         "trees": [
           {
@@ -76,6 +76,7 @@
             "sourceId": "web",
             "topology": {
               "mountedAt": "/app",
+              "clientBase": "/api",
               "hosts": ["api.internal.example.com"]
             }
           },
@@ -93,6 +94,7 @@
               "root": "apps/web",
               "sourceId": "web",
               "mountedAt": "/app",
+              "clientBase": "/api",
               "hosts": ["api.internal.example.com"]
             },
             {

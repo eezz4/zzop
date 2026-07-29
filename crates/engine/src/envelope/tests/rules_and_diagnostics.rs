@@ -252,6 +252,40 @@ mod resolve_envelope_specifier_tests {
         );
     }
 
+    /// The appended-extension candidate list must cover every extension a classic/bundler
+    /// extensionless resolution can land on — `.jsx` included. It was the one hole: a JS-flavored
+    /// projection whose fragment `Ref` says `./Button` while the file is `Button.jsx` resolved to
+    /// `None`, i.e. the mount silently vanished.
+    #[test]
+    fn extension_guessing_covers_every_extensionless_resolvable_extension() {
+        for ext in ["ts", "tsx", "js", "jsx"] {
+            let owned = format!("a/sibling.{ext}");
+            let all: HashSet<&str> = [owned.as_str()].into_iter().collect();
+            assert_eq!(
+                resolve_envelope_specifier("./sibling", "a/b.ts", &all),
+                Some(owned.clone()),
+                "extensionless './sibling' must find {owned}"
+            );
+        }
+    }
+
+    /// The other direction, and the reason the list is not simply `is_ts_source_ext`'s eight: the
+    /// `.mjs`/`.cjs`/`.mts`/`.cts` family is NEVER reachable from an extensionless specifier under
+    /// any resolver — Node ESM and TypeScript's node16 mode both demand the explicit extension. A
+    /// future widening to "everything that parses" would invent a resolution no toolchain performs.
+    #[test]
+    fn extension_guessing_never_appends_an_explicit_extension_only_family_member() {
+        for ext in ["mjs", "cjs", "mts", "cts"] {
+            let owned = format!("a/sibling.{ext}");
+            let all: HashSet<&str> = [owned.as_str()].into_iter().collect();
+            assert_eq!(
+                resolve_envelope_specifier("./sibling", "a/b.ts", &all),
+                None,
+                "extensionless './sibling' must NOT invent a .{ext} resolution"
+            );
+        }
+    }
+
     #[test]
     fn unresolvable_specifier_is_none() {
         let all: HashSet<&str> = ["a/b.ts"].into_iter().collect();

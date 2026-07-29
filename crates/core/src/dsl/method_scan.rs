@@ -290,6 +290,7 @@ pub(super) fn eval_method_scan(
                 file: f.rel.clone(),
                 line: body_start + i as u32,
                 message,
+                evidence_paths: Vec::new(),
                 data: Some(
                     serde_json::json!({ "snippet": snippet, "method": sym.name, "triggerLines": trigger_lines }),
                 ),

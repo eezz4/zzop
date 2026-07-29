@@ -162,6 +162,7 @@ pub fn scan_cache_lane_file_read(input: &ScanCacheLaneFileReadInput) -> Vec<Find
             file: anchor.file.clone(),
             line: anchor.line,
             message: hint.clone(),
+            evidence_paths: Vec::new(),
             data: Some(serde_json::json!({
                 "anchor": anchor.name,
                 "anchorSymbol": anchor.id,

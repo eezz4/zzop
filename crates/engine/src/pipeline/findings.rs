@@ -221,6 +221,7 @@ fn schema_issue_to_finding(
         file: rel.to_string(),
         line: zzop_parser_prisma::model_decl_line(text, &issue.model),
         message: zzop_rules_schema::schema_issue_message(issue),
+        evidence_paths: Vec::new(),
         data: serde_json::to_value(issue).ok(),
     }
 }

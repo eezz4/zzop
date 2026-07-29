@@ -1,7 +1,23 @@
-//! `cross_repo`'s `bucketKeys`/`bucketKeySites` shaping.
-
-/// Default cap for `cross_repo`'s `bucketKeys` distinct-key lists (see `bucket_keys`).
-pub const DEFAULT_BUCKET_KEYS_LIMIT: usize = 20;
+//! `cross_repo`'s `bucketKeys`/`bucketKeySites` shaping — UNCAPPED.
+//!
+//! There was a `DEFAULT_BUCKET_KEYS_LIMIT = 20` here until 2026-07-29, with the usual
+//! `bucketKeysTruncated` remainder disclosure beside it. The cap is gone, by user decision, and with it
+//! the truncation branch, the disclosure field, `snapshot.mjs`'s abort-on-truncation path and its
+//! `--tolerate-bucket-key-cap` escape hatch. What made it go was not the cost of the cap but the cost of
+//! everything the cap needed in order to stay honest: five moving parts existed so that twenty keys could
+//! be shown instead of all of them.
+//!
+//! It also failed on its own terms. The `cases/` benchmark hit the cap in normal use — a batch adding
+//! negative-case trees truncated `unconsumedProvides` and scored ZERO lines, because `snapshot.mjs`
+//! correctly refuses to grade a truncated snapshot. The wall was invisible until it was hit, and the
+//! escape hatch could not be used (grading a truncated snapshot is grading the wrong thing). A cap whose
+//! own repository routes around it is not paying for itself.
+//!
+//! KNOWN AND ACCEPTED: on a large repo a single list field here can now run to hundreds of lines, and the
+//! primary consumer is an agent reading a reply. That cost was weighed and taken. If it is ever MEASURED to
+//! hurt, the answer is not this cap back — it is a deliberate paging or query surface. (`zzop facts` and
+//! `zzop manifest` were already uncapped, so the large-output case has been shipping on those lanes all
+//! along.)
 
 /// The five non-edge cross-layer buckets, in engine (`CrossLayerResult`) field order. Shared
 /// (`pub(crate)`) with `crate::manifest`, which walks the same five buckets to record bucket
@@ -14,27 +30,22 @@ pub(crate) const KEY_BUCKETS: [&str; 5] = [
     "ambiguousConsumes",
 ];
 
-/// `cross_repo`'s `bucketKeys`: per non-edge bucket, up to `DEFAULT_BUCKET_KEYS_LIMIT` DISTINCT keys
-/// (deduped, engine order preserved) so an agent can see WHICH keys sit in a bucket instead of only
-/// how many. An unresolved consume (`key: null`) contributes its `raw` expression when recorded —
-/// nothing otherwise (never guessed). Returns `(bucketKeys, bucketKeysTruncated?, bucketKeySites)`:
-/// the truncation value is `Some({bucket: remainingDistinctCount})` only when a bucket's distinct-key
-/// list was capped — the same explicit-truncation-disclosure stance as `shape_list`, in a per-bucket
-/// remainder shape; `bucketKeySites` mirrors `bucketKeys`' shape exactly (same buckets, same order,
-/// same length after capping) but each entry is the FIRST call site backing that distinct key, as
-/// `"file:line"` — every bucket item already carries `file`/`line` (the engine's `IoProvide`/
-/// `IoConsume` facts, flattened onto the bucket entry), so this is a same-layer read, never a facade
-/// change; `null` only if an item is missing one of the two (never guessed).
+/// `cross_repo`'s `bucketKeys`: per non-edge bucket, EVERY distinct key (deduped, engine order preserved)
+/// so an agent can see WHICH keys sit in a bucket instead of only how many. An unresolved consume
+/// (`key: null`) contributes its `raw` expression when recorded — nothing otherwise (never guessed).
+///
+/// Returns `(bucketKeys, bucketKeySites)`. There is no truncation value: the list is complete by
+/// construction, which is the strongest form of the never-silent stance — nothing is dropped, so nothing
+/// needs disclosing. `bucketKeySites` mirrors `bucketKeys`' shape exactly (same buckets, same order, same
+/// length) but each entry is the FIRST call site backing that distinct key, as `"file:line"` — every bucket
+/// item already carries `file`/`line` (the engine's `IoProvide`/`IoConsume` facts, flattened onto the
+/// bucket entry), so this is a same-layer read, never a facade change; `null` only if an item is missing
+/// one of the two (never guessed).
 pub(crate) fn bucket_keys(
     cross_layer: &serde_json::Value,
-) -> (
-    serde_json::Value,
-    Option<serde_json::Value>,
-    serde_json::Value,
-) {
+) -> (serde_json::Value, serde_json::Value) {
     let mut keys_out = serde_json::Map::new();
     let mut sites_out = serde_json::Map::new();
-    let mut truncated = serde_json::Map::new();
     for bucket in KEY_BUCKETS {
         let mut seen = std::collections::HashSet::new();
         let mut distinct: Vec<&str> = Vec::new();
@@ -62,20 +73,11 @@ pub(crate) fn bucket_keys(
                 }
             }
         }
-        if distinct.len() > DEFAULT_BUCKET_KEYS_LIMIT {
-            truncated.insert(
-                bucket.to_string(),
-                serde_json::json!(distinct.len() - DEFAULT_BUCKET_KEYS_LIMIT),
-            );
-            distinct.truncate(DEFAULT_BUCKET_KEYS_LIMIT);
-            sites.truncate(DEFAULT_BUCKET_KEYS_LIMIT);
-        }
         keys_out.insert(bucket.to_string(), serde_json::json!(distinct));
         sites_out.insert(bucket.to_string(), serde_json::Value::Array(sites));
     }
     (
         serde_json::Value::Object(keys_out),
-        (!truncated.is_empty()).then_some(serde_json::Value::Object(truncated)),
         serde_json::Value::Object(sites_out),
     )
 }
@@ -88,8 +90,10 @@ mod tests {
         serde_json::json!({ "key": key, "raw": raw, "file": file, "line": line })
     }
 
+    /// The old cap was 20 and `cases/` sat at exactly 20 the day it was removed. 23 is that number plus
+    /// the batch that could not be added under it — a size that used to truncate and now must not.
     #[test]
-    fn distinct_keys_are_deduped_capped_and_disclose_their_remainder() {
+    fn distinct_keys_are_deduped_and_never_truncated() {
         let mut cross_layer = serde_json::json!({
             "unconsumedProvides": [],
             "unprovidedConsumes": [],
@@ -97,7 +101,7 @@ mod tests {
             "externalConsumes": [],
             "ambiguousConsumes": [],
         });
-        let items: Vec<serde_json::Value> = (0..DEFAULT_BUCKET_KEYS_LIMIT + 3)
+        let items: Vec<serde_json::Value> = (0..23)
             .map(|i| {
                 consume(
                     Some(&format!("GET /x/{i}")),
@@ -106,19 +110,24 @@ mod tests {
                     i as u64 + 1,
                 )
             })
+            // One exact duplicate, so "deduped" is still pinned alongside "uncapped".
+            .chain(std::iter::once(consume(
+                Some("GET /x/0"),
+                None,
+                "src/other.ts",
+                99,
+            )))
             .collect();
         cross_layer["unprovidedConsumes"] = serde_json::json!(items);
-        let (keys, truncated, sites) = bucket_keys(&cross_layer);
+        let (keys, sites) = bucket_keys(&cross_layer);
         let shown = keys["unprovidedConsumes"].as_array().unwrap();
-        assert_eq!(shown.len(), DEFAULT_BUCKET_KEYS_LIMIT);
-        assert_eq!(
-            truncated.unwrap()["unprovidedConsumes"],
-            3,
-            "remainder disclosed, never silent"
-        );
+        assert_eq!(shown.len(), 23, "every distinct key, no cap");
         let site_list = sites["unprovidedConsumes"].as_array().unwrap();
         assert_eq!(site_list.len(), shown.len(), "sites parallel to keys");
-        assert_eq!(site_list[0], "src/api.ts:1");
+        assert_eq!(
+            site_list[0], "src/api.ts:1",
+            "FIRST site wins for a dup key"
+        );
     }
 
     #[test]
@@ -129,7 +138,7 @@ mod tests {
         });
         cross_layer["unresolvedConsumes"] =
             serde_json::json!([consume(None, Some("usersUrl(x)"), "src/api.ts", 7)]);
-        let (keys, _, sites) = bucket_keys(&cross_layer);
+        let (keys, sites) = bucket_keys(&cross_layer);
         assert_eq!(keys["unresolvedConsumes"][0], "usersUrl(x)");
         assert_eq!(sites["unresolvedConsumes"][0], "src/api.ts:7");
     }
@@ -141,7 +150,7 @@ mod tests {
             "externalConsumes": [], "ambiguousConsumes": [],
         });
         cross_layer["unprovidedConsumes"] = serde_json::json!([{ "key": "GET /x", "raw": null }]);
-        let (_, _, sites) = bucket_keys(&cross_layer);
+        let (_, sites) = bucket_keys(&cross_layer);
         assert!(sites["unprovidedConsumes"][0].is_null());
     }
 }

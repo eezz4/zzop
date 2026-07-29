@@ -115,7 +115,6 @@ use zzop_core::callgraph::{bfs_reachable, SymbolGraph};
 use zzop_core::{Finding, Severity, SourceSymbol};
 
 use crate::http_scan::{build_name_index, resolve_handler_scoped};
-use zzop_core::is_test_file;
 
 /// Default guard-name vocabulary — see module doc "Guard vocabulary".
 pub const DEFAULT_AUTH_GUARD_PATTERN: &str = r"(?i)(auth|guard|verify|session|token|permission|acl|owner|admin|role|(?:has|can|check|require)access)";
@@ -200,32 +199,9 @@ pub struct ScanMutatingRouteNoAuthInput<'a> {
 
 pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<Finding> {
     let acquisition = vocab::AcquisitionSurface::compile(input);
-    let mutating: Vec<&zzop_core::IoProvide> = input
-        .io_provides
-        .iter()
-        .filter(|p| p.kind == "http")
-        .filter(|p| !is_test_file(&p.file))
-        // The call-graph BFS below has zero evidence for a non-TS/JS ecosystem — module doc "Call-graph
-        // language coverage". Exempt before resolving/BFS-ing, the same "do not guess" spirit as the
-        // unresolved/ambiguous-handler skip.
-        .filter(|p| is_call_graph_covered(&p.file))
-        .filter(|p| !input.decorator_guarded.contains(&(p.file.clone(), p.line)))
-        // Injected auth-guard evidence (route-level middleware the call-graph BFS can't see) — see
-        // `AUTH_GUARDED_ATTR`. Exempt BEFORE the BFS, like `decorator_guarded`: this IS how the route is guarded.
-        .filter(|p| {
-            !input
-                .route_attr_store
-                .route_attr(&p.kind, &p.key, AUTH_GUARDED_ATTR)
-                .is_some_and(zzop_core::attr_is_truthy)
-        })
-        .filter(|p| {
-            let Some((method, path)) = p.key.split_once(' ') else {
-                return false;
-            };
-            // The auth-acquisition surface itself is exempt — see module doc.
-            WRITE_HTTP_METHODS.contains(&method) && !acquisition.exempts(path)
-        })
-        .collect();
+    // Which routes are even candidates — see `candidates`. Every exemption there is a "do not guess"
+    // gate, and they are read together rather than interleaved with the call-graph walk below.
+    let mutating = candidates::mutating_route_candidates(input, &acquisition);
     if mutating.is_empty() {
         return Vec::new();
     }
@@ -277,6 +253,7 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
             file: p.file.clone(),
             line: p.line,
             message: hint.clone(),
+            evidence_paths: Vec::new(),
             data: Some(serde_json::json!({
                 "method": method,
                 "path": path,
@@ -290,6 +267,7 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
     out
 }
 
+mod candidates;
 mod message;
 /// `pub` only so `QUALIFIER_GUARD_TOKENS` can be re-exported at the crate root as a declarable default —
 /// everything else in it stays `pub(super)`.

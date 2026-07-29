@@ -71,25 +71,27 @@ _existing_paths_only() {
 # whatever grep wrote to stderr, either aborts loud or prints the standard-exclusion-filtered result
 # and returns 0. Not part of the public API.
 _tracked_grep_emit() {
-  local who="$1" producer_failed="$2" grep_stderr="$3" out="$4"
+  local who="$1" producer_failed="$2" grep_stderr="$3" dir="$4"
 
   if [ "$producer_failed" -ne 0 ]; then
     echo "$who: a file-enumeration stage failed -- aborting rather than risk an under-reported result." >&2
-    rm -f "$out"
+    rm -rf "$dir"
     return 1
   fi
 
   if [ -n "$grep_stderr" ]; then
     echo "$who: grep -lP reported an error (not just 'no matches'):" >&2
     printf '%s\n' "$grep_stderr" >&2
-    rm -f "$out"
+    rm -rf "$dir"
     return 1
   fi
 
-  grep -vE '(^|/)target/' "$out" \
-    | grep -vE '(^|/)node_modules/' \
-    | grep -vE '(^|/)\.claude/' || true
-  rm -f "$out"
+  # ONE grep, not three chained (2026-07-29). The three exclusions are independent — a path is
+  # dropped if ANY of them matches — so they are one alternation, and `(^|/)` still distributes over
+  # each branch exactly as it did when each had its own grep. Three processes per call, on a helper
+  # every isolation guard calls, is real money on a box where a spawn costs more than the whole scan.
+  grep -vE '(^|/)(target|node_modules|\.claude)/' "$dir/out" || true
+  rm -rf "$dir"
   return 0
 }
 
@@ -104,26 +106,32 @@ tracked_files_matching() {
   local pattern="$1"
   shift
 
-  local out err
-  out="$(mktemp)"
-  err="$(mktemp)"
+  # ONE `mktemp -d` and one `rm -rf`, rather than two `mktemp`s and two `rm -f`s (2026-07-29). On
+  # this box every external command costs roughly the same ~0.6s of fork/exec regardless of what it
+  # does, so four of them per call was a measurable slice of every guard that scans. A private
+  # directory (mktemp -d is mode 700) is also what makes the fixed inner names `out`/`err` safe:
+  # deriving predictable sibling paths from a single `mktemp` FILE would not be.
+  local dir
+  dir="$(mktemp -d)"
 
   set +e
   git ls-files -z -- "$@" \
     | _existing_paths_only \
     | xargs -0 -r grep -lP "$pattern" -- \
-    > "$out" 2> "$err"
+    > "$dir/out" 2> "$dir/err"
   local -a stat=("${PIPESTATUS[@]}")
   set -e
 
+  # `$(< file)` is bash's own no-fork file read; `$(cat "$err")` spawned a process to do the same
+  # thing on every call (2026-07-29). Identical result — command substitution strips the trailing
+  # newline in both spellings, so the `[ -n "$grep_stderr" ]` test downstream is unchanged.
   local grep_stderr
-  grep_stderr="$(cat "$err")"
-  rm -f "$err"
+  grep_stderr="$(< "$dir/err")"
 
   local producer_failed=0
   [ "${stat[0]}" -ne 0 ] && producer_failed=1
 
-  _tracked_grep_emit "tracked_files_matching" "$producer_failed" "$grep_stderr" "$out"
+  _tracked_grep_emit "tracked_files_matching" "$producer_failed" "$grep_stderr" "$dir"
 }
 
 # tracked_and_untracked_files_matching <perl-regex> <pathspec-glob>...
@@ -137,29 +145,38 @@ tracked_and_untracked_files_matching() {
   local pattern="$1"
   shift
 
-  local out err
-  out="$(mktemp)"
-  err="$(mktemp)"
+  # `mktemp -d` once — see the sibling function above.
+  local dir
+  dir="$(mktemp -d)"
 
+  # ONE `git ls-files`, not two (2026-07-29). `--cached --others --exclude-standard` IS the union
+  # this used to build by running the tracked half and the untracked-but-not-ignored half separately
+  # and merging them: `--others` means "not in the index", so the two halves are disjoint by
+  # definition and no entry can be produced twice. Verified on this repo the day it changed — 1264
+  # paths from either spelling, identical set AND identical order after `sort -z -u`. `git ls-files`
+  # measured ~1.2s per invocation here, which is why halving the count is worth a comment.
+  #
+  # `sort -z -u` is kept even though one invocation cannot emit a duplicate: it is what makes the
+  # order independent of git's own listing order, and every caller that prints a result depends on
+  # that stability.
   set +e
-  { git ls-files -z -- "$@" && git ls-files -z --others --exclude-standard -- "$@"; } \
+  git ls-files -z --cached --others --exclude-standard -- "$@" \
     | sort -z -u \
     | _existing_paths_only \
     | xargs -0 -r grep -lP "$pattern" -- \
-    > "$out" 2> "$err"
+    > "$dir/out" 2> "$dir/err"
   local -a stat=("${PIPESTATUS[@]}")
   set -e
 
+  # `$(< file)` rather than `$(cat "$err")` — see the sibling function above.
   local grep_stderr
-  grep_stderr="$(cat "$err")"
-  rm -f "$err"
+  grep_stderr="$(< "$dir/err")"
 
-  # stat[0] = the `{ ls-files && ls-files; }` group (its own exit status is that of whichever half
-  # ran last to determine it -- the `&&` means a first-half failure short-circuits and IS that
-  # exit status, so either half failing is visible here). stat[1] = `sort -z -u`.
+  # stat[0] = `git ls-files` (previously the `{ ls-files && ls-files; }` group; one command now, so
+  # its status is read directly). stat[1] = `sort -z -u`.
   local producer_failed=0
   [ "${stat[0]}" -ne 0 ] && producer_failed=1
   [ "${stat[1]}" -ne 0 ] && producer_failed=1
 
-  _tracked_grep_emit "tracked_and_untracked_files_matching" "$producer_failed" "$grep_stderr" "$out"
+  _tracked_grep_emit "tracked_and_untracked_files_matching" "$producer_failed" "$grep_stderr" "$dir"
 }

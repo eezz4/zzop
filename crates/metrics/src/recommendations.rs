@@ -1,12 +1,25 @@
 //! Generates improvement recommendations from `FileNode`s, coupling, and circular deps.
 //!
-//! Every rule is evaluated; each item gets ROI, cost, and an `ActionHintKey`. `scope_excludes`
-//! (rule + glob) and `permanent_ignores` (rule + path) are applied as post-filters. Results are
+//! Every rule is evaluated; each item gets ROI, cost, and an `ActionHintKey`. The config's top-level
+//! `exclude` (`BuildRecInput::excludes`) is applied as a post-filter. Results are
 //! sorted by severity (critical -> warning -> info), then ROI desc within the same severity.
 //! `deriveActionHintKey` is folded in below since it is tiny and has no other callers.
 //!
 //! Rule-gate thresholds are passed explicitly via `RecommendationGates` rather than through an
 //! ambient config singleton (see `crate::scores::config` for the precedent).
+//!
+//! ## Why `exclude` reaches THIS channel and not only `findings`
+//! Recommendations are scores, not findings, so the config's `exclude` key did not originally reach here
+//! — the engine passed an empty filter and the four filter/cost knobs this input once carried were dead
+//! at every production call site. That was measured as a false report on this repo itself (2026-07-29):
+//! `zzop.config.jsonc` excludes `cases/**` — a labelled defect benchmark, every file deliberately wrong —
+//! and `zzop analyze .` still headlined `topRecommendation.topItem = "cases/trees/graph/circularB.ts"`.
+//! `exclude` is one user statement, "do not report on these paths", and a run whose FIRST line names an
+//! excluded path contradicts the config that produced it. So the filter is wired to
+//! `RuleConfig::global_excludes` and evaluated with `zzop_core::global_exclude_matches_path` — the same
+//! matcher `is_suppressed` uses — rather than a second glob dialect local to this module. The three
+//! remaining dead knobs (`permanent_ignores`, `untested_paths`, `amplification_by_path`) had no config
+//! surface anywhere and were deleted instead of wired: nothing could ever have fed them.
 //!
 //! ## Bug evidence + severity escalation (not ROI inflation)
 //! Every item can carry `bug_evidence`: deterministic strings naming WHY the underlying file is
@@ -71,7 +84,7 @@ pub fn build_recommendations(
     for (rule_id, severity, items) in raw {
         let filtered: Vec<RawItem> = items
             .into_iter()
-            .filter(|it| !is_filtered(rule_id, &it.path, input))
+            .filter(|it| !is_filtered(&it.path, input))
             .collect();
         if filtered.is_empty() {
             continue;
@@ -80,22 +93,8 @@ pub fn build_recommendations(
             .into_iter()
             .map(|it| {
                 let node = nodes_by_path.get(it.path.as_str()).copied();
-                let untested = input.untested_paths.contains(&it.path);
-                let amplification = input
-                    .amplification_by_path
-                    .get(&it.path)
-                    .copied()
-                    .unwrap_or(0.0);
                 let bug_evidence = bug_evidence_for(&it.path, node, &critical_by_path);
-                enrich(
-                    rule_id,
-                    severity,
-                    it,
-                    node,
-                    untested,
-                    amplification,
-                    bug_evidence,
-                )
+                enrich(rule_id, severity, it, node, bug_evidence)
             })
             .collect();
         enriched.sort_by(|a, b| b.roi.partial_cmp(&a.roi).unwrap_or(Ordering::Equal));

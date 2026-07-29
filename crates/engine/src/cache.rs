@@ -59,52 +59,54 @@ use zzop_core::RulePackDef;
 use crate::dispatch::Language;
 use crate::{CacheStats, EngineConfig};
 
-/// Schema version passed to `AnalysisCache::open` — the cache's one bulk invalidator (see
-/// `AnalysisCache::open`'s own doc: a mismatch is a wipe, not a per-entry migration). It is a
-/// COMPOSITE of two axes, and neither one alone is enough:
-///
-/// - **Release axis** — `env!("CARGO_PKG_VERSION")`, the workspace version. DERIVED, never typed by
-///   hand, so it cannot drift from the release it claims. It did drift: this const sat at `"0.23.0"`
-///   for the whole of the 0.24.0 cycle and was corrected by hand, which is exactly the failure a
-///   hand-copied version always eventually has. The consequence is deliberate and is now part of what
-///   a release DOES: the string changes on every release, so **every release reclaims exactly one
-///   cache generation**. This crate has no GC — `zzop_cache`'s store module doc records non-eviction
-///   as designed — so a generation that stops being addressed would otherwise sit unread on every
-///   user's disk forever. The price is one cold run per upgrade.
-/// - **In-cycle axis** — the trailing `+rN` counter, bumped BY HAND when a persisted shape changes
-///   BETWEEN releases. The release axis cannot cover that case at all: within one cycle the version
-///   does not move, so a developer's (or a nightly consumer's) warm cache would be served slices of
-///   the old shape under a version that claims to describe the new one. Monotonic and never reset —
-///   a reset would be harmless once the release axis has moved, but buys nothing.
-///
-/// Bump `+rN` whenever `FileIrSlice`, the cached findings payload, or either entry envelope gains,
-/// renames, or removes a field. That holds even when `#[serde(default)]` would deserialize an old
-/// entry without erroring: a missing field silently defaulting (an empty `Vec`/`false`) is
-/// indistinguishable from "genuinely has none", so a hit against a pre-existing directory would serve
-/// a wrong answer instead of recomputing.
-///
-/// **And whenever the MEANING of an existing key ingredient changes**, which is not a shape change and
-/// is easy to miss. `+r2` is exactly that case: on 2026-07-27 an undeclared convention vocabulary
-/// stopped falling back to built-ins and started making no judgment at all. The declared struct — which
-/// is what [`vocabulary_fingerprint`] hashes — is byte-identical across that change, so the key does NOT
-/// move on its own, while the slices it addresses are computed differently. Without this bump a warm
-/// cache would serve pre-flip IR under a post-flip key.
-///
-/// `scripts/check-parser-fingerprint-bump.sh`'s `core` scope enforces this. It compares the const's
-/// value EXPRESSION at both ends of the diff range and resolves `env!("CARGO_PKG_VERSION")` against
-/// each end's `Cargo.toml`, so both axes are visible to it: a `CORE_SHARED_FILES` change with neither
-/// the release version nor `+rN` moved is red, and a release bump alone is accepted as the
-/// invalidation it really is.
-pub const CACHE_SCHEMA_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+r2");
+// Source-derived fingerprints, one per dependency closure — see build.rs. Nothing here is bumped by
+// hand, which is the whole point: the hash IS the version.
+include!(concat!(env!("OUT_DIR"), "/fingerprints.rs"));
 
-/// Fingerprint for files that never reach a structural parser crate in the fused pass: no `Language` match
-/// (`dispatch::dispatch` returned `None` — unrecognized extension), or the size-cap lexical fallback
-/// (`pipeline::compute_fresh_artifact`'s oversized branch, which short-circuits before any language-specific
-/// parse call). Both produce their result via this engine's own text-only heuristics
-/// (`pipeline::lexical_loc`), never a parser crate, so this is a fixed local marker rather than a borrowed
-/// `PARSER_FINGERPRINT` — restamp with the current `CARGO_PKG_VERSION` if the engine's own lexical-fallback
-/// shape changes (2026-07-22 version reform: cache-bust tokens are package-version stamps).
-const LEXICAL_FALLBACK_FINGERPRINT: &str = "lexical/0.21.0";
+/// Joins a parser's human-readable id (`"rust/syn-2"`) to its source-derived hash. The id is what a
+/// person reads in a cache path or a bug report and never needs to move; the hash is what actually
+/// invalidates.
+fn derived(id: &str, source_hash: &str) -> String {
+    format!("{id}/{source_hash}")
+}
+
+/// Schema version passed to `AnalysisCache::open` — the cache's one bulk invalidator (see
+/// `AnalysisCache::open`'s own doc: a mismatch is a wipe, not a per-entry migration). Two axes, and
+/// neither one alone is enough:
+///
+/// - **Release axis** — the workspace version. Every release reclaims exactly one cache generation,
+///   which matters because this crate has no GC (`zzop_cache`'s store module doc records
+///   non-eviction as designed), so a generation that stopped being addressed would otherwise sit
+///   unread on every user's disk forever. The price is one cold run per upgrade.
+/// - **Stored-shape axis** — a hash of the two crates that DEFINE what gets persisted, `zzop-cache`
+///   (the entry envelopes) and `zzop-core` (`FileIrSlice`, `Finding`, and the shared types they
+///   embed), each taken by Cargo dependency closure. See `build.rs`.
+///
+/// **The second axis used to be a `+rN` counter bumped by hand**, and the whole apparatus around it —
+/// a ~400-line guard, a list of watched files inside that guard, and three escape hatches for the
+/// cases the guard read wrong — existed only because a human had to remember. The hash cannot be
+/// forgotten. It also covers what the hand list structurally could not: a NEW file under either crate
+/// is in the closure the day it lands, where a listed path had to be added by the same person who
+/// would have had to remember the bump.
+///
+/// It catches strictly more than shape, too. A `+rN` bump was also required whenever the MEANING of a
+/// key ingredient changed without its shape moving — a real 2026-07-27 case where an undeclared
+/// vocabulary stopped falling back to built-ins, leaving `vocabulary_fingerprint`'s hashed struct
+/// byte-identical while the slices it addressed were computed differently. That change edited
+/// `zzop-core`, so the source hash moves on it; the judgment call is gone.
+///
+/// Over-invalidation is the accepted direction: a comment-only edit in either crate wipes the cache,
+/// which costs recomputation, where under-invalidation serves a WRONG ANSWER from a stale entry.
+pub const CACHE_SCHEMA_VERSION: &str = CACHE_SCHEMA_VERSION_DERIVED;
+
+/// Human-readable id for files that never reach a structural parser crate in the fused pass: no
+/// `Language` match (`dispatch::dispatch` returned `None` — unrecognized extension), or the size-cap
+/// lexical fallback (`pipeline::compute_fresh_artifact`'s oversized branch, which short-circuits
+/// before any language-specific parse call). Both produce their result via this engine's own
+/// text-only heuristics (`pipeline::lexical_loc`), never a parser crate, so there is no
+/// `PARSER_FINGERPRINT` to borrow an id from. The VERSION half is `FP_LEXICAL`, a source hash of this
+/// crate's `pipeline` module — where those heuristics actually live.
+const LEXICAL_FALLBACK_ID: &str = "lexical";
 
 /// `ruleset_fingerprint`'s native-rule-logic-version token for `pipeline::schema_findings`
 /// (`zzop_rules_schema::apply_schema_rules`, wired into the fused per-file pass for Prisma files). Unlike
@@ -116,8 +118,9 @@ const LEXICAL_FALLBACK_FINGERPRINT: &str = "lexical/0.21.0";
 /// recomputed-every-run (`usage.rs`) lane split that decides whether a bump is needed.
 fn schema_structural_fingerprint() -> String {
     format!(
-        "schema-structural-{}",
-        zzop_rules_schema::STRUCTURAL_RULES_VERSION
+        "schema-structural-{}/{}",
+        zzop_rules_schema::STRUCTURAL_RULES_VERSION,
+        FP_SCHEMA_RULES
     )
 }
 
@@ -127,8 +130,7 @@ fn schema_structural_fingerprint() -> String {
 /// window, ...) alters findings for byte-identical source AND identical pack content — invisible to the
 /// key without this token. Restamp with the current `CARGO_PKG_VERSION` on any such change (2026-07-22
 /// version reform: cache-bust tokens are package-version stamps).
-const DSL_INTERPRETER_FINGERPRINT: &str =
-    "dsl/0.24.0+zzop-marker-prefix-v1+method-scan-trigger-lines";
+const DSL_INTERPRETER_FINGERPRINT: &str = FP_DSL;
 
 /// Opens the on-disk cache at `config.cache_dir`, if set. Never panics: an open failure (bad permissions,
 /// path collides with a plain file, disk full while writing the schema-version marker, ...) degrades to
@@ -169,19 +171,19 @@ pub(crate) fn parser_fingerprint(language: Option<Language>, config: &EngineConf
         Some(Language::TypeScript) => {
             format!(
                 "{}+degrade-v2+io={:?}",
-                zzop_parser_typescript::PARSER_FINGERPRINT,
+                derived(zzop_parser_typescript::PARSER_FINGERPRINT, FP_TYPESCRIPT),
                 config.io
             )
         }
-        Some(Language::Prisma) => zzop_parser_prisma::PARSER_FINGERPRINT.to_string(),
+        Some(Language::Prisma) => derived(zzop_parser_prisma::PARSER_FINGERPRINT, FP_PRISMA),
         // Own fingerprint (not `LEXICAL_FALLBACK_FINGERPRINT`): `.java` uses the real structural projector.
-        Some(Language::Java21) => zzop_parser_java_21::PARSER_FINGERPRINT.to_string(),
-        Some(Language::Python) => zzop_parser_python_3::PARSER_FINGERPRINT.to_string(),
-        Some(Language::Rust) => zzop_parser_rust::PARSER_FINGERPRINT.to_string(),
-        Some(Language::Go) => zzop_parser_go::PARSER_FINGERPRINT.to_string(),
-        Some(Language::Sql) => zzop_parser_sql::PARSER_FINGERPRINT.to_string(),
-        Some(Language::CSharp) => zzop_parser_csharp::PARSER_FINGERPRINT.to_string(),
-        None => LEXICAL_FALLBACK_FINGERPRINT.to_string(),
+        Some(Language::Java21) => derived(zzop_parser_java_21::PARSER_FINGERPRINT, FP_JAVA),
+        Some(Language::Python) => derived(zzop_parser_python_3::PARSER_FINGERPRINT, FP_PYTHON),
+        Some(Language::Rust) => derived(zzop_parser_rust::PARSER_FINGERPRINT, FP_RUST),
+        Some(Language::Go) => derived(zzop_parser_go::PARSER_FINGERPRINT, FP_GO),
+        Some(Language::Sql) => derived(zzop_parser_sql::PARSER_FINGERPRINT, FP_SQL),
+        Some(Language::CSharp) => derived(zzop_parser_csharp::PARSER_FINGERPRINT, FP_CSHARP),
+        None => derived(LEXICAL_FALLBACK_ID, FP_LEXICAL),
     };
     format!("{base}+size_cap={}", config.size_cap)
 }

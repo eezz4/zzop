@@ -114,6 +114,9 @@ pub fn route_shadowing_findings(io_provides: &[zzop_core::IoProvide]) -> Vec<zzo
                             .strip_prefix("Disable ")
                             .expect("disable_hint always starts with \"Disable \"")
                     ),
+                    // Empty by construction, not by omission: this rule only compares routes registered
+                    // in the SAME file, so the only path it ever names is its own anchor.
+                    evidence_paths: Vec::new(),
                     data: Some(serde_json::json!({
                         "literalKey": literal.key,
                         "literalLine": literal.line,

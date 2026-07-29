@@ -167,7 +167,11 @@ pub(crate) fn run_file_pass(
     cache: Option<&AnalysisCache>,
     counters: Option<&CacheCounters>,
 ) -> Vec<FileArtifact> {
-    let files = walking::walk_files(root, &config.dispatch);
+    // `config.cache_dir` is handed to the walk, not just to the store: the directory this run writes its
+    // own entries into must not be walked as source by the NEXT run (`walk_files`'s doc has the growth
+    // numbers). It is passed even when `cache` is `None` — a cache directory that failed to OPEN may still
+    // hold entries an earlier run wrote, and those are no more source than this run's are.
+    let files = walking::walk_files(root, &config.dispatch, config.cache_dir.as_deref());
     // Pack-level and per-rule `disabled_rules` gating happen once here, outside the per-file loop
     // (`pack_loader::applies_to` below is the remaining per-file pre-filter). A bare pack id drops the
     // whole pack; a `"{pack}/{rule}"` id drops just that rule.

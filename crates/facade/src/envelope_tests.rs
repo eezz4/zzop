@@ -148,6 +148,51 @@ fn envelope_analyze_request_defaults_mounted_at_and_mounts_to_empty() {
         serde_json::from_str(r#"{"sourceId": "legacy"}"#).expect("valid config JSON");
     assert!(req.mounted_at.is_none());
     assert!(req.mounts.is_empty());
+    assert!(req.client_base.is_none());
+}
+
+/// `clientBase` is the CONSUME-side half of the same promise `mountedAt` keeps: a declaration about
+/// where a tree sits applies to a Mode A envelope and a natively-parsed tree alike. An adapter emits
+/// call sites exactly as the source spells them, so an envelope is if anything MORE likely to need it —
+/// no code-extracted base pass runs in this mode at all. And it must stay idempotent here too: the
+/// second consume below already carries the base, and re-prefixing it would break a joining key.
+#[test]
+fn analyze_envelope_json_client_base_prefixes_relative_consume_keys_over_the_wire() {
+    let envelope = r#"{
+        "format": "zzop-normalized-ast",
+        "version": 1,
+        "parser": "jsp-lexical/1",
+        "source": "legacy",
+        "files": [
+            {
+                "path": "legacy/Client.jsp",
+                "loc": 20,
+                "io": {
+                    "provides": [],
+                    "consumes": [
+                        {"kind": "http", "key": "GET /users", "file": "legacy/Client.jsp", "line": 3},
+                        {"kind": "http", "key": "GET /api/orders", "file": "legacy/Client.jsp", "line": 4}
+                    ]
+                }
+            }
+        ]
+    }"#;
+    let config = r#"{"sourceId": "legacy", "clientBase": "/api"}"#;
+    let out =
+        analyze_envelope_json(envelope, config).expect("analyze_envelope_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+    let keys: Vec<&str> = value["ir"]["io"]["consumes"]
+        .as_array()
+        .expect("consumes array")
+        .iter()
+        .map(|c| c["key"].as_str().expect("key"))
+        .collect();
+    assert_eq!(
+        keys,
+        vec!["GET /api/orders", "GET /api/users"],
+        "clientBase sent over the analyzeEnvelope config wire must prefix the suffix-only consume and \
+         leave the already-based one alone, got: {value}"
+    );
 }
 
 #[test]

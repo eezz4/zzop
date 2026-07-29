@@ -289,12 +289,28 @@ fn cross_layer_findings_cover_at_least_four_of_the_six_rules_end_to_end() {
     assert!(skew[0].message.contains("`v1`"));
     assert!(skew[0].message.contains("`v2`"));
 
-    // 4. cross-layer/duplicate-route — DELETE /api/legacy/purge provided by both be1 and be2.
+    // 4. cross-layer/duplicate-route — DELETE /api/legacy/purge provided by both be1 and be2. ONE COPY
+    // PER PROVIDING SOURCE since 2026-07-29, each anchored in its own tree: a single anchor meant one
+    // source excluding its own paths deleted the finding about the other. Both copies name both sources.
     let dup = find(&out.cross_layer_findings, "cross-layer/duplicate-route");
-    assert_eq!(dup.len(), 1, "{:?}", dup);
-    assert!(dup[0].message.contains("DELETE /api/legacy/purge"));
-    assert!(dup[0].message.contains("be1"));
-    assert!(dup[0].message.contains("be2"));
+    assert_eq!(dup.len(), 2, "{:?}", dup);
+    assert_eq!(
+        dup.iter().map(|f| f.file.as_str()).collect::<Vec<_>>(),
+        vec!["routes/apiRoutes.ts", "routes/legacy.ts"]
+    );
+    for f in &dup {
+        assert!(f.message.contains("DELETE /api/legacy/purge"));
+        assert!(f.message.contains("be1"));
+        assert!(f.message.contains("be2"));
+    }
+    // Each copy names ITS OWN tree as the anchor's source, which is what lets a consumer key the finding
+    // to a tree without guessing from the shared site list.
+    assert_eq!(
+        dup.iter()
+            .map(|f| f.data.as_ref().unwrap()["provideSource"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["be1", "be2"]
+    );
 
     // Deterministic (severity, file, line, ruleId) sort — the same order `merge_findings` gives per-tree
     // findings. Every one of these 4 rules is `Warning` except `unconsumed-endpoint` (`Info`), so `Info`
@@ -1246,4 +1262,118 @@ fn unconsumed_findings_carry_no_caveat_when_every_tree_contributes_joinable_io()
             f.message
         );
     }
+}
+
+// --- D52: `exclude` reads every path a finding NAMES, not just the one it anchors at -----------------
+//
+// The two roles a path plays get different treatment from the SAME config key: anchor -> the finding is
+// dropped, evidence -> the finding survives with that path redacted. These run the real pipeline rather
+// than calling the filter directly, because the value being tested is that the RULES fill
+// `Finding::evidence_paths` — a filter that works over an empty field is the exact silent failure D52
+// exists to close.
+
+/// The provide side excludes its own paths. The consume-anchored `method-mismatch` still fires (the
+/// caller's bug is the caller's), but the provide file must appear nowhere in it.
+#[test]
+fn excluding_the_provide_side_redacts_its_path_from_a_consume_anchored_finding() {
+    let fe = fe_tree();
+    let be1 = be1_tree();
+    let mut be_config = config("be1");
+    be_config.rule_config.global_excludes = vec![zzop_core::GlobalExclude {
+        path: Some("routes/apiRoutes.ts".to_string()),
+        glob: None,
+    }];
+    let trees = vec![
+        (fe.path().to_path_buf(), config("fe")),
+        (be1.path().to_path_buf(), be_config),
+    ];
+    let out = analyze_trees(&trees);
+
+    let mismatch = find(&out.cross_layer_findings, "cross-layer/method-mismatch");
+    assert_eq!(
+        mismatch.len(),
+        1,
+        "the consume-anchored finding must survive a provide-side exclude: {mismatch:?}"
+    );
+    let f = mismatch[0];
+    assert_eq!(f.file, "src/Ctx.tsx", "anchor is untouched");
+    assert!(
+        f.message.contains("/api/v1/orders") && f.message.contains("PUT"),
+        "the finding still says what is wrong: {}",
+        f.message
+    );
+    let rendered = format!("{}{}", f.message, serde_json::to_string(&f.data).unwrap());
+    assert!(
+        !rendered.contains("routes/apiRoutes.ts"),
+        "the excluded provide path must not be printed anywhere: {rendered}"
+    );
+    assert!(
+        rendered.contains(zzop_core::REDACTED),
+        "and its absence must be visible as a redaction, not a silent gap: {rendered}"
+    );
+}
+
+/// The other role, unchanged: excluding the path a finding ANCHORS at still drops it whole. Same fixture,
+/// same key, opposite side — which is what makes "one key, two roles" a real distinction rather than a
+/// restatement.
+#[test]
+fn excluding_the_consume_side_still_drops_the_consume_anchored_finding_whole() {
+    let fe = fe_tree();
+    let be1 = be1_tree();
+    let mut fe_config = config("fe");
+    fe_config.rule_config.global_excludes = vec![zzop_core::GlobalExclude {
+        path: Some("src/Ctx.tsx".to_string()),
+        glob: None,
+    }];
+    let trees = vec![
+        (fe.path().to_path_buf(), fe_config),
+        (be1.path().to_path_buf(), config("be1")),
+    ];
+    let out = analyze_trees(&trees);
+    assert!(
+        find(&out.cross_layer_findings, "cross-layer/method-mismatch").is_empty(),
+        "an excluded ANCHOR drops the finding: {:?}",
+        out.cross_layer_findings
+    );
+}
+
+/// An N-source finding: `duplicate-route` emits one copy per providing source, so excluding one tree drops
+/// that tree's copy AND redacts its path out of the sibling copy that still fires.
+#[test]
+fn excluding_one_provider_drops_its_copy_and_redacts_it_from_the_siblings() {
+    let fe = fe_tree();
+    let be1 = be1_tree();
+    let be2 = be2_tree();
+    let mut be2_config = config("be2");
+    be2_config.rule_config.global_excludes = vec![zzop_core::GlobalExclude {
+        path: Some("routes/legacy.ts".to_string()),
+        glob: None,
+    }];
+    let trees = vec![
+        (fe.path().to_path_buf(), config("fe")),
+        (be1.path().to_path_buf(), config("be1")),
+        (be2.path().to_path_buf(), be2_config),
+    ];
+    let out = analyze_trees(&trees);
+
+    let dup = find(&out.cross_layer_findings, "cross-layer/duplicate-route");
+    assert_eq!(
+        dup.len(),
+        1,
+        "be2's own copy is dropped by its anchor exclude; be1's survives: {dup:?}"
+    );
+    assert_eq!(dup[0].file, "routes/apiRoutes.ts");
+    let rendered = format!(
+        "{}{}",
+        dup[0].message,
+        serde_json::to_string(&dup[0].data).unwrap()
+    );
+    assert!(
+        !rendered.contains("routes/legacy.ts"),
+        "the surviving copy must not print the excluded sibling's path: {rendered}"
+    );
+    assert!(
+        rendered.contains("be2"),
+        "the SOURCE id is not a path and stays — the finding still says two trees provide this: {rendered}"
+    );
 }

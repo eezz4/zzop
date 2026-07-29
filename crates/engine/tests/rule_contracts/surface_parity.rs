@@ -224,20 +224,7 @@ pub(crate) fn cli_only_lane_sources(registry: &serde_json::Value) -> BTreeSet<Pa
     out
 }
 
-/// Whether a path is TEST source rather than emission source: any `tests` directory component, or a
-/// file named `tests.rs` / `*_test.rs` / `*_tests.rs`. A fixture that mimics an engine output spells the
-/// engine's own key literals on purpose; counting those as emissions made the guard dictate what a test
-/// may name its own variables, which is not a wire contract.
-fn is_test_source(path: &Path) -> bool {
-    if path.components().any(|c| c.as_os_str() == "tests") {
-        return true;
-    }
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or_default();
-    name == "tests.rs" || name.ends_with("_test.rs") || name.ends_with("_tests.rs")
-}
+use crate::is_test_source;
 
 /// A source file reduced to its (line-)comment-free text. Rust line comments — `//`, `///` and `//!` —
 /// are dropped whole, because prose that MENTIONS a field name is not a place that emits it: a doc
@@ -431,27 +418,137 @@ fn row_status<'a>(row: &'a serde_json::Value, surface: &str) -> Option<&'a str> 
     row.get(surface).and_then(|v| v.as_str())
 }
 
-// Only one delivery surface remains: the MCP `analyze_repo`/`cross_repo` reply, which is the same
-// shaped summary the `zzop analyze`/`zzop cross` CLI subcommands print — `zzop`, the `packages/cli-bin`
-// binary. NOT `zzop-mcp`, as this comment said until 2026-07-27: that binary takes no analysis
-// subcommand at all (bare invocation and `mcp` both start the stdio server; `version` and `help` are
-// the only others), so the sentence attributed real subcommands to a binary that rejects them. The same
-// false sentence was duplicated into `docs/contracts/surface-parity.json`'s `_doc` — one claim, two
-// copies, both wrong, which is the standing argument for citing the registry rather than restating it.
-// @zzop/cli is a zero-logic shim that spawns the native `zzop` binary — it has no render surface of its
-// own (no `jsCliRender`/`mdReport`, which briefly existed here across the npm distribution's
-// removal-then-restoration; see the registry's own `_doc` historical note).
-const SURFACES: [&str; 1] = ["mcpAnalyzeReply"];
+/// The three status tokens a surface column's value may take — the same exhaustive set TEST 3 matches
+/// on. Load-bearing beyond documentation: this is the DISCRIMINATOR [`registry_surfaces`] uses to tell a
+/// surface column apart from a row's other keys.
+const STATUSES: [&str; 3] = ["carry", "carry-conditional", "omit"];
+/// The one delivery surface whose emission source TEST 3 knows how to scan. Named here rather than
+/// inline so [`the_scanned_surface_is_one_the_registry_actually_declares`] can reconcile it with the
+/// DERIVED surface set — a renamed column would otherwise leave that test scanning for a status key no
+/// row carries.
+///
+/// Historical note on why there is exactly one: it is the MCP `analyze_repo`/`cross_repo` reply, which
+/// is the same shaped summary the `zzop analyze`/`zzop cross` CLI subcommands print — `zzop`, the
+/// `packages/cli-bin` binary. NOT `zzop-mcp`, as this comment said until 2026-07-27: that binary takes
+/// no analysis subcommand at all (bare invocation and `mcp` both start the stdio server; `version` and
+/// `help` are the only others), so the sentence attributed real subcommands to a binary that rejects
+/// them. The same false sentence was duplicated into `docs/contracts/surface-parity.json`'s `_doc` — one
+/// claim, two copies, both wrong, which is the standing argument for citing the registry rather than
+/// restating it. @zzop/cli is a zero-logic shim that spawns the native `zzop` binary — it has no render
+/// surface of its own (no `jsCliRender`/`mdReport`, which briefly existed here across the npm
+/// distribution's removal-then-restoration; see the registry's own `_doc` historical note).
+const SCANNED_SURFACE: &str = "mcpAnalyzeReply";
+
+/// Every FIELD-ROW ROOT the registry declares: its top-level keys minus the `_`-prefixed meta blocks
+/// (`_doc`, `_cliOnlyLanes`). Same meta convention [`cli_only_lane_sources`] already applies one level
+/// down, inside `_cliOnlyLanes`.
+///
+/// DERIVED, since 2026-07-29. The note contract below used to walk the literal pair
+/// `["analyzeOutputView", "multiAnalyzeOutputView"]`, so a third root — a future view type getting its
+/// own rows — would have ridden with no note contract at all, and the suite would have stayed green
+/// while reading none of it. Measured before the fix: a planted `plantedOutputView` root whose only row
+/// carried `"mcpAnalyzeReply": "omit"` with an empty `note` left all five tests here green.
+fn registry_roots(registry: &serde_json::Value) -> Vec<String> {
+    let roots: Vec<String> = registry
+        .as_object()
+        .expect("surface-parity.json's top level must be an object")
+        .keys()
+        .filter(|key| !key.starts_with('_'))
+        .cloned()
+        .collect();
+    assert!(
+        !roots.is_empty(),
+        "docs/contracts/surface-parity.json declares NO field-row root (every top-level key starts with \
+         `_`, i.e. is meta) — the note contract would then walk nothing and pass having checked no row. \
+         This registry ships at least `analyzeOutputView`; a zero here is a broken read, not an empty \
+         registry"
+    );
+    roots
+}
+
+/// Every DELIVERY SURFACE the registry's rows actually carry — the union, over every row of every root,
+/// of the keys whose value is one of [`STATUSES`].
+///
+/// The status VALUE is the discriminator, not a key denylist: a row is a flat object of
+/// `<surface>: <status>` pairs plus the prose `note`, and only a surface column holds a status token.
+/// Anchoring on meaning rather than on "everything except `note`" is what keeps a future prose field
+/// (`history`, `owner`, ...) from being mistaken for a surface whose every row is then reported missing.
+///
+/// A status TYPO would shrink the derived set (`"carreid"` is not a status, so that key stops looking
+/// like a surface), which is exactly the silent-narrowing this function exists to prevent — so the
+/// second half asserts that EVERY row of EVERY root carries EVERY derived surface with a valid status.
+/// One row spelling a status wrong therefore fails loudly on the OTHER rows' behalf, and cannot quietly
+/// remove a column from the contract.
+///
+/// DERIVED, since 2026-07-29 — for the same reason [`registry_roots`] is. The note contract used to
+/// consult a hand-written one-element list, so a second surface column added to the rows would have gone
+/// unchecked. Measured before the fix: a planted `"plantedSurface": "omit"` added to the
+/// `analyzeOutputView.configWarnings` row (whose `note` is empty) left all five tests green.
+fn registry_surfaces(registry: &serde_json::Value) -> BTreeSet<String> {
+    let roots = registry_roots(registry);
+    let mut surfaces = BTreeSet::new();
+    for root in &roots {
+        for (field, row) in registry_rows(registry, root) {
+            for (key, value) in row.as_object().unwrap_or_else(|| {
+                panic!("surface-parity.json's `{root}.{field}` must be an object")
+            }) {
+                if value.as_str().is_some_and(|s| STATUSES.contains(&s)) {
+                    surfaces.insert(key.clone());
+                }
+            }
+        }
+    }
+    assert!(
+        !surfaces.is_empty(),
+        "no row in docs/contracts/surface-parity.json carries a key whose value is one of {STATUSES:?} \
+         — the delivery-surface derivation found nothing, so the note contract would demand nothing of \
+         any row. Either every status token was renamed (update `STATUSES` in the SAME commit) or the \
+         row shape changed"
+    );
+    for root in &roots {
+        for (field, row) in registry_rows(registry, root) {
+            for surface in &surfaces {
+                let status = row_status(row, surface).unwrap_or_else(|| {
+                    panic!(
+                        "{root}.{field} is missing the required string field `{surface}` — every row \
+                         must state what EVERY delivery surface does with its field. If the value is \
+                         present but misspelled, that is the same bug: a non-status value stops the \
+                         column from being recognized as a surface at all"
+                    )
+                });
+                assert!(
+                    STATUSES.contains(&status),
+                    "{root}.{field}.{surface} is {status:?}, which is not one of {STATUSES:?} — a typo \
+                     here silently removes `{surface}` from the derived surface set for every OTHER row"
+                );
+            }
+        }
+    }
+    surfaces
+}
+
+/// `(field, row)` for every row of one root, minus any `_`-prefixed meta entry — the single place the
+/// row walk is spelled, so the derivations above and the note contract below cannot disagree about what
+/// counts as a row.
+fn registry_rows<'a>(
+    registry: &'a serde_json::Value,
+    root: &str,
+) -> Vec<(&'a String, &'a serde_json::Value)> {
+    registry[root]
+        .as_object()
+        .unwrap_or_else(|| panic!("surface-parity.json's `{root}` must be an object"))
+        .iter()
+        .filter(|(field, _)| !field.starts_with('_'))
+        .collect()
+}
 
 #[test]
 fn every_omit_or_conditional_row_carries_a_non_empty_note() {
     let registry = load_registry();
-    for root in ["analyzeOutputView", "multiAnalyzeOutputView"] {
-        let fields = registry[root]
-            .as_object()
-            .unwrap_or_else(|| panic!("surface-parity.json's `{root}` must be an object"));
-        for (field, row) in fields {
-            let needs_note = SURFACES.iter().any(|surface| {
+    let surfaces = registry_surfaces(&registry);
+    for root in registry_roots(&registry) {
+        for (field, row) in registry_rows(&registry, &root) {
+            let needs_note = surfaces.iter().any(|surface| {
                 let status = row_status(row, surface).unwrap_or_else(|| {
                     panic!("{root}.{field} is missing the required string field `{surface}`")
                 });
@@ -468,6 +565,57 @@ fn every_omit_or_conditional_row_carries_a_non_empty_note() {
             );
         }
     }
+}
+
+/// The two hand-written couplings left in this file — TEST 3's scanned surface and TEST 1/2's pinned
+/// roots — reconciled against the derived sets, so neither can be left naming something the registry
+/// no longer has (or, worse, stay silent about something it grew).
+///
+/// Both remain hand-written on purpose and cannot be derived away: each names a place where this file
+/// knows something the registry does not. TEST 3 knows WHERE the `mcpAnalyzeReply` lane's emission
+/// source lives ([`mcp_lane_dirs`]) — a second surface column would need its own directory set, which
+/// only a human can supply. TEST 1/2 each know WHICH facade pin a root's key set must equal — a third
+/// root needs a third pin in `crates/facade/src/analyze_tests.rs` before anything here can check it.
+/// What this test converts is the FAILURE MODE: growth used to mean silent non-coverage, and now means
+/// a red build naming the missing piece.
+#[test]
+fn the_scanned_surface_is_one_the_registry_actually_declares() {
+    let registry = load_registry();
+    let surfaces = registry_surfaces(&registry);
+    assert!(
+        surfaces.contains(SCANNED_SURFACE),
+        "TEST 3 scans for the `{SCANNED_SURFACE}` column, which NO row in \
+         docs/contracts/surface-parity.json carries (declared surfaces: {surfaces:?}) — it was renamed \
+         or removed, and TEST 3 would have panicked on every row (or, had it been written to skip, \
+         checked nothing). Re-point `SCANNED_SURFACE`."
+    );
+    let unscanned: Vec<&String> = surfaces
+        .iter()
+        .filter(|s| s.as_str() != SCANNED_SURFACE)
+        .collect();
+    assert!(
+        unscanned.is_empty(),
+        "the registry declares delivery surface(s) {unscanned:?} that TEST 3 does not scan — it only \
+         knows where the `{SCANNED_SURFACE}` lane's emission source lives. Add the new surface's own \
+         source directories (a sibling of `mcp_lane_dirs`) and its own forwarding check, or drop the \
+         column. A new column left unscanned gets the note contract and nothing else."
+    );
+
+    let pinned: BTreeSet<String> = ["analyzeOutputView", "multiAnalyzeOutputView"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let declared: BTreeSet<String> = registry_roots(&registry).into_iter().collect();
+    assert_eq!(
+        declared, pinned,
+        "docs/contracts/surface-parity.json's field-row roots and the roots pinned against a facade \
+         key set (TEST 1 and TEST 2) disagree.\nroots with NO key-set pin (their rows are checked for \
+         notes and nothing else — nothing forces a row to EXIST for each field of the view they \
+         describe): {:?}\npinned roots the registry no longer declares (the pin reads `null` and its \
+         `as_object` panics): {:?}",
+        declared.difference(&pinned).collect::<Vec<_>>(),
+        pinned.difference(&declared).collect::<Vec<_>>(),
+    );
 }
 
 /// TEST 3 — mcp truthfulness. Scoped to `analyzeOutputView` (the single-tree shape `analyze_repo` forwards)
@@ -515,12 +663,9 @@ fn mcp_lane_forwards_exactly_the_rows_marked_carry_and_never_forwards_the_rows_m
          likely broke (per-directory coverage is pinned by \
          every_haystack_dir_actually_contributes_emission_text, which fails first and more precisely)"
     );
-    let fields = registry["analyzeOutputView"]
-        .as_object()
-        .expect("analyzeOutputView must be an object");
-    for (field, row) in fields {
-        let status = row_status(row, "mcpAnalyzeReply")
-            .unwrap_or_else(|| panic!("analyzeOutputView.{field} is missing `mcpAnalyzeReply`"));
+    for (field, row) in registry_rows(&registry, "analyzeOutputView") {
+        let status = row_status(row, SCANNED_SURFACE)
+            .unwrap_or_else(|| panic!("analyzeOutputView.{field} is missing `{SCANNED_SURFACE}`"));
         let key_literal = format!("\"{field}\":");
         let present = sources.contains(&key_literal);
         match status {

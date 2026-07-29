@@ -26,11 +26,34 @@ pub use store::AnalysisCache;
 /// literal of its own:
 /// - `zzop-config` derives [`DEFAULT_CACHE_DIR`] from it (the default a config-file/zero-config run
 ///   resolves against its base directory).
-/// - `zzop-engine`'s `dispatch::DEFAULT_SKIP_DIRS` lists it so the tree walker never walks zzop's own
-///   output as source. That entry is load-bearing, not tidiness: the walker runs `hidden(false)`, so a
-///   dot directory IS walked, and `.gitignore` only covers users who have a git tree and remembered to
-///   write the rule. The removed JS CLI's `.zzop-cache` is in that same list for exactly this reason —
-///   after a blind field test observed the analyzed file count growing every run.
+/// - `zzop-engine`'s `dispatch::DEFAULT_SKIP_DIRS` lists it, alongside the removed JS CLI's
+///   `.zzop-cache`, so a walk that never had a cache directory named to it still does not walk zzop's own
+///   output as source: the walker runs `hidden(false)`, so a dot directory IS walked, and `.gitignore`
+///   only covers users who have a git tree and remembered to write the rule.
+///
+/// **That skip-list entry is not what protects a run from its own output**, and must not be relied on as
+/// if it were — it is a NAME in a list any caller may replace wholesale (the config front-end assigns
+/// `dispatch.skip_dirs` from the declared `vocabulary.skipDirs`, which is an empty list when undeclared).
+/// The structural protection lives in `zzop-engine`'s `pipeline::walking::walk_files`, on two independent
+/// axes, and is sealed by BEHAVIOUR (analyze twice, assert the file count did not move) in
+/// `crates/engine/tests/analyze_self_output_exclusion.rs`:
+/// 1. **this constant is a RESERVED NAMESPACE** — a directory named `.zzop` is pruned wherever it appears,
+///    ahead of anything configurable, so no caller can disarm it. Same standing `git` gives `.git`.
+/// 2. **this run's own `cache_dir`** is pruned by resolved DIRECTORY, whatever it is named — so a cache
+///    parked outside `.zzop` is covered too.
+///
+/// **Axis 1 landed 2026-07-29 and is a PARTIAL REVERSAL of the 2026-07-28 judgement** that what must be
+/// excluded is "not the NAME `.zzop` but the one `cacheDir` this run wrote". Axis 2 alone was measurably
+/// narrower than "zzop never walks its own output": it prunes the directory THIS run was told to write to,
+/// so it was unarmed wherever there is no such directory to name —
+/// - **caching turned off** (`"cacheDir": null` / any JSON-falsy value) — `cache_dir` is `None`, so nothing
+///   was pruned and an earlier run's leftovers were walked as source. Measured on a one-file tree: 2 files
+///   with caching on, **7** after switching it off over a populated `.zzop/cache`.
+/// - **cacheDir moved from A to B** — B was pruned, A's leftovers were not.
+///
+/// What axis 1 costs: analyzing SOMEBODY ELSE'S `.zzop` tree on purpose now needs an opt-in knob that does
+/// not exist. Taken knowingly — the name cannot mean two things, and everywhere else in this codebase it
+/// already means "zzop's own derived output". The dotless sibling `zzop/` stays user-authored source.
 pub const TOOL_DIR: &str = ".zzop";
 
 /// Default on-disk cache directory (`.zzop/cache`), relative to the resolution base — the directory of
@@ -48,9 +71,19 @@ mod dir_tests {
     use super::{DEFAULT_CACHE_DIR, TOOL_DIR};
 
     /// Seals the one relation the two path constants have to each other: the default cache directory
-    /// must live UNDER the tool directory. If it ever did not, `zzop-engine`'s skip-list entry (which
-    /// names `TOOL_DIR`) would stop covering the cache, and the next run would walk the cache it just
-    /// wrote as source — the self-scan pollution the skip list exists to prevent.
+    /// must live UNDER the tool directory, so that everything documented as covering `.zzop/` — this
+    /// repo's own `.gitignore` rule (`**/.zzop/`), `zzop init`'s starter file, the shipped docs — keeps
+    /// covering the cache.
+    ///
+    /// **What this does NOT seal**, despite what it claimed until 2026-07-29: that a second run will not
+    /// walk the first run's cache. It compares one constant to another and passes no matter what any
+    /// consumer of either does — a guard that seals a protection by asserting a constant exists, while
+    /// leaving the wiring that consumes the constant unsealed. It sat green through the entire period in
+    /// which the config front-end's wholesale `dispatch.skip_dirs` overwrite made an undeclared
+    /// `vocabulary.skipDirs` disarm the skip-list entry, and the analyzed file count compounded every run.
+    /// That defect is now closed structurally in `walk_files` and sealed by BEHAVIOUR (run twice, assert
+    /// the file count is stable) in `crates/engine/tests/analyze_self_output_exclusion.rs` — which is
+    /// where a change to this area has to stay green, not here.
     #[test]
     fn the_default_cache_dir_lives_under_the_tool_dir() {
         assert!(

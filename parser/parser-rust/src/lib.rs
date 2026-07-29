@@ -55,6 +55,12 @@ pub use lang::used_names::parse_local_identifier_refs;
 /// `parse_calls`/`parse_extractor_guards` deliberately do NOT bump this: neither fact enters the cached
 /// per-file `FileArtifact` projection this fingerprint keys (the engine's call-graph pass re-parses off
 /// disk, uncached, by design — `run_callgraph_rules`' own doc), so a cached tree cannot go stale on them.
+///
+/// **This string is an ID, not a version — it no longer has to be bumped.** `crates/engine/build.rs`
+/// hashes this crate's whole dependency closure into the cache key beside it, so a change to any
+/// source here invalidates on its own. What is left is the part a person reads in a cache path or a
+/// bug report: which frontend parsed the file. Change it when the FRONTEND changes; correctness no
+/// longer depends on remembering.
 pub const PARSER_FINGERPRINT: &str = "rust/syn-2/0.21.0";
 
 /// Parses `text` with `syn`, returning `None` on any syntax error (never panics — unexpected/malformed

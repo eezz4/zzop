@@ -88,6 +88,11 @@ cd "$(dirname "$0")/.."
 SELF=check-deploy-facts-prose
 PREBUILD=.github/workflows/prebuild.yml
 CLI_PKG=packages/cli/package.json
+# The two RUNTIME platform maps — the shim's install-time resolution table and the plugin's download
+# bootstrap. Both carry the platform set by hand; the names axis below is what keeps them honest.
+CLI_SHIM=packages/cli/bin/zzop.js
+PLUGIN_BOOTSTRAP=.claude-plugin/hooks/bootstrap.sh
+seen_platform_dirs=""
 
 abort() { echo "$SELF: $*" >&2; exit 1; }
 
@@ -190,6 +195,94 @@ fi
 platform_count="$matrix_platforms"
 npm_package_count="$((platform_count + 1))" # the per-platform sub-packages plus the @zzop/cli shim
 
+# --- Platform NAMES in the code maps, not just the count (2026-07-29) -------------------------------
+# The three inventories above agree on HOW MANY. They said nothing about WHICH, and two runtime code maps
+# carry the platform set by hand: `packages/cli/bin/zzop.js`'s PLATFORM_PACKAGES (what the shim looks for
+# at install time) and `.claude-plugin/hooks/bootstrap.sh`'s uname case (what the plugin downloads).
+# Neither was in any guard's subject set, so on the sixth platform's day the counts could stay equal while
+# the shim failed to resolve a binary and the plugin install broke silently.
+#
+# Truth here is `packages/cli/npm/` — those directories ARE the sub-packages that publish. Each must be
+# named by both maps. The maps spell the token differently on purpose (the shim keys by
+# `process.platform-process.arch` and maps TO `@zzop/cli-<dir>`), so what is checked is that the
+# sub-package NAME appears — the string that actually has to resolve.
+#
+# MATCHED AT A TOKEN BOUNDARY, not as a substring. A plain `grep -F` here is VACUOUS against the most
+# likely edit: renaming `darwin-arm64` to `darwin-arm64-REMOVED` leaves the original as a prefix, so the
+# search still hits and the guard stays green while the map is broken. Measured while writing this axis —
+# the bootstrap half passed a planted violation until the boundary was added, which is the whole reason
+# this repo plants one before believing a green.
+platform_named() { # $1 = file, $2 = token
+  grep -qE "(^|[^A-Za-z0-9_-])$2([^A-Za-z0-9_-]|\$)" "$1"
+}
+missing_map_entries=""
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  d="${f#packages/cli/npm/}"
+  d="${d%%/*}"
+  case " $seen_platform_dirs " in *" $d "*) continue ;; esac
+  seen_platform_dirs="$seen_platform_dirs $d"
+  platform_named "$CLI_SHIM" "@zzop/cli-$d" \
+    || missing_map_entries="$missing_map_entries\n  $CLI_SHIM: no entry resolving to @zzop/cli-$d"
+  platform_named "$PLUGIN_BOOTSTRAP" "$d" \
+    || missing_map_entries="$missing_map_entries\n  $PLUGIN_BOOTSTRAP: platform token '$d' never named"
+done < <(git ls-files -- packages/cli/npm)
+
+if [ -n "$missing_map_entries" ]; then
+  echo "$SELF: a published npm sub-package is missing from a runtime platform map:" >&2
+  # shellcheck disable=SC2059
+  printf "$missing_map_entries\n" >&2
+  echo "  Each directory under packages/cli/npm/ publishes, so a platform absent from these maps means" >&2
+  echo "  the shim cannot find its binary at install time, or the plugin bootstrap cannot download it." >&2
+  exit 1
+fi
+
+# --- Supported LANGUAGES named on the distribution surfaces (2026-07-29) ----------------------------
+# The shipped language set is `parser/parser-*/` — those directories are the parsers that exist. Four
+# distribution surfaces enumerate it BY HAND: the plugin and .mcpb descriptions, the npm keywords, and
+# the README table. None was in any guard's subject set: `check-deploy-facts-prose` counted packs, rules
+# and platforms; `check-version-lists-parsers` reads `version.rs` only. So adding or removing a parser
+# could leave a surface UNDER-advertising (a new language nowhere) or OVER-advertising (a removed one
+# still claimed) — and over-advertising is a direct hit on the no-overclaiming doctrine.
+#
+# COMPARISON, not generation: three of the four are free prose, and rewriting a sentence from a list is a
+# worse cure than checking it. The token is derived from the directory (`parser-python-3` -> `python`,
+# `parser-java-21` -> `java`), so a new parser directory fails this until every surface names it.
+# Boundary-matched for the same reason as the platform axis above — and here it also stops `go` from
+# matching "GitHub"/"algorithm", which would make the whole axis vacuous for that language.
+lang_surfaces="$CLI_PKG .claude-plugin/plugin.json packages/mcpb/manifest.json README.md"
+missing_lang=""
+for parser_dir in parser/parser-*/; do
+  [ -d "$parser_dir" ] || continue
+  slug="${parser_dir#parser/parser-}"
+  slug="${slug%/}"
+  slug="${slug%-[0-9]*}" # `python-3` -> `python`, `java-21` -> `java`
+  # One alternation per language, so every surface is checked by a SINGLE grep. An alias is listed only
+  # where the shipped spelling is not the slug case-insensitively — a future `parser-kotlin` needs no
+  # entry, while one whose display name diverges fails loudly until it gets one rather than passing on a
+  # coincidence. (`C#` also accepts the `csharp` slug, which is how the npm keywords spell it.)
+  case "$slug" in
+    csharp) alts='C#|csharp'; shown='C# (or the csharp slug)' ;;
+    *) alts="$slug"; shown="$slug" ;;
+  esac
+  for surface in $lang_surfaces; do
+    [ -f "$surface" ] || continue
+    if grep -qiE "(^|[^A-Za-z0-9_-])($alts)([^A-Za-z0-9_-]|\$)" "$surface"; then
+      continue
+    fi
+    missing_lang="$missing_lang\n  $surface: never names $shown (parser/parser-${slug}* exists)"
+  done
+done
+
+if [ -n "$missing_lang" ]; then
+  echo "$SELF: a shipped parser's language is missing from a distribution surface:" >&2
+  # shellcheck disable=SC2059
+  printf "$missing_lang\n" >&2
+  echo "  These four surfaces advertise what zzop parses. A language that ships but is not named there is" >&2
+  echo "  under-advertised; one named there that no longer ships is an overclaim. Truth is parser/parser-*/." >&2
+  exit 1
+fi
+
 # --- Scan tracked *.md / *.html / *.rs --------------------------------------------------------------
 bt='`'
 prefilter='[0-9]+ (bundled )?DSL packs|[0-9]+ packs shipped|[0-9]+ DSL rules|[0-9]+ platforms?|[0-9]+ packages|\([0-9]+ rules?\)|ships [0-9]+ rules?|[0-9]+-rule'
@@ -201,6 +294,19 @@ total_files=0
 while IFS= read -r f; do
   [ -n "$f" ] && total_files=$((total_files + 1))
 done < <(git ls-files -- '*.md' '*.html' '*.rs')
+
+# Subject-set floor (2026-07-29). Every derivation above aborts loudly on a broken parse (zero packs,
+# zero platforms, a disagreeing inventory) — but the SCAN those numbers are compared against had no
+# such floor, so a pathspec that stopped matching printed "clean (0 files scanned; 12 DSL packs, 138
+# DSL rules, 5 platforms, 6 npm packages)" and exited 0. Measured 2026-07-29 by redirecting the globs
+# in a scratch copy. That green is the worst shape available here: it recites four correct derived
+# truths, which reads as proof, while having compared them against nothing.
+if [ "$total_files" -eq 0 ]; then
+  echo "$SELF: FAILED -- enumerated ZERO tracked *.md/*.html/*.rs files. The derived counts below were" >&2
+  echo "  computed but compared against no prose at all, so this run proved nothing. An empty subject" >&2
+  echo "  set is a broken guard, never a clean tree." >&2
+  exit 1
+fi
 
 # Every claim shape is matched by ONE `grep -HnoE` pass over the candidate files and classified in-shell
 # afterwards. The obvious alternative -- one grep per (file, shape) pair -- costs 3 + 3*<packs> process

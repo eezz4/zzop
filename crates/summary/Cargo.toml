@@ -26,3 +26,9 @@ zzop-core = { path = "../core" }
 # after a release audit measured the drift live — widening the rule's set left every test in the
 # workspace green while this diagram silently kept covering the old four.
 zzop-rules-http = { path = "../../rules/native/rules-http" }
+# Test-only again, same T2 shape: `graph/cosmograph.rs`'s emitted column schema is published as prose in
+# `docs/contracts/surface-parity.json` and `site/usage.html`, and neither can reference a Rust value, so
+# the relation is sealed by a test that reads both documents. Matching a column LIST (delimited names
+# joined by slashes) rather than a bare name mention is the whole point — see that test's own doc for
+# the drift a looser matcher let through — and that needs a real regex, not `str::contains`.
+regex = { workspace = true }

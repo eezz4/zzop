@@ -19,11 +19,17 @@ use zzop_core::{SchemaModel, Severity};
 /// - NOT CACHED: `usage.rs`'s rules run from `analyze::assemble`'s whole-tree stage
 ///   (`pipeline::schema_usage_findings`) and are recomputed every run, so a usage-only change needs no bump.
 ///
-/// The trap is `message.rs`: it is shared by both lanes, so "usage isn't cached, no bump" does NOT
+/// The trap was `message.rs`: it is shared by both lanes, so "usage isn't cached, no bump" does NOT
 /// generalize to it. The 0.22.0 -> 0.24.0 bump was exactly that case — `family_disable_hint` became
-/// `issue_disable_hint`, changing the message text of every cached STRUCTURAL finding. The guard
-/// (`scripts/check-parser-fingerprint-bump.sh`, and its `[no-projection-change: rules-schema]` /
-/// `FINGERPRINT_NO_PROJECTION_CHANGE` waiver) scopes the whole crate as one and cannot tell the lanes apart.
+/// `issue_disable_hint`, changing the message text of every cached STRUCTURAL finding, and nothing but
+/// an author's memory connected the two.
+///
+/// **Since 2026-07-29 this const no longer has to be right.** `crates/engine/build.rs` hashes this whole
+/// crate's dependency closure into the cache key alongside this string, so the `message.rs` case — and
+/// every case like it — invalidates on its own. What survives here is the human-readable half: a version
+/// a person can read in a cache path. Bump it when you want to SAY something changed; correctness no
+/// longer depends on you noticing. The lane split above is still worth reading — it explains which
+/// changes have a cache consequence at all — but it is now an explanation, not an obligation.
 pub const STRUCTURAL_RULES_VERSION: &str = "0.24.0";
 
 /// A structural schema issue (source-agnostic; from a single model/field). `camelCase` here matches

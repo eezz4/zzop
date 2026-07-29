@@ -3,7 +3,10 @@
 //! the same "the tool has never heard of its own output" failure the `schema/<label>` lane fixes, one
 //! namespace over. Two of them, both reached by a reader copying an `id` out of real JSON:
 //! - `disclosure[].id` / `disclosure[].group` — the coverage-disclosure registry
-//!   (`zzop_engine::blindness_registry`), emitted on EVERY run, 17 ids in 4 groups today;
+//!   (`zzop_engine::blindness_registry`), 17 ids in 4 groups today. Since the 2026-07-29 fold a run
+//!   reply carries the registry's COUNTS rather than each class's row, so a reader most often arrives
+//!   here holding an id copied out of `zzop contract disclosure-classes` (or an older reply) — which is
+//!   why this lane now prints the class's own summary instead of pointing back at the reply for it;
 //! - `architecture.topRecommendation.id` (and `recommendations[].id` in the facade output view) — a
 //!   `zzop_metrics::roi::RecId`, 8 ids today.
 //!
@@ -35,18 +38,23 @@ pub(super) fn output_id_lane(query: &str) -> Option<String> {
         .or_else(|| recommendation_id(query))
 }
 
-/// `disclosure[].id` — one coverage-disclosure class. The reply already carries the class's full
-/// `summary`, so this names the class and points back at it rather than reprinting a paragraph.
+/// `disclosure[].id` — one coverage-disclosure class. Since the 2026-07-29 fold the reply carries the
+/// registry's COUNTS, not each class's paragraph, so this lane prints the class's own `summary` — it is
+/// now the shortest path from an id in a reply to what that id means, and pointing back at a reply
+/// field that no longer holds the prose would have been a pointer to nothing.
 fn disclosure_class(query: &str) -> Option<String> {
     let class = blindness_registry().iter().find(|c| c.id == query)?;
     Some(format!(
         "{query:?} is a coverage-DISCLOSURE class id (group {:?}, status {:?}), not a rule id — it names \
-         one way zzop's own output can be silently misread, and every `zzop analyze` reply already prints \
-         it in `disclosure[]` with that status and its full `summary`. It is not a finding: it has no \
+         one way zzop's own output can be silently misread. Every `zzop analyze` reply carries how many \
+         such classes there are and how many are NOT fully detected (`disclosure.classes` and the \
+         per-status counts); the full text of all of them is one lookup away, at \
+         `zzop contract disclosure-classes`. This class reads: {}\nIt is not a finding: it has no \
          severity, no suppression marker, and no `rules: {{ \"<id>\": \"off\" }}` toggle. `zzop explain` \
          only reads the compiled-in DSL pack data — see `zzop contract rule-catalog` for the rule ids.",
         class.group,
-        class.status.as_str()
+        class.status.as_str(),
+        class.summary
     ))
 }
 
@@ -63,7 +71,8 @@ fn disclosure_group(query: &str) -> Option<String> {
     }
     Some(format!(
         "{query:?} is a coverage-disclosure GROUP, not a rule id — it is the taxonomy bucket over {} \
-         disclosure classes every `zzop analyze` reply prints in `disclosure[]`: {}. Explain one of those \
+         disclosure classes, counted in every `zzop analyze` reply's `disclosure` block and spelled out \
+         in full by `zzop contract disclosure-classes`: {}. Explain one of those \
          for what it means; `zzop contract rule-catalog` has the rule ids.",
         ids.len(),
         ids.join(", ")
@@ -96,7 +105,20 @@ mod tests {
             "{message}"
         );
         assert!(message.contains("trust-calibration"), "{message}");
-        assert!(message.contains("disclosure[]"), "{message}");
+        // Names the reply field that really holds the channel today (the folded counts) AND the lane
+        // that holds the prose — the pin used to demand `disclosure[]`, a shape the reply stopped
+        // emitting on 2026-07-29.
+        assert!(message.contains("disclosure.classes"), "{message}");
+        assert!(
+            message.contains("zzop contract disclosure-classes"),
+            "{message}"
+        );
+        // The class's own summary is now IN the answer, so an id from any source resolves to meaning
+        // without a second command.
+        assert!(
+            message.contains("Stale results from an un-bumped fingerprint"),
+            "{message}"
+        );
     }
 
     #[test]

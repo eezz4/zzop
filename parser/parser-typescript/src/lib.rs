@@ -81,8 +81,8 @@ pub use function_spans::extract_function_spans;
 pub use ident_refs::parse_local_identifier_refs;
 pub use imports::parse_imports;
 pub use loop_spans::extract_loop_spans;
-pub use parse::parse_ok;
 pub(crate) use parse::{line_of, parse_module, parse_with_cm};
+pub use parse::{parse_count, parse_ok, reset_parse_count};
 pub use project::{build_common_ir, count_loc};
 pub use re_exports::{parse_dynamic_imports, parse_re_exports};
 pub use sfc_imports::extract_sfc_script_imports;
@@ -94,6 +94,12 @@ pub use symbols::{parse_symbols, parse_symbols_with_vocab};
 /// extraction → must restamp). The trailing `CARGO_PKG_VERSION` is restamped whenever this crate's
 /// projected IR shape changes; an unchanged release keeps the old value so warm TS caches survive the
 /// upgrade (2026-07-22 version reform — the "what changed" narrative lives in git, not this string).
+///
+/// **This string is an ID, not a version — it no longer has to be bumped.** `crates/engine/build.rs`
+/// hashes this crate's whole dependency closure into the cache key beside it, so a change to any
+/// source here invalidates on its own. What is left is the part a person reads in a cache path or a
+/// bug report: which frontend parsed the file. Change it when the FRONTEND changes; correctness no
+/// longer depends on remembering.
 pub const PARSER_FINGERPRINT: &str =
     "typescript/swc_core-71.0.5/0.22.0+resource-query-v1+trpc-leaf-procedure-v1+dispatch-branch-symbol-v1+exported-signature-names-v1+function-spans-v1+same-file-const-prepend-v1+raw-sql-db-table-v1+same-file-url-binding-v1+same-file-fn-url-v1+retry-wrapper-binding-v1+generated-verb-member-v1+dispatch-verb-order-v1";
 

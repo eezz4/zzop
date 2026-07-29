@@ -67,7 +67,10 @@ pub const CONFIG_TEMPLATE_JSONC: &str = r#"// zzop configuration. JSONC: comment
   "git": {},
 
   // Findings dropped by path, whatever rule reported them — the per-rule `exclude` above is the same
-  // idea scoped to one id. Entries are path substrings, or globs when they carry wildcards.
+  // idea scoped to one id. Entries are path substrings, or globs when they carry wildcards. A path
+  // plays one of two roles and gets the treatment that role deserves: where it is the finding's own
+  // subject the finding is dropped, and where it is only named as evidence in a finding about somewhere
+  // else, the finding stays and your path is replaced by <excluded>.
   "exclude": [],
 
   // Where the analysis cache is written. Setting it to null turns caching off; the directory is

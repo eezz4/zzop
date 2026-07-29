@@ -61,7 +61,9 @@ the anchor set difference rather than count deltas.
 ## Ground truth
 
 `EXPECTED.jsonc` maps `"<sourceId>/<tree-relative path>:<line>"` to the rule ids expected to fire
-there, plus a `benign` array of control paths where ANY finding counts as a false positive.
+there, plus a `benign` array of control paths where ANY finding counts as a false positive, plus a
+`gap` object — same key shape — for shapes that *should* fire once a known capability lands and do not
+today (see "Negative cases" below).
 
 The `<sourceId>/` prefix is load-bearing. Keys used to be tree-relative only, and against the current
 corpus that spelling collapses 12 distinct locations in different trees onto the same key (several
@@ -108,10 +110,25 @@ aborts with an axis-scope-divergence message rather than let a scope change read
 2. Add its `import * as … from './…'` line to that tree's `index.ts` barrel.
 3. Snapshot, then run `benchmark.mjs --dump` to see what fired and where.
 4. Add `"<sourceId>/…/<pack>.<rule>.ts:<badLine>": ["<ruleId>"]` to `EXPECTED.jsonc`. Re-score —
-   the target on THIS fixture set is zero FN (a FN = engine miss or bad label/placement) and zero
-   FP (a FP = over-report, or a `good` that accidentally trips another rule; fix the `good`).
+   the target on THIS fixture set is zero FP (a FP = over-report, or a `good` that accidentally trips
+   another rule; fix the `good`) and zero FN (a FN = engine miss or bad label/placement). A shape that
+   is correct but that the engine is *documented as refusing* goes in the `gap` object instead of being
+   written as an expectation the gate can never meet — see **negative cases** below for what earns a
+   place there.
 
 Surprises worth engine follow-up are engine work, not silent EXPECTED edits.
+
+**Adding a backend tree used to have a hard ceiling — it is gone.** `bucket_keys.rs` capped each
+cross-layer bucket's distinct-key list at 20, and `snapshot.mjs` aborted on truncation, so a corpus that
+outgrew the cap produced NO score rather than a degraded one. This corpus hit it: a 2026-07-29 batch
+adding trees pushed `unconsumedProvides` past 20 and scored zero lines. The cap, its `bucketKeysTruncated`
+disclosure and the `--tolerate-bucket-key-cap` hatch were all deleted that day (user decision — see
+`bucket_keys.rs`' module doc); bucket key lists are complete now and a corpus may grow freely.
+
+The workaround that batch used is still worth keeping, on its own merits rather than as ceiling relief:
+both backends added below are genuinely consumed (each front end has a `server/loader.ts` reaching the
+same routes with full literal paths, the ordinary SSR shape). That makes each pair show a joining call and
+a non-joining call side by side in one app, which is a better fixture than either alone.
 
 ## Two negative-control axes
 
@@ -146,10 +163,105 @@ Some rules can ONLY be cleared this way: `http/protected-path-no-auth-evidence` 
 looks at the handler identifier, so before the overlay existed it fired on its own `good` export and was
 the benchmark's single standing false positive.
 
+## Negative cases — shapes that are supposed to fail
+
+Until 2026-07-29 this corpus scored `TP 143 FN 0 FP 0` — every expectation met, nothing unexpected
+fired. Over the same period only 2 of 6 front-end trees in the real dogfood corpus joined to a backend
+at all. Both numbers were accurate, and the gap between them was the whole problem: **every front-end
+consume here was a literal path**, so the answer key was planted exclusively inside zzop's capability
+boundary. A perfect score on it measured the inside of that boundary, not the capability. Verified the
+same day: no tree contained a cross-file `baseURL` assignment.
+
+Two pairs now sit deliberately outside it. Each is a front end whose call sites carry only the path
+SUFFIX, paired with a backend that genuinely provides the full route — so the **correct** answer is a
+join and the **current** answer is a miss:
+
+| pair | the shape | why zzop cannot resolve it |
+| --- | --- | --- |
+| `trees/fe-axios` × `trees/be-articles` | `axios.defaults.baseURL = settings.baseApiUrl` — a cross-file constant | `parser/parser-typescript/src/adapters/client_base.rs` recognizes a string **literal** only, and names this exact expression as the shape it refuses (never-guess IO convention) |
+| `trees/fe-gensdk` × `trees/be-invoices` | a vendored swagger `HttpClient` whose `baseUrl` comes from the environment | `…/adapters/client_base_generated.rs` refuses a non-literal base the same way |
+
+Neither refusal is a bug: guessing a base would mis-key every consume in the tree. What was missing was
+any measurement of the resulting hole — and, once measured, a repair that did not require rewriting the
+source. Both arrived on 2026-07-29: **`trees[].topology.clientBase`**, where the author STATES the base
+the client carries, is declared on each front end in `cases/zzop.config.jsonc`. The three reads per pair
+now join and the POST becomes the real `cross-layer/method-mismatch` it always was.
+
+So what these pairs measure changed on purpose, from *how big is the hole* to *does the declared repair
+work end to end*. The hole has not moved: delete either declaration and every expectation on those two
+trees reverts. And each front end still calls the same four routes with full literal paths from
+`server/loader.ts` — the Next-style split of a browser client with an implicit base and server-side
+rendering without one. Those eight calls join today and are the standing check that the declared prefix
+is applied **idempotently**: a blind prepend would re-key them to `/api/api/…`, and this gate would
+report eight lost joins.
+
+**How an unmet expectation is spelled: the `gap` disposition.** For three days these two were written
+as **ordinary expectations**, and the gate was therefore permanently RED — `TP 147 FN 2 FP 0`, exit 1,
+for something nobody intended to fix that week. That is intolerable as a steady state: it blocks every
+push and it teaches everyone to ignore the gate. Writing them as `benign` was never the alternative —
+"no finding here is correct" would freeze today's incapacity as the right answer forever, which is the
+exact reason they were added.
+
+Since 2026-07-29 `benchmark.mjs` has a third disposition, `"gap"`, a top-level object in
+`EXPECTED.jsonc` using the same `"<sourceId>/<path>:<line>": [ruleId]` shape as an expectation. It means
+*this should fire once a known capability lands, and today it does not*:
+
+| | in the score | exit |
+| --- | --- | --- |
+| expectation, absent | FN | nonzero |
+| `benign` control, present | FP | nonzero |
+| **`gap`, absent** | **nothing — untouched recall and precision** | **zero** |
+| **`gap`, present** | **nothing — it is not an FP either** | **nonzero, naming what to promote** |
+
+The last row is the point. A gap that fires is *progress*, and it is refused rather than absorbed: the
+run prints the full score and then exits nonzero demanding the entry be promoted by hand into an
+ordinary expectation. Absorbed silently, the corpus would go on reporting `GAP 0/2` while the engine had
+already closed both — an unnoticed capability gain is how a benchmark stops measuring. The count prints
+on its own line in **every** run (`GAP 0/2 closed`), green or red, so the size of the acknowledged hole
+is a number on screen rather than a paragraph here.
+
+`scripts/detection-expected-baseline.txt` carries a **third column** for gaps. It needs one more than
+the other two do: an expectation or a control defends itself in the score, but a gap is exit-zero while
+open, so deleting one leaves the score *byte-identical*. Measured before the column existed — removing a
+gap from the ground truth scored `TP 2 FN 0 FP 0`, recall 100.0%, precision 100.0%, exit 0.
+
+`gap` is not a suppression list. An entry earns its place by naming the capability, the code that
+refuses it today, and what would close it; a false negative with no named cause belongs in the score.
+
+**The mechanism has since run once, end to end.** The two gapped entries were the
+`cross-layer/method-mismatch` at each pair's POST: each backend provides its fourth route as GET only,
+so with the base resolved each is a real method mismatch anchored at the consume. The run that shipped
+`clientBase` printed `GAP 2/2 closed` and **aborted** — it produced a full score and then refused to
+report it, naming the two lines to promote. Both anchors already carried a met
+`cross-layer/unprovided-mutation-call` (which co-fires with method-mismatch per that rule's own module
+doc), so the promotion was purely additive and the floor only grew.
+
+The same commit **retired** the two `cross-layer/prefix-drift` entries, and that half was not automatic.
+They were the degrade path and true positives while the base was unresolved: three same-method reads per
+pair landed as `prefix`-dimension route-near-misses aggregating into one finding naming the missing
+`/api`. Resolved, the three reads join and there is no drift left to name. `--update-baseline` grows
+only, so retiring an expectation is a hand edit of `scripts/detection-expected-baseline.txt` — the
+ratchet does not let a detection be given up without an author.
+
+**There is deliberately no inverse of `gap`** — no "will stop firing" disposition for that degrade path.
+It was considered and declined on 2026-07-29, and the retirement above is what it would have covered.
+(1) Such entries are *scored* while they last; nothing about them is mislabeled in the meantime, so the
+marker would buy only pre-authorization of a future deletion — a two-line hand edit, once, riding in the
+same commit as the fix that causes it, which is precisely the diff-with-an-author the ratchet exists to
+produce. (2) The scorer cannot tell *why* a true positive disappeared: "the base resolved" and "the
+near-miss aggregation regressed" look identical at the score. `gap` is safe in the mirror position only
+because it moves toward **more** signal and **stops** the run to demand adjudication; its inverse would
+have to let a disappearance be *silent*, converting the ratchet's fail-closed edge into a fail-open one
+on the very axis (recall) it exists to protect.
+
 ## Status
 
-`EXPECTED.jsonc` is **current**: 15 trees, 143 findings, 143 labeled expectations, every expectation
-met and nothing unexpected fired.
+Every labeled expectation is met with nothing unexpected fired: the gate reads `FN 0 FP 0`, recall and
+precision 100.0%, and **exits 0**. The counts themselves are not written here — `scripts/measure/detection-gate.sh`
+prints them, and `scripts/detection-expected-baseline.txt` is the per-tree floor they are checked
+against in both directions. Any FN at all is a regression, and so is `GAP` moving in either direction:
+upward means a gap closed and must be promoted by hand, downward means an entry was deleted, which the
+floor's third column refuses.
 
 **That is a statement about this fixture set, not about zzop.** These defects were planted here to be
 found, by the same people who wrote the rules that find them — so a clean score means "the corpus is

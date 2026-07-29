@@ -41,10 +41,15 @@ use zzop_core::IoConsume;
 /// DELIBERATELY never prefixed (custom wrappers stay uninterpreted — overlay territory). Must stay
 /// BEFORE `io_consumes` is frozen into `MinimalIr::io` / read by any whole-tree rule
 /// (`unprovided-consume`) or the cross-layer linker — see `zzop_engine::analyze::mod`'s call site.
+/// Returns the clients a prefix was ACTUALLY applied for (sorted, deduped) — the input
+/// `super::apply_config_client_base` needs to tell a declared base that duplicates a code-extracted one
+/// from a declared base that adds something new. Empty when nothing was rewritten, including on the
+/// conflict path where the pass deliberately applies nothing.
 pub(crate) fn apply_client_base_prefixes(
     io_consumes: &mut Vec<IoConsume>,
     warnings: &mut Vec<String>,
-) {
+) -> Vec<String> {
+    let mut applied_clients: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     // Bound to the parser's exported const (not a local literal) so a rename on the emit side
     // cannot silently desynchronize the strip side — a leaked sentinel would reach output.
     const SENTINEL_KIND: &str = zzop_parser_typescript::CLIENT_BASE_PREFIX_KIND;
@@ -122,9 +127,11 @@ pub(crate) fn apply_client_base_prefixes(
             continue; // external/absolute-URL key — axios ignores baseURL for those
         }
         c.key = Some(format!("{verb} /{prefix}{path}"));
+        applied_clients.insert(client.to_string());
     }
 
     io_consumes.retain(|c| c.kind != SENTINEL_KIND);
+    applied_clients.into_iter().collect()
 }
 
 #[cfg(test)]

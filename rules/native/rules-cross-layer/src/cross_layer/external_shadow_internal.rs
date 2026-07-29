@@ -105,6 +105,7 @@ pub fn external_shadow_internal_findings(
             file: c.consume.file.clone(),
             line: c.consume.line,
             message,
+            evidence_paths: vec![first.file.clone()],
             data: Some(serde_json::json!({
                 "consumeKey": key,
                 // The ANCHOR's tree. `matchedProvide.source` below names the OTHER side of the join, so

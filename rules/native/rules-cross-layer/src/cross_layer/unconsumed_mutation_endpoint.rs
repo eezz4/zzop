@@ -217,6 +217,7 @@ pub fn unconsumed_mutation_endpoint_findings(
                 file: p.provide.file.clone(),
                 line: p.provide.line,
                 message,
+                evidence_paths: Vec::new(),
                 data: Some(data),
             })
         })

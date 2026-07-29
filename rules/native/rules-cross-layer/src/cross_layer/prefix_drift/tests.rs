@@ -195,6 +195,7 @@ fn near_miss_finding(file: &str, line: u32, source: &str, key: &str, msg: &str) 
         file: file.to_string(),
         line,
         message: msg.to_string(),
+        evidence_paths: Vec::new(),
         data: Some(serde_json::json!({"consumeSource": source, "consumeKey": key})),
     }
 }
@@ -209,6 +210,7 @@ fn retain_non_subsumed_drops_only_subsumed() {
         file: "Api.tsx".to_string(),
         line: 10,
         message: "no data keys".to_string(),
+        evidence_paths: Vec::new(),
         data: None,
     };
 

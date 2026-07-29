@@ -70,12 +70,6 @@ impl AttributeStore {
         Self { attrs }
     }
 
-    /// Build the store from every Mode-B adapter overlay's per-file `attributes`, flattened tree-wide. The
-    /// single source of "attributes come from overlays" — both the callgraph and schema passes call this.
-    pub fn from_overlays(overlays: &[crate::NormalizedEnvelope]) -> Self {
-        Self::from_parts(Vec::new(), overlays)
-    }
-
     /// Build the store from a NATIVE-producer attribute list plus every Mode-B adapter overlay's
     /// per-file `attributes` — the merge point for the two independent attribute sources: a native
     /// parser's own composed judgments (e.g. a recognized Express middleware guard, riding

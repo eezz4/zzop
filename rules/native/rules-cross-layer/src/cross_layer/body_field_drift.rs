@@ -238,6 +238,7 @@ fn build_drift_finding(
         file: edge.from.file.clone(),
         line: edge.from.line,
         message,
+        evidence_paths: vec![edge.to.file.clone()],
         data: Some(data),
     })
 }

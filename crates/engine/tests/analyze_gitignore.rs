@@ -237,12 +237,19 @@ fn zzops_own_report_and_cache_dirs_are_not_rescanned_as_source() {
     assert_eq!(out.file_count, 1, "{walked:?}");
 }
 
-/// The CURRENT default cache directory (`zzop_cache::DEFAULT_CACHE_DIR` = `.zzop/cache`), end to end.
-/// Unlike the legacy names above this one fires on real runs: the config front-end defaults `cacheDir`
-/// there, so the very first zero-config run leaves entries in `.zzop/cache/{ir,findings}/` — and the
-/// SECOND run would walk them as source without the `DEFAULT_SKIP_DIRS` entry. No `.gitignore` in this
-/// fixture, deliberately: the walker runs `hidden(false)`, so the dot in `.zzop` protects nothing, and
-/// a user analyzing a non-git tree (or one that never listed `/.zzop/`) gets no help from git either.
+/// The CURRENT default cache directory (`zzop_cache::DEFAULT_CACHE_DIR` = `.zzop/cache`) against the
+/// DEFAULT skip list. No `.gitignore` in this fixture, deliberately: the walker runs `hidden(false)`, so
+/// the dot in `.zzop` protects nothing, and a user analyzing a non-git tree (or one that never listed
+/// `/.zzop/`) gets no help from git either.
+///
+/// **Scope, corrected 2026-07-29.** This doc used to claim the test "fires on real runs" and stood in as
+/// the guard against a run walking its own cache. It never was: `config()` builds a
+/// `DispatchConfig::default()`, so the test only proves the DEFAULT list still names `TOOL_DIR` — the
+/// shape a Rust library embedder gets. A shipped run comes through the config front-end, which REPLACES
+/// `dispatch.skip_dirs` wholesale with the declared `vocabulary.skipDirs` (empty when undeclared), and
+/// this test stayed green through the entire period in which that made the analyzed file count compound
+/// run over run. It is kept for the embedder path it does cover; the run-over-run stability of a real run
+/// is measured, as behaviour, in `analyze_self_output_exclusion.rs`.
 ///
 /// The user-authored sibling `zzop/` is in the same fixture as the negative half: one character apart,
 /// and it MUST still be analyzed.

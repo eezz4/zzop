@@ -2,6 +2,7 @@
 name = "zzop-parser-java-21"
 version.workspace = true
 edition = "2021"
+license.workspace = true
 publish = false
 
 [dependencies]
@@ -15,3 +16,7 @@ tree-sitter-java = "=0.23.5"
 tree-sitter = "0.25.8"
 zzop-core = { path = "../../crates/core" }
 regex = { workspace = true }
+
+# tests/no_panic_proptest.rs — the arbitrary-input panic property every parser frontend carries.
+[dev-dependencies]
+proptest = { workspace = true }

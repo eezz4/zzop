@@ -56,6 +56,58 @@ fn dispatched_subcommands() -> BTreeSet<String> {
     out
 }
 
+/// Every `.rs` file under this crate's `src/`, relative to it, in sorted order.
+///
+/// # Why this is walked and not listed
+/// TEST 3 below used to iterate `["cli/run.rs", "cli/analysis.rs"]` — a hand list inside the test's
+/// own file, which cannot see the set of source files grow. Its green meant "the two files I
+/// remembered are documented", never "the CLI is documented". That is not hypothetical here: the
+/// repo's 300-line ratchet was about to force the question, with `cli/run.rs` at 224 lines and
+/// `cli/analysis.rs` at 210, and a split moves runners into a file the list does not name.
+/// Demonstrated 2026-07-29 by dropping a `cli/probe.rs` holding a `pub fn run_init` that parses an
+/// undocumented `--zzz-probe`: all three tests passed.
+///
+/// # Why the whole `src/` tree rather than `cli/`
+/// A runner only becomes a subject if it is a top-level `pub fn run_<sub>` AND `<sub>` matches an
+/// elaboration row, so a file with no such function contributes nothing and widening costs no false
+/// positives. Narrowing to `cli/` would just be a second, subtler hand rule with the same failure
+/// mode one directory up: a runner relocated to `src/subcommands/` would be exempt again. The
+/// contract is "a function that parses this subcommand's argv", and that has never been a statement
+/// about which directory it lives in.
+fn all_source_files() -> Vec<String> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut out = Vec::new();
+    let mut stack = vec![root.clone()];
+    while let Some(dir) = stack.pop() {
+        let entries = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
+        for entry in entries {
+            let path = entry.expect("readable dir entry").path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                let rel = path
+                    .strip_prefix(&root)
+                    .expect("walked path is under src/")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                out.push(rel);
+            }
+        }
+    }
+    out.sort();
+    // Empty-enumeration floor. A walk that comes back empty prints the same "nothing missing" as a
+    // fully-documented CLI, and this file's whole premise is that silence and correctness must not
+    // look alike.
+    assert!(
+        out.len() > 3,
+        "the src/ walk found {} .rs file(s) — it has stopped matching this crate's layout, so every \
+         test built on it would vouch for nothing",
+        out.len()
+    );
+    out
+}
+
 /// Every long flag literal a subcommand's argv parser compares against, keyed by the `run_*` function
 /// it appears in. Flags shared by the findings-view knobs live in their own helper and are excluded —
 /// the help text prints those from one `FILTER_KNOBS` block rather than per subcommand.
@@ -155,8 +207,8 @@ fn every_flag_a_subcommand_parses_appears_in_its_help_line() {
     let mut checked = 0usize;
     let mut missing: Vec<String> = Vec::new();
 
-    for file in ["cli/run.rs", "cli/analysis.rs"] {
-        for (runner, flags) in flags_by_runner(file) {
+    for file in all_source_files() {
+        for (runner, flags) in flags_by_runner(&file) {
             let Some(sub) = runner.strip_prefix("run_") else {
                 continue;
             };

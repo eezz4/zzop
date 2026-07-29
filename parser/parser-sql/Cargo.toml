@@ -2,8 +2,13 @@
 name = "zzop-parser-sql"
 version.workspace = true
 edition = "2021"
+license.workspace = true
 publish = false
 
 [dependencies]
 zzop-core = { path = "../../crates/core" }
 regex = { workspace = true }
+
+# tests/no_panic_proptest.rs — the arbitrary-input panic property every parser frontend carries.
+[dev-dependencies]
+proptest = { workspace = true }

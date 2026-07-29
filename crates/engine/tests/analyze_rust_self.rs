@@ -101,6 +101,8 @@ fn workspace_tree() -> TempDir {
     dir.write(
         "crates/app/src/main.rs",
         concat!(
+            "mod deep;\n",
+            "\n",
             "use demo_core::g;\n",
             // A genuinely external head — never resolves in-tree, so it must still enter the package
             // census exactly as before.
@@ -108,6 +110,20 @@ fn workspace_tree() -> TempDir {
             "\n",
             "fn main() {\n",
             "    let _ = g();\n",
+            "    let _ = deep::call();\n",
+            "}\n",
+        ),
+    );
+    // A SECOND cross-crate import, this one naming a MODULE inside the target crate rather than a
+    // root-level item. Before 2026-07-29 every cross-crate edge landed on the crate root regardless of
+    // what the path named; this one must land on `util.rs`.
+    dir.write(
+        "crates/app/src/deep.rs",
+        concat!(
+            "use demo_core::util::helper;\n",
+            "\n",
+            "pub fn call() -> i32 {\n",
+            "    helper()\n",
             "}\n",
         ),
     );
@@ -133,6 +149,39 @@ fn cross_crate_use_resolves_to_the_other_workspace_members_root_file() {
     assert!(
         targets.is_some_and(|t| t.iter().any(|x| x == "crates/core/src/lib.rs")),
         "expected main.rs -> (workspace member demo-core's) lib.rs cross-crate edge, got: {targets:?}"
+    );
+}
+
+/// D46. A cross-crate path naming a MODULE lands on that module's file, not on the target crate's root.
+/// Measured on this repo before the fix: 279 boundary-crossing edges, module-file targets ZERO — every
+/// one pointed at a `lib.rs`. `circular`, `unreachable` and blast radius are all computed over that graph,
+/// so they were being answered on a coarser graph than the source supports.
+#[test]
+fn a_cross_crate_path_naming_a_module_resolves_to_that_modules_file() {
+    let dir = workspace_tree();
+    let out = analyze_tree(dir.path(), &config());
+    let targets = out.ir.ir.dep.get("crates/app/src/deep.rs");
+    assert!(
+        targets.is_some_and(|t| t.iter().any(|x| x == "crates/core/src/util.rs")),
+        "expected deep.rs -> demo-core's util.rs (the module the path names), got: {targets:?}"
+    );
+    assert!(
+        targets.is_some_and(|t| t.iter().all(|x| x != "crates/core/src/lib.rs")),
+        "and NOT the crate root — that is the coarseness this closes: {targets:?}"
+    );
+}
+
+/// The residual, pinned so it reads as a decision rather than a bug: a path whose tail is an ITEM the
+/// crate root re-exports still lands on the root. Following it would mean resolving the target crate's
+/// `pub use` graph — item-level resolution this pass does not do, and does not intend to.
+#[test]
+fn a_cross_crate_path_naming_a_root_level_item_still_lands_on_the_crate_root() {
+    let dir = workspace_tree();
+    let out = analyze_tree(dir.path(), &config());
+    let targets = out.ir.ir.dep.get("crates/app/src/main.rs");
+    assert!(
+        targets.is_some_and(|t| t.iter().any(|x| x == "crates/core/src/lib.rs")),
+        "`use demo_core::g` names an item defined at the root, so the root IS the answer: {targets:?}"
     );
 }
 

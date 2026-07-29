@@ -24,7 +24,7 @@
 //! once (every digest moves), so the reclamation lever is the one that already exists — a
 //! `CACHE_SCHEMA_VERSION` bump, whose bulk wipe turns "the old generation lives on disk forever" into
 //! "one cold run". A key change needs no bump for CORRECTNESS (see
-//! `scripts/check-parser-fingerprint-bump.sh`'s note on `key.rs`: every key mutation degrades to a MISS,
+//! the key contract's own note on `key.rs`: every key mutation degrades to a MISS,
 //! never a stale hit); it needs one for HOUSEKEEPING.
 //!
 //! `<digest>` is `hash::digest128` of `CacheKey::digest_input`/`IrKey::digest_input` — the key type's own
@@ -50,10 +50,21 @@
 //! a well-known atomic-replace idiom. On Windows, `std::fs::rename` also replaces an existing destination
 //! (it is implemented via `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`), but unlike POSIX it can fail
 //! with a sharing violation if some other process/handle holds the destination open without
-//! `FILE_SHARE_DELETE`. Because every write for a given target path carries identical bytes (the path is
-//! a deterministic function of the cache key, which is itself a deterministic function of file content +
-//! fingerprints), losing that race to a concurrent writer that already produced the same file is treated
-//! as success rather than propagated as an error (see `write_atomic`).
+//! `FILE_SHARE_DELETE`. Losing that race to a concurrent writer that already produced the file is
+//! therefore treated as success rather than propagated as an error (see `write_atomic`).
+//!
+//! What makes that safe is that both racers wrote an EQUIVALENT entry, not an identical one. The target
+//! path is a deterministic function of the cache key, which is itself a deterministic function of file
+//! content + fingerprints, so two writers landing on the same path derived their entry from the same
+//! inputs and it deserializes to the same value either way; combined with rename's atomicity (a reader
+//! sees one complete entry, never a blend) whichever writer wins is a correct entry for that key.
+//!
+//! It does NOT mean the two writers produced identical BYTES, and this doc claimed that until 2026-07-29.
+//! Stored entries carry map fields typed `std::collections::HashMap`, whose serde_json object-key order
+//! follows a per-instance randomized hash seed — `grep -n 'HashMap' crates/cache/src/ir_slice.rs` names
+//! them (`const_map_fragment` is the standing example). Nothing here reads a stored entry byte-wise, so
+//! the difference has never had a consequence; it is corrected because the benign-race argument above was
+//! resting on it, and an argument resting on a false premise cannot be re-checked by whoever comes next.
 
 use std::fs;
 use std::io;
@@ -225,10 +236,11 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     match fs::rename(&tmp_path, path) {
         Ok(()) => Ok(()),
         Err(e) => {
-            // Every writer for this exact `path` carries identical bytes (see module doc), so a
-            // concurrent writer finishing first and leaving `path` in place is a benign race, not a
-            // failure — clean up our now-redundant temp file and report success. Only propagate the
-            // error if `path` genuinely never got written (a real I/O problem).
+            // Every writer for this exact `path` derived its entry from the same cache key, so the
+            // entries are equivalent even where their bytes differ (see module doc) — a concurrent
+            // writer finishing first and leaving `path` in place is a benign race, not a failure.
+            // Clean up our now-redundant temp file and report success; only propagate the error if
+            // `path` genuinely never got written (a real I/O problem).
             let _ = fs::remove_file(&tmp_path);
             if path.exists() {
                 Ok(())

@@ -2,6 +2,7 @@
 name = "zzop-parser-python-3"
 version.workspace = true
 edition = "2021"
+license.workspace = true
 publish = false
 
 [dependencies]
@@ -16,3 +17,7 @@ ruff_python_ast = "=0.0.4"
 # risk — this is the same artifact already in the dependency graph, just named directly.
 ruff_text_size = "=0.0.4"
 zzop-core = { path = "../../crates/core" }
+
+# tests/no_panic_proptest.rs — the arbitrary-input panic property every parser frontend carries.
+[dev-dependencies]
+proptest = { workspace = true }

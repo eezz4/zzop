@@ -421,11 +421,12 @@ output or a rule:
 If your framework has an equivalent concept (a global route prefix, a per-client base URL), fold it into
 the normalized `key` you emit yourself rather than trying to reproduce either native rewrite.
 
-Deployment-topology mounts (config-declared as `trees[].topology`, not a sentinel kind — see
-[modules/facade.md](modules/facade.md#functions)'s `mounts`/`mountedAt`/`hosts` `AnalyzeRequest` fields) are
+Deployment-topology declarations (config-declared as `trees[].topology`, not a sentinel kind — see
+[modules/facade.md](modules/facade.md#functions)'s `mounts`/`mountedAt`/`hosts`/`clientBase` `AnalyzeRequest` fields) are
 NOT part of the reserved-kind drop above: they apply uniformly to Mode A envelopes and natively-parsed trees alike, at the structurally
 equivalent seam after fragment composition and before the IO freeze — a config mount rewrites a Mode A
-tree's `http` provide keys exactly like it would a native tree's.
+tree's `http` provide keys exactly like it would a native tree's, and `clientBase` prefixes its relative
+`http` consume keys the same way (idempotently: a key already under the declared base is left alone).
 
 ## Adapter overlays
 

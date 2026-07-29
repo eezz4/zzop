@@ -1,4 +1,4 @@
-/* Regenerate the data block inside site/graph.html.
+/* Regenerate the data block inside site/graph.html, and every published count that describes it.
  *
  * WHY THIS EXISTS
  * site/graph.html draws this repository's own import graph. The data is INLINE — it has to be,
@@ -43,7 +43,9 @@ if (!nodesPath || !linksPath) {
   process.exit(2);
 }
 
-const PAGE = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..', 'site', 'graph.html');
+const SITE = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..', 'site');
+const PAGE = path.join(SITE, 'graph.html');
+const ARCH = path.join(SITE, 'architecture.html');
 const BEGIN = '/* zzop:dep-data:begin */';
 const END = '/* zzop:dep-data:end */';
 
@@ -158,43 +160,81 @@ const payload = JSON.stringify({
 const page = fs.readFileSync(PAGE, 'utf8');
 const from = page.indexOf(BEGIN), to = page.indexOf(END);
 if (from < 0 || to < 0) throw new Error(`markers not found in ${PAGE} — expected ${BEGIN} … ${END}`);
-let next = page.slice(0, from + BEGIN.length) + '\nwindow.ZZOP_DEP = ' + payload + ';\n' + page.slice(to);
+// The tracked site is CRLF on a Windows checkout. Splicing bare \n in left the file `w/mixed`, which
+// git reports as modified forever after even though the normalised content is identical — a permanent
+// false positive in `git status` is the same class of noise this script exists to remove.
+const eol = page.includes('\r\n') ? '\r\n' : '\n';
+const next0 = page.slice(0, from + BEGIN.length) + eol + 'window.ZZOP_DEP = ' + payload + ';' + eol + page.slice(to);
 
 // ── the prose counts, which are part of the same claim ────────────────────────
 // The page argues that NOTHING IS DROPPED, so a total in its text that the drawing disagrees with is
-// not a typo — it is the page contradicting itself. Those two numbers were hand-typed and drifted on
-// the very first regeneration after they were written (text 1,074/1,969 while the tables held
-// 1,078/1,974). They are rewritten here from the counts this script just computed, so there is
-// nothing left for anyone to remember.
+// not a typo — it is the page contradicting itself. Those numbers were hand-typed and drifted on the
+// very first regeneration after they were written (text 1,074/1,969 while the tables held 1,078/1,974).
+// They are rewritten here from the counts this script just computed, so there is nothing left for
+// anyone to remember.
+//
+// THE LIST IS NOT LIMITED TO graph.html, and that was learned the expensive way. The first version of
+// this block anchored the two sentences on the page it was already editing and stopped there — while a
+// THIRD copy of the same count sat in site/architecture.html's CommonIr `dep` row, one link away, still
+// reading 1,074/1,969. A generator that owns two of three copies has not fixed the defect class it was
+// written to fix; it has only moved the survivor somewhere less likely to be looked at. So the anchor
+// list is keyed by FILE, and the question to ask before adding a sentence anywhere on the site is
+// whether this script should own its number — `grep -rn 'files and .* imports' site/` is the check.
+//
+// KNOWN-UNOWNED (documented, not silently ignored): crates/summary/src/graph/mod.rs's module doc says
+// "Measured on zzop's own tree, mermaid draws 40 of 1073 files". Same number class, and it has already
+// drifted (1073 vs 1078). It is left out on purpose: it is a PAST MEASUREMENT justifying why the
+// cosmograph format exists, correct as written about the tree it was taken on — and a node script that
+// rewrites Rust source would make `cargo build`'s inputs depend on having run this. If that doc comment
+// is ever reworded into a present-tense claim about today's tree, it belongs in the list above instead.
 //
 // A missing anchor is a HARD ERROR, never a silent skip: the stale-count case is exactly the one
-// where someone believes they have already regenerated the page. If the sentence is reworded,
-// re-anchor it here in the same edit.
+// where someone believes they have already regenerated the page. A skip would report success while
+// leaving the stale number in place, which is strictly worse than never having run at all. If a
+// sentence is reworded, re-anchor it here in the same edit.
 const nodeCount = rows.length;
 const linkCount = links.length;
 const commas = (n) => n.toLocaleString('en-US');
 const proseSites = [
   {
-    what: 'prose total',
+    file: PAGE,
+    what: 'lede total',
     re: /— [\d,]+ nodes, [\d,]+ edges, nothing/,
     to: `— ${commas(nodeCount)} nodes, ${commas(linkCount)} edges, nothing`,
   },
   {
+    file: PAGE,
     what: 'canvas aria-label',
     re: /zzop repository: \d+ files, \d+ imports/,
     to: `zzop repository: ${nodeCount} files, ${linkCount} imports`,
   },
+  {
+    file: ARCH,
+    what: 'CommonIr `dep` row',
+    re: /Rendered against this repository<\/a>: [\d,]+ files and [\d,]+ imports/,
+    to: `Rendered against this repository</a>: ${commas(nodeCount)} files and ${commas(linkCount)} imports`,
+  },
 ];
+
+// One buffer per file: graph.html arrives with the data block already spliced in, anything else is
+// read on first use. Nothing is written until every anchor has matched, so a hard error leaves the
+// whole site untouched rather than half-rewritten.
+const buffers = new Map([[PAGE, next0]]);
 for (const site of proseSites) {
-  if (!site.re.test(next)) {
+  if (!buffers.has(site.file)) buffers.set(site.file, fs.readFileSync(site.file, 'utf8'));
+  const before = buffers.get(site.file);
+  if (!site.re.test(before)) {
     throw new Error(
-      `${site.what} not found in ${PAGE} — this script owns that number, so a reworded sentence must ` +
-        'be re-anchored here rather than left to drift'
+      `${site.what} not found in ${site.file} — this script owns that number, so a reworded sentence ` +
+        'must be re-anchored here rather than left to drift'
     );
   }
-  next = next.replace(site.re, site.to);
+  buffers.set(site.file, before.replace(site.re, site.to));
 }
+for (const [file, content] of buffers) fs.writeFileSync(file, content);
 
-fs.writeFileSync(PAGE, next);
-
-console.log(`site/graph.html: ${rows.length} nodes, ${links.length} links, aspect ${ratio.toFixed(2)}, ${(next.length / 1024).toFixed(1)} KB`);
+const kb = (f) => (buffers.get(f).length / 1024).toFixed(1);
+console.log(
+  `site/graph.html: ${rows.length} nodes, ${links.length} links, aspect ${ratio.toFixed(2)}, ${kb(PAGE)} KB` +
+    ` · site/architecture.html: counts rewritten (${commas(nodeCount)} files, ${commas(linkCount)} imports)`
+);

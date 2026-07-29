@@ -365,7 +365,15 @@ fn analyze_request_vocabulary_flows_into_engine_config_and_skip_dirs_splits_off(
         Some("(?i)ensureSession")
     );
     assert_eq!(config.dispatch.skip_dirs, vec!["vendored".to_string()]);
-    // A key the author did not name keeps its built-in — per-key replacement, never a blanket wipe.
+    // A key the author did not name arrives UNDECLARED, and stays that way — there is no built-in
+    // fallback arm left (2026-07-27). Per-key replacement, never a blanket wipe: naming one key must
+    // not disturb its siblings, and not naming a key must not invent a value for it.
+    //
+    // This comment said "keeps its built-in" until 2026-07-29 — the exact opposite of the assertion
+    // directly below it, which has always asserted `is_none()`. The same false sentence was found in
+    // three other places the same day (docs/modules/facade.md, site/reference.html,
+    // config-surface.json). A comment that contradicts the assertion it sits on is worse than no
+    // comment: the assertion is what runs, so the drift is invisible to every gate.
     assert!(config.vocabulary.api_segment_pattern.is_none());
 }
 

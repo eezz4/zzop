@@ -4,6 +4,15 @@
 //! applied in multiple places instead of one. Anchored at the first site; the fix is to centralize behind
 //! one client/backend proxy that every tree goes through instead of calling the vendor directly.
 //!
+//! **ONE FINDING PER CALLING SOURCE, each anchored in that source's own tree** (2026-07-29), following
+//! `shared_db_table`'s precedent — read its module doc for the full argument. `exclude` applies to the
+//! ANCHOR, so a single representative made WHICH tree could silence an N-tree fact an accident of sorting.
+//! The gate here is literally "2+ distinct SOURCES", so the source IS the unit of the fact.
+//!
+//! Its co-firing sibling `external-host-fanout` deliberately does NOT do this: that rule counts distinct
+//! FILES ("regardless of how many source trees own those files"), so splitting it per source would divide
+//! one fanout below its own 3-file floor and delete the finding instead of re-anchoring it.
+//!
 //! Consume sites in test-path files (`zzop_core::is_test_file`) are skipped, including from the
 //! per-host source-tree count — a test mocking a vendor API is not deployed egress.
 //!
@@ -57,7 +66,6 @@ pub fn external_duplicated_integration_findings(
                 .then(a.file.cmp(b.file))
                 .then(a.line.cmp(&b.line))
         });
-        let first = &sites[0];
         let site_count = sites.len();
         let example_sites: Vec<_> = sites
             .iter()
@@ -66,34 +74,58 @@ pub fn external_duplicated_integration_findings(
             .collect();
         let sources_sorted: Vec<&str> = sources.into_iter().collect();
 
-        let message = format!(
-            "external host `{host}` is called directly from {} distinct sources ({}) — {site_count} \
-             call site(s) in total, e.g. {}:{} (source `{}`). Each source likely built its own client for the \
-             same third-party integration, duplicating auth/retry/failure-mode handling and multiplying the \
-             places a vendor-side change (base URL, auth scheme) has to be applied. Centralize this \
-             integration behind one client/backend proxy that every source calls through instead of hitting the \
-             vendor directly from each source. {} if these sources are intentionally independent \
-             deployments that must not share a runtime dependency on one proxy.",
-            sources_sorted.len(),
-            sources_sorted.join(", "),
-            first.file,
-            first.line,
-            first.source,
-            disable_hint("cross-layer/external-host-in-multiple-sources"),
-        );
-        out.push(Finding {
-            rule_id: "cross-layer/external-host-in-multiple-sources".to_string(),
-            severity: Severity::Warning,
-            file: first.file.to_string(),
-            line: first.line,
-            message,
-            data: Some(serde_json::json!({
-                "host": host,
-                "sources": sources_sorted,
-                "siteCount": site_count,
-                "exampleSites": example_sites,
-            })),
-        });
+        // ONE COPY PER CALLING SOURCE, each anchored in its own tree — see the module doc. `sites` is
+        // already `(source, file, line)`-sorted, so each source's first match is deterministic.
+        for source in &sources_sorted {
+            let Some(first) = sites.iter().find(|s| &s.source == source) else {
+                continue;
+            };
+            let others: Vec<&str> = sources_sorted
+                .iter()
+                .copied()
+                .filter(|s| s != source)
+                .collect();
+            let message = format!(
+                "external host `{host}` is called directly from this source (`{source}`, first at {}:{}) \
+                 and from {} other analyzed source(s) ({}) — {site_count} call site(s) in total. Each \
+                 source likely built its own client for the same third-party integration, duplicating \
+                 auth/retry/failure-mode handling and multiplying the places a vendor-side change (base \
+                 URL, auth scheme) has to be applied. Centralize this integration behind one \
+                 client/backend proxy that every source calls through instead of hitting the vendor \
+                 directly from each source. Each calling source gets its own copy of this finding, \
+                 anchored in its own tree, so excluding one source's paths never silences the others. {} \
+                 if these sources are intentionally independent deployments that must not share a runtime \
+                 dependency on one proxy.",
+                first.file,
+                first.line,
+                others.len(),
+                others.join(", "),
+                disable_hint("cross-layer/external-host-in-multiple-sources"),
+            );
+            out.push(Finding {
+                rule_id: "cross-layer/external-host-in-multiple-sources".to_string(),
+                severity: Severity::Warning,
+                file: first.file.to_string(),
+                line: first.line,
+                message,
+                // Every other call site this copy prints (via `exampleSites`). Deduped and sorted.
+                evidence_paths: sites
+                    .iter()
+                    .map(|s| s.file)
+                    .filter(|f| *f != first.file)
+                    .map(str::to_string)
+                    .collect::<std::collections::BTreeSet<String>>()
+                    .into_iter()
+                    .collect(),
+                data: Some(serde_json::json!({
+                    "host": host,
+                    "consumeSource": source,
+                    "sources": sources_sorted,
+                    "siteCount": site_count,
+                    "exampleSites": example_sites,
+                })),
+            });
+        }
     }
     out.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
     out
@@ -137,20 +169,23 @@ mod tests {
             ),
         ];
         let out = external_duplicated_integration_findings(&external);
-        assert_eq!(out.len(), 1);
-        assert_eq!(
-            out[0].rule_id,
-            "cross-layer/external-host-in-multiple-sources"
-        );
-        assert_eq!(out[0].severity, Severity::Warning);
+        // One copy PER CALLING SOURCE, each anchored in its own tree (2026-07-29) — see the module doc.
+        assert_eq!(out.len(), 2);
         assert_eq!(out[0].file, "Client.java");
         assert_eq!(out[0].line, 5);
-        assert!(out[0].message.contains("api.vendor.com"));
-        assert!(out[0].message.contains("disabled_rules"));
-        let data = out[0].data.as_ref().unwrap();
-        assert_eq!(data["host"], "api.vendor.com");
-        assert_eq!(data["sources"], serde_json::json!(["be", "fe"]));
-        assert_eq!(data["siteCount"], 2);
+        for f in &out {
+            assert_eq!(f.rule_id, "cross-layer/external-host-in-multiple-sources");
+            assert_eq!(f.severity, Severity::Warning);
+            assert!(f.message.contains("api.vendor.com"), "{}", f.message);
+            assert!(f.message.contains("disabled_rules"), "{}", f.message);
+            let data = f.data.as_ref().unwrap();
+            assert_eq!(data["host"], "api.vendor.com");
+            assert_eq!(data["sources"], serde_json::json!(["be", "fe"]));
+            assert_eq!(data["siteCount"], 2);
+        }
+        // Each copy names its own tree — that is the whole point of the change.
+        assert_eq!(out[0].data.as_ref().unwrap()["consumeSource"], "be");
+        assert_eq!(out[1].data.as_ref().unwrap()["consumeSource"], "fe");
     }
 
     #[test]
@@ -200,8 +235,9 @@ mod tests {
             consume(Some("GET https://a.vendor.com/a"), "be", "B.java", 2),
         ];
         let out = external_duplicated_integration_findings(&external);
-        assert_eq!(out.len(), 2);
-        assert_eq!(out[0].file, "A.java");
-        assert_eq!(out[1].file, "B.java");
+        // Two hosts x two calling sources each = four copies, still ordered by (file, line).
+        assert_eq!(out.len(), 4);
+        let files: Vec<&str> = out.iter().map(|f| f.file.as_str()).collect();
+        assert_eq!(files, vec!["A.java", "B.java", "M.tsx", "Z.tsx"]);
     }
 }

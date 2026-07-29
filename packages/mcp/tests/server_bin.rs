@@ -1,7 +1,15 @@
 //! Binary-level smoke tests for the `zzop-mcp` MCP-server binary (`src/bin/zzop-mcp.rs`) — its
-//! non-serving surfaces. The serving path (bare / `mcp` → stdio JSON-RPC) blocks on stdin, so it is
-//! covered by the protocol unit tests in `server.rs`, not spawned here; this pins the thin entry's
-//! version/help/error lanes so the CLI (`zzop`) and the server can never disagree on the version string.
+//! non-serving surfaces only. This pins the thin entry's version/help/error lanes so the CLI (`zzop`)
+//! and the server can never disagree on the version string.
+//!
+//! The serving path (bare / `mcp` → stdio JSON-RPC) blocks on stdin and is NOT spawned here. Until
+//! 2026-07-29 this header claimed it was "covered by the protocol unit tests in `server.rs`" — it was
+//! not: those tests called `version()` and `negotiate_protocol_version()`, and no Rust test entered
+//! the dispatch at all. The dispatch is now genuinely covered, in-process and on a single connection,
+//! by the table in `src/server/tests.rs` (`serve`/`handle_line`/`handle_message`); the binary end of
+//! it is exercised for real by `scripts/measure/snapshot.mjs` under `detection-gate.sh`, on the
+//! `initialize` + `tools/call` happy path. What no test covers is the argv arm in `main` that decides
+//! to call `run_stdio` — spawning it here would block on stdin.
 
 use std::process::{Command, Output};
 

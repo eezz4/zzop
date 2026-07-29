@@ -231,6 +231,10 @@ pub fn unconsumed_endpoint_findings(
                     file: p.provide.file.clone(),
                     line: p.provide.line,
                     message,
+                    // The near-miss consume site, when the message names one.
+                    evidence_paths: near_miss
+                        .map(|t| vec![t.consume_file.clone()])
+                        .unwrap_or_default(),
                     data: Some(data),
                 },
             )

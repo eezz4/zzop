@@ -71,6 +71,7 @@ pub fn unknown_verb_route_findings(sites: &[UnknownVerbRouteSite]) -> Vec<Findin
             file: site.file.clone(),
             line: site.line,
             message,
+            evidence_paths: Vec::new(),
             data: Some(serde_json::json!({
                 "source": site.source,
                 "servedPath": site.path,

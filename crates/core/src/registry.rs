@@ -27,6 +27,7 @@
 mod config;
 mod merge;
 mod native_stub;
+mod redact;
 #[cfg(test)]
 mod tests;
 
@@ -36,6 +37,7 @@ pub use config::{
 };
 pub use merge::merge_findings;
 pub use native_stub::register_native_analysis_stub;
+pub use redact::REDACTED;
 
 /// The native analysis ids registered at boot — every owning rules crate's `register_native_analyses`
 /// plugs its own ids in via `register_native_analysis_stub`, and `zzop_engine::register_all_native`

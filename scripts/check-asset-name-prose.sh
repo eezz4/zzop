@@ -150,6 +150,18 @@ candidate_files="$(tracked_files_matching "$rule_pattern" '*.md' '*.html' ':!:.g
 # clean run should report how much ground it covered, not how much it found.
 total_files="$(git ls-files -- '*.md' '*.html' ':!:.github/**' | grep -c . || true)"
 
+# Subject-set floor (2026-07-29). The count above was already derived and PRINTED, but never compared
+# to zero — so a pathspec that stopped matching produced the literal line "check-asset-name-prose:
+# clean (0 files scanned)." and exit 0. Measured 2026-07-29 by redirecting the globs in a scratch copy.
+# Printing a number is not asserting on it; the whole point of the count is that a green states how
+# much ground was covered, and zero ground is a broken enumeration, never a clean tree.
+if [ "$total_files" -eq 0 ]; then
+  echo "check-asset-name-prose: FAILED -- enumerated ZERO tracked *.md/*.html files outside .github/**." >&2
+  echo "  The scan surface is empty, so no prose was read and no asset name was checked against" >&2
+  echo "  $PREBUILD's matrix. An empty subject set is a broken guard, never a clean tree." >&2
+  exit 1
+fi
+
 fail=0
 
 if [ -n "$candidate_files" ]; then

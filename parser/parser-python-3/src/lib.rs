@@ -49,6 +49,12 @@ pub use lang::used_names::parse_local_identifier_refs;
 /// segment must match this crate's `Cargo.toml` `ruff_python_parser`/`ruff_python_ast` pin (a ruff upgrade
 /// changes extraction → restamp); the trailing `CARGO_PKG_VERSION` is restamped when this crate's projected
 /// IR shape changes, else kept so warm Python caches survive the upgrade (2026-07-22 version reform).
+///
+/// **This string is an ID, not a version — it no longer has to be bumped.** `crates/engine/build.rs`
+/// hashes this crate's whole dependency closure into the cache key beside it, so a change to any
+/// source here invalidates on its own. What is left is the part a person reads in a cache path or a
+/// bug report: which frontend parsed the file. Change it when the FRONTEND changes; correctness no
+/// longer depends on remembering.
 pub const PARSER_FINGERPRINT: &str = "python3/ruff-0.0.4/0.24.0";
 
 /// Parses `text` with ruff's Python parser, returning `None` on any syntax error (never panics —

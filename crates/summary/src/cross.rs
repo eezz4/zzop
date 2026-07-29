@@ -83,11 +83,12 @@ pub fn cross_summary(
         .as_array()
         .cloned()
         .unwrap_or_default();
-    // WHICH keys sit in each non-edge bucket, not just how many — capped per bucket with the
-    // remainder disclosed (`bucketKeysTruncated`), same never-silent stance as `edgesTruncated`.
+    // WHICH keys sit in each non-edge bucket, not just how many — UNCAPPED since 2026-07-29, so unlike
+    // `edges` below there is no truncation field to pair with it (nothing is dropped, so nothing needs
+    // disclosing; see `output::bucket_keys`' own doc for why the cap and its disclosure both went).
     // `bucket_key_sites` locates the FIRST site (`file:line`) backing each listed key, so e.g. an
     // `unresolvedConsumes` key is no longer a bare string with no call site to go look at.
-    let (bucket_keys, bucket_keys_truncated, bucket_key_sites) = output::bucket_keys(cl);
+    let (bucket_keys, bucket_key_sites) = output::bucket_keys(cl);
 
     let mut summary = serde_json::json!({
         "config": loaded.config_path.as_deref().map(|p| p.display().to_string()),
@@ -105,14 +106,13 @@ pub fn cross_summary(
         "edges": edges_shown,
         "crossLayerFindings": output::shape_findings(&cl_findings, filters),
         "configWarnings": config_warnings,
-        // Run-global blindness-class registry — the meta-honesty channel (see analyze_summary).
-        "disclosure": v["disclosure"],
+        // Run-global blindness-class registry, FOLDED to counts + a pointer to its full text (see
+        // `output::disclosure`) — the meta-honesty channel with its magnitude intact and its
+        // run-invariant prose one lookup away, same as `analyze_summary`'s.
+        "disclosure": output::fold_disclosure(&v["disclosure"]),
     });
     if let Some(truncated) = edges_truncated {
         summary["edgesTruncated"] = truncated;
-    }
-    if let Some(truncated) = bucket_keys_truncated {
-        summary["bucketKeysTruncated"] = truncated;
     }
     // Run-level warnings (distinct from sources[].warnings) — e.g. the parallel-implementation
     // tripwire ("0 cross-source edges but N duplicate/ambiguous findings"). `.get()`-defensive:

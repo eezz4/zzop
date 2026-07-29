@@ -44,6 +44,7 @@ fn dead_export_to_finding(symbol_lines: &HashMap<(&str, &str), u32>, d: DeadExpo
         file: d.file.clone(),
         line,
         message,
+        evidence_paths: Vec::new(),
         data: serde_json::to_value(&d).ok(),
     }
 }

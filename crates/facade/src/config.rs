@@ -249,6 +249,7 @@ pub(crate) fn build_engine_config(
     }
 
     config.mounts = fold_mounts(&req.mounts, req.mounted_at.as_deref());
+    config.client_base = req.client_base.clone();
     config.hosts = req.hosts.clone();
 
     declared::apply_declared(&mut config, req, warnings);

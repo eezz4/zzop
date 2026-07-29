@@ -57,7 +57,10 @@ use zzop_core::RuleRegistry;
 
 pub use config::{EngineConfig, GitOptions, MountRule, PackSource};
 pub use coverage::CoverageCensus;
-pub use disclosure::{blindness_registry, BlindnessClass, DisclosureStatus};
+pub use disclosure::{
+    blindness_registry, disclosure_contract_text, disclosure_counts, BlindnessClass,
+    DisclosureStatus,
+};
 pub use dispatch::{DispatchConfig, Language};
 pub use envelope::analyze_envelope;
 pub use io::IoOptions;

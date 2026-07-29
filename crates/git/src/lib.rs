@@ -1,12 +1,12 @@
 //! zzop-git — git history collection: ONE `git log --numstat` pass produces both per-file `GitStats`
 //! (zzop_core::file_nodes) and per-commit `CommitFileSet`s (zzop_core::coupling) together, in the same
 //! streaming parse. No consumer re-runs git per file or per commit. The design is single-pass by
-//! construction: one numstat traversal yields rename tracking (`alias_to_canonical`), the HEAD-hash
-//! cache key, and the recent-activity window, so collection cost is independent of file count.
+//! construction: one numstat traversal yields both rename tracking (`alias_to_canonical`) and the
+//! recent-activity window, so collection cost is independent of file count.
 //!
 //! [`parse_git_log`] is the pure core — it never touches git or the filesystem, so it is fully
-//! testable against canned `git log` text. [`collect`] and [`head_hash`] are the two
-//! `std::process::Command` entry points that feed it (never more than one git process per call).
+//! testable against canned `git log` text. [`collect`] is this crate's only `std::process::Command`
+//! entry point — the one that feeds it (exactly one git process per call).
 
 mod error;
 mod iso_date;
@@ -99,12 +99,6 @@ impl Default for CollectOptions {
 pub fn collect(repo: &Path, opts: &CollectOptions) -> Result<GitCollection, GitError> {
     let output = process::run_git_log(repo, opts)?;
     Ok(parse_git_log(&output, opts, now_ms()))
-}
-
-/// The repository's current `HEAD` commit hash — a cache-key input (an unchanged HEAD means the
-/// history is unchanged, so a caller can skip re-collecting). One `git rev-parse HEAD` process call.
-pub fn head_hash(repo: &Path) -> Result<String, GitError> {
-    process::head_hash_impl(repo)
 }
 
 fn now_ms() -> i64 {

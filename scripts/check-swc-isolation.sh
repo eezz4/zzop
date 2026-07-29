@@ -33,13 +33,35 @@ cd "$(dirname "$0")/.."
 
 violations=0
 
+# ## Subject-set floor (2026-07-29)
+# Both scans below take their file list from a git pathspec, and a pathspec that stops matching (a
+# crate moved, a glob typo, a rename) makes tracked_files_matching return the SAME empty string it
+# returns on a genuinely clean tree — so without this, "clean." is printed identically whether 24
+# Cargo.toml files and 912 .rs files were read or zero were. Measured 2026-07-29 by redirecting both
+# pathspecs in a scratch copy: it printed "swc isolation guard: clean." and exited 0. That is the
+# repo's own twice-paid class (a scan root pointing at nothing, green while reading nothing), and the
+# sibling of the "a guard reads its own copy" class removed from sixteen guards on 2026-07-28.
+#
+# The glob arrays are the SINGLE owner of each scan's scope: the count and the scan below read the
+# same array, so widening a scope cannot leave its assertion behind on the old one.
+CARGO_GLOBS=('Cargo.toml' '*/Cargo.toml')
+RS_GLOBS=('*.rs')
+cargo_scanned="$(git ls-files -- "${CARGO_GLOBS[@]}" | grep -c . || true)"
+rs_scanned="$(git ls-files -- "${RS_GLOBS[@]}" | grep -c . || true)"
+if [ "$cargo_scanned" -eq 0 ] || [ "$rs_scanned" -eq 0 ]; then
+  echo "swc isolation guard: FAILED -- enumerated $cargo_scanned Cargo.toml file(s) and $rs_scanned .rs"
+  echo "file(s). A zero on either axis means that pathspec matched nothing, so this run proved nothing"
+  echo "about where swc is used. An empty subject set is a broken guard, never a clean tree."
+  exit 1
+fi
+
 echo "swc isolation guard: checking Cargo.toml dependency declarations..."
 DEP_PATTERN='^\s*swc[_-][A-Za-z0-9_-]*\s*='
 # The enumeration call is kept OUTSIDE the `|| true` below on purpose: tracked_files_matching's own
 # failure must still trip `set -e` and abort loud (see its header comment); only its allowlisted
 # false-positives (this guard's own Cargo.toml, parser-typescript's own) are safe to swallow via
 # `|| true`.
-cargo_matches=$(tracked_files_matching "$DEP_PATTERN" 'Cargo.toml' '*/Cargo.toml')
+cargo_matches=$(tracked_files_matching "$DEP_PATTERN" "${CARGO_GLOBS[@]}")
 cargo_files=$(grep -v -x 'Cargo.toml' <<< "$cargo_matches" \
   | grep -v -x 'parser/parser-typescript/Cargo.toml' || true)
 
@@ -53,7 +75,7 @@ fi
 
 echo "swc isolation guard: checking .rs source usage..."
 USE_PATTERN='swc_core::|use\s+swc_'
-rs_matches=$(tracked_files_matching "$USE_PATTERN" '*.rs')
+rs_matches=$(tracked_files_matching "$USE_PATTERN" "${RS_GLOBS[@]}")
 rs_files=$(grep -v '^parser/parser-typescript/src/' <<< "$rs_matches" || true)
 
 if [ -n "$rs_files" ]; then
@@ -72,4 +94,4 @@ if [ "$violations" -ne 0 ]; then
   exit 1
 fi
 
-echo "swc isolation guard: clean."
+echo "swc isolation guard: clean ($cargo_scanned Cargo.toml + $rs_scanned .rs files scanned)."

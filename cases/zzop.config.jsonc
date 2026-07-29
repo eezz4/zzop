@@ -16,6 +16,32 @@
     { "root": "trees/xlayer-be2", "sourceId": "xbe2" },
     { "root": "trees/xlayer-fe", "sourceId": "xfe" },
     { "root": "trees/depedge", "sourceId": "depedge" },
+    // TWO NEGATIVE-CASE PAIRS, added 2026-07-29. Each is a front end whose consumes are DELIBERATELY
+    // outside the base-URL capability boundary, paired with a backend that genuinely provides the routes
+    // it calls — so the correct answer is a join and the current answer is a miss. Every other front-end
+    // consume in this corpus is a literal path, i.e. planted inside the boundary, which is why this
+    // corpus scored 100% recall while only 2 of 6 real front-end trees joined. See EXPECTED.jsonc's
+    // "THE TWO NEGATIVE-CASE PAIRS" note for what each pair claims and which of its expectations a fix
+    // retires.
+    // Each front end DECLARES the base its unreadable client carries (`topology.clientBase`, 2026-07-29).
+    // That is the repair zzop offers for this exact shape, so the corpus exercises it rather than
+    // measuring a hole nobody can close: the three reads join and the POST becomes the real
+    // `cross-layer/method-mismatch` it always was. Each tree ALSO calls the same four routes with full
+    // literal paths from server/loader.ts, which is why the apply has to be idempotent — see
+    // crates/engine/src/analyze/compose/config_client_base.rs. Those calls are the standing check that it
+    // stays that way: if the prepend ever goes blind again, they re-key to /api/api/... and this gate
+    // reports 8 lost joins.
+    { "root": "trees/fe-axios", "sourceId": "feaxios", "topology": { "clientBase": "/api" } },
+    { "root": "trees/be-articles", "sourceId": "bearticles" },
+    { "root": "trees/fe-gensdk", "sourceId": "fegensdk", "topology": { "clientBase": "/api" } },
+    { "root": "trees/be-invoices", "sourceId": "beinvoices" },
+    // AMBIGUITY TRIPLE, added 2026-07-29 with `cross-layer/all-consumes-unjoined`. Two backends
+    // implementing one identical API plus a front end calling it — the shape four of the six real dogfood
+    // front ends have, and the one this corpus could not express before (every other front end here either
+    // joins or near-misses). See trees/be-catalog-a/provides.ts for the measurement.
+    { "root": "trees/be-catalog-a", "sourceId": "cata" },
+    { "root": "trees/be-catalog-b", "sourceId": "catb" },
+    { "root": "trees/fe-catalog", "sourceId": "fecat" },
     // Whole-file precision axis: every file in this tree is a negative control listed in EXPECTED.jsonc's
     // `benign` array, where ANY finding is a false positive. See trees/decoy/README.md — in particular why
     // each decoy has to sit on a path its target rule's `file_pattern` actually admits.

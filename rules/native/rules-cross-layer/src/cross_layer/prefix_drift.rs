@@ -114,6 +114,7 @@ pub fn prefix_drift_findings(records: &[PrefixNearMissRecord]) -> PrefixDriftOut
             file: anchor.consume_file.clone(),
             line: anchor.consume_line,
             message,
+            evidence_paths: Vec::new(),
             data: Some(serde_json::json!({
                 "consumeSource": consume_source,
                 "provideSource": provide_source,

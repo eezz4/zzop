@@ -170,6 +170,7 @@ pub(super) fn eval_line_scan(
                 file: f.rel.clone(),
                 line: (i + 1) as u32,
                 message,
+                evidence_paths: Vec::new(),
                 data: Some(data),
             });
         }

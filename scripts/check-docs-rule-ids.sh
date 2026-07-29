@@ -58,41 +58,68 @@ catalog="$repo_root/docs/rules/catalog.md"
 
 [ -f "$catalog" ] || { echo "check-docs-rule-ids: missing $catalog" >&2; exit 1; }
 
-# Default file list: the TWO user-facing surfaces that still carry `rules:`-shaped config examples —
-# docs/getting-started.md and site/usage.html. It said "the four real user-facing surfaces" while
-# listing two, uncorrected across the removals that took the other two away (the JS front-end's init
-# template went with the JS CLI on 2026-07-20; README's config block was distilled out). Counted
-# 2026-07-26. The count is stated once, right here, next to the list it counts — a scope claim that
-# lives away from its own list is a scope claim nobody re-reads when the list changes. The OK line at
-# the bottom prints the ACTUAL count, so the two can be compared without trusting this comment.
-# ZZOP_CHECK_DOCS_RULE_IDS_FILES overrides the list (newline-separated paths) for self-testing against
-# fixtures — never used by the shipped CI step.
-if [ -n "${ZZOP_CHECK_DOCS_RULE_IDS_FILES:-}" ]; then
-  files="$ZZOP_CHECK_DOCS_RULE_IDS_FILES"
-else
-  # DERIVED, not hand-listed. Two hardcoded paths sat here until 2026-07-28 — and this script's own
-  # header already recorded that the list had rotted once ("It said 'the four real user-facing
-  # surfaces' while listing two, uncorrected across the removals"). Measured that day: a bare DSL id
-  # (`no-explicit-any` instead of `typescript/no-explicit-any`) planted in README.md — a real
-  # user-facing surface outside the list — left this guard GREEN. A guard whose SCANNED SET is
-  # hand-typed cannot see a surface nobody remembered to add, and the header proves nobody does.
-  #
-  # The subject is now every tracked .md/.html, PREFILTERED to the files that could possibly carry a
-  # finding. The three passes below only ever fire on a severity token, a `"severity"` field, or a
-  # `disabledRules` array, so a file with none of those three is provably a no-op — and per-file cost
-  # here is process spawns, which dominate under msys (the widened scan measured 55s over all 43 files
-  # and 25s over the 19 that match). The prefilter is deliberately LOOSER than the passes (bare words,
-  # no anchoring, entity form included): it may only over-include, never under-include, because a
-  # prefilter that drops a real candidate is a silent false green — the exact failure this whole sweep
-  # is about. If a pass ever grows a fourth trigger, widen this regex in the same edit.
-  files="$(git -C "$repo_root" ls-files -- '*.md' '*.html' \
-    | sed "s|^|$repo_root/|" \
-    | xargs grep -lE 'severity|disabledRules|"(off|none|disable|disabled|critical|error|err|high|warning|warn|medium|info|information|note|low)"' 2>/dev/null || true)"
-fi
+# Subject set: DERIVED from git. Not hand-listed, and NOT overridable — this script takes no input
+# that can narrow what it reads. Two pieces of history, both load-bearing:
+#
+#  1. It began as TWO hardcoded paths (docs/getting-started.md, site/usage.html) under a comment
+#     claiming "the four real user-facing surfaces" while listing two — uncorrected across the two
+#     removals that took the others away (the JS front-end's init template went with the JS CLI on
+#     2026-07-20; README's config block was distilled out). Measured 2026-07-28: a bare DSL id
+#     (`no-explicit-any` instead of `typescript/no-explicit-any`) planted in README.md — a real
+#     user-facing surface outside the list — left this guard GREEN. A guard whose SCANNED SET is
+#     hand-typed cannot see a surface nobody remembered to add, and the header proved nobody does.
+#
+#  2. It then carried a `ZZOP_CHECK_DOCS_RULE_IDS_FILES` env override that REPLACED the derived set
+#     with an arbitrary newline-separated path list, annotated "for self-testing against fixtures —
+#     never used by the shipped CI step". Removed 2026-07-28. Nothing in the tree ever read it: it
+#     was the only guard-scope override among the 23 scripts/check-*.sh guards, and no fixture
+#     self-test harness exists for any of them, so the use it was written for never arrived. What
+#     did exist was a working off-switch — measured, with a real violation planted in README.md:
+#       $ bash scripts/check-docs-rule-ids.sh
+#       check-docs-rule-ids: README.md:327: object-form key "no-explicit-any" is not a cataloged ...
+#       exit=1
+#       $ ZZOP_CHECK_DOCS_RULE_IDS_FILES="$PWD/LICENSE" bash scripts/check-docs-rule-ids.sh
+#       check-docs-rule-ids: OK (196 catalog ids + 12 pack ids vouched, 1 doc/config surfaces checked)
+#       exit=0
+#     An env var that turns a guard green over a file it would never otherwise scan is an off-switch
+#     whatever its comment calls it, and the zero-file abort below cannot catch it — one file is not
+#     zero files. Deleted rather than converted into a "fails if the scope shrinks" form: detecting a
+#     shrink needs a committed expected count, i.e. a SECOND enumeration of what "checked" means, and
+#     a second enumeration is precisely the defect class this repo spent 2026-07-28 removing from
+#     sixteen guards. Paying for that to keep a hatch with no caller is the wrong trade. A developer
+#     wanting a narrow run edits their working copy, where the diff is visible, instead of exporting
+#     a variable that leaves no trace in the exit code.
+#
+# The subject is every tracked .md/.html, PREFILTERED to the files that could possibly carry a
+# finding. The four passes below only ever fire on a severity token, a `"severity"` field, a
+# `disabledRules` array, or a `"rule"` key, so a file with none of those is provably a no-op. The
+# prefilter is deliberately LOOSER than the passes (bare words, no anchoring, entity form included):
+# it may only over-include, never under-include, because a prefilter that drops a real candidate is a
+# silent false green — the exact failure this whole sweep is about. If a pass ever grows a fifth
+# trigger, widen this regex in the same edit.
+#
+# What the prefilter is now WORTH is smaller than the number this comment used to quote. It was
+# introduced when the scan cost five process spawns PER FILE, so halving the file count halved the
+# guard (the figures recorded here were 55s over all 43 files, 25s over the ~20 that match). The
+# scan below is now ONE awk over every subject file, so a wider subject costs reading, not spawning:
+# measured 2026-07-29, dropping the prefilter entirely moves this guard by well under a second. It is
+# kept because narrowing it back later would be a coverage change nobody would notice, and because
+# the `xargs grep -l` it costs is a single batched spawn — but it is no longer a performance argument,
+# and nobody should defend it as one.
+#
+# The OK line at the bottom prints the ACTUAL count, so the scanned scope is readable from the run
+# itself rather than trusted from this comment.
+files="$(git -C "$repo_root" ls-files -- '*.md' '*.html' \
+  | sed "s|^|$repo_root/|" \
+  | xargs grep -lE 'severity|disabledRules|"(off|none|disable|disabled|critical|error|err|high|warning|warn|medium|info|information|note|low)"' 2>/dev/null || true)"
 
+# Word-splitting on $files (unquoted) is the enumeration this guard has always used; the array is
+# only a way to hand the very same list to awk as argv instead of re-splitting it per pass.
+subject=()
 scanned=0
 for f in $files; do
   [ -f "$f" ] || { echo "check-docs-rule-ids: missing $f" >&2; exit 1; }
+  subject+=("$f")
   scanned=$((scanned + 1))
 done
 # An empty subject set is a broken enumeration, not a repo with no docs — the sibling failure this
@@ -142,15 +169,12 @@ pack_id_count="$(printf '%s\n' "$pack_ids" | grep -c . || true)"
 [ "$catalog_id_count" -gt 0 ] || { echo "check-docs-rule-ids: extracted 0 ids from $catalog — extraction is broken" >&2; exit 1; }
 [ "$pack_id_count" -gt 0 ] || { echo "check-docs-rule-ids: extracted 0 pack ids from $catalog — extraction is broken" >&2; exit 1; }
 
-# Herestrings, never `printf big-blob | grep -q`: under pipefail, grep -q exiting on first match
-# SIGPIPEs printf (exit 141) once the input exceeds the pipe buffer — a real match reads as failure.
-is_valid_id() {
-  grep -qxF "$1" <<< "$valid_ids"
-}
-
-is_in() { # $1 = candidate, $2 = newline-separated set
-  grep -qxF "$1" <<< "$2"
-}
+# The id sets are handed to awk and looked up as associative-array keys, which is an exact
+# whole-string match — the same semantics as the `grep -qxF "$candidate" <<< "$set"` helpers this
+# replaced, without the spawn. (Those helpers used a HERESTRING, never `printf big-blob | grep -q`:
+# under pipefail, grep -q exiting on first match SIGPIPEs printf (exit 141) once the input exceeds
+# the pipe buffer, so a real match reads as failure. The hazard is recorded here because the idiom
+# is still the right one anywhere a set membership test does need a subprocess.)
 
 # Pass-A allowlist: config keys that legitimately carry a severity-like STRING value without being a rule
 # id. Source: crates/config/config-surface.json — `configKeys.top` includes `failOn`;
@@ -173,121 +197,167 @@ severity_tokens='off|none|disable|disabled|critical|error|err|high|warning|warn|
 
 fail=0
 
-check_file() {
-  local file="$1"
+# ONE awk process for the WHOLE subject set — see the cost note at the top of this block.
+#
+# What this replaced (2026-07-29): a bash `check_file` called once per subject file, each call
+# spawning a `sed` (entity decode), two `grep`s (passes A and D), two `awk`s (passes B and C), plus a
+# `sed` per pass-A/D match to slice the key out and a `grep -qxF` per candidate to test set
+# membership. That is five processes per file BEFORE any match, on ~20 files, and the measured cost
+# was 45-47s of which `user` time was a rounding error: on this box the tax is fork/exec, not
+# computation. Nothing about WHAT is examined changes here — same subject files, same four passes,
+# same regexes, same messages, same line numbers.
+#
+# awk already knows file boundaries (FILENAME/FNR), so the per-file loop the shell was paying a
+# process for is just an index. Lines are buffered per file because pass B needs a five-line
+# lookahead window; the buffer is flushed on the next file's FNR == 1 and once more in END.
+#
+# The sets cross into awk through the ENVIRONMENT, not `-v`: `awk -v x="$multi_line_value"` runs the
+# value through escape-sequence processing, so an id containing a backslash would be silently
+# rewritten. ENVIRON is verbatim, and costs no extra process.
+scan_rc=0
+ZZ_VALID_IDS="$valid_ids" \
+ZZ_SEVERITY_KEYS="$severity_key_allowlist" \
+ZZ_OBJECT_KEYS="$object_key_allowlist" \
+ZZ_SEVERITY_TOKENS="$severity_tokens" \
+awk '
+BEGIN {
+  nv = split(ENVIRON["ZZ_VALID_IDS"], v, "\n")
+  for (i = 1; i <= nv; i++) if (v[i] != "") valid[v[i]] = 1
+  ns = split(ENVIRON["ZZ_SEVERITY_KEYS"], s, "\n")
+  for (i = 1; i <= ns; i++) if (s[i] != "") sevkey[s[i]] = 1
+  no = split(ENVIRON["ZZ_OBJECT_KEYS"], o, "\n")
+  for (i = 1; i <= no; i++) if (o[i] != "") objkey[o[i]] = 1
 
-  # Decode &quot; so an entity-encoded HTML code block is scanned identically to a Markdown/JS one.
-  # Line numbers are preserved (pure in-line substitution).
-  local content
-  content="$(sed 's/&quot;/"/g' "$file")"
+  # Built as strings because the severity alternation comes from the shell. Byte-for-byte the EREs
+  # the two greps used, including [[:space:]] rather than [ \t] — the passes that were already awk
+  # (B and C) keep their own [ \t] spellings below, also unchanged.
+  sev_re  = "\"[A-Za-z][A-Za-z0-9/_.-]*\"[[:space:]]*:[[:space:]]*\"(" ENVIRON["ZZ_SEVERITY_TOKENS"] ")\""
+  rule_re = "\"rule\"[[:space:]]*:[[:space:]]*\"[^\"]+\""
+  fail = 0
+}
 
+# Flush the PREVIOUS file before `subject` is reassigned. An empty file produces no records at all,
+# so it neither flushes nor is flushed twice — it simply contributes nothing, exactly as the
+# per-file version did.
+FNR == 1 && nl > 0 { check_file() }
+FNR == 1 { subject = FILENAME; nl = 0; delete L }
+
+# Decode &quot; so an entity-encoded HTML code block is scanned identically to a Markdown/JS one.
+# Line numbers are preserved (pure in-line substitution).
+{ ln = $0; gsub(/&quot;/, "\"", ln); L[++nl] = ln }
+
+END { if (nl > 0) check_file(); if (fail) exit 1 }
+
+function check_file(   i, j, rest, m, key, win, str, t, elem, val, inarr) {
   # --- Pass A: single-line string form — "<key>": "<severity-token>" ---
-  local simple
-  simple="$(printf '%s\n' "$content" \
-    | grep -noE '"[A-Za-z][A-Za-z0-9/_.-]*"[[:space:]]*:[[:space:]]*"('"$severity_tokens"')"' || true)"
-  while IFS=: read -r lineno match; do
-    [ -z "$lineno" ] && continue
-    local key
-    key="$(printf '%s' "$match" | sed -E 's/^"([^"]+)".*/\1/')"
-    is_in "$key" "$severity_key_allowlist" && continue
-    is_valid_id "$key" && continue
-    echo "check-docs-rule-ids: $file:$lineno: key \"$key\" is not a cataloged rule/analysis id" >&2
-    echo "  (DSL rules need the full pack/rule id, e.g. \"typescript/no-explicit-any\", not a bare id)" >&2
-    fail=1
-  done <<< "$simple"
+  # EVERY match on the line, not just the first: `grep -oE` emits them all, and the object-form pass
+  # below records what it cost to lose that property once.
+  for (i = 1; i <= nl; i++) {
+    rest = L[i]
+    while (match(rest, sev_re)) {
+      m = substr(rest, RSTART, RLENGTH)
+      rest = substr(rest, RSTART + RLENGTH)
+      key = substr(m, 2); sub(/".*/, "", key)
+      if (key in sevkey) continue
+      if (key in valid) continue
+      print "check-docs-rule-ids: " subject ":" i ": key \"" key "\" is not a cataloged rule/analysis id" > "/dev/stderr"
+      print "  (DSL rules need the full pack/rule id, e.g. \"typescript/no-explicit-any\", not a bare id)" > "/dev/stderr"
+      fail = 1
+    }
+  }
 
   # --- Pass B: object form — "<key>": {   (body may span lines; exclude-only entries included) ---
   #
   # A key in OBJECT form is a rule id only when its object is a rule CONFIG, and the one thing that
-  # makes it one is a `severity` field (crates/config's `ruleObject`). Without that discriminator this
+  # makes it one is a `severity` field (crates/config'"'"'s `ruleObject`). Without that discriminator this
   # pass treats every `"key": {` in the repo as a candidate id — survivable while the scanned surface
   # was two curated config-example files, and 28 false positives the moment the surface became derived
   # (2026-07-28): envelope shapes, MCP server configs, DSL matcher docs. The alternative on offer was
   # growing `object_key_allowlist` to hold them, and an allowlist that grows is how a guard stops
   # guarding — the reason check-vendor-token-literals.sh never got an escape hatch. Anchor on meaning.
   #
-  # ONE awk pass, not a per-match `sed` window: the obvious spelling (spawn a sed per candidate to slice
-  # the lookahead) measured 2m21s on 43 files under msys, where process creation dominates — the same
-  # trap check-max-file-lines.sh's header records for its own census. A guard nobody can afford to run
-  # in a pre-commit hook is a guard that gets moved to CI and then skipped.
-  local objform
-  objform="$(printf '%s\n' "$content" | awk '
-    { line[NR] = $0 }
-    END {
-      for (i = 1; i <= NR; i++) {
-        win = ""
-        for (j = i; j <= i + 4 && j <= NR; j++) win = win line[j]
-        if (win !~ /"severity"/) continue
-        # EVERY match on the line, not just the first. A single-line example
-        # (`{ "rules": { "bad-id": { "severity": "off" } } }`) puts the allowlisted `rules` key and the
-        # real candidate on one line; stopping at the first match finds only `rules`, skips it as
-        # structural, and passes. Measured 2026-07-28 — this loop was a bare `match()` for one revision
-        # and a planted bare id went undetected, which is how the grep this replaced behaved correctly
-        # by accident (`grep -oE` emits all matches per line).
-        rest = line[i]
-        while (match(rest, /"[A-Za-z][A-Za-z0-9\/_.-]*"[ \t]*:[ \t]*\{/)) {
-          key = substr(rest, RSTART + 1)
-          sub(/".*/, "", key)
-          print i ":" key
-          rest = substr(rest, RSTART + RLENGTH)
-        }
-      }
-    }' || true)"
-  while IFS=: read -r lineno key; do
-    [ -z "$lineno" ] && continue
-    is_in "$key" "$object_key_allowlist" && continue
-    is_valid_id "$key" && continue
-    echo "check-docs-rule-ids: $file:$lineno: object-form key \"$key\" is not a cataloged rule/analysis id" >&2
-    echo "  (DSL rules need the full pack/rule id, e.g. \"sql/nplus1\", not a bare id; a new structural" >&2
-    echo "   config key with an object value must be added to this script's object_key_allowlist)" >&2
-    fail=1
-  done <<< "$objform"
+  # ONE pass over the buffered lines, not a per-match `sed` window: the obvious spelling (spawn a sed
+  # per candidate to slice the lookahead) measured 2m21s on 43 files under msys, where process
+  # creation dominates — the same trap check-max-file-lines.sh'"'"'s header records for its own census. A
+  # guard nobody can afford to run in a pre-commit hook is a guard that gets moved to CI and then
+  # skipped.
+  for (i = 1; i <= nl; i++) {
+    win = ""
+    for (j = i; j <= i + 4 && j <= nl; j++) win = win L[j]
+    if (win !~ /"severity"/) continue
+    # EVERY match on the line, not just the first. A single-line example
+    # (`{ "rules": { "bad-id": { "severity": "off" } } }`) puts the allowlisted `rules` key and the
+    # real candidate on one line; stopping at the first match finds only `rules`, skips it as
+    # structural, and passes. Measured 2026-07-28 — this loop was a bare `match()` for one revision
+    # and a planted bare id went undetected, which is how the grep this replaced behaved correctly
+    # by accident (`grep -oE` emits all matches per line).
+    rest = L[i]
+    while (match(rest, /"[A-Za-z][A-Za-z0-9\/_.-]*"[ \t]*:[ \t]*\{/)) {
+      key = substr(rest, RSTART + 1)
+      sub(/".*/, "", key)
+      rest = substr(rest, RSTART + RLENGTH)
+      if (key in objkey) continue
+      if (key in valid) continue
+      print "check-docs-rule-ids: " subject ":" i ": object-form key \"" key "\" is not a cataloged rule/analysis id" > "/dev/stderr"
+      print "  (DSL rules need the full pack/rule id, e.g. \"sql/nplus1\", not a bare id; a new structural" > "/dev/stderr"
+      # \047 is the apostrophe: the awk program is single-quoted in sh, so a literal one cannot appear
+      # here (the same constraint check-rule-desc-tokens.sh and check-guards-wired.sh record).
+      print "   config key with an object value must be added to this script\047s object_key_allowlist)" > "/dev/stderr"
+      fail = 1
+    }
+  }
 
   # --- Pass C: "disabledRules": [ ... ] arrays, single- or multi-line; validate every element ---
-  local dr_elems
-  dr_elems="$(printf '%s\n' "$content" | awk '
-    function emit(s,   t) {
-      t = index(s, "]")
-      if (t) { s = substr(s, 1, t - 1); inarr = 0 }
-      while (match(s, /"[^"]*"/)) {
-        print NR ":" substr(s, RSTART + 1, RLENGTH - 2)
-        s = substr(s, RSTART + RLENGTH)
-      }
-    }
-    inarr { emit($0); next }
-    /"disabledRules"[ \t]*:[ \t]*\[/ {
-      s = $0
-      sub(/.*"disabledRules"[ \t]*:[ \t]*\[/, "", s)
+  # The `inarr` state machine is unchanged; it is a function-local here because the enclosing
+  # per-file scope is now a function call rather than a fresh awk process.
+  inarr = 0
+  for (i = 1; i <= nl; i++) {
+    str = L[i]
+    if (!inarr) {
+      if (str !~ /"disabledRules"[ \t]*:[ \t]*\[/) continue
+      sub(/.*"disabledRules"[ \t]*:[ \t]*\[/, "", str)
       inarr = 1
-      emit(s)
     }
-  ' || true)"
-  while IFS=: read -r lineno elem; do
-    [ -z "$lineno" ] && continue
-    is_valid_id "$elem" && continue
-    echo "check-docs-rule-ids: $file:$lineno: disabledRules entry \"$elem\" is not a cataloged rule/analysis/pack id" >&2
-    echo "  (DSL rules need the full pack/rule id; native ids incl. cross-layer/* and bare pack ids are valid as-is)" >&2
-    fail=1
-  done <<< "$dr_elems"
+    t = index(str, "]")
+    if (t) { str = substr(str, 1, t - 1); inarr = 0 }
+    while (match(str, /"[^"]*"/)) {
+      elem = substr(str, RSTART + 1, RLENGTH - 2)
+      str = substr(str, RSTART + RLENGTH)
+      if (elem in valid) continue
+      print "check-docs-rule-ids: " subject ":" i ": disabledRules entry \"" elem "\" is not a cataloged rule/analysis/pack id" > "/dev/stderr"
+      print "  (DSL rules need the full pack/rule id; native ids incl. cross-layer/* and bare pack ids are valid as-is)" > "/dev/stderr"
+      fail = 1
+    }
+  }
 
   # --- Pass D: suppressions entry shape — "rule": "<id>"; the VALUE must be a valid id ---
-  local rulevals
-  rulevals="$(printf '%s\n' "$content" \
-    | grep -noE '"rule"[[:space:]]*:[[:space:]]*"[^"]+"' || true)"
-  while IFS=: read -r lineno match; do
-    [ -z "$lineno" ] && continue
-    local val
-    val="$(printf '%s' "$match" | sed -E 's/^"rule"[[:space:]]*:[[:space:]]*"([^"]+)"$/\1/')"
-    is_valid_id "$val" && continue
-    echo "check-docs-rule-ids: $file:$lineno: suppression rule \"$val\" is not a cataloged rule/analysis/pack id" >&2
-    echo "  (DSL rules need the full pack/rule id, e.g. \"sql/nplus1\", not a bare id)" >&2
-    fail=1
-  done <<< "$rulevals"
+  for (i = 1; i <= nl; i++) {
+    rest = L[i]
+    while (match(rest, rule_re)) {
+      m = substr(rest, RSTART, RLENGTH)
+      rest = substr(rest, RSTART + RLENGTH)
+      val = m
+      sub(/^"rule"[[:space:]]*:[[:space:]]*"/, "", val)
+      sub(/"$/, "", val)
+      if (val in valid) continue
+      print "check-docs-rule-ids: " subject ":" i ": suppression rule \"" val "\" is not a cataloged rule/analysis/pack id" > "/dev/stderr"
+      print "  (DSL rules need the full pack/rule id, e.g. \"sql/nplus1\", not a bare id)" > "/dev/stderr"
+      fail = 1
+    }
+  }
 }
+' "${subject[@]}" || scan_rc=$?
 
-for f in $files; do
-  check_file "$f"
-done
+# exit 1 is this program saying "violations"; anything else is awk itself failing (unreadable file,
+# broken program) and must not be reported as a verdict. The version this replaced piped awk through
+# `|| true`, which swallowed both.
+if [ "$scan_rc" -eq 1 ]; then
+  fail=1
+elif [ "$scan_rc" -ne 0 ]; then
+  echo "check-docs-rule-ids: the scan pass failed (awk exit $scan_rc) — aborting rather than report a" >&2
+  echo "  verdict from a scan that did not finish." >&2
+  exit 1
+fi
 
 if [ "$fail" -ne 0 ]; then
   echo "check-docs-rule-ids: FAILED — fix the offending example(s) to use a cataloged id (see docs/rules/catalog.md)." >&2

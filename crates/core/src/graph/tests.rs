@@ -1,6 +1,6 @@
-//! Exercises `connected_components`: isolated nodes, fully-connected islands, multiple islands sorted
-//! descending by size, direction-agnostic edges, self-loops, edges with an out-of-set endpoint, and
-//! alphabetical tie-breaking by first node.
+//! Exercises `find_cycles`: no-cycle graphs, two-/three-node cycles, self-loops, multiple cycles
+//! sorted largest first, nested cycles merging into one SCC, and deep chains (iterative Tarjan must
+//! not overflow the stack).
 use super::*;
 
 fn ids(xs: &[&str]) -> Vec<String> {
@@ -12,81 +12,6 @@ fn edge(s: &str, t: &str) -> ComponentEdge {
         target: t.into(),
     }
 }
-
-#[test]
-fn no_edges_each_node_own_component() {
-    let r = connected_components(&ids(&["a", "b", "c"]), &[]);
-    assert_eq!(r.sizes, vec![1, 1, 1]);
-    let distinct: std::collections::HashSet<_> = r.component_by_node.values().collect();
-    assert_eq!(distinct.len(), 3);
-}
-
-#[test]
-fn fully_connected_single_island() {
-    let r = connected_components(&ids(&["a", "b", "c"]), &[edge("a", "b"), edge("b", "c")]);
-    assert_eq!(r.sizes, vec![3]);
-    let distinct: std::collections::HashSet<_> = r.component_by_node.values().copied().collect();
-    assert_eq!(distinct, std::collections::HashSet::from([0]));
-}
-
-#[test]
-fn two_islands_sorted_desc() {
-    let r = connected_components(
-        &ids(&["a", "b", "c", "d"]),
-        &[edge("a", "b"), edge("b", "c")],
-    );
-    assert_eq!(r.sizes, vec![3, 1]);
-    assert_eq!(r.component_by_node["a"], 0);
-    assert_eq!(r.component_by_node["b"], 0);
-    assert_eq!(r.component_by_node["c"], 0);
-    assert_eq!(r.component_by_node["d"], 1);
-}
-
-#[test]
-fn direction_ignored() {
-    let r1 = connected_components(&ids(&["a", "b"]), &[edge("a", "b")]);
-    let r2 = connected_components(&ids(&["a", "b"]), &[edge("b", "a")]);
-    assert_eq!(r1.sizes, r2.sizes);
-}
-
-#[test]
-fn self_loop_no_effect() {
-    let r = connected_components(&ids(&["a"]), &[edge("a", "a")]);
-    assert_eq!(r.sizes, vec![1]);
-}
-
-#[test]
-fn ghost_endpoints_ignored() {
-    let r = connected_components(&ids(&["a", "b"]), &[edge("a", "b"), edge("a", "ghost")]);
-    assert_eq!(r.sizes, vec![2]);
-}
-
-#[test]
-fn complex_three_islands() {
-    let r = connected_components(
-        &ids(&["a", "b", "c", "d", "e", "f", "g"]),
-        &[
-            edge("a", "b"),
-            edge("b", "c"),
-            edge("c", "d"),
-            edge("e", "f"),
-        ],
-    );
-    assert_eq!(r.sizes, vec![4, 2, 1]);
-}
-
-#[test]
-fn tie_break_by_alphabetical_first_node() {
-    let r = connected_components(
-        &ids(&["z", "y", "a", "b"]),
-        &[edge("a", "b"), edge("z", "y")],
-    );
-    assert_eq!(r.sizes, vec![2, 2]);
-    assert_eq!(r.component_by_node["a"], 0); // first node "a" < "z"
-    assert_eq!(r.component_by_node["z"], 1);
-}
-
-// --- find_cycles (directed edges) ---
 
 fn sorted(mut v: Vec<String>) -> Vec<String> {
     v.sort();

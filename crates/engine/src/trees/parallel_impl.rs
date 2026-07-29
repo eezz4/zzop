@@ -40,13 +40,7 @@ pub fn maybe_warn(
     if cross_source_edges > 0 {
         return None;
     }
-    let signal_count = cross_layer_findings
-        .iter()
-        .filter(|f| {
-            f.rule_id == "cross-layer/duplicate-route"
-                || f.rule_id == "cross-layer/ambiguous-consume"
-        })
-        .count();
+    let signal_count = count_signals(cross_layer_findings);
     if signal_count < MIN_PARALLEL_IMPL_SIGNALS {
         return None;
     }
@@ -55,6 +49,43 @@ pub fn maybe_warn(
          findings — the trees may be parallel implementations of the same API surface rather than one \
          system; if so, analyze them separately (or trim the config's trees)."
     ))
+}
+
+/// How many DISTINCT overlap signals this run carries — the quantity [`MIN_PARALLEL_IMPL_SIGNALS`] is
+/// calibrated against.
+///
+/// `cross-layer/duplicate-route` is deduped by its route key, because since 2026-07-29 that rule emits
+/// ONE COPY PER PROVIDING SOURCE, each anchored in its own tree. Counting copies would make the threshold
+/// mean something different for every run: two trees sharing 3 routes would produce 6 "signals" and five
+/// trees sharing 1 route would produce 5, so a fixed threshold would stop measuring "how much of the API
+/// surface overlaps" and start measuring "how many trees are in the config". One colliding route is one
+/// signal regardless of how many sources serve it. `ambiguous-consume` is already one per consume site,
+/// which is the per-call-site quantity the threshold wants.
+fn count_signals(cross_layer_findings: &[Finding]) -> usize {
+    let mut duplicate_keys: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    let mut per_finding = 0usize;
+    for f in cross_layer_findings {
+        match f.rule_id.as_str() {
+            "cross-layer/duplicate-route" => {
+                match f
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.get("key"))
+                    .and_then(serde_json::Value::as_str)
+                {
+                    Some(key) => {
+                        duplicate_keys.insert(key);
+                    }
+                    // Defensive: a payload with no `key` cannot be deduped, so it counts on its own
+                    // rather than being dropped — an unrecognized shape must not shrink the signal.
+                    None => per_finding += 1,
+                }
+            }
+            "cross-layer/ambiguous-consume" => per_finding += 1,
+            _ => {}
+        }
+    }
+    duplicate_keys.len() + per_finding
 }
 
 #[cfg(test)]
@@ -69,6 +100,7 @@ mod tests {
             file: "a.ts".to_string(),
             line: 1,
             message: String::new(),
+            evidence_paths: Vec::new(),
             data: None,
         }
     }
@@ -83,6 +115,32 @@ mod tests {
         assert!(warning.contains("0 cross-source edges"));
         assert!(warning.contains(&MIN_PARALLEL_IMPL_SIGNALS.to_string()));
         assert!(warning.contains("parallel implementations"));
+    }
+
+    fn duplicate_route(key: &str) -> Finding {
+        Finding {
+            data: Some(serde_json::json!({ "key": key })),
+            ..finding("cross-layer/duplicate-route")
+        }
+    }
+
+    /// The threshold measures how much of the API SURFACE overlaps. `duplicate-route` emits one copy per
+    /// providing source, so counting copies would instead measure how many trees are in the config —
+    /// three trees serving one shared route would trip a threshold two trees serving three could not.
+    #[test]
+    fn duplicate_route_copies_of_one_route_are_one_signal() {
+        let cl = CrossLayerResult::default();
+        let copies: Vec<Finding> = (0..MIN_PARALLEL_IMPL_SIGNALS + 3)
+            .map(|_| duplicate_route("DELETE /api/legacy/purge"))
+            .collect();
+        assert!(maybe_warn(&cl, &copies).is_none());
+
+        // ...and distinct routes still each count, so the gate is untouched for the shape it was
+        // calibrated on: one signal per colliding route, at the same threshold.
+        let distinct: Vec<Finding> = (0..MIN_PARALLEL_IMPL_SIGNALS)
+            .map(|i| duplicate_route(&format!("GET /api/r{i}")))
+            .collect();
+        assert!(maybe_warn(&cl, &distinct).is_some());
     }
 
     #[test]

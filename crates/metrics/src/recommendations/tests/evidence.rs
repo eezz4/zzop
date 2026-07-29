@@ -23,10 +23,7 @@ fn escalates_item_with_critical_finding_into_urgent_group_and_removes_from_home(
         dep: &dep,
         coupling: &coupling,
         circular: &circular,
-        scope_excludes: &[],
-        permanent_ignores: &[],
-        untested_paths: empty_set(),
-        amplification_by_path: empty_map(),
+        excludes: &[],
         findings: &findings,
     };
     let recs = build_recommendations(&input, &RecommendationGates::default());
@@ -126,10 +123,7 @@ fn bug_evidence_order_is_critical_findings_then_fix_ratio_then_hotspot() {
         dep: &dep,
         coupling: &coupling,
         circular: &[],
-        scope_excludes: &[],
-        permanent_ignores: &[],
-        untested_paths: empty_set(),
-        amplification_by_path: empty_map(),
+        excludes: &[],
         findings: &findings,
     };
     let recs = build_recommendations(&input, &RecommendationGates::default());
@@ -167,10 +161,7 @@ fn build_recommendations_is_deterministic_across_two_runs() {
         dep: &dep,
         coupling: &coupling,
         circular: &[],
-        scope_excludes: &[],
-        permanent_ignores: &[],
-        untested_paths: empty_set(),
-        amplification_by_path: empty_map(),
+        excludes: &[],
         findings: &findings,
     };
     let gates = RecommendationGates::default();

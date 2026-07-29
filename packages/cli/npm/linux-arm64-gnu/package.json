@@ -6,7 +6,8 @@
     "access": "public"
   },
   "files": [
-    "zzop"
+    "zzop",
+    "THIRD-PARTY-NOTICES.md"
   ],
   "license": "MIT",
   "repository": "github:eezz4/zzop",

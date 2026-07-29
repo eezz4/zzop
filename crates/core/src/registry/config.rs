@@ -30,15 +30,41 @@ pub struct Suppression {
     pub glob: Option<String>,
 }
 
-/// A config-wide, rule-agnostic finding-level filter: a file matching a `global_excludes` entry has
+/// A config-wide, rule-agnostic REPORT-level filter: a file matching a `global_excludes` entry has
 /// findings from EVERY rule dropped, not just one. Same mutually-exclusive `path`/`glob` filter shape as
 /// `Suppression` (minus `rule`, since there is no rule to match) — see `Suppression`'s own field docs for
 /// the exact substring-vs-glob semantics, shared verbatim via `path_filter_matches`.
 ///
-/// This is a finding-level filter, never a scan-skip: a matching file is still parsed (so the dep graph /
-/// dead-code analysis stays correct) — only its findings are suppressed, in `is_suppressed` alongside
-/// per-rule suppressions. Cache-neutral, exactly like `suppressions` (see `RuleConfig::suppressions`'s
-/// doc and `zzop_engine::cache`'s fingerprint doc) — never part of the IR/fingerprint.
+/// Never a scan-skip: a matching file is still parsed (so the dep graph / dead-code analysis stays
+/// correct) — only what the run REPORTS about it is dropped. **Every reporting channel consumes it**, and
+/// the count is deliberately not written here: it was "two consumers, deliberately" until 2026-07-29 and
+/// was already stale by the end of that day. The channels are `is_suppressed` below (findings, alongside
+/// per-rule suppressions), `zzop_metrics::build_recommendations` via `BuildRecInput::excludes`,
+/// `cross_layer_findings`' merged config, `compute_criticality` (the summary's `architecture.criticalTop`),
+/// and the per-metric violation lists under `scores.*` — each wired with its own test; ask those modules,
+/// not this sentence. The principle is what belongs here: the author's "do not report on these paths" is
+/// ONE statement, so a channel that ignores it makes the run contradict the config that produced it.
+///
+/// TWO ROLES, ONE KEY (2026-07-29). A path is either a finding's ANCHOR or its EVIDENCE, and the role
+/// decides the treatment: an excluded anchor drops the finding whole, an excluded evidence path keeps the
+/// finding and redacts that path out of it. Before this the filter read the anchor alone, so what it
+/// enforced was "do not ANCHOR a finding here" while this doc promised "do not NAME this path" — and a
+/// relational finding anchored on one side printed the other side's excluded path in its own message. See
+/// `super::redact` for why that is one key rather than two, and `Finding::evidence_paths` for why the
+/// paths are a typed field rather than a per-rule table of `data` keys.
+///
+/// TWO EXEMPTIONS, and they are exemptions rather than omissions. `health.pain` is a whole-tree rollup —
+/// filtering it would make the number incomparable with any other run. `warnings` is the config-diagnostics
+/// channel, and one of the things it warns about is an `exclude` so broad the problem only LOOKS absent;
+/// filtering it would let the filter erase its own warning. Rows keyed by a slice or module rather than a
+/// file path (`cohesion.slices`, `sdp.violations`, `mainSequence.modules`) are likewise unfiltered: each is
+/// itself a whole-directory rollup, so the `pain` argument applies to them too.
+///
+/// FILTERING IS EMISSION-TIME, NEVER COMPUTATION-TIME. An excluded file is still parsed, still appears in
+/// `nodes` and the dep graph, and still counts toward every score, every denominator, and every OTHER
+/// file's blast radius — it is a real importer whether or not the run is allowed to name it. Cache-neutral, exactly like
+/// `suppressions` (see `RuleConfig::suppressions`'s doc and `zzop_engine::cache`'s fingerprint doc) —
+/// never part of the IR/fingerprint.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GlobalExclude {
     /// Optional path filter (plain substring). See `Suppression::path`.

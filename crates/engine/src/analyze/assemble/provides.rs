@@ -7,11 +7,12 @@ use std::collections::HashMap;
 
 use zzop_core::{IoConsume, IoProvide};
 
+mod consume_chain;
+
 use crate::analyze::compose::{
-    apply_and_strip_global_prefix, apply_client_base_prefixes, apply_config_mounts,
-    compose_controller_prefix_provides, compose_router_mount_provides, compose_trpc_provides,
-    late_resolve_cross_file_consumes, merge_const_map_fragments, resolve_provide_body_refs,
-    resolve_wrapper_consumes,
+    apply_and_strip_global_prefix, apply_config_mounts, compose_controller_prefix_provides,
+    compose_router_mount_provides, compose_trpc_provides, late_resolve_cross_file_consumes,
+    merge_const_map_fragments, resolve_provide_body_refs,
 };
 use crate::analyze::native_rules::{
     run_csharp_provides_project_pass, run_java_provides_project_pass,
@@ -222,37 +223,20 @@ pub(super) fn compose(
     let attribute_store =
         zzop_core::AttributeStore::from_parts(native_attrs, &config.adapter_overlays);
 
-    // Wrapper-consume join — re-anchors HTTP consumes from wrapper internals to real FE call sites
-    // (`resolve_wrapper_consumes`'s own doc). Same placement constraints as the provide composers
-    // above: needs the workspace resolver, and must run while `io_consumes` is still mutable.
-    if !wrapper_call_pairs.is_empty() && !wrapper_def_pairs.is_empty() {
-        resolve_wrapper_consumes(
-            wrapper_def_pairs,
-            wrapper_call_pairs,
-            |specifier, from_file| {
-                zzop_parser_typescript::resolve_file_with_workspace(
-                    specifier,
-                    from_file,
-                    ts_paths,
-                    &pkg_scan.workspace_pkgs,
-                    &tsconfigs,
-                )
-            },
-            &mut io_consumes,
-        );
-    }
-
-    // Axios `baseURL` path-prefix apply + strip (`axios-defaults-base-v1`) — the CONSUME-side
-    // counterpart of `apply_and_strip_global_prefix` above. MUST run here: after
-    // `late_resolve_cross_file_consumes`, which fills `key` IN PLACE and preserves the `client` tag —
-    // that tag is the load-bearing reason for the ordering (a late-resolved axios consume still gets
-    // the prefix). Sitting after the wrapper-consume join is only "after the last consume-mutating
-    // pass" hygiene: wrapper-emitted consumes carry `client: None` and are DELIBERATELY never
-    // prefixed (custom wrappers stay uninterpreted — overlay territory). Must stay before
-    // `io_consumes` is frozen into `MinimalIr::io` / read by any whole-tree rule
-    // (`unprovided-consume`) or the cross-layer linker.
-    // See `compose::apply_client_base_prefixes`'s own doc for the full placement rationale.
-    apply_client_base_prefixes(&mut io_consumes, &mut warnings);
+    // The tail of the CONSUME channel — the wrapper-consume join plus the two base-path applies, in
+    // the one order that is correct. Must stay HERE: after the workspace resolver exists (the join
+    // needs it) and before `io_consumes` is frozen into `MinimalIr::io` / read by any whole-tree rule
+    // (`unprovided-consume`) or the cross-layer linker. See `consume_chain`'s module doc.
+    consume_chain::finish_consumes(
+        &mut io_consumes,
+        wrapper_def_pairs,
+        wrapper_call_pairs,
+        ts_paths,
+        &pkg_scan.workspace_pkgs,
+        &tsconfigs,
+        config.client_base.as_deref(),
+        &mut warnings,
+    );
 
     // File-convention route PROVIDE composition — frameworks whose HTTP surface is the file tree
     // itself (Next.js `pages/api` + app-router `route.ts`, Remix flat routes, Medusa-style

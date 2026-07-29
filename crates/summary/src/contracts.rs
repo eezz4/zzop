@@ -1,17 +1,25 @@
-//! Compile-time embedded authoring contracts — the documents a custom-parser or rule author needs,
-//! served over MCP `resources/*` as `zzop://contract/<name>` and printed by `zzop contract [<name>]`.
-//! Embedding (vs. reading from disk) is
+//! In-binary authoring contracts — the documents a custom-parser or rule author needs, served over MCP
+//! `resources/*` as `zzop://contract/<name>` and printed by `zzop contract [<name>]`.
+//! Carrying them INSIDE the binary (vs. reading from disk) is
 //! what makes the "author an adapter with only the binary" promise hold: no zzop source checkout, no
-//! sidecar files, no install-location assumptions. All sources are committed, English, CI-guarded repo
-//! files — the public docs plus the machine-verified config-surface vocabulary and the rule catalog —
-//! ~180KB total.
+//! sidecar files, no install-location assumptions. Every source is committed, English and CI-guarded —
+//! the public docs plus the machine-verified config-surface vocabulary and the rule catalog, ~180KB
+//! embedded at compile time, plus one document rendered from a compiled-in registry (below).
 //!
 //! Why this table lives in the SHAPING crate rather than in either product: both surfaces resolve
 //! `<name>` through it, so it is a host-shared answer like every other module here, and the embed table
 //! keeps the established "reference, never re-own" discipline — the `config-surface` row points at
 //! `zzop_config::CONFIG_SURFACE_JSON` instead of embedding the same bytes a second time.
+//!
+//! One row is RENDERED rather than embedded: `disclosure-classes`, the silent-failure-class registry's
+//! full text, which lives in Rust (`zzop_engine::disclosure_contract_text`) and has no file to
+//! `include_str!`. Same discipline, one step further — the run reply's folded `disclosure` counts and
+//! this document are two views of one registry, so neither can drift into claiming the other's numbers.
+
+use std::sync::OnceLock;
 
 /// One embedded contract document.
+#[derive(Clone)]
 pub struct ContractDoc {
     /// URI tail: the resource is addressed as `zzop://contract/<name>`.
     pub name: &'static str,
@@ -29,23 +37,95 @@ pub struct ContractDoc {
 pub const CONFIG_TEMPLATE_NAME: &str = "config-template";
 pub const CONFIG_TEMPLATE_FILENAME: &str = zzop_config::DEFAULT_CONFIG_FILENAME;
 
+/// The URI space every contract document is addressed in. Owned here, next to the names it prefixes,
+/// because three surfaces now spell it: MCP `resources/list`/`resources/read` (`packages/mcp`), and —
+/// since the disclosure fold — every analyze-shaped reply, which prints the disclosure document's URI
+/// as the pointer to the full text it stopped shipping. A pointer assembled from a second copy of this
+/// prefix is a pointer that can drift.
+pub const URI_PREFIX: &str = "zzop://contract/";
+
+/// The `<name>` of the silent-failure-class document — the FULL TEXT of the registry an analyze reply
+/// used to ship on every call (~10.6KB, byte-identical every run) and now folds to counts plus this
+/// pointer. Named here for the same reason `CONFIG_TEMPLATE_NAME` is: the shaper that prints the
+/// pointer and the table that answers it must read one constant, or the reply can name a document the
+/// contract lane cannot serve.
+pub const DISCLOSURE_CONTRACT_NAME: &str = "disclosure-classes";
+
 /// Looks up an embedded contract document by its `<name>` (the `zzop://contract/<name>` URI tail).
 /// The ONE lookup both surfaces share — the MCP `resources/read` handler (package `zzop-mcp`'s
 /// `resources.rs`) and the `zzop contract <name>` CLI path (package `zzop-cli-bin`'s `main.rs`) resolve
 /// names through this function, so the two surfaces cannot drift on which names exist. Both reach it as
 /// `zzop_summary::contracts::find`.
 pub fn find(name: &str) -> Option<&'static ContractDoc> {
-    CONTRACT_DOCS.iter().find(|doc| doc.name == name)
+    docs().iter().find(|doc| doc.name == name)
 }
 
 /// Every embedded contract name, in `CONTRACT_DOCS` (= `resources/list`) order — the shared "valid
 /// names" vocabulary both the unknown-URI resource error and the unknown-name CLI error enumerate.
 pub fn names() -> impl Iterator<Item = &'static str> {
-    CONTRACT_DOCS.iter().map(|doc| doc.name)
+    docs().iter().map(|doc| doc.name)
 }
 
-/// Every contract resource this binary serves. Order is the `resources/list` order (deterministic).
-pub static CONTRACT_DOCS: &[ContractDoc] = &[
+/// The `disclosure-classes` document's text, rendered ONCE from the engine's live blindness registry
+/// (`zzop_facade::disclosure_contract_text`, itself a re-export of the engine's own render) instead of
+/// embedded from a committed file. It has no file to embed: the registry it describes lives in Rust,
+/// and a checked-in copy would be exactly the second hand-maintained list the fold is not allowed to
+/// have — the run reply's `disclosure` counts are tallied off that same registry.
+fn disclosure_classes_text() -> &'static str {
+    static TEXT: OnceLock<String> = OnceLock::new();
+    TEXT.get_or_init(zzop_facade::disclosure_contract_text)
+}
+
+/// Every contract resource this binary serves, in `resources/list` order — [`EMBEDDED_DOCS`] followed
+/// by the one RENDERED row. Built once at first use, then shared; deterministic (same binary, same
+/// list, same bytes) because its one non-const row renders from a pinned registry.
+fn docs() -> &'static [ContractDoc] {
+    static DOCS: OnceLock<Vec<ContractDoc>> = OnceLock::new();
+    DOCS.get_or_init(|| {
+        let mut docs = EMBEDDED_DOCS.to_vec();
+        docs.push(ContractDoc {
+            name: DISCLOSURE_CONTRACT_NAME,
+            description: "Every silent-failure class zzop knows about — the ways its own output can be silently MISREAD, each with the status of how completely zzop detects it today (asserted / partial / notYetDetected). This is the full text of the `disclosure` block every analyze reply used to ship verbatim; the reply now carries the counts plus a pointer here, so the numbers stay unmissable and the paragraphs cost nothing per call. Rendered from the engine's live registry, never a copy.",
+            mime: "text/markdown",
+            content: disclosure_classes_text(),
+        });
+        docs
+    })
+}
+
+/// The contract table as every surface reads it (`for doc in CONTRACT_DOCS`, `.iter()`, `.len()`) —
+/// a zero-size handle over [`docs`] rather than a plain `&'static [ContractDoc]`, because one row is
+/// RENDERED at first use (see [`disclosure_classes_text`]) and a `static` slice can only hold
+/// const-evaluated rows. The read shape is unchanged on purpose: the MCP `resources/list` handler, the
+/// `zzop contract` listing and the name lookups all keep seeing ONE table, so a document that resolves
+/// but is not listed — half a pointer — stays impossible.
+#[derive(Clone, Copy)]
+pub struct ContractDocs;
+
+/// See [`ContractDocs`]. Still a `static`, as the slice it replaced was — a `const` here would put a
+/// brand-new const TYPE in front of the policy-census guard, which reads const shapes and fails on one
+/// it has neither been taught nor had waived.
+pub static CONTRACT_DOCS: ContractDocs = ContractDocs;
+
+impl std::ops::Deref for ContractDocs {
+    type Target = [ContractDoc];
+
+    fn deref(&self) -> &Self::Target {
+        docs()
+    }
+}
+
+impl IntoIterator for ContractDocs {
+    type Item = &'static ContractDoc;
+    type IntoIter = std::slice::Iter<'static, ContractDoc>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        docs().iter()
+    }
+}
+
+/// The contract documents embedded from committed files — every row but the rendered one.
+static EMBEDDED_DOCS: &[ContractDoc] = &[
     ContractDoc {
         name: "envelope-schema",
         description: "JSON Schema (draft-07) for the Normalized AST envelope v1 — machine-validate a custom parser's output.",

@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use crate::pipeline::{GoModuleMap, RustWorkspaceMap};
+use crate::pipeline::GoModuleMap;
 
 mod csharp;
 mod java;
@@ -95,49 +95,10 @@ pub(super) fn is_sfc_ext(rel: &str) -> bool {
     matches!(ext.to_ascii_lowercase().as_str(), "vue" | "svelte")
 }
 
-/// Rust standard/compiler-provided crate family — never a genuinely external (third-party) package, so a
-/// `use std::...`/`use core::...`/... head is excluded from the package-import census entirely (task 4's
-/// "exclude the std family from the census" requirement), the same way a Python relative specifier
-/// (`starts_with('.')`) never even reaches `resolve_python_import`.
-pub(super) const RUST_STD_CRATE_FAMILY: &[&str] = &["std", "core", "alloc", "proc_macro", "test"];
+mod rust;
 
-/// The first `::`-segment of a Rust import specifier (`"crate::a::b"` -> `"crate"`, `"serde::Deserialize"`
-/// -> `"serde"`, a bare single-segment specifier -> itself unchanged).
-pub(super) fn rust_head(specifier: &str) -> &str {
-    specifier.split("::").next().unwrap_or(specifier)
-}
-
-/// Rust import-specifier resolution glue — the Rust-side counterpart of `resolve_python_import`, unifying
-/// TWO resolution paths behind one call: `zzop_parser_rust::rust_import_candidates` (pure, in-tree
-/// `crate::`/`super::`/`self::` module-path resolution — returns an empty candidate list for any other
-/// head, including a bare external one) tried first, then — only reached when the first path yields
-/// nothing, which is always true for an external head since `rust_import_candidates` itself never
-/// resolves one — a same-workspace crate lookup via `workspace` (task 6's "dogfooding payoff": an
-/// external head like `zzop_core` resolving to `crates/core/src/lib.rs`). Both candidate lists are
-/// checked against `all_paths`, first-present-wins, mirroring `resolve_python_import`'s own convention.
-/// Called from BOTH [`super::dep_graph::merge_rust_dep_edges`] (dep-graph edges) and the router-mount
-/// compose resolver closure in `super::provides` (cross-file `.nest()`/`.merge()` mounts) — same dual-call
-/// shape `resolve_python_import`'s own doc describes for its two call sites.
-pub(in crate::analyze) fn resolve_rust_import(
-    specifier: &str,
-    from_file: &str,
-    all_paths: &HashSet<String>,
-    workspace: &RustWorkspaceMap,
-) -> Option<String> {
-    let candidates = zzop_parser_rust::rust_import_candidates(specifier, from_file);
-    if let Some(hit) = candidates.into_iter().find(|c| all_paths.contains(c)) {
-        return Some(hit);
-    }
-    let head = rust_head(specifier);
-    if matches!(head, "crate" | "super" | "self") {
-        return None;
-    }
-    workspace
-        .get(head)?
-        .iter()
-        .find(|c| all_paths.contains(c.as_str()))
-        .cloned()
-}
+pub(in crate::analyze) use rust::resolve_rust_import;
+pub(super) use rust::{rust_head, RUST_STD_CRATE_FAMILY};
 
 /// True for the extension the dispatch table routes to `Language::Go` — same "duplicated rather than
 /// threading the dispatch config" convention `is_python_source_ext`/`is_rust_source_ext` document.

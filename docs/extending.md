@@ -88,6 +88,22 @@ goes wrong in two ways, and both are declarations rather than code:
 ]
 ```
 
+**Your client's base path is real but unreadable.** `axios.defaults.baseURL = settings.baseApiUrl` — the
+prefix exists on the wire, but zzop refuses to guess a value it cannot read at the assignment, so the calls
+key `GET /articles` while the backend serves `GET /api/articles` and nothing joins. Declare it on the
+CALLING tree (the mirror of `mountedAt`; `cross-layer/all-consumes-unjoined` is the finding that points
+here):
+
+```jsonc
+"trees": [
+  { "root": "./web", "sourceId": "web",
+    "topology": { "clientBase": "/api" } }
+]
+```
+
+If the base *is* a literal in the source, zzop already read it — declaring it again stacks a second copy,
+and the run says so in a warning rather than silently keying `/api/api/...`.
+
 **A route is not statically visible** — a computed path, a dynamic verb, a wrapper. Inject the fact
 directly:
 

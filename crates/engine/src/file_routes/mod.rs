@@ -42,12 +42,41 @@ use zzop_core::{http_interface_key, IoProvide, SourceSymbol};
 /// only mint dead provides.
 const HTTP_VERB_EXPORTS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
+/// The extensions a file-routing convention in this module will turn into a route — the SINGLE
+/// source for every convention here (`pages_api_route`'s stem gate and [`is_route_module_filename`]
+/// both read it), so the two cannot drift the way they silently could while each spelled its own
+/// six-arm `matches!`.
+///
+/// **Why this is NARROWER than `dead_exports::is_ts_source_ext` (which adds `.mts`/`.cts`), stated
+/// because nothing else in the tree answers it:** the two lists answer different questions. That one
+/// asks *"can zzop's TypeScript frontend parse this file?"* — a fact about our own parser. This one
+/// asks *"does the FRAMEWORK serve this file as a route?"* — a fact about someone else's build, and
+/// a strictly narrower one: a file we can parse perfectly well is still not an endpoint unless the
+/// framework routes it.
+///
+/// The framework answer, for each convention wired here, is that **`.mts`/`.cts` are routed by
+/// none of them**: Next.js gates both `pages/**` and app-router `route.*` on `pageExtensions`, whose
+/// default is `tsx|ts|jsx|js`; Remix's route modules are `js|jsx|ts|tsx`; Medusa's are `route.ts` /
+/// `route.js`. `.mjs`/`.cjs` here are one notch of deliberate over-inclusion past all three defaults
+/// (an ESM/CJS-flavored tree that spells its handler `pages/api/x.mjs` reads as an intended handler),
+/// and that notch is the generous edge, not a precedent: `pageExtensions` is user-configurable and
+/// zzop does not read `next.config.js`, so this list is a fixed approximation that can only be
+/// justified up to what the conventions do by DEFAULT. Widening it to `is_ts_source_ext`'s eight
+/// would mint `http` PROVIDEs for files no supported framework serves — phantom provides, which this
+/// module's doc already names as the failure it refuses to cause (they misreport a route as
+/// unconsumed). Pinned against `is_ts_source_ext` by
+/// `tests::route_extensions_are_a_declared_subset_of_the_typescript_dispatch_set`.
+pub(super) const ROUTE_EXTENSIONS: [&str; 6] = ["ts", "tsx", "js", "jsx", "mjs", "cjs"];
+
+/// True when `ext` (no leading dot) is one a file-routing convention here will route — see
+/// [`ROUTE_EXTENSIONS`] for why this set is narrower than "what parses as TypeScript".
+pub(super) fn is_route_extension(ext: &str) -> bool {
+    ROUTE_EXTENSIONS.contains(&ext)
+}
+
 /// Filename test for the `route.<ext>` module conventions (Next app router, Medusa).
 pub(super) fn is_route_module_filename(name: &str) -> bool {
-    matches!(
-        name,
-        "route.ts" | "route.tsx" | "route.js" | "route.jsx" | "route.mjs" | "route.cjs"
-    )
+    name.strip_prefix("route.").is_some_and(is_route_extension)
 }
 
 /// Convention-local test/fixture gate, kept separate from `rules-graph`'s `test_patterns` (that one

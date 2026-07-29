@@ -34,12 +34,12 @@ use std::time::Instant;
 
 use zzop_core::{ir::DepGraph, is_enabled, FileNode, Finding};
 use zzop_metrics::{
-    build_coupling, build_cross_layer_co_churn, build_recommendations, compute_criticality,
-    compute_health_index, compute_scores, compute_seams, layer_of, scores::types::FileKinds,
-    BuildRecInput, CriticalFile, CrossLayerCoChurn, CrossLayerCoChurnOptions, HealthIndex,
-    Recommendation, RecommendationGates, Scores, ScoresInput, SeamCandidate, COUPLING_TOP_PER_FILE,
-    CRITICALITY_LIMIT, CRITICALITY_MIN_BLAST_RADIUS, CRITICALITY_SILENT_CHANGE_MAX, SEAMS_LIMIT,
-    SEAMS_MIN_FILES,
+    apply_excludes_to_scores, build_coupling, build_cross_layer_co_churn, build_recommendations,
+    compute_criticality, compute_health_index, compute_scores, compute_seams, layer_of,
+    scores::types::FileKinds, BuildRecInput, CriticalFile, CrossLayerCoChurn,
+    CrossLayerCoChurnOptions, HealthIndex, Recommendation, RecommendationGates, Scores,
+    ScoresInput, SeamCandidate, COUPLING_TOP_PER_FILE, CRITICALITY_LIMIT,
+    CRITICALITY_MIN_BLAST_RADIUS, CRITICALITY_SILENT_CHANGE_MAX, SEAMS_LIMIT, SEAMS_MIN_FILES,
 };
 
 use crate::EngineConfig;
@@ -126,10 +126,12 @@ pub(super) fn compute(
                     dep,
                     coupling: &coupling,
                     circular: cycles,
-                    scope_excludes: &[],
-                    permanent_ignores: &[],
-                    untested_paths: &std::collections::HashSet::new(),
-                    amplification_by_path: &HashMap::new(),
+                    // The config's top-level `exclude` — the SAME list `zzop_core::is_suppressed` applies
+                    // to findings. Recommendations are scores rather than findings, and this argument was
+                    // hardcoded empty until 2026-07-29, which let this repo's own run headline
+                    // `topRecommendation.topItem = "cases/trees/graph/circularB.ts"` under a config that
+                    // excludes `cases/**`. See `zzop_metrics::recommendations`' module doc.
+                    excludes: &config.rule_config.global_excludes,
                     findings,
                 },
                 &RecommendationGates::default(),
@@ -145,6 +147,14 @@ pub(super) fn compute(
             let critical = compute_criticality(
                 nodes,
                 dep,
+                // The same top-level `exclude` the line above hands `build_recommendations`, and the same
+                // one `zzop_core::is_suppressed` applies to findings. Hardcoded absent until 2026-07-29,
+                // which let TWO FIELDS OF THE SAME `architecture` OBJECT answer in opposite directions:
+                // measured on this repo with `exclude: ["crates/core/**"]`, all three `criticalTop` slots
+                // were `crates/core/...` while `topRecommendation` in the same run honoured the exclusion.
+                // Blast radius itself is still computed over the whole graph — see
+                // `zzop_metrics::criticality`'s doc for where exactly the filter attaches.
+                &config.rule_config.global_excludes,
                 CRITICALITY_MIN_BLAST_RADIUS,
                 CRITICALITY_SILENT_CHANGE_MAX,
                 CRITICALITY_LIMIT,
@@ -166,13 +176,17 @@ pub(super) fn compute(
 
         // `scores` is dropped here (not above) when only `health` asked for it — the field is
         // suppressed, the work it fed was still real.
-        (
-            computed_scores.filter(|_| scores_on),
-            health,
-            recommendations,
-            critical,
-            seams,
-        )
+        let mut scores = computed_scores.filter(|_| scores_on);
+        // The top-level `exclude` applied to the per-metric violation LISTS — deliberately after
+        // `compute_health_index` above has already read this struct, so `health.pain` is provably the
+        // whole-tree rollup it claims to be and stays comparable across runs. Every `.score` and the counts
+        // behind it are likewise untouched: only the "what should I look at" rows shrink. See
+        // `zzop_metrics::report_excludes`.
+        if let Some(scores) = scores.as_mut() {
+            apply_excludes_to_scores(scores, &config.rule_config.global_excludes);
+        }
+
+        (scores, health, recommendations, critical, seams)
     } else {
         (None, None, Vec::new(), Vec::new(), Vec::new())
     };

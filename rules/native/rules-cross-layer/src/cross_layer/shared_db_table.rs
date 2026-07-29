@@ -4,6 +4,22 @@
 //! declares its schema. Signal is pulled from three places — `edges` (kind `db-table`, consumer side),
 //! `ambiguous_consumes`, and `unprovided_consumes` — since all three can carry a `db-table` consume.
 //!
+//! **ONE FINDING PER PARTICIPATING SOURCE, each anchored in that source's own tree** (2026-07-29). Until
+//! then this emitted a single finding anchored at the alphabetically-first source's first site, which made
+//! WHICH tree could silence it an accident of sorting: that tree excluding its own paths deleted the whole
+//! finding, including the half that was about the OTHER trees — and the point of this rule is the other
+//! trees. Anchoring is not a presentation detail here, because `exclude` is applied to the anchor.
+//!
+//! This is not the per-call wall `all_consumes_unjoined` folds. The unit of the fact IS the (table,
+//! source) pair — each participating tree genuinely has something to answer for — and any single reader
+//! sees exactly one copy, in their own files. Every copy still lists the full source set, so nothing is
+//! lost relative to the single-finding form.
+//!
+//! Three sibling rules still anchor an N-source fact at `sites[0]` the old way (`duplicate_route`,
+//! `external_duplicated_integration`, `external_host_fanout`). That is the same shape, was measured while
+//! fixing this one, and is queued rather than fixed here — widening the change silently would move three
+//! more rules' output in a commit whose subject is this one.
+//!
 //! Two sources merely consuming the same table-key string is only evidence of a naming coincidence, not
 //! proof of a shared physical database (an unrelated repo providing its own same-named table lands in
 //! `ambiguous_consumes` instead, via join integrity) — the finding message says so explicitly, which is
@@ -62,203 +78,56 @@ pub fn shared_db_table_findings(cross_layer: &CrossLayerResult) -> Vec<Finding> 
         if distinct_sources.len() < 2 {
             continue;
         }
-        let sources_list: Vec<&str> = distinct_sources.into_iter().collect();
-        let (first_source, first_file, first_line) = sites[0].clone();
-        let message = format!(
-            "db table `{key}` is consumed by {} distinct sources ({}) — first at {first_file}:{first_line} \
-             (source `{first_source}`). This only shows the same table identifier is referenced from multiple \
-             analyzed sources, not that they physically share one database: unrelated repos with independent \
-             databases can coincidentally name a table the same. Verify these sources actually share one \
-             database before treating this as real coupling. {} if table-name collisions across independent \
-             databases are expected in your stack.",
-            sources_list.len(),
-            sources_list.join(", "),
-            disable_hint("cross-layer/db-table-name-in-multiple-sources"),
-        );
-        out.push(Finding {
-            rule_id: "cross-layer/db-table-name-in-multiple-sources".to_string(),
-            severity: Severity::Warning,
-            file: first_file,
-            line: first_line,
-            message,
-            data: Some(serde_json::json!({
-                "key": key,
-                "sources": sources_list,
-            })),
-        });
+        let sources_list: Vec<&str> = distinct_sources.iter().copied().collect();
+        for source in &distinct_sources {
+            // This source's OWN first site — `sites` is sorted, so the first match is deterministic.
+            let Some((_, file, line)) = sites.iter().find(|(s, _, _)| s == source) else {
+                continue;
+            };
+            let others: Vec<&str> = sources_list
+                .iter()
+                .copied()
+                .filter(|s| s != source)
+                .collect();
+            let message = format!(
+                "db table `{key}` is consumed by this source (`{source}`, first at {file}:{line}) and by \
+                 {} other analyzed source(s) ({}). This only shows the same table identifier is referenced \
+                 from multiple analyzed sources, not that they physically share one database: unrelated \
+                 repos with independent databases can coincidentally name a table the same. Verify these \
+                 sources actually share one database before treating this as real coupling. Each \
+                 participating source gets its own copy of this finding, anchored in its own tree, so \
+                 excluding one source's paths never silences the others. {} if table-name collisions \
+                 across independent databases are expected in your stack.",
+                others.len(),
+                others.join(", "),
+                disable_hint("cross-layer/db-table-name-in-multiple-sources"),
+            );
+            out.push(Finding {
+                rule_id: "cross-layer/db-table-name-in-multiple-sources".to_string(),
+                severity: Severity::Warning,
+                file: file.clone(),
+                line: *line,
+                message,
+                // The sibling consume sites this copy's message counts. Deduped and sorted.
+                evidence_paths: sites
+                    .iter()
+                    .map(|(_, f, _)| f)
+                    .filter(|f| *f != file)
+                    .cloned()
+                    .collect::<BTreeSet<String>>()
+                    .into_iter()
+                    .collect(),
+                data: Some(serde_json::json!({
+                    "key": key,
+                    "consumeSource": source,
+                    "sources": sources_list,
+                })),
+            });
+        }
     }
     out.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
     out
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use zzop_core::io::{
-        AmbiguousConsume, CrossLayerEdge, EdgeFrom, EdgeTo, TaggedConsume, TaggedProvide,
-    };
-    use zzop_core::IoConsume;
-
-    fn edge(kind: &str, key: &str, from_source: &str, file: &str, line: u32) -> CrossLayerEdge {
-        CrossLayerEdge {
-            kind: kind.to_string(),
-            key: key.to_string(),
-            from: EdgeFrom {
-                source: from_source.to_string(),
-                file: file.to_string(),
-                line,
-            },
-            to: EdgeTo {
-                source: "db".to_string(),
-                file: "schema.sql".to_string(),
-                line: 1,
-                symbol: None,
-            },
-            cross_source: true,
-            low_confidence_reason: None,
-        }
-    }
-
-    fn unprovided_consume(
-        kind: &str,
-        key: &str,
-        source: &str,
-        file: &str,
-        line: u32,
-    ) -> TaggedConsume {
-        TaggedConsume {
-            source: source.to_string(),
-            consume: IoConsume {
-                client: None,
-                body: None,
-                kind: kind.to_string(),
-                key: Some(key.to_string()),
-                file: file.to_string(),
-                line,
-                raw: None,
-                method: None,
-                retry_configured: None,
-            },
-        }
-    }
-
-    #[test]
-    fn same_table_consumed_by_two_edge_sources_is_flagged() {
-        let cl = CrossLayerResult {
-            edges: vec![
-                edge("db-table", "table:users", "svc-a", "a.ts", 3),
-                edge("db-table", "table:users", "svc-b", "b.ts", 9),
-            ],
-            ..Default::default()
-        };
-        let out = shared_db_table_findings(&cl);
-        assert_eq!(out.len(), 1);
-        assert_eq!(
-            out[0].rule_id,
-            "cross-layer/db-table-name-in-multiple-sources"
-        );
-        assert_eq!(out[0].severity, Severity::Warning);
-        assert_eq!(out[0].file, "a.ts");
-        assert_eq!(out[0].line, 3);
-        assert!(out[0].message.contains("svc-a"));
-        assert!(out[0].message.contains("svc-b"));
-        assert!(out[0].message.contains("Verify"));
-        assert!(out[0].message.contains("disabled_rules"));
-    }
-
-    #[test]
-    fn same_table_consumed_by_only_one_source_is_not_flagged() {
-        let cl = CrossLayerResult {
-            edges: vec![
-                edge("db-table", "table:users", "svc-a", "a.ts", 3),
-                edge("db-table", "table:users", "svc-a", "a2.ts", 5),
-            ],
-            ..Default::default()
-        };
-        assert!(shared_db_table_findings(&cl).is_empty());
-    }
-
-    #[test]
-    fn signal_combines_edges_ambiguous_and_dangling_consumes() {
-        let cl = CrossLayerResult {
-            edges: vec![edge("db-table", "table:orders", "svc-a", "a.ts", 1)],
-            unprovided_consumes: vec![unprovided_consume(
-                "db-table",
-                "table:orders",
-                "svc-b",
-                "b.ts",
-                2,
-            )],
-            ..Default::default()
-        };
-        let out = shared_db_table_findings(&cl);
-        assert_eq!(out.len(), 1);
-        assert!(out[0].message.contains("svc-a"));
-        assert!(out[0].message.contains("svc-b"));
-    }
-
-    #[test]
-    fn ambiguous_consume_of_a_db_table_counts_toward_the_signal() {
-        let cl = CrossLayerResult {
-            edges: vec![edge("db-table", "table:orders", "svc-a", "a.ts", 1)],
-            ambiguous_consumes: vec![AmbiguousConsume {
-                source: "svc-c".to_string(),
-                consume: IoConsume {
-                    client: None,
-                    body: None,
-                    kind: "db-table".to_string(),
-                    key: Some("table:orders".to_string()),
-                    file: "c.ts".to_string(),
-                    line: 4,
-                    raw: None,
-                    method: None,
-                    retry_configured: None,
-                },
-                candidates: vec![TaggedProvide {
-                    source: "db1".to_string(),
-                    provide: zzop_core::IoProvide {
-                        body: None,
-                        kind: "db-table".to_string(),
-                        key: "table:orders".to_string(),
-                        file: "s1.sql".to_string(),
-                        line: 1,
-                        symbol: None,
-                    },
-                }],
-            }],
-            ..Default::default()
-        };
-        let out = shared_db_table_findings(&cl);
-        assert_eq!(out.len(), 1);
-        assert!(out[0].message.contains("svc-a"));
-        assert!(out[0].message.contains("svc-c"));
-    }
-
-    #[test]
-    fn non_db_table_kind_is_ignored() {
-        let cl = CrossLayerResult {
-            edges: vec![
-                edge("http", "GET /x", "svc-a", "a.ts", 1),
-                edge("http", "GET /x", "svc-b", "b.ts", 2),
-            ],
-            ..Default::default()
-        };
-        assert!(shared_db_table_findings(&cl).is_empty());
-    }
-
-    #[test]
-    fn duplicate_sites_are_deduped_before_counting() {
-        let cl = CrossLayerResult {
-            edges: vec![
-                edge("db-table", "table:users", "svc-a", "a.ts", 3),
-                edge("db-table", "table:users", "svc-a", "a.ts", 3),
-                edge("db-table", "table:users", "svc-b", "b.ts", 9),
-            ],
-            ..Default::default()
-        };
-        let out = shared_db_table_findings(&cl);
-        assert_eq!(out.len(), 1);
-        let sources = out[0].data.as_ref().unwrap()["sources"].as_array().unwrap();
-        assert_eq!(sources.len(), 2);
-    }
-}
+mod tests;

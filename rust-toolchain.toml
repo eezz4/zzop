@@ -1,0 +1,35 @@
+# Pins the toolchain that builds this repo toward the one users actually receive.
+#
+# The release matrix in .github/workflows/prebuild.yml ships x86_64-pc-windows-msvc for Windows, but a
+# dev box was measured building with stable-x86_64-pc-windows-gnu — mingw CRT locally, MSVC UCRT in the
+# artifact. `cargo test --workspace` was validating a different C runtime than the one users run.
+#
+# HOW THIS ACTUALLY RESOLVES (measured 2026-07-29, because the first draft of this comment got it
+# wrong). rustup has TWO separate settings and they are easy to confuse:
+#   * the HOST triple, fixed when rustup was installed        -> x86_64-pc-windows-msvc here
+#   * `rustup default`, a per-user choice                     -> stable-x86_64-pc-windows-gnu here
+# A bare `channel = "stable"` resolves against the HOST, not the default. So this file alone flips the
+# active toolchain from gnu to msvc on this box. Probed in a scratch directory: a rust-toolchain.toml
+# containing ONLY `channel = "stable"` already selects stable-x86_64-pc-windows-msvc, and adding
+# `targets` does not change that selection. `targets` is not what earns the CRT guarantee.
+#
+# WHAT THIS DOES NOT DO — the honest limit. On a Windows box whose rustup HOST is gnu, `stable` resolves
+# to gnu and this file does NOT flip the CRT; it only guarantees the shipped target is installed, so
+# `cargo test --workspace` there still validates mingw unless you pass
+# `--target x86_64-pc-windows-msvc` explicitly. That is a narrower guarantee than "everyone tests what
+# ships", and it is written down rather than left for the next person to rediscover.
+#
+# WHY `targets` STAYS ANYWAY: it guarantees the shipped Windows target is installed and buildable —
+# which is what makes the explicit `--target` escape hatch above available at all, and what lets a
+# gnu-host contributor reproduce a Windows-only failure. The cost is real and one-sided: rustup SYNCS
+# this list into an already-installed toolchain on first use of the override (measured, not assumed),
+# so a macOS/Linux host pays a one-time rust-std download for a target it never links. Their own builds
+# are otherwise unchanged — a native `cargo build` still uses the host triple.
+#
+# CI: this directory override outranks the `rustup default` that `dtolnay/rust-toolchain@stable` sets,
+# and that action exports no RUSTUP_TOOLCHAIN. Both resolve to `stable-<host>`, so CI is unaffected, and
+# the per-lane `--target` flags in prebuild.yml still work because that action installs those targets
+# into the same toolchain. NOT executed in CI — read from the action's own action.yml.
+[toolchain]
+channel = "stable"
+targets = ["x86_64-pc-windows-msvc"]

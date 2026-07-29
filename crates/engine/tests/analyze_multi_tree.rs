@@ -479,12 +479,18 @@ fn parallel_implementation_tripwire_fires_on_zero_edges_plus_enough_duplicate_ro
         "fixture must have zero cross-source edges: {:?}",
         out.cross_layer.edges
     );
-    let duplicate_route_count = out
+    // One copy per PROVIDING SOURCE (2026-07-29), so 5 shared routes across 2 trees are 10 findings —
+    // but 5 SIGNALS, which is what the threshold counts. See `count_signals`: deduping by route key is
+    // what keeps this threshold measuring API-surface overlap rather than tree count.
+    let duplicate_routes: Vec<&str> = out
         .cross_layer_findings
         .iter()
         .filter(|f| f.rule_id == "cross-layer/duplicate-route")
-        .count();
-    assert_eq!(duplicate_route_count, MIN_PARALLEL_IMPL_SIGNALS);
+        .map(|f| f.data.as_ref().unwrap()["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(duplicate_routes.len(), MIN_PARALLEL_IMPL_SIGNALS * 2);
+    let distinct: std::collections::BTreeSet<&str> = duplicate_routes.into_iter().collect();
+    assert_eq!(distinct.len(), MIN_PARALLEL_IMPL_SIGNALS);
 
     assert!(
         out.warnings

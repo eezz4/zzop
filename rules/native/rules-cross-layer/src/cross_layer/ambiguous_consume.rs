@@ -60,6 +60,15 @@ pub fn ambiguous_consume_findings(ambiguous_consumes: &[AmbiguousConsume]) -> Ve
                 file: a.consume.file.clone(),
                 line: a.consume.line,
                 message,
+                // The candidate providers this finding lists in `candidates`.
+                evidence_paths: a
+                    .candidates
+                    .iter()
+                    .take(MAX_CANDIDATES)
+                    .map(|c| c.provide.file.clone())
+                    .collect::<std::collections::BTreeSet<String>>()
+                    .into_iter()
+                    .collect(),
                 data: Some(serde_json::json!({
                     "kind": kind,
                     "key": key,

@@ -1,3 +1,13 @@
+crates/cache/src/hash.rs:FNV_OFFSET_A internal # FNV-1a basis; changing it re-addresses every cache entry filename
+crates/cache/src/hash.rs:FNV_OFFSET_B internal # FNV-1a basis; changing it re-addresses every cache entry filename
+crates/cache/src/hash.rs:FNV_PRIME_A internal # FNV-1a basis; changing it re-addresses every cache entry filename
+crates/cache/src/hash.rs:FNV_PRIME_B internal # FNV-1a basis; changing it re-addresses every cache entry filename
+crates/cache/src/lib.rs:DEFAULT_CACHE_DIR internal # zzop's own on-disk layout; already overridable via the cacheDir config key
+crates/cache/src/lib.rs:TOOL_DIR internal # zzop's own on-disk namespace (.zzop/); the walk prunes the RESOLVED cache dir, not this name
+crates/cache/src/store.rs:FINDINGS_DIR internal # cache-directory layout zzop defines
+crates/cache/src/store.rs:FORMAT_VERSION internal # on-disk entry format version
+crates/cache/src/store.rs:IR_DIR internal # cache-directory layout zzop defines
+crates/cache/src/store.rs:SCHEMA_VERSION_FILE internal # cache-directory layout zzop defines
 crates/config/src/lib.rs:CONFIG_SURFACE_JSON internal
 crates/config/src/lib.rs:DEFAULT_AUTHORED_PACKS_DIR internal # zzop's own on-disk layout; already overridable via packs.extraDirs
 crates/config/src/lib.rs:DEFAULT_CONFIG_FILENAME internal
@@ -29,16 +39,20 @@ crates/core/src/node.rs:NOW test
 crates/core/src/normalized.rs:NORMALIZED_AST_FORMAT internal
 crates/core/src/normalized.rs:SUPPORTED_NORMALIZED_AST_VERSION internal
 crates/core/src/pack_loader.rs:SUPPORTED_DSL_SCHEMA_VERSION internal
-crates/engine/src/analyze/assemble/helpers.rs:RUST_STD_CRATE_FAMILY fact # Rust's own std crate names
+crates/core/src/registry/redact.rs:REDACTED internal # the marker an excluded evidence path is replaced with; zzop's own output vocabulary, not a tunable
+crates/engine/build.rs:FNV_OFFSET internal # FNV-1a basis; changing it re-addresses every derived fingerprint (= one cache wipe)
+crates/engine/build.rs:FNV_PRIME internal # FNV-1a prime; same consequence as the basis above
 crates/engine/src/analyze/assemble/helpers/csharp.rs:CSHARP_STD_IMPORT_HEADS fact # .NET BCL namespace roots
 crates/engine/src/analyze/assemble/helpers/java.rs:JAVA_STD_IMPORT_HEADS fact # JDK package roots
+crates/engine/src/analyze/assemble/helpers/rust.rs:RUST_STD_CRATE_FAMILY fact # Rust's own std crate names
 crates/engine/src/analyze/compose/client_base.rs:SENTINEL_KIND internal # alias of zzop's own sentinel kind
 crates/engine/src/analyze/compose/global_prefix.rs:SENTINEL_KIND internal # alias of zzop's own sentinel kind
 crates/engine/src/analyze/diagnostics.rs:SAMPLE cap
 crates/engine/src/analyze/diagnostics/capability.rs:ON_RAMP_EXT_SAMPLE cap
 crates/engine/src/cache.rs:CACHE_SCHEMA_VERSION internal
 crates/engine/src/cache.rs:DSL_INTERPRETER_FINGERPRINT internal
-crates/engine/src/cache.rs:LEXICAL_FALLBACK_FINGERPRINT internal
+crates/engine/src/cache.rs:LEXICAL_FALLBACK_ID internal # names which projector produced an entry; the version half is a source hash (build.rs)
+crates/engine/src/cross_layer_findings/diagnosed.rs:DIAGNOSING_RULE_IDS internal # zzop rule ids, not user vocabulary — which of our own rules count as a specific diagnosis
 crates/engine/src/dead_exports.rs:NON_TS_CALL_GRAPH_EXTENSIONS fact # file extensions fixed by the languages
 crates/engine/src/disclosure.rs:ANALYSIS_DARK internal
 crates/engine/src/disclosure.rs:BLINDNESS_REGISTRY internal # zzop's own disclosure-class registry (ids, groups, prose)
@@ -49,7 +63,11 @@ crates/engine/src/disclosure/tests.rs:EXPECTED test
 crates/engine/src/dispatch.rs:DEFAULT_SKIP_DIRS convention -> vocabulary.skipDirs # dist/build/.next/target are build-output names a project picks; decides what is never analyzed at all
 crates/engine/src/dispatch.rs:NON_SOURCE_EXTENSIONS fact # extensions fixed by the file formats
 crates/engine/src/dispatch/tests.rs:EXPECTED test
+crates/engine/src/envelope/resolve.rs:EXTENSIONLESS_CANDIDATE_EXTENSIONS fact # extensions a resolver may append to an extensionless specifier — fixed by TS/bundler classic resolution, not by any project
 crates/engine/src/file_routes/mod.rs:HTTP_VERB_EXPORTS fact # Next.js App Router requires these exact export names
+crates/engine/src/file_routes/mod.rs:ROUTE_EXTENSIONS fact # the frameworks fixed these: Next pageExtensions default tsx|ts|jsx|js, Remix js|jsx|ts|tsx, Medusa route.ts|route.js. AMBIGUOUS - pageExtensions is overridable per project, but the override renames nothing; it narrows/widens which language-fixed extensions Next serves, and zzop tracks the default
+crates/engine/src/file_routes/tests.rs:NOT_ROUTED_BY_ANY_CONVENTION test
+crates/engine/src/file_routes/tests.rs:TYPESCRIPT_DISPATCH_EXTENSIONS test
 crates/engine/src/framework_silence/builtin_fetch.rs:FETCH_CALL_SITES_MIN cap
 crates/engine/src/framework_silence/builtin_fetch.rs:FUNNEL_TAIL internal # warning prose zzop emits
 crates/engine/src/framework_silence/builtin_fetch.rs:MAX_SAMPLES cap
@@ -79,7 +97,12 @@ crates/engine/src/pipeline/rust_workspace.rs:TARGET_SECTIONS fact # Cargo.toml s
 crates/engine/src/tests.rs:DERIVED_SCHEMA_GATE test
 crates/engine/src/trees/parallel_impl.rs:MIN_PARALLEL_IMPL_SIGNALS cap
 crates/engine/src/vocabulary.rs:DEFAULT_JAVA_SOURCE_ROOT convention -> vocabulary.javaSourceRoot # the Maven/Gradle layout is a source root a project can relocate (moved here from decorator_gate.rs SRC_ROOT, whose one reader now takes it as an argument)
-crates/metrics/src/recommendations/enrich.rs:DOUBLE_STAR_PLACEHOLDER internal # in-band placeholder for ** while a glob is rewritten; parsing mechanics, not a name
+crates/git/src/parse.rs:MS_PER_DAY internal # unit arithmetic (24*60*60*1000), neither a name nor a threshold
+crates/git/src/process.rs:COMMIT_MARKER internal # in-band marker in zzop's own git-log --format string
+crates/git/src/tests.rs:FAR_FUTURE_NOW_MS test
+crates/git/src/tests.rs:LATIN1_SUBJECT test
+crates/metrics/src/report_excludes/tests.rs:DROP test # fixture path excluded by the test's own glob; the paired KEEP is the control. No shipped counterpart — the exclude globs users write are config data, never a const here
+crates/metrics/src/report_excludes/tests.rs:KEEP test # fixture path the test's exclude glob must NOT match; paired with DROP so a filter that empties a list fails as loudly as one that filters nothing
 crates/metrics/src/scores/config.rs:DEFAULT_HIERARCHY_SHARED_DIRS convention -> vocabulary.hierarchySharedDirs # cross-cutting dirs exempted from layering violations
 crates/metrics/src/scores/config/fsd.rs:DEFAULT_FSD_BASE_DIRS convention -> vocabulary.fsd.baseDirs # FSD base-layer dir name
 crates/metrics/src/scores/config/fsd.rs:DEFAULT_FSD_ENTRY convention -> vocabulary.fsd.entry # FSD entry-layer dir names; a project using views/screens scores against a layout it never adopted
@@ -91,6 +114,9 @@ crates/summary/src/analyze/tests.rs:EXAMPLE_ENVELOPE test
 crates/summary/src/analyze/tests.rs:SHAPER_INVENTED_KEYS test # reply keys the shaper invents (no AnalyzeOutputView row); fail-closed whitelist for a derived pin
 crates/summary/src/contracts.rs:CONFIG_TEMPLATE_FILENAME internal
 crates/summary/src/contracts.rs:CONFIG_TEMPLATE_NAME internal
+crates/summary/src/contracts.rs:DISCLOSURE_CONTRACT_NAME internal # zzop's own contract-document name, not a name a project picks; T1 - the ONE symbol the reply's disclosure pointer and the table row answering it both read, so the pointer cannot rot on one surface while the other stays green
+crates/summary/src/contracts.rs:URI_PREFIX internal # zzop's own resource URI space (zzop://contract/), not a name a project picks; T1 - moved here from packages/mcp/src/resources.rs, which now imports it, so the MCP resources lane and the reply pointer spell one prefix
+crates/summary/src/graph/cosmograph/tests.rs:EMITTER test # workspace-relative path of this lane's emitter, used test-only to locate its owning _cliOnlyLanes entry in surface-parity.json by `sources` rather than by lane name; not a name any project spells
 crates/summary/src/graph/dep.rs:DEFAULT_DEP_TOP cap # node cap for the dep diagram; readability threshold, overridable with --top
 crates/summary/src/graph/mermaid.rs:CLASS_DEFS internal # mermaid classDef names and colours zzop emits
 crates/summary/src/graph/mod.rs:DEFAULT_GRAPH_TOP cap
@@ -101,7 +127,6 @@ crates/summary/src/graph/posture.rs:DEFAULT_POSTURE_TOP cap # per-tree route cap
 crates/summary/src/graph/posture.rs:WRITE_METHODS fact # HTTP method TOKENS fixed by RFC, mirroring http_scan.rs WRITE_HTTP_METHODS - not names a project picks
 crates/summary/src/graph/risk.rs:DEFAULT_RISK_TOP cap # per-kind node cap for the risk diagram; readability threshold, overridable with --top
 crates/summary/src/manifest/mod.rs:RELATIONS internal # zzop manifest relation names
-crates/summary/src/output/bucket_keys.rs:DEFAULT_BUCKET_KEYS_LIMIT cap
 crates/summary/src/output/bucket_keys.rs:KEY_BUCKETS internal # zzop's own output bucket names
 crates/summary/src/output/mod.rs:DEFAULT_DEGRADED_LIMIT cap
 crates/summary/src/output/mod.rs:DEFAULT_EDGES_LIMIT cap
@@ -200,10 +225,13 @@ parser/parser-typescript/src/lang/write_site.rs:WRITE_LABEL_TOKEN_COUNT cap
 parser/parser-typescript/src/lib.rs:ARRAY_ITERATION_METHODS fact # ECMAScript Array.prototype method names
 parser/parser-typescript/src/lib.rs:PARSER_FINGERPRINT internal
 parser/parser-typescript/src/lib.rs:PROMISE_CONTINUATION_METHODS fact # ECMAScript Promise method names
+rules/native/rules-cross-layer/src/cross_layer/all_consumes_unjoined.rs:MAX_SAMPLE_KEYS cap
+rules/native/rules-cross-layer/src/cross_layer/all_consumes_unjoined.rs:MIN_UNJOINED_CONSUMES cap
+rules/native/rules-cross-layer/src/cross_layer/all_consumes_unjoined/subsume.rs:REPLACED internal # zzop rule ids this fold replaces, not user vocabulary
 rules/native/rules-cross-layer/src/cross_layer/ambiguous_consume.rs:MAX_CANDIDATES cap
+rules/native/rules-cross-layer/src/cross_layer/blindness.rs:MIN_TOTAL_CONSUMES cap
 rules/native/rules-cross-layer/src/cross_layer/external_host_fanout.rs:FANOUT_MIN_FILES cap
 rules/native/rules-cross-layer/src/cross_layer/external_secret_in_url.rs:SECRET_PARAM_NAMES convention -> vocabulary.secretParamNames # query-parameter names a project chooses - the secret-param class of the vocabulary decision
-rules/native/rules-cross-layer/src/cross_layer/mod.rs:MIN_TOTAL_CONSUMES cap
 rules/native/rules-cross-layer/src/cross_layer/mod.rs:VERSION_SEGMENT_PATTERN convention -> vocabulary.apiVersionSegmentPattern # AMBIGUOUS - /v1/ is a widespread URL convention, not a standard; date-versioned APIs (/2024-01/) are invisible to it
 rules/native/rules-cross-layer/src/cross_layer/prefix_drift.rs:MIN_PREFIX_DRIFT_GROUP cap
 rules/native/rules-cross-layer/src/cross_layer/retrying_write_no_idempotency.rs:IDEMPOTENCY_GUARDED_ATTR internal # zzop producer/consumer attribute key

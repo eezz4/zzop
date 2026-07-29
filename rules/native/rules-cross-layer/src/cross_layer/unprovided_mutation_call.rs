@@ -116,6 +116,7 @@ pub fn unprovided_mutation_call_findings(
                 file: c.consume.file.clone(),
                 line: c.consume.line,
                 message,
+                evidence_paths: Vec::new(),
                 data: Some(serde_json::json!({
                     "consumeKey": key,
                     "consumeSource": c.source,

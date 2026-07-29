@@ -396,7 +396,7 @@ fn from_parts_overlay_wins_over_native_for_the_same_target_and_key() {
 }
 
 #[test]
-fn from_overlays_still_delegates_with_no_native_attributes() {
+fn from_parts_with_no_native_attributes_still_reads_the_overlay() {
     let overlays = vec![overlay_with_attrs(vec![Attribute {
         target: EntityRef::PathScope {
             prefix: "/admin".into(),
@@ -404,7 +404,7 @@ fn from_overlays_still_delegates_with_no_native_attributes() {
         key: "auth-guarded".into(),
         value: json!(true),
     }])];
-    let s = AttributeStore::from_overlays(&overlays);
+    let s = AttributeStore::from_parts(Vec::new(), &overlays);
     assert_eq!(
         s.route_attr("http", "POST /admin/x", "auth-guarded"),
         Some(&json!(true))

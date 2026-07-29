@@ -3,7 +3,11 @@
 //! "author an adapter with only the binary" promise — `resources/list` advertises every contract,
 //! `resources/read` returns its full text. Deterministic: same binary, same list, same bytes.
 
-const URI_PREFIX: &str = "zzop://contract/";
+/// The URI space, owned by the shared contract table rather than spelled here. Three surfaces now
+/// build a `zzop://contract/<name>` string — this handler pair and, since the disclosure fold, every
+/// analyze-shaped reply, which prints the disclosure document's URI as a pointer. A local copy of the
+/// prefix is a pointer that can drift away from the lane that has to answer it.
+use zzop_summary::contracts::URI_PREFIX;
 
 /// `resources/list` result — every embedded contract document, in embed order.
 pub fn list() -> serde_json::Value {
@@ -130,6 +134,47 @@ mod tests {
         assert!(
             json["_docs"]["purpose"].is_string(),
             "missing _docs.purpose"
+        );
+    }
+
+    /// Pins the OTHER end of the disclosure fold (2026-07-29): every analyze-shaped reply now prints
+    /// `disclosure.resource` instead of the registry's ~10.6KB of prose, and this is the lane that has
+    /// to answer it. A pointer this handler cannot serve would be worse than no pointer — the reader
+    /// would lose the classes entirely, where before they merely cost tokens.
+    ///
+    /// Asserted through the WIRE, not through the table: `read` with the exact URI the reply prints,
+    /// checking that the served text really is the class list (an id and a status token), and that
+    /// `list` advertises it — a document that reads but is not listed is discoverable only to a reader
+    /// who already knows the name.
+    #[test]
+    fn the_disclosure_pointer_every_reply_prints_reads_back_the_full_class_list() {
+        let name = zzop_summary::contracts::DISCLOSURE_CONTRACT_NAME;
+        let uri = format!("zzop://contract/{name}");
+        let params = serde_json::json!({ "uri": uri });
+        let read = super::read(Some(&params)).expect("the reply's own pointer must resolve");
+        let text = read["contents"][0]["text"]
+            .as_str()
+            .expect("a served document has text");
+        assert_eq!(read["contents"][0]["mimeType"], "text/markdown");
+        // The wire really carries the table's bytes (this crate is a thin protocol facade — serving
+        // something else would be the drift), and those bytes really are the class list: a per-class
+        // heading and all three status tokens. That the list is COMPLETE against the engine's live
+        // registry is sealed one crate down, in `crates/summary/tests/disclosure_fold.rs`, which is
+        // where the dev-dependency for reading the registry belongs.
+        let doc = zzop_summary::contracts::find(name).expect("the table serves it too");
+        assert_eq!(text, doc.content);
+        assert!(text.contains("### "), "no per-class heading: {text:.400}");
+        for status in ["asserted", "partial", "notYetDetected"] {
+            assert!(text.contains(status), "served text omits status {status}");
+        }
+        let listed = super::list();
+        assert!(
+            listed["resources"]
+                .as_array()
+                .expect("resources array")
+                .iter()
+                .any(|r| r["uri"] == serde_json::json!(uri)),
+            "resources/list must advertise {uri}"
         );
     }
 

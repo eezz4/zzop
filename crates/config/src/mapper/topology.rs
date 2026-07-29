@@ -49,13 +49,24 @@ pub(super) fn apply_topology(
     if let Some(topo) = tree_obj.get("topology") {
         let topo = topo.as_object().ok_or_else(|| {
             ConfigError(format!(
-                "trees[{i}].topology must be an object ({{ \"mountedAt\": ..., \"mounts\": \
-                 [...], \"hosts\": [...] }})."
+                "trees[{i}].topology must be an object ({{ \"mountedAt\": ..., \"clientBase\": \
+                 ..., \"mounts\": [...], \"hosts\": [...] }})."
             ))
         })?;
         if let Some(v) = topo.get("mountedAt") {
             let s = validate_mount_at(v, &format!("trees[{i}].topology.mountedAt"))?;
             tree_request.insert("mountedAt".to_string(), Value::String(s));
+        }
+        // The CALLING side's mirror of `mountedAt` (2026-07-29). `mountedAt`/`mounts`/`hosts` are all
+        // about where this tree is SERVED; `clientBase` is the prefix this tree's own outbound calls
+        // carry — the base an engine that refuses to guess cannot read when it is assigned from a
+        // cross-file constant (`axios.defaults.baseURL = settings.baseApiUrl`). Same validation as
+        // `mountedAt` because it is the same kind of value: a leading-slash path prefix, no scheme, no
+        // `{}` placeholder. Belongs in `topology` for the reason the grouping exists — it answers the
+        // same "where does this tree sit relative to the gateway" question, from the other end.
+        if let Some(v) = topo.get("clientBase") {
+            let s = validate_mount_at(v, &format!("trees[{i}].topology.clientBase"))?;
+            tree_request.insert("clientBase".to_string(), Value::String(s));
         }
         if let Some(v) = topo.get("mounts") {
             let arr = validate_mounts_array(v, &format!("trees[{i}].topology.mounts"))?;

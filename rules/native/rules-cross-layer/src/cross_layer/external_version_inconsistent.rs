@@ -128,6 +128,10 @@ pub fn external_version_inconsistent_findings(
             file: anchor.consume.file.clone(),
             line: anchor.consume.line,
             message,
+            // Deliberately empty, not overlooked: everything this finding names besides its anchor is a
+            // URL path (`versionedPathExamples`/`versionlessPathExamples`) or a source ID
+            // (`consumeSources`). Neither is a repo path, so neither is `exclude`'s business.
+            evidence_paths: Vec::new(),
             data: Some(serde_json::json!({
                 "host": host,
                 "versionedPathCount": versioned.len(),

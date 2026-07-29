@@ -22,9 +22,12 @@
 //!   shaping module also touches the wire, through these helpers and only these:
 //!   `output::FindingFilters::from_args`, the JSON front door onto the wire-neutral `new`.)
 //! - `output` — tool-output shaping: `FindingFilters`, capped lists, explicit truncation disclosure,
-//!   cross-layer bucket-key shaping (the token-bomb guard behind every reply).
-//! - `contracts` — the compile-time embedded authoring-contract documents (`zzop://contract/<name>` over
-//!   MCP, `zzop contract [<name>]` from a terminal): the ONE table both surfaces resolve names through.
+//!   cross-layer bucket-key shaping, the blindness-registry fold (the token-bomb guard behind every
+//!   reply).
+//! - `contracts` — the authoring-contract documents (`zzop://contract/<name>` over MCP,
+//!   `zzop contract [<name>]` from a terminal): the ONE table both surfaces resolve names through. Every
+//!   row but one is a compile-time embed of a committed file; `disclosure-classes` is rendered from the
+//!   engine's live blindness registry, which lives in Rust and has no file to embed.
 //! - `siblings` — sibling-directory scope disclosure for `cross_summary`.
 //! - `suggest`  — deterministic nearest-key fallback for `endpoint_summary`'s `not-found` suggestions.
 //! - `config_warnings` — facade-level `configWarnings` merge helper shared by `analyze_summary`/

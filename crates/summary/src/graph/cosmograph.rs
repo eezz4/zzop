@@ -32,6 +32,16 @@
 //! zzop surface whose reader is a person looking at a screen, and the self-documenting-long-name rule
 //! that governs every other surface would put an unreadable string on every node.
 //!
+//! # Every axis always, and a missing one is a missing KEY
+//! The points table carries every axis a viewer can style by, on every run — there is no flag that adds
+//! or removes a column, because a schema that changes per invocation is one no consumer can write
+//! against. What varies instead is whether a row HAS a given key: an axis this run did not measure
+//! (`loc` for a file outside the scanned set, the git axes on a run with git collection off) is OMITTED,
+//! never written as `0`. `churn: 0` would say "this file never changed" in the same bytes as "nobody
+//! looked", and a viewer colouring by it would draw the second as the first — the silent-failure shape
+//! this repo refuses everywhere else. A viewer offers the columns its rows actually contain, so an
+//! absent axis correctly disappears from the styling menu instead of appearing as a flat zero field.
+//!
 //! # Disclosure goes to stderr, not into the table
 //! stdout here is a DATA TABLE that a viewer parses; a `%%` census line like mermaid's would be a corrupt
 //! row. The census is therefore returned separately for the CLI to print on stderr, which keeps the
@@ -51,6 +61,17 @@ pub(super) struct CosmographCensus {
     pub(super) total_edges: usize,
     pub(super) cycles: usize,
     pub(super) scoped: bool,
+    /// How many emitted rows actually carried each measured axis — `None` for the LINKS table, which
+    /// has no node axes and would be describing a table its reader is not looking at.
+    pub(super) measured: Option<MeasuredAxes>,
+}
+
+/// Emitted-row counts for the axes that can be absent. Omitting an unmeasured axis is honest but
+/// SILENT — the viewer just has one fewer column to offer — so the count rides the census, which is
+/// this lane's honesty channel. `0 of N` is the answer to "where did colour-by-churn go?".
+pub(super) struct MeasuredAxes {
+    pub(super) loc: usize,
+    pub(super) git: usize,
 }
 
 impl CosmographCensus {
@@ -65,9 +86,18 @@ impl CosmographCensus {
         } else {
             String::new()
         };
+        let axes_note = match &self.measured {
+            None => String::new(),
+            Some(m) => format!(
+                " Measured axes: loc on {} of {} row(s), git history on {} of {} — an axis this run \
+                 did not measure is an ABSENT column, never a zero.",
+                m.loc, self.nodes_emitted, m.git, self.nodes_emitted
+            ),
+        };
         format!(
             "zzop graph --domain dep --format cosmograph: {} of {} files, {} of {} import edges, \
-             {} circular finding(s){scope_note}. UNCAPPED — --top does not apply to this format.",
+             {} circular finding(s){scope_note}. UNCAPPED — --top does not apply to this format.\
+             {axes_note}",
             self.nodes_emitted, self.total_nodes, self.links_emitted, self.total_edges, self.cycles
         )
     }
@@ -78,7 +108,7 @@ impl CosmographCensus {
 fn kept_ids<'a>(u: &'a DepUniverse, scope: Option<&str>) -> BTreeSet<&'a String> {
     u.nodes
         .iter()
-        .filter(|(id, (source, rel))| node_in_scope(scope, id, source, rel))
+        .filter(|(id, n)| node_in_scope(scope, id, &n.source, &n.rel))
         .map(|(id, _)| id)
         .collect()
 }
@@ -106,21 +136,22 @@ pub(super) fn nodes_ndjson(u: &DepUniverse, scope: Option<&str>) -> (String, Cos
     let kept = kept_ids(u, scope);
     let deg = degrees(u);
     let mut out = String::new();
-    for (id, (source, rel)) in &u.nodes {
+    let mut measured = MeasuredAxes { loc: 0, git: 0 };
+    for (id, n) in &u.nodes {
         if !kept.contains(id) {
             continue;
         }
         let (fan_in, fan_out) = deg.get(id).copied().unwrap_or((0, 0));
         // A basename for the screen and the full path for identification — both, because a viewer shows
         // the label always and the row on demand.
-        let (folder, label) = match rel.rsplit_once('/') {
+        let (folder, label) = match n.rel.rsplit_once('/') {
             Some((dir, base)) => (dir, base),
-            None => ("", rel.as_str()),
+            None => ("", n.rel.as_str()),
         };
-        let row = json!({
+        let mut row = json!({
             "id": id,
-            "source": source,
-            "path": rel,
+            "source": n.source,
+            "path": n.rel,
             "label": label,
             "folder": folder,
             "fanIn": fan_in,
@@ -128,6 +159,27 @@ pub(super) fn nodes_ndjson(u: &DepUniverse, scope: Option<&str>) -> (String, Cos
             "degree": fan_in + fan_out,
             "inCycle": u.cycle_files.contains(id),
         });
+        // MEASURED axes are appended, never defaulted. Everything above is derived from the graph
+        // itself, so it exists for every node by construction; everything below comes from a
+        // measurement that can be missing, and the two cases must not share a value. See `DepNode`'s
+        // doc — a missing key is "nobody looked", `0` would be a claim. A viewer reads its columns from
+        // the rows it actually got, so an absent axis simply is not offered as a styling choice, which
+        // is the correct outcome.
+        if let Some(obj) = row.as_object_mut() {
+            if let Some(loc) = n.loc {
+                measured.loc += 1;
+                obj.insert("loc".to_string(), json!(loc));
+            }
+            if let Some(g) = &n.git {
+                measured.git += 1;
+                obj.insert("changeCount".to_string(), json!(g.change_count));
+                obj.insert("churn".to_string(), json!(g.churn));
+                obj.insert("authorCount".to_string(), json!(g.author_count));
+                if let Some(last) = &g.last_modified {
+                    obj.insert("lastModified".to_string(), json!(last));
+                }
+            }
+        }
         out.push_str(&row.to_string());
         out.push('\n');
     }
@@ -139,6 +191,7 @@ pub(super) fn nodes_ndjson(u: &DepUniverse, scope: Option<&str>) -> (String, Cos
         total_edges: u.edges.len(),
         cycles: u.cycles,
         scoped: scope.is_some(),
+        measured: Some(measured),
     };
     (out, census)
 }
@@ -181,6 +234,8 @@ pub(super) fn links_ndjson(u: &DepUniverse, scope: Option<&str>) -> (String, Cos
         total_edges: u.edges.len(),
         cycles: u.cycles,
         scoped: scope.is_some(),
+        // The links table carries no node axes, so it has no coverage to report — see `measured`'s doc.
+        measured: None,
     };
     (out, census)
 }

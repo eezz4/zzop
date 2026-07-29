@@ -5,7 +5,24 @@ workflow, CI gates, and conventions for PRs.
 
 ## Prerequisites
 
-- Rust (stable toolchain)
+- Rust (stable). [`rust-toolchain.toml`](rust-toolchain.toml) pins the channel and requests the
+  `x86_64-pc-windows-msvc` target, so `rustup` applies both automatically on your first `cargo`
+  invocation in this repo — you do not need to configure anything, and you should not override it with
+  `rustup default`/`rustup override`. The pin exists because the release matrix in
+  [`.github/workflows/prebuild.yml`](.github/workflows/prebuild.yml) ships that MSVC target for
+  Windows: a Windows box building with the `-gnu` toolchain builds against the mingw CRT, so
+  `cargo test --workspace` would validate a different C runtime than the artifact users receive.
+  **On Windows this target needs the MSVC linker** — install the Visual Studio Build Tools with the
+  "Desktop development with C++" workload. On macOS and Linux the only effect is a one-time rust-std
+  download for a target you never link against — your builds keep using your own host triple.
+  - ⚠ **Windows contributors, one limit worth knowing.** A bare `stable` channel resolves against your
+    rustup **host** triple, which is a different setting from `rustup default`. If your rustup was
+    installed with the standard MSVC host, the pin flips you to MSVC and `cargo test --workspace`
+    validates the shipped CRT. If your rustup host is `-gnu`, the pin only guarantees the MSVC target
+    is *installed* — your default `cargo test` still builds mingw, and you need an explicit
+    `cargo test --workspace --target x86_64-pc-windows-msvc` to test what ships. The file cannot force
+    this for everyone without naming a full Windows triple, which would break macOS and Linux
+    contributors outright.
 - Node 18+ — **only** for the local measurement harness under `scripts/measure/` (see
   [Re-measuring before you commit](#re-measuring-before-you-commit)). Nothing that ships needs it:
   both binaries are plain Rust.
@@ -93,10 +110,7 @@ they gate how a change must be SHAPED rather than merely whether it compiles:
   docs hub (`docs/README.md`) and every entry under an examples hub from that hub's `README.md`
   (`examples/README.md`, `examples/adapters/README.md`); and a vocabulary
   restated in prose must match its SSOT in code.
-- **Drift/census guards** (`check-parser-fingerprint-bump.sh`, `check-policy-census.sh`) — a parser
-  crate's `src/**` cannot change without bumping its `PARSER_FINGERPRINT` const (a parser crate with a
-  `src/` and no such const fails outright, and a change to `crates/core`'s shared projected-type surface
-  without a `CACHE_SCHEMA_VERSION` bump fails too — see the script's core section); a new policy-shaped
+- **Census guard** (`check-policy-census.sh`) — a new policy-shaped
   constant must be triaged into `scripts/policy-census.txt`, and the triage VERDICT is part of the
   snapshot — every line carries an axis (`fact` / `convention` / `cap` / `internal` / `test`), and
   `--update` writes `?` for a name it has not seen before, so regenerating cannot make the guard green.
@@ -150,6 +164,18 @@ node scripts/measure/snapshot.mjs --label mine-<what-changed> \
 # 3. read the difference
 node scripts/measure/diff.mjs base-<commit> mine-<what-changed>
 ```
+
+Before pushing a change that can move findings, also score the labeled benchmark — the same thing
+CI's `detection-benchmark` job runs:
+
+```sh
+bash scripts/measure/detection-gate.sh   # takes NO arguments; it builds the binary it scores
+```
+
+It builds its own binary on purpose. It used to accept a path, and on 2026-07-29 a leftover 0.24.0
+binary scored a green `TP 143 FN 0 FP 0` against a 0.25.0 tree — the gate certified a build nobody
+had made. CI runs this only **after** a push, so this local run is the only place a detection
+regression is visible beforehand, which is exactly why it must not be able to score the wrong bytes.
 
 **Read the anchor difference, not the count table.** `diff.mjs` prints, as its primary output, which
 `(tree, rule, file, line)` anchors disappeared and which appeared. A per-rule count delta cannot tell

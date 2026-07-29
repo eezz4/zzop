@@ -2,6 +2,7 @@
 name = "zzop-parser-prisma"
 version.workspace = true
 edition = "2021"
+license.workspace = true
 publish = false
 
 [dependencies]
@@ -17,3 +18,5 @@ regex = { workspace = true }
 # `zzop-core` alone (never on this crate), so it never created a cycle either way.
 [dev-dependencies]
 zzop-rules-schema = { path = "../../rules/native/rules-schema" }
+# tests/no_panic_proptest.rs — the arbitrary-input panic property every parser frontend carries.
+proptest = { workspace = true }

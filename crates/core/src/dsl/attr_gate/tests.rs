@@ -31,6 +31,7 @@ fn finding(rule_id: &str, file: &str) -> Finding {
         file: file.to_string(),
         line: 1,
         message: "m".to_string(),
+        evidence_paths: Vec::new(),
         data: None,
     }
 }

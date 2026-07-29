@@ -17,7 +17,8 @@
 //! # What a node IS
 //! One FILE, labelled by its tree-relative path, prefixed by `sourceId` when the run has more than one
 //! tree (two trees can both have `src/index.ts`). An edge is "importer -> imported", the direction
-//! `ir.dep` already stores.
+//! `ir.dep` already stores. What ELSE a node carries — the measured axes a viewer styles by, and the
+//! rule that an unmeasured one is an omitted column rather than a zero — is [`node`]'s business.
 //!
 //! # Cycles are the point, so they are drawn differently
 //! `circular` is the highest-severity structural finding this engine emits and the hardest to read as
@@ -42,11 +43,15 @@ use serde_json::Value;
 /// doc's density note; a flowchart stops being readable well before it stops being renderable.
 pub const DEFAULT_DEP_TOP: usize = 40;
 
+mod node;
+
+pub(super) use node::DepNode;
+
 /// One file node, keyed by its display id so two trees' identical relative paths cannot collide.
 #[derive(Default)]
 struct DepGraph {
-    /// display id -> (sourceId, rel)
-    nodes: BTreeMap<String, (String, String)>,
+    /// display id -> node
+    nodes: BTreeMap<String, DepNode>,
     edges: BTreeSet<(String, String)>,
     in_cycle: BTreeSet<String>,
 }
@@ -67,8 +72,8 @@ struct DepCensus {
 /// whole understanding of the graph and differ only in what they do with it — which is the property that
 /// keeps them from drifting into two different answers about the same repo.
 pub(super) struct DepUniverse {
-    /// display id -> (sourceId, tree-relative path)
-    pub(super) nodes: BTreeMap<String, (String, String)>,
+    /// display id -> node
+    pub(super) nodes: BTreeMap<String, DepNode>,
     pub(super) edges: BTreeSet<(String, String)>,
     pub(super) cycle_files: BTreeSet<String>,
     pub(super) cycles: usize,
@@ -90,7 +95,7 @@ pub(super) fn collect(v: &Value) -> DepUniverse {
     let trees = v["trees"].as_array().unwrap_or(&empty);
     let multi = trees.len() > 1;
 
-    let mut all_nodes: BTreeMap<String, (String, String)> = BTreeMap::new();
+    let mut all_nodes: BTreeMap<String, DepNode> = BTreeMap::new();
     let mut all_edges: BTreeSet<(String, String)> = BTreeSet::new();
     let mut cycle_files: BTreeSet<String> = BTreeSet::new();
     let mut cycles = 0usize;
@@ -103,12 +108,15 @@ pub(super) fn collect(v: &Value) -> DepUniverse {
                 rel.to_string()
             }
         };
+        // The measured axes (`ir.loc`, and the git history when this tree collected any) — read once
+        // per tree, then asked per file. See `node`'s module doc for why an unmeasured one stays `None`.
+        let axes = node::TreeAxes::of(t);
         if let Some(dep) = t["output"]["ir"]["dep"].as_object() {
             for (from, tos) in dep {
-                all_nodes.insert(id(from), (source.to_string(), from.clone()));
+                all_nodes.insert(id(from), axes.node(source, from));
                 for to in tos.as_array().unwrap_or(&empty) {
                     let Some(to) = to.as_str() else { continue };
-                    all_nodes.insert(id(to), (source.to_string(), to.to_string()));
+                    all_nodes.insert(id(to), axes.node(source, to));
                     all_edges.insert((id(from), id(to)));
                 }
             }
@@ -149,9 +157,9 @@ pub(super) fn project(v: &Value, scope: Option<&str>, top: usize) -> String {
 
     // Pass 2 — scope, then rank by degree and cap NODES. Ranking is (degree desc, id asc): a total
     // order, so the same analysis always draws the same picture.
-    let in_scope: BTreeMap<&String, &(String, String)> = all_nodes
+    let in_scope: BTreeMap<&String, &DepNode> = all_nodes
         .iter()
-        .filter(|(id, (source, rel))| node_in_scope(scope, id, source, rel))
+        .filter(|(id, n)| node_in_scope(scope, id, &n.source, &n.rel))
         .collect();
     let mut degree: BTreeMap<&String, usize> = in_scope.keys().map(|k| (*k, 0)).collect();
     for (a, b) in &all_edges {
@@ -211,9 +219,9 @@ fn render(g: &DepGraph, c: &DepCensus, scope: Option<&str>, top: usize) -> Strin
     out.push_str("flowchart LR\n");
 
     let index: BTreeMap<&String, usize> = g.nodes.keys().enumerate().map(|(i, k)| (k, i)).collect();
-    for (id, (_, rel)) in &g.nodes {
+    for (id, n) in &g.nodes {
         let i = index[id];
-        let label = rel.replace('"', "'");
+        let label = n.rel.replace('"', "'");
         if g.in_cycle.contains(id) {
             // A distinct SHAPE, not only a class: a reader looking at raw mermaid text (or a renderer
             // with no CSS) still sees which files are in a cycle.

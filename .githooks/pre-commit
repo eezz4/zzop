@@ -6,15 +6,9 @@
 #
 # Scope: the fast guards. cargo test/clippy are excluded (too slow for a hook; CI owns them).
 #
-# check-parser-fingerprint-bump USED to be excluded here too, on the reasoning that it "diffs against
-# a base commit — a release/CI concern, not a per-commit one". That reasoning was wrong in exactly the
-# way that mattered: this project's batch flow leaves a whole batch uncommitted, so at the moment the
-# guard's subject (an unbumped fingerprint) is most likely to exist, the only two lanes running it
-# (pre-push, CI) had not run yet — and the guard itself, on a 100%-uncommitted batch, read the empty
-# range and printed OK having looked at nothing. It now reads the WORKING TREE for its file list (see
-# its own header), which is precisely the bytes a pre-commit hook is supposed to judge, so it belongs
-# in this array. It is still ALSO wired into .githooks/pre-push, which asks the different, push-shaped
-# question (does the outgoing COMMIT range carry the bump / the squash marker?).
+# The parser-fingerprint guard used to run here. It is gone (2026-07-29): every fingerprint it
+# policed is now derived from a hash of the source that produces the cached bytes
+# (crates/engine/build.rs), so there is no bump to forget and nothing to check.
 #
 # Which bytes the guards read: the WORKING TREE, not the index — a violation in an unstaged file also
 # blocks the commit; stash if that's ever wrong. ONE guard deliberately differs:
@@ -49,7 +43,7 @@ GUARDS=(
   check-overclaim-prose
   check-vendor-token-literals
   check-server-json-hashes
-  check-parser-fingerprint-bump
+  check-license-shipping
 )
 
 for g in "${GUARDS[@]}"; do

@@ -139,6 +139,7 @@ pub fn dead_candidate_findings(
                  template-string dynamic import).",
                 disable_hint("dead-candidates")
             ),
+            evidence_paths: Vec::new(),
             data: None,
         })
         .collect()

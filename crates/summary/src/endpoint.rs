@@ -54,6 +54,11 @@ pub fn endpoint_summary(
             }
         }
     }
+    // The query core forwards the analysis's run-global blindness registry verbatim; fold it to counts
+    // plus a pointer here, exactly like the analyze/cross replies (`crate::output::disclosure`). This
+    // reply is the shortest of the three — a definitive one-key verdict — so the un-folded registry was
+    // the overwhelming majority of its bytes.
+    v["disclosure"] = crate::output::fold_disclosure(&v["disclosure"]);
     v["config"] = loaded
         .config_path
         .as_deref()

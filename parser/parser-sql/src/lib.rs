@@ -34,6 +34,12 @@
 //!   `CREATE` and `TABLE`.
 //! - `+dml-table-refs-v1`: the `consume` module is new — `extract_statement_table_refs` projects the
 //!   CONSUME side of the channel from a SQL statement string.
+///
+/// **This string is an ID, not a version — it no longer has to be bumped.** `crates/engine/build.rs`
+/// hashes this crate's whole dependency closure into the cache key beside it, so a change to any
+/// source here invalidates on its own. What is left is the part a person reads in a cache path or a
+/// bug report: which frontend parsed the file. Change it when the FRONTEND changes; correctness no
+/// longer depends on remembering.
 pub const PARSER_FINGERPRINT: &str = "sql/0.21.0+dml-table-refs-v1";
 
 mod consume;

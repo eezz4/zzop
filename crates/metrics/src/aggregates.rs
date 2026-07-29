@@ -1,5 +1,5 @@
-//! Aggregation helpers — roll up per-file/per-edge/per-action data to a coarser granularity for
-//! summary views (folder heatmaps, folder dep graphs, CI action blast-radius).
+//! Aggregation helpers — roll up per-file/per-edge data to a coarser granularity for summary views
+//! (folder heatmaps, folder dep graphs).
 
 use std::collections::BTreeMap;
 
@@ -160,107 +160,6 @@ fn folder_of(path: &str, depth: usize) -> String {
     }
     let take = depth.min(parts.len() - 1);
     parts[..take].join("/")
-}
-
-// ---------------------------------------------------------------------------------------------
-// aggregateActionDeps — aggregates ActionUse[] by owner/vendor for CI external action blast-radius
-// visibility.
-//
-// Design note: no GitHub Actions workflow parser exists in this crate yet. Rather than build one
-// just for this aggregate (out of scope here, and not a dependency this file should own),
-// `ActionUse` is declared locally as the minimal plain-data input this aggregate needs. If a real
-// GitHub Actions parser is added later, its output type should be unified with this one.
-//
-// Casing note: unlike every other type in this file, `ActionUse`/`ActionDepSummary` do NOT carry
-// `#[serde(rename_all = "camelCase")]` — neither `aggregate_action_deps` nor these two types is wired
-// into `AnalyzeOutputView` (nothing builds them into the facade output view today), so they never reach
-// the JSON wire boundary this casing unification covers. Add the attribute when/if this aggregate is wired up.
-// ---------------------------------------------------------------------------------------------
-
-/// A single `uses:` reference extracted from a GitHub Actions workflow file (see module doc above
-/// for why this type is declared locally rather than sourced from a dedicated parser).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ActionUse {
-    /// raw `owner/name@ref` or `owner/name/sub@ref`.
-    pub action: String,
-    /// organization/user.
-    pub owner: String,
-    /// action name (sub-path excluded).
-    pub name: String,
-    /// tag/branch/sha.
-    pub reference: String,
-    /// relative workflow file path.
-    pub workflow_file: String,
-    pub line: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ActionDepSummary {
-    /// vendor = owner; actions/* is GitHub official.
-    pub vendor: String,
-    /// distinct action names (owner/name), sorted.
-    pub actions: Vec<String>,
-    /// distinct workflow files, sorted.
-    pub workflows: Vec<String>,
-    /// total uses count.
-    pub count: u32,
-    /// ratio of pinned (SHA ref) uses among this vendor's actions (0..1).
-    pub pinned_ratio: f64,
-}
-
-const TWO_DECIMAL_FACTOR: f64 = 100.0;
-
-/// True for a 7-40 char hex string (equivalent to the regex `/^[0-9a-f]{7,40}$/i`).
-fn is_sha_ref(reference: &str) -> bool {
-    let len = reference.len();
-    (7..=40).contains(&len) && reference.bytes().all(|b| b.is_ascii_hexdigit())
-}
-
-/// Aggregates `ActionUse`s by owner/vendor for CI external-action blast-radius visibility.
-pub fn aggregate_action_deps(uses: &[ActionUse]) -> Vec<ActionDepSummary> {
-    struct Acc {
-        actions: std::collections::BTreeSet<String>,
-        workflows: std::collections::BTreeSet<String>,
-        count: u32,
-        pinned: u32,
-    }
-
-    // BTreeMap keeps vendor accumulation order deterministic; final output order is decided by the
-    // explicit sort below regardless.
-    let mut by_vendor: BTreeMap<String, Acc> = BTreeMap::new();
-    for u in uses {
-        let cur = by_vendor.entry(u.owner.clone()).or_insert_with(|| Acc {
-            actions: std::collections::BTreeSet::new(),
-            workflows: std::collections::BTreeSet::new(),
-            count: 0,
-            pinned: 0,
-        });
-        cur.actions.insert(format!("{}/{}", u.owner, u.name));
-        cur.workflows.insert(u.workflow_file.clone());
-        cur.count += 1;
-        if is_sha_ref(&u.reference) {
-            cur.pinned += 1;
-        }
-    }
-
-    let mut out: Vec<ActionDepSummary> = by_vendor
-        .into_iter()
-        .map(|(vendor, v)| ActionDepSummary {
-            vendor,
-            actions: v.actions.into_iter().collect(),
-            workflows: v.workflows.into_iter().collect(),
-            count: v.count,
-            pinned_ratio: (v.pinned as f64 / v.count as f64 * TWO_DECIMAL_FACTOR).round()
-                / TWO_DECIMAL_FACTOR,
-        })
-        .collect();
-    out.sort_by(|a, b| {
-        b.workflows
-            .len()
-            .cmp(&a.workflows.len())
-            .then_with(|| a.vendor.cmp(&b.vendor))
-    });
-    out
 }
 
 #[cfg(test)]

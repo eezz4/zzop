@@ -21,13 +21,13 @@ mod diagnostics;
 mod native_rules;
 
 pub(crate) use assemble::assemble;
-// `apply_config_mounts` is re-exported here (not just privately `use`d below) for the same reason as the
-// trio above: `envelope::analyze_envelope` (Mode A) reaches it by this path too, at the structurally
-// equivalent seam its own call site documents — origin-agnostic deployment topology must apply
-// regardless of which assembler produced `io_provides`.
+// `apply_config_mounts` and `apply_config_client_base` are re-exported here (not just privately `use`d
+// below) for the same reason as the trio above: `envelope::analyze_envelope` (Mode A) reaches them by
+// this path too, at the structurally equivalent seam its own call site documents — an origin-agnostic
+// topology declaration must apply regardless of which assembler produced `io_provides`/`io_consumes`.
 pub(crate) use compose::{
-    apply_config_mounts, compose_router_mount_provides, compose_trpc_provides,
-    late_resolve_cross_file_consumes,
+    apply_config_client_base, apply_config_mounts, compose_router_mount_provides,
+    compose_trpc_provides, late_resolve_cross_file_consumes,
 };
 // `envelope::analyze_envelope` also reaches the config-diagnostics quartet by this path (config-
 // diagnostics parity with `assemble` — a `disabled_rules` typo / dead exclude filter self-reports on

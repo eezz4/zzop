@@ -69,9 +69,10 @@ pub struct AnalyzeRequest {
     /// wins when both filters are set). Reuses
     /// `zzop_core::Suppression`/`RuleConfig::suppressions` directly. Default: empty (nothing suppressed).
     pub suppressions: Vec<Suppression>,
-    /// Config-wide, rule-agnostic finding-level filter — the top-level `"exclude"` config key's wire
-    /// exposure (camelCase `globalExcludes`). `{path?, glob?}` entries drop matching findings from EVERY
-    /// rule at once (the file is still analyzed; only findings are filtered). Reuses
+    /// Config-wide, rule-agnostic REPORT-level filter — the top-level `"exclude"` config key's wire
+    /// exposure (camelCase `globalExcludes`). `{path?, glob?}` entries drop matching paths from EVERY
+    /// rule at once AND from the `recommendations` score channel (the file is still analyzed and still
+    /// appears in `nodes`/the dep graph; only what is reported about it is filtered). Reuses
     /// `zzop_core::GlobalExclude`/`RuleConfig::global_excludes` directly. Default: empty (nothing globally
     /// excluded).
     pub global_excludes: Vec<GlobalExclude>,
@@ -99,6 +100,11 @@ pub struct AnalyzeRequest {
     /// `mounted_at`. Same "mapper validates, the facade passes through, engine defensively backstops" contract
     /// as `mounted_at`.
     pub mounts: Vec<MountEntryRequest>,
+    /// The base path this tree's own OUTBOUND calls carry — the wire exposure of
+    /// `zzop_engine::EngineConfig::client_base`, and the CALLING-side mirror of `mounted_at`. `None` (the
+    /// default) prefixes nothing. Same "mapper validates, the facade passes through, engine defensively
+    /// backstops" contract as `mounted_at`, and the same shape rules (leading `/`, no scheme, no `{}`).
+    pub client_base: Option<String>,
     /// Hosts this tree owns — the wire exposure of `zzop_engine::EngineConfig::hosts` (absolute-URL
     /// consumes to these hosts are re-keyed internal at cross-layer link time, see
     /// `zzop_core::LinkOptions::internal_hosts`). Empty (the default) declares no hosts.
@@ -284,4 +290,10 @@ pub struct EnvelopeAnalyzeRequest {
     /// `AnalyzeRequest::mounts`, identical shape (`{dir, at}` via `MountEntryRequest`) and identical
     /// fold order (every `mounts[]` entry first, `mounted_at` as the implicit `dir: ""` entry LAST).
     pub mounts: Vec<MountEntryRequest>,
+    /// The base this envelope's own outbound calls carry — the envelope-path twin of
+    /// `AnalyzeRequest::client_base`, identical shape and semantics. Present for the same reason
+    /// `mounted_at` is: a declaration about where a tree sits is origin-agnostic, so a tree analyzed
+    /// through Mode A must not freeze un-prefixed consume keys while the native path prefixes the same
+    /// config. Mode A runs no code-extracted base pass, so this is the only base an envelope can carry.
+    pub client_base: Option<String>,
 }

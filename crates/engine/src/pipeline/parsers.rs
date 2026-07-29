@@ -16,19 +16,33 @@ pub(super) fn lexical_loc(text: &str) -> u32 {
 /// `parse_symbols`/`parse_imports` fold "swc couldn't parse this" and "legitimately empty file" into
 /// the same empty result, so the broken/empty distinction instead comes from
 /// `zzop_parser_typescript::parse_ok`: `false` means swc produced no `Module` at all — route straight to
-/// the lexical fallback; `true` proceeds to `parse_symbols`/`parse_imports`, still `catch_unwind`-wrapped
-/// as defense in depth.
+/// the lexical fallback; `true` proceeds to `parse_symbols`/`parse_imports`. EVERY swc call in here is
+/// `catch_unwind`-wrapped, the probe included — see the comment at the probe for the run-killing panic
+/// that was measured when it was not.
 ///
-/// Also computes `used_names` (`parse_local_identifier_refs`) for `unimported-export`. Known cost: each of
-/// the three extraction calls parses independently, so a well-formed file is parsed by swc three times
-/// per pass (four counting `parse_ok`'s probe) — `zzop_cache::FileIrSlice::used_names` caches the result
-/// so a warm run pays this only once per distinct file content.
+/// Also computes `used_names` (`parse_local_identifier_refs`) for `unimported-export`. Known cost: every
+/// extraction call parses independently, and the four in THIS function (`parse_ok`'s probe plus the three
+/// below) are a minority of a pass — `super::fresh`/`super::io` run many further extractors over the same
+/// text, each parsing again. Deliberately no count here: this doc used to give one ("three times per
+/// pass"), it described only this function, and it was wrong about a run by an order of magnitude by the
+/// time anyone checked — a number in a comment cannot be re-measured. The per-file figure is measured
+/// instead, by `crates/engine/tests/analyze_parse_census.rs` against `zzop_parser_typescript::parse_count`.
+/// `zzop_cache::FileIrSlice` caches the results, so a warm run pays the whole bill only once per distinct
+/// file content.
 pub(super) fn parse_typescript(
     rel: &str,
     text: &str,
     write_site_vocab: &zzop_parser_typescript::WriteSiteVocab<'_>,
 ) -> (Vec<SourceSymbol>, Option<ImportMap>, u32, bool, Vec<String>) {
-    if !zzop_parser_typescript::parse_ok(rel, text) {
+    // Wrapped like its three siblings below, and for the reason the asymmetry itself taught: the probe
+    // PARSES, so it panics on exactly the inputs they do, and until 2026-07-29 it was the only swc call in
+    // this function standing outside a `catch_unwind` — which is how one `.ts` file came to kill a whole
+    // `analyze_tree` run. The real fix is at the owner (`zzop_parser_typescript::parse_with_cm` now
+    // collapses a panic into the `None` its contract already promised; that comment carries the incident).
+    // This stays as the same defense in depth every frontend here carries, and a panic means what `false`
+    // means — no `Module` for these bytes, take the lexical lane.
+    let parses = std::panic::catch_unwind(|| zzop_parser_typescript::parse_ok(rel, text));
+    if !parses.unwrap_or(false) {
         return (
             Vec::new(),
             Some(ImportMap::new()),

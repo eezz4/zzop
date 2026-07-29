@@ -76,3 +76,12 @@ pub use request::{
 };
 pub use rule_pack::validate_rule_pack_json;
 pub use version::{version, version_string};
+/// The silent-failure-class registry's two DERIVED views — its full text as a contract document, and
+/// its per-status tallies. Re-exported rather than wrapped, and re-exported HERE rather than reached
+/// for directly, because this is the analysis-MEANING layer (the same reason `explain` and `version`
+/// live here): `zzop-summary` shapes the reply and serves the contract table, and it must not skip a
+/// layer to `zzop-engine` to do either — the facade/summary split is what `docs/contracts/
+/// surface-parity.json` and its metatests rest on. Both views read one `const` registry
+/// (`zzop_engine::BLINDNESS_REGISTRY`), which is what lets the reply carry counts while the text ships
+/// once: a second owner of either would be a tally that can drift from the prose it summarizes.
+pub use zzop_engine::{disclosure_contract_text, disclosure_counts};

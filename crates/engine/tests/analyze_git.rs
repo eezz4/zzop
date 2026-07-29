@@ -482,6 +482,123 @@ fn urgent_bug_risk_escalation_shows_up_first_with_evidence_in_a_single_tree_anal
         .all(|r| r.items.iter().all(|i| i.path != "a.ts")));
 }
 
+/// Same shape as `git_fixture_repo_with_critical_bug_prone_file` minus the critical-marker line, but the
+/// file lives under `legacy/` so a top-level `exclude` glob can be pointed at it. 5 `[FIX]` commits meets
+/// the default `bug-prone` recommendation gate, which is what puts the path in `recommendations` at all.
+fn git_fixture_repo_with_a_bug_prone_file_under_legacy() -> TempDir {
+    let dir = TempDir::new("zzop-engine-rec-exclude-fixture");
+    run_git(dir.path(), &["init", "-q"]);
+    run_git(dir.path(), &["config", "user.email", "test@example.com"]);
+    run_git(dir.path(), &["config", "user.name", "Test User"]);
+
+    fs::create_dir_all(dir.path().join("legacy")).unwrap();
+    fs::write(
+        dir.path().join("legacy/a.ts"),
+        "export function a() { return 1; }\n",
+    )
+    .unwrap();
+    run_git(dir.path(), &["add", "legacy/a.ts"]);
+    run_git(dir.path(), &["commit", "-q", "-m", "[FEAT] add a"]);
+
+    for i in 0..5 {
+        fs::write(
+            dir.path().join("legacy/a.ts"),
+            format!("export function a() {{ return {i}; }}\n"),
+        )
+        .unwrap();
+        run_git(dir.path(), &["add", "legacy/a.ts"]);
+        let msg = format!("[FIX] fix a #{i}");
+        run_git(dir.path(), &["commit", "-q", "-m", &msg]);
+    }
+
+    dir
+}
+
+fn rec_paths(out: &AnalyzeOutput) -> Vec<String> {
+    out.recommendations
+        .iter()
+        .flat_map(|r| r.items.iter())
+        .map(|i| i.path.clone())
+        .collect()
+}
+
+/// The top-level `exclude` config key (`RuleConfig::global_excludes`) must reach the RECOMMENDATIONS
+/// channel, not only `findings`.
+///
+/// Measured false positive that forced this (2026-07-29, on THIS repo): `zzop.config.jsonc` carries
+/// `exclude: ["cases/**"]` — `cases/` is a labelled defect benchmark whose files are deliberately wrong —
+/// and `zzop analyze .` still answered
+/// `architecture.topRecommendation = {id: "circular", severity: "critical", topItem:
+/// "cases/trees/graph/circularB.ts"}`. `topRecommendation` is the FIRST thing the summary says; naming a
+/// path the config excluded makes the run's headline contradict the config that produced it. The
+/// exclusion is one user statement ("do not report on these paths"), so it applies to every reporting
+/// channel, not to the one channel that happens to be spelled `findings`.
+#[test]
+fn global_excludes_drop_recommendations_for_excluded_paths() {
+    if !git_available() {
+        eprintln!(
+            "skipping global_excludes_drop_recommendations_for_excluded_paths: git not on PATH"
+        );
+        return;
+    }
+    let dir = git_fixture_repo_with_a_bug_prone_file_under_legacy();
+
+    // Baseline — without the exclude the path IS recommended, so the assertion below is non-vacuous.
+    let baseline = analyze_tree(dir.path(), &config_with_git());
+    assert!(
+        rec_paths(&baseline).iter().any(|p| p == "legacy/a.ts"),
+        "fixture must produce a recommendation for legacy/a.ts, else the exclude assertion is vacuous: {:?}",
+        rec_paths(&baseline)
+    );
+
+    let excluded = EngineConfig {
+        rule_config: RuleConfig {
+            global_excludes: vec![zzop_core::GlobalExclude {
+                path: None,
+                glob: Some("legacy/**".to_string()),
+            }],
+            ..RuleConfig::default()
+        },
+        ..config_with_git()
+    };
+    let out = analyze_tree(dir.path(), &excluded);
+    assert!(
+        !rec_paths(&out).iter().any(|p| p == "legacy/a.ts"),
+        "a top-level `exclude` must drop the path from recommendations too: {:?}",
+        rec_paths(&out)
+    );
+}
+
+/// The substring half of the same filter shape (`GlobalExclude::path`) reaches recommendations too — the
+/// two halves share `zzop_core::global_exclude_matches_path`, so a wiring that honoured only `glob` would
+/// be a second, quieter dialect.
+#[test]
+fn global_excludes_substring_form_also_drops_recommendations() {
+    if !git_available() {
+        eprintln!(
+            "skipping global_excludes_substring_form_also_drops_recommendations: git not on PATH"
+        );
+        return;
+    }
+    let dir = git_fixture_repo_with_a_bug_prone_file_under_legacy();
+    let excluded = EngineConfig {
+        rule_config: RuleConfig {
+            global_excludes: vec![zzop_core::GlobalExclude {
+                path: Some("legacy/".to_string()),
+                glob: None,
+            }],
+            ..RuleConfig::default()
+        },
+        ..config_with_git()
+    };
+    let out = analyze_tree(dir.path(), &excluded);
+    assert!(
+        !rec_paths(&out).iter().any(|p| p == "legacy/a.ts"),
+        "a substring `exclude` must drop the path from recommendations too: {:?}",
+        rec_paths(&out)
+    );
+}
+
 #[test]
 fn minimal_config_reports_both_capability_notes() {
     // A plain default config (no git, no packs) over a one-file tree self-reports BOTH silently-narrowed

@@ -50,21 +50,25 @@
 //      what was measured; and each tree's analyze_repo total is checked against that source's
 //      `findingCount` from the join.
 //   5. TRUNCATION IS NEVER "IDENTICAL". Any capped list (findings.truncated, shown.length != total,
-//      edgesTruncated, bucketKeysTruncated, crossLayerFindings.truncated) aborts the run. A capped
-//      anchor list silently shrinks the set difference, and a shrunken set difference reads as "no
-//      change". The one cap the caller cannot raise (bucketKeys is capped by the product itself) is
-//      opt-in via --tolerate-bucket-key-cap, recorded in meta, and reported by diff.mjs as NOT
-//      identity.
+//      edgesTruncated, crossLayerFindings.truncated) aborts the run. A capped anchor list silently
+//      shrinks the set difference, and a shrunken set difference reads as "no change". Every cap left
+//      on this list is one a --limit CAN raise; `bucketKeys` used to be the exception (capped by the
+//      product, tolerated via --tolerate-bucket-key-cap) and that cap was deleted on 2026-07-29, so the
+//      exception and its flag are both gone.
 //
 // PROVING IT: every abort branch above has a deliberately misbehaving counterpart in
 // `selftest-stub.rs` (empty stdout, initialize-only, garbage, JSON-RPC error, isError, wrong
-// payload, nonzero exit). See that file's header for the one-line build + run loop. A guard nobody
-// has seen go red is not known to work.
+// payload, nonzero exit), and `scripts/measure/harness-selftest.sh` RUNS all seven — on every
+// `detection-benchmark` CI job, as detection-gate.sh's preflight — requiring each to abort with ITS
+// OWN message, because a mode that aborts for the wrong reason would let one over-eager branch stand
+// in for six dead ones. A guard nobody has seen go red is not known to work; until 2026-07-29 nobody
+// had seen these, because the stub sat in the tree with a manual build loop and zero callers.
+// Still unproven anywhere: contract 1's other half — that an EXISTING label is refused. It needs no
+// stub, and it is the branch that destroyed 22 baseline files mid-audit.
 //
 // usage:
 //   node scripts/measure/snapshot.mjs --label <label> --bin <zzop-mcp[.exe]> --config <zzop.config.jsonc>
-//                                     [--limit 1000] [--runs <dir>] [--tolerate-bucket-key-cap]
-//                                     [--allow-axis-scope-divergence]
+//                                     [--limit 1000] [--runs <dir>] [--allow-axis-scope-divergence]
 //
 // A good label says what was measured, not when: `<commit-or-branch>-<what-changed>`. It ends up in
 // diff.mjs's header next to the binary's sha256, so two snapshots can never be confused.
@@ -123,7 +127,6 @@ const bin = path.resolve(arg("bin"));
 const configPath = path.resolve(arg("config"));
 const runsRoot = path.resolve(arg("runs", path.join(REPO, "scratchpad", "runs")));
 const limit = Number(arg("limit", "1000"));
-const tolerateBucketKeyCap = argv.includes("--tolerate-bucket-key-cap");
 const allowAxisScopeDivergence = argv.includes("--allow-axis-scope-divergence");
 
 if (!Number.isInteger(limit) || limit < 1) fail(`--limit must be a positive integer (got ${arg("limit", "1000")})`);
@@ -242,21 +245,11 @@ if (c.crossLayerFindings.truncated) {
       `\n  Raise --limit (currently ${limit}).`
   );
 }
-if (c.bucketKeysTruncated) {
-  // This one cap is the PRODUCT's (DEFAULT_BUCKET_KEYS_LIMIT in crates/summary), not a --limit the
-  // caller can raise. So the tolerance must be opt-in AND recorded, never assumed.
-  if (!tolerateBucketKeyCap) {
-    fail(
-      "cross_repo `bucketKeys` TRUNCATED — key identity is incomplete: " +
-        JSON.stringify(c.bucketKeysTruncated) +
-        "\n  This cap belongs to the product (crates/summary bucket-keys limit); no tool argument raises it.\n" +
-        "  Re-run with --tolerate-bucket-key-cap to record it and continue — diff.mjs will then refuse to\n" +
-        "  present the affected bucket's key difference as identity."
-    );
-  }
-  meta.bucketKeysTruncated = c.bucketKeysTruncated;
-  console.error(`[${label}]   !! bucketKeys CAPPED BY THE PRODUCT: ${JSON.stringify(c.bucketKeysTruncated)}`);
-}
+// `bucketKeys` had a branch here until 2026-07-29: the product capped it at 20 distinct keys, this
+// script aborted on the resulting `bucketKeysTruncated`, and `--tolerate-bucket-key-cap` was the opt-in
+// that recorded the cap instead. The product cap is GONE (crates/summary/src/output/bucket_keys.rs) —
+// `bucketKeys` is now complete by construction, so there is no truncation to detect, tolerate or record.
+// This corpus is what removed it: it sat at exactly 20 keys and a batch adding trees scored zero lines.
 
 fs.writeFileSync(path.join(outDir, "cross.json"), JSON.stringify(c, null, 2));
 meta.serverInfo = cross.serverInfo;

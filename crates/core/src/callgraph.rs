@@ -193,7 +193,11 @@ pub fn build_symbol_graph(
 
 /// Downstream-only BFS depth map from `start` over `graph` (the only direction the two call-graph rules
 /// need; nodeId -> depth, 0 = `start`). Unreachable nodes are simply absent from the map.
-pub fn bfs_depths(graph: &SymbolGraph, start: &str) -> BTreeMap<String, u32> {
+///
+/// Module-private: `bfs_reachable` is the only caller and the only shape any consumer has ever wanted
+/// ("closest reached site wins"). Exporting the raw depth map published a second entry point nobody
+/// used — widen it again when a caller outside this module actually needs the whole map.
+fn bfs_depths(graph: &SymbolGraph, start: &str) -> BTreeMap<String, u32> {
     let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
     for edge in graph {
         adjacency

@@ -71,7 +71,15 @@ pub(super) fn shape_analyze_output(
         "configWarnings".to_string(),
         serde_json::Value::Array(config_warnings),
     );
-    summary.insert("disclosure".to_string(), disclosure);
+    // FOLDED, not forwarded (2026-07-29): the registry's counts and a pointer to its full text, never
+    // the ~10.6KB of run-invariant prose the facade emits — see `output::disclosure`'s module doc for
+    // why that stays inside decision 1c, and for the run-VARYING channels (`coverage`, `warnings`) it
+    // deliberately does not touch. This was also the one list this shaper forwarded uncapped while
+    // capping even `degraded` two fields above.
+    summary.insert(
+        "disclosure".to_string(),
+        output::fold_disclosure(&disclosure),
+    );
     if let Some(truncated) = degraded_truncated {
         summary.insert("degradedTruncated".to_string(), truncated);
     }

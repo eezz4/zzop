@@ -2,9 +2,14 @@
 name = "zzop-parser-rust"
 version.workspace = true
 edition = "2021"
+license.workspace = true
 publish = false
 
 [dependencies]
 syn = { version = "2", features = ["full", "visit"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 zzop-core = { path = "../../crates/core" }
+
+# tests/no_panic_proptest.rs — the arbitrary-input panic property every parser frontend carries.
+[dev-dependencies]
+proptest = { workspace = true }

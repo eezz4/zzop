@@ -178,6 +178,37 @@ jobs:
               cp "target/${{ matrix.target }}/release/zzop-mcp" "dist-mcp/zzop-mcp-${{ matrix.platform }}" ;;
           esac
           ls -la dist-mcp
+      - name: Smoke-test the collected binaries
+        # Native lanes only. `matrix.cross` is unset for win32-x64-msvc / darwin-arm64 / linux-x64-gnu
+        # and `"true"` for the two cross lanes (darwin-x64, linux-arm64-gnu), whose binaries cannot
+        # execute on the runner that built them — those stay uncovered on purpose, tracked separately.
+        #
+        # Runs the COLLECTED copies under dist-mcp/, not target/: those are the exact bytes the release
+        # asset and the npm platform packages carry, so a bad copy in the step above is caught here too.
+        # `version` is the cheapest subcommand that still proves the binary loads and links against the
+        # runner's CRT, and it is compared against Cargo.toml's `[workspace.package] version` (which is
+        # what `CARGO_PKG_VERSION`, and therefore this output, is built from) — an exit code alone would
+        # pass on a binary that printed nothing. Two process spawns; well under a second.
+        if: matrix.cross != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -m1 '^version = "' Cargo.toml | sed -E 's/^version = "(.*)"/\1/')
+          case "${{ matrix.target }}" in
+            *windows*) EXT=".exe" ;;
+            *)         EXT="" ;;
+          esac
+          for bin in zzop-cli zzop-mcp; do
+            path="dist-mcp/$bin-${{ matrix.platform }}$EXT"
+            # The CLI binary is named `zzop`; only its release-asset filename carries the `-cli` infix.
+            if [ "$bin" = "zzop-cli" ]; then expect="zzop $VERSION"; else expect="zzop-mcp $VERSION"; fi
+            got=$("./$path" version)
+            echo "$path version -> $got"
+            if [ "$got" != "$expect" ]; then
+              echo "::error::$path printed '$got'; expected '$expect' (Cargo.toml [workspace.package] version is $VERSION)"
+              exit 1
+            fi
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: zzop-mcp-${{ matrix.target }}
@@ -300,16 +331,26 @@ jobs:
               *)     cp "$f" out/bin/zzop-mcp && chmod +x out/bin/zzop-mcp ;;
             esac
             cp manifest.stamped.json out/manifest.json
-            (cd out && zip -r "../zzop-mcp-$plat.mcpb" manifest.json bin)
+            # A `.mcpb` is installed and then run offline, so the license texts have to travel INSIDE
+            # the bundle — a link back to the repo is not a copy of the license, and the third-party
+            # notices cover statically-linked crates whose licenses require the notice to accompany
+            # the binary. Both are copied per iteration because `rm -rf out` above wipes the staging dir.
+            cp LICENSE THIRD-PARTY-NOTICES.md out/
+            (cd out && zip -r "../zzop-mcp-$plat.mcpb" manifest.json bin LICENSE THIRD-PARTY-NOTICES.md)
           done
           ls -la ./*.mcpb
-      - name: Upload zzop-mcp binaries + MCPB bundles to the release
+      - name: Upload zzop-mcp binaries + MCPB bundles + license texts to the release
+        # LICENSE and THIRD-PARTY-NOTICES.md ride along as their own release assets: the bare
+        # `zzop`/`zzop-mcp` binaries above are downloaded individually (PATH install, the Claude Code
+        # plugin's SessionStart hook), and unlike the `.mcpb` bundles they have nowhere to carry a
+        # license text of their own. Anyone who takes a binary off this release page can take the terms
+        # it ships under from the same page.
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.meta.outputs.version }}
         run: |
           TAG="v$VERSION"
-          gh release upload "$TAG" mcp-artifacts/* ./*.mcpb --clobber
+          gh release upload "$TAG" mcp-artifacts/* ./*.mcpb LICENSE THIRD-PARTY-NOTICES.md --clobber
 
   # Only runs when `meta` says this run releases. The release version is the single source of truth
   # for the published version: this job overwrites every package.json's committed version with it, so
@@ -333,12 +374,34 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
       - name: Update npm (OIDC trusted publishing needs a recent npm CLI)
-        # Pinned to the 11.x line: npm@12.0.0 (published 2026-07-08) ships a broken
-        # `--provenance` path — `Cannot find module 'sigstore'` inside its own bundled
-        # libnpmpublish — which failed the v0.7.0 publish twice (run 29057344845, retry
-        # included). `@latest` floated onto that major the day after v0.6.0 shipped.
-        # Re-evaluate the pin once a fixed 12.x is out.
-        run: npm install -g npm@11
+        # UNPINNED as of 2026-07-29. The step itself stays: the npm bundled with node 22 is 10.x, which
+        # predates OIDC trusted publishing, so a newer npm still has to be installed here.
+        #
+        # PINNED TO THE MAJOR (`npm@12`), which is a different pin from the `npm@11` that used to be here.
+        # The 11.x pin is gone because its stated reason was fixed; the major pin is here because that was
+        # never the whole reason. Recorded so nobody re-pins on rumor OR unpins on the same reasoning again:
+        # npm@12.0.0 (2026-07-08) was published without a top-level `node_modules/sigstore` in its own
+        # tarball, so `npm publish --provenance` died with `Cannot find module 'sigstore'` raised from
+        # its bundled `libnpmpublish/lib/provenance.js`. That killed the v0.7.0 publish twice (run
+        # 29057344845 and its retry), one day after `@latest` floated onto the new major. npm/cli#9722
+        # -> PR #9740 ("correct bundled sigstore from dev dependency conflict") fixed the bundling and
+        # shipped in npm@12.0.1 (2026-07-10). Verified by unpacking the published tarballs rather than
+        # trusting the changelog: 12.0.0 has only nested copies (under `pacote/` and
+        # `workspaces/libnpmpublish/`), while 12.0.1 carries `node_modules/sigstore` at top level again,
+        # exactly as 11.18.0 does.
+        #
+        # WHY THE MAJOR STAYS PINNED even though 12.0.1 is fixed. Re-read the incident: the break arrived
+        # ONE DAY AFTER `@latest` floated onto a new major. The thing that hurt was not npm 12 — it was an
+        # unreviewed MAJOR arriving between our releases, into a lane that has no rehearsal. `release` and
+        # `publish` are SIBLINGS (same `needs:`), so they run in parallel: a broken npm 13 would let the
+        # GitHub release and all five .mcpb bundles ship while `npm publish` dies here, leaving a
+        # half-shipped release. `npm@12` costs nothing, keeps every 12.x patch and minor, and moves the
+        # decision to adopt 13 to a human. Re-evaluate when there is a reason to want 13, not on a date.
+        #
+        # One coupling this creates: npm 12 requires node `^22.22.2 || ^24.15.0 || >=26.0.0`. The
+        # `node-version: 22` above resolves to the newest 22.x (22.23.1 today), which satisfies it —
+        # do not lower it to an exact older 22.x without checking npm's `engines` first.
+        run: npm install -g npm@12
       - name: Download zzop CLI binaries
         # Over the binary artifacts the `build` job's "Collect the zzop + zzop-mcp binaries" step
         # uploads (`zzop-mcp-<target>`, containing both `zzop-<platform>[.exe]` and
@@ -432,20 +495,76 @@ jobs:
           mkdir -p mcpb-assets
           gh release download "v$VERSION" --pattern '*.mcpb' --dir mcpb-assets
       - name: Stamp version, identifier, and fileSha256 into server.json
-        # Rewrites the top-level version and, per platform package entry (same 5-platform list/order
-        # as the `build` matrix's `platform` values), the release-tag-specific download URL and that
-        # exact asset's SHA-256 — the registry does not itself validate this hash, but MCP clients do
-        # before install, so a stale/placeholder hash here would silently fail every client install.
-        # `fileSha256` is absent from the committed file; jq's assignment creates the key, so this
-        # loop is unchanged by that. The step after this one refuses to publish if it did not.
+        # Rewrites the top-level version and, per platform package entry, the release-tag-specific
+        # download URL and that exact asset's SHA-256 — the registry does not itself validate this
+        # hash, but MCP clients do before install, so a stale/placeholder hash here would silently
+        # fail every client install. `fileSha256` is absent from the committed file; jq's assignment
+        # creates the key, so this loop is unchanged by that. The step after this one refuses to
+        # publish if it did not.
+        #
+        # ## The platform list is DERIVED from the `build` matrix (2026-07-29)
+        # It used to be a literal `platforms=(...)` array hand-copied from that matrix, and the loop
+        # writes `.packages[$i]` BY POSITION. scripts/check-server-json-hashes.sh already guards the
+        # array against server.json (packages[] must name the same platforms in the same order) — but
+        # both of those lists are downstream of the matrix, and neither of them can see it change.
+        #
+        # Measured 2026-07-29 on a scratch copy of this file: add a sixth matrix entry
+        # (`aarch64-pc-windows-msvc` / `win32-arm64-msvc`), change nothing else, and
+        # `check-server-json-hashes.sh` prints "clean (5 packages, ... packages[] matches the stamping
+        # loop)" and exits 0. Every equality check passes because they only ever compared the two
+        # copies to each other. The release would upload six `.mcpb` bundles and list five, and the
+        # missing one is invisible to every check in the chain — the same "a hand list inside the
+        # guard's own file cannot see the shipped set grow" defect the guards themselves are made of.
+        #
+        # So the loop now walks the matrix's own `platform:` values, and `platforms=(...)` survives
+        # only as a MIRROR — it is the spelling check-server-json-hashes.sh sed-extracts out of this
+        # file, so it has to stay a literal — asserted equal to the matrix before anything is written.
+        # That closes the chain end to end: matrix == mirror (here) == packages[] == one hash each
+        # (the blocker step below). A sixth platform now fails loudly at exactly the moment it appears.
         env:
           VERSION: ${{ needs.meta.outputs.version }}
         run: |
           set -euo pipefail
           jq --arg v "$VERSION" '.version = $v' server.json > server.tmp && mv server.tmp server.json
+
+          # The build matrix's own `platform:` values, in matrix order. A line whose first token is
+          # `platform:` occurs ONLY in that matrix — every other mention in this file is a
+          # `matrix.platform` expression inside a larger line — so this reads the authority rather
+          # than a copy of it. (Deliberately no `$`-brace-brace expression in this comment: the whole
+          # `run:` block is one YAML scalar and GitHub substitutes expressions inside it before bash
+          # ever sees it, so an example written literally would be evaluated, not quoted.)
+          matrix_platforms=()
+          matrix_count=0
+          while IFS= read -r p; do
+            matrix_platforms+=("$p")
+            matrix_count=$((matrix_count + 1))
+          done < <(sed -n 's/^[[:space:]]*platform:[[:space:]]*\([A-Za-z0-9._-][A-Za-z0-9._-]*\)[[:space:]]*$/\1/p' .github/workflows/prebuild.yml)
+
+          # Empty-enumeration floor, and it is not decorative: with an empty list this loop would stamp
+          # NOTHING and `set -euo pipefail` would see a clean run, publishing a server.json whose five
+          # entries still carry the committed (absent) hash. The blocker step below would catch that
+          # one — but a guard chain whose first link can silently produce nothing is a chain that gets
+          # diagnosed from the wrong end. Plain counter, not `${#arr[@]}`, per this repo's convention.
+          if [ "$matrix_count" -eq 0 ]; then
+            echo "::error::could not read a single 'platform:' value out of the build matrix in .github/workflows/prebuild.yml."
+            echo "::error::The matrix was renamed or reshaped, so this step can no longer derive what to stamp. Re-point the extraction; do not hardcode the list back."
+            exit 1
+          fi
+
+          # The mirror scripts/check-server-json-hashes.sh reads out of this file. NOT the authority —
+          # asserted equal to the matrix above, and to server.json's packages[] by that script.
           platforms=(win32-x64-msvc darwin-x64 darwin-arm64 linux-x64-gnu linux-arm64-gnu)
-          for i in "${!platforms[@]}"; do
-            plat="${platforms[$i]}"
+          if [ "${platforms[*]}" != "${matrix_platforms[*]}" ]; then
+            echo "::error::the build matrix and the platforms=(...) mirror in this file disagree."
+            echo "::error::  build matrix : ${matrix_platforms[*]}"
+            echo "::error::  mirror       : ${platforms[*]}"
+            echo "::error::This job writes .packages[\$i] BY POSITION, so while these differ a release would list the wrong assets -- or silently omit one that it nonetheless uploaded."
+            echo "::error::Fix: update platforms=(...) to match the matrix exactly (same values, same order), and add the matching entry to server.json's packages[]."
+            exit 1
+          fi
+
+          for i in "${!matrix_platforms[@]}"; do
+            plat="${matrix_platforms[$i]}"
             sha=$(sha256sum "mcpb-assets/zzop-mcp-$plat.mcpb" | cut -d' ' -f1)
             url="https://github.com/eezz4/zzop/releases/download/v$VERSION/zzop-mcp-$plat.mcpb"
             jq --argjson i "$i" --arg v "$VERSION" --arg sha "$sha" --arg url "$url" \
@@ -455,11 +574,13 @@ jobs:
           cat server.json
       - name: Refuse to publish a server.json with a missing or placeholder integrity hash
         # PUBLISH BLOCKER, deliberately between stamping and publishing. The loop above writes
-        # `.packages[$i]` by POSITION off a hardcoded `platforms` array; jq assigning past the end of
-        # that array is not an error, so a sixth package entry or a reordered packages[] would ship
-        # unstamped or mis-stamped with `set -euo pipefail` none the wiser. This asserts one
-        # well-formed, non-all-zeros fileSha256 per package and that packages[] still lines up with
-        # the array — see the script's header for what it does and does not prove.
+        # `.packages[$i]` by POSITION; jq assigning past the end of an array is not an error, so a
+        # sixth package entry or a reordered packages[] would ship unstamped or mis-stamped with
+        # `set -euo pipefail` none the wiser. This asserts one well-formed, non-all-zeros fileSha256
+        # per package and that packages[] still lines up with `platforms=(...)` — see the script's
+        # header for what it does and does not prove. Since 2026-07-29 that array is itself asserted
+        # equal to the `build` matrix in the step above, so this link now reaches all the way back to
+        # the list of platforms actually built, rather than to a copy of it.
         run: bash scripts/check-server-json-hashes.sh --stamped
       - name: Authenticate to the MCP Registry (GitHub OIDC, io.github.eezz4 namespace)
         run: ./mcp-publisher login github-oidc

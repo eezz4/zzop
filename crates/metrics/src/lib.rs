@@ -14,10 +14,10 @@ pub mod diagnostics;
 pub mod generic_interface_keys;
 pub mod health;
 pub mod recommendations;
+pub mod report_excludes;
 pub mod roi;
 pub mod scores;
 pub mod seams;
-pub mod trend;
 
 use zzop_core::{register_native_analysis_stub, RuleRegistry};
 
@@ -42,8 +42,8 @@ pub fn register_native_analyses(registry: &mut RuleRegistry) {
 }
 
 pub use aggregates::{
-    aggregate_action_deps, aggregate_by_folder, aggregate_dep_by_folder, build_folder_aggregates,
-    ActionDepSummary, ActionUse, FolderAggregates, FolderEdge, FolderSummary, DEFAULT_FOLDER_DEPTH,
+    aggregate_by_folder, aggregate_dep_by_folder, build_folder_aggregates, FolderAggregates,
+    FolderEdge, FolderSummary, DEFAULT_FOLDER_DEPTH,
 };
 
 pub use commit_tags::default_commit_type_patterns;
@@ -76,6 +76,8 @@ pub use recommendations::{
     RecommendationGates,
 };
 
+pub use report_excludes::{apply_excludes_to_scores, path_excluded};
+
 pub use roi::{compute_roi, RecId, RoiResult};
 
 pub use scores::compute::{compute_scores, ScoresInput};
@@ -90,5 +92,3 @@ pub use scores::config::{
 pub use scores::types::Scores;
 
 pub use seams::{compute_seams, SeamCandidate, SEAMS_LIMIT, SEAMS_MIN_FILES};
-
-pub use trend::{build_trend_series, TrendPoint, TrendSeries, TrendSnapshot, TOP_N};

@@ -1,13 +1,11 @@
 //! Serialized recommendation output shapes (`Recommendation`/`RecItem`/`ActionHintKey`), the
 //! `RecommendationGates` thresholds, `BuildRecInput`, and the pre-enrichment `RawItem`.
 
-use std::collections::{HashMap, HashSet};
-
 use serde::{Deserialize, Serialize};
 
 use crate::coupling::CouplingMap;
 use crate::roi::RecId;
-use zzop_core::{DepGraph, FileNode, Finding, Severity};
+use zzop_core::{DepGraph, FileNode, Finding, GlobalExclude, Severity};
 
 /// actionHint i18n key — resolved via FE `labels.action[<key>]`; branched on rule + metric.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,22 +91,18 @@ impl Default for RecommendationGates {
     }
 }
 
-/// Inputs to `build_recommendations`. `scope_excludes`, `permanent_ignores`, `untested_paths`, and
-/// `amplification_by_path` are all optional in practice; callers that have nothing to pass pass
-/// empty collections rather than `Option`.
+/// Inputs to `build_recommendations`.
 pub struct BuildRecInput<'a> {
     pub nodes: &'a [FileNode],
     pub dep: &'a DepGraph,
     pub coupling: &'a CouplingMap,
     pub circular: &'a [Vec<String>],
-    /// rule + glob scope exclusions (e.g. hidden-coupling x core/i18n/**).
-    pub scope_excludes: &'a [(RecId, String)],
-    /// permanently ignored (ruleId, path) pairs.
-    pub permanent_ignores: &'a [(RecId, String)],
-    /// Paths with no test — their ROI cost is multiplied (safely changing untested code costs more).
-    pub untested_paths: &'a HashSet<String>,
-    /// path -> change-amplification (effective co-changing file count); raises ROI cost for ripple epicenters.
-    pub amplification_by_path: &'a HashMap<String, f64>,
+    /// The config's rule-agnostic path filter — `RuleConfig::global_excludes`, the top-level `"exclude"`
+    /// config key. Matching paths are dropped from every recommendation group, using
+    /// `zzop_core::global_exclude_matches_path` so this channel and the findings channel share ONE filter
+    /// dialect rather than two (see this module's parent doc for the false positive that wired it).
+    /// Callers with nothing to exclude pass an empty slice.
+    pub excludes: &'a [GlobalExclude],
     /// Whole-tree findings — sole source of an item's critical-finding bug evidence (and the sole
     /// escalation trigger; see this module's doc). Not filtered to any particular rule id: any
     /// `Severity::Critical` finding on the item's path counts.

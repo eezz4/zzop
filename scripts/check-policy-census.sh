@@ -29,32 +29,53 @@
 # `cargo fmt --all --check` is a CI gate, so a `const` declaration cannot be reflowed onto a shared
 # line the way a hand-edited JSON key can.
 #
-# crates/metrics/src is DELIBERATELY out of scope (2026-07-16): its thresholds (e.g. SEAMS_MIN_FILES)
-# are metric eligibility/presentation floors, not rule/extraction policy vocab — the one value that
-# overlaps rule thresholds is adjudicated T3 coincidental equality in the inventory + its doc comment.
+# ## Scan roots are DERIVED, not listed (2026-07-29) — and it took three misses to get here
+# The roots used to be a hand list: `crates/{engine,core,config,summary}/src` plus two globs. The
+# entries below record the same accident happening over and over, each time fixed by APPENDING one
+# more crate to that list:
 #
-# crates/facade/src stays out of scope (2026-07-16): its QUERY_*_LIMIT consts are result-truncation
-# caps on already-computed output. crates/summary/src JOINED the scan (2026-07-17, facade-thinning
-# batch): the shared summary layer's DEFAULT_*_LIMIT / MAX_LIMIT caps moved there from the deleted host crate
-# (previously excluded as per-host presentation) — now that every host shares them, a silent cap
-# change alters what EVERY agent-facing surface shows, so they get the same triage moment as policy
-# vocab (inventoried as presentation-cap tier, not rule policy).
+#   crates/metrics/src is DELIBERATELY out of scope for THRESHOLDS (2026-07-16): SEAMS_MIN_FILES and
+#   friends are metric eligibility/presentation floors, not rule/extraction policy vocab. Its NAME
+#   vocabulary is scanned — see the name-only block further down for how that exclusion had to be
+#   narrowed to the axis it actually argued.
 #
-# crates/config/src JOINED the scan (2026-07-27, crates/host teardown batch). It was the one workspace
-# crate in NEITHER list — not scanned, and not recorded as a reasoned exclusion the way crates/metrics
-# and crates/facade are above — so its absence was an oversight rather than a decision, and there was
-# nothing to re-read when the teardown moved request assembly (crates/summary/src/{paths,trees}.rs) OUT
-# of a scanned directory and INTO this unscanned one. It already held census-shaped constants before
-# that move: mapper/warnings.rs's RETIRED_KEYS (a `&[(&str, &str)]` vocabulary of config keys that no
-# longer exist, which decides what warning a user's config gets) and workspaces.rs's SKIP_DIRS /
-# MAX_GLOB_DEPTH (which directories discovery refuses to walk, and how deep — extraction policy in the
-# most literal sense: they decide what is never analyzed at all).
+#   crates/facade/src stays out of scope (2026-07-16): its QUERY_*_LIMIT consts are result-truncation
+#   caps on already-computed output. crates/summary/src JOINED the scan (2026-07-17, facade-thinning
+#   batch): the shared summary layer's DEFAULT_*_LIMIT / MAX_LIMIT caps moved there from the deleted
+#   host crate (previously excluded as per-host presentation) — now that every host shares them, a
+#   silent cap change alters what EVERY agent-facing surface shows.
 #
-# packages/mcp/src/server.rs's SUPPORTED_PROTOCOL_VERSIONS is the same class and is deliberately NOT
-# added — recorded here so the omission stays a decision. This census has only ever read crates/,
-# parser/ and rules/; admitting packages/ is a scope question (those crates are product/distribution
-# shells, and the answer governs every future const under them, not just this one) and needs its own
-# decision rather than riding along with the crates/config fix above.
+#   crates/config/src JOINED the scan (2026-07-27, crates/host teardown batch). It was the one
+#   workspace crate in NEITHER list — not scanned, and not recorded as a reasoned exclusion the way
+#   crates/metrics and crates/facade are above — "so its absence was an oversight rather than a
+#   decision", as this header put it at the time.
+#
+# And then it happened AGAIN, to the two crates that sentence did not think to check. Measured
+# 2026-07-29: crates/cache/src and crates/git/src were in neither the scan nor the exclusions, and
+# nine census-shaped constants lived there unseen —
+#     crates/cache/src/lib.rs:TOOL_DIR (".zzop"), DEFAULT_CACHE_DIR (".zzop/cache")
+#     crates/cache/src/store.rs:SCHEMA_VERSION_FILE, IR_DIR, FINDINGS_DIR, FORMAT_VERSION
+#     crates/git/src/process.rs:COMMIT_MARKER, crates/git/src/parse.rs:MS_PER_DAY, ...
+# A guard that had already WRITTEN DOWN this exact mistake committed it again, because the fix it
+# applied was to the list rather than to the listing. So the list is gone: the scan roots are derived
+# from Cargo.toml's `[workspace] members` (see the derivation below for why that rather than a
+# directory glob), and the two buckets there are the only way out. A new crate is therefore born IN
+# the census — its constants arrive as `added:` drift with axis `?`, which fails the check until
+# someone triages them. That is the triage moment this whole script exists to force, and it now fires
+# for a crate nobody remembered to think about.
+#
+# The declared exclusions are asserted to EXIST on disk. A bucket entry pointing at a renamed crate
+# would otherwise be inert: `excluded` silently stops excluding (harmless — the crate joins the scan
+# loudly) but `name_only` silently stops scanning metrics ENTIRELY, and a shrink that the drift
+# comparison reports as `removed:` lines is a diagnosis nobody would connect to a typo in a bucket.
+#
+# packages/cli-bin/src and packages/mcp/src are still NOT scanned, but that is now a WRITTEN exclusion
+# instead of a silence — which is the whole difference this entry is about. packages/mcp/src/server.rs's
+# SUPPORTED_PROTOCOL_VERSIONS is census-shaped, and the reason it stays out is unchanged: those two
+# crates are product/distribution shells, admitting them is a scope question whose answer governs every
+# future const under them, and it deserves its own decision rather than riding along with a derivation
+# fix. What changed is that the derivation now REACHES them, so declining them had to be said out loud
+# in $excluded_dirs rather than achieved by not thinking about them.
 #
 # Regex covers `^\s*(pub[(vis)] )?const NAME: (&str|&[&str]|&[(&str,&str)]|[&str; N]|usize|u32|i32|f64) = ...`.
 # This is tighter than "every const" on purpose — it's scoped to the shapes that actually carry policy
@@ -65,7 +86,7 @@
 # on the visibility axis). If a future sweep needs to widen the type list further, re-run --update and
 # re-check the line count; if it balloons, narrow back down and note that here.
 #
-# ## Bare `&str` joined 2026-07-27 (148 -> 227 entries)
+# ## Bare `&str` joined 2026-07-27 (148 -> the committed snapshot's entries)
 # A single `const NAME: &str = "literal"` sat outside the alternation for two releases. It was measured
 # in the v0.13.0 audit (~32-35 new entries, mostly `PARSER_FINGERPRINT`-shaped) and DEFERRED as
 # ballooning: the census was sized to stay "modest", and the sentinel-kind desync that motivated it had
@@ -138,7 +159,20 @@ census_file="scripts/policy-census.txt"
 # `type_alternation` is the SINGLE owner of "which const shapes this census reads". The blind-spot
 # assertion at the bottom of this script re-reads it and compares against every const type actually
 # present in the scanned dirs, so a shape that is neither scanned nor explicitly waived fails.
-type_alternation='&str|&\[&str\]|&\[\(&str,[[:space:]]*&str\)\]|\[&str;[[:space:]]*[0-9]+\]|\[\(&str,[[:space:]]*&str\);[[:space:]]*[0-9]+\]|&\[\(&str,[[:space:]]*&\[&str\]\)\]|&\[\(&str,[[:space:]]*SeverityValue\)\]|&\[BlindnessClass\]|RiskWeights|usize|u32|i32|i64|f64'
+#
+# `u64` and `&[u8]` joined 2026-07-29, and they are the first thing the DERIVED scan roots found. Both
+# live in crates the hand-listed roots never reached, so the blind-spot assertion directly above —
+# whose stated job is "the scanner must declare what it cannot see" — had never been asked about them.
+# A completeness assertion is only as complete as the subject set it runs over; that is the same defect
+# one level up, and it is why the roots are derived now.
+#   u64    — crates/cache/src/hash.rs's FNV_OFFSET_A/FNV_PRIME_A/FNV_OFFSET_B/FNV_PRIME_B. Numeric,
+#            same shape family as the usize/u32/i32/i64/f64 already read, and consequential: these
+#            four values decide every cache entry's filename, so a silent edit is a repo-wide cache
+#            identity change.
+#   &[u8]   — a byte-string literal (`b"..."`) is a string vocabulary written in bytes. Reading it is
+#            the fail-closed direction the header's doubt rule asks for; the one present instance is a
+#            test fixture and censuses as `test`.
+type_alternation='&str|&\[&str\]|&\[u8\]|&\[\(&str,[[:space:]]*&str\)\]|\[&str;[[:space:]]*[0-9]+\]|\[\(&str,[[:space:]]*&str\);[[:space:]]*[0-9]+\]|&\[\(&str,[[:space:]]*&\[&str\]\)\]|&\[\(&str,[[:space:]]*SeverityValue\)\]|&\[BlindnessClass\]|RiskWeights|usize|u32|u64|i32|i64|f64'
 pattern="^[[:space:]]*(pub(\\((crate|super|in [^)]+)\\))? )?const [A-Z_][A-Z0-9_]*: ($type_alternation)"
 
 # Const types the census DELIBERATELY does not read, one line per type with its reason. Nothing is
@@ -160,10 +194,112 @@ ignored_types='char
 # an untriaged key, and its whole job is to fail this check.
 axes='fact convention cap internal test'
 
-dirs=()
-for d in crates/engine/src crates/core/src crates/config/src crates/summary/src parser/*/src rules/native/*/src; do
-  [ -d "$d" ] && dirs+=("$d")
+# ## The subject set: every Cargo workspace member's src/
+# Directory globs (`crates/*/src parser/*/src rules/native/*/src`) were the first attempt at deriving
+# this, and they were still a hand-shaped guess about where crates live: `rules/src` — the
+# `zzop-rule-packs` member, which embeds every shipped pack — matches none of them, and would have
+# been the NEXT crate to go missing exactly the way crates/cache and crates/git did. So the authority
+# is `[workspace] members` in Cargo.toml, the one list that cannot go stale without Cargo itself
+# failing on the next build.
+#
+# A new member is therefore scanned the moment it is added, without anyone remembering this file.
+#
+# The element pattern is ANCHORED to line start (after indentation) rather than "any quoted string on
+# a line in the block", and that is not defensive style — the loose form was written first and was
+# WRONG on this very manifest. Cargo.toml line 48 is a comment reading `... "rules" below is a thin
+# test-only crate ...`, and the loose extractor read that prose mention as a 24th member, scanning
+# rules/src twice and reporting one scan dir more than it had. Harmless only because the phantom
+# happened to duplicate a real member; a comment naming a path that is NOT a member would have made
+# this census scan a directory Cargo does not build. A guard whose subject set is derived from a file
+# must parse that file's grammar, not grep it for shapes.
+member_dirs=()
+member_count=0
+while IFS= read -r m; do
+  [ -n "$m" ] || continue
+  member_dirs+=("$m/src")
+  member_count=$((member_count + 1))
+done < <(awk '
+  /^members[[:space:]]*=[[:space:]]*\[/ { inm = 1; next }
+  inm && /^\]/ { exit }
+  inm && /^[[:space:]]*"[^"]+"/ { match($0, /"[^"]+"/); print substr($0, RSTART + 1, RLENGTH - 2) }
+' Cargo.toml)
+
+if [ "$member_count" -eq 0 ]; then
+  echo "check-policy-census: FAILED -- read ZERO entries out of Cargo.toml's [workspace] members list." >&2
+  echo "  That list is where this census derives what to scan, so an empty read means the manifest was" >&2
+  echo "  reshaped (an inline array, a different key spelling) and this guard would silently scan" >&2
+  echo "  nothing. Re-point the extraction; do not hardcode the crate list back." >&2
+  exit 1
+fi
+
+# The ONLY two ways a member's src/ can stay out of the full scan. Each entry is a reasoned exclusion
+# argued in the header above; anything not named here is scanned, including a crate created tomorrow.
+#   excluded_dirs  — read at all by neither pass.
+#   name_only_dirs — string-shaped consts only; the numeric half is the declared exclusion (see the
+#                    crates/metrics block further down for why that exclusion had to be split by axis).
+excluded_dirs=(crates/facade/src packages/cli-bin/src packages/mcp/src)
+name_only_dirs=(crates/metrics/src)
+
+stale_bucket=""
+for d in "${excluded_dirs[@]}" "${name_only_dirs[@]}"; do
+  [ -d "$d" ] || stale_bucket="${stale_bucket}    ${d}"$'\n'
 done
+if [ -n "$stale_bucket" ]; then
+  echo "check-policy-census: FAILED -- a declared scan-root exclusion points at a directory that does" >&2
+  echo "  not exist:" >&2
+  printf '%s' "$stale_bucket" >&2
+  echo "Each entry in \$excluded_dirs / \$name_only_dirs carries a written reason in this script's" >&2
+  echo "header. A stale one is inert: the name-only bucket would stop scanning that crate ALTOGETHER" >&2
+  echo "and report the loss only as unexplained 'removed:' drift. Re-point it, or delete it (and its" >&2
+  echo "reason) if the crate is genuinely gone." >&2
+  exit 1
+fi
+
+dirs=()
+dir_count=0
+for d in "${member_dirs[@]}"; do
+  [ -d "$d" ] || continue
+  bucketed=0
+  for x in "${excluded_dirs[@]}" "${name_only_dirs[@]}"; do
+    [ "$d" = "$x" ] && bucketed=1
+  done
+  [ "$bucketed" -eq 1 ] && continue
+  dirs+=("$d")
+  dir_count=$((dir_count + 1))
+  # BUILD SCRIPTS TOO (2026-07-29). `$member_dirs` is `<member>/src`, so a `build.rs` — which sits at the
+  # crate ROOT, one level up — was outside every scan. That is not a hypothetical hole: the release audit
+  # for v0.26.0 found `crates/engine/build.rs` carrying FNV basis/prime constants that ADDRESS every
+  # cached entry (the same values censused as `internal` in `crates/cache/src/hash.rs`), invisible here
+  # while the guard read green. A build script is exactly the kind of file this census exists for — it
+  # decides values at compile time that nothing downstream can renegotiate. `find`/`grep -r` both accept
+  # a file argument, so a single path needs no special casing.
+  build_rs="${d%/src}/build.rs"
+  [ -f "$build_rs" ] && dirs+=("$build_rs")
+done
+
+# ## Scan-root floor (2026-07-29)
+# The `[ -d "$d" ]` filter above is defensive by design (the two globbed entries expand to nothing in a
+# tree without parser crates), and it was reported as making a directory RENAME silently shrink the
+# census. Measured 2026-07-29, and that half of the report is WRONG: a shrunken scan produces a
+# `$current` that cannot equal the committed snapshot, so the drift comparison below fires
+# with a `removed:` list. Pointing the whole loop at one empty directory in a scratch copy printed a
+# `removed:` line for EVERY committed entry and exited 1 — loud, not silent.
+#
+# What is NOT covered is the total collapse, and it fails in the worst available way. With `dirs` empty,
+# `grep -rE "$pattern" "${dirs[@]}"` gets no file operand and grep falls back to READING STDIN — the
+# same "no arguments means read stdin" default that made check-docs-link-graph.sh certify an empty link
+# graph. Measured: the guard HUNG until killed, and with stdin at EOF it walked the whole repo through
+# `find` instead. A guard that hangs is a guard that gets bypassed, so the collapse is named here
+# rather than left to be diagnosed from a stall. Plain counter, not `${#dirs[@]}` — see the same note
+# in check-max-file-lines.sh.
+if [ "$dir_count" -eq 0 ]; then
+  echo "check-policy-census: FAILED -- ZERO scan directories exist. Every glob in the loop above" >&2
+  echo "  (crates/*/src, parser/*/src, rules/native/*/src) matched nothing, or everything it matched" >&2
+  echo "  landed in \$excluded_dirs / \$name_only_dirs, so this census would read nothing -- and a" >&2
+  echo "  recursive grep with no file operand reads STDIN, which hangs rather than reporting. Fix the" >&2
+  echo "  scan roots." >&2
+  exit 1
+fi
 
 # ## Field-form vocabulary: a SECOND shape, scanned since 2026-07-27
 # A `const` census cannot see vocabulary that lives as a STRUCT FIELD whose default is built in
@@ -195,9 +331,10 @@ done
 # STRING-shaped consts and not for numeric ones. Implemented as a type filter rather than a second
 # opinion about which names matter — a hand-kept allowlist of "the metrics consts that count" would be
 # the drift surface this census exists to remove.
+#
+# `name_only_dirs` itself is declared with the scan-root derivation near the top of this script,
+# together with the on-disk assertion that keeps a rename from silently emptying it.
 name_type_alternation='&str|&\[&str\]|&\[\(&str,[[:space:]]*&str\)\]|\[&str;[[:space:]]*[0-9]+\]'
-name_only_dirs=()
-[ -d crates/metrics/src ] && name_only_dirs+=(crates/metrics/src)
 
 # Every directory whose FIELD-form vocabulary is read: the full-scan dirs plus the name-only ones. Field
 # defaults are string literals by construction (that is the extraction rule), so there is no numeric
@@ -375,10 +512,25 @@ if [ -n "$bad_axis" ]; then
 fi
 
 count="$(printf '%s\n' "$current" | grep -c . || true)"
+
+# Census floor (2026-07-29). Reaching here means `$current` equalled `$committed`, which is normally
+# proof enough that something was read — the snapshot has the committed snapshot's entries and an empty scan cannot match
+# it. The one way past that is `--update`, which rewrites the snapshot from whatever the scan found:
+# run it once against a broken scan root and the snapshot becomes empty, after which every later run
+# compares empty to empty and prints "OK (0 policy-shaped constants tracked; ...)". The comparison is
+# self-referential, so it cannot be the floor for itself; this is.
+if [ "$count" -eq 0 ]; then
+  echo "check-policy-census: FAILED -- the census is EMPTY. Zero policy-shaped constants were found in" >&2
+  echo "  $dir_count scan directory(ies), and $census_file agrees, so this run proved nothing. That pair" >&2
+  echo "  is what a --update against a broken scan root leaves behind: a snapshot regenerated from a scan" >&2
+  echo "  that read nothing. Fix the scan roots, then --update from a tree where the scan actually works." >&2
+  exit 1
+fi
+
 # Fixed axis order, not awk's `for (k in array)` — that iteration order is unspecified, and a summary
 # line whose field order shuffles between runs is exactly the kind of noise a guard must not emit.
 by_axis="$(awk -v axes="$axes" '
   { c[$2]++ }
   END { n = split(axes, a, " "); for (i = 1; i <= n; i++) printf "%s%s=%d", (i > 1 ? " " : ""), a[i], c[a[i]] + 0 }
 ' "$census_file")"
-echo "check-policy-census: OK ($count policy-shaped constants tracked; $by_axis)"
+echo "check-policy-census: OK ($count policy-shaped constants tracked across $dir_count scan dirs; $by_axis)"

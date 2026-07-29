@@ -249,10 +249,7 @@ fn circular_note_joins_cycle_with_arrow_back_to_start() {
         dep: &dep,
         coupling: &coupling,
         circular: &circular,
-        scope_excludes: &[],
-        permanent_ignores: &[],
-        untested_paths: empty_set(),
-        amplification_by_path: empty_map(),
+        excludes: &[],
         findings: &[],
     };
     let recs = build_recommendations(&input, &RecommendationGates::default());

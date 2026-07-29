@@ -318,9 +318,6 @@ fn collect_end_to_end_against_a_real_temp_git_repo() {
     assert!(renamed.tag_counts.get("FEAT").copied().unwrap_or(0) >= 1);
     assert!(renamed.tag_counts.get("FIX").copied().unwrap_or(0) >= 1);
 
-    let hash = head_hash(&dir).unwrap_or_else(|e| panic!("head_hash() failed: {e}"));
-    assert_eq!(hash.len(), 40, "HEAD hash should be a 40-char sha1: {hash}");
-
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -415,11 +412,6 @@ fn collect_on_a_non_git_directory_returns_a_typed_error() {
     std::fs::create_dir_all(&dir).expect("create plain temp dir");
     let result = collect(&dir, &CollectOptions::default());
     assert!(matches!(result, Err(GitError::NotAGitRepository { .. })));
-    let hash_result = head_hash(&dir);
-    assert!(matches!(
-        hash_result,
-        Err(GitError::NotAGitRepository { .. })
-    ));
     std::fs::remove_dir_all(&dir).ok();
 }
 

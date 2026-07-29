@@ -487,6 +487,7 @@ fn reported_provide_sites_ignores_findings_from_other_rules() {
         file: "Api.java".to_string(),
         line: 12,
         message: String::new(),
+        evidence_paths: Vec::new(),
         data: Some(serde_json::json!({ "source": "be", "key": "POST /a" })),
     };
     assert!(reported_provide_sites(&[foreign]).is_empty());

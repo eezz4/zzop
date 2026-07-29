@@ -72,7 +72,7 @@ zzop endpoint "/api/articles/{}/favorite" ./web ./api   # per key — the verdic
 ```
 
 The order is load-bearing. `check_endpoint`'s reply carries `pattern`, `verdict`, `counts`,
-`matches`, `relatedFindings`, `suggestions` (on `not-found`), the run-global `disclosure` registry,
+`matches`, `relatedFindings`, `suggestions` (on `not-found`), the run-global `disclosure` fold,
 and this host's `config`/`configWarnings` — **and no per-tree `coverage` or `warnings`**. Those are
 the blindness signals, and they ride `cross_repo`/`analyze_repo` replies instead
 ([Output contract](../modules/mcp.md#output-contract)). A verdict read without them is a verdict you
@@ -111,13 +111,26 @@ The frontend calls its backend through `superagent`, an idiom this extraction pa
 recognize. `provided-only` was a fact about zzop's sightline, not about the code. **Report a
 negative only when the tree that would have to supply the missing half was actually visible.**
 
-There is also a run-global prior riding the `analyze_repo`/`cross_repo`/`check_endpoint` replies: the
-`disclosure` registry, a pinned list of the ways zzop's own output can be silently wrong, each entry carrying a
-`status` of `asserted` / `partial` / `notYetDetected`
-([contract](../modules/facade.md#disclosure--silent-failure-class-registry-run-global); source of
-truth `crates/engine/src/disclosure.rs`). It is the same on every run, so read it once and keep it —
+There is also a run-global prior riding the `analyze_repo`/`cross_repo`/`check_endpoint` replies: a pinned
+list of the ways zzop's own output can be silently wrong, each entry carrying a `status` of `asserted` /
+`partial` / `notYetDetected`
+([contract](../modules/facade.md#disclosure--silent-failure-class-registry-run-global); source of truth
+`crates/engine/src/disclosure.rs`).
+
+**Since 2026-07-29 the reply carries a FOLD of that list, not the list.** `disclosure` in a shaped reply is
+an object — the counts (`classes`, `asserted`, `partial`, `notYetDetected`) plus a `note`, a `resource` and
+a `command`. The list is identical on every run, which is exactly why the prose ships once instead of per
+call, so **read the entries once from the contract lane and keep them**:
+
+```sh
+zzop contract disclosure-classes          # CLI
+# MCP: resources/read  zzop://contract/disclosure-classes
+```
+
 `consume-side-unextracted`, `provide-side-unextracted`, `language-unparsed`,
-`generated-client-unrecognized` and `key-mismatch-drift` are the entries this workflow leans on.
+`generated-client-unrecognized` and `key-mismatch-drift` are the entries this workflow leans on. What the
+reply still tells you without asking is that gaps exist and how many — the counts move the moment the
+registry grows, and a test enforces that.
 
 ---
 

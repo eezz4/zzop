@@ -3,11 +3,14 @@
 //! Verb derivation lives in `mod.rs` (app-router: `export const GET/POST/…` symbols; pages/api:
 //! `scan_pages_api_handler` over the re-read text); this module only owns the path mapping.
 
-use super::{convert_dynamic_segment, has_segment_pair, is_route_module_filename};
+use super::{
+    convert_dynamic_segment, has_segment_pair, is_route_extension, is_route_module_filename,
+};
 
 /// `apps/web/pages/api/book/event.ts` → `/api/book/event`.
 ///
-/// Gate: `rel` contains the adjacent segments `pages/api` and a ts|tsx|js|jsx|mjs|cjs extension.
+/// Gate: `rel` contains the adjacent segments `pages/api` and a `super::ROUTE_EXTENSIONS` extension
+/// (that constant's doc owns why the routed set is narrower than the parseable one).
 /// Mapping: `/api/` + directory segments after the pair + the file stem (`index` contributes
 /// nothing, e.g. `pages/api/foo/index.ts` → `/api/foo`). `[param]` → `{param}`; a catch-all
 /// (`[...x]`/`[[...x]]`) anywhere → `None` (not statically routable).
@@ -18,7 +21,7 @@ pub(super) fn pages_api_route(rel: &str) -> Option<String> {
     let segs: Vec<&str> = rel.split('/').collect();
     let (file, dirs) = segs.split_last()?;
     let (stem, ext) = file.rsplit_once('.')?;
-    if !matches!(ext, "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs") {
+    if !is_route_extension(ext) {
         return None;
     }
     let pair_at = dirs

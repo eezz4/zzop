@@ -4,15 +4,11 @@
 # mechanically enforces that a newly authored guard actually runs anywhere; without this, a guard
 # can be written, committed, and quietly never invoked again.
 #
-# Single hardcoded EXTRA requirement (2026-07-26 — it used to be an EXEMPTION):
-# check-parser-fingerprint-bump.sh must additionally be wired into .githooks/pre-push. It used to be
-# exempted from the pre-commit requirement on the claim that it "structurally cannot run from
-# pre-commit, which only ever sees the working tree, not a range". Both halves were wrong once
-# measured: the guard now takes its file list from the working tree when the range's right end is
-# HEAD (see its own header), and the batch flow that leaves work uncommitted is exactly when its
-# subject exists. So it is held to the same pre-commit + CI bar as every sibling, and pre-push — which
-# asks the separate push-shaped question about the outgoing COMMIT range — is asserted on top.
-# A hardcoded name that only ever ADDS a requirement cannot become a hole; the old spelling could.
+# NO per-guard exceptions. There was one until 2026-07-29 — check-parser-fingerprint-bump.sh
+# additionally had to be wired into .githooks/pre-push, because its question was range-shaped.
+# That guard is gone: every fingerprint it policed is derived from a hash of the source that
+# produces the cached bytes (crates/engine/build.rs), so there is no bump to forget. The pre-push
+# hook went with it — it had no other subject — and this script is back to one flat rule.
 #
 # This script wires itself the same way its siblings are wired (see .githooks/pre-commit and
 # ci.yml, both updated alongside this file) rather than special-casing itself out of the
@@ -45,11 +41,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PRE_COMMIT=.githooks/pre-commit
-PRE_PUSH=.githooks/pre-push
 CI=.github/workflows/ci.yml
 TRACKED_GREP_LIB=scripts/lib/tracked-grep.sh
 
-ALSO_NEEDS_PRE_PUSH="check-parser-fingerprint-bump"
 
 missing=0        # any failure at all -> exit 1
 wiring_missing=0 # the scripts/check-*.sh axis only, so its spelling epilogue prints only for it
@@ -161,11 +155,6 @@ while IFS= read -r -d '' f; do
   base="$(basename "$f" .sh)"
   count=$((count + 1))
 
-  if [ "$base" = "$ALSO_NEEDS_PRE_PUSH" ] && ! invoked_in "$PRE_PUSH" "$base"; then
-    echo "check-guards-wired: ($base, $PRE_PUSH) -- range-based guard not wired into pre-push"
-    missing=1; wiring_missing=1
-  fi
-
   if ! grep -qE "^[[:space:]]*${base}[[:space:]]*$" "$PRE_COMMIT"; then
     echo "check-guards-wired: ($base, $PRE_COMMIT) -- not wired into pre-commit's GUARDS array"
     missing=1; wiring_missing=1
@@ -255,9 +244,7 @@ fi
 if [ "$missing" -ne 0 ] && [ "$wiring_missing" -ne 0 ]; then
   echo
   echo "check-guards-wired: every scripts/check-*.sh must run in BOTH .githooks/pre-commit and"
-  echo ".github/workflows/ci.yml's guards job. check-parser-fingerprint-bump.sh must ALSO run from"
-  echo ".githooks/pre-push (the outgoing-commit-range question); that is an extra requirement on top"
-  echo "of the two, not a substitute for them."
+  echo ".github/workflows/ci.yml's guards job."
   echo
   echo "If the guard IS wired and this still fails, check the SPELLING: ci.yml/pre-push invocations"
   echo "are recognized only as 'bash scripts/<name>.sh', 'sh scripts/<name>.sh', './scripts/<name>.sh'"
@@ -282,4 +269,39 @@ if [ "$count" -eq 0 ]; then
   exit 1
 fi
 
-echo "check-guards-wired: clean ($count guards checked; ${#workflow_files[@]} workflows, ${wf_refs:-0} workflow_run reference(s) resolved)."
+# THIRD SUBJECT (2026-07-29): core.hooksPath must be RELATIVE, or a WORKTREE commit runs the MAIN
+# repo's hooks instead of its own. Measured on this clone: the value had drifted to an absolute path
+# even though CONTRIBUTING.md's own setup line prescribes a relative one. That drift splits this
+# meta-guard in half -- it reads the WORKTREE's files to decide the fleet is wired, while the commit
+# actually runs the MAIN repo's hook set. A worktree branch adding a guard would be certified by a
+# fleet that never saw it. Relative is safe and was measured 2026-07-29 in a scratch repo: git chdirs
+# to the working-tree top level before invoking a hook, so `.githooks` resolves per-worktree AND
+# commits from a subdirectory still fire it (root and sub/deeper both ran, pwd at the top level both
+# times). UNSET is also fine -- that is CI, where no hook runs and the guards job invokes each script
+# directly.
+#
+# The expected value is DERIVED from CONTRIBUTING.md's setup line rather than spelled here, so the
+# guard and the instruction it enforces cannot drift apart -- a second hand-written copy of a policy
+# value is the class this repo keeps paying for.
+expected_hooks_path="$(sed -n 's/^git config core\.hooksPath \([^ ]*\).*$/\1/p' CONTRIBUTING.md | head -1)"
+if [ -z "$expected_hooks_path" ]; then
+  echo "check-guards-wired: FAILED -- CONTRIBUTING.md no longer contains a 'git config core.hooksPath"
+  echo "  <path>' setup line, so this check has nothing to compare against and cannot judge. That line"
+  echo "  is the only place the prescribed value lives; restore it rather than hardcoding a value here."
+  exit 1
+fi
+actual_hooks_path="$(git config --get core.hooksPath 2>/dev/null || true)"
+if [ -n "$actual_hooks_path" ] && [ "$actual_hooks_path" != "$expected_hooks_path" ]; then
+  echo "check-guards-wired: FAILED -- core.hooksPath is '$actual_hooks_path', not '$expected_hooks_path'."
+  echo
+  echo "  An absolute (or otherwise non-prescribed) hooksPath makes every WORKTREE commit run the MAIN"
+  echo "  repo's hooks. The guard fleet then verifies one directory and protects another, and this very"
+  echo "  script would report a worktree's new guard as wired while the commit ran without it."
+  echo
+  echo "  Fix: git config core.hooksPath $expected_hooks_path"
+  echo "  (CONTRIBUTING.md prescribes exactly that; leaving it UNSET is fine only in CI, where the"
+  echo "  guards job invokes each script directly and no hook runs at all.)"
+  exit 1
+fi
+
+echo "check-guards-wired: clean ($count guards checked; ${#workflow_files[@]} workflows, ${wf_refs:-0} workflow_run reference(s) resolved; core.hooksPath ${actual_hooks_path:-unset})."

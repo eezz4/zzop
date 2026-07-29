@@ -81,6 +81,7 @@ pub fn method_mismatch_findings(
             file: c.consume.file.clone(),
             line: c.consume.line,
             message,
+            evidence_paths: vec![first.file.clone()],
             data: Some(serde_json::json!({
                 "consumeKey": key,
                 "consumeSource": c.source,

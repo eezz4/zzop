@@ -6,11 +6,15 @@
 //!
 //! ## Why this exists at all (the cap is the whole argument)
 //! "Just diff two runs yourself" holds only BELOW the caps. The shipped reply is not raw output, it
-//! is a CAPPED summary (`crossLayer.edges` <= `DEFAULT_EDGES_LIMIT`, `bucketKeys` <=
-//! `DEFAULT_BUCKET_KEYS_LIMIT`, findings/degraded <= their own limits — see
-//! `docs/contracts/surface-parity.json`). Above a cap, two runs' texts still agree on the COUNTS
-//! while saying nothing about WHICH route left the join. This module is the surface that stays
+//! is a CAPPED summary (`crossLayer.edges` <= `DEFAULT_EDGES_LIMIT`, findings/degraded <= their own
+//! limits — see `docs/contracts/surface-parity.json`). Above a cap, two runs' texts still agree on the
+//! COUNTS while saying nothing about WHICH route left the join. This module is the surface that stays
 //! structurally readable there, and it stays small by carrying IDENTITY ONLY.
+//!
+//! `bucketKeys` was on that list until 2026-07-29 and is now UNCAPPED, which narrows this argument
+//! without retiring it: bucket MEMBERSHIP is answerable from the reply directly now, but `edges` and the
+//! findings list are still capped, and this lane remains the only one that carries identity for the whole
+//! run at a bounded size.
 //!
 //! ## What a manifest carries, and what it deliberately does not
 //! - `tool` — `zzop_facade::version_string()` verbatim: release version + every parser fingerprint.

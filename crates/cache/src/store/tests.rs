@@ -78,6 +78,7 @@ fn sample_findings() -> Vec<Finding> {
         file: "a.ts".to_string(),
         line: 1,
         message: "example finding".to_string(),
+        evidence_paths: Vec::new(),
         data: None,
     }]
 }

@@ -1,0 +1,359 @@
+#!/usr/bin/env bash
+# license-shipping guard — fails when the repository's license obligations are not actually SHIPPED.
+#
+# Three obligations, three checks. All three were unenforced (and all three were violated) until this
+# guard existed on 2026-07-29; the repo had exactly one LICENSE file, at the root, and not one
+# distribution artifact carried it.
+#
+#  1. DISTRIBUTION ROOTS CARRY OUR OWN LICENSE. MIT's operative sentence is "The above copyright
+#     notice and this permission notice shall be included in all copies or substantial portions of
+#     the Software" — a published npm tarball and a Claude Desktop .mcpb bundle are copies. The
+#     comparison is byte-exact against the root LICENSE, not mere existence: a truncated, empty, or
+#     drifted copy satisfies `[ -f ]` and satisfies nothing else. The copy must also be SHIPPABLE,
+#     i.e. tracked by git (or at least not gitignored) — a LICENSE that exists only on the author's
+#     disk is in no archive at all.
+#  2. EVERY CRATE DECLARES A LICENSE. `cargo metadata` reports `license: null` for a crate whose
+#     Cargo.toml omits the field, and every downstream consumer of that metadata (this repo's own
+#     THIRD-PARTY-NOTICES generator included) then has nothing to report. Twelve of twenty-four
+#     workspace crates were in that state when this guard was written.
+#  3. THIRD-PARTY-NOTICES.md IS DERIVED, NOT REMEMBERED. Static linking does not dissolve the
+#     upstream licenses: Apache-2.0 §4(a) requires giving every recipient a copy of the license, and
+#     `smartstring` is MPL-2.0+, whose §3.2 requires telling recipients how to get the source. The
+#     notices file is generated from `cargo metadata`; this check proves the committed file is still
+#     what that generation produced, and does it OFFLINE (see below).
+#     See scripts/gen-third-party-notices.mjs for what --check does and does not cover.
+#
+# ENUMERATION IS DERIVED, NEVER HAND-LISTED — every subject set below comes from ONE `git ls-files`.
+# This repo has already paid twice for the opposite: a guard that iterates a list written inside its
+# own file cannot see the shipped set grow, so the seventh npm platform package (or the twenty-fifth
+# crate) is born exempt from the check that exists to cover it. There is deliberately no array of
+# seven paths in this file. Distribution roots are the directories that hold a tracked publish
+# manifest (`package.json` for the npm lane, `manifest.json` for the .mcpb bundle) plus the
+# repository root itself, which is what a source tarball / `git archive` / GitHub release zip is.
+#
+# Subject-set floors: every check below aborts loudly when its enumeration comes back empty. The
+# sibling class this repo has paid for twice is a scan root pointing at nothing — a guard that reads
+# zero files prints the same "clean." it prints on a genuinely clean tree, and stays vacuously green
+# forever. Zero distribution roots and zero Cargo.toml files are both impossible in this repository;
+# either one means the pathspec broke, never that the obligation went away.
+#
+# WHY THE WORK IS BATCHED INTO SO FEW PROCESSES. Written the obvious way — a `grep` per Cargo.toml, a
+# `cmp` and a `git check-ignore` per LICENSE — this guard measured 18-26s on Windows msys, where a
+# process spawn costs ~0.7s and the whole pre-commit fleet is already 4m25s. Everything is therefore
+# collapsed: one `git ls-files` covering all four pathspecs, one `git hash-object` covering every
+# LICENSE at once, and the shared grep helper instead of a per-file loop. `git check-ignore` is
+# consulted only for a LICENSE that is not already tracked, which is zero calls in steady state.
+#
+# Deps: git, sort/comm, scripts/lib/tracked-grep.sh, plus `node` for check 3. NO cargo, NO network,
+# NO toolchain — this guard runs in a CI job that checks out the repo and installs nothing, and in a
+# pre-commit hook that is already 4m25s. Check 3 explains itself if node is missing rather than
+# skipping silently.
+# Exit 1 on any violation, listing each offending path.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+. ./scripts/lib/tracked-grep.sh
+
+SELF=check-license-shipping
+ROOT_LICENSE=LICENSE
+NOTICES=THIRD-PARTY-NOTICES.md
+GENERATOR=scripts/gen-third-party-notices.mjs
+# The line the generator prints ONLY after a check that actually ran. Its exit code alone is not
+# enough: a truncated, emptied, or stubbed-out generator exits 0 having done nothing, and this guard
+# would then print "clean" having verified nothing at all. Observed live on 2026-07-29 with a
+# zero-byte $GENERATOR. The generator's check() documents that this string is load-bearing.
+GENERATOR_OK_TOKEN='gen-third-party-notices: OK, offline ('
+
+fail=0
+
+abort() {
+  echo "$SELF: FAILED -- $*" >&2
+  exit 1
+}
+
+[ -f "$ROOT_LICENSE" ] || abort "$ROOT_LICENSE is missing. Every check below compares against it; there is
+  nothing to ship and nothing to compare."
+
+# --- One enumeration, three subject sets -----------------------------------------------------------
+#
+# `git ls-files` pathspecs use fnmatch WITHOUT FNM_PATHNAME, so `*` crosses `/`: 'packages/*/package.json'
+# matches packages/cli/package.json AND packages/cli/npm/<platform>/package.json. That is the property
+# that makes this derivation grow on its own when a seventh platform package is added.
+CARGO_GLOBS=('Cargo.toml' '*/Cargo.toml')
+MANIFEST_GLOBS=('packages/*/package.json' 'packages/*/manifest.json')
+LICENSE_GLOBS=('LICENSE' '*/LICENSE')
+
+dist_roots=$'.\n'
+cargo_files=""
+tracked_licenses=""
+while IFS= read -r p; do
+  case "$p" in
+    */package.json | */manifest.json) dist_roots="$dist_roots${p%/*}"$'\n' ;;
+    Cargo.toml | */Cargo.toml) cargo_files="$cargo_files$p"$'\n' ;;
+    LICENSE | */LICENSE) tracked_licenses="$tracked_licenses$p"$'\n' ;;
+  esac
+done < <(git ls-files -- "${CARGO_GLOBS[@]}" "${MANIFEST_GLOBS[@]}" "${LICENSE_GLOBS[@]}")
+
+dist_roots="$(printf '%s' "$dist_roots" | sort -u)"
+
+root_count=0
+for _ in $dist_roots; do root_count=$((root_count + 1)); done
+crate_count=0
+for _ in $cargo_files; do crate_count=$((crate_count + 1)); done
+
+# 1 means only the '.' this script hardcoded survived — i.e. the manifest pathspecs matched nothing.
+if [ "$root_count" -le 1 ]; then
+  abort "enumerated $root_count distribution root(s). The publish-manifest pathspecs
+  (${MANIFEST_GLOBS[*]}) matched nothing, so this run checked no shipped artifact. This repository
+  publishes an npm lane and an .mcpb bundle; a zero here is a broken enumeration, never a repo with
+  nothing to ship."
+fi
+if [ "$crate_count" -eq 0 ]; then
+  abort "enumerated ZERO Cargo.toml files. The pathspec (${CARGO_GLOBS[*]}) matched nothing, so no
+  crate was checked for a license declaration. This is a Rust workspace; a zero here is a broken
+  enumeration, never an empty workspace."
+fi
+
+# --- Check 1: every distribution root carries a byte-identical, shippable copy of the LICENSE ------
+missing_license=""
+unshipped_license=""
+present_licenses=""
+for d in $dist_roots; do
+  f="$d/LICENSE"
+  f="${f#./}"
+  if [ ! -f "$f" ]; then
+    missing_license="$missing_license $f"
+    continue
+  fi
+  # Tracked is the cheap, strong answer (it is exactly what `git archive` and the release tarball
+  # carry), and it costs nothing extra because the paths came out of the same ls-files above. The
+  # `git check-ignore` fallback exists for the one legitimate window where a correct new LICENSE is
+  # not yet in the index: the commit that introduces it, before `git add`.
+  case $'\n'"$tracked_licenses" in
+    *$'\n'"$f"$'\n'*) : ;;
+    *) git check-ignore -q "$f" && { unshipped_license="$unshipped_license $f"; continue; } ;;
+  esac
+  present_licenses="$present_licenses $f"
+done
+
+# One `git hash-object` for every copy at once, results consumed with shell builtins only (no `head`
+# or `sed` per file -- the whole point of batching was to stop paying per-file process spawns).
+# --no-filters hashes the bytes on disk with no clean/CRLF conversion, so this is a byte-exact
+# comparison and not a normalized one.
+drifted_license=""
+if [ -n "$present_licenses" ]; then
+  hash_list=()
+  while IFS= read -r h; do
+    [ -n "$h" ] && hash_list+=("$h")
+  done < <(git hash-object --no-filters -- "$ROOT_LICENSE" $present_licenses)
+
+  copy_count=0
+  for _ in $present_licenses; do copy_count=$((copy_count + 1)); done
+  # The root's own hash is element 0; one element per copy must follow. A short list means
+  # `git hash-object` skipped a path, and comparing against a list we did not fully receive would
+  # silently pass every copy it never hashed.
+  if [ "${#hash_list[@]}" -ne "$((copy_count + 1))" ]; then
+    abort "git hash-object returned ${#hash_list[@]} hash(es) for $((copy_count + 1)) file(s). Refusing to
+  report on a comparison that did not fully run."
+  fi
+
+  i=0
+  for f in $present_licenses; do
+    i=$((i + 1))
+    [ "${hash_list[$i]}" = "${hash_list[0]}" ] || drifted_license="$drifted_license $f"
+  done
+fi
+
+if [ -n "$missing_license" ]; then
+  echo "$SELF: distribution roots with no LICENSE file:" >&2
+  printf '    %s\n' $missing_license >&2
+  echo "  Each of these is published as a copy of the Software (npm tarball, .mcpb bundle, source" >&2
+  echo "  archive). MIT requires the notice to travel with the copy. Copy the root LICENSE verbatim." >&2
+  fail=1
+fi
+if [ -n "$unshipped_license" ]; then
+  echo "$SELF: LICENSE files that git ignores (present locally, absent from every archive):" >&2
+  printf '    %s\n' $unshipped_license >&2
+  fail=1
+fi
+if [ -n "$drifted_license" ]; then
+  echo "$SELF: LICENSE copies that differ from the root $ROOT_LICENSE:" >&2
+  printf '    %s\n' $drifted_license >&2
+  echo "  A copy that is truncated, empty, or carrying a different year/holder is worse than none:" >&2
+  echo "  it looks like compliance. Re-copy the root LICENSE verbatim." >&2
+  fail=1
+fi
+
+# --- Check 1b: every distribution root that ships a BINARY also carries the third-party notices ----
+#
+# Why this is separate from check 1. Our own LICENSE discharges OUR MIT notice; it discharges nothing
+# for the 170 crates statically linked into the binary. Apache-2.0 section 4(a) attaches to the
+# object-form distribution, so it follows the BINARY, not the container format -- a .mcpb bundle and an
+# npm tarball carrying the same bytes owe the same duty.
+#
+# Measured 2026-07-29, and this is why the check exists: the .mcpb lane and the GitHub release lane both
+# shipped THIRD-PARTY-NOTICES.md while all five `@zzop/cli-<platform>` tarballs -- the largest-reach lane
+# -- shipped our MIT LICENSE and nothing else. Check 1 was green throughout, because check 1 only ever
+# asked about LICENSE. A guard that enforces one of two obligations reads exactly like a guard that
+# enforces both.
+#
+# TWO TRAPS, both of which a naive "the file exists" check walks into:
+#  1. npm force-includes LICENSE in every tarball regardless of `files`/.npmignore -- and does NOT extend
+#     that courtesy to any other filename. So the notices file must additionally be LISTED in `files`
+#     wherever a `files` array exists, or it is on disk, tracked, and still absent from the archive.
+#  2. It must be byte-identical to the root copy, checked the same way LICENSE is. A stale notices file
+#     is worse than none: it names a dependency set that is no longer the one being shipped.
+#
+# Roots are the same derived set check 1 uses, so a sixth platform package is covered the day it lands.
+# A root whose manifest declares no binary payload is exempt -- that exemption is derived (does the
+# package.json `files` array name anything but docs?), never a hand-list of package names.
+notices_missing=""
+notices_unlisted=""
+notices_present=""
+for d in $dist_roots; do
+  [ "$d" = "." ] && continue # repo root holds the original; nothing to copy to itself
+  manifest="$d/package.json"
+  # Only npm-lane roots have a `files` array to police. Non-npm roots (the .mcpb bundle) get their
+  # copies from the workflow, so presence + byte-identity is the whole obligation there.
+  if [ -f "$d/$NOTICES" ]; then
+    notices_present="$notices_present $d/$NOTICES"
+    if [ -f "$manifest" ] && grep -q '"files"' "$manifest" && ! grep -q "\"$NOTICES\"" "$manifest"; then
+      notices_unlisted="$notices_unlisted    $manifest"$'\n'
+    fi
+  else
+    notices_missing="$notices_missing    $d/$NOTICES"$'\n'
+  fi
+done
+
+if [ -n "$notices_missing" ]; then
+  echo "$SELF: distribution roots that ship a binary but carry no $NOTICES:" >&2
+  printf '%s' "$notices_missing" >&2
+  echo "  Our own LICENSE covers OUR code. The statically linked Apache-2.0 crates (section 4(a)) and" >&2
+  echo "  smartstring's MPL-2.0+ (section 3.2) impose duties on whoever ships the OBJECT FORM, which is" >&2
+  echo "  every one of these archives. Copy $NOTICES in, verbatim." >&2
+  fail=1
+fi
+if [ -n "$notices_unlisted" ]; then
+  echo "$SELF: $NOTICES exists but is NOT in the package's \"files\" array:" >&2
+  printf '%s' "$notices_unlisted" >&2
+  echo "  npm force-includes LICENSE in every tarball and extends that to NO other filename, so a" >&2
+  echo "  notices file left out of \"files\" is tracked, present on disk, and still absent from the" >&2
+  echo "  published archive -- the exact shape that let this obligation go unmet while the guard was green." >&2
+  fail=1
+fi
+if [ -n "$notices_present" ]; then
+  notices_hashes=()
+  while read -r h; do notices_hashes+=("$h"); done < <(git hash-object -- "$NOTICES" $notices_present)
+  n_expected=1
+  for _ in $notices_present; do n_expected=$((n_expected + 1)); done
+  if [ "${#notices_hashes[@]}" -ne "$n_expected" ]; then
+    abort "git hash-object returned ${#notices_hashes[@]} hash(es) for $n_expected file(s) while checking
+  $NOTICES copies. Refusing to compare against a list we did not fully receive."
+  fi
+  i=1
+  notices_drift=""
+  for f in $notices_present; do
+    [ "${notices_hashes[$i]}" = "${notices_hashes[0]}" ] || notices_drift="$notices_drift    $f"$'\n'
+    i=$((i + 1))
+  done
+  if [ -n "$notices_drift" ]; then
+    echo "$SELF: $NOTICES copies that differ from the root $NOTICES:" >&2
+    printf '%s' "$notices_drift" >&2
+    echo "  A stale notices file is worse than a missing one -- it names a dependency set that is not the" >&2
+    echo "  one being shipped, while looking like compliance. Regenerate, then re-copy verbatim." >&2
+    fail=1
+  fi
+fi
+
+# --- Check 2: every workspace Cargo.toml declares a license ---------------------------------------
+#
+# Accepts `license = "..."` or `license.workspace = true` (the spelling every compliant sibling in
+# this workspace uses; the root Cargo.toml's [workspace.package] is where the value lives). The
+# root Cargo.toml is in the subject set on purpose -- it is the one that supplies the value the
+# other twenty-three inherit.
+#
+# Expressed as a set difference (all Cargo.toml minus those that declare) rather than a grep per
+# file: one shared, hardened grep pass instead of twenty-four spawns. tracked_files_matching aborts
+# loudly on a real grep failure, so an empty result here means "none declare", never "the scan died".
+LICENSE_FIELD='^license(\.workspace)?\s*='
+declaring="$(tracked_files_matching "$LICENSE_FIELD" "${CARGO_GLOBS[@]}")"
+unlicensed="$(comm -23 <(printf '%s' "$cargo_files" | sort) <(printf '%s\n' "$declaring" | sort) || true)"
+
+if [ -n "$unlicensed" ]; then
+  echo "$SELF: workspace crates that declare no license:" >&2
+  printf '    %s\n' $unlicensed >&2
+  echo "  \`cargo metadata\` reports license: null for these, so every consumer of that metadata --" >&2
+  echo "  including this repo's own $NOTICES generator -- has nothing to report. Add" >&2
+  echo "  \`license.workspace = true\` to the [package] section (the root Cargo.toml's" >&2
+  echo "  [workspace.package] supplies \"MIT\")." >&2
+  fail=1
+fi
+
+# --- Check 3: THIRD-PARTY-NOTICES.md agrees with cargo metadata -----------------------------------
+#
+# Delegated to the generator's own --check mode rather than re-implemented here: the dependency-graph
+# walk (workspace members, normal edges only -- no dev, no build) is the single hardest thing to get
+# right in this whole area, and a bash re-derivation of it would be a second SSOT that drifts from
+# the first. The generator prints its own diff and exit status; this script only reports which stage
+# failed.
+#
+# EXACT WITHOUT cargo. --check used to shell out to `cargo metadata`, which turned this pure-bash,
+# network-free guard into one that wants a sparse registry index (and, on a cold runner, a rust-std
+# for a target rust-toolchain.toml requests but the runner lacks) — a licensing guard with a brand
+# new way to go red for reasons that are not about licensing. It no longer does. The shipped
+# inventory is a pure function of two committed inputs, Cargo.lock and the workspace Cargo.toml
+# manifests: if neither changed since the notices were generated, the inventory CANNOT have changed.
+# The generator records a digest of those inputs (enumerated by `git ls-files`, never a hand-written
+# path list) plus a digest of its own output inside $NOTICES, and --check recomputes both. A
+# mismatch is a FAILURE that says "regenerate" — never a skip, never an automatic rewrite.
+#
+# WHAT --check DOES AND DOES NOT VERIFY, stated plainly because the difference is load-bearing. The
+# input digest proves the INVENTORY is current; it proves nothing about the notices file's own bytes,
+# because a hand-edited table row or a gutted `### MIT` section touches no manifest. The output
+# digest plus the semantic checks (Summary counts vs the parsed table, the table's SPDX identifiers
+# vs the `### ` sections, every section carrying a non-trivial body or an explicit "text unavailable"
+# declaration, the textless list being a subset of the table) cover exactly that direction. What
+# remains uncovered in both: --check does NOT re-read the upstream license bodies out of the cargo
+# registry `src/` directory, because those files exist only on a machine that has actually EXTRACTED
+# the crates -- requiring them would make this guard fail on a fresh checkout for reasons that have
+# nothing to do with license compliance. Regenerating (`node $GENERATOR`) does read them, and does
+# rewrite the bodies; regeneration is therefore the one step that still needs a cargo toolchain.
+if [ ! -f "$GENERATOR" ]; then
+  abort "$GENERATOR is missing. $NOTICES is a DERIVED file; without its generator it is a
+  hand-maintained list, which is the state this guard exists to prevent."
+fi
+if [ ! -f "$NOTICES" ]; then
+  echo "$SELF: $NOTICES does not exist." >&2
+  echo "  Statically linked Apache-2.0 crates (§4(a)) and smartstring's MPL-2.0+ (§3.2) impose" >&2
+  echo "  duties that our own MIT notice does not discharge. Generate it: node $GENERATOR" >&2
+  fail=1
+elif ! command -v node >/dev/null 2>&1; then
+  abort "\`node\` not found, so $NOTICES could not be verified. This guard does not skip a check it
+  cannot run -- a silently skipped compliance check is the failure mode. (\`cargo\` is NOT required
+  here; only \`node\` and \`git\` are.)"
+else
+  # Output captured (not streamed) so the success token can be inspected; matched with a shell
+  # `case`, not a pipe into grep, so nothing here can be killed by SIGPIPE.
+  if ! gen_out="$(node "$GENERATOR" --check 2>&1)"; then
+    printf '%s\n' "$gen_out" >&2
+    echo "$SELF: $NOTICES failed verification (details above)." >&2
+    echo "  Regenerate it: node $GENERATOR   # regeneration is the step that needs a cargo toolchain" >&2
+    fail=1
+  else
+    case "$gen_out" in
+      *"$GENERATOR_OK_TOKEN"*) printf '%s\n' "$gen_out" ;;
+      *)
+        printf '%s\n' "$gen_out" >&2
+        abort "$GENERATOR exited 0 without printing its success line. A generator that reports
+  nothing has verified nothing, and this guard refuses to translate that silence into \"clean\"."
+        ;;
+    esac
+  fi
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo >&2
+  echo "$SELF: FAILED -- license obligations are not shipped. See the individual sections above." >&2
+  exit 1
+fi
+
+echo "$SELF: clean ($root_count distribution roots carry the root LICENSE byte-for-byte, $crate_count Cargo.toml files declare a license, $NOTICES verified offline)."

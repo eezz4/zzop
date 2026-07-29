@@ -129,6 +129,7 @@ fn join_issue_to_finding(issue: &zzop_rules_schema::JoinIssue) -> Finding {
         file: issue.file.clone(),
         line: issue.line,
         message: zzop_rules_schema::join_issue_message(issue),
+        evidence_paths: Vec::new(),
         data: serde_json::to_value(issue).ok(),
     }
 }

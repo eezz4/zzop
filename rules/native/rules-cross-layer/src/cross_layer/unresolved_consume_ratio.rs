@@ -97,6 +97,7 @@ pub fn unresolved_consume_ratio_findings(
             file: anchor.consume.file.clone(),
             line: anchor.consume.line,
             message,
+            evidence_paths: Vec::new(),
             data: Some(serde_json::json!({
                 "source": source,
                 "unresolvedCount": unresolved_count,

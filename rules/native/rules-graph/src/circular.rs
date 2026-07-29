@@ -35,6 +35,8 @@ pub fn circular_findings(cycles: &[Vec<String>]) -> Vec<Finding> {
                     cycle.join(" -> "),
                     disable_hint("circular")
                 ),
+                // Every other member of the cycle — the message prints the whole chain.
+                evidence_paths: cycle.iter().skip(1).cloned().collect(),
                 data: Some(serde_json::json!({ "cycle": cycle })),
             }
         })

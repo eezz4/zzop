@@ -1,4 +1,4 @@
-//! `cross-layer/*` — 25 native rules that run over `zzop_core::CrossLayerResult`, the multi-tree join result
+//! `cross-layer/*` — the native rules that run over `zzop_core::CrossLayerResult`, the multi-tree join result
 //! `zzop_engine::analyze_trees` produces (see `crates/core/src/io.rs`'s module doc for the join itself:
 //! exact `(kind, key)` join with an ambiguity gate for keys provided by 2+ distinct source trees, an
 //! external-egress gate for host-carrying consume keys, and a low-confidence tag for generic paths).
@@ -83,6 +83,11 @@
 //!   removal — the invented `[GET, POST]` verb pair is gone, replaced by an info disclosure that names the
 //!   served path and points at inject-to-confirm (`cross-layer/unknown-verb-route`, info).
 //!
+//! - [`all_consumes_unjoined`]: ONE finding per tree whose internal http calls ALL failed to join, replacing
+//!   the per-call `ambiguous-consume`/`unprovided-mutation-call` wall one unresolved base path otherwise
+//!   produces — 93 of 210 findings in the measured 2026-07-29 dogfood join, and never folding an aggregate
+//!   (`cross-layer/all-consumes-unjoined`, info).
+//!
 //! ## Suppression
 //! None of these rules honor an inline `// <marker>-ok` suppression comment. Checked against how the
 //! existing native rules in this crate do it: `duplicate_route`/`route_shadowing`/`unprovided_consume`
@@ -112,7 +117,9 @@
 //! bug — each finding carries a distinct diagnosis of the same broken call. `unconsumed_mutation_endpoint` does NOT co-fire: it is a strict specialization, so `unconsumed_endpoint` stands
 //! down on the ROUTES it reported — keyed `(source, file, line, key)`, never the anchor alone (one line can carry several routes, e.g. gin `router.Any`, and a coarser key would silence a co-located read route); output-keyed, never a second copy of the predicate (`crates/engine/src/cross_layer_findings/unconsumed_family.rs`); disabling it hands those routes back.
 
+pub mod all_consumes_unjoined;
 pub mod ambiguous_consume;
+pub mod blindness;
 pub mod body_field_drift;
 pub mod cross_tree_route_shadowing;
 pub mod duplicate_route;
@@ -143,7 +150,10 @@ mod external_url;
 mod trpc_mount;
 mod vocab;
 
+pub use all_consumes_unjoined::{all_consumes_unjoined_findings, retain_non_subsumed_sources};
 pub use ambiguous_consume::ambiguous_consume_findings;
+pub use blindness::majority_unresolved_http_sources;
+pub(crate) use blindness::MIN_TOTAL_CONSUMES;
 pub use body_field_drift::body_field_drift_findings;
 pub use cross_tree_route_shadowing::cross_tree_route_shadowing_findings;
 pub use duplicate_route::cross_layer_duplicate_route_findings;
@@ -225,54 +235,6 @@ pub(crate) fn is_all_slot_path(segments: &[&str]) -> bool {
 /// A version-shaped path segment: `v1`, `V2`, `v1.2`, ... — shared by `version_skew` (dangling-vs-provide
 /// skew) and `external_version_inconsistent` (versioned/versionless mix against one external host).
 pub const VERSION_SEGMENT_PATTERN: &str = r"(?i)^v[0-9]+(?:\.[0-9]+)*$";
-
-/// Trees below this many total `http` consumes are too small for a ratio claim — shared floor between
-/// `unresolved_consume_ratio` (fires at/above it) and `sdk_import_no_visible_consume` (fires below it),
-/// so the two blind-spot self-reports partition the space and never co-fire on one tree. Also the floor
-/// [`majority_unresolved_http_sources`] uses to decide which sources are eligible to count as BLIND at all.
-pub(crate) const MIN_TOTAL_CONSUMES: usize = 5;
-
-/// Majority threshold, integer math only (no floats — output must be byte-stable across platforms):
-/// `unresolved * 2 >= total` is equivalent to `unresolved / total >= 0.5` without any floating-point
-/// division. Single definition, shared by [`majority_unresolved_http_sources`] and `unresolved_consume_ratio`
-/// so the two can never drift apart on what "majority" means.
-pub(crate) fn is_majority_unresolved(unresolved: usize, total: usize) -> bool {
-    unresolved * 2 >= total
-}
-
-/// Sources whose `http` consumes are majority-unresolved (key extraction failed for most call sites) AND
-/// above the small-sample floor ([`MIN_TOTAL_CONSUMES`]) — i.e. sources the cross-layer join is effectively
-/// BLIND to. Single definition shared by `unresolved-consume-ratio` (which discloses the blindness per
-/// source) and the `unconsumed-*` rules (which must not over-claim a confident "unconsumed" verdict when a
-/// blind source could be the unseen caller). Integer math only — no floats reach output.
-///
-/// This helper is the shared predicate that lets both the disclosure rule (`unresolved_consume_ratio`) and
-/// the confidence-gated rules reason about blindness identically, so they can never silently drift apart on
-/// the definition again.
-pub fn majority_unresolved_http_sources(
-    unresolved_consumes: &[zzop_core::io::TaggedConsume],
-    http_consume_totals: &[(String, usize)],
-) -> std::collections::BTreeSet<String> {
-    let mut unresolved_by_source: std::collections::BTreeMap<&str, usize> =
-        std::collections::BTreeMap::new();
-    for c in unresolved_consumes {
-        if c.consume.kind == "http" {
-            *unresolved_by_source.entry(c.source.as_str()).or_insert(0) += 1;
-        }
-    }
-
-    http_consume_totals
-        .iter()
-        .filter_map(|(source, total)| {
-            let total = *total;
-            if total < MIN_TOTAL_CONSUMES {
-                return None;
-            }
-            let unresolved_count = *unresolved_by_source.get(source.as_str())?;
-            is_majority_unresolved(unresolved_count, total).then(|| source.clone())
-        })
-        .collect()
-}
 
 /// One non-relative (package) import specifier observed in a tree, aggregated per specifier — the input
 /// `sdk_import_no_visible_consume` needs. Engine-derived like [`HttpProvideSite`] and for the same reason:

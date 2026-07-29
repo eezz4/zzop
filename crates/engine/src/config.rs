@@ -94,6 +94,20 @@ pub struct EngineConfig {
     /// because a gateway lives outside the app. Applied by `analyze::compose::apply_config_mounts`, as the
     /// LAST provide transform in `analyze::assemble`. Empty (the default) applies no mounts.
     pub mounts: Vec<MountRule>,
+    /// The base path this tree's own OUTBOUND http calls carry — the calling-side mirror of [`mounts`].
+    /// Prepended to the key of every keyed, relative `http` CONSUME in the tree. Config-declared, because
+    /// the engine refuses to guess a base it cannot read statically: a `baseURL` assigned from a
+    /// cross-file constant emits nothing, so without this the calls key as `GET /articles` while the
+    /// backend serves `GET /api/articles` and nothing joins.
+    ///
+    /// IDEMPOTENT, which is where it diverges from [`mounts`]: a consume already keyed under this base is
+    /// left alone. The code-extracted pass (the `client-base-prefix` sentinel a literal
+    /// `axios.defaults.baseURL` produces) prepends unconditionally because it SIMULATES a runtime that
+    /// really does concatenate; a config declaration states what the effective route IS, and one tree
+    /// routinely spells its calls both ways (a browser client with an implicit base, server-side
+    /// rendering with the full path). A declaration that moved nothing self-reports as a warning. See
+    /// `analyze::compose::apply_config_client_base`. `None` (the default) applies nothing.
+    pub client_base: Option<String>,
     /// Hosts this tree owns: absolute-URL consumes to these hosts are re-keyed internal at cross-layer
     /// link time (see `zzop_core::LinkOptions::internal_hosts`) — plumbed in from every tree's own
     /// `hosts` by `analyze_trees`. Empty (the default) declares no hosts.
@@ -139,6 +153,7 @@ impl Default for EngineConfig {
             profile_rules: false,
             adapter_overlays: Vec::new(),
             mounts: Vec::new(),
+            client_base: None,
             hosts: Vec::new(),
             vocabulary: crate::VocabularyConfig::built_in(),
         }

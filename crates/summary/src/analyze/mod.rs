@@ -58,7 +58,9 @@ pub fn analyze_summary(
     };
     // `disclosure` is the facade's run-global blindness-class registry (which failure classes zzop
     // does/does NOT detect) — the meta-honesty channel an AI consumer needs alongside the active
-    // `warnings`; it rides at the top level of every facade output and is forwarded, never dropped.
+    // `warnings`; it rides at the top level of every facade output. Carried here, then FOLDED to its
+    // counts plus a pointer by the shaper (`crate::output::disclosure`) — never dropped, and never
+    // shipped as the ~10.6KB of run-invariant prose it is at the facade boundary.
     let (output_view, disclosure) = match loaded.method {
         zzop_config::Method::Analyze => {
             let out = zzop_facade::analyze_json(&loaded.request.to_string())?;

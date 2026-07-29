@@ -50,6 +50,29 @@ for dir in "${ALLOWLIST[@]}"; do
   [ -d "$dir" ] || { echo "tree-sitter isolation guard: stale ALLOWLIST entry '$dir' -- directory does not exist (crate renamed/moved?)." >&2; exit 1; }
 done
 
+# ## Subject-set floor (2026-07-29) — see check-swc-isolation.sh's identical block for the full
+# rationale. Short form: tracked_files_matching returns the same empty string for "no violations" and
+# for "the pathspec matched nothing", so without this the clean line cannot tell the two apart.
+# Measured 2026-07-29 by redirecting both pathspecs in a scratch copy: printed "tree-sitter isolation
+# guard: clean." and exited 0.
+#
+# This is a DIFFERENT axis from the stale-ALLOWLIST assert above, which the presence of that assert
+# made easy to mistake for coverage: that loop proves the three allowlisted crate DIRECTORIES still
+# exist, and says nothing about whether the two pathspecs below enumerated a single file. A guard that
+# asserts on one axis reads as asserted-on generally — the same misreading that let this class survive
+# the 2026-07-28 sweep. The glob arrays are the single owner of each scan's scope.
+CARGO_GLOBS=('Cargo.toml' '*/Cargo.toml')
+RS_GLOBS=('*.rs')
+cargo_scanned="$(git ls-files -- "${CARGO_GLOBS[@]}" | grep -c . || true)"
+rs_scanned="$(git ls-files -- "${RS_GLOBS[@]}" | grep -c . || true)"
+if [ "$cargo_scanned" -eq 0 ] || [ "$rs_scanned" -eq 0 ]; then
+  echo "tree-sitter isolation guard: FAILED -- enumerated $cargo_scanned Cargo.toml file(s) and"
+  echo "$rs_scanned .rs file(s). A zero on either axis means that pathspec matched nothing, so this run"
+  echo "proved nothing about where tree-sitter is used. An empty subject set is a broken guard, never a"
+  echo "clean tree."
+  exit 1
+fi
+
 echo "tree-sitter isolation guard: checking Cargo.toml dependency declarations..."
 # `(-[a-z0-9]+)*` (not `?`): grammar crate names can be multi-segment (`tree-sitter-c-sharp`) — a
 # single-suffix pattern would let such a dependency slip past the guard (opus review F3).
@@ -57,7 +80,7 @@ DEP_PATTERN='^\s*(tree-sitter(-[a-z0-9]+)*)\s*='
 # The enumeration call is kept OUTSIDE the `|| true` below on purpose: tracked_files_matching's own
 # failure must still trip `set -e` and abort loud (see its header comment); only the root-Cargo.toml
 # exclusion and the per-crate allowlist loop below are safe to swallow via `|| true`.
-cargo_matches=$(tracked_files_matching "$DEP_PATTERN" 'Cargo.toml' '*/Cargo.toml')
+cargo_matches=$(tracked_files_matching "$DEP_PATTERN" "${CARGO_GLOBS[@]}")
 cargo_files=$(grep -v -x 'Cargo.toml' <<< "$cargo_matches" || true)
 
 for dir in "${ALLOWLIST[@]}"; do
@@ -75,7 +98,7 @@ fi
 
 echo "tree-sitter isolation guard: checking .rs source usage..."
 USE_PATTERN='\btree_sitter::[A-Za-z_]|use\s+tree_sitter(::|;|\s)'
-rs_files=$(tracked_files_matching "$USE_PATTERN" '*.rs')
+rs_files=$(tracked_files_matching "$USE_PATTERN" "${RS_GLOBS[@]}")
 
 for dir in "${ALLOWLIST[@]}"; do
   rs_files=$(echo "$rs_files" | grep -v "^$dir/src/" || true)
@@ -98,4 +121,4 @@ if [ "$violations" -ne 0 ]; then
   exit 1
 fi
 
-echo "tree-sitter isolation guard: clean."
+echo "tree-sitter isolation guard: clean ($cargo_scanned Cargo.toml + $rs_scanned .rs files scanned)."

@@ -40,10 +40,7 @@ pub use dsl::{
 };
 
 pub use finding::{disable_hint, Finding, RuleExplain, Severity};
-pub use graph::{
-    circular_from_dep, circular_from_dep_excluding, connected_components, find_cycles,
-    ComponentEdge, ConnectedComponentsResult,
-};
+pub use graph::{circular_from_dep, circular_from_dep_excluding, find_cycles, ComponentEdge};
 pub use io::{
     classify_consume_join, db_table_channel_casing, http_consume_interface_key, http_interface_key,
     key_carries_route_identity, link_cross_layer_io, normalize_http_path, unknown_verb_route_path,
@@ -71,7 +68,7 @@ pub use paths::is_test_file;
 pub use registry::{
     apply_severity_override, global_exclude_matches_path, is_enabled, is_suppressed,
     merge_findings, register_native_analysis_stub, suppression_matches_path, GlobalExclude,
-    RuleConfig, RuleRegistry, Suppression,
+    RuleConfig, RuleRegistry, Suppression, REDACTED,
 };
 
 pub use file_nodes::{

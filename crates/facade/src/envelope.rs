@@ -68,6 +68,8 @@ pub fn analyze_envelope_json(envelope_json: &str, config_json: &str) -> Result<S
     // engine's uniform envelope-mode mount apply (`analyze_envelope`'s `apply_config_mounts` call —
     // `docs/NORMALIZED_AST.md`'s Mode-A parity promise) is reachable over this wire path too.
     config.mounts = fold_mounts(&req.mounts, req.mounted_at.as_deref());
+    // The calling-side counterpart, plumbed for the same origin-agnostic reason (see the field's doc).
+    config.client_base = req.client_base.clone();
     let mut output = zzop_engine::analyze_envelope(&envelope, &config);
     warnings.append(&mut output.warnings);
     output.warnings = warnings;

@@ -59,7 +59,7 @@ members = [
 # the `0.0.0` placeholder), and a stamp cannot fail the way a verification can. `version_string()`
 # / the binaries report `CARGO_PKG_VERSION` directly (no `ZZOP_RELEASE_VERSION` env). Cache-bust tokens are
 # stamped with this version at their scope's last change — see the cache decision.
-version = "0.25.0"
+version = "0.26.0"
 edition = "2021"
 license = "MIT"
 
@@ -71,3 +71,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = "1"
 rayon = "1"
+# Property testing — a DEV dependency of all eight `parser/*` frontends and of nothing else. Pinned here
+# rather than eight times because eight copies of a version requirement drift; the isolation scripts
+# (check-swc-isolation.sh and friends) exist for the opposite case, a dependency that must NOT spread.
+# `default-features = false` drops proptest's `fork`/`timeout` support, which needs `rusty-fork` + `wait-timeout`
+# and spawns a subprocess per case — the no-panic properties here run in-process, so that machinery is
+# dead weight in every parser test binary.
+proptest = { version = "1", default-features = false, features = ["std", "bit-set"] }

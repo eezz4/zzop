@@ -3,32 +3,84 @@
   "_cliOnlyLanes": {
     "_doc": "Delivery lanes that exist ONLY on the `zzop` CLI, with the reason each has no MCP tool twin, and the .rs files that implement each one's PROJECTION. What `sources` means, precisely, because the subtraction below depends on it: the projection implementation under crates/summary/** — NOT the argv entry points that route to it (packages/cli-bin/src/main.rs and its cli/ module). Those files are deliberately NOT declared, and must not be: they also dispatch lanes that are NOT CLI-only (`analyze`, `cross`, `endpoint`), so subtracting them wholesale would blind the haystack to a real MCP-lane leak in exactly the files where argv meets the shared handlers. The consequence of leaving them in is FAIL-SAFE, which is why it is the right side to err on: if an argv file ever emits an `omit` field's key literal, the guard reads it as an MCP-lane leak and goes RED (a false red someone must then explain), never green. As of 2026-07-26 neither file spells any registry field name as a JSON key literal outside a comment, so nothing is failing today. The PROSE here is documentation (the meta-test's SURFACES list in crates/engine/tests/rule_contracts/surface_parity.rs covers `mcpAnalyzeReply` alone) — recorded so a future batch does not 'restore parity' by adding a twin without re-reading why there isn't one. The `sources` arrays, however, ARE machine-read (since 2026-07-26): that meta-test's carry/omit check subtracts exactly those files from the MCP lane it scans, so this block is what defines the boundary between 'a CLI-only lane deliberately emits this' and 'the MCP reply leaks it'. Consequences, both deliberate: a lane that ships without declaring its sources leaves them inside the MCP lane and fails the build the moment it emits an `omit` field (declare the lane, do not rename the key around the guard); and a declared path that no longer resolves is a hard failure, so a moved lane source must update this file in the same commit. The subtraction applies to `carry` rows too — a CLI-only emission must never be what keeps a `carry` row green after the MCP reply stopped forwarding it. NOTE for the `zzop manifest` and `zzop facts` rows below: because both read fields the shaped reply drops, an `omit` row's note can no longer say 'available ONLY via a direct zzop-facade embedding' without qualification — see the `ir` row.",
     "zzop manifest": {
-      "sources": ["crates/summary/src/manifest/mod.rs"],
-      "reads": ["trees[].sourceId", "trees[].output.coverage", "trees[].output.ir.io.provides", "crossLayer.edges", "crossLayer's five non-edge buckets"],
+      "sources": [
+        "crates/summary/src/manifest/mod.rs"
+      ],
+      "reads": [
+        "trees[].sourceId",
+        "trees[].output.coverage",
+        "trees[].output.ir.io.provides",
+        "crossLayer.edges",
+        "crossLayer's five non-edge buckets"
+      ],
       "emits": "Identity rows only — provides {kind,key,source}, edges {kind,key,from,to}, buckets {bucket,kind,key,source} — sorted, deduped, UNCAPPED, plus a `tool` fingerprint (zzop_facade::version_string) and per-source {joinContributionZero, degraded}. No file, no line, no root path, no findings.",
       "noMcpTwinBecause": "(1) The manifest is deliberately UNCAPPED, and every MCP reply this repo ships is cap-governed (the token-bomb guard crates/summary/src/output exists for); putting it on that wire would force a choice between breaking that doctrine and capping the one artifact whose whole reason for existing is that the caps make two capped summaries un-diffable above them. (2) The workflow is file-shaped, not conversation-shaped: a manifest earns its keep by being COMMITTED and compared by a later run (the scripts/max-file-lines-baseline.txt model). (3) An agent that wants it can shell out to the same binary — the analysis path is identical."
     },
     "zzop diff": {
-      "sources": ["crates/summary/src/manifest/diff.rs"],
-      "reads": ["two `zzop manifest` outputs — no engine, no filesystem beyond the two files"],
+      "sources": [
+        "crates/summary/src/manifest/diff.rs"
+      ],
+      "reads": [
+        "two `zzop manifest` outputs — no engine, no filesystem beyond the two files"
+      ],
       "emits": "transitions (a key's bucket placement changed — the ranked signal), sources {added, removed, coverageDropped}, and per-relation added/removed for provides/edges/buckets, with `blindnessSuspect` on any removal attributable to a source that lost coverage.",
       "noMcpTwinBecause": "It consumes manifests; without a `manifest` twin an agent could not produce its own inputs, so a diff-only tool would be half a surface. Ships with `manifest` or not at all."
     },
     "zzop graph": {
-      "sources": ["crates/summary/src/graph/mod.rs", "crates/summary/src/graph/collect.rs", "crates/summary/src/graph/mermaid.rs", "crates/summary/src/graph/cosmograph.rs", "crates/summary/src/graph/dep.rs", "crates/summary/src/graph/risk.rs", "crates/summary/src/graph/posture.rs"],
-      "reads": ["trees[].sourceId", "trees[].output.coverage.joinContributionZero", "crossLayer.edges", "crossLayer's five non-edge buckets", "trees[].output.ir.dep", "trees[].output.findings (circular only, for cycle membership)", "trees[].output.critical", "trees[].output.seams", "trees[].output.scores (presence only — the numbers are deliberately NOT drawn)", "trees[].output.ir.io.provides (http, write methods only)", "trees[].output.findings (mutating-route-no-auth, for guard status)"],
-      "emits": "TWO FORMATS, selected by `--format`, because its consumer is a renderer rather than a parser. (A) `--format mermaid` (DEFAULT, every domain) — MERMAID TEXT, the one zzop product that is not a JSON document. (B) `--format cosmograph-nodes|cosmograph-links` (`--domain dep` ONLY, a usage error elsewhere) — NDJSON tables for an interactive viewer, one record per line, emitted UNCAPPED: `--top` is refused rather than ignored, because capping exists to keep a DRAWN picture readable and a viewer with zoom does that job itself. Measured on zzop's own tree, mermaid draws 40 of 1073 files where this lane emits all 1073 and all 1968 edges, which is the case dep.rs's module doc reserved when it said a large graph is where a different format stays live. Both formats read the SAME uncapped `dep::collect` pass, so they cannot become two answers about one repo. The nodes table carries id/source/path/label(basename)/folder/fanIn/fanOut/degree/inCycle — the axes a viewer styles by; the links table carries source/target/inCycle. NDJSON rather than CSV so `serde_json` owns quoting (a path containing a comma cannot silently shift columns). DISCLOSURE GOES TO STDERR for this format, never into the table: stdout is a parseable table and a `%%` census line would be a corrupt row, so the CLI prints the scope/total census on the other stream. A `flowchart LR` with one subgraph per analyzed source and one node per (sourceId, side, kind, key): rectangles for provides, stadiums for consumes, solid arrows for resolved edges, DOTTED arrows for the two non-authoritative relations (an ambiguous consume to each candidate provider, and an edge the linker flagged `lowConfidenceReason`). Each node's bucket rides its LABEL as well as its `classDef` class, so a viewer that drops styling still reads the verdict. SCOPED BY CONSTRUCTION: `--top` caps DRAWN RELATIONS per bucket (default 25, no upper bound — a file/pipe surface, not the capped wire; rows are deduped to distinct relations BEFORE the cap, because a node aggregates call sites and a row-based cap described a picture the reader was not looking at — measured on the OSS corpus, 60 `edges` rows are 4 relations) and `--scope <prefix>` keeps rows whose source id or a site path starts with the prefix; both are disclosed twice, in a `%%` per-bucket drawn/inScope/total-relations census that also publishes the call-site count each aggregates, AND as a visible note node, since a mermaid comment does not survive rendering. NOT emitted, and named in the document's own header rather than left to inference: `crossLayerFindings` (the drift/near-miss VERDICTS — findings ABOUT the join, not members of it; a finding has no node identity here and inventing one would be inventing facts the IR does not have), `hostRekeyCounts` (a counter, not an edge), the warnings/configWarnings/disclosure prose channels, and per-site file/line (nodes AGGREGATE call sites — `zzop facts`/`zzop cross`'s `bucketKeySites` carry sites). An item with neither `key` nor `raw` is counted as an unlabelable remainder in the census, never guessed at.",
+      "sources": [
+        "crates/summary/src/graph/mod.rs",
+        "crates/summary/src/graph/collect.rs",
+        "crates/summary/src/graph/mermaid.rs",
+        "crates/summary/src/graph/cosmograph.rs",
+        "crates/summary/src/graph/dep.rs",
+        "crates/summary/src/graph/dep/node.rs",
+        "crates/summary/src/graph/risk.rs",
+        "crates/summary/src/graph/posture.rs"
+      ],
+      "reads": [
+        "trees[].sourceId",
+        "trees[].output.coverage.joinContributionZero",
+        "crossLayer.edges",
+        "crossLayer's five non-edge buckets",
+        "trees[].output.ir.dep",
+        "trees[].output.ir.loc (the dep domain's size axis)",
+        "trees[].output.gitWindow (presence only — the gate on whether git collection ran)",
+        "trees[].output.nodes[].{path,changeCount,churn,authorCount,lastModified} (the dep domain's history axes, read only when that gate says git ran)",
+        "trees[].output.findings (circular only, for cycle membership)",
+        "trees[].output.critical",
+        "trees[].output.seams",
+        "trees[].output.scores (presence only — the numbers are deliberately NOT drawn)",
+        "trees[].output.ir.io.provides (http, write methods only)",
+        "trees[].output.findings (mutating-route-no-auth, for guard status)"
+      ],
+      "emits": "TWO FORMATS, selected by `--format`, because its consumer is a renderer rather than a parser. (A) `--format mermaid` (DEFAULT, every domain) — MERMAID TEXT, the one zzop product that is not a JSON document. (B) `--format cosmograph-nodes|cosmograph-links` (`--domain dep` ONLY, a usage error elsewhere) — NDJSON tables for an interactive viewer, one record per line, emitted UNCAPPED: `--top` is refused rather than ignored, because capping exists to keep a DRAWN picture readable and a viewer with zoom does that job itself. Measured on zzop's own tree, mermaid draws 40 of 1073 files where this lane emits all 1073 and all 1968 edges, which is the case dep.rs's module doc reserved when it said a large graph is where a different format stays live. Both formats read the SAME uncapped `dep::collect` pass, so they cannot become two answers about one repo. The nodes table carries the axes a viewer styles by; the links table carries `source`/`target`/`inCycle`. Nine node columns are STRUCTURAL — `id`/`source`/`path`/`label`/`folder`/`fanIn`/`fanOut`/`degree`/`inCycle`, where `label` is a basename — derived from the graph itself, so every row has them. The rest are MEASURED and ride only when this run measured them: `loc` (from `ir.loc`) and, when `gitWindow` says git collection ran, `changeCount`/`churn`/`authorCount`/`lastModified` (from `nodes[]`). No flag adds or removes a column — a schema that changed per invocation is one no consumer could write against — so what varies is whether a ROW HAS a key. An unmeasured axis is OMITTED, never written as `0`: `churn: 0` would say 'never changed' in the same bytes as 'nobody looked', and a viewer colouring by it would draw the second as the first. That is also why the git axes are gated on `gitWindow` rather than read field-by-field: `nodes[]` is built unconditionally and its counters default to `0`, so on a git-off run every row on the wire carries a perfectly-formed `changeCount: 0`. NDJSON rather than CSV so `serde_json` owns quoting (a path containing a comma cannot silently shift columns). DISCLOSURE GOES TO STDERR for this format, never into the table: stdout is a parseable table and a `%%` census line would be a corrupt row, so the CLI prints the scope/total census on the other stream — and that census also reports how many emitted rows carried each MEASURED axis (`loc on N of M row(s), git history on N of M`), because omitting an unmeasured column is honest but silent: without the count, a reader whose viewer offers no colour-by-churn has nothing to read. A `flowchart LR` with one subgraph per analyzed source and one node per (sourceId, side, kind, key): rectangles for provides, stadiums for consumes, solid arrows for resolved edges, DOTTED arrows for the two non-authoritative relations (an ambiguous consume to each candidate provider, and an edge the linker flagged `lowConfidenceReason`). Each node's bucket rides its LABEL as well as its `classDef` class, so a viewer that drops styling still reads the verdict. SCOPED BY CONSTRUCTION: `--top` caps DRAWN RELATIONS per bucket (default 25, no upper bound — a file/pipe surface, not the capped wire; rows are deduped to distinct relations BEFORE the cap, because a node aggregates call sites and a row-based cap described a picture the reader was not looking at — measured on the OSS corpus, 60 `edges` rows are 4 relations) and `--scope <prefix>` keeps rows whose source id or a site path starts with the prefix; both are disclosed twice, in a `%%` per-bucket drawn/inScope/total-relations census that also publishes the call-site count each aggregates, AND as a visible note node, since a mermaid comment does not survive rendering. NOT emitted, and named in the document's own header rather than left to inference: `crossLayerFindings` (the drift/near-miss VERDICTS — findings ABOUT the join, not members of it; a finding has no node identity here and inventing one would be inventing facts the IR does not have), `hostRekeyCounts` (a counter, not an edge), the warnings/configWarnings/disclosure prose channels, and per-site file/line (nodes AGGREGATE call sites — `zzop facts`/`zzop cross`'s `bucketKeySites` carry sites). An item with neither `key` nor `raw` is counted as an unlabelable remainder in the census, never guessed at.",
       "noMcpTwinBecause": "(1) A diagram is a terminal/file act — `zzop graph ./api ./web > join.mmd` then a renderer — the same file- and pipe-shaped lane `manifest` and `facts` argued for; an agent that wants the picture shells out to the same binary for identical bytes. (2) The shaped answers already exist on the MCP wire: `cross_repo` carries the same buckets as counts, keys and sites, which is what a PROGRAM reasons over, while a flowchart is for a human eye. A tool twin would put the same data on two surfaces under two different shaping rules — the exact drift class this registry exists to prevent. (3) Since the cosmograph format landed, this lane also emits an UNCAPPED table — 1073 nodes and 1968 edges on zzop's own tree — which is the same argument `manifest` and `facts` make, only now it applies to a lane whose reader is explicitly a HUMAN at a viewer rather than an agent in a conversation. Putting it on the cap-governed wire would force capping the one output whose reason for existing is that it is not capped."
     },
     "zzop facts": {
-      "sources": ["crates/summary/src/facts.rs"],
-      "reads": ["trees[].sourceId", "trees[].output.ir (the whole CommonIr)", "trees[].output.coverage", "trees[].output.warnings", "trees[].output.configWarnings", "crossLayer (all seven buckets)", "the run-level warnings channel", "disclosure"],
+      "sources": [
+        "crates/summary/src/facts.rs"
+      ],
+      "reads": [
+        "trees[].sourceId",
+        "trees[].output.ir (the whole CommonIr)",
+        "trees[].output.coverage",
+        "trees[].output.warnings",
+        "trees[].output.configWarnings",
+        "crossLayer (all seven buckets)",
+        "the run-level warnings channel",
+        "disclosure"
+      ],
       "emits": "The whole post-assembly FACT SUBSTRATE, UNCAPPED and verbatim: `{tool, config, configWarnings, trees[{sourceId, coverage, warnings, commonIr}], crossLayer, warnings, disclosure}`. The consumer half of the custom-rule extension point — zzop emits what it knows and a user's own program decides what is a problem. It executes nothing (no process spawn) and ingests nothing (no findings channel back in). NOT emitted: zzop's own `findings`/`crossLayerFindings` (verdicts, not facts — a rule author computes their own, and carrying ours would put the same data on two surfaces under two different caps), and `AttributeStore` (the one post-assembly fact whose CONTAINER is not already a serialized wire shape; emitting it would freeze a NEW shape, which this repo's projection-contract bar gates behind a consuming rule existing first). KEY NAMING: the per-tree IR rides under `commonIr`, not `ir` — a design choice, and (since 2026-07-26) no longer a guard workaround: the meta-test enforcing the `ir` row's `omit` status now subtracts this lane's `sources`, so either spelling would pass it. `commonIr` camel-cases the exact type a rule author has to look up to read the block (`zzop_core::CommonIr`, field list in docs/modules/facade.md) and stays greppable inside a consumer's own codebase, which a two-letter key that is a substring of `circular`/`directory`/`require` is not. The cost is one mapping to remember, because a direct zzop-facade embedding spells the same block `ir` — stated in the `ir` row below so a reader diffing the two surfaces meets it there.",
       "noMcpTwinBecause": "(1) The output is deliberately UNCAPPED and grows with tree size, while every MCP reply this repo ships is cap-governed (crates/summary/src/output) — the same argument the `ir` row already makes for the analyze reply, only stronger: `ir` alone measured 107x the shipped reply on zzop's own tree and `facts` carries the whole join on top. The main MCP consumer is an AI agent, so output size is a direct context cost. (2) The consumer is a PROGRAM, not a conversation: the workflow is `zzop facts ./api ./web > facts.json && ./my-rule facts.json`, a terminal/CI act. (3) An agent already has the shaped answers it usually wants (join buckets, check_endpoint); `facts` exists for the case those cannot serve, which is precisely the case that is not a conversation. An agent that genuinely wants it can shell out to the same binary for the identical answer."
     },
     "zzop explain": {
-      "sources": ["crates/facade/src/explain.rs", "crates/facade/src/explain/output_ids.rs"],
-      "reads": ["nothing from a run — the bundled DSL pack data compiled INTO the binary"],
+      "sources": [
+        "crates/facade/src/explain.rs",
+        "crates/facade/src/explain/output_ids.rs"
+      ],
+      "reads": [
+        "nothing from a run — the bundled DSL pack data compiled INTO the binary"
+      ],
       "emits": "One rule's compiled-in data as human-readable lines, or a guided Err naming what the id actually is (a native analysis id, a pack id, an output field id, an ambiguous bare id, or unknown).",
       "noMcpTwinBecause": "It answers from data that is already ON the MCP wire as a whole: the `rule-catalog` contract resource carries every shipped rule id with its prose, so an agent looks a rule up by reading one document rather than by calling a tool per id. The subcommand exists because a TERMINAL user wants one rule, not the catalog. Declared here — even though its projection lives in crates/facade rather than crates/summary — because the one-audience fact is what both consumers of this block need: crates/engine/tests/rule_contracts/host_vocabulary.rs's contract 16 subtracts these files when it checks that shared crates name no CLI-only vocabulary, and naming `zzop explain` inside the `zzop explain` lane is correct, not a leak. NOT declared, deliberately: `zzop init`. Its only implementation is the argv entry point (packages/cli-bin/src/cli/run.rs), which this block's `_doc` forbids declaring, and the bytes it writes are a two-audience contract resource that MCP `resources/read` serves as well."
     }
@@ -56,7 +108,7 @@
     },
     "disclosure": {
       "mcpAnalyzeReply": "carry",
-      "note": ""
+      "note": "Carried as a FOLD since 2026-07-29 (crates/summary/src/output/disclosure.rs): the reply gets the registry's counts plus a pointer (`zzop contract disclosure-classes` / `zzop://contract/disclosure-classes`), never the ~10.6KB of run-invariant prose. The full text is available from the contract lane on both surfaces and, verbatim, from the CLI-only `zzop facts` lane."
     },
     "fileCount": {
       "mcpAnalyzeReply": "carry",
@@ -126,7 +178,7 @@
     },
     "crossLayer": {
       "mcpAnalyzeReply": "carry-conditional",
-      "note": "cross_repo shapes crossLayer into bucket counts (`buckets.*`), capped edges (`edges`, DEFAULT_EDGES_LIMIT=200, with `edgesTruncated` disclosure), and capped distinct bucket keys (`bucketKeys`/`bucketKeySites`, DEFAULT_BUCKET_KEYS_LIMIT=20, with `bucketKeysTruncated`) — never the raw CrossLayerResult object verbatim. The raw edges/unprovidedConsumes/unconsumedProvides/unresolvedConsumes/externalConsumes/ambiguousConsumes buckets are available via the raw zzop-facade output (direct engine embedding) and, since 2026-07-26, VERBATIM AND UNCAPPED from the CLI-only `zzop facts` lane — plus as UNCAPPED IDENTITY (kind/key/bucket/source, no file or line) from the CLI-only `zzop manifest` lane (both in `_cliOnlyLanes`). Those two caps are exactly why the manifest lane exists: above them, two runs' replies agree on the bucket COUNTS while neither can say which route left the join."
+      "note": "cross_repo shapes crossLayer into bucket counts (`buckets.*`), capped edges (`edges`, DEFAULT_EDGES_LIMIT=200, with `edgesTruncated` disclosure), and UNCAPPED distinct bucket keys (`bucketKeys`/`bucketKeySites` — every distinct key, no truncation field; the 20-key DEFAULT_BUCKET_KEYS_LIMIT and its `bucketKeysTruncated` disclosure were deleted 2026-07-29) — never the raw CrossLayerResult object verbatim. The raw edges/unprovidedConsumes/unconsumedProvides/unresolvedConsumes/externalConsumes/ambiguousConsumes buckets are available via the raw zzop-facade output (direct engine embedding) and, since 2026-07-26, VERBATIM AND UNCAPPED from the CLI-only `zzop facts` lane — plus as UNCAPPED IDENTITY (kind/key/bucket/source, no file or line) from the CLI-only `zzop manifest` lane (both in `_cliOnlyLanes`). The edges cap is why the manifest lane still exists: above it, two runs' replies agree on the edge COUNTS while neither can say which route left the join. Bucket MEMBERSHIP no longer needs that lane."
     },
     "crossLayerFindings": {
       "mcpAnalyzeReply": "carry-conditional",
@@ -138,7 +190,7 @@
     },
     "disclosure": {
       "mcpAnalyzeReply": "carry",
-      "note": ""
+      "note": "Carried as a FOLD since 2026-07-29 (crates/summary/src/output/disclosure.rs): the reply gets the registry's counts plus a pointer (`zzop contract disclosure-classes` / `zzop://contract/disclosure-classes`), never the ~10.6KB of run-invariant prose. The full text is available from the contract lane on both surfaces and, verbatim, from the CLI-only `zzop facts` lane."
     }
   }
 }

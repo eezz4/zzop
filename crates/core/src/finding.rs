@@ -103,6 +103,29 @@ pub struct Finding {
     pub line: u32,
     /// One-line message / snippet.
     pub message: String,
+    /// Every OTHER tree-relative path this finding names — the paths it prints in `message`/`data` that
+    /// are not [`file`](Finding::file). Empty for the great majority of findings, which speak about one
+    /// place; populated by the relational rules that necessarily name two (a consume site and the
+    /// provide it mismatched, an N-source collision's sibling sites).
+    ///
+    /// EXISTS SO `exclude` CAN MEAN WHAT IT SAYS. The filter used to read the anchor alone, so the
+    /// contract it actually enforced was "do not ANCHOR a finding here" while every document promised
+    /// "do not NAME this path to me": a finding anchored on the consume side sailed through the provide
+    /// side's `exclude` and printed that path in its message anyway. The two roles get different
+    /// treatment, from ONE config key — see `registry::merge_findings`: excluded ANCHOR drops the
+    /// finding, excluded EVIDENCE redacts just that path. "My folder is the subject of the problem, I
+    /// don't look at it; my folder is evidence in someone else's problem, I see the problem but my paths
+    /// are not named."
+    ///
+    /// A TYPED FIELD RATHER THAN A PER-RULE TABLE OF `data` KEYS. The table version — "which `data` key
+    /// holds a path, for each of the twelve rules that carry one" — is the shape this repo refuses
+    /// elsewhere for the reason it would fail here: a thirteenth rule, or a renamed key, leaves it
+    /// silently short, and the failure looks exactly like "that path was not excluded".
+    ///
+    /// Paths are tree-relative and in the same spelling `file` uses, because the exclude filter compares
+    /// them with the identical substring/glob matcher.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence_paths: Vec<String>,
     /// Pack-native finding shape — opaque at the engine boundary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,

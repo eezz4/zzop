@@ -99,8 +99,10 @@ pub fn top_subdir(path: &str, module_root_path: &str) -> Option<String> {
     Some(first.to_string())
 }
 
-/// The directory portion of a path ("" when there is no slash).
-pub fn dir_for(p: &str) -> &str {
+/// The directory portion of a path ("" when there is no slash). Module-private: `is_upward_import` below
+/// is the only caller, and every other score module reaches path structure through `module_of`/
+/// `top_subdir`/`classify_path` instead.
+fn dir_for(p: &str) -> &str {
     match p.rfind('/') {
         Some(i) => &p[..i],
         None => "",

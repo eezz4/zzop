@@ -100,6 +100,7 @@ pub fn scan_non_idempotent_write(input: &ScanNonIdempotentWriteInput) -> Vec<Fin
             file: site.file.clone(),
             line: site.line,
             message: hint.clone(),
+            evidence_paths: Vec::new(),
             data: Some(serde_json::json!({
                 "method": method,
                 "path": e.path,

@@ -26,15 +26,23 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const npmDir = path.join(__dirname, '..', 'npm');
 
-// npm/<platform> sub-package directory name -> binary filename within it (mirrors bin/zzop.js's
-// PLATFORM_PACKAGES map).
-const PLATFORM_BINARY_NAMES = {
-  'win32-x64-msvc': 'zzop.exe',
-  'darwin-x64': 'zzop',
-  'darwin-arm64': 'zzop',
-  'linux-x64-gnu': 'zzop',
-  'linux-arm64-gnu': 'zzop',
-};
+// The set of platforms is READ FROM DISK — every directory under npm/ is a sub-package that will be
+// published — rather than hand-listed here. A hand list is a copy of the release matrix, and the sixth
+// platform's day is exactly when a copy is wrong: an artifact for an unlisted platform used to be warned
+// about and skipped, which is how a sub-package could publish with no binary inside it.
+function publishedPlatforms() {
+  return fs
+    .readdirSync(npmDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort();
+}
+
+// The binary filename inside a sub-package is DERIVED, not mapped: Windows carries the `.exe` suffix and
+// nothing else does. That is a property of the platform token (`win32-…`), so it needs no table to drift.
+function binaryNameFor(platform) {
+  return platform.startsWith('win32-') ? 'zzop.exe' : 'zzop';
+}
 
 function main() {
   const artifactsDir = process.argv[2];
@@ -48,7 +56,12 @@ function main() {
   }
 
   const entries = fs.readdirSync(artifactsDir);
-  let placed = 0;
+  const expected = publishedPlatforms();
+  if (expected.length === 0) {
+    console.error(`place-artifacts: no sub-package directories under ${npmDir} — nothing to place into.`);
+    process.exit(1);
+  }
+  const filled = new Set();
 
   for (const entry of entries) {
     // Match ONLY the CLI binaries (`zzop-cli-<platform>[.exe]`), never the `zzop-mcp-<platform>`
@@ -58,31 +71,41 @@ function main() {
     if (!match) continue;
 
     const platform = match[1];
-    const binaryName = PLATFORM_BINARY_NAMES[platform];
-    if (!binaryName) {
-      console.warn(`place-artifacts: unrecognized platform "${platform}" (from ${entry}), skipping`);
-      continue;
-    }
-
     const destDir = path.join(npmDir, platform);
-    if (!fs.existsSync(destDir)) {
-      console.warn(`place-artifacts: missing sub-package dir ${destDir}, skipping ${entry}`);
-      continue;
+    // FATAL, not a skip. A built artifact this script cannot place is a platform whose sub-package is
+    // about to publish empty — "we produced a binary and then dropped it on the floor" must never be a
+    // warning, because the step's exit code is what the release lane trusts.
+    if (!expected.includes(platform)) {
+      console.error(
+        `place-artifacts: artifact "${entry}" names platform "${platform}", which has no sub-package ` +
+          `directory under npm/. Known: ${expected.join(', ')}.\n` +
+          `  Either add npm/${platform}/ (with its package.json, and list it in the root package.json's ` +
+          `optionalDependencies) or stop building that target.`
+      );
+      process.exit(1);
     }
 
-    const dest = path.join(destDir, binaryName);
+    const dest = path.join(destDir, binaryNameFor(platform));
     fs.copyFileSync(path.join(artifactsDir, entry), dest);
     fs.chmodSync(dest, 0o755);
     console.log(`place-artifacts: ${entry} -> ${path.relative(process.cwd(), dest)}`);
-    placed += 1;
+    filled.add(platform);
   }
 
-  if (placed === 0) {
-    console.error(`place-artifacts: no recognized "zzop-cli-<platform>[.exe]" files found in ${artifactsDir}`);
+  // `placed > 0` was the old success condition, and it is not one: with five sub-packages and four
+  // artifacts it is true while one package publishes with no binary. EVERY sub-package must have been
+  // filled — that is the property "no empty package is published" actually rests on.
+  const missing = expected.filter((p) => !filled.has(p));
+  if (missing.length) {
+    console.error(
+      `place-artifacts: no "zzop-cli-<platform>[.exe]" artifact arrived for: ${missing.join(', ')}.\n` +
+        `  Every npm/ sub-package publishes, so a missing artifact means an EMPTY package on the registry.\n` +
+        `  Check the prebuild build matrix produced all ${expected.length} CLI binaries.`
+    );
     process.exit(1);
   }
 
-  console.log(`place-artifacts: placed ${placed} artifact(s).`);
+  console.log(`place-artifacts: placed ${filled.size} artifact(s), one per sub-package.`);
 }
 
 main();

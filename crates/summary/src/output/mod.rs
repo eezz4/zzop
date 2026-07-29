@@ -19,11 +19,12 @@ pub const DEFAULT_DEGRADED_LIMIT: usize = 50;
 const MAX_LIMIT: usize = 1000;
 
 mod bucket_keys;
+mod disclosure;
 #[cfg(test)]
 mod tests;
 
-pub use bucket_keys::DEFAULT_BUCKET_KEYS_LIMIT;
 pub(crate) use bucket_keys::{bucket_keys, KEY_BUCKETS};
+pub(crate) use disclosure::fold as fold_disclosure;
 
 /// Caller-facing filters for a findings list. Two constructors, one validation vocabulary:
 /// [`FindingFilters::new`] is WIRE-NEUTRAL (already-parsed values — what the CLI has after argv

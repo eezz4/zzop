@@ -98,14 +98,22 @@ jobs:
         # stamping loop in prebuild.yml. That job runs the same script's --stamped mode as a publish
         # blocker after stamping.
         run: bash scripts/check-server-json-hashes.sh
-      - name: parser fingerprint bump guard
-        # Also runs from `.githooks/pre-commit` (working tree) and `.githooks/pre-push` (outgoing range).
-        # Here it diffs against the PR base / previous commit, which the `fetch-depth: 0` checkout above
-        # is what makes available.
-        env:
-          FINGERPRINT_DIFF_RANGE: ${{ github.event_name == 'pull_request' && format('origin/{0}...HEAD', github.base_ref) || 'HEAD~1...HEAD' }}
-        run: bash scripts/check-parser-fingerprint-bump.sh
-      - name: adapter-kit parity tests
+      - name: license shipping guard
+        # Every distribution root must carry the root LICENSE, every workspace Cargo.toml must declare a
+        # license, and THIRD-PARTY-NOTICES.md must still be the file its generator would produce. MIT
+        # requires the notice to travel with the copies; the statically linked Apache-2.0 crates require a
+        # license copy under their own section 4(a). Shipping without them is not a bug report, it is a
+        # legal review reject.
+        #
+        # This step needs only git and node. Verification is OFFLINE by construction: the notices file
+        # carries two digests (one over the tracked Cargo.lock/Cargo.toml set, one over its own generated
+        # body), so `--check` never invokes cargo and never touches the network. That matters here
+        # specifically — this job is checkout-and-nothing-else, with no Rust toolchain and no rust-cache,
+        # and a guard that needed a registry fetch would have turned a fast, network-free job into a slow
+        # one with a new way to go red for reasons that have nothing to do with licensing. GENERATING the
+        # file still needs a cargo toolchain; only verifying it does not.
+        run: bash scripts/check-license-shipping.sh
+      - name: adapter example tests
         # `examples/adapters/adapter-kit` re-implements `zzop_core::io::key`'s normalization in JS, and
         # that module's header requires the two to stay byte-identical ("their logic must not change here
         # without changing every mirror"). Until 2026-07-28 nothing ran these — a Rust-side change could
@@ -115,8 +123,34 @@ jobs:
         # fixture one directory short of the repo root, so the whole file aborted on ENOENT and 40 of its
         # assertions had never executed. A parity suite nobody runs does not decay loudly.
         #
+        # The subject set is DERIVED, not hand-typed. This step's first spelling was
+        # `node --test examples/adapters/adapter-kit/test/*.test.js` — ONE directory, ONE extension — and
+        # it ran zero of the two sibling adapters' suites, which are `.mjs` and live under
+        # `auth-overlay-adapter/` and `java-imports-adapter/`. Measured 2026-07-28 by expanding that glob
+        # in a shell: 3 files, neither sibling among them, while both suites existed and passed. One of
+        # them is the ONLY test pinning the adapter envelope snapshot contract. A hand-typed glob cannot
+        # see a suite nobody remembered to add to it — the same defect class this repo spent 2026-07-28
+        # removing from sixteen guards, re-committed here in the same week.
+        #
+        # The zero-file abort is the sibling half: a pathspec that stops matching would otherwise make
+        # this step pass by running nothing, which is what the enumeration exists to prevent.
+        #
+        # `git ls-files` + shell word splitting, not `node --test <dir>` — the bare-directory form throws
+        # MODULE_NOT_FOUND on this runner's Node (see cli-shim-test below), and letting git expand the
+        # pathspec keeps a no-match case detectable instead of passing a literal pattern to node.
+        #
         # No Rust build needed, so it rides the guards job rather than paying for a toolchain.
-        run: node --test examples/adapters/adapter-kit/test/*.test.js
+        run: |
+          set -euo pipefail
+          files="$(git ls-files -- 'examples/adapters/*/test/*.test.js' 'examples/adapters/*/test/*.test.mjs')"
+          if [ -z "$files" ]; then
+            echo "adapter example tests: FAILED -- enumerated ZERO test files. The pathspec stopped" >&2
+            echo "matching, so this step proved nothing. An empty subject set is a broken runner," >&2
+            echo "never a clean tree." >&2
+            exit 1
+          fi
+          echo "$files"
+          node --test $files
 
   test:
     runs-on: ubuntu-latest
@@ -145,10 +179,58 @@ jobs:
         # path resolution only checks a release build (../../target/release/zzop[.exe] relative to
         # packages/cli, no debug fallback), so this needs --release, not a debug build.
         run: cargo build -p zzop-cli-bin --release
+      - name: site graph is regenerated from the tree it claims to draw
+        # `site/graph.html` carries a COMMITTED data block — 1,088 nodes of this repo, plus two prose
+        # totals — and `site/architecture.html` carries a third copy of those totals. All four are
+        # written by scripts/site-graph-data.mjs, and until 2026-07-29 NOTHING ran that script: measured,
+        # it had zero callers anywhere in the tree outside itself. A generator nobody runs and an output
+        # everybody commits drift by default, and the drift is invisible — the page keeps rendering, just
+        # of a tree that no longer exists. That is the exact defect the generator was written to close
+        # (hand-typed prose counts), reappearing one level up as the generator itself being unwired.
+        #
+        # This rides `cli-shim-test` because that job ALREADY builds `zzop` in release for its own reason.
+        # A dedicated job would pay a second release build for one diff; a scripts/check-*.sh would pay it
+        # on every commit, which no local hook budget survives.
+        run: |
+          set -euo pipefail
+          ./target/release/zzop graph --domain dep --format cosmograph-nodes --config zzop.config.jsonc > /tmp/n.ndjson
+          ./target/release/zzop graph --domain dep --format cosmograph-links --config zzop.config.jsonc > /tmp/l.ndjson
+          node scripts/site-graph-data.mjs /tmp/n.ndjson /tmp/l.ndjson
+          if ! git diff --quiet -- site/; then
+            echo "::error::site/ is stale — regenerating it changed these files:" >&2
+            git --no-pager diff --stat -- site/ >&2
+            echo "Run: zzop graph --domain dep --format cosmograph-nodes/links > … then node scripts/site-graph-data.mjs <nodes> <links>" >&2
+            exit 1
+          fi
+          echo "site graph matches the tree."
       - name: CLI shim tests
-        # Glob form (not a bare directory) — `node --test test/` fails on Node v22+ (verified: the
-        # bare-directory form throws MODULE_NOT_FOUND on this runner's Node version).
-        run: node --test packages/cli/test/*.test.js
+        # Individual FILE paths, never a bare directory — `node --test test/` fails on Node v22+
+        # (verified: the bare-directory form throws MODULE_NOT_FOUND on this runner's Node version).
+        #
+        # Zero-file abort, same shape as the `adapter example tests` step above. This step used to be a
+        # bare `node --test packages/cli/test/*.test.js`, and the failure mode is not the one a reader
+        # assumes: an unmatched SHELL glob is passed through literally, and `node --test` on a path that
+        # matches nothing does NOT error — measured 2026-07-29, it printed `1..0 / # tests 0 / # pass 0`
+        # and exited 0. So renaming the directory, or renaming the one suite in it to `.mjs`, would turn
+        # this job green while running zero assertions against the shim, which is the ONLY thing proving
+        # the npm shim can spawn the native binary at all.
+        #
+        # `git ls-files` + shell word splitting rather than the shell glob, for the same reason the
+        # adapter step uses it: a git pathspec that matches nothing yields an EMPTY string, which is
+        # detectable, where an unmatched shell glob yields a literal pattern that node quietly accepts.
+        # Both `.js` and `.mjs` are enumerated so a suite added in either extension is covered from the
+        # moment it exists, rather than waiting for someone to remember this line.
+        run: |
+          set -euo pipefail
+          files="$(git ls-files -- 'packages/cli/test/*.test.js' 'packages/cli/test/*.test.mjs')"
+          if [ -z "$files" ]; then
+            echo "CLI shim tests: FAILED -- enumerated ZERO test files. The pathspec stopped matching," >&2
+            echo "so this step proved nothing about the @zzop/cli shim. An empty subject set is a broken" >&2
+            echo "runner, never a clean tree." >&2
+            exit 1
+          fi
+          echo "$files"
+          node --test $files
 
   detection-benchmark:
     # Scores the labeled detection benchmark (cases + its adjudicated EXPECTED.jsonc) and fails
@@ -161,12 +243,20 @@ jobs:
     #
     # Deliberately NOT a scripts/check-*.sh — check-guards-wired.sh would then require it in
     # .githooks/pre-commit too, and a release build per commit is not a hook's budget.
+    #
+    # ONE STEP, NO BINARY PATH (2026-07-29). This job used to build the binary itself and hand
+    # `target/release/zzop-mcp` to the gate, which asserted only that the path was executable. That
+    # made the path a parameter, and a parameter is something that can be stale: measured locally, a
+    # 0.24.0 binary scored the 0.25.0 tree as TP 143 / FN 0 / FP 0 with exit 0. CI happened to be safe
+    # because its build step sat immediately above — but the LOCAL run is the only place a developer
+    # can see a detection regression before pushing, and there nothing guaranteed the two matched.
+    # The gate builds its own binary now, so this job stops restating a build the script performs and
+    # stops naming an artifact path it has no business knowing (that path is also wrong under
+    # $CARGO_TARGET_DIR, and CI and local now agree instead of each having their own spelling).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build native zzop-mcp binary
-        run: cargo build -p zzop-mcp --release
       - name: Detection benchmark
-        run: bash scripts/measure/detection-gate.sh target/release/zzop-mcp
+        run: bash scripts/measure/detection-gate.sh

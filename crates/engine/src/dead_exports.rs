@@ -38,19 +38,20 @@ use zzop_rules_graph::{DeadExportCandidate, DeadExportInputFile};
 /// in `analyze`'s call-graph scan re-read + re-parse each `ts_paths` member AS TypeScript; a NON-TS
 /// dep-graph participant a Mode B overlay added (e.g. a `.svelte` file whose imports were projected) must
 /// be skipped — its dep-graph facts already reached `build_dep` via its projection, and parsing its raw
-/// non-TS text as TypeScript would be garbage (and could inject spurious call edges). Extension-based and
-/// duplicated rather than threading the dispatch config: these passes only ever see TS-or-overlay paths.
+/// non-TS text as TypeScript would be garbage (and could inject spurious call edges). Extension-based
+/// rather than threading the dispatch CONFIG (these passes only ever see TS-or-overlay paths, so a
+/// tree's `glob_overrides` are deliberately not consulted) — but T1 on the dispatch TABLE, which is
+/// the whole definition of "the dispatch table routes it to TypeScript". It used to restate that
+/// table's TypeScript arm as its own `matches!`: two spellings of one fact, unpinned, in one crate.
+///
+/// Note what stays hand-kept and why: `mutating_route_no_auth::CALL_GRAPH_COVERED_EXTENSIONS` and
+/// `http_scan::WRITE_SITE_COVERED_EXTENSIONS` live in rule crates that depend on `zzop_core` only, so
+/// they cannot reach this table at all — those two are T2, pinned by `call_graph_covered_extensions_pin`
+/// below, which is also where the reverse-direction hand-copy of this arm now lives.
 pub(crate) fn is_ts_source_ext(rel: &str) -> bool {
     matches!(
-        Path::new(rel)
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_ascii_lowercase())
-            .as_deref(),
-        // If you add/remove an extension here, also update the reverse-direction snapshot in
-        // `call_graph_covered_extensions_pin` below AND `mutating_route_no_auth::CALL_GRAPH_COVERED_EXTENSIONS`
-        // — this predicate has no enumerable set to check live, so that pin guards the duplicate by hand.
-        Some("ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "mts" | "cts")
+        crate::dispatch::dispatch_by_extension(rel),
+        Some(crate::dispatch::Language::TypeScript)
     )
 }
 

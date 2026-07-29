@@ -5,8 +5,13 @@
 //! cannot parse MUST NOT be swallowed (the client is left hanging on a reply that never comes; a Windows
 //! path with unescaped backslashes, e.g. `"C:\Users\x"`, is invalid JSON and hit exactly this). Parse
 //! failures answer with JSON-RPC `-32700` and `id: null` (the spec's reserved shape for "id was
-//! unrecoverable"), non-object frames (including batch arrays, which this server does not support) with
-//! `-32600` — both also log one line to stderr, the conventional MCP diagnostic channel.
+//! unrecoverable"), frames that are neither a request object nor a batch array with `-32600` — both
+//! also log one line to stderr, the conventional MCP diagnostic channel.
+//!
+//! A JSON array IS a batch and IS served (`handle_batch`): receiving batches is a MUST of the
+//! `2025-03-26` revision this server advertises, so refusing them (the behavior up to 2026-07-29) made
+//! that advertisement false. Batches are only RECEIVED — nothing here originates requests, so there is
+//! no sending side to batch.
 
 use std::io::{BufRead, Write};
 
@@ -37,6 +42,13 @@ pub use zzop_summary::version_string;
 /// across them — no revision-divergent feature (elicitation, structured tool output, auth) is
 /// implemented. Listing the older revisions keeps older-SDK clients connectable where a
 /// latest-only counter-offer could make them disconnect.
+///
+/// The one requirement that does NOT hold uniformly across the three is JSON-RPC batching: the middle
+/// entry, `2025-03-26`, says a server MUST support RECEIVING batches; `2025-06-18` deleted that and
+/// `2024-11-05` never had it. Up to 2026-07-29 this file answered every array `-32600`, so the "not
+/// aspirational" above was itself aspirational for one of the three revisions it vouched for.
+/// `handle_batch` closes that: the claim is now true for each entry in this list, which is the only
+/// condition under which an entry belongs in it.
 const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
 /// The server's latest supported protocol version — the spec-mandated counter-offer when a client
@@ -57,126 +69,162 @@ fn negotiate_protocol_version(requested: Option<&str>) -> &'static str {
 }
 
 /// Runs the stdio server until stdin closes. Notifications (parsed objects with no `id`) get no reply,
-/// per JSON-RPC 2.0; an explicit `"id": null` is NOT a notification and is answered.
+/// per JSON-RPC 2.0 — nor does a batch whose elements are all notifications; an explicit `"id": null`
+/// is NOT a notification and is answered.
 pub fn run_stdio() {
-    let stdin = std::io::stdin();
-    let mut stdout = std::io::stdout();
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let msg: serde_json::Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(e) => {
-                // -32700 Parse error, id null: the request id is unrecoverable from a line that does
-                // not parse, and the spec reserves exactly this response shape for that case.
-                eprintln!("zzop-mcp: unparseable JSON-RPC line ({e})");
-                respond(
-                    &mut stdout,
-                    serde_json::json!({
-                        "jsonrpc": "2.0", "id": null,
-                        "error": { "code": -32700, "message": format!("Parse error: {e}") }
-                    }),
-                );
-                continue;
-            }
-        };
-        if !msg.is_object() {
-            // A JSON array here would be a JSON-RPC batch — unsupported by this server (and unused by
-            // MCP clients). Saying so beats the previous behavior (falling into the "no id" branch and
-            // silently never replying).
-            eprintln!("zzop-mcp: non-object JSON-RPC frame (batch requests are not supported)");
-            respond(
-                &mut stdout,
-                serde_json::json!({
-                    "jsonrpc": "2.0", "id": null,
-                    "error": { "code": -32600, "message": "Invalid Request: expected a single JSON-RPC object (batch arrays are not supported)" }
-                }),
-            );
-            continue;
-        }
-        let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
-        // Notifications (no `id` key) are fire-and-forget — never reply.
-        let Some(id) = msg.get("id").cloned() else {
-            continue;
-        };
+    serve(std::io::stdin().lock(), &mut std::io::stdout());
+}
 
-        let reply = match method {
-            "initialize" => {
-                let requested = msg
-                    .get("params")
-                    .and_then(|p| p.get("protocolVersion"))
-                    .and_then(|v| v.as_str());
-                ok(
-                    id,
-                    serde_json::json!({
-                        "protocolVersion": negotiate_protocol_version(requested),
-                        "capabilities": { "tools": {}, "resources": {} },
-                        "serverInfo": { "name": "zzop", "version": version() }
-                    }),
-                )
-            }
-            "tools/list" => ok(id, crate::tools::list()),
-            "tools/call" => ok(id, crate::tools::call(msg.get("params"))),
-            "resources/list" => ok(id, crate::resources::list()),
-            "resources/read" => match crate::resources::read(msg.get("params")) {
-                Ok(result) => ok(id, result),
-                Err(e) => serde_json::json!({
-                    "jsonrpc": "2.0", "id": id,
-                    "error": { "code": -32602, "message": e }
-                }),
-            },
-            _ => serde_json::json!({
-                "jsonrpc": "2.0", "id": id,
-                "error": { "code": -32601, "message": format!("method not found: {method}") }
-            }),
-        };
-        respond(&mut stdout, reply);
+/// The transport loop, over any reader/writer so the protocol is testable ON ONE CONNECTION without
+/// spawning anything. That is the whole reason this is not inlined into `run_stdio`: the only other
+/// driver of this loop (`scripts/measure/snapshot.mjs`, via `detection-gate.sh`) spawns a process per
+/// tool call and feeds each the same two-line happy path, so it cannot vary the sequence.
+fn serve(input: impl BufRead, output: &mut impl Write) {
+    for line in input.lines() {
+        let Ok(line) = line else { break };
+        if let Some(reply) = handle_line(&line) {
+            let _ = writeln!(output, "{reply}");
+            let _ = output.flush();
+        }
     }
+}
+
+/// One wire line in, at most one reply LINE out — a batch's individual replies travel together as one
+/// array on that single line, so the line-per-line rhythm a client reads by never changes. `None` means
+/// "emit nothing", which is a real protocol state (a blank line, a JSON-RPC notification, or a batch of
+/// only notifications) and not an error — collapsing it into an empty reply would put an unrequested
+/// line on a channel the client is parsing positionally.
+pub fn handle_line(line: &str) -> Option<serde_json::Value> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+    let msg: serde_json::Value = match serde_json::from_str(line) {
+        Ok(v) => v,
+        Err(e) => {
+            // -32700 Parse error, id null: the request id is unrecoverable from a line that does
+            // not parse, and the spec reserves exactly this response shape for that case.
+            eprintln!("zzop-mcp: unparseable JSON-RPC line ({e})");
+            return Some(serde_json::json!({
+                "jsonrpc": "2.0", "id": null,
+                "error": { "code": -32700, "message": format!("Parse error: {e}") }
+            }));
+        }
+    };
+    match &msg {
+        serde_json::Value::Array(elements) => handle_batch(elements),
+        _ => handle_message(&msg),
+    }
+}
+
+/// Dispatches a JSON-RPC 2.0 BATCH: an array of requests/notifications, answered with an array of the
+/// individual replies. Every element goes through the same `handle_message` a lone top-level object
+/// does, so "an element is answered exactly as it would be alone" holds by construction rather than by
+/// a second implementation kept in sync.
+///
+/// Three shapes the spec calls out, and they are the ones implementations get wrong:
+/// - a notification element contributes NO element, so a batch of only notifications is answered with
+///   NOTHING — never `[]`, which would be an unrequested line on a channel read positionally.
+/// - an EMPTY array is not a batch of zero: the spec calls it an invalid request outright, answered
+///   with ONE bare `-32600` object rather than an array containing one.
+/// - an element that is not a valid request answers `-32600` IN the array, leaving its neighbours
+///   alone; one bad element does not fail the batch.
+///
+/// ORDER: elements are processed left to right and the replies keep that order. The spec lets a server
+/// answer in any order (the client matches by id), so this is a free choice — it is the only thing a
+/// single-threaded loop can do without buffering, and it additionally keeps working the client that
+/// (wrongly) matches positionally. Pinned by a table row so it stays a decision rather than an accident.
+fn handle_batch(elements: &[serde_json::Value]) -> Option<serde_json::Value> {
+    if elements.is_empty() {
+        eprintln!("zzop-mcp: empty JSON-RPC batch array");
+        return Some(invalid_request(
+            "Invalid Request: an empty array is not a valid JSON-RPC batch",
+        ));
+    }
+    let replies: Vec<serde_json::Value> = elements.iter().filter_map(handle_message).collect();
+    if replies.is_empty() {
+        // Every element was a notification: nothing to answer means answer nothing, NOT `[]`.
+        return None;
+    }
+    Some(serde_json::Value::Array(replies))
+}
+
+/// The JSON-RPC `-32600` reply, always with `id: null`: a frame that is not a well-formed request
+/// object is one whose id cannot be trusted to exist, and the spec reserves this shape for that.
+fn invalid_request(message: &str) -> serde_json::Value {
+    serde_json::json!({
+        "jsonrpc": "2.0", "id": null,
+        "error": { "code": -32600, "message": message }
+    })
+}
+
+/// Dispatches one already-parsed JSON-RPC message. Split from the transport (`serve`) and from
+/// parsing (`handle_line`) so the protocol is a pure function of the message — which is what makes the
+/// error lanes and the notification contract testable as a table rather than as spawned processes.
+pub fn handle_message(msg: &serde_json::Value) -> Option<serde_json::Value> {
+    if !msg.is_object() {
+        // Two ways to land here: a top-level frame that is neither an object nor a batch array (a bare
+        // scalar), or a batch element that is not a request object — including a nested array, since
+        // JSON-RPC has no nested batches. Both are `-32600`; inside a batch this is that ELEMENT's
+        // reply, not the batch's. Answering at all beats the pre-2026-07-27 behavior (falling into the
+        // "no id" branch and silently never replying).
+        eprintln!("zzop-mcp: JSON-RPC frame is not a request object");
+        return Some(invalid_request(
+            "Invalid Request: expected a JSON-RPC request object",
+        ));
+    }
+    // An object with no STRING `method` is not a request at all — JSON-RPC 2.0 section 5 answers it
+    // `-32600`, and the spec's own "invalid Batch" example uses exactly this shape
+    // (`{"jsonrpc":"2.0","method":1,"params":"bar"}`). Checked BEFORE the id, deliberately: reading the
+    // id first meant `{"foo":"bar"}` took the no-id branch and was answered with silence, i.e. treated
+    // as a notification purely because it was too malformed to be recognized. A one-element batch of
+    // that shape produced no wire line at all. That is the silent-swallow this module's header names as
+    // the class it exists to close, and three prose sites (twice here, once in docs/modules/mcp.md)
+    // already promised the `-32600` — the code, not the prose, was the thing that was wrong.
+    let Some(method) = msg.get("method").and_then(|m| m.as_str()) else {
+        eprintln!("zzop-mcp: JSON-RPC object carries no string `method`");
+        return Some(invalid_request(
+            "Invalid Request: a request object must carry a string \"method\"",
+        ));
+    };
+    // Notifications (a well-formed request with no `id` key) are fire-and-forget — never reply.
+    let id = msg.get("id").cloned()?;
+
+    Some(match method {
+        "initialize" => {
+            let requested = msg
+                .get("params")
+                .and_then(|p| p.get("protocolVersion"))
+                .and_then(|v| v.as_str());
+            ok(
+                id,
+                serde_json::json!({
+                    "protocolVersion": negotiate_protocol_version(requested),
+                    "capabilities": { "tools": {}, "resources": {} },
+                    "serverInfo": { "name": "zzop", "version": version() }
+                }),
+            )
+        }
+        "tools/list" => ok(id, crate::tools::list()),
+        "tools/call" => ok(id, crate::tools::call(msg.get("params"))),
+        "resources/list" => ok(id, crate::resources::list()),
+        "resources/read" => match crate::resources::read(msg.get("params")) {
+            Ok(result) => ok(id, result),
+            Err(e) => serde_json::json!({
+                "jsonrpc": "2.0", "id": id,
+                "error": { "code": -32602, "message": e }
+            }),
+        },
+        _ => serde_json::json!({
+            "jsonrpc": "2.0", "id": id,
+            "error": { "code": -32601, "message": format!("method not found: {method}") }
+        }),
+    })
 }
 
 fn ok(id: serde_json::Value, result: serde_json::Value) -> serde_json::Value {
     serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
 
-fn respond(stdout: &mut std::io::Stdout, value: serde_json::Value) {
-    let _ = writeln!(stdout, "{value}");
-    let _ = stdout.flush();
-}
-
 #[cfg(test)]
-mod tests {
-    // `version()` reports `CARGO_PKG_VERSION` = the workspace version (release SSOT since the 2026-07-22
-    // version reform — no `ZZOP_RELEASE_VERSION` env). CI verifies the release tag matches it.
-    #[test]
-    fn version_reports_cargo_pkg_version() {
-        assert_eq!(super::version(), env!("CARGO_PKG_VERSION"));
-    }
-
-    #[test]
-    fn negotiate_echoes_a_supported_requested_protocol_version() {
-        // Every listed revision echoes — an older-SDK client (2024-11-05) keeps its own version
-        // rather than being counter-offered into a disconnect.
-        for v in super::SUPPORTED_PROTOCOL_VERSIONS {
-            assert_eq!(super::negotiate_protocol_version(Some(v)), *v);
-        }
-    }
-
-    #[test]
-    fn negotiate_counter_offers_latest_supported_for_unsupported_or_missing_versions() {
-        // An unsupported request must NOT be echoed back (that would falsely claim support) —
-        // the spec's answer is the server's latest supported version.
-        assert_eq!(
-            super::negotiate_protocol_version(Some("9999-99-99")),
-            super::LATEST_PROTOCOL_VERSION
-        );
-        assert_eq!(
-            super::negotiate_protocol_version(None),
-            super::LATEST_PROTOCOL_VERSION
-        );
-        // Sanity: the counter-offer is itself a supported version.
-        assert!(super::SUPPORTED_PROTOCOL_VERSIONS.contains(&super::LATEST_PROTOCOL_VERSION));
-    }
-}
+mod tests;

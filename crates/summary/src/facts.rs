@@ -144,9 +144,13 @@ fn project(
         // parallel-implementation tripwire). Always an array here, unlike `cross_summary`'s
         // presence-gated forward — this surface has no token budget to protect.
         "warnings": array_or_empty(&v["warnings"]),
-        // The run-global blindness-class registry, verbatim. Carried even though it is a build-time
-        // constant: this is the one surface where the reader writes their own verdicts, so what zzop is
-        // structurally blind to belongs next to the facts, not one command away.
+        // The run-global blindness-class registry, VERBATIM — deliberately un-folded, unlike the
+        // analyze/cross/endpoint replies, which since 2026-07-29 carry its counts plus a pointer to
+        // `zzop contract disclosure-classes` (see `crate::output::disclosure`). Carried whole even
+        // though it is a build-time constant, and even though it is the largest block on this surface:
+        // this is the one lane where the reader writes their own verdicts and the doc above already
+        // says it has no token budget to protect, so what zzop is structurally blind to belongs next to
+        // the facts, not one command away.
         "disclosure": array_or_empty(&v["disclosure"]),
     }))
     .expect("facts is plain JSON values")

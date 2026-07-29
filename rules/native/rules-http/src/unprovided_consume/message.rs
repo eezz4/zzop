@@ -68,6 +68,7 @@ pub(super) fn individual_finding(
              (this rule has no inline suppression marker).",
             zzop_core::disable_hint("unprovided-consume")
         ),
+        evidence_paths: Vec::new(),
         data: Some(data),
     }
 }
@@ -128,6 +129,7 @@ pub(super) fn aggregate_finding(a: Aggregate) -> zzop_core::Finding {
         file: a.file.to_string(),
         line: a.line,
         message,
+        evidence_paths: Vec::new(),
         data: Some(data),
     }
 }

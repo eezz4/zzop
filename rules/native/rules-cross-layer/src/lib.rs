@@ -32,6 +32,7 @@ pub fn register_native_analyses(registry: &mut RuleRegistry) {
         "cross-layer/external-version-inconsistent",
         "cross-layer/external-ip-literal",
         "cross-layer/ambiguous-consume",
+        "cross-layer/all-consumes-unjoined",
         "cross-layer/unconsumed-mutation-endpoint",
         "cross-layer/unprovided-mutation-call",
         "cross-layer/route-shadowing",
@@ -52,14 +53,14 @@ pub use cross_layer::unconsumed_endpoint::EXTERNALLY_FETCHED_PATHS;
 pub use cross_layer::CROSS_LAYER_WRITE_METHODS;
 pub use cross_layer::VERSION_SEGMENT_PATTERN;
 pub use cross_layer::{
-    ambiguous_consume_findings, body_field_drift_findings, cross_layer_duplicate_route_findings,
-    cross_tree_route_shadowing_findings, external_base_url_drift_findings,
-    external_duplicated_integration_findings, external_host_fanout_findings,
-    external_ip_literal_findings, external_secret_in_url_findings,
+    all_consumes_unjoined_findings, ambiguous_consume_findings, body_field_drift_findings,
+    cross_layer_duplicate_route_findings, cross_tree_route_shadowing_findings,
+    external_base_url_drift_findings, external_duplicated_integration_findings,
+    external_host_fanout_findings, external_ip_literal_findings, external_secret_in_url_findings,
     external_shadow_internal_findings, external_version_inconsistent_findings,
     is_trpc_mount_route_path, majority_unresolved_http_sources, method_mismatch_findings,
     path_near_miss_findings, prefix_drift_findings, retain_non_subsumed,
-    retrying_write_no_idempotency_findings, route_near_miss_findings,
+    retain_non_subsumed_sources, retrying_write_no_idempotency_findings, route_near_miss_findings,
     sdk_import_no_visible_consume_findings, shared_db_table_findings,
     trpc_mount_route_suppression_notes, unconsumed_endpoint_findings,
     unconsumed_mutation_endpoint_findings, unconsumed_procedure_findings,

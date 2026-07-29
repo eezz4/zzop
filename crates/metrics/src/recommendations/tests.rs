@@ -1,15 +1,12 @@
 //! Covers rule selection and ordering (every applicable rule included, sorted by severity then
-//! ROI desc), the per-rule filters (fat-fanout barrel/re-export/orchestrator exclusions, scope
-//! excludes, permanent ignores), the glob matcher, hidden-coupling pair dedup, and cost/ROI
-//! adjustments from untested paths and amplification. `deriveActionHintKey`'s branches are
+//! ROI desc), the per-rule filters (fat-fanout barrel/re-export/orchestrator exclusions), the
+//! config-exclude post-filter, and hidden-coupling pair dedup. `deriveActionHintKey`'s branches are
 //! exercised indirectly here via `action_hint_key` assertions since it has no separate call site
 //! in this crate.
 
 mod evidence;
 mod pipeline;
 mod rules;
-
-use std::collections::HashSet;
 
 use zzop_core::{DepGraph, Finding, Lifecycle};
 
@@ -51,10 +48,7 @@ fn empty_input<'a>(
         dep,
         coupling,
         circular: &[],
-        scope_excludes: &[],
-        permanent_ignores: &[],
-        untested_paths: empty_set(),
-        amplification_by_path: empty_map(),
+        excludes: &[],
         findings: &[],
     }
 }
@@ -66,18 +60,7 @@ fn critical_finding(path: &str, rule_id: &str) -> Finding {
         file: path.to_string(),
         line: 1,
         message: "test fixture critical finding".to_string(),
+        evidence_paths: Vec::new(),
         data: None,
     }
-}
-
-// Static empty collections shared by tests that don't exercise untested/amplification inputs.
-// std has no `const fn` HashSet::new usable in a `static`, so build lazily via `OnceLock`.
-static EMPTY_SET: std::sync::OnceLock<HashSet<String>> = std::sync::OnceLock::new();
-static EMPTY_MAP: std::sync::OnceLock<HashMap<String, f64>> = std::sync::OnceLock::new();
-
-fn empty_set() -> &'static HashSet<String> {
-    EMPTY_SET.get_or_init(HashSet::new)
-}
-fn empty_map() -> &'static HashMap<String, f64> {
-    EMPTY_MAP.get_or_init(HashMap::new)
 }

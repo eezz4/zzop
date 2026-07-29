@@ -1,6 +1,8 @@
-//! The 25 `cross-layer/*` native rules run over one `analyze_trees` join — see `compute_cross_layer_findings` for the gating/derivation/sort contract.
+//! The `cross-layer/*` native rules run over one `analyze_trees` join — see `compute_cross_layer_findings` for the gating/derivation/sort contract (`zzop_rules_cross_layer::register_native_analyses` owns how many there are).
 
 mod blindness_caveat;
+mod diagnosed;
+mod join_maps;
 mod merge_config;
 mod partition;
 mod unconsumed_family;
@@ -8,11 +10,11 @@ mod unconsumed_family;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use zzop_core::{ConsumeBodyShape, Finding, ProvideBodyShape, SourceIo};
+use zzop_core::{Finding, SourceIo};
 
 use crate::EngineConfig;
 
-/// Runs the 25 `cross-layer/*` native rules (`zzop_rules_cross_layer::cross_layer`) over `cross_layer`, returning their merged, sorted findings.
+/// Runs the `cross-layer/*` native rules (`zzop_rules_cross_layer::cross_layer`) over `cross_layer`, returning their merged, sorted findings.
 ///
 /// ## disabledRules gating, severity overrides and the run vocabulary
 /// All three derive across trees — see `merge_config` for the exclude-only gating rationale and the
@@ -26,6 +28,9 @@ use crate::EngineConfig;
 /// `zzop_core::merge_findings`, the same (severity, file, line, ruleId) order `AnalyzeOutput::findings`
 /// uses. Its config carries the severity-overrides union so the override runs INSIDE the merge, before its
 /// sort (see `merge_config::union_configs` for why applying it after would break the order).
+///
+/// `cross-layer/all-consumes-unjoined` then fires once per join-blind tree and REPLACES that tree's per-call
+/// `ambiguous-consume`/`unprovided-mutation-call` findings, filtered on the MERGED vector at the bottom.
 ///
 /// ## Extraction-blindness caveat
 /// `blindness_caveat::build`/`append` (split out to keep this file under the line-count ratchet) append a
@@ -46,9 +51,9 @@ pub(crate) fn compute_cross_layer_findings(
     let extraction_blindness_caveat = blindness_caveat::build(source_ios);
 
     // Verb-unknown routes (`UNKNOWN_VERB` sentinel: `pages/api` serve-all / pathname-dispatch / Go
-    // `HandleFunc` pinning no method / every Django URLconf entry, verb-unknown by construction) lift
-    // OUT of the exact-key join to a served-set — `http_provides` drops
-    // them (never dead), `unprovided_filtered` drops consumes they serve (no FP); surface via `unknown-verb-route`.
+    // `HandleFunc` pinning no method / every Django URLconf entry, verb-unknown by construction) lift OUT
+    // of the exact-key join to a served-set — `http_provides` drops them (never dead), `unprovided_filtered`
+    // drops consumes they serve (no FP); surface via `unknown-verb-route`.
     let verb_unknown_sites = partition::verb_unknown_sites(source_ios);
     let verb_unknown_paths = partition::served_path_set(&verb_unknown_sites);
     let unprovided_filtered =
@@ -57,41 +62,14 @@ pub(crate) fn compute_cross_layer_findings(
         partition::without_verb_unknown_provides(&cross_layer.unconsumed_provides);
     let http_provides = partition::http_provide_sites(source_ios);
 
-    let http_consume_totals: Vec<(String, usize)> = source_ios
-        .iter()
-        .filter_map(|s| {
-            let n = s.io.consumes.iter().filter(|c| c.kind == "http").count();
-            (n > 0).then(|| (s.source.clone(), n))
-        })
-        .collect();
+    let http_consume_totals = join_maps::http_consume_totals(source_ios);
+    let join_maps::JoinMaps {
+        consume_bodies,
+        provide_bodies,
+        retry_sites,
+    } = join_maps::build(source_ios);
 
-    // `cross-layer/body-field-drift`'s lookup maps, keyed `(source, file, line)` like edge `from`/`to` anchors
-    // so a rule joins straight in; only `Some`-body entries kept, first occurrence wins per key.
-    let mut consume_bodies: BTreeMap<(String, String, u32), ConsumeBodyShape> = BTreeMap::new();
-    let mut provide_bodies: BTreeMap<(String, String, u32), ProvideBodyShape> = BTreeMap::new();
-    // Retry-configured write consume sites (write-only tag), same `from`-anchor key — join set for `cross-layer/retrying-write-no-idempotency`.
-    let mut retry_sites: BTreeSet<zzop_rules_cross_layer::RetrySite> = BTreeSet::new();
-    for s in source_ios {
-        for c in s.io.consumes.iter().filter(|c| c.kind == "http") {
-            if let Some(body) = &c.body {
-                consume_bodies
-                    .entry((s.source.clone(), c.file.clone(), c.line))
-                    .or_insert_with(|| body.clone());
-            }
-            if c.retry_configured == Some(true) {
-                retry_sites.insert((s.source.clone(), c.file.clone(), c.line));
-            }
-        }
-        for p in s.io.provides.iter().filter(|p| p.kind == "http") {
-            if let Some(body) = &p.body {
-                provide_bodies
-                    .entry((s.source.clone(), p.file.clone(), p.line))
-                    .or_insert_with(|| body.clone());
-            }
-        }
-    }
-
-    let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(25);
+    let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(26);
 
     if zzop_core::is_enabled(&gate, "cross-layer/unknown-verb-route") {
         sources.push(zzop_rules_cross_layer::unknown_verb_route_findings(
@@ -227,6 +205,25 @@ pub(crate) fn compute_cross_layer_findings(
             &cross_layer.ambiguous_consumes,
         ));
     }
+    // Computed HERE (`diagnosed` needs the near-miss family already pushed), APPLIED after the merge: its
+    // two replaced rules sit at two push positions, so filtering at each would be two call sites to keep
+    // in step. Disabling it hands the per-call wall back.
+    let unjoined = if zzop_core::is_enabled(&gate, "cross-layer/all-consumes-unjoined") {
+        let out = zzop_rules_cross_layer::all_consumes_unjoined_findings(
+            cross_layer,
+            &diagnosed::consume_anchors(&sources),
+            // The shared blind-tree predicate `unresolved-consume-ratio` and the `unconsumed-*` gates also
+            // read — so the blind-spot self-reports cannot disagree about which trees are blind.
+            &zzop_rules_cross_layer::majority_unresolved_http_sources(
+                &cross_layer.unresolved_consumes,
+                &http_consume_totals,
+            ),
+        );
+        sources.push(out.findings);
+        out.subsumed_sources
+    } else {
+        BTreeSet::new()
+    };
     // Computed above (its output gates the general rule); pushed here to keep the `sources` order stable.
     sources.push(mutation_findings);
     if zzop_core::is_enabled(&gate, "cross-layer/unprovided-mutation-call") {
@@ -295,5 +292,9 @@ pub(crate) fn compute_cross_layer_findings(
         );
     }
 
-    zzop_core::merge_findings(sources, &merge_config)
+    // After the overrides and sort; filtering preserves order, and an empty `unjoined` is a no-op pass.
+    zzop_rules_cross_layer::retain_non_subsumed_sources(
+        zzop_core::merge_findings(sources, &merge_config),
+        &unjoined,
+    )
 }

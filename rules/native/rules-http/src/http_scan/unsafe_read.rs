@@ -109,6 +109,7 @@ pub fn scan_unsafe_read_endpoint(input: &ScanUnsafeReadEndpointInput) -> Vec<Fin
             file: site.file.clone(),
             line: site.line,
             message: hint.clone(),
+            evidence_paths: Vec::new(),
             data: Some(serde_json::json!({
                 "method": method,
                 "path": e.path,

@@ -10,9 +10,6 @@ use zzop_core::Severity;
 
 const MIN_COST: f64 = 10.0;
 const FANIN_COST_WEIGHT: f64 = 3.0;
-const UNTESTED_COST_MULTIPLIER: f64 = 2.0;
-const AMP_COST_WEIGHT: f64 = 0.25;
-const AMP_COST_CAP: f64 = 8.0;
 
 /// Recommendation rule id.
 ///
@@ -45,26 +42,24 @@ pub struct RoiResult {
 
 /// ROI scalar (D1 formula):
 /// reduction = base_risk * reductionRatio(rule) * severityMultiplier(sev)
-/// cost      = max(10, loc + fanIn*3) * untestedMult * ampFactor
+/// cost      = max(10, loc + fanIn*3)
 /// roi       = reduction / cost
+///
+/// The formula once carried two more cost multipliers — an untested-path doubling and a
+/// change-amplification factor — driven by `BuildRecInput` fields that NO production caller ever
+/// populated (the engine passed an empty set and an empty map at the sole call site, so both multipliers
+/// were constant 1.0 in every real run). They were deleted rather than wired because nothing in the
+/// config surface could feed them: neither "which paths have tests" nor "co-change amplification per
+/// path" is a quantity this pipeline computes. Reinstating either means first building its input.
 pub fn compute_roi(
     rule_id: RecId,
     severity: Severity,
     base_risk: f64,
     loc: u32,
     fan_in: u32,
-    untested: bool,
-    amplification: f64,
 ) -> RoiResult {
     let reduction = base_risk * reduction_ratio(rule_id) * severity_multiplier(severity);
-    let amp_factor = 1.0 + amplification.min(AMP_COST_CAP) * AMP_COST_WEIGHT;
-    let cost = (loc as f64 + fan_in as f64 * FANIN_COST_WEIGHT).max(MIN_COST)
-        * if untested {
-            UNTESTED_COST_MULTIPLIER
-        } else {
-            1.0
-        }
-        * amp_factor;
+    let cost = (loc as f64 + fan_in as f64 * FANIN_COST_WEIGHT).max(MIN_COST);
     RoiResult {
         roi: reduction / cost,
         estimated_reduction: reduction,
@@ -98,52 +93,22 @@ mod tests {
     #[test]
     fn roi_basic_formula() {
         // risk 100, loc 50, fanIn 10, circular(0.7) x critical(3); cost = max(10, 50+30)=80.
-        let r = compute_roi(
-            RecId::Circular,
-            Severity::Critical,
-            100.0,
-            50,
-            10,
-            false,
-            0.0,
-        );
+        let r = compute_roi(RecId::Circular, Severity::Critical, 100.0, 50, 10);
         assert!((r.estimated_reduction - 210.0).abs() < 1e-9);
         assert!((r.estimated_cost - 80.0).abs() < 1e-9);
         assert!((r.roi - 2.625).abs() < 1e-9);
     }
 
     #[test]
-    fn roi_untested_doubles_cost() {
-        let r = compute_roi(
-            RecId::Circular,
-            Severity::Critical,
-            100.0,
-            50,
-            10,
-            true,
-            0.0,
-        );
-        assert!((r.estimated_cost - 160.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn roi_amplification_raises_cost() {
-        // amp 4 -> factor 1 + 4*0.25 = 2.
-        let r = compute_roi(
-            RecId::Circular,
-            Severity::Critical,
-            100.0,
-            50,
-            10,
-            false,
-            4.0,
-        );
-        assert!((r.estimated_cost - 160.0).abs() < 1e-9);
+    fn roi_cost_floor_applies_to_tiny_files() {
+        // loc 1, fanIn 0 -> raw cost 1, floored to MIN_COST.
+        let r = compute_roi(RecId::Circular, Severity::Critical, 100.0, 1, 0);
+        assert!((r.estimated_cost - 10.0).abs() < 1e-9);
     }
 
     #[test]
     fn roi_zero_risk_is_zero() {
-        let r = compute_roi(RecId::KnowledgeSilo, Severity::Info, 0.0, 0, 0, false, 0.0);
+        let r = compute_roi(RecId::KnowledgeSilo, Severity::Info, 0.0, 0, 0);
         assert_eq!(r.estimated_reduction, 0.0);
         assert_eq!(r.roi, 0.0);
     }

@@ -7,13 +7,21 @@
 // Asserting in a comment that the harness now catches that is worth nothing; running it against a
 // binary that does exactly that is worth something.
 //
-// NOT part of the cargo workspace — a standalone single file, compiled on demand:
+// NOT part of the cargo workspace — a standalone single file, compiled on demand by
+// `scripts/measure/harness-selftest.sh`, which `scripts/measure/detection-gate.sh` runs as a
+// preflight in the `detection-benchmark` CI job. That runner derives its subject list from the match
+// arms BELOW, so a mode added here without an expectation row fails loudly instead of going
+// unexercised. Until 2026-07-29 no runner existed and this header held the loop as a manual
+// procedure — which meant this file, the one asserting the rule, was the rule's own violation.
 //
+// By hand (needs no --release build of anything):
+//
+//   bash scripts/measure/harness-selftest.sh
+//
+//   # or one mode at a time:
 //   rustc -O scripts/measure/selftest-stub.rs -o <tmp>/stub.exe
-//   for m in empty initonly garbage rpcerror iserror wrongpayload fail; do
-//     ZZOP_STUB=$m node scripts/measure/snapshot.mjs --label selftest-$m \
-//       --bin <tmp>/stub.exe --config <any corpus>/zzop.config.jsonc --runs <tmp>/runs
-//   done
+//   ZZOP_STUB=<mode> node scripts/measure/snapshot.mjs --label selftest-<mode> \
+//     --bin <tmp>/stub.exe --config cases/zzop.config.jsonc --runs <tmp>/runs
 //
 // Every one of those must exit nonzero with a HARNESS ABORT naming the specific defect, and must
 // leave no directory behind under --runs. A mode that produces a snapshot is a harness regression.

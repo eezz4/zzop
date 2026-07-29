@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use zzop_core::{
-    circular_from_dep_excluding, is_enabled, merge_findings, registry, CommonIr, GitStats, IoFacts,
+    circular_from_dep_excluding, is_enabled, merge_findings, registry, CommonIr, GitStats,
     MinimalIr, NormalizedEnvelope, RulePackDef, DEFAULT_WEIGHTS,
 };
 
@@ -212,40 +212,15 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         &config.rule_config,
     );
 
-    // Deployment-topology mount apply (`EngineConfig::mounts`, config-declared) — the Mode A counterpart
-    // of `analyze::assemble`'s own call (`analyze/mod.rs`'s placement doc, ~line 397, which this mirrors):
-    // must run AFTER every provide-composing step above (tRPC/router-mount fragment composition,
-    // `compose_trpc_provides`/`compose_router_mount_provides`) so a config mount covers every http provide
-    // this mode ever produces, and BEFORE `io_provides` is sorted/frozen into `MinimalIr::io` just below —
-    // deployment topology is origin-agnostic (same rationale Mode B's overlay provides receive mounts
-    // under, in `analyze::assemble`), so a tree analyzed via Mode A must not silently freeze un-mounted
-    // keys while the native path mounts the same config. See `compose::apply_config_mounts`'s own doc for
-    // the winner-selection/validation/zero-effect-tripwire rules.
-    crate::analyze::apply_config_mounts(&mut io_provides, &config.mounts, &mut warnings);
-
     degraded.sort();
-    io_provides.sort_by(|a, b| {
-        a.kind
-            .cmp(&b.kind)
-            .then_with(|| a.key.cmp(&b.key))
-            .then_with(|| a.file.cmp(&b.file))
-            .then_with(|| a.line.cmp(&b.line))
-    });
-    io_consumes.sort_by(|a, b| {
-        a.kind
-            .cmp(&b.kind)
-            .then_with(|| a.key.cmp(&b.key))
-            .then_with(|| a.file.cmp(&b.file))
-            .then_with(|| a.line.cmp(&b.line))
-    });
-    let io = if io_provides.is_empty() && io_consumes.is_empty() {
-        None
-    } else {
-        Some(IoFacts {
-            provides: io_provides,
-            consumes: io_consumes,
-        })
-    };
+    // Config-declared topology onto both channels, then the sort + freeze — one seam because the
+    // ordering constraint lives BETWEEN them. See `super::topology_freeze`.
+    let io = super::topology_freeze::apply_topology_and_freeze(
+        io_provides,
+        io_consumes,
+        config,
+        &mut warnings,
+    );
 
     let ir = CommonIr {
         source: config.source_id.clone(),

@@ -22,6 +22,81 @@ fn no_text(_: &str) -> Option<String> {
     None
 }
 
+/// T2 pin (rule-quality.md §6) over the ONE divergence this module deliberately keeps from
+/// `dead_exports::is_ts_source_ext`. A T1 shared symbol is not available here — the sets answer
+/// different questions ("does the framework route it" vs "can we parse it"), so sharing one symbol
+/// would be wrong, not merely inconvenient. What must never happen is the divergence becoming
+/// SILENT, which is precisely the state this pin was added to end.
+///
+/// Both directions are checked, and both have teeth:
+/// - **Subset**: a routed extension the TypeScript frontend cannot parse would mint a PROVIDE for a
+///   file no extractor ever reads — the route's verbs would come from an empty symbol set.
+/// - **Exact delta**: the difference is `{mts, cts}` and nothing else. Growing the route list to
+///   cover them (the drift an outside reviewer flagged as possibly unintentional) goes red here and
+///   must be argued against [`super::ROUTE_EXTENSIONS`]'s recorded framework-default reasoning;
+///   shrinking it, or growing the dispatch set, goes red for the same reason.
+#[test]
+fn route_extensions_are_a_declared_subset_of_the_typescript_dispatch_set() {
+    use crate::dead_exports::is_ts_source_ext;
+
+    for ext in super::ROUTE_EXTENSIONS {
+        assert!(
+            is_ts_source_ext(&format!("x.{ext}")),
+            "ROUTE_EXTENSIONS routes {ext:?}, but the TypeScript frontend does not claim it — the \
+             convention would provide a route for a file no extractor reads"
+        );
+    }
+
+    // Enumerated from `is_ts_source_ext`'s own match arm (it is a predicate, not an iterable set);
+    // if that arm changes, this list must change with it and the loop below re-justified.
+    const TYPESCRIPT_DISPATCH_EXTENSIONS: [&str; 8] =
+        ["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"];
+    /// The deliberate, documented delta — see [`super::ROUTE_EXTENSIONS`]: no supported file-routing
+    /// convention's DEFAULT extension list contains these two.
+    const NOT_ROUTED_BY_ANY_CONVENTION: [&str; 2] = ["mts", "cts"];
+
+    for ext in TYPESCRIPT_DISPATCH_EXTENSIONS {
+        assert!(
+            is_ts_source_ext(&format!("x.{ext}")),
+            "this pin's hand-copy of is_ts_source_ext's match arm has gone stale: it lists {ext:?}, \
+             which is_ts_source_ext no longer accepts"
+        );
+        assert_eq!(
+            super::is_route_extension(ext),
+            !NOT_ROUTED_BY_ANY_CONVENTION.contains(&ext),
+            "the routed/parseable delta must stay exactly {NOT_ROUTED_BY_ANY_CONVENTION:?}; {ext:?} \
+             broke it. Re-justify BOTH sides together — see ROUTE_EXTENSIONS's doc for the \
+             framework-default evidence that set the delta."
+        );
+    }
+}
+
+/// The `route.<ext>` filename gate and the `pages/api` stem gate must accept the same extensions —
+/// they now read one constant, and this holds them to it from the outside (a future convention that
+/// re-spells its own list gets caught here).
+#[test]
+fn both_route_filename_gates_agree_on_the_extension_set() {
+    for ext in [
+        "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "json", "md",
+    ] {
+        let routed = super::is_route_extension(ext);
+        assert_eq!(
+            super::is_route_module_filename(&format!("route.{ext}")),
+            routed,
+            "route.{ext} filename gate disagrees with is_route_extension"
+        );
+        assert_eq!(
+            super::next::pages_api_route(&format!("pages/api/x.{ext}")).is_some(),
+            routed,
+            "pages/api/x.{ext} stem gate disagrees with is_route_extension"
+        );
+    }
+    // ...and the gate is a suffix test on a literal `route.` stem, not a substring one.
+    assert!(!super::is_route_module_filename("myroute.ts"));
+    assert!(!super::is_route_module_filename("route.ts.bak"));
+    assert!(!super::is_route_module_filename("route."));
+}
+
 #[test]
 fn medusa_verb_exports_become_http_provides() {
     let rel = "packages/medusa/src/api/admin/campaigns/[id]/route.ts";

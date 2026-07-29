@@ -11,6 +11,7 @@ fn finding(rule_id: &str, severity: Severity, file: &str, line: u32) -> Finding 
         file: file.to_string(),
         line,
         message: "m".to_string(),
+        evidence_paths: Vec::new(),
         data: None,
     }
 }

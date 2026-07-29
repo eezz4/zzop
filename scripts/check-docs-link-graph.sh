@@ -34,14 +34,33 @@ cd "$(dirname "$0")/.."
 fail=0
 
 # --- Check 1: docs/**/*.md all referenced from docs/README.md ---
+# The hub is slurped ONCE and searched with bash's own pattern match, not re-read by a `grep -qF` per
+# page (2026-07-29). "Is this fixed string somewhere in the hub" is exactly what `[[ $s == *"$x"* ]]`
+# answers — same substring semantics as `grep -F`, no anchoring on either — and the per-page grep was
+# one process per docs page. On this box that is the guard's whole cost: its `sys` time dwarfs its
+# `user` time. `$(< file)` is bash's no-fork file read (it does not run `cat`), so the slurp itself
+# adds nothing.
 hub=docs/README.md
 [ -f "$hub" ] || { echo "check-docs-link-graph: missing $hub" >&2; exit 1; }
+hub_text="$(< "$hub")"
 orphans=""
+docs_pages=0
 while IFS= read -r f; do
   rel="${f#docs/}"
   [ "$rel" = "README.md" ] && continue
-  grep -qF "$rel" "$hub" || orphans="$orphans $rel"
+  docs_pages=$((docs_pages + 1))
+  [[ $hub_text == *"$rel"* ]] || orphans="$orphans $rel"
 done < <(git ls-files -- 'docs/**/*.md' 'docs/*.md')
+# Subject-set floor (2026-07-29): all three checks in this file enumerate through a git pathspec, and
+# "no orphans found" and "no pages enumerated" produce the identical green. Plain counters, not
+# ${#arr[@]} — under `set -u` an empty array's expansion reports "unbound variable" instead of the
+# reason, and a guard that fails with the wrong message costs the next reader the whole diagnosis.
+if [ "$docs_pages" -eq 0 ]; then
+  echo "check-docs-link-graph: FAILED -- enumerated ZERO docs pages besides $hub. The docs/ pathspec" >&2
+  echo "  matched nothing, so check 1 proved nothing about hub reachability. An empty subject set is a" >&2
+  echo "  broken guard, never a clean hub." >&2
+  exit 1
+fi
 if [ -n "$orphans" ]; then
   echo "check-docs-link-graph: docs pages not referenced from docs/README.md (orphaned from the hub):" >&2
   printf '    %s\n' $orphans >&2
@@ -57,11 +76,32 @@ fi
 for exhub in examples/README.md examples/adapters/README.md; do
   exdir="${exhub%/README.md}"
   [ -f "$exhub" ] || { echo "check-docs-link-graph: missing $exhub" >&2; exit 1; }
+  exhub_text="$(< "$exhub")"
   orphans=""
-  while IFS= read -r entry; do
+  entries=0
+  # The `sed | sort -u` that used to sit after `git ls-files` is done in bash instead: strip the
+  # directory prefix, cut at the first "/" to get the top-level entry name, and de-duplicate through
+  # an associative array. Identical result, and it is three fewer processes per hub on top of the
+  # per-entry grep this loop no longer spawns (see check 1's note). Iteration order is git's own path
+  # order rather than `sort -u`'s, which only reorders the orphan list a failure prints.
+  declare -A seen_entry=()
+  while IFS= read -r path; do
+    entry="${path#"$exdir"/}"
+    entry="${entry%%/*}"
+    [ -n "$entry" ] || continue
+    [ -n "${seen_entry[$entry]:-}" ] && continue
+    seen_entry["$entry"]=1
     [ "$entry" = "README.md" ] && continue
-    grep -qF "$entry" "$exhub" || orphans="$orphans $entry"
-  done < <(git ls-files -- "$exdir/*" "$exdir/**" | sed "s|^$exdir/||; s|/.*||" | sort -u)
+    entries=$((entries + 1))
+    [[ $exhub_text == *"$entry"* ]] || orphans="$orphans $entry"
+  done < <(git ls-files -- "$exdir/*" "$exdir/**")
+  unset seen_entry
+  if [ "$entries" -eq 0 ]; then
+    echo "check-docs-link-graph: FAILED -- enumerated ZERO entries under $exdir besides its README." >&2
+    echo "  The hub's own pathspec matched nothing, so check 2 proved nothing for this hub. The 2026-07-16" >&2
+    echo "  drift this check exists for (6 of 9 adapters listed) is invisible to a scan of zero entries." >&2
+    exit 1
+  fi
   if [ -n "$orphans" ]; then
     echo "check-docs-link-graph: $exdir entries not referenced from $exhub:" >&2
     printf '    %s\n' $orphans >&2
@@ -73,7 +113,27 @@ done
 # One awk pass over every tracked *.md (a per-file loop costs minutes under Windows msys process
 # spawning). External schemes and non-.md targets are out of scope: this guard owns the prose graph,
 # not the network and not the schema fixtures docs link to.
-mapfile -t md_files < <(git ls-files -- '*.md')
+#
+# The zero-file case is the sharpest of the three here, and it was measured 2026-07-29: with the `*.md`
+# pathspec redirected in a scratch copy, `awk` was invoked with NO FILE ARGUMENTS AT ALL, so it read
+# STDIN, saw EOF, and the guard printed "OK (... 0 local md links resolve, 0 of them anchored against 0
+# headings)" and exited 0. A green that says "0 links resolve" is not a clean tree, it is a scan that
+# never happened — and awk's file-or-stdin default is what turns the broken pathspec into silence.
+# Building the list with a counted loop rather than `mapfile` also keeps `"${md_files[@]}"` provably
+# non-empty at the awk call, so `set -u` never has an empty array to complain about.
+md_files=()
+md_count=0
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  md_files+=("$f")
+  md_count=$((md_count + 1))
+done < <(git ls-files -- '*.md')
+if [ "$md_count" -eq 0 ]; then
+  echo "check-docs-link-graph: FAILED -- enumerated ZERO tracked *.md files. Check 3 would hand awk no" >&2
+  echo "  file arguments, awk would read stdin, and this guard would report '0 local md links resolve'" >&2
+  echo "  as a pass. An empty subject set is a broken guard, never a clean link graph." >&2
+  exit 1
+fi
 link_report="$(awk '
   function slugify(s,   t) {
     sub(/^#+[ \t]*/, "", s)
@@ -151,4 +211,4 @@ if [ "$fail" -ne 0 ]; then
 fi
 # shellcheck disable=SC2086
 set -- $link_stats
-echo "check-docs-link-graph: OK (docs + examples hubs reference every entry; $2 local md links resolve, $3 of them anchored against $4 headings)"
+echo "check-docs-link-graph: OK ($docs_pages docs pages + 2 examples hubs reference every entry; $md_count md files scanned, $2 local md links resolve, $3 of them anchored against $4 headings)"

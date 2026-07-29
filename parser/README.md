@@ -25,6 +25,14 @@ should never leak into the public IR).
 > single polyglot repo. Because the cross-layer linker is a multi-source join, even a crude JSP parser joins as a
 > first-class citizen as long as it extracts accurate IoFacts.
 
+## `parser/tests/` is shared test material, not a crate
+
+`parser/tests/input_strategy.rs` has no `Cargo.toml` and belongs to no package. Each crate's
+`tests/no_panic_proptest.rs` pulls it in with `#[path = "../../tests/input_strategy.rs"]`, so the eight
+"arbitrary input must not panic this frontend" properties draw from one generator instead of eight copies
+that would drift apart. Its module doc owns the rationale — why the property is worth running when
+`catch_unwind` already exists, what the generated inputs are, and how each crate's case count was set.
+
 ## The envelope path remains the default for the long tail (JSP, Ruby, ...)
 
 A new language does not get its own crate here by default — it arrives via the **external-parser

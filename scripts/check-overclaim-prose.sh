@@ -153,7 +153,34 @@ negators="no|not|never|n't|without|cannot|nothing|neither|nor|rather than|instea
 candidate_files="$(tracked_files_matching "$prefilter" '*.md' '*.html' ':!:.github/**')" \
   || { echo "$SELF: file enumeration failed" >&2; exit 1; }
 
-total_files="$(git ls-files -- '*.md' '*.html' ':!:.github/**' | grep -c . || true)"
+# Counted in bash rather than by a `grep -c .` on the end of the pipe (2026-07-29): on this box any
+# external command costs ~0.6s of fork/exec whatever it does, and counting lines is something the
+# shell already reading them can do for free. The enumeration itself is untouched — same pathspec,
+# same `git ls-files`, same number.
+total_files=0
+while IFS= read -r _p; do
+  [ -n "$_p" ] && total_files=$((total_files + 1))
+done < <(git ls-files -- '*.md' '*.html' ':!:.github/**')
+
+# ## Subject-set floor (2026-07-29) — added even though the collapse is currently caught elsewhere
+# This guard was reported as printing "clean (0 files scanned)" on an empty scan surface. Measured, and
+# the report is WRONG as the tree stands: with the globs redirected in a scratch copy it went RED, via
+# the stale-ALLOWLIST check at the bottom — every vetted claim stops matching when nothing is read, so
+# two "stale ALLOWLIST entry ... matched nothing" failures fire and `fail=1`.
+#
+# That net is real but CONTINGENT, and on the one variable a maintainer is most free to change: the
+# size of ALLOWLIST. Measured in the same session with ALLOWLIST emptied AND the globs redirected —
+# "check-overclaim-prose: clean (0 files scanned; 0 vetted claims)." exit 0. So the guard's honesty
+# about reading nothing currently rests on there happening to be two entries in an allowlist whose
+# stated purpose is to SHRINK toward zero as prose gets fixed. That is the same shape as
+# check-max-file-lines.sh's note about its own stale-baseline net (empty ratchet, empty net), and it is
+# why the floor is asserted directly rather than left to a side effect.
+if [ "$total_files" -eq 0 ]; then
+  echo "$SELF: FAILED -- enumerated ZERO tracked *.md/*.html files outside .github/**. The published" >&2
+  echo "  prose surface is empty, so no absolute claim was read and none was vetted. An empty subject" >&2
+  echo "  set is a broken guard, never clean prose." >&2
+  exit 1
+fi
 
 files=()
 while IFS= read -r f; do
@@ -168,6 +195,20 @@ fi
 # Which allowlist entries actually fired this run — index-parallel to ALLOWLIST.
 used=()
 for _ in "${ALLOWLIST[@]}"; do used+=(0); done
+
+# The negation window is tested with bash's own ERE engine instead of a `grep -qiE` per match, and
+# the matched line is read out of a per-file line cache instead of a `sed -n "${lineno}p"` per match
+# (2026-07-29). Two processes per match, and the shell can answer both questions itself: `mapfile` is
+# a builtin reading through a redirect (no fork), and `[[ $s =~ $re ]]` is the same POSIX ERE grep
+# was given. Case-insensitivity is done by lowercasing the window with `${window,,}` — the same
+# parameter-expansion-not-`tr` choice check-io-key-vocab.sh's header records — and every negator is
+# already lowercase, so `-i` had nothing else to fold.
+#
+# The cache holds ONE file at a time, which is enough: `grep -H` emits its matches grouped by file,
+# so a file is loaded once and every match in it is served from that load.
+cached_file=""
+cached_lines=()
+negators_re="(^|[^A-Za-z])($negators)([^A-Za-z]|$)"
 
 fail=0
 while IFS= read -r row; do
@@ -185,7 +226,15 @@ while IFS= read -r row; do
 
   # Negation carve-out — see the header. `${line%%"$text"*}` is everything on the line before this
   # match; only its last 32 characters are consulted.
-  line="$(sed -n "${lineno}p" "$file")"
+  if [ "$file" != "$cached_file" ]; then
+    mapfile -t cached_lines < "$file"
+    cached_file="$file"
+  fi
+  # mapfile is 0-indexed; grep line numbers are 1-based. The `:-` is not decoration: under `set -u`
+  # an out-of-range index is an "unbound variable" abort, and the `sed -n "${lineno}p"` this replaced
+  # simply yielded the empty string. That can only happen if the file changed between the grep above
+  # and this read, and the two spellings should not disagree about what to do when it does.
+  line="${cached_lines[$((lineno - 1))]:-}"
   prefix="${line%%"$text"*}"
   if [ "$prefix" != "$line" ]; then
     # NOT `${prefix: -32}`: bash yields the EMPTY string when a negative offset exceeds the string's
@@ -193,7 +242,7 @@ while IFS= read -r row; do
     start=0
     [ "${#prefix}" -gt 32 ] && start=$(( ${#prefix} - 32 ))
     window="${prefix:$start}"
-    if grep -qiE "(^|[^A-Za-z])($negators)([^A-Za-z]|$)" <<< "$window"; then
+    if [[ ${window,,} =~ $negators_re ]]; then
       continue
     fi
   fi

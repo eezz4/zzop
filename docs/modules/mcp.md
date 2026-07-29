@@ -37,7 +37,8 @@ is drift surface, not a guard against drift. The layer that actually prevents pe
 | `packages/cli-bin/src/main.rs` | The `zzop` CLI entry — thin argument dispatch: `analyze` / `analyze-envelope` / `cross` / `file` / `endpoint` / `manifest` / `diff` / `facts` / `graph` / `init` / `contract` / `explain` / `validate-*` / `version` / `help` subcommands calling `zzop-summary` directly (the `USAGE` const in that file is the canonical list — every subcommand but `help` is spelled there). Its findings filters are built through the WIRE-NEUTRAL `FindingFilters::new`, never an MCP-shaped JSON object. |
 | `packages/cli-bin/src/cli/` | The CLI's own argv helpers, split by responsibility: `args.rs` (argv shape + the findings knobs), `help.rs` (the per-subcommand elaboration table both `zzop help` and `zzop <sub> --help` read), `analysis.rs` (the four lanes that run an analysis), `run.rs` (the remaining diverging runners), `mod.rs` (the two terminal print/read steps). |
 | `packages/mcp/src/bin/zzop-mcp.rs` | The `zzop-mcp` server entry — thin: bare / `mcp` serve stdio; `version` / `help` / unknown-arg lanes. |
-| `packages/mcp/src/server.rs` | The stdio JSON-RPC 2.0 loop (`initialize`, `tools/*`, `resources/*`); re-exports `version()` from `zzop-summary`. |
+| `packages/mcp/src/server.rs` | The stdio JSON-RPC 2.0 loop (`initialize`, `tools/*`, `resources/*`); re-exports `version()` from `zzop-summary`. Split into seams so the protocol is testable in-process: `run_stdio` (binds real stdin/stdout), `serve` (the transport loop over any reader/writer — this is what makes *several messages on one connection* reachable from a test), `handle_line` (the trim/blank/parse-error lane, and the object-vs-array fork), `handle_batch` (maps a JSON-RPC batch through the same dispatch a lone request takes), and `handle_message(&Value) -> Option<Value>` (the dispatch, a pure function of the parsed message; `Option` is what carries "a notification gets no reply", and it is also what makes a notification-only batch produce nothing). |
+| `packages/mcp/src/server/tests.rs` | The protocol table driving `handle_message`, plus the loop tests that need a real connection (sequential requests, an interleaved notification, a malformed line not ending the session, a final line with no trailing newline). Added 2026-07-29: the dispatch previously had **no** Rust test entering it, while a test file asserted it was "covered by the protocol unit tests in `server.rs`" — a claim of coverage that did not exist, which is why a family of loop defects survived several releases. |
 | `packages/mcp/src/tools.rs` | Pure dispatch: match tool name → extract arguments → call the shared `zzop-summary` function → wrap the MCP result. No shaping logic lives here. |
 | `packages/mcp/src/tools/definitions.rs` | MCP tool descriptions + input schemas (`tools/list`). |
 | `packages/mcp/src/resources.rs` | MCP resource handlers (`resources/list`, `resources/read`) over the embedded authoring contracts (from `zzop_summary::contracts`). |
@@ -345,8 +346,17 @@ transport level, before dispatch reaches `tools/call`/`resources/read`:
 
 - A line that isn't valid JSON at all answers JSON-RPC error `-32700` (Parse error) with `id: null` —
   the spec's reserved shape for "the request id itself is unrecoverable."
-- A line that parses but isn't a single JSON object (e.g. a batch array — unsupported by this server, and
-  unused by MCP clients) answers `-32600` (Invalid Request).
+- A line that parses to a JSON **array** is a JSON-RPC batch and is served: each element goes through the
+  same dispatch a lone request takes, and the replies come back as one array on one line, in request
+  order. Notifications contribute no element, so a batch of only notifications produces **no reply at
+  all** (not an empty array); an **empty** array is itself an invalid request and answers a single
+  `-32600`; an element that is not a request object gets its own `-32600` **inside** the array rather
+  than failing the whole batch. Implemented 2026-07-29, and it is a correction rather than a feature:
+  the `2025-03-26` revision — one of the three this server advertises — makes receiving batches a MUST,
+  so refusing them while listing that revision was a false claim of support. Only *receiving* is
+  implemented; nothing here originates requests, so there is no sending side to batch.
+- A line that parses but is neither an object nor an array (a bare scalar) answers `-32600`
+  (Invalid Request).
 
 Both also log one line to stderr. An unknown `method` (anything other than `initialize`/`tools/list`/
 `tools/call`/`resources/list`/`resources/read`) answers `-32601` (Method not found) with the request's
@@ -470,11 +480,10 @@ built to never lie by omission.
   the number.
 - **`bucketKeys`** (`cross_repo`) — alongside the numeric `buckets` counts, each of the five non-edge
   join buckets (`unconsumedProvides`, `unprovidedConsumes`, `unresolvedConsumes`, `externalConsumes`,
-  `ambiguousConsumes`) lists up to 20 DISTINCT keys (deduped, engine order preserved; an unresolved
+  `ambiguousConsumes`) lists EVERY DISTINCT key (deduped, engine order preserved; an unresolved
   consume contributes its `raw` expression when recorded), so an agent sees WHICH keys sit in a bucket
-  instead of only how many. A capped bucket discloses its remainder in `bucketKeysTruncated`
-  (`{bucket: remainingDistinctCount}`, present only when something was capped) — for the definitive
-  per-key answer, follow up with `check_endpoint`. A parallel `bucketKeySites` object mirrors
+  instead of only how many. The list is uncapped since 2026-07-29, so there is no truncation field to
+  check — on a large repo one of these lists can be long. A parallel `bucketKeySites` object mirrors
   `bucketKeys` with each key's first recorded site as `"file:line"` (`null` when the fact carries no
   location — never guessed), so a listed key is locatable without a follow-up call. These keys are the
   RAW join residue: no rule vocabulary filters them (see the bucket contract in
@@ -512,10 +521,20 @@ built to never lie by omission.
   JOINABLE io — 0 provides and 0 keyed consumes, unresolved consumes don't count — while analyzing
   `files > 0`, so it is invisible to the cross-layer join) and must reach the summary
   reader — a "0 findings" tree that contributed nothing to the join is not a clean tree.
-- **`disclosure`** — the engine's run-global, pinned silent-failure-class registry (identical every run;
-  see [`disclosure` — silent-failure-class registry (run-global)](facade.md#disclosure--silent-failure-class-registry-run-global) for the full field
-  contract) rides through unfiltered on every `analyze_repo`/`cross_repo` reply, the same meta-honesty
-  channel the shared facade exposes to every host.
+- **`disclosure`** — the engine's run-global, pinned silent-failure-class registry, carried on every
+  `analyze_repo`/`cross_repo`/`check_endpoint` reply as a **fold** since 2026-07-29: the reply gets the
+  registry's *shape* (`classes`, `asserted`, `partial`, `notYetDetected`) plus a `note`, a `resource`
+  (`zzop://contract/disclosure-classes`) and a runnable `command` (`zzop contract disclosure-classes`).
+  The prose itself ships once through the contract lane rather than on every call — it was byte-identical
+  on every run and every tree, and measured 10,809 of 16,617 reply bytes on this repo (92% of a small
+  `check_endpoint` reply), i.e. a fixed per-call tax on the agent this output is written for.
+  **What did not change**: the fact that gaps exist *and their magnitude* are still in the reply without
+  asking, which is what the disclosure doctrine requires; and run-VARYING disclosure — `coverage`
+  (including `joinContributionZero`) and the `warnings` tripwires — is untouched. The counts and the
+  served text are derived from one registry and sealed by tests on both sides, so a registry that grows
+  while the counts stand still fails the build. See
+  [`disclosure` — silent-failure-class registry (run-global)](facade.md#disclosure--silent-failure-class-registry-run-global)
+  for the facade-level field contract, which still carries the full array (it is the derivation source).
 - **`architecture`** (`analyze_repo` only) — a compact, capped summary closing a disclosure asymmetry:
   the facade output carries full `health`/`recommendations`/`critical` (git-history-dependent
   structural-debt metrics — see the [`AnalyzeOutputView` table](facade.md#the-zzop-facade-json-contract)), but this host's

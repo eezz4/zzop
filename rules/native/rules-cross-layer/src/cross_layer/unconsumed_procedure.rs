@@ -43,6 +43,7 @@ pub fn unconsumed_procedure_findings(unconsumed_provides: &[TaggedProvide]) -> V
                 file: p.provide.file.clone(),
                 line: p.provide.line,
                 message,
+                evidence_paths: Vec::new(),
                 data: Some(serde_json::json!({
                     "key": key,
                     "source": p.source,

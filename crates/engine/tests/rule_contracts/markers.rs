@@ -8,7 +8,7 @@
 //! same marker and co-suppress — so that is the one presence/uniqueness invariant still worth a test.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use zzop_core::Matcher;
 
@@ -120,33 +120,264 @@ fn every_dsl_rule_message_documents_how_to_exclude_it() {
 // 2b. Published-surface leg — the catalog pages may only claim a marker for a rule that has one
 // ---------------------------------------------------------------------------------------------
 
-/// The pages whose ROWS are checked, relative to this crate's manifest dir. Both are hand-authored prose
-/// keyed by rule id, and neither can reference a Rust value, so the relationship is sealed here instead.
-const ROW_SURFACES: [&str; 2] = ["../../docs/rules/catalog.md", "../../site/rules.html"];
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
 
-/// The ONLY native analyses that honor an inline comment marker: `rules-http`'s two call-graph scanners
-/// read a HAND-WRITTEN `// idempotent-ok:` literal (`rules/native/rules-http/src/http_scan.rs`) that is
-/// derived from no rule id. Every other native id — all 25 `cross-layer/*`, the graph rules, the schema
-/// rules, the metrics ids — honors none (`rules-cross-layer/src/cross_layer/mod.rs`'s "Suppression"
-/// section). Census-visible on purpose: retiring the hand-authored marker (the id-derivation unification
-/// on the backlog) empties this list, and `the_hand_authored_native_marker_still_exists_in_the_scanner`
-/// below goes red the moment the literal leaves the scanner, forcing this constant and the pages to move
-/// together.
-const NATIVE_MARKER_HONORING_IDS: [&str; 2] = ["unsafe-read-endpoint", "non-idempotent-write"];
+/// The pages whose ROWS are checked — every `.md` and `.html` in the repository, DERIVED from git the
+/// way `scripts/check-docs-rule-ids.sh` derives its own subject set, and for the identical reason its
+/// header records: that script began as two hard-typed paths under a comment claiming to list "the four
+/// real user-facing surfaces", and a violation planted in a third surface left it green.
+///
+/// This constant had the same shape and the same hole until 2026-07-29 — `["../../docs/rules/catalog.md",
+/// "../../site/rules.html"]`, hand-typed, with no mechanism that could notice a third page growing rule
+/// rows. Measured before the fix: a `docs/rules/planted-surface.md` carrying one row that told readers
+/// to suppress `cross-layer/prefix-drift` (a rule that honors NO marker) with an inline marker left this
+/// file's contract green.
+///
+/// Scanning EVERY doc rather than a rules-only subset is deliberate and costs nothing in precision: the
+/// contract below only judges a row whose id it recognizes ([`rule_rows`] + the `known` filter), so a
+/// document with no rule rows contributes nothing. There is therefore no discriminator to get wrong —
+/// the row shape IS the discriminator, which is the property the shell guard had to approximate with a
+/// `"severity"` prefilter because grep has no cheaper way to ask.
+///
+/// UNTRACKED-but-not-ignored files are included alongside tracked ones, matching
+/// `scripts/check-max-file-lines.sh`'s two-call `list_rs_files`. A page added in the working tree is
+/// exactly the page whose claims nobody has reviewed yet, and a guard that only sees committed bytes
+/// reports on the previous commit rather than on the one being made.
+fn row_surfaces() -> Vec<(String, String)> {
+    let root = workspace_root();
+    let list = |extra: &[&str]| -> Vec<String> {
+        let mut cmd = std::process::Command::new("git");
+        cmd.arg("-C").arg(&root).arg("ls-files");
+        cmd.args(extra);
+        let out = cmd
+            .args(["--", "*.md", "*.html"])
+            .output()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "could not run `git ls-files` in {} ({e}) — this contract DERIVES the pages it \
+                     checks from git, so without it there is no subject set and a green result would \
+                     mean nothing was read",
+                    root.display()
+                )
+            });
+        assert!(
+            out.status.success(),
+            "`git ls-files {extra:?}` failed in {}: {}",
+            root.display(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect()
+    };
+
+    // No exclusion list. `--exclude-standard` already applies every ignore file git itself honors —
+    // repo, per-user global, and `.git/info/exclude` — so build output and local-only tooling state are
+    // filtered by the SAME rules that decide what this repo would ever publish, rather than by a set of
+    // path prefixes typed here. That is the point: a hand-typed exclusion list is the identical defect,
+    // one level down. The sibling shell guards spell three prefixes out because `git ls-files` is only
+    // half of what they enumerate; here it is all of it, and the census below prints what was read.
+    let mut rels: Vec<String> = list(&[])
+        .into_iter()
+        .chain(list(&["--others", "--exclude-standard"]))
+        .collect();
+    rels.sort();
+    rels.dedup();
+
+    assert!(
+        !rels.is_empty(),
+        "`git ls-files` matched ZERO .md/.html files in {} — the surface enumeration is broken, not the \
+         repo empty. This repo ships docs/rules/catalog.md and site/rules.html at minimum; a zero here \
+         would let every page claim any marker it liked",
+        root.display()
+    );
+
+    rels.into_iter()
+        .filter_map(|rel| {
+            // A tracked-but-deleted path stays listed until the deletion is committed — skip it rather
+            // than panicking, the same degradation `check-max-file-lines.sh`'s `existing_only` applies.
+            let text = std::fs::read_to_string(root.join(&rel)).ok()?;
+            Some((rel, text))
+        })
+        .collect()
+}
 
 /// The hand-authored native marker literal, spelled once here and asserted to still exist in the scanner.
 const HAND_AUTHORED_NATIVE_MARKER: &str = "idempotent-ok";
 
-fn read_repo_file(rel: &str) -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
-    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+/// The one function in `rules/native/` that actually READS a source line looking for an inline marker.
+/// Everything below is derived from its definition and its callers — see [`native_marker_honoring_ids`]
+/// for why that is the only sound derivation path.
+const MARKER_WINDOW_FN: &str = "scan_marker_window";
+
+/// `(path, comment-free text)` for every SHIPPED `.rs` file under `rules/native/`.
+///
+/// Line comments (`//`, `///`, `//!`) are dropped whole, for the same reason `surface_parity`'s
+/// `emission_text` drops them: prose that MENTIONS a function is not a place that calls it. That is not
+/// a hypothetical here — `http_scan.rs`'s own doc writes ``[`scan_marker_window`] is the definition``
+/// and `http_scan/tests.rs` writes ``while `scan_marker_window` reads the body-start line``, and a
+/// bare-substring derivation would read both as call sites. Test sources are dropped outright
+/// ([`crate::is_test_source`]): a marker-suppression unit test necessarily calls the marker reader, and
+/// counting it would make every rule in a crate look marker-honoring because one of its tests exercised
+/// the scanner.
+fn native_rule_sources() -> Vec<(PathBuf, String)> {
+    let mut files = Vec::new();
+    crate::collect_rs_files(&crate::native_dir(), &mut files);
+    files.retain(|path| !crate::is_test_source(path));
+    let sources: Vec<(PathBuf, String)> = files
+        .into_iter()
+        .filter_map(|path| {
+            let text = std::fs::read_to_string(&path).ok()?;
+            let code = text
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            Some((path, code))
+        })
+        .collect();
+    assert!(
+        !sources.is_empty(),
+        "no shipped .rs file found under {} — the native-rule scan root is gone or became test-only, \
+         and every derivation below would return an EMPTY set while reading nothing",
+        crate::native_dir().display()
+    );
+    sources
+}
+
+/// Whether `code` contains a CALL to `name` — `name` immediately followed by `(`, so a `use super::{..,
+/// name, ..}` import line (no parenthesis) and a `fn name<T>(` definition (a generic parameter list
+/// between the two) are both excluded by shape rather than by a special case.
+fn calls(code: &str, name: &str) -> bool {
+    regex::Regex::new(&format!(r"\b{}\s*\(", regex::escape(name)))
+        .expect("static shape, escaped name")
+        .is_match(code)
+}
+
+/// The names of the functions that CALL [`MARKER_WINDOW_FN`] — i.e. the marker-reading API every
+/// rule-level honor has to go through. Derived by tracking the enclosing `fn` while walking each file:
+/// the last `fn <name>` opened before the call line owns it.
+///
+/// The definition itself must exist exactly once and must be called at least once; both are asserted,
+/// because either failing turns every derivation below into a silent empty set.
+fn marker_window_reader_fns(sources: &[(PathBuf, String)]) -> BTreeSet<String> {
+    let fn_re =
+        regex::Regex::new(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([a-z_][a-z0-9_]*)")
+            .expect("static regex");
+    let mut definitions = 0usize;
+    let mut readers = BTreeSet::new();
+    for (_path, code) in sources {
+        let mut current: Option<String> = None;
+        for line in code.lines() {
+            if let Some(c) = fn_re.captures(line) {
+                let name = c[1].to_string();
+                if name == MARKER_WINDOW_FN {
+                    definitions += 1;
+                }
+                current = Some(name);
+            }
+            if calls(line, MARKER_WINDOW_FN) {
+                if let Some(name) = current.as_deref() {
+                    if name != MARKER_WINDOW_FN {
+                        readers.insert(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(
+        definitions, 1,
+        "expected exactly ONE `fn {MARKER_WINDOW_FN}` definition under rules/native/, found \
+         {definitions}. Zero means it was renamed or retired and every derivation below silently \
+         returns an empty set; more than one means two independent marker readers exist and this \
+         single-seed derivation no longer describes them."
+    );
+    assert!(
+        !readers.is_empty(),
+        "`fn {MARKER_WINDOW_FN}` is defined but never called from any shipped native source — no rule \
+         can honor an inline marker through it, so this derivation would report NOTHING honoring while \
+         the catalog pages keep promising a marker"
+    );
+    readers
+}
+
+/// The native analysis ids whose emitting file reads the inline marker window — the DERIVED replacement
+/// for what was, until 2026-07-29, a hand-written `NATIVE_MARKER_HONORING_IDS` pair.
+///
+/// ## Why this derivation path and not a grep for the marker literal
+/// The obvious route — grep `rules/native/` for `idempotent-ok` — is a trap, and a measured one. Two
+/// files spell that literal in order to DENY it: `rules-cross-layer/src/cross_layer/mod.rs` and
+/// `rules-schema/src/message.rs` both write out the marker in a "this crate honors none" sentence. A
+/// literal grep therefore reports the two crates that most explicitly do NOT honor a marker as honoring
+/// one — the same shape as the `cli_only_vocabulary()` defect this repo hit the day before, where a
+/// discriminator-free scan matched prose instead of behaviour. Anchoring on the CALL removes the class
+/// outright: prose cannot call a function.
+///
+/// ## What "honoring" means here, stated precisely
+/// A file qualifies when it calls one of [`marker_window_reader_fns`], which today is
+/// `is_whitelisted` (the marker SUPPRESSES the finding) or `with_ok_marker_near_miss` (a marker-shaped
+/// comment that did not suppress is DISCLOSED in the message). Both are counted, and the second is not
+/// a looseness: the near-miss text it appends says, in the finding the user reads, "the marker this
+/// rule honors is `idempotent-ok:`". A file making that claim is exactly a file whose catalog row may
+/// repeat it, which is the contract this set feeds.
+///
+/// ## Granularity, stated honestly
+/// FILE-level: every `rule_id: "<id>"` literal in a marker-reading file is taken as honoring. A file
+/// emitting two rule ids where only one is marker-gated would over-report. No such file exists (each
+/// native rule owns its own module), and the failure would be LOUD rather than silent — an id wrongly
+/// in this set makes any catalog row that correctly DENIES a marker fail the contract below. A file
+/// that reads the marker window but exposes no `rule_id` literal at all (an id built from a `const` or
+/// threaded through a struct field, both of which exist elsewhere in `rules/native/`) is a real blind
+/// spot, so it is asserted against rather than skipped.
+fn native_marker_honoring_ids() -> BTreeSet<String> {
+    let sources = native_rule_sources();
+    let readers = marker_window_reader_fns(&sources);
+    let id_re = regex::Regex::new("rule_id:\\s*\"([a-z0-9][a-z0-9/_-]*)\"").expect("static regex");
+    let mut ids = BTreeSet::new();
+    for (path, code) in &sources {
+        if !readers.iter().any(|reader| calls(code, reader)) {
+            continue;
+        }
+        let found: Vec<String> = id_re
+            .captures_iter(code)
+            .map(|c| c[1].to_string())
+            .collect();
+        // The file that DEFINES the readers is shared plumbing, not a rule — it emits no finding, so
+        // yielding no id there is correct rather than a blind spot.
+        let defines_a_reader = readers.iter().any(|reader| {
+            regex::Regex::new(&format!(r"fn\s+{}\b", regex::escape(reader)))
+                .expect("static shape, escaped name")
+                .is_match(code)
+        });
+        assert!(
+            !found.is_empty() || defines_a_reader,
+            "{} reads the inline marker window but exposes no `rule_id: \"<id>\"` literal, so this \
+             derivation cannot tell WHICH rule honors the marker — its findings would be missing from \
+             the honoring set and the catalog pages could deny a marker this file honors. Spell the id \
+             as a literal at the `Finding` construction site, or teach this derivation the new shape.",
+            path.display()
+        );
+        ids.extend(found);
+    }
+    assert!(
+        !ids.is_empty(),
+        "NO native rule reads the inline marker window. If the hand-authored `{HAND_AUTHORED_NATIVE_MARKER}` \
+         exception was deliberately retired, that is correct — but then docs/rules/catalog.md, \
+         site/rules.html, site/usage.html and docs/getting-started.md must stop promising it in the SAME \
+         commit, and this assertion is where you find out."
+    );
+    ids
 }
 
 /// Every rule id (bare and, for DSL rules, pack-qualified) whose findings an inline marker can actually
 /// suppress — read from the same data the engine loads, never a hand-copied list. DSL: every matcher
 /// except `symbol-scan`, whose findings have no source line to anchor a comment against
 /// (`RuleDef::suppress_marker` still derives a string for it, but nothing ever consults the result — see
-/// `crates/facade/src/explain/render.rs`'s `suppress_marker_str`). Native: `NATIVE_MARKER_HONORING_IDS`.
+/// `crates/facade/src/explain/render.rs`'s `suppress_marker_str`). Native:
+/// [`native_marker_honoring_ids`], derived from the marker reader's own call sites.
 fn marker_honoring_ids() -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
     for pack in &load_all_packs() {
@@ -158,9 +389,7 @@ fn marker_honoring_ids() -> BTreeSet<String> {
             ids.insert(format!("{}/{}", pack.id, rule.id));
         }
     }
-    for id in NATIVE_MARKER_HONORING_IDS {
-        ids.insert(id.to_string());
-    }
+    ids.extend(native_marker_honoring_ids());
     ids
 }
 
@@ -225,13 +454,14 @@ fn catalog_surfaces_claim_a_suppression_marker_only_for_rules_that_honor_one() {
     let honoring = marker_honoring_ids();
     let known: BTreeSet<String> = honoring.iter().cloned().chain(native_ids()).collect();
     let mut offenders = Vec::new();
+    let mut rows_judged = 0usize;
 
-    for rel in ROW_SURFACES {
-        let text = read_repo_file(rel);
+    for (rel, text) in row_surfaces() {
         for (id, row) in rule_rows(&text) {
             if !known.contains(&id) {
                 continue; // not a rule row (matchers, config keys, ... share the table shape)
             }
+            rows_judged += 1;
             let honors = honoring.contains(&id);
             if !honors && affirms_a_marker(row) && !denies_a_marker(row) {
                 offenders.push(format!(
@@ -245,30 +475,77 @@ fn catalog_surfaces_claim_a_suppression_marker_only_for_rules_that_honor_one() {
             }
         }
     }
+    // NON-VACUITY GUARD, the necessary companion to a derived subject set. `row_surfaces` already fails
+    // on a zero-file enumeration, but that is the weaker bar: every page could be readable and yet no
+    // ROW recognized (the table markup changed, `rule_rows`' anchors went stale), and this contract
+    // would pass having judged nothing at all — a green that means "found no claims to check", read as
+    // "every claim checks out". That is the same false green the hand list produced, arrived at from
+    // the other direction, so it is asserted rather than assumed.
+    assert!(
+        rows_judged > 0,
+        "scanned {} .md/.html page(s) and recognized ZERO rule rows keyed by a known id — this repo \
+         publishes a rule catalog, so either `rule_rows`' Markdown/HTML row anchors no longer match \
+         what the pages emit, or the pages stopped carrying rows. Nothing was verified.",
+        row_surfaces().len()
+    );
     assert!(
         offenders.is_empty(),
         "published rule rows whose suppression claim contradicts the code: {offenders:#?}"
     );
 }
 
-/// Keeps `NATIVE_MARKER_HONORING_IDS` honest: the hand-authored `// idempotent-ok:` literal it exists for
-/// must still be in the scanner. Retiring it (unifying onto derived `zzop-<id>-ok`, or dropping the exception
-/// entirely) empties the exception and must empty this list in the same commit — otherwise the pages could
-/// keep promising a marker that no longer exists and the test above would still read green.
+/// Keeps [`native_marker_honoring_ids`] honest from the other end: the hand-authored `// idempotent-ok:`
+/// literal the whole exception exists for must still be in the scanner, and every id the derivation
+/// yields must be a REGISTERED native analysis — an id that ships no analysis cannot honor anything, and
+/// would let the contract above vouch for a page row about a rule that does not run.
+///
+/// The scanner is LOCATED, not hardcoded: it is the file defining the marker readers
+/// [`marker_window_reader_fns`] found. The path `../../rules/native/rules-http/src/http_scan.rs` used
+/// to be typed here, which meant relocating the scanner turned this pin into a `cannot read` panic
+/// blaming the wrong thing, and splitting it across two files would have left the pin watching whichever
+/// half kept the old name.
 #[test]
 fn the_hand_authored_native_marker_still_exists_in_the_scanner() {
-    let scanner = read_repo_file("../../rules/native/rules-http/src/http_scan.rs");
+    let sources = native_rule_sources();
+    let readers = marker_window_reader_fns(&sources);
+    let scanners: Vec<&PathBuf> = sources
+        .iter()
+        .filter(|(_, code)| {
+            readers.iter().any(|reader| {
+                regex::Regex::new(&format!(r"fn\s+{}\b", regex::escape(reader)))
+                    .expect("static shape, escaped name")
+                    .is_match(code)
+            })
+        })
+        .map(|(path, _)| path)
+        .collect();
     assert!(
-        scanner.contains(HAND_AUTHORED_NATIVE_MARKER),
-        "rules-http's hand-authored `{HAND_AUTHORED_NATIVE_MARKER}` marker is gone from http_scan.rs — \
-         empty NATIVE_MARKER_HONORING_IDS and update docs/rules/catalog.md, site/rules.html, \
-         site/usage.html and docs/getting-started.md in the same commit"
+        !scanners.is_empty(),
+        "found no shipped native source DEFINING any of the marker readers {readers:?} — they are \
+         called from somewhere but defined nowhere this scan can see, so the derivation's seed is broken"
     );
+    let carrying: Vec<&&PathBuf> = scanners
+        .iter()
+        .filter(|path| {
+            std::fs::read_to_string(path)
+                .unwrap_or_default()
+                .contains(HAND_AUTHORED_NATIVE_MARKER)
+        })
+        .collect();
+    assert!(
+        !carrying.is_empty(),
+        "the hand-authored `{HAND_AUTHORED_NATIVE_MARKER}` marker is gone from every file defining a \
+         marker reader ({scanners:?}) — if that exception was retired, update docs/rules/catalog.md, \
+         site/rules.html, site/usage.html and docs/getting-started.md in the same commit"
+    );
+
     let registered = native_ids();
-    for id in NATIVE_MARKER_HONORING_IDS {
+    for id in native_marker_honoring_ids() {
         assert!(
-            registered.iter().any(|registered_id| registered_id == id),
-            "NATIVE_MARKER_HONORING_IDS names `{id}`, which is not a registered native analysis id"
+            registered.contains(&id),
+            "the marker-honoring derivation yielded `{id}`, which is not a registered native analysis \
+             id — either the rule was renamed on one side only, or the `rule_id:` literal scan picked \
+             up something that is not a shipped id"
         );
     }
 }

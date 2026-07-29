@@ -161,6 +161,7 @@ pub fn retrying_write_no_idempotency_findings(
             file: edge.from.file.clone(),
             line: edge.from.line,
             message,
+            evidence_paths: vec![edge.to.file.clone()],
             data: Some(serde_json::json!({
                 "method": method,
                 "path": path,

@@ -1,4 +1,4 @@
-//! Exercises `aggregate_by_folder`, `aggregate_dep_by_folder`, and `aggregate_action_deps`.
+//! Exercises `aggregate_by_folder` and `aggregate_dep_by_folder`.
 use super::*;
 
 // --- aggregateByFolder ---
@@ -155,76 +155,4 @@ fn build_folder_aggregates_bundles_summaries_and_edges() {
             count: 1,
         }]
     );
-}
-
-// --- aggregateActionDeps ---
-
-fn u(owner: &str, name: &str, reference: &str, workflow_file: &str) -> ActionUse {
-    ActionUse {
-        action: format!("{owner}/{name}@{reference}"),
-        owner: owner.to_string(),
-        name: name.to_string(),
-        reference: reference.to_string(),
-        workflow_file: workflow_file.to_string(),
-        line: 1,
-    }
-}
-
-#[test]
-fn distinct_actions_workflows_and_count_per_owner() {
-    let summary = aggregate_action_deps(&[
-        u("actions", "checkout", "v4", "a.yml"),
-        u("actions", "checkout", "v4", "b.yml"),
-        u("actions", "setup-node", "v4", "a.yml"),
-        u("pnpm", "action-setup", "v4", "a.yml"),
-    ]);
-    assert_eq!(summary.len(), 2);
-    let actions = summary.iter().find(|s| s.vendor == "actions").unwrap();
-    assert_eq!(
-        actions.actions,
-        vec![
-            "actions/checkout".to_string(),
-            "actions/setup-node".to_string()
-        ]
-    );
-    assert_eq!(
-        actions.workflows,
-        vec!["a.yml".to_string(), "b.yml".to_string()]
-    );
-    assert_eq!(actions.count, 3);
-}
-
-#[test]
-fn sorted_descending_by_workflow_count() {
-    let summary = aggregate_action_deps(&[
-        u("small", "checkout", "v4", "a.yml"),
-        u("big", "checkout", "v4", "a.yml"),
-        u("big", "checkout", "v4", "b.yml"),
-    ]);
-    let vendors: Vec<String> = summary.into_iter().map(|s| s.vendor).collect();
-    assert_eq!(vendors, vec!["big".to_string(), "small".to_string()]);
-}
-
-#[test]
-fn pinned_ratio_sha_ref_counts_as_pinned_tag_does_not() {
-    let summary = aggregate_action_deps(&[
-        u("x", "checkout", "v4", "a.yml"),
-        u("x", "checkout", "a1b2c3d4e5f6", "a.yml"),
-        u("x", "checkout", "abc1234", "a.yml"),
-    ]);
-    assert!((summary[0].pinned_ratio - 2.0 / 3.0).abs() < 0.01);
-}
-
-#[test]
-fn all_pinned_ratio_1() {
-    let summary = aggregate_action_deps(&[
-        u("x", "checkout", &"a".repeat(40), "a.yml"),
-        u("x", "checkout", &"b".repeat(40), "a.yml"),
-    ]);
-    assert_eq!(summary[0].pinned_ratio, 1.0);
-}
-
-#[test]
-fn empty_input_empty_array() {
-    assert_eq!(aggregate_action_deps(&[]), vec![]);
 }

@@ -96,6 +96,7 @@ pub fn external_secret_in_url_findings(
             file: c.consume.file.clone(),
             line: c.consume.line,
             message,
+            evidence_paths: Vec::new(),
             data: Some(serde_json::json!({
                 "key": key,
                 "host": url.host,

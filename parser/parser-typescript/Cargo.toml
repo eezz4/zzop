@@ -2,6 +2,7 @@
 name = "zzop-parser-typescript"
 version.workspace = true
 edition = "2021"
+license.workspace = true
 publish = false
 
 [dependencies]
@@ -11,3 +12,7 @@ zzop-core = { path = "../../crates/core" }
 # ONE crate for both directions of the channel; `adapters/raw_sql` hands it strings, never regexes.
 zzop-parser-sql = { path = "../parser-sql" }
 regex = { workspace = true }
+
+# tests/no_panic_proptest.rs — the arbitrary-input panic property every parser frontend carries.
+[dev-dependencies]
+proptest = { workspace = true }

@@ -1,9 +1,9 @@
-//! Pipeline-level behavior: rule inclusion, ROI/severity ordering, per-item enrichment fields,
-//! the scope-exclude / permanent-ignore post-filters, the glob matcher, and cost adjustments.
+//! Pipeline-level behavior: rule inclusion, ROI/severity ordering, per-item enrichment fields, and
+//! the config-exclude post-filter.
 
 use super::*;
 
-use crate::recommendations::enrich::matches_glob;
+use zzop_core::GlobalExclude;
 
 #[test]
 fn every_applicable_rule_is_included_no_persona_filtering() {
@@ -26,10 +26,7 @@ fn every_applicable_rule_is_included_no_persona_filtering() {
         dep: &dep,
         coupling: &coupling,
         circular: &[],
-        scope_excludes: &[],
-        permanent_ignores: &[],
-        untested_paths: empty_set(),
-        amplification_by_path: empty_map(),
+        excludes: &[],
         findings: &[],
     };
     let recs = build_recommendations(&input, &RecommendationGates::default());
@@ -62,10 +59,7 @@ fn sorted_descending_by_roi_within_the_same_rule() {
         dep: &dep,
         coupling: &coupling,
         circular: &[],
-        scope_excludes: &[],
-        permanent_ignores: &[],
-        untested_paths: empty_set(),
-        amplification_by_path: empty_map(),
+        excludes: &[],
         findings: &[],
     };
     let recs = build_recommendations(&input, &RecommendationGates::default());
@@ -97,7 +91,7 @@ fn each_item_carries_roi_estimated_reduction_estimated_cost_action_hint_key_fan_
 }
 
 #[test]
-fn scope_excludes_filters_by_rule_id_and_glob() {
+fn config_excludes_drop_matching_items_by_glob() {
     let nodes = [
         FileNode {
             fan_out: 10,
@@ -110,16 +104,16 @@ fn scope_excludes_filters_by_rule_id_and_glob() {
     ];
     let dep = DepGraph::new();
     let coupling = CouplingMap::new();
-    let scope_excludes = [(RecId::FatFanout, "core/i18n/**".to_string())];
+    let excludes = [GlobalExclude {
+        path: None,
+        glob: Some("core/i18n/**".to_string()),
+    }];
     let input = BuildRecInput {
         nodes: &nodes,
         dep: &dep,
         coupling: &coupling,
         circular: &[],
-        scope_excludes: &scope_excludes,
-        permanent_ignores: &[],
-        untested_paths: empty_set(),
-        amplification_by_path: empty_map(),
+        excludes: &excludes,
         findings: &[],
     };
     let recs = build_recommendations(&input, &RecommendationGates::default());
@@ -129,11 +123,11 @@ fn scope_excludes_filters_by_rule_id_and_glob() {
 }
 
 #[test]
-fn permanent_ignores_removes_rule_id_path_pairs() {
+fn config_excludes_drop_matching_items_by_substring_path() {
     let nodes = [
         FileNode {
             fan_out: 10,
-            ..node("A.ts")
+            ..node("legacy/A.ts")
         },
         FileNode {
             fan_out: 10,
@@ -142,22 +136,92 @@ fn permanent_ignores_removes_rule_id_path_pairs() {
     ];
     let dep = DepGraph::new();
     let coupling = CouplingMap::new();
-    let permanent_ignores = [(RecId::FatFanout, "A.ts".to_string())];
+    let excludes = [GlobalExclude {
+        path: Some("legacy/".to_string()),
+        glob: None,
+    }];
     let input = BuildRecInput {
         nodes: &nodes,
         dep: &dep,
         coupling: &coupling,
         circular: &[],
-        scope_excludes: &[],
-        permanent_ignores: &permanent_ignores,
-        untested_paths: empty_set(),
-        amplification_by_path: empty_map(),
+        excludes: &excludes,
         findings: &[],
     };
     let recs = build_recommendations(&input, &RecommendationGates::default());
     let fat = recs.iter().find(|r| r.id == RecId::FatFanout).unwrap();
     let paths: Vec<&str> = fat.items.iter().map(|i| i.path.as_str()).collect();
     assert_eq!(paths, vec!["B.ts"]);
+}
+
+/// Rule-agnostic, exactly like the findings-side filter: one exclude covers every recommendation group a
+/// path could land in, not just the group the test happened to look at.
+#[test]
+fn config_excludes_apply_to_every_rule_group_at_once() {
+    let nodes = [FileNode {
+        fan_out: 10,
+        author_count: 7,
+        tag_counts: tags(6),
+        risk_score: 100.0,
+        ..node("legacy/A.ts")
+    }];
+    let dep = DepGraph::new();
+    let coupling = CouplingMap::new();
+
+    let baseline_input = empty_input(&nodes, &dep, &coupling);
+    let baseline = build_recommendations(&baseline_input, &RecommendationGates::default());
+    assert!(
+        baseline.len() >= 2,
+        "fixture must trip 2+ rules, else this test is vacuous: {:?}",
+        baseline.iter().map(|r| r.id).collect::<Vec<_>>()
+    );
+
+    let excludes = [GlobalExclude {
+        path: None,
+        glob: Some("legacy/**".to_string()),
+    }];
+    let input = BuildRecInput {
+        nodes: &nodes,
+        dep: &dep,
+        coupling: &coupling,
+        circular: &[],
+        excludes: &excludes,
+        findings: &[],
+    };
+    let recs = build_recommendations(&input, &RecommendationGates::default());
+    assert!(
+        recs.is_empty(),
+        "one exclude must empty every group the path appeared in: {:?}",
+        recs
+    );
+}
+
+/// A `GlobalExclude` with neither filter matches NOTHING (`zzop_core::global_exclude_matches_path`'s
+/// deliberate divergence from `Suppression`) — pinned here so this channel can never become the one place
+/// where an empty entry silently drops every recommendation.
+#[test]
+fn a_filterless_exclude_entry_drops_nothing() {
+    let nodes = [FileNode {
+        fan_out: 10,
+        ..node("A.ts")
+    }];
+    let dep = DepGraph::new();
+    let coupling = CouplingMap::new();
+    let excludes = [GlobalExclude {
+        path: None,
+        glob: None,
+    }];
+    let input = BuildRecInput {
+        nodes: &nodes,
+        dep: &dep,
+        coupling: &coupling,
+        circular: &[],
+        excludes: &excludes,
+        findings: &[],
+    };
+    let recs = build_recommendations(&input, &RecommendationGates::default());
+    let fat = recs.iter().find(|r| r.id == RecId::FatFanout).unwrap();
+    assert_eq!(fat.items[0].path, "A.ts");
 }
 
 #[test]
@@ -185,54 +249,4 @@ fn severity_order_critical_then_warning_then_info() {
     let idx_of = |s: Severity| sevs.iter().position(|&x| x == s).unwrap();
     assert!(idx_of(Severity::Critical) < idx_of(Severity::Warning));
     assert!(idx_of(Severity::Warning) < idx_of(Severity::Info));
-}
-
-// --- glob matcher ---
-
-#[test]
-fn glob_double_star_matches_any_depth() {
-    assert!(matches_glob("core/i18n/nested/en.ts", "core/i18n/**"));
-    assert!(matches_glob("core/i18n/en.ts", "core/i18n/**"));
-    assert!(!matches_glob("core/other/en.ts", "core/i18n/**"));
-}
-
-#[test]
-fn glob_single_star_does_not_cross_slash() {
-    assert!(matches_glob("src/Foo.ts", "src/*.ts"));
-    assert!(!matches_glob("src/nested/Foo.ts", "src/*.ts"));
-}
-
-#[test]
-fn glob_escapes_regex_special_characters() {
-    assert!(matches_glob("a.b.ts", "a.b.ts"));
-    assert!(!matches_glob("aXb.ts", "a.b.ts")); // literal '.', not "any char"
-}
-
-#[test]
-fn untested_and_amplification_raise_cost_and_lower_roi() {
-    let nodes = [FileNode {
-        fan_out: 10,
-        ..node("fat.ts")
-    }];
-    let dep = DepGraph::new();
-    let coupling = CouplingMap::new();
-    let baseline_input = empty_input(&nodes, &dep, &coupling);
-    let baseline = build_recommendations(&baseline_input, &RecommendationGates::default());
-    let baseline_roi = baseline[0].items[0].roi;
-
-    let mut untested_paths = HashSet::new();
-    untested_paths.insert("fat.ts".to_string());
-    let input = BuildRecInput {
-        nodes: &nodes,
-        dep: &dep,
-        coupling: &coupling,
-        circular: &[],
-        scope_excludes: &[],
-        permanent_ignores: &[],
-        untested_paths: &untested_paths,
-        amplification_by_path: empty_map(),
-        findings: &[],
-    };
-    let recs = build_recommendations(&input, &RecommendationGates::default());
-    assert!(recs[0].items[0].roi < baseline_roi);
 }

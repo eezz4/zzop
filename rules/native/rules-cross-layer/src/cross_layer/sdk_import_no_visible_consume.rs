@@ -159,6 +159,14 @@ pub fn sdk_import_no_visible_consume_findings(
             file: first.example_file.clone(),
             line: 1,
             message,
+            // Each package's example file, minus the anchor (which is the first one).
+            evidence_paths: packages
+                .iter()
+                .map(|(p, _)| p.example_file.clone())
+                .filter(|f| *f != first.example_file)
+                .collect::<std::collections::BTreeSet<String>>()
+                .into_iter()
+                .collect(),
             data: Some(serde_json::json!({
                 "source": source,
                 "sdkPackages": packages

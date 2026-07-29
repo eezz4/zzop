@@ -66,13 +66,39 @@ extract() {
   fi
 }
 
+# set_diff <A> <B> — the lines of A that are not in B, in A's own (already sorted) order.
+# count_lines <set> — how many non-empty lines it has.
+#
+# Both are pure bash (associative array + a read loop), and that is the whole point: they replaced
+# four `comm -23 <(printf '%s\n' "$a") <(printf '%s\n' "$b")` calls and four `grep -c .` calls
+# (2026-07-29). Each `comm` line cost three processes — the comm plus a forked subshell for each
+# process substitution — so those eight lines were sixteen spawns, and on this box a spawn is the
+# entire cost of this guard: its `user` time is a rounding error beside its `sys` time. comm needed
+# sorted inputs; a hash does not, but every set here still arrives from `sort -u`, so the output
+# order is unchanged and so is every message printed from it.
+set_diff() {
+  local -A inb=()
+  local x
+  while IFS= read -r x; do [ -n "$x" ] && inb["$x"]=1; done <<< "$2"
+  while IFS= read -r x; do
+    [ -n "$x" ] || continue
+    [ -n "${inb[$x]:-}" ] || printf '%s\n' "$x"
+  done <<< "$1"
+}
+
+count_lines() {
+  local n=0 x
+  while IFS= read -r x; do [ -n "$x" ] && n=$((n + 1)); done <<< "$1"
+  printf '%s' "$n"
+}
+
 # --- Check 1: no site .rs path is absent from the catalog (site ⊆ catalog) ---
 # Extract *.rs tokens using a path character class — backticks and <code> tags are outside the class, so
 # they delimit the token cleanly in both Markdown and HTML.
 catalog_paths="$(extract 'catalog .rs paths' "$catalog" '[A-Za-z0-9_./-]+\.rs')"
 site_paths="$(extract 'site .rs paths' "$site" '[A-Za-z0-9_./-]+\.rs')"
 
-stale="$(comm -23 <(printf '%s\n' "$site_paths") <(printf '%s\n' "$catalog_paths") || true)"
+stale="$(set_diff "$site_paths" "$catalog_paths")"
 if [ -n "$stale" ]; then
   echo "check-rules-catalog-sync: site/rules.html references .rs paths not in docs/rules/catalog.md" >&2
   echo "  (stale or invented — align the site with the catalog SSOT):" >&2
@@ -111,8 +137,8 @@ catalog_ids="$(extract 'catalog rule/analysis ids' "$catalog" '^\| `[a-z0-9][a-z
 site_row_ids="$(extract 'site rule-row ids' "$site" \
   '<tr><td><code>[a-z0-9][a-z0-9/_-]*</code></td><td><code>' \
   's#^<tr><td><code>##; s#</code></td><td><code>$##')"
-missing="$(comm -23 <(printf '%s\n' "$catalog_ids") <(printf '%s\n' "$site_row_ids") || true)"
-invented="$(comm -13 <(printf '%s\n' "$catalog_ids") <(printf '%s\n' "$site_row_ids") || true)"
+missing="$(set_diff "$catalog_ids" "$site_row_ids")"
+invented="$(set_diff "$site_row_ids" "$catalog_ids")"
 if [ -n "$missing" ]; then
   echo "check-rules-catalog-sync: catalog rule/analysis ids missing from site/rules.html:" >&2
   printf '    %s\n' $missing >&2
@@ -129,13 +155,49 @@ fi
 # --- Check 3: every catalog .rs token resolves to a tracked file (catalog ⊆ filesystem) ---
 # A token vouches when some tracked path ends with it ("/token" or the token itself), so bare
 # basenames (`graph.rs`) and crate-relative fragments (`scores/compute.rs`) both resolve.
-unresolved=""
-while IFS= read -r p; do
-  [ -z "$p" ] && continue
-  if [ -z "$(git -C "$repo_root" ls-files -- "$p" "*/$p")" ]; then
-    unresolved="$unresolved $p"
-  fi
-done <<< "$catalog_paths"
+#
+# ONE `git ls-files` for the whole tree, not one per token (2026-07-29). This was
+# `git -C "$repo_root" ls-files -- "$p" "*/$p"` inside the loop: 45 catalog tokens meant 45 git
+# processes, and on this box a process spawn is the entire cost — the guard measured 16.4s of which
+# `user` time was a rounding error. Same trap check 2's comment above records for its own 181-spawn
+# version, and the same fix.
+#
+# The rewrite is a restatement of what those two pathspecs MEAN, not a new rule. `-- "$p"` matches a
+# tracked path equal to the token; `-- "*/$p"` matches one ending in "/" + token (git pathspec
+# wildcards are matched without FNM_PATHNAME, so a single `*` spans directory separators). So the
+# question is exactly "is the token a whole tracked path, or a tracked path's suffix at a `/`
+# boundary", which is decided here by hashing every `/`-boundary suffix of every tracked path once
+# and looking each token up. Deliberately NOT also accepting a token as a directory PREFIX (something
+# `-- "$p"` would technically do for a directory literally named `foo.rs`): that case cannot occur —
+# the extractor only emits `*.rs` tokens — and widening the accept set is how a phantom filename gets
+# vouched for.
+#
+# The tracked list is materialized and asserted non-empty BEFORE awk sees it, and that assertion is
+# load-bearing rather than decorative. The two-input awk idiom below tells its inputs apart with
+# `FNR == NR`, which is true for the first file — and ALSO true for every record of the second file
+# when the first one is empty. So an empty `git ls-files` would not make this check fail loudly; it
+# would quietly load the CATALOG tokens into `full[]`, find every token present in it, and report
+# zero phantom paths. A green. That is the same silent-empty-scan class every other floor in this
+# repo exists to close, and it is a hazard this rewrite introduced (the per-token loop it replaced
+# had no such state to confuse — an empty ls-files made every token unresolved, i.e. loud).
+tracked_list="$(git -C "$repo_root" ls-files)"
+if [ -z "$tracked_list" ]; then
+  echo "check-rules-catalog-sync: git ls-files produced ZERO tracked paths — check 3 would have" >&2
+  echo "  nothing to resolve catalog .rs tokens against and would read as green. Aborting rather" >&2
+  echo "  than report a verdict from an empty scan." >&2
+  exit 1
+fi
+unresolved="$(awk '
+  FNR == NR {
+    full[$0] = 1
+    s = $0
+    while ((i = index(s, "/")) > 0) { s = substr(s, i + 1); suffix[s] = 1 }
+    next
+  }
+  $0 == "" { next }
+  ($0 in full) || ($0 in suffix) { next }
+  { printf " %s", $0 }
+' <(printf '%s\n' "$tracked_list") <(printf '%s\n' "$catalog_paths"))"
 if [ -n "$unresolved" ]; then
   echo "check-rules-catalog-sync: catalog .rs tokens that match no tracked file (phantom filenames):" >&2
   printf '    %s\n' $unresolved >&2
@@ -157,8 +219,8 @@ site_triples="$(extract 'site DSL triples' "$site" \
   '<tr><td><code>[a-z0-9][a-z0-9/_-]*</code></td><td><code>[a-z]+</code></td><td><code>[a-z][a-z-]*[a-z]</code></td>' \
   's#<tr><td><code>##; s#</code></td><td><code>#|#g; s#</code></td>$##')"
 
-only_catalog="$(comm -23 <(printf '%s\n' "$catalog_triples") <(printf '%s\n' "$site_triples") || true)"
-only_site="$(comm -13 <(printf '%s\n' "$catalog_triples") <(printf '%s\n' "$site_triples") || true)"
+only_catalog="$(set_diff "$catalog_triples" "$site_triples")"
+only_site="$(set_diff "$site_triples" "$catalog_triples")"
 if [ -n "$only_catalog" ] || [ -n "$only_site" ]; then
   echo "check-rules-catalog-sync: DSL rule (id|severity|matcher) triples differ between catalog and site:" >&2
   if [ -n "$only_catalog" ]; then
@@ -183,10 +245,10 @@ fi
 # Nonzero is the assertion, deliberately not a pinned expected value: the catalog grows every release
 # and a pinned number would be a second SSOT to forget. The exact-agreement question for DSL rows is
 # owned by check-rule-desc-tokens.sh, which asserts pack rules == catalog rows == site rows.
-id_count="$(printf '%s\n' "$catalog_ids" | grep -c . || true)"
-site_id_count="$(printf '%s\n' "$site_row_ids" | grep -c . || true)"
-path_count="$(printf '%s\n' "$site_paths" | grep -c . || true)"
-triple_count="$(printf '%s\n' "$catalog_triples" | grep -c . || true)"
+id_count="$(count_lines "$catalog_ids")"
+site_id_count="$(count_lines "$site_row_ids")"
+path_count="$(count_lines "$site_paths")"
+triple_count="$(count_lines "$catalog_triples")"
 for pair in "catalog rule/analysis ids|$id_count" "site rule-row ids|$site_id_count" "site .rs paths|$path_count" "DSL id/severity/matcher triples|$triple_count"; do
   if [ "${pair##*|}" -eq 0 ]; then
     echo "check-rules-catalog-sync: extracted 0 ${pair%%|*} — every check in this guard is a set" >&2

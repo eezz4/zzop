@@ -94,7 +94,7 @@ fn projection_with_attrs(path: &str, loc: u32, attrs: Vec<Attribute>) -> FilePro
 }
 
 /// A single-file overlay whose one `FileProjection` carries exactly `attrs` — the placeholder path/loc
-/// are irrelevant to `AttributeStore::from_overlays`, which flattens `attributes` across every overlay
+/// are irrelevant to `AttributeStore::from_parts`, which flattens `attributes` across every overlay
 /// file regardless of path (attributes are entity-addressed, not file-addressed).
 fn overlay_with_attrs(parser: &str, attrs: Vec<Attribute>) -> NormalizedEnvelope {
     NormalizedEnvelope {

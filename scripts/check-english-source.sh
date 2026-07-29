@@ -30,6 +30,39 @@ FOREIGN='[\x{AC00}-\x{D7A3}\x{1100}-\x{11FF}\x{3130}-\x{318F}\x{3040}-\x{30FF}\x
 # helper. This script keeps only its own glob list, patterns, and messages.
 SOURCE_GLOBS=('*.rs' '*.md' '*.toml' '*.json' '*.jsonc' '*.js' '*.mjs' '*.cjs' '*.ts' '*.tsx' '*.jsx' '*.py' '*.html' '*.yml' '*.yaml' '*.sh')
 
+# ## Subject-set floor (2026-07-29)
+# Both scans below enumerate through SOURCE_GLOBS, and a helper that matched nothing returns exactly
+# the same empty string whether the tree is clean or the pathspec stopped matching. This guard did not
+# even derive a count, so "clean." was printed identically for 1600 files and for zero. Measured
+# 2026-07-29 by pointing SOURCE_GLOBS at a nonexistent extension in a scratch copy: it printed
+# "English-only source guard: clean." / "Internal-path guard: clean." and exited 0. Same class the
+# repo closed in check-guards-wired.sh / check-max-file-lines.sh / check-shell-pipe-sigpipe.sh.
+#
+# SOURCE_GLOBS above is the single owner of the scope: the count and both scans read the same array,
+# so widening the glob list cannot leave the assertion behind. The count mirrors the helper's own
+# tracked + untracked-but-not-ignored enumeration; it does not re-apply the helper's standard
+# target/node_modules/.claude exclusions, which only ever REMOVE files — a floor of "at least one"
+# cannot be made false by them.
+#
+# ONE `git ls-files`, not two, and the count is done in bash (2026-07-29). `--cached --others
+# --exclude-standard` is the same union the two-invocation form built — `--others` means "not in the
+# index", so the halves are disjoint — verified against the old spelling on this repo the day it
+# changed: 1264 paths, identical set and order after `sort -u`. It is the same single-invocation
+# enumeration scripts/lib/tracked-grep.sh now uses, so the count and the scans still read one
+# mechanism. `git ls-files` measured ~1.2s per invocation on this box and `grep -c` another ~0.6s;
+# this guard was performing SIX ls-files for one set of paths (this block, plus the tracked and
+# untracked halves inside each of the two scans below).
+source_scanned=0
+while IFS= read -r _p; do
+  [ -n "$_p" ] && source_scanned=$((source_scanned + 1))
+done < <(git ls-files --cached --others --exclude-standard -- "${SOURCE_GLOBS[@]}" | sort -u)
+if [ "$source_scanned" -eq 0 ]; then
+  echo "English-only source guard: FAILED -- enumerated ZERO source files. SOURCE_GLOBS matched nothing,"
+  echo "so neither the non-Latin-letter scan nor the .claude/ path scan below read a single byte. This"
+  echo "repo ships Rust, Markdown and JSON; a zero here is a broken enumeration, never a clean tree."
+  exit 1
+fi
+
 # The enumeration call is kept OUTSIDE any `|| true` on purpose: tracked_and_untracked_files_matching's
 # own failure must still trip `set -e` and abort loud (see its header comment in tracked-grep.sh).
 files=$(tracked_and_untracked_files_matching "$FOREIGN" "${SOURCE_GLOBS[@]}")
@@ -43,7 +76,7 @@ if [ -n "$files" ]; then
   echo "OSS-facing files (comments / docs) must be English. Korean is allowed only under .claude/."
   exit 1
 fi
-echo "English-only source guard: clean."
+echo "English-only source guard: clean ($source_scanned files scanned)."
 
 # Internal-path guard: OSS-facing files must never point readers at .claude/ — those paths are not
 # published, so any "see .claude/context/..." reference is a broken pointer for anyone outside this
@@ -69,4 +102,4 @@ if [ -n "$claude_ref_files" ]; then
   echo "OSS-facing files must not reference .claude/ paths — summarize the rationale inline instead."
   exit 1
 fi
-echo "Internal-path guard: clean."
+echo "Internal-path guard: clean ($source_scanned files scanned)."

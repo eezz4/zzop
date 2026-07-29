@@ -20,11 +20,17 @@
   // a run without it reports circular-import and db-rule hits whose top item is
   // `cases/trees/graph/circularB.ts`, a file that exists to be circular.
   //
-  // ⚠ `exclude` is a FINDING-level filter, not a walk filter (`zzop_core::registry::config`'s
+  // ⚠ `exclude` is a REPORT-level filter, not a walk filter (`zzop_core::registry::config`'s
   // `GlobalExclude`). These files are still walked, parsed and graphed — `zzop graph --domain dep` on
   // this config draws them, which is how the distinction was noticed. Only `vocabulary.skipDirs` below
   // keeps a directory out of the walk entirely. Both are correct here: we want `cases/` in the graph
-  // (it is real code) and out of the findings (its defects are intentional).
+  // (it is real code) and out of the report (its defects are intentional).
+  //
+  // "Report" covers findings AND `architecture.topRecommendation` — but only since 2026-07-29. Until
+  // then the recommendations channel never received this list, and this run's own headline was
+  // `topRecommendation = {id: "circular", severity: "critical", topItem: "cases/trees/graph/circularB.ts"}`
+  // under the very exclusion two paragraphs up. The config was right and the wiring was missing; that a
+  // committed self-analysis is what surfaced it is the argument for committing one.
   //
   // `corpus/**` and `target/**` used to be here and were REMOVED 2026-07-28, because this run told us
   // they were dead: `exclude "corpus/**" matched no files` / `exclude "target/**" matched no files` in

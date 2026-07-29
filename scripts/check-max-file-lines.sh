@@ -33,12 +33,25 @@ cd "$(dirname "$0")/.."
 LIMIT=300
 BASELINE=scripts/max-file-lines-baseline.txt
 
+# ONE `git ls-files` and ONE `grep -v`, where this was two ls-files and a seven-link grep chain
+# (2026-07-29). Ten processes to produce a list of paths, on a box where every external command
+# costs ~0.6s of fork/exec no matter how little it does — the same tax this file's own header
+# already records for the wc census.
+#
+# Both collapses are identities, not new rules:
+#   - `--cached --others --exclude-standard` is exactly the union of the tracked half and the
+#     untracked-but-not-ignored half, because `--others` means "not in the index" and so the two can
+#     never overlap. Verified against the old spelling on this repo the day it changed: same set,
+#     same order after `sort -u`. `sort -u` stays — it is what makes the order independent of git's
+#     listing order.
+#   - `grep -v A | grep -v B | ...` drops a line when ANY link matches it, which is one `grep -vE`
+#     over the alternation of those patterns. The three that were BRE (`^\.claude/`, `/target/`,
+#     `node_modules/`) contain no character that means something different in ERE, so they carry over
+#     unchanged; the four that were already `-E` are copied verbatim.
 list_rs_files() {
-  { git ls-files -- '*.rs'
-    git ls-files --others --exclude-standard -- '*.rs'
-  } | sort -u | grep -v '^\.claude/' | grep -v '/target/' | grep -v 'node_modules/' \
-    | grep -vE '(^|/)tests/' | grep -vE '_tests?\.rs$' | grep -vE '(^|/)tests\.rs$' \
-    | grep -v '^rules/dsl/' || true
+  git ls-files --cached --others --exclude-standard -- '*.rs' \
+    | sort -u \
+    | grep -vE '^\.claude/|/target/|node_modules/|(^|/)tests/|_tests?\.rs$|(^|/)tests\.rs$|^rules/dsl/' || true
 }
 
 # Drop tracked-but-deleted paths (a file converted to a directory module stays listed by
@@ -156,4 +169,8 @@ if [ "$violations" -ne 0 ]; then
   echo "max-file-lines guard: violations found (limit $LIMIT lines, baseline $BASELINE)."
   exit 1
 fi
-echo "max-file-lines guard: clean ($(grep -c . <<< "$census" || true) grandfathered files remaining)."
+# Counted in bash — `grep -c .` on a herestring is a whole process to count what the shell can count
+# for free, and the census is usually empty anyway.
+census_count=0
+while IFS= read -r _c; do [ -n "$_c" ] && census_count=$((census_count + 1)); done <<< "$census"
+echo "max-file-lines guard: clean ($census_count grandfathered files remaining)."

@@ -1,4 +1,6 @@
-//! Exercises transitive blast-radius criticality scoring.
+//! Exercises transitive blast-radius criticality scoring, plus the two properties that make the config's
+//! top-level `exclude` a REPORTING filter here and not a computation one: an excluded file still counts
+//! toward everyone else's blast radius, and it never eats a `limit` slot.
 use super::*;
 use std::collections::HashMap;
 
@@ -45,6 +47,107 @@ fn dep(pairs: &[(&str, &[&str])]) -> DepGraph {
         .collect()
 }
 
+fn exclude(glob: &str) -> Vec<GlobalExclude> {
+    vec![GlobalExclude {
+        path: None,
+        glob: Some(glob.to_string()),
+    }]
+}
+
+/// The filter is a REPORT filter, not a graph edit: `vendor/wrapper.ts` disappears from the output while
+/// still counting as one of `core.ts`'s importers. If the exclusion had been pushed into the computation,
+/// `core.ts`'s blast radius would read 1 instead of 2 — a corrupted metric, not a filtered report.
+#[test]
+fn an_excluded_file_is_dropped_from_the_report_but_still_counts_toward_blast_radius() {
+    let d = dep(&[
+        ("app.ts", &["vendor/wrapper.ts"]),
+        ("vendor/wrapper.ts", &["core.ts"]),
+        ("core.ts", &[]),
+    ]);
+    let nodes = vec![
+        node("app.ts", P::default()),
+        node(
+            "vendor/wrapper.ts",
+            P {
+                fan_in: 1,
+                ..P::default()
+            },
+        ),
+        node(
+            "core.ts",
+            P {
+                fan_in: 1,
+                ..P::default()
+            },
+        ),
+    ];
+    let crit = compute_criticality(
+        &nodes,
+        &d,
+        &exclude("vendor/**"),
+        1,
+        CRITICALITY_SILENT_CHANGE_MAX,
+        CRITICALITY_LIMIT,
+    );
+    let ranked: Vec<(&str, usize)> = crit
+        .iter()
+        .map(|c| (c.path.as_str(), c.blast_radius))
+        .collect();
+    assert_eq!(
+        ranked,
+        vec![("core.ts", 2)],
+        "the excluded wrapper must vanish from the report while still counting as one of core.ts's two \
+         transitive dependents"
+    );
+}
+
+/// The filter runs BEFORE `truncate(limit)`. With the exclusion applied after truncation instead, the two
+/// excluded hubs would consume both reported slots and this run would answer with an empty list while a
+/// real, un-excluded hub sat right behind them.
+#[test]
+fn an_excluded_hub_never_eats_a_report_slot() {
+    let d = dep(&[
+        ("a.ts", &["vendor/big1.ts", "vendor/big2.ts", "core.ts"]),
+        ("b.ts", &["vendor/big1.ts", "vendor/big2.ts", "core.ts"]),
+        ("vendor/big1.ts", &[]),
+        ("vendor/big2.ts", &[]),
+        ("core.ts", &[]),
+    ]);
+    let hub = |path: &str, loc: u32| {
+        node(
+            path,
+            P {
+                fan_in: 2,
+                loc,
+                ..P::default()
+            },
+        )
+    };
+    let nodes = vec![
+        node("a.ts", P::default()),
+        node("b.ts", P::default()),
+        // The two excluded hubs outrank `core.ts` (equal blast, far bigger), so they would fill a limit of 2.
+        hub("vendor/big1.ts", 900),
+        hub("vendor/big2.ts", 800),
+        hub("core.ts", 10),
+    ];
+    let crit = compute_criticality(
+        &nodes,
+        &d,
+        &exclude("vendor/**"),
+        2,
+        CRITICALITY_SILENT_CHANGE_MAX,
+        2,
+    );
+    let paths: Vec<&str> = crit.iter().map(|c| c.path.as_str()).collect();
+    assert_eq!(
+        paths,
+        vec!["core.ts"],
+        "excluded hubs must be removed before ranking, not after — otherwise they consume the report's \
+         limited slots and hide a hub the user asked to see"
+    );
+}
+
 #[test]
 fn ranks_by_transitive_blast_radius() {
     // a -> b -> c (a imports b, b imports c). c's dependents = {a, b} = 2; b's = {a} = 1.
@@ -69,6 +172,7 @@ fn ranks_by_transitive_blast_radius() {
     let crit = compute_criticality(
         &nodes,
         &d,
+        &[],
         1,
         CRITICALITY_SILENT_CHANGE_MAX,
         CRITICALITY_LIMIT,
@@ -116,6 +220,7 @@ fn flags_high_blast_low_churn_hub_as_silent() {
     let crit = compute_criticality(
         &nodes,
         &d,
+        &[],
         2,
         CRITICALITY_SILENT_CHANGE_MAX,
         CRITICALITY_LIMIT,
@@ -160,6 +265,7 @@ fn weights_blast_by_hub_size() {
     let crit = compute_criticality(
         &nodes,
         &d,
+        &[],
         3,
         CRITICALITY_SILENT_CHANGE_MAX,
         CRITICALITY_LIMIT,
@@ -191,6 +297,7 @@ fn cycle_safe_and_respects_min_blast_radius() {
     assert!(compute_criticality(
         &nodes,
         &d,
+        &[],
         2,
         CRITICALITY_SILENT_CHANGE_MAX,
         CRITICALITY_LIMIT
@@ -200,6 +307,7 @@ fn cycle_safe_and_respects_min_blast_radius() {
         compute_criticality(
             &nodes,
             &d,
+            &[],
             1,
             CRITICALITY_SILENT_CHANGE_MAX,
             CRITICALITY_LIMIT

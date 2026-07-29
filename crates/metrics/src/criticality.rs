@@ -5,12 +5,21 @@
 //! criticality = transitive **blast radius** (count of files that directly or transitively import this file). Reported
 //! alongside churn so the consumer can isolate `high criticality x low churn` = pin with a characterization test /
 //! document before anyone dares change it. Pure over (nodes, dep) — language-agnostic (works on adapter IR too).
+//!
+//! ## Where the config's top-level `exclude` attaches
+//! At RANKING, never at computation — see [`crate::report_excludes`] for the whole rule. Blast radius is a
+//! fact about the graph: an excluded file is still a real importer, so it stays in `dependents` and still
+//! counts toward every other file's radius. `excludes` only shortens the candidate list, and it does so
+//! BEFORE `truncate(limit)` so an excluded hub cannot eat a reporting slot from a hub the user does want to
+//! see (the recommendations channel filters at the same point, before its own sort — `build_recommendations`).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
-use zzop_core::{DepGraph, FileNode};
+use zzop_core::{DepGraph, FileNode, GlobalExclude};
+
+use crate::report_excludes::path_excluded;
 
 /// Minimum blast radius to qualify as a hub.
 pub const CRITICALITY_MIN_BLAST_RADIUS: usize = 3;
@@ -41,6 +50,7 @@ pub struct CriticalFile {
 pub fn compute_criticality(
     nodes: &[FileNode],
     dep: &DepGraph,
+    excludes: &[GlobalExclude],
     min_blast_radius: usize,
     silent_change_max: u32,
     limit: usize,
@@ -63,6 +73,9 @@ pub fn compute_criticality(
             silent: n.change_count <= silent_change_max,
         });
     }
+    // The config's top-level `exclude`, applied here — after every blast radius above was computed over the
+    // whole graph, and before the ranking below picks the reported rows. See this module's doc.
+    out.retain(|c| !path_excluded(excludes, &c.path));
     // Rank by blast radius WEIGHTED by the hub's own size: two hubs with equal blast are not equal danger — a 5-line
     // re-export barrel is cheap to fix, a 400-line core is the real bomb. log(loc) dampens so size nudges, not
     // dominates.

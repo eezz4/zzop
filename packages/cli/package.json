@@ -34,7 +34,8 @@
   },
   "files": [
     "bin/",
-    "README.md"
+    "README.md",
+    "THIRD-PARTY-NOTICES.md"
   ],
   "scripts": {
     "test": "node --test test/*.test.js",

@@ -241,9 +241,14 @@ fn check_endpoint_single_path_gives_a_definitive_verdict_over_the_join() {
     // zero_config_trees naming) — never the empty-string "unnamed tree" source tag.
     let dir_name = fe.path().file_name().unwrap().to_str().unwrap();
     assert_eq!(v["matches"]["unprovidedConsumes"][0]["source"], dir_name);
+    // Forwarded from the analysis, FOLDED (2026-07-29): the counts and the pointer, never the
+    // registry's run-invariant prose — this verdict reply is the shortest of the three that carry the
+    // channel, so the un-folded array was almost all of it. `crates/summary/tests/disclosure_fold.rs`
+    // owns the shape; this only pins that `check_endpoint` still carries the channel at all.
     assert!(
-        v["disclosure"].is_array(),
-        "disclosure forwarded from the analysis"
+        v["disclosure"]["classes"].as_u64().is_some_and(|n| n > 0),
+        "disclosure forwarded from the analysis: {}",
+        v["disclosure"]
     );
 }
 
@@ -351,11 +356,13 @@ fn check_endpoint_carries_the_config_honesty_channels_like_every_sibling_tool() 
     }
 }
 
+/// `bucketKeys` is UNCAPPED (2026-07-29 — the cap, its `bucketKeysTruncated` disclosure, and
+/// `snapshot.mjs`'s abort-on-truncation path were all deleted together). 25 keys is deliberately the size
+/// that used to truncate: it was 5 over the old 20-key cap, so this test fails the moment a cap returns.
 #[test]
-fn cross_repo_summary_lists_bucket_keys_and_discloses_their_truncation() {
+fn cross_repo_summary_lists_every_bucket_key_uncapped() {
     let fe = TempDir::new("zzop-summary-bucket-keys-fe");
-    // 25 distinct unprovided consume keys: over the 20-key bucketKeys cap by 5.
-    let over = zzop_summary::output::DEFAULT_BUCKET_KEYS_LIMIT + 5;
+    let over = 25;
     let paths: Vec<String> = (0..over).map(|i| format!("/api/things/{i}")).collect();
     write_fetch_tree(&fe, &paths);
     let be = TempDir::new("zzop-summary-bucket-keys-be");
@@ -369,13 +376,16 @@ fn cross_repo_summary_lists_bucket_keys_and_discloses_their_truncation() {
     let keys = v["bucketKeys"]["unprovidedConsumes"]
         .as_array()
         .expect("bucketKeys array");
-    assert_eq!(keys.len(), zzop_summary::output::DEFAULT_BUCKET_KEYS_LIMIT);
+    assert_eq!(keys.len(), over, "every distinct key, no cap");
     assert_eq!(keys[0], "GET /api/things/0", "engine order preserved");
-    assert_eq!(v["bucketKeysTruncated"]["unprovidedConsumes"], 5);
-    // Un-capped buckets appear with their (empty) key lists and no truncation entry.
+    assert!(
+        v.get("bucketKeysTruncated").is_none(),
+        "the truncation field is gone entirely, not merely empty: {}",
+        v["bucketKeysTruncated"]
+    );
+    // An empty bucket still appears, with its (empty) key list.
     assert_eq!(v["bucketKeys"]["unconsumedProvides"], serde_json::json!([]));
-    assert!(v["bucketKeysTruncated"].get("unconsumedProvides").is_none());
-    // `bucketKeySites` mirrors `bucketKeys` shape (same length after capping) with a locatable
+    // `bucketKeySites` mirrors `bucketKeys` shape with a locatable
     // "file:line" for the first site behind each key — a key is no longer a bare string with no
     // call site to go look at.
     let sites = v["bucketKeySites"]["unprovidedConsumes"]

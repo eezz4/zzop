@@ -186,27 +186,23 @@ for (const k of [...new Set([...Object.keys(A.cross.buckets || {}), ...Object.ke
 }
 hr();
 
+// This diff IS identity, unconditionally. `bucketKeys` was capped by the product at 20 distinct keys
+// until 2026-07-29, so this block used to read `meta.bucketKeysTruncated` from both runs and mark the
+// affected buckets as "not identity" (and push an `untrustworthy` entry). The cap is deleted, the meta
+// field no longer exists on any new snapshot, and a complete list needs no caveat. An OLD snapshot that
+// still carries the field is not silently mis-read either: `diff.mjs` already refuses to compare two
+// different zzop builds unless forced, and the field only ever appeared on builds that had the cap.
 line(`\n## AXIS 2 — bucketKeys IDENTITY (which keys, not how many)`);
-const cappedA = A.meta.bucketKeysTruncated || {};
-const cappedB = B.meta.bucketKeysTruncated || {};
-const cappedBuckets = new Set([...Object.keys(cappedA), ...Object.keys(cappedB)]);
-if (cappedBuckets.size) {
-  line("   !! PRODUCT CAP HIT — these buckets' key lists are TRUNCATED, so their diff below is NOT identity:");
-  if (Object.keys(cappedA).length) line("      before: " + JSON.stringify(cappedA));
-  if (Object.keys(cappedB).length) line("      after : " + JSON.stringify(cappedB));
-  untrustworthy.push(`bucketKeys capped by the product for: ${[...cappedBuckets].join(", ")} — those key diffs are not identity.`);
-}
 for (const k of [...new Set([...Object.keys(A.cross.bucketKeys || {}), ...Object.keys(B.cross.bucketKeys || {})])].sort()) {
   const sa = new Set((A.cross.bucketKeys[k] || []).map(String));
   const sb = new Set((B.cross.bucketKeys[k] || []).map(String));
   const gone = [...sa].filter((x) => !sb.has(x));
   const born = [...sb].filter((x) => !sa.has(x));
-  const capNote = cappedBuckets.has(k) ? "  [CAPPED — not identity]" : "";
   if (!gone.length && !born.length) {
-    line(`  ${k}: identical (${sa.size} keys)${capNote}`);
+    line(`  ${k}: identical (${sa.size} keys)`);
     continue;
   }
-  line(`  ${k}: ${sa.size} -> ${sb.size}${capNote}`);
+  line(`  ${k}: ${sa.size} -> ${sb.size}`);
   for (const g of gone) line(`      - GONE  ${g}`);
   for (const n of born) line(`      + NEW   ${n}`);
 }

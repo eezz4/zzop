@@ -49,6 +49,7 @@ mod merge;
 mod overlay;
 mod reserved;
 mod resolve;
+mod topology_freeze;
 
 #[cfg(test)]
 mod tests;
