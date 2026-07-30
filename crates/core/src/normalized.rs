@@ -1,6 +1,6 @@
 //! External-parser protocol receiver — the engine-side deserialization + validation of the
 //! "Normalized AST" envelope an external/custom parser (Java, Python, JSP, anything the engine does
-//! not parse natively) emits per source tree, frozen v1 by `docs/NORMALIZED_AST.md`. These types
+//! not parse natively) emits per source tree, specified by `docs/NORMALIZED_AST.md`. These types
 //! mirror that document's Envelope/FileProjection JSON shapes field-for-field and reuse the SAME
 //! `zzop_core` serde types (`SourceSymbol`/`ImportBinding`/`ReExport`/`IoFacts`) native parsers already
 //! project into — an external parser is first-class regardless of how crude it is, as long as its
@@ -19,19 +19,82 @@ pub use hints::envelope_hints;
 /// section).
 pub const NORMALIZED_AST_FORMAT: &str = "zzop-normalized-ast";
 
-/// The highest `NormalizedEnvelope::version` this engine build understands — same "reject newer, never
-/// guess" policy as `pack_loader::SUPPORTED_DSL_SCHEMA_VERSION` (see `docs/NORMALIZED_AST.md`'s "a
-/// consumer rejects `version` greater than it supports" line).
-pub const SUPPORTED_NORMALIZED_AST_VERSION: u32 = 1;
+/// The RELEASE in which the envelope shape last changed — the value a conforming producer declares as
+/// `NormalizedEnvelope::version`, and the only contract-version constant this crate has.
+///
+/// ## Why this is a release number and not a counter (2026-07-31, user ruling)
+/// It used to be an independent `u32` (v1, v2), so a reader had to hold two unrelated version systems
+/// at once and could not tell from an envelope which zzop it belonged with. It now uses the workspace's
+/// own semver, so "which zzop is this" and "which shape is this" are answered in the same units.
+///
+/// It is NOT simply the current release. It moves only when the SHAPE moves, which is what keeps a
+/// producer's output working across releases: an adapter that emitted `"0.27.0"` keeps emitting it, and
+/// keeps being accepted, through every later release that did not change the shape. Bumping it every
+/// release would be the defect this replaces — a number that appears to describe the shape while
+/// actually describing the calendar, leaving a reader unable to tell which bump mattered.
+///
+/// ## What acceptance means
+/// A consumer accepts an envelope whose declared version is `<=` its own package version, and rejects
+/// anything newer ("reject newer, never guess" — the same policy `pack_loader`'s DSL schema version
+/// keeps). An engine built before a shape existed refuses the whole envelope rather than silently
+/// ignoring the field it does not know, which is the silent-loss shape the displacement disclosure
+/// exists to abolish, reappearing one level up in the contract. `FileProjection` has no
+/// `deny_unknown_fields`, so without this comparison an unknown field would deserialize, be dropped,
+/// and leave the producer believing it applied.
+///
+/// That comparison protects an HONEST producer, and only an honest one — it cannot see a mislabelled
+/// envelope, which declares an old version while carrying a new field. Nothing about switching to a
+/// release number changed that, so the per-feature floors ([`MIN_VERSION_FOR_OVERRIDES`]) stay: they
+/// are the only thing that makes the mislabel fail loudly on the engine that DOES understand the field,
+/// which is the one run where the producer can still be told.
+///
+/// PRE-1.0 CONSEQUENCE, accepted deliberately: an envelope declaring this version does not run on an
+/// engine older than it, including engines that would have understood every field in it. `VERSIONING.md`
+/// already states that `0.x` makes no backward-compatibility promise; the only known producers are this
+/// repo's own `examples/adapters/`, which are migrated in the same commit.
+pub const NORMALIZED_AST_CONTRACT_VERSION: &str = "0.27.0";
+
+/// The release that introduced `overrides` — the floor an envelope must DECLARE to use it.
+///
+/// A per-feature floor is not made redundant by the `<=` acceptance comparison above, because the two
+/// catch opposite mistakes. Acceptance catches an envelope that is NEWER than the engine. This catches
+/// one that claims to be OLDER than the field it carries: declared `"0.20.0"` plus a populated
+/// `overrides` deserializes cleanly on an engine that predates the field, drops it, and produces a run
+/// where the adapter believes it displaced a native binding and the engine quietly did not. The engine
+/// that understands the field is the only one positioned to notice, so it rejects — the producer learns
+/// at authoring time instead of shipping bytes that mean different things to different engines.
+///
+/// A new gated field adds a constant here and moves [`NORMALIZED_AST_CONTRACT_VERSION`] to the same
+/// release. Fields that are safe to silently ignore need no floor and get none.
+pub const MIN_VERSION_FOR_OVERRIDES: &str = "0.27.0";
+
+/// This build's own version, as the acceptance ceiling — see [`NORMALIZED_AST_CONTRACT_VERSION`].
+/// Every crate inherits the workspace version (`version.workspace = true`), so this is the number
+/// `zzop version` prints.
+pub const SUPPORTED_NORMALIZED_AST_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// `"0.27.0"` -> `(0, 27, 0)`, or `None` when the string is not three dot-separated integers.
+///
+/// Hand-rolled rather than a `semver` dependency: the envelope contract needs ordering over
+/// `MAJOR.MINOR.PATCH` and nothing else — no pre-release tags, no build metadata, no ranges — and a
+/// dependency whose extra semantics nobody uses is a surface that can disagree with this crate's own
+/// idea of what a version is. Tuple comparison gives the ordering directly.
+pub fn parse_contract_version(version: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = version.split('.');
+    let mut next = || parts.next()?.parse::<u32>().ok();
+    let parsed = (next()?, next()?, next()?);
+    parts.next().is_none().then_some(parsed)
+}
 
 /// One external-parser invocation's output for one source tree (`docs/NORMALIZED_AST.md`'s Envelope
-/// section, v1 freeze). `format`/`version` are plain fields here (not enforced at the type level) so a
+/// section). `format`/`version` are plain fields here (not enforced at the type level) so a
 /// deserialization failure can never hide a "wrong format string"/"future version" mismatch behind a
 /// generic serde error — [`validate_envelope`] is what turns those into structured, actionable errors.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NormalizedEnvelope {
     pub format: String,
-    pub version: u32,
+    /// The release whose envelope shape these bytes conform to — see [`NORMALIZED_AST_CONTRACT_VERSION`].
+    pub version: String,
     /// `"<parser id>/<impl version>"` — doubles as the cache fingerprint segment (bump the impl
     /// version whenever the projection changes for identical input).
     pub parser: String,
@@ -146,141 +209,55 @@ pub struct FileProjection {
     /// union it against). Default `false`.
     #[serde(default)]
     pub is_entry: bool,
+    /// Native facts this projection DISPLACES rather than adds to. Empty
+    /// by default, and empty is the whole contract for every adapter that only fills gaps — see
+    /// [`ProjectionOverrides`] for the shape and [`structural_issues`] for the three rules that make a
+    /// declaration valid.
+    ///
+    /// Why a declaration exists at all, rather than "the overlay's value wins on a key collision":
+    /// measured on `examples/adapters/override-required/`, an adapter correcting a wrong native import
+    /// did not COLLIDE with it — the two sides spelled the local-name key differently, so the correction
+    /// arrived as a sibling entry and both the right and the wrong edge survived. Priority-on-collision
+    /// therefore cannot express overriding; the displacing fact has to NAME what it displaces.
+    #[serde(default)]
+    pub overrides: ProjectionOverrides,
 }
 
-/// Validates `json` against the v1 Normalized AST contract (`docs/NORMALIZED_AST.md`) beyond what plain
-/// `serde_json` deserialization alone checks — a wrong `format` string or an out-of-range `version`
-/// still deserializes fine as plain data (both are ordinary `String`/`u32` fields), so only this
-/// function's semantic pass rejects them. Also rejected: an empty `path`, a duplicate `path` across
-/// `files`, and a symbol whose `body_end` is less than its `body_start`.
+/// The per-channel displacement declaration carried by [`FileProjection::overrides`].
 ///
-/// Collects every applicable issue rather than stopping at the first — a producer fixing its output
-/// against one `validate_envelope` call should see every problem at once, not one round-trip per bug
-/// (the same "structured, list of issues" shape `pack_loader::load_dsl_packs`'s `LoadResult::errors`
-/// uses for a directory of packs). Returns `Ok(envelope)` only when the JSON parses AND every semantic
-/// check passes; a JSON parse failure short-circuits with a single-element `Vec` (there is no partial
-/// envelope to inspect for further issues in that case).
+/// One channel today (`imports`), because one channel is what has a measured case
+/// (`examples/adapters/override-required/`). Adding a second is additive here and additive on the wire
+/// — a `#[serde(default)]` field beside this one — and deliberately waits for its own measured case,
+/// since widening a surface ahead of evidence is the cost this repo has paid repeatedly.
 ///
-/// This is the VALIDITY axis only. Shapes that are valid but almost certainly not what the producer
-/// meant (an absolute `files[].path`, a non-normalized `http` key) are the separate ADVISORY axis —
-/// [`envelope_hints`], returned alongside this result by [`validate_envelope_verdict`]. A caller that
-/// only needs "may I analyze this" keeps using this function unchanged.
-// Note: `const_map_fragment`/`procedure_router_fragments`/`router_mount_fragments` presence is never
-// validated here — any fragment content a producer emits is accepted as-is (empty is always valid,
-// per their `#[serde(default)]`). An unresolvable `Ref`/`Mount` specifier is a composition-time
-// concern, silently skipped by the engine's assembly pass, not a validation-time rejection — "never
-// guessed" per this crate's convention, but also never a hard error for a shape this validator cannot
-// know is wrong.
-pub fn validate_envelope(json: &str) -> Result<NormalizedEnvelope, Vec<String>> {
-    validate_envelope_verdict(json).result
+/// `imports` lists LOCAL NAMES (the `FileProjection::imports` map's keys). Each listed name means: "the
+/// native binding for this local name is wrong; mine replaces it, and the engine must say so." The
+/// replacement is mandatory — a name listed here without a corresponding entry in `imports` is a
+/// deletion request, which [`structural_issues`] rejects. Deletion has no honest output form (there is
+/// no replacement fact to disclose, and an adapter that can delete can blind the engine silently), so it
+/// is refused at the contract boundary rather than at the merge.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectionOverrides {
+    #[serde(default)]
+    pub imports: Vec<String>,
 }
 
-/// Both axes of envelope judgment for one JSON text: [`validate_envelope`]'s VALIDITY result plus the
-/// advisory [`envelope_hints`] pass, which is why the two are computed in one place — an authoring
-/// surface (`zzop validate-envelope`, the `validate_envelope` MCP tool) wants both from one read, and
-/// getting them from two entry points would deserialize the same text twice.
-///
-/// The two axes are deliberately SEPARATE fields and must stay so: `result` decides acceptance
-/// (`valid`, the CLI's exit code, whether `analyze_envelope` proceeds) and is computed from the
-/// structural issues ALONE — no hint can ever reach it. A hint says "accepted, but this is probably not
-/// what you meant"; promoting one to a rejection would break the frozen v1 contract for envelopes that
-/// conform to it.
-///
-/// `hints` is empty whenever the text did not deserialize at all (there is no envelope to inspect), and
-/// otherwise carries every hint the pass found — INCLUDING when `result` is `Err`, so a producer fixing
-/// a structural issue sees the semantic ones in the same round-trip rather than one per fix.
-pub struct EnvelopeVerdict {
-    /// The validity verdict — exactly what [`validate_envelope`] returns.
-    pub result: Result<NormalizedEnvelope, Vec<String>>,
-    /// Advisory hints (see [`envelope_hints`]). Never affects `result`.
-    pub hints: Vec<String>,
-}
-
-pub fn validate_envelope_verdict(json: &str) -> EnvelopeVerdict {
-    let envelope = match parse_envelope(json) {
-        Ok(envelope) => envelope,
-        Err(errors) => {
-            return EnvelopeVerdict {
-                result: Err(errors),
-                hints: Vec::new(),
-            }
-        }
-    };
-    let issues = structural_issues(&envelope);
-    let hints = envelope_hints(&envelope);
-    EnvelopeVerdict {
-        result: if issues.is_empty() {
-            Ok(envelope)
-        } else {
-            Err(issues)
-        },
-        hints,
-    }
-}
-
-/// Deserialization half — everything that must succeed before there is an envelope to judge at all.
-fn parse_envelope(json: &str) -> Result<NormalizedEnvelope, Vec<String>> {
-    // A JSON ARRAY root is a special case: serde's derived `Deserialize` for a struct accepts a
-    // sequence as well as a map (the positional-fields fallback other serde formats rely on), so a
-    // top-level array is NOT rejected as "wrong shape" the way a string/number/bool/null root already
-    // is (those hit the ordinary "invalid type: X, expected struct NormalizedEnvelope" branch, which is
-    // clear on its own). Instead each array element gets deserialized against the next declared field
-    // in turn, so `["a"]` against a `format: String` first field fails with a field-level type mismatch
-    // ("invalid type: integer `1`, expected a string") that reads like ONE field is wrong rather than
-    // "this isn't an envelope at all" — a blind field test hit exactly this passing a JSON array as
-    // `envelopeJson`. Caught here, before the struct deserialize, with the honest diagnosis.
-    if matches!(
-        serde_json::from_str::<serde_json::Value>(json),
-        Ok(serde_json::Value::Array(_))
-    ) {
-        return Err(vec![
-            "expected a JSON object envelope, got an array".to_string()
-        ]);
-    }
-    serde_json::from_str(json).map_err(|e| vec![format!("invalid JSON: {e}")])
-}
-
-/// The VALIDITY pass: every semantic check whose failure makes the envelope unusable. Kept apart from
-/// [`envelope_hints`] because the two answer different questions — this one rejects, that one advises.
-fn structural_issues(envelope: &NormalizedEnvelope) -> Vec<String> {
-    let mut errors = Vec::new();
-
-    if envelope.format != NORMALIZED_AST_FORMAT {
-        errors.push(format!(
-            "unknown format: '{}' (expected '{NORMALIZED_AST_FORMAT}')",
-            envelope.format
-        ));
-    }
-    if envelope.version > SUPPORTED_NORMALIZED_AST_VERSION {
-        errors.push(format!(
-            "unsupported version: {} (this engine supports up to {SUPPORTED_NORMALIZED_AST_VERSION})",
-            envelope.version
-        ));
-    }
-
-    let mut seen_paths: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    for (idx, file) in envelope.files.iter().enumerate() {
-        if file.path.is_empty() {
-            errors.push(format!("files[{idx}]: empty path"));
-        } else if !seen_paths.insert(file.path.as_str()) {
-            errors.push(format!("files[{idx}] ('{}'): duplicate path", file.path));
-        }
-        for sym in &file.symbols {
-            if let (Some(start), Some(end)) = (sym.body_start, sym.body_end) {
-                if end < start {
-                    errors.push(format!(
-                        "files[{idx}] ('{}') symbol '{}': body_end ({end}) < body_start ({start})",
-                        file.path, sym.name
-                    ));
-                }
-            }
-        }
-    }
-
-    errors
-}
-
+mod validate;
+pub use validate::{validate_envelope, validate_envelope_verdict, EnvelopeVerdict};
 #[cfg(test)]
 mod hints_tests;
 #[cfg(test)]
 mod tests;
+
+/// One patch past this build's own version — the smallest version `validate_envelope` must reject.
+///
+/// DERIVED, never a literal. The assertion it feeds used to spell the rejected version as a hardcoded
+/// `2`, which stopped being a future version the moment the ceiling moved to 2 — the test then asserted
+/// that a SUPPORTED version is rejected, and failed for the right reason at the wrong place. Deriving it
+/// keeps "one past the ceiling" true at every ceiling, including every future release bump.
+#[cfg(test)]
+pub(crate) fn one_past_supported_version() -> String {
+    let (major, minor, patch) = parse_contract_version(SUPPORTED_NORMALIZED_AST_VERSION)
+        .expect("this build's own CARGO_PKG_VERSION must be MAJOR.MINOR.PATCH");
+    format!("{major}.{minor}.{}", patch + 1)
+}

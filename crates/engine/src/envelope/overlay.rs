@@ -7,9 +7,14 @@ use std::collections::HashSet;
 use zzop_core::{IoFacts, NormalizedEnvelope};
 
 use super::merge::{merge_projection_onto_artifact, synthetic_artifact_from_projection};
+
+mod facts;
+mod reports;
+
 use super::reserved::{
     drop_reserved_io, is_reserved_consume_kind, is_reserved_provide_kind, reserved_drop_warning,
 };
+use facts::overlay_file_carries_facts;
 
 /// What [`apply_adapter_overlays`] ACTUALLY applied, as opposed to what config DECLARED. Both sets are
 /// derived inside the apply loop, after the `validate_envelope` gate, so a REJECTED overlay contributes to
@@ -55,9 +60,11 @@ pub(crate) struct OverlayApplication {
 /// Per `FileProjection`: if `path` matches an existing artifact's `rel`, it's merged in place — `io`
 /// entries appended minus exact-duplicate `(kind, key, file, line)` tuples (`file` normalized to
 /// `projection.path` first), fragments appended with no dedup (composition dedups later), and
-/// `const_map_fragment` native-first (existing key wins); the native artifact's own
-/// `imports`/`re_exports`/`dynamic_imports` are left untouched (native dep-graph facts stay
-/// authoritative — see `merge_projection_onto_artifact`'s doc). If `path` names no existing artifact
+/// `const_map_fragment` native-first (existing key wins), and the three dep-graph channels
+/// (`imports`/`re_exports`/`dynamic_imports`) additive under the same native-first rule — a local name
+/// the native pass already bound keeps its native binding, names it never bound are added, and
+/// re-exports/dynamic specifiers append minus exact duplicates (see `merge_projection_onto_artifact`'s
+/// doc for why this is per-key rather than the per-file all-or-nothing it replaced). If `path` names no existing artifact
 /// (e.g. a `.py`/`.jsp`/`.svelte` sibling the native dispatch table doesn't recognize), it's pushed as a
 /// synthetic `FileArtifact` carrying the projection's OWN `imports`/`re_exports`/`dynamic_imports` (so
 /// it contributes real dep-graph fan-in edges too — see `synthetic_artifact_from_projection`'s doc) with
@@ -173,6 +180,12 @@ pub(crate) fn apply_adapter_overlays(
         let mut fact_carrying = 0usize;
         let mut synthetic_count = 0usize;
         let mut synthetic_samples: Vec<String> = Vec::new();
+        // G9 — every native fact this overlay DISPLACED (`FileProjection::overrides`). Collected per
+        // overlay and disclosed in full below; see the warning's own comment for why this list is not
+        // capped and why it names values rather than counting them.
+        let mut tombstones: Vec<super::merge::Tombstone> = Vec::new();
+        // G10 — the mirror: overlay bindings the native side outranked. Same loss, opposite direction.
+        let mut dropped_bindings: Vec<super::merge::DroppedOverlayBinding> = Vec::new();
         for projection in &overlay.files {
             let (cleaned, dropped) = drop_reserved_io(projection);
             reserved_dropped += dropped;
@@ -192,7 +205,12 @@ pub(crate) fn apply_adapter_overlays(
                 applied.entry_paths.insert(cleaned.path.clone());
             }
             if let Some(artifact) = artifacts.iter_mut().find(|a| a.rel == cleaned.path) {
-                merge_projection_onto_artifact(artifact, &cleaned);
+                merge_projection_onto_artifact(
+                    artifact,
+                    &cleaned,
+                    &mut tombstones,
+                    &mut dropped_bindings,
+                );
             } else {
                 synthetic_count += 1;
                 if synthetic_samples.len() < 3 {
@@ -222,6 +240,16 @@ pub(crate) fn apply_adapter_overlays(
                 overlay.source, overlay.parser
             ));
         }
+        if let Some(w) =
+            reports::displacement_warning(&overlay.source, &overlay.parser, &tombstones)
+        {
+            warnings.push(w);
+        }
+        if let Some(w) =
+            reports::overruled_warning(&overlay.source, &overlay.parser, &dropped_bindings)
+        {
+            warnings.push(w);
+        }
         if fact_carrying == 0 && declared_n > 0 {
             let plural = if declared_n == 1 { "y" } else { "ies" };
             warnings.push(format!(
@@ -236,50 +264,6 @@ pub(crate) fn apply_adapter_overlays(
 
     artifacts.sort_by(|a, b| a.rel.cmp(&b.rel));
     applied
-}
-
-/// True iff `file` contributes at least one extraction FACT that an overlay merge actually acts on —
-/// non-empty non-reserved `io.provides`/`io.consumes`, `imports`, `re_exports`, `dynamic_imports`, any
-/// fragment channel (`const_map_fragment`, `procedure_router_fragments`, `router_mount_fragments`,
-/// `class_shape_fragments`), a non-empty per-file `attributes` (the channel already lives on
-/// `FileProjection` itself, one array per file — not envelope-level — so "this projection's own
-/// `attributes` is non-empty" is already the precise per-file rule, no cross-referencing an `EntityRef`
-/// target needed), or `is_entry == true`. `path`/`loc`/`degraded` are metadata, not facts.
-///
-/// The io checks skip reserved engine-internal sentinel kinds (the same set `drop_reserved_io` strips
-/// before the merge), so the predicate judges a RAW projection and a cleaned one identically — the two
-/// call sites can safely feed it different pre-processing stages without drifting.
-///
-/// `symbols` is deliberately EXCLUDED: Mode B's merge never consumes overlay symbols
-/// (`merge_projection_onto_artifact` does not touch the field and `synthetic_artifact_from_projection`
-/// sets it empty), so counting it would call a file "covered" for data the engine silently drops — a
-/// symbols-only overlay must instead trip the zero-fact census and keep the "no native parser"
-/// disclosure alive. `used_names`, `loop_spans`, and `function_spans` are excluded for the same reason:
-/// none is read by either merge branch in a way that reaches an actual consumer today.
-///
-/// Called from exactly one place — [`apply_adapter_overlays`]'s per-projection loop — where its verdict
-/// feeds BOTH the per-overlay zero-fact census (G8b) and the returned covered-path set `analyze::assemble`
-/// uses to exclude a file from the "no native parser" per-extension disclosure (G8's unmasking half). One
-/// rule, one evaluation, so the two can never drift apart.
-fn overlay_file_carries_facts(file: &zzop_core::FileProjection) -> bool {
-    file.io
-        .provides
-        .iter()
-        .any(|p| !is_reserved_provide_kind(&p.kind))
-        || file
-            .io
-            .consumes
-            .iter()
-            .any(|c| !is_reserved_consume_kind(&c.kind))
-        || !file.imports.is_empty()
-        || !file.re_exports.is_empty()
-        || !file.dynamic_imports.is_empty()
-        || !file.const_map_fragment.is_empty()
-        || !file.procedure_router_fragments.is_empty()
-        || !file.router_mount_fragments.is_empty()
-        || !file.class_shape_fragments.is_empty()
-        || !file.attributes.is_empty()
-        || file.is_entry
 }
 
 /// Overwrites every `IoProvide`/`IoConsume` in `io`'s `file` field to `path` — the defensive

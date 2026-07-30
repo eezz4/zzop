@@ -37,6 +37,15 @@ example-envelope`, and an MCP resource), and every one of its siblings already l
   native Java parser has since closed that gap, so on Java trees it now merges as a no-op — kept as
   the reference recipe for any extension still missing a channel, and its
   `test/expected-envelope.json` is a live fixture for `analyze_java_imports_overlay`.
+- [`python-package-alias-adapter/`](python-package-alias-adapter/) — the layer-3 boundary crossed for
+  real: a tree importable under a package name NO file in it declares (`twitter/the-algorithm-ml`
+  installs itself as `tml` via one `ln -s` in a venv script). ~110 lines and one `--alias` flag take
+  that tree from 3 import edges to 167. Also the first user of `overrides` outside its own fixture —
+  the native parser binds the same local names to dead specifiers, so the correction has to displace.
+- [`override-required/`](override-required/) — not an adapter but a committed MEASUREMENT: the
+  tree where adding facts cannot fix the graph (two real files answer one import, first match
+  wrong; an adapter's correct edge lands beside the wrong native edge instead of replacing it).
+  The acceptance fixture for any future partial-overriding design.
 - [`auth-overlay-adapter/`](auth-overlay-adapter/) — a demo of the entity-ATTRIBUTES injection
   channel: router-level `app.use('/prefix', requireAuth)` guards injected as file attributes to
   close `mutating-route-no-auth`'s middleware blind spot for non-Express frameworks/custom

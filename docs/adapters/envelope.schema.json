@@ -1,9 +1,9 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://zzop.dev/schema/envelope.v1.json",
-  "title": "zzop NormalizedEnvelope v1",
+  "$id": "https://zzop.dev/schema/envelope.json",
+  "title": "zzop NormalizedEnvelope",
   "description": "External-parser / adapter-overlay envelope contract (docs/NORMALIZED_AST.md; crates/core/src/normalized.rs). Field names, required-ness, and nullability below mirror the Rust serde types field-for-field — a field is 'required' here exactly when its Rust struct field has no #[serde(default)], and 'nullable' exactly when its Rust type is Option<T> deserialized without #[serde(default)] (present key, value may be null) as opposed to omittable-and-defaulting.",
-  "$comment": "TOLERANCE CONTRACT: additionalProperties is true at every object level in this schema except the three externally-tagged enum wrapper objects (procedureRouterEntry, routerMountEntry, entityRef), whose single-discriminator shape is closed. The engine silently ignores fields it does not recognize — it never hard-fails on an unknown field, AND never warns about one either (serde drops unrecognized fields by default; no unknown-field warning code exists anywhere in this crate's envelope/overlay ingestion path). Same tolerant-input philosophy as zzop's config surface (see docs/adapters/README.md's 'Envelope schema & versioning policy'), except that the config surface additionally WARNS on an unknown key via an explicit vocabulary walk (crates/config/src/mapper.rs, warn_unknown_keys) — the envelope path has no such warning layer. A producer emitting a field ahead of this schema, or omitting any field marked optional below, still produces a valid v1 envelope. Only a BREAKING change (removing, renaming, or re-typing a REQUIRED field) needs a new envelope `version`; additive fields never do.",
+  "$comment": "TOLERANCE CONTRACT: additionalProperties is true at every object level in this schema except the three externally-tagged enum wrapper objects (procedureRouterEntry, routerMountEntry, entityRef), whose single-discriminator shape is closed. The engine silently ignores fields it does not recognize — it never hard-fails on an unknown field, AND never warns about one either (serde drops unrecognized fields by default; no unknown-field warning code exists anywhere in this crate's envelope/overlay ingestion path). Same tolerant-input philosophy as zzop's config surface (see docs/adapters/README.md's 'Envelope schema & versioning policy'), except that the config surface additionally WARNS on an unknown key via an explicit vocabulary walk (crates/config/src/mapper.rs, warn_unknown_keys) — the envelope path has no such warning layer. A producer emitting a field ahead of this schema, or omitting any field marked optional below, still produces a valid envelope. VERSIONING: `version` is a zzop RELEASE number and moves whenever the SHAPE moves — additive included. It is NOT true that only breaking changes bump it: an ADDITIVE field bumps it too whenever an engine that silently drops the field would produce a different analysis than one that honours it (`overrides` is exactly that case, and carries a floor of 0.27.0). Additive fields that are safe to ignore — a hint an older engine can do without — do not bump it, and are the reason this schema stays additionalProperties: true.",
   "type": "object",
   "required": ["format", "version", "parser", "source", "files"],
   "additionalProperties": true,
@@ -13,9 +13,9 @@
       "description": "Must be exactly this string — zzop_core::validate_envelope rejects any other value."
     },
     "version": {
-      "type": "integer",
-      "minimum": 1,
-      "description": "Contract version. This schema documents v1; a consumer rejects version > SUPPORTED_NORMALIZED_AST_VERSION."
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "The zzop RELEASE whose envelope shape these bytes conform to, as MAJOR.MINOR.PATCH (e.g. \"0.27.0\") — the same units `zzop version` prints, not an independent counter. A consumer accepts <= its own package version and rejects anything newer. This schema documents 0.27.0."
     },
     "parser": {
       "type": "string",
@@ -110,6 +110,20 @@
           "type": "boolean",
           "default": false,
           "description": "The parser could not fully process this file (size cap, syntax failure); loc must still be present."
+        },
+        "overrides": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": true,
+          "properties": {
+            "imports": {
+              "type": "array",
+              "default": [],
+              "items": { "type": "string" },
+              "description": "Local names (keys of this projection's imports map) whose NATIVE binding this overlay displaces. Requires the envelope to declare version >= 0.27.0 (the release that introduced the field — an older engine drops it silently, so the same bytes would displace nothing there). Each listed name MUST also appear in imports: the replacement is mandatory, because a declaration without one is a deletion, and deletion is not offered (it has no honest output form and would let an adapter blind the engine silently). Listing a name twice is rejected. A displaced native binding is reported in the run warnings with both the old and the new specifier."
+            }
+          },
+          "description": "Native facts this projection DISPLACES rather than adds to. Absent/empty is the whole contract for an adapter that only fills gaps, and such an envelope stays valid below the 0.27.0 floor. An override exists as an explicit DECLARATION rather than as priority-on-key-collision because a correcting adapter often does not collide at all: measured on examples/adapters/override-required, the two sides spelled the local-name key differently, so the correction arrived as a sibling entry and both the right and the wrong edge survived."
         },
         "is_entry": {
           "type": "boolean",

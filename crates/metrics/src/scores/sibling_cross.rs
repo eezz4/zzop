@@ -10,13 +10,21 @@ use zzop_core::DepGraph;
 /// Caps the returned violation list (not the score).
 const MAX_VIOLATIONS_LISTED: usize = 100;
 
-pub fn compute_sibling_cross(dep: &DepGraph, cfg: &ScoresConfig) -> SiblingCrossScore {
+pub fn compute_sibling_cross(
+    dep: &DepGraph,
+    cfg: &ScoresConfig,
+    is_scored: &dyn Fn(&str) -> bool,
+) -> SiblingCrossScore {
     let mut violations: Vec<SiblingCross> = Vec::new();
     let mut intra: u32 = 0;
 
     // Deterministic traversal: HashMap iteration order is unspecified, so sorting by the importer path
     // gives a stable, reproducible order.
-    let mut froms: Vec<&String> = dep.keys().collect();
+    // Judged per IMPORTER: an excluded file is not a subject here, so it contributes neither a
+    // violation nor a denominator slot. Its edges are still real for everyone else — a scored file
+    // importing excluded code keeps that edge and any violation the edge commits, because the scored
+    // file is the one that chose it (see `ScoresInput::is_scored`).
+    let mut froms: Vec<&String> = dep.keys().filter(|from| is_scored(from)).collect();
     froms.sort();
 
     for from in froms {
@@ -93,7 +101,7 @@ mod tests {
 
     #[test]
     fn empty_graph_score_100() {
-        let r = compute_sibling_cross(&DepGraph::new(), &cfg());
+        let r = compute_sibling_cross(&DepGraph::new(), &cfg(), &|_| true);
         assert_eq!(r.score, 100.0);
         assert_eq!(r.total_intra_module_edges, 0);
         assert!(r.violations.is_empty());
@@ -105,7 +113,7 @@ mod tests {
             ("orders/ui/Btn.ts", &["orders/ui/Card.ts"]),
             ("orders/ui/Card.ts", &[]),
         ]);
-        let r = compute_sibling_cross(&d, &cfg());
+        let r = compute_sibling_cross(&d, &cfg(), &|_| true);
         assert_eq!(r.total_intra_module_edges, 1);
         assert!(r.violations.is_empty());
         assert_eq!(r.score, 100.0);
@@ -114,7 +122,7 @@ mod tests {
     #[test]
     fn cross_sibling_import_ui_to_data_is_a_violation() {
         let d = dep(&[("orders/ui/Btn.ts", &["orders/data/api.ts"])]);
-        let r = compute_sibling_cross(&d, &cfg());
+        let r = compute_sibling_cross(&d, &cfg(), &|_| true);
         assert_eq!(r.total_intra_module_edges, 1);
         assert_eq!(r.violations.len(), 1);
         assert_eq!(r.violations[0].from, "orders/ui/Btn.ts");
@@ -128,7 +136,7 @@ mod tests {
     #[test]
     fn import_into_a_shared_subdir_utils_is_exempt_score_100() {
         let d = dep(&[("orders/ui/Btn.ts", &["orders/utils/h.ts"])]);
-        let r = compute_sibling_cross(&d, &cfg());
+        let r = compute_sibling_cross(&d, &cfg(), &|_| true);
         assert_eq!(r.total_intra_module_edges, 1);
         assert!(r.violations.is_empty());
         assert_eq!(r.score, 100.0);
@@ -148,7 +156,7 @@ mod tests {
             ("orders/data/api.ts", &["orders/ui/Btn.ts"]), // data -> ui -> violation
             ("orders/index.ts", &["orders/ui/Btn.ts"]),    // fromSubdir is null (index.ts) -> skip
         ]);
-        let r = compute_sibling_cross(&d, &cfg());
+        let r = compute_sibling_cross(&d, &cfg(), &|_| true);
         assert_eq!(r.total_intra_module_edges, 5);
         assert_eq!(r.violations.len(), 2);
         // 100 - (2/5)*100 = 60

@@ -22,6 +22,7 @@ pub fn compute_sfc<F>(
     target: Option<&str>,
     cfg: &ScoresConfig,
     is_source: F,
+    is_scored: &dyn Fn(&str) -> bool,
 ) -> SfcScore
 where
     F: Fn(&str) -> bool,
@@ -29,7 +30,7 @@ where
     let limit = cfg.thresholds.loc_limit(target);
     let live: Vec<&FileNode> = nodes
         .iter()
-        .filter(|n| n.loc > 0 && is_source(&n.id))
+        .filter(|n| n.loc > 0 && is_source(&n.id) && is_scored(&n.id))
         .collect();
     let mut violations: Vec<SfcViolation> = Vec::new();
     let mut compliant = 0u32;
@@ -87,7 +88,7 @@ mod tests {
 
     #[test]
     fn no_live_files_score_100_default_limit_150() {
-        let r = compute_sfc(&[], None, &ScoresConfig::default(), |_| true);
+        let r = compute_sfc(&[], None, &ScoresConfig::default(), |_| true, &|_| true);
         assert_eq!(r.score, 100.0);
         assert_eq!(r.limit, 150);
         assert_eq!(r.compliant, 0);
@@ -99,7 +100,7 @@ mod tests {
     fn all_files_within_limit_boundary_loc_eq_limit_is_compliant_score_100() {
         // default limit 150; loc 150 is <= limit -> compliant
         let nodes = [node("a", 150), node("b", 50)];
-        let r = compute_sfc(&nodes, None, &ScoresConfig::default(), |_| true);
+        let r = compute_sfc(&nodes, None, &ScoresConfig::default(), |_| true, &|_| true);
         assert_eq!(r.score, 100.0);
         assert_eq!(r.compliant, 2);
         assert_eq!(r.total, 2);
@@ -110,7 +111,7 @@ mod tests {
     fn half_compliant_score_50() {
         // compliant=1, total=2 -> (1/2)*100 = 50
         let nodes = [node("ok", 100), node("big", 300)];
-        let r = compute_sfc(&nodes, None, &ScoresConfig::default(), |_| true);
+        let r = compute_sfc(&nodes, None, &ScoresConfig::default(), |_| true, &|_| true);
         assert_eq!(r.score, 50.0);
         assert_eq!(r.compliant, 1);
         assert_eq!(r.total, 2);
@@ -127,7 +128,7 @@ mod tests {
     #[test]
     fn violations_sorted_by_loc_desc() {
         let nodes = [node("med", 200), node("huge", 500), node("ok", 50)];
-        let r = compute_sfc(&nodes, None, &ScoresConfig::default(), |_| true);
+        let r = compute_sfc(&nodes, None, &ScoresConfig::default(), |_| true, &|_| true);
         // compliant=1, total=3 -> round((1/3)*100) = 33
         assert_eq!(r.score, 33.0);
         let paths: Vec<&str> = r.violations.iter().map(|v| v.path.as_str()).collect();
@@ -138,7 +139,13 @@ mod tests {
     fn target_be_raises_the_limit_to_200() {
         // target be -> limit 200; loc 180 compliant, loc 250 violation
         let nodes = [node("a", 180), node("b", 250)];
-        let r = compute_sfc(&nodes, Some("be"), &ScoresConfig::default(), |_| true);
+        let r = compute_sfc(
+            &nodes,
+            Some("be"),
+            &ScoresConfig::default(),
+            |_| true,
+            &|_| true,
+        );
         assert_eq!(r.limit, 200);
         assert_eq!(r.compliant, 1);
         assert_eq!(r.score, 50.0);
@@ -158,9 +165,13 @@ mod tests {
         // `violations` — treated as absent from the metric entirely, so a lone compliant source file still
         // scores a perfect 100.
         let nodes = [node("pnpm-lock.yaml", 5174), node("src/app.ts", 100)];
-        let r = compute_sfc(&nodes, None, &ScoresConfig::default(), |id| {
-            id == "src/app.ts"
-        });
+        let r = compute_sfc(
+            &nodes,
+            None,
+            &ScoresConfig::default(),
+            |id| id == "src/app.ts",
+            &|_| true,
+        );
         assert_eq!(r.total, 1);
         assert_eq!(r.compliant, 1);
         assert_eq!(r.violations, vec![]);
@@ -171,7 +182,7 @@ mod tests {
     fn same_huge_file_classified_as_source_still_produces_a_violation() {
         // Same 5174 LOC, but source: the gate is about source-ness, not the limit, so it still violates.
         let nodes = [node("src/huge.ts", 5174)];
-        let r = compute_sfc(&nodes, None, &ScoresConfig::default(), |_| true);
+        let r = compute_sfc(&nodes, None, &ScoresConfig::default(), |_| true, &|_| true);
         assert_eq!(r.total, 1);
         assert_eq!(r.compliant, 0);
         assert_eq!(

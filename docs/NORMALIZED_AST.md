@@ -1,4 +1,4 @@
-# Normalized AST contract (external parser protocol) — v1 freeze
+# Normalized AST contract (external parser protocol)
 
 External/custom parsers (Ruby, JSP, anything the engine does not parse natively — see
 `docs/ARCHITECTURE.md`'s "Language support" section for which languages already have a native parser
@@ -16,15 +16,28 @@ the linker is an exact join on normalized keys, never AST matching).
 ```json
 {
   "format": "zzop-normalized-ast",
-  "version": 1,
+  "version": "0.27.0",
   "parser": "<parser id>/<impl version>",
   "source": "<tree/source id>",
   "files": [ <FileProjection> ]
 }
 ```
 
-- `version` is the contract version (this document freezes v1). A consumer rejects `version` greater
-  than it supports — same policy as the DSL pack `schema_version`.
+- `version` is the zzop RELEASE whose envelope shape these bytes conform to, as `MAJOR.MINOR.PATCH` —
+  the same units `zzop version` prints, NOT an independent counter. **Emit `"0.27.0"`**, the current
+  contract version. A consumer accepts anything at or below its own package version and rejects
+  anything newer — same "reject newer, never guess" policy as the DSL pack `schema_version`.
+
+  It moves only when the SHAPE moves, so an adapter that emits `"0.27.0"` keeps being accepted through
+  every later release that did not change the shape; you do not re-emit it every release. It moves for
+  an ADDITIVE field too whenever an engine that silently drops that field would produce a different
+  analysis than one that honours it — `overrides` is exactly that case (see "The `overrides` version
+  floor" below). Additive fields an older engine can safely ignore do not move it.
+
+  A bare integer (`"version": 1`) is what adapters written before 0.27.0 emitted; it is now rejected as
+  malformed rather than coerced. This is a one-time break, taken deliberately under the `0.x` no-
+  backward-compatibility promise in [`VERSIONING.md`](../VERSIONING.md) — the fix is a one-line edit to
+  the adapter, and it buys a reader one version system instead of two.
 - `parser` doubles as the cache fingerprint segment: bump the impl version whenever the projection
   changes for identical input.
 
@@ -46,6 +59,7 @@ the linker is an exact join on normalized keys, never AST matching).
   "class_shape_fragments": [ <ClassShapeFragment> ],
   "degraded": false,
   "is_entry": false,
+  "overrides": { "imports": ["localNameWhoseNativeBindingThisReplaces"] },
   "loop_spans": [[10, 14]],
   "function_spans": [[4, 20], [9, 12]],
   "attributes": [ <Attribute> ]
@@ -233,6 +247,59 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
   It does NOT exempt a file from `unreachable`, in either mode: that analysis's entry set is seeded from
   declared cargo targets plus SFC-only and runtime-asset import targets, and `is_entry` is not among
   them.
+
+- `overrides` — OPTIONAL (`#[serde(default)]`, default `{}`), and the one channel that DISPLACES a
+  native fact rather than adding to it. Requires the envelope to declare `version` >= `"0.27.0"`; see
+  "The `overrides` version floor" below for why that floor is per-feature. One sub-field today:
+
+  - `overrides.imports` — an array of LOCAL NAMES (keys of this projection's `imports` map) whose
+    native binding this overlay replaces. Each listed name MUST also appear in `imports`: the
+    replacement is mandatory. A name listed without one is a deletion request, and deletion is not
+    offered — it has no honest output form (there is no replacement fact to disclose) and an adapter
+    that can delete can blind the engine without leaving a trace. Listing a name twice is rejected.
+
+  **Why a declaration, rather than "the overlay's value wins on a key collision".** Measured on
+  `examples/adapters/override-required/`: an adapter correcting a wrong native import did not collide
+  with it at all. Python binds `import util.config` under the local name `util`, so an adapter that
+  keys its binding `util.config` — the specifier, which reads like the obvious key — lands as a
+  SIBLING entry and both the right and the wrong edge survive. Priority-on-collision cannot express
+  overriding, because the displacing side often does not know it is colliding. The displacing fact has
+  to NAME what it displaces.
+
+  **What the run says.** Every displacement is reported in `warnings`, naming the file, the local
+  name, the native specifier and the replacing one — an override is the only overlay operation that
+  removes something the engine extracted itself, so that line is the only record the native fact was
+  ever there. Nothing verifies that the adapter is the correct side; the disclosure exists so a reader
+  can disagree.
+
+  The mirror is reported too: an overlay binding DROPPED because the native pass held the same local
+  name with a different specifier and no override was declared. Parsed facts win by default, but
+  losing the adapter's side in silence is the same defect pointing the other way — without that line,
+  an author who misspells or forgets a declaration sees a run indistinguishable from success. An
+  overlay restating a binding the native pass already holds is agreement, not a loss, and is silent.
+
+### The `overrides` version floor
+
+The floor (`"0.27.0"`) exists for exactly one reason: `FileProjection` has no
+`additionalProperties: false`, so an `overrides` key handed to an engine built before this field
+existed would deserialize, be ignored, and produce a run where the adapter believes it displaced a
+native fact and the engine quietly did not — the same silent-loss shape the displacement disclosure
+abolishes, reintroduced one level up in the contract itself.
+
+Two DIFFERENT checks close it, and neither substitutes for the other:
+
+- The **ceiling** ("reject anything newer than me") catches an honest envelope: it declares `"0.27.0"`,
+  an older engine sees a version above its own and refuses the whole thing.
+- The **floor** catches a MISLABELLED one: it declares `"0.20.0"` while carrying `overrides`. The
+  ceiling accepts that happily — it is older, not newer — so only the floor rejects it. The engine that
+  understands the field is the only one positioned to notice, which is why the current engine is the
+  one that says so, at authoring time, instead of letting you ship bytes that mean different things to
+  different engines.
+
+The floor is PER-FEATURE, not "the contract version". It is a separate constant
+(`MIN_VERSION_FOR_OVERRIDES` in both `crates/core/src/normalized.rs` and the adapter kit) that happens
+to equal the contract version today and stops equalling it at the next gated field. A field that an
+older engine can safely ignore gets no floor at all.
 - `loop_spans` — OPTIONAL (`#[serde(default)]`; camelCase `loopSpans` also accepted on input). `[[startLine,
   endLine], ...]`, 1-based and inclusive. Each pair is either a loop statement's whole span (`for`/
   `for-in`/`for-of`/`while`/`do-while`, header line included) or an array-iteration callback argument's
@@ -337,7 +404,7 @@ they merge onto a natively-parsed tree whose source text is readable off disk, s
 live there even for a language with no native parser. A
 caller-supplied pack reusing a bundled id keeps the existing collision semantics (a later inline def,
 or any directory pack, wins whole). See `docs/modules/facade.md`'s "Defaults" section for the full
-contract. `examples/adapters/jsp-envelope.example.json` is a hand-written,
+contract. `docs/contracts/example-envelope.json` is a hand-written,
 crude-parser-shaped fixture (symbols with no body spans, one `http` provide, one `db-table` consume, no
 imports) that validates cleanly against this contract — see `zzop-core`'s `normalized::tests::
 jsp_contract_example_validates` for the fixture-based check. A JSON Schema export for this contract
@@ -358,7 +425,7 @@ Casing is not uniform across the envelope, and which part you get wrong changes 
   unrecognized key.
 - **`SourceSymbol` (the `symbols` array) outputs camelCase, but accepts snake_case input for exactly
   three fields**: `is_default`, `body_start`, and `body_end` each carry a `#[serde(alias = ...)]` back
-  to their frozen v1 snake_case spelling (`crates/core/src/ir.rs`) so the original external-parser
+  to their long-standing snake_case spelling (`crates/core/src/ir.rs`) so the original external-parser
   contract keeps working alongside the newer camelCase-uniform output. `writeSites` has no snake_case
   alias — camelCase-only, both directions.
 - **The `io` payload types are camelCase with no snake_case aliasing at all**: `IoProvide`/`IoConsume`
@@ -470,8 +537,17 @@ callers can refer to either unambiguously.
     entries (an overlay entry EXACTLY duplicating a native one — same kind/key/file/line — is deduped,
     never double-counted), its fragment channels (`procedure_router_fragments`/`router_mount_fragments`) are
     appended, and `const_map_fragment` merges NATIVE-FIRST (a key the native pass already resolved is
-    never overwritten by an overlay). The native artifact's own `imports`/`re_exports`/`dynamic_imports`
-    are left untouched — native dep-graph facts stay authoritative; this merge branch never adds to them.
+    never overwritten by an overlay). The three dep-graph channels
+    (`imports`/`re_exports`/`dynamic_imports`) merge under that SAME native-first rule, applied per KEY:
+    `imports` is a `localName -> binding` map, so a local name the native pass already bound keeps its
+    native binding and only names it never bound are added; `re_exports` and `dynamic_imports` have no
+    key and so append minus exact duplicates (a type-only re-export stays distinct from an otherwise
+    identical runtime one, since only the latter is an edge). A native fact is therefore never
+    overridden, but it no longer SILENCES the overlay either: before 2026-07-30 this was all-or-nothing
+    per FILE — one native binding discarded the overlay's entire dep-graph contribution for that file,
+    which made an adapter's worth depend on what the native parser happened to leave empty rather than on
+    what the adapter knows. Additive merging is what lets native and injected extraction combine on one
+    file, so an adapter can supply exactly the imports the native parser could not resolve.
   - If no native artifact exists at that path (an adapter-only file — e.g. a `.svelte`/`.vue`/`.astro`
     file, or a generated route table the native TS parser never sees as a distinct file): a synthetic
     artifact is created from the projection, carrying its OWN `imports`/`re_exports`/`dynamic_imports`
@@ -551,7 +627,7 @@ resolution rule documented above for fragment specifiers.
 ```json
 {
   "format": "zzop-normalized-ast",
-  "version": 1,
+  "version": "0.27.0",
   "parser": "hono-router-overlay/1",
   "source": "api",
   "files": [
@@ -639,7 +715,7 @@ same shape (`AnalyzeRequest::adapter_overlays` in `crates/facade/src/lib.rs`), e
   "root": "/path/to/tree",
   "sourceId": "api",
   "adapterOverlays": [
-    { "format": "zzop-normalized-ast", "version": 1, "parser": "hono-router-overlay/1", "source": "api", "files": [ ... ] }
+    { "format": "zzop-normalized-ast", "version": "0.27.0", "parser": "hono-router-overlay/1", "source": "api", "files": [ ... ] }
   ]
 }
 ```

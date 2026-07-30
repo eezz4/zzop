@@ -91,10 +91,11 @@ pub(crate) fn routes_overlay(
         function_spans: Vec::new(),
         degraded: false,
         is_entry: false,
+        overrides: Default::default(),
     };
     Some(zzop_core::NormalizedEnvelope {
         format: zzop_core::NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "zzop-route-injection/1".to_string(),
         source: source_id.to_string(),
         files: vec![file],

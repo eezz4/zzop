@@ -78,7 +78,7 @@
             <tr><th>Field</th><th>Holds</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>dep</code></td><td>The import graph — each path to the paths it imports. <a href="graph.html">Rendered against this repository</a>: 1,137 files and 2,121 imports, nothing dropped.</td></tr>
+            <tr><td><code>dep</code></td><td>The import graph — each path to the paths it imports. <a href="graph.html">Rendered against this repository</a>: 1,155 files and 2,128 imports, nothing dropped.</td></tr>
             <tr><td><code>symbols</code></td><td>Function, class, const, type, and interface declarations.</td></tr>
             <tr><td><code>loc</code></td><td>Physical line count, per file.</td></tr>
             <tr><td><code>io</code></td><td>HTTP/DB/tRPC provide and consume facts (<code>IoFacts</code>) — the input to the cross-layer join.</td></tr>
@@ -202,7 +202,7 @@
       <p>Every run also emits a structural <strong>coverage census</strong> per tree (<code>coverage</code> in the output) — vocab-free counts of how much of each channel it actually filled (files, symbols, import edges, and IO), plus the <code>degraded</code> count above — so a consumer can tell "analyzed and found nothing" apart from "this channel was dark". When a tree analyzes files but extracts zero IO, its <code>coverage.joinContributionZero</code> flag asserts the blindness outright: the tree is invisible to the cross-layer join, so any join finding that references it is structurally weak (a client the extractor can't see — a hand-rolled HTTP wrapper, a generated SDK — is a common cause). And a run-global <code>disclosure</code> registry names the classes of silent failure zzop does, and does <em>not</em> yet, actively detect — so the tool never quietly claims to be complete.</p>
     </section>
 
-    <p>This page is a conceptual orientation. For the exhaustive, per-decision architecture reference — the public source of truth this page indexes rather than restates — see <a href="https://github.com/eezz4/zzop/blob/main/docs/ARCHITECTURE.md">docs/ARCHITECTURE.md</a>, plus each crate's own <code>README</code> under <a href="https://github.com/eezz4/zzop/tree/main/crates">crates/</a>.</p>
+    <p>This page is a conceptual orientation. For the exhaustive, per-decision architecture reference — the public source of truth this page indexes rather than restates — see <a href="https://github.com/eezz4/zzop/blob/main/docs/ARCHITECTURE.md">docs/ARCHITECTURE.md</a>, plus the module docs at the top of each crate's <code>lib.rs</code> under <a href="https://github.com/eezz4/zzop/tree/main/crates">crates/</a>.</p>
 
   </main>
 

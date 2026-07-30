@@ -6,27 +6,138 @@ use zzop_core::IoFacts;
 
 use super::overlay::normalize_io_file_field;
 
+/// One native fact an overlay DISPLACED via a declared `overrides` entry, carried back to
+/// `apply_adapter_overlays` so the run can say so.
+///
+/// The engine refuses to lose a fact silently, and an override is the one overlay operation that
+/// otherwise would: the native binding is simply gone from the output with nothing recording that it was
+/// ever extracted. This carries enough to re-derive the judgment — which file, which local name, what we
+/// had, what replaced it — for the same reason `zzop_core::registry::redact` marks an excluded evidence
+/// path instead of dropping it: a reader must be able to tell "displaced here" from "never known".
+pub(super) struct Tombstone {
+    pub(super) path: String,
+    pub(super) local_name: String,
+    pub(super) native_specifier: String,
+    pub(super) overlay_specifier: String,
+}
+
+/// The mirror of [`Tombstone`]: a binding the OVERLAY offered that the engine dropped, because the
+/// native pass had already bound that local name to something different and the overlay declared no
+/// override for it.
+///
+/// Native-first is the right default — an adapter must not overwrite parsed facts by accident — but a
+/// silent drop of the adapter's side is the same defect as a silent drop of ours, just pointing the
+/// other way. Without this line an author who misspells an override declaration, or forgets one, sees a
+/// run indistinguishable from success: the corrected binding is absent, the wrong native one is still
+/// there, and nothing separates "I was overruled" from "I was applied". Measured on
+/// `examples/adapters/override-required`, this is easy to hit — Python binds `import util.config` under
+/// the local name `util`, so an adapter naming the key `util.config` misses entirely while one naming
+/// `util` collides.
+///
+/// Only a DIFFERING value is recorded. An overlay restating a binding the native pass already holds is
+/// agreement, not a loss — that is `java-imports-adapter`'s whole situation, and warning about it would
+/// be noise on every run.
+pub(super) struct DroppedOverlayBinding {
+    pub(super) path: String,
+    pub(super) local_name: String,
+    pub(super) native_specifier: String,
+    pub(super) overlay_specifier: String,
+}
+
 /// The "found" branch of `apply_adapter_overlays`'s per-`FileProjection` merge (see that function's doc
 /// for the dedup/native-first semantics per channel). A TypeScript artifact the native pass parsed keeps
-/// its own authoritative `imports`/`re_exports`/`dynamic_imports` (an overlay never overrides parsed
-/// facts). But the native pass walks EVERY file, so a non-TS file type the engine can't parse (e.g. a
-/// `.svelte` component) lands here too as a degraded artifact with `imports: None` — nothing to preserve
-/// — and an overlay carrying dep-graph data then fills it, letting an adapter complete the graph for that
-/// file type (its imports become real fan-in edges to their TS targets).
+/// every dep-graph fact it extracted itself — an overlay never overrides a parsed one — but it no longer
+/// SILENCES the overlay's other facts: the three dep-graph channels merge ADDITIVELY, exactly like `io`
+/// and the fragment channels already do. Also covers the case the native pass walks but cannot parse
+/// (e.g. a `.svelte` component lands here as a degraded artifact with `imports: None`), where the
+/// overlay supplies the whole channel and its imports become real fan-in edges to their TS targets.
+///
+/// The previous rule was all-or-nothing at the FILE level: one native binding discarded the overlay's
+/// entire dep-graph contribution for that file. That made an adapter's worth a function of what the
+/// native parser happened to leave empty rather than of what the adapter knows — `examples/adapters/
+/// java-imports-adapter` became a total no-op the day the native Java parser started emitting imports,
+/// and a partially-better adapter had the same fate (native at 60% discarded the adapter's other 40%).
+/// Additive merging is what lets native and injected extraction COMBINE on one file.
+///
+/// Native-first is enforced per KEY, not per file: `imports` is a `localName -> ImportBinding` map, so a
+/// local name the native pass already bound keeps its native binding (`or_insert_with`, the same rule
+/// `const_map_fragment` uses below) and only names it never bound are added. `re_exports` and
+/// `dynamic_imports` are sequences with no key, so they append minus exact duplicates — `ReExport` is
+/// compared by value, which keeps a type-only re-export distinct from an otherwise identical runtime one
+/// (only the latter is a dep-graph edge).
+///
+/// A DECLARED override (`FileProjection::overrides`) is the single exception to native-first, and it
+/// runs BEFORE the additive pass — see the loop's own comment for why the order is load-bearing. Both
+/// directions of loss are reported out: displacements into `tombstones`, and overlay bindings the
+/// native side outranked into `dropped`.
 pub(super) fn merge_projection_onto_artifact(
     artifact: &mut crate::pipeline::FileArtifact,
     projection: &zzop_core::FileProjection,
+    tombstones: &mut Vec<Tombstone>,
+    dropped: &mut Vec<DroppedOverlayBinding>,
 ) {
-    // Dep-graph facts: adopt the overlay's only when the native artifact has none of its own (a
-    // degraded/non-TS file), so parsed TS imports always win over an overlay.
-    if artifact.imports.is_none()
-        && (!projection.imports.is_empty()
-            || !projection.re_exports.is_empty()
-            || !projection.dynamic_imports.is_empty())
-    {
-        artifact.imports = Some(projection.imports.clone());
-        artifact.re_exports = projection.re_exports.clone();
-        artifact.dynamic_imports = projection.dynamic_imports.clone();
+    // DISPLACEMENT first. The additive pass below is native-first (`or_insert_with`), so a declared
+    // override must remove the native binding here or the replacement would lose its own collision.
+    // Every removal is recorded; validation (`zzop_core`'s structural pass) guarantees a declaration
+    // always carries its replacement, so a displaced fact is always swapped, never deleted.
+    for local_name in &projection.overrides.imports {
+        let Some(replacement) = projection.imports.get(local_name) else {
+            continue; // validation rejects this shape, and a rejected overlay never reaches here.
+        };
+        if let Some(existing) = artifact.imports.as_mut() {
+            if let Some(displaced) = existing.remove(local_name) {
+                tombstones.push(Tombstone {
+                    path: projection.path.clone(),
+                    local_name: local_name.clone(),
+                    native_specifier: displaced.specifier,
+                    overlay_specifier: replacement.specifier.clone(),
+                });
+            }
+        }
+    }
+
+    // Gated on the projection actually carrying dep-graph data, for the same reason
+    // `synthetic_artifact_from_projection` gates on it below: `analyze::assemble` folds an artifact into
+    // `ts_import_pairs`/`ts_paths`/`package_import_files` inside `if let Some(imports) = artifact.imports`,
+    // so flipping a `None` to `Some(empty)` would enter a no-data file into those sets. With data present
+    // the flip is exactly what a degraded/non-TS file needs.
+    let has_dep_graph_data = !projection.imports.is_empty()
+        || !projection.re_exports.is_empty()
+        || !projection.dynamic_imports.is_empty();
+    if has_dep_graph_data {
+        let existing = artifact
+            .imports
+            .get_or_insert_with(zzop_core::ImportMap::default);
+        for (local_name, binding) in &projection.imports {
+            match existing.get(local_name) {
+                // Native already bound this name to something ELSE and no override was declared for it.
+                // Native still wins, but the overlay's side is not lost quietly — see
+                // `DroppedOverlayBinding` for why the silent version of this is a defect.
+                Some(native) if native.specifier != binding.specifier => {
+                    dropped.push(DroppedOverlayBinding {
+                        path: projection.path.clone(),
+                        local_name: local_name.clone(),
+                        native_specifier: native.specifier.clone(),
+                        overlay_specifier: binding.specifier.clone(),
+                    });
+                }
+                // Same specifier: agreement, nothing lost, nothing to say.
+                Some(_) => {}
+                None => {
+                    existing.insert(local_name.clone(), binding.clone());
+                }
+            }
+        }
+        for re_export in &projection.re_exports {
+            if !artifact.re_exports.contains(re_export) {
+                artifact.re_exports.push(re_export.clone());
+            }
+        }
+        for specifier in &projection.dynamic_imports {
+            if !artifact.dynamic_imports.contains(specifier) {
+                artifact.dynamic_imports.push(specifier.clone());
+            }
+        }
     }
 
     let mut incoming_io = projection.io.clone();
@@ -107,8 +218,10 @@ pub(super) fn synthetic_artifact_from_projection(
         // whenever there is dep-graph data to contribute, so an injected non-TS file (`.svelte`/`.vue`/
         // `.astro`) gives its imported native TS targets real fan-in, exactly like a native TS importer
         // would. This is the synthetic-artifact half of the injection contract's dep-graph completion;
-        // `merge_projection_onto_artifact` (the onto-an-EXISTING-native-artifact branch, above) is
-        // deliberately NOT touched here — native imports stay authoritative there, a separate concern.
+        // `merge_projection_onto_artifact` (the onto-an-EXISTING-native-artifact branch, above) reaches
+        // the same outcome by a different rule — additive per key, native binding wins on a collision
+        // unless the overlay declared an override for that name. Nothing to displace here: a synthetic
+        // artifact has no native facts, so `overrides` on such a projection is inert by construction.
         imports: has_dep_graph_data.then(|| projection.imports.clone()),
         // Now carried through (previously always `Vec::new()` — see the superseded comment this
         // replaces) via the SAME `if let Some(imports)` branch in `analyze::assemble` as `imports` right

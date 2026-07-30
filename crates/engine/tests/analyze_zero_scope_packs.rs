@@ -233,7 +233,7 @@ fn no_warning_when_the_tree_analyzed_no_files() {
 fn envelope_mode_gets_the_same_warning() {
     let envelope = NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "fixture/1".to_string(),
         source: "zero-scope-envelope".to_string(),
         files: vec![FileProjection {

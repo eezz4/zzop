@@ -10,7 +10,7 @@ fn analyze_envelope_json_suppressions_drop_a_finding() {
     // cycle -> a `circular` finding.
     let envelope = r#"{
         "format": "zzop-normalized-ast",
-        "version": 1,
+        "version": "0.27.0",
         "parser": "test/1",
         "source": "legacy",
         "files": [
@@ -160,7 +160,7 @@ fn envelope_analyze_request_defaults_mounted_at_and_mounts_to_empty() {
 fn analyze_envelope_json_client_base_prefixes_relative_consume_keys_over_the_wire() {
     let envelope = r#"{
         "format": "zzop-normalized-ast",
-        "version": 1,
+        "version": "0.27.0",
         "parser": "jsp-lexical/1",
         "source": "legacy",
         "files": [
@@ -291,7 +291,7 @@ fn validate_envelope_only_json_always_carries_a_hints_array() {
 /// validity result alone — a hint may never flip it.
 #[test]
 fn hints_are_reported_without_making_a_valid_envelope_invalid() {
-    // Absolute path + a non-normalized `http` provide key: both join with nothing, neither is a v1
+    // Absolute path + a non-normalized `http` provide key: both join with nothing, neither is a
     // contract violation.
     let suspicious = tiny_envelope_json()
         .replace(
@@ -321,8 +321,11 @@ fn hints_are_reported_without_making_a_valid_envelope_invalid() {
 /// so a producer does not have to fix one class, re-run, and only then learn about the other.
 #[test]
 fn an_invalid_envelope_still_reports_its_hints() {
+    // A FUTURE version, not a malformed one: a malformed `version` fails to deserialize, and a text
+    // that never became an envelope has nothing to run the hint pass over — which would make this
+    // assert the opposite of what it is sealing.
     let bad = tiny_envelope_json()
-        .replace("\"version\": 1", "\"version\": 99")
+        .replace("\"version\": \"0.27.0\"", "\"version\": \"99.0.0\"")
         .replace(
             "\"path\": \"legacy/UserController.jsp\"",
             "\"path\": \"/srv/x.jsp\"",

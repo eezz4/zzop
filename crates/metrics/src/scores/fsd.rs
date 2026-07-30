@@ -11,13 +11,21 @@ use zzop_core::DepGraph;
 /// FSD L2 (slice) layer number.
 const SLICE_LAYER: u8 = 2;
 
-pub fn compute_fsd(dep: &DepGraph, cfg: &ScoresConfig) -> FsdScore {
+pub fn compute_fsd(
+    dep: &DepGraph,
+    cfg: &ScoresConfig,
+    is_scored: &dyn Fn(&str) -> bool,
+) -> FsdScore {
     let mut violations: Vec<FsdViolation> = Vec::new();
     let mut total: u32 = 0;
 
     // Deterministic traversal: HashMap iteration order is unspecified, so sorting by the importer path
     // gives a stable, reproducible violation order.
-    let mut froms: Vec<&String> = dep.keys().collect();
+    // Judged per IMPORTER: an excluded file is not a subject here, so it contributes neither a
+    // violation nor a denominator slot. Its edges are still real for everyone else — a scored file
+    // importing excluded code keeps that edge and any violation the edge commits, because the scored
+    // file is the one that chose it (see `ScoresInput::is_scored`).
+    let mut froms: Vec<&String> = dep.keys().filter(|from| is_scored(from)).collect();
     froms.sort();
 
     for from in froms {
@@ -87,7 +95,7 @@ mod tests {
 
     #[test]
     fn empty_graph_score_100_no_violations() {
-        let r = compute_fsd(&DepGraph::new(), &cfg());
+        let r = compute_fsd(&DepGraph::new(), &cfg(), &|_| true);
         assert_eq!(r.score, 100.0);
         assert_eq!(r.total_imports, 0);
         assert!(r.violations.is_empty());
@@ -100,7 +108,7 @@ mod tests {
             ("features/auth/login.ts", &["utils/x.ts"]),
             ("utils/x.ts", &[]),
         ]);
-        let r = compute_fsd(&d, &cfg());
+        let r = compute_fsd(&d, &cfg(), &|_| true);
         assert_eq!(r.total_imports, 2);
         assert!(r.violations.is_empty());
         assert_eq!(r.score, 100.0);
@@ -109,7 +117,7 @@ mod tests {
     #[test]
     fn layer_reverse_import_l2_to_l1_is_a_violation() {
         let d = dep(&[("features/auth/login.ts", &["pages/home.ts"])]);
-        let r = compute_fsd(&d, &cfg());
+        let r = compute_fsd(&d, &cfg(), &|_| true);
         assert_eq!(r.total_imports, 1);
         assert_eq!(r.violations.len(), 1);
         assert_eq!(r.violations[0].kind, FsdViolationKind::LayerReverse);
@@ -122,7 +130,7 @@ mod tests {
     #[test]
     fn same_layer_cross_slice_l2_to_l2_different_slice_is_a_violation() {
         let d = dep(&[("features/auth/login.ts", &["features/cart/cart.ts"])]);
-        let r = compute_fsd(&d, &cfg());
+        let r = compute_fsd(&d, &cfg(), &|_| true);
         assert_eq!(r.violations.len(), 1);
         assert_eq!(r.violations[0].kind, FsdViolationKind::CrossSlice);
         assert_eq!(
@@ -147,7 +155,7 @@ mod tests {
                 ],
             ),
         ]);
-        let r = compute_fsd(&d, &cfg());
+        let r = compute_fsd(&d, &cfg(), &|_| true);
         assert_eq!(r.total_imports, 4);
         assert_eq!(r.violations.len(), 2);
         // 100 - (2/4)*100 = 50

@@ -71,6 +71,7 @@ pub(super) fn build_overlay(scan_root: &Path, scan_prefix: &str) -> NormalizedEn
             io: IoFacts::default(),
             degraded: false,
             is_entry: false,
+            overrides: Default::default(),
             attributes: Vec::new(),
             loop_spans: Vec::new(),
             function_spans: Vec::new(),
@@ -79,7 +80,7 @@ pub(super) fn build_overlay(scan_root: &Path, scan_prefix: &str) -> NormalizedEn
 
     NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "fastapi-overlay-prototype/1".to_string(),
         source: scan_root
             .file_name()

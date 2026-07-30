@@ -1,0 +1,23 @@
+{
+  "format": "zzop-normalized-ast",
+  "version": "0.27.0",
+  "parser": "override-required-fix/1",
+  "source": "d59",
+  "files": [
+    {
+      "path": "src/app.py",
+      "loc": 4,
+      "imports": {
+        "util": {
+          "specifier": "src.util.config",
+          "original": "*"
+        }
+      },
+      "overrides": {
+        "imports": [
+          "util"
+        ]
+      }
+    }
+  ]
+}

@@ -5,8 +5,9 @@
 use zzop_core::{
     ClassShapeFragment, ConsumeBodyShape, FileProjection, ImportBinding, IoConsume, IoFacts,
     IoProvide, NonIdempotentKind, NormalizedEnvelope, ProcedureRouterEntry,
-    ProcedureRouterFragment, ProvideBodyField, ProvideBodyShape, ReExport, RouterMountEntry,
-    RouterMountFragment, SourceSymbol, SourceSymbolKind, WriteSite, NORMALIZED_AST_FORMAT,
+    ProcedureRouterFragment, ProjectionOverrides, ProvideBodyField, ProvideBodyShape, ReExport,
+    RouterMountEntry, RouterMountFragment, SourceSymbol, SourceSymbolKind, WriteSite,
+    NORMALIZED_AST_FORMAT,
 };
 
 /// One fully-populated `ProvideBodyField` — every `Option` `Some`, nothing to default.
@@ -208,6 +209,9 @@ pub(crate) fn sample_file_projection() -> FileProjection {
         function_spans: vec![(5, 30)],
         degraded: true,
         is_entry: true,
+        overrides: ProjectionOverrides {
+            imports: vec!["displacedLocalName".to_string()],
+        },
         attributes: Vec::new(),
     }
 }
@@ -215,7 +219,7 @@ pub(crate) fn sample_file_projection() -> FileProjection {
 pub(crate) fn sample_envelope() -> NormalizedEnvelope {
     NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "test-adapter/1".to_string(),
         source: "test-source".to_string(),
         files: vec![sample_file_projection()],

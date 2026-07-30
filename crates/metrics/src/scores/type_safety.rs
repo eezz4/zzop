@@ -26,6 +26,7 @@ pub fn compute_type_safety(
     nodes: &[FileNode],
     counts: &HashMap<String, TypeSafetyCounts>,
     cfg: &ScoresConfig,
+    is_scored: &dyn Fn(&str) -> bool,
 ) -> TypeSafetyScore {
     let loc_by_path: HashMap<&str, u32> = nodes.iter().map(|n| (n.path.as_str(), n.loc)).collect();
 
@@ -35,6 +36,9 @@ pub fn compute_type_safety(
     let mut violations: Vec<TypeSafetyViolation> = Vec::new();
 
     for (path, c) in counts {
+        if !is_scored(path) {
+            continue;
+        }
         let loc = loc_by_path.get(path.as_str()).copied().unwrap_or(1);
         total_as_cast += c.as_cast;
         total_any_type += c.any_type;
@@ -122,7 +126,7 @@ mod tests {
 
     #[test]
     fn empty_counts_total_loc_0_avg_density_0_score_100() {
-        let r = compute_type_safety(&[node("a", 100)], &HashMap::new(), &cfg());
+        let r = compute_type_safety(&[node("a", 100)], &HashMap::new(), &cfg(), &|_| true);
         assert_eq!(r.score, 100.0);
         assert_eq!(r.total_as_cast, 0);
         assert_eq!(r.total_any_type, 0);
@@ -131,7 +135,9 @@ mod tests {
 
     #[test]
     fn zero_casts_over_real_loc_density_0_score_100() {
-        let r = compute_type_safety(&[node("a", 100)], &counts(&[("a", 0, 0)]), &cfg());
+        let r = compute_type_safety(&[node("a", 100)], &counts(&[("a", 0, 0)]), &cfg(), &|_| {
+            true
+        });
         assert_eq!(r.score, 100.0);
         assert_eq!(
             r.violations,
@@ -148,7 +154,9 @@ mod tests {
     #[test]
     fn density_at_the_10_percent_cap_score_0() {
         // asCast+anyType = 10 over loc 100 -> avgDensity 0.1 -> (1 - 0.1/0.1)*100 = 0
-        let r = compute_type_safety(&[node("a", 100)], &counts(&[("a", 6, 4)]), &cfg());
+        let r = compute_type_safety(&[node("a", 100)], &counts(&[("a", 6, 4)]), &cfg(), &|_| {
+            true
+        });
         assert_eq!(r.score, 0.0);
         assert_eq!(r.total_as_cast, 6);
         assert_eq!(r.total_any_type, 4);
@@ -157,7 +165,9 @@ mod tests {
     #[test]
     fn density_above_cap_score_floors_at_0() {
         // 20 casts over loc 100 -> density 0.2 -> (1 - 2)*100 = -100 -> max(0,..) = 0
-        let r = compute_type_safety(&[node("a", 100)], &counts(&[("a", 20, 0)]), &cfg());
+        let r = compute_type_safety(&[node("a", 100)], &counts(&[("a", 20, 0)]), &cfg(), &|_| {
+            true
+        });
         assert_eq!(r.score, 0.0);
     }
 
@@ -169,6 +179,7 @@ mod tests {
             &[node("a", 40), node("b", 60)],
             &counts(&[("a", 2, 2), ("b", 1, 0)]),
             &cfg(),
+            &|_| true,
         );
         assert_eq!(r.score, 50.0);
         assert_eq!(r.total_as_cast, 3);
@@ -181,7 +192,7 @@ mod tests {
     fn missing_node_loc_falls_back_to_1() {
         // path "ghost" not in nodes -> loc defaults to 1; 1 cast over loc 1 -> density 1.0
         // avgDensity = 1/1 = 1 -> (1 - 10)*100 -> 0
-        let r = compute_type_safety(&[], &counts(&[("ghost", 1, 0)]), &cfg());
+        let r = compute_type_safety(&[], &counts(&[("ghost", 1, 0)]), &cfg(), &|_| true);
         assert_eq!(r.violations[0].loc, 1);
         assert_eq!(r.violations[0].density, 1.0);
         assert_eq!(r.score, 0.0);

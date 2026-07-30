@@ -9,8 +9,11 @@
 //! - **Relative** (`./sib`, `../a/b` — the slash-relative form `lang::imports::parse_imports` emits):
 //!   joined against `dirname(from_file)`, normalized (`.`/`..` segments resolved).
 //! - **Absolute dotted** (`a.b.c`) and **bare single-segment** (`fastapi`): the dots become slashes,
-//!   joined from the tree root (`from_file`'s own directory is irrelevant here — Python absolute imports
-//!   always resolve from a top-level package, never relative to the importing file).
+//!   joined from the tree root AND from `src/` (`from_file`'s own directory is irrelevant here — Python
+//!   absolute imports always resolve from a top-level package, never relative to the importing file).
+//!   The `src/` root is the src-layout that setuptools, poetry and hatch all document as the recommended
+//!   project shape; see the comment at the branch for why an extra candidate is free and cannot invent
+//!   an edge. Relative specifiers get the tree root only — they are already anchored to `from_file`.
 //! - **`original`** (the imported name in `from X import name` — `Some("c")` for `from a.b import c`,
 //!   `None`/`Some("*")` for a star import or a plain `import a.b.c`): when present and DISTINCT from the
 //!   resolved base path's own last segment, submodule-first candidates (`<base>/<original>.py`,
@@ -41,15 +44,37 @@ pub fn python_import_candidates(
         specifier.replace('.', "/")
     };
 
+    // Absolute dotted specifiers are tried from the tree root AND from `src/` — the src-layout that
+    // setuptools, poetry and hatch all document as the recommended project shape, where `mypkg` lives at
+    // `src/mypkg/` and is importable as `mypkg` only because the packaging metadata says so. Measured
+    // 2026-07-30: without this, a standard src-layout tree resolves ZERO absolute imports (relative ones
+    // worked, which is what made the gap look like a Python problem rather than a layout one) — the
+    // resolver silently assumed "package name == a directory at the tree root", true for flat layout by
+    // coincidence and false the moment one directory is interposed.
+    //
+    // Reading `pyproject.toml` for the real `where`/`package-dir` value would be the literal-minded fix
+    // and is NOT what this needs: candidates here are filtered by the engine against the set of paths
+    // that actually exist (`resolve_python_import`'s `all_paths.contains`), so an extra spelling costs
+    // one failed set lookup and can never invent an edge. A candidate is a question, not a claim.
+    // Relative specifiers are excluded because they are already anchored to the importing file.
+    let roots: &[&str] = if specifier.starts_with('.') {
+        &[""]
+    } else {
+        &["", "src/"]
+    };
+
     let mut candidates: Vec<String> = Vec::new();
-    if let Some(orig) = original {
-        if !orig.is_empty() && orig != "*" && last_segment(&base) != orig {
-            candidates.push(format!("{base}/{orig}.py"));
-            candidates.push(format!("{base}/{orig}/__init__.py"));
+    for root in roots {
+        let base = format!("{root}{base}");
+        if let Some(orig) = original {
+            if !orig.is_empty() && orig != "*" && last_segment(&base) != orig {
+                candidates.push(format!("{base}/{orig}.py"));
+                candidates.push(format!("{base}/{orig}/__init__.py"));
+            }
         }
+        candidates.push(format!("{base}.py"));
+        candidates.push(format!("{base}/__init__.py"));
     }
-    candidates.push(format!("{base}.py"));
-    candidates.push(format!("{base}/__init__.py"));
 
     let mut seen = std::collections::HashSet::new();
     candidates.retain(|c| seen.insert(c.clone()));
@@ -161,7 +186,12 @@ mod tests {
         // translates that to `None` before calling this function.
         assert_eq!(
             python_import_candidates("a.b.c", None, "x.py"),
-            vec!["a/b/c.py".to_string(), "a/b/c/__init__.py".to_string()],
+            vec![
+                "a/b/c.py".to_string(),
+                "a/b/c/__init__.py".to_string(),
+                "src/a/b/c.py".to_string(),
+                "src/a/b/c/__init__.py".to_string(),
+            ],
         );
     }
 
@@ -183,17 +213,48 @@ mod tests {
                 "a/b/c/__init__.py".to_string(),
                 "a/b.py".to_string(),
                 "a/b/__init__.py".to_string(),
+                "src/a/b/c.py".to_string(),
+                "src/a/b/c/__init__.py".to_string(),
+                "src/a/b.py".to_string(),
+                "src/a/b/__init__.py".to_string(),
             ]
         );
     }
 
+    #[test]
+    fn src_layout_root_is_offered_for_absolute_specifiers_only() {
+        // The regression this branch exists for: a standard src-layout tree (`src/mypkg/...`, the shape
+        // setuptools/poetry/hatch document) resolved ZERO absolute imports before 2026-07-30, because the
+        // candidate list assumed the package name was a directory at the tree root. Relative imports
+        // worked throughout, which is what disguised a LAYOUT gap as a Python one.
+        let abs = python_import_candidates("mypkg.sub.helper", None, "src/mypkg/main.py");
+        assert!(abs.contains(&"src/mypkg/sub/helper.py".to_string()));
+        assert!(abs.contains(&"mypkg/sub/helper.py".to_string()));
+
+        // Relative specifiers are already anchored to the importing file, so a `src/`-prefixed candidate
+        // would name a path no import shape can mean. None is offered.
+        let rel = python_import_candidates("./sib", None, "src/mypkg/main.py");
+        assert!(rel.iter().all(|c| !c.starts_with("src/src/")));
+        assert_eq!(
+            rel,
+            vec![
+                "src/mypkg/sib.py".to_string(),
+                "src/mypkg/sib/__init__.py".to_string(),
+            ]
+        );
+    }
     #[test]
     fn bare_single_segment_external_package_still_expands_but_wont_match_in_tree() {
         // `import fastapi` — external package name, expanded the same way; the engine's membership
         // check against its known-paths set is what actually filters this out as unresolvable.
         assert_eq!(
             python_import_candidates("fastapi", None, "app.py"),
-            vec!["fastapi.py".to_string(), "fastapi/__init__.py".to_string()],
+            vec![
+                "fastapi.py".to_string(),
+                "fastapi/__init__.py".to_string(),
+                "src/fastapi.py".to_string(),
+                "src/fastapi/__init__.py".to_string(),
+            ],
         );
     }
 

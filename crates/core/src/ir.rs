@@ -68,10 +68,10 @@ pub struct WriteSite {
 ///
 /// ## Casing: uniform camelCase OUTPUT, snake_case still accepted on INPUT
 /// Dual-purpose type: an OUTPUT shape (`CommonIr`'s `symbols`, via `MinimalIr`) AND the exact type
-/// `docs/NORMALIZED_AST.md`'s frozen v1 `FileProjection.symbols` external-parser input contract
+/// `docs/NORMALIZED_AST.md`'s `FileProjection.symbols` external-parser input contract
 /// deserializes (see `normalized.rs`, which reuses this struct verbatim). `#[serde(rename_all =
 /// "camelCase")]` makes the OUTPUT uniform with every other output-facing type in this crate; the
-/// per-field `#[serde(alias = ...)]` attributes keep the frozen v1 snake_case INPUT names
+/// per-field `#[serde(alias = ...)]` attributes keep the long-standing snake_case INPUT names
 /// (`is_default`/`body_start`/`body_end`) deserializing alongside the new camelCase ones — additive
 /// on input, unifying on output, not a breaking rename.
 #[derive(Debug, Clone, Serialize, Deserialize)]

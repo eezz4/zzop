@@ -1,6 +1,6 @@
 {
   "format": "zzop-normalized-ast",
-  "version": 1,
+  "version": "0.27.0",
   "parser": "benchmark-attrs/1",
   "source": "benchmark-attrs-web",
   "files": [

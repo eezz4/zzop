@@ -12,8 +12,11 @@ const PERCENT: f64 = 100.0;
 
 /// `score = 100 - (renamed / live) * 100`, where `live` = files with `loc > 0` and `renamed` = live files with
 /// `rename_count > 0`. 100 when there are no live files (nothing to penalize).
-pub fn compute_rename(nodes: &[FileNode]) -> RenameScore {
-    let live: Vec<&FileNode> = nodes.iter().filter(|n| n.loc > 0).collect();
+pub fn compute_rename(nodes: &[FileNode], is_scored: &dyn Fn(&str) -> bool) -> RenameScore {
+    let live: Vec<&FileNode> = nodes
+        .iter()
+        .filter(|n| n.loc > 0 && is_scored(&n.id))
+        .collect();
 
     let mut files: Vec<RenamedFile> = live
         .iter()
@@ -71,7 +74,7 @@ mod tests {
 
     #[test]
     fn no_live_files_score_100() {
-        let r = compute_rename(&[]);
+        let r = compute_rename(&[], &|_| true);
         assert_eq!(r.score, 100.0);
         assert_eq!(r.renamed, 0);
         assert_eq!(r.total, 0);
@@ -80,7 +83,7 @@ mod tests {
 
     #[test]
     fn no_renames_rename_count_undefined_or_zero_score_100() {
-        let r = compute_rename(&[node("a", 10, None), node("b", 10, Some(0))]);
+        let r = compute_rename(&[node("a", 10, None), node("b", 10, Some(0))], &|_| true);
         assert_eq!(r.score, 100.0);
         assert_eq!(r.renamed, 0);
         assert_eq!(r.total, 2);
@@ -89,12 +92,15 @@ mod tests {
     #[test]
     fn one_renamed_out_of_four_score_75() {
         // renamed=1, live=4 -> 100 - (1/4)*100 = 75
-        let r = compute_rename(&[
-            node("moved", 10, Some(2)),
-            node("a", 10, None),
-            node("b", 10, None),
-            node("c", 10, None),
-        ]);
+        let r = compute_rename(
+            &[
+                node("moved", 10, Some(2)),
+                node("a", 10, None),
+                node("b", 10, None),
+                node("c", 10, None),
+            ],
+            &|_| true,
+        );
         assert_eq!(r.score, 75.0);
         assert_eq!(r.renamed, 1);
         assert_eq!(r.total, 4);
@@ -110,7 +116,7 @@ mod tests {
     #[test]
     fn all_files_renamed_score_0_sorted_by_rename_count_desc() {
         // renamed=2, live=2 -> 100 - 100 = 0
-        let r = compute_rename(&[node("a", 10, Some(1)), node("b", 10, Some(3))]);
+        let r = compute_rename(&[node("a", 10, Some(1)), node("b", 10, Some(3))], &|_| true);
         assert_eq!(r.score, 0.0);
         let paths: Vec<&str> = r.files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(paths, vec!["b", "a"]);
@@ -119,7 +125,10 @@ mod tests {
     #[test]
     fn loc_0_files_excluded_from_total_and_renamed() {
         // ghost (loc 0) renamed is ignored; only the live un-renamed file counts
-        let r = compute_rename(&[node("ghost", 0, Some(5)), node("real", 20, None)]);
+        let r = compute_rename(
+            &[node("ghost", 0, Some(5)), node("real", 20, None)],
+            &|_| true,
+        );
         assert_eq!(r.total, 1);
         assert_eq!(r.renamed, 0);
         assert_eq!(r.score, 100.0);

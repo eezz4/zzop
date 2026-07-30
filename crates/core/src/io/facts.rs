@@ -68,7 +68,7 @@ pub struct ProvideBodyShape {
 
 /// An ingress a tree PROVIDES. `key` is the adapter-normalized interface identity.
 /// `#[serde(rename_all = "camelCase")]` is a no-op today (every field is one word) — applied for
-/// future-proofing/consistency; this type is shared with `docs/NORMALIZED_AST.md`'s frozen v1 envelope
+/// future-proofing/consistency; this type is shared with `docs/NORMALIZED_AST.md`'s envelope
 /// input contract (via `FileProjection.io`), but since no field name actually changes there is no casing
 /// conflict to resolve (unlike `SourceSymbol` — see that type's doc).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,7 +83,7 @@ pub struct IoProvide {
     pub symbol: Option<String>,
     /// Request-body contract the handler declares, when statically visible (`@Body()` param with
     /// a class DTO type). See `ProvideBodyShape` — additive/optional, absent everywhere it does
-    /// not apply, so the frozen v1 envelope contract is untouched.
+    /// not apply, so the envelope contract is untouched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<ProvideBodyShape>,
 }

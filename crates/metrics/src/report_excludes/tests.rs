@@ -328,18 +328,40 @@ fn every_single_file_list_drops_the_excluded_row_and_keeps_the_other() {
     );
 }
 
-/// An edge row names TWO files; either endpoint being excluded means printing the row would print an
-/// excluded path, so either endpoint drops it. `diamond` extends that to the whole `through` chain.
+/// An edge row names TWO files and the two sides are not symmetric. The `from`/`root` side is the judged
+/// SUBJECT: it can no longer be excluded here, because `compute_scores` never produced a row for an
+/// excluded subject (`ScoresInput::is_scored`) — the `retain` that still drops it is belt-and-braces, and
+/// this test exercises it directly by handing the function rows it would not receive in a real run.
+///
+/// The far side is different: that row IS counted against a scored file, so dropping it would delete the
+/// evidence for a number the run still reports — the exact defect this seam exists to close. It is
+/// REDACTED instead, the same treatment `zzop_core::registry::redact` gives excluded finding evidence.
+///
+/// Revised 2026-07-30. This test previously asserted that EITHER endpoint dropped the row, which was
+/// coherent while an excluded file changed no score at all.
 #[test]
-fn an_edge_row_drops_when_either_endpoint_is_excluded() {
+fn an_edge_row_drops_on_its_subject_and_redacts_its_far_side() {
     let mut s = sample_scores();
     apply_excludes_to_scores(&mut s, &excludes());
 
-    // The fixture's fsd list has the excluded path once as `from` and once as `to`; only the third row
-    // (neither endpoint excluded) survives.
-    assert_eq!(s.fsd.violations.len(), 1, "{:?}", s.fsd.violations);
-    assert_eq!(s.fsd.violations[0].from, KEEP);
-    assert_eq!(s.fsd.violations[0].to, "src/other.ts");
+    // The fixture's fsd list is (DROP -> KEEP), (KEEP -> DROP), (KEEP -> src/other.ts). The first loses its
+    // subject and goes; the second keeps its subject and only its target is masked.
+    assert_eq!(s.fsd.violations.len(), 2, "{:?}", s.fsd.violations);
+    assert!(
+        s.fsd.violations.iter().all(|v| v.from == KEEP),
+        "no row may survive with an excluded subject: {:?}",
+        s.fsd.violations
+    );
+    assert!(
+        s.fsd.violations.iter().any(|v| v.to == zzop_core::REDACTED),
+        "the excluded target must be redacted, not deleted with its row: {:?}",
+        s.fsd.violations
+    );
+    assert!(
+        s.fsd.violations.iter().any(|v| v.to == "src/other.ts"),
+        "an untouched row must stay untouched: {:?}",
+        s.fsd.violations
+    );
 
     assert_eq!(
         s.hierarchy.violations.len(),
@@ -351,11 +373,15 @@ fn an_edge_row_drops_when_either_endpoint_is_excluded() {
 
     assert_eq!(
         s.public_api.deep_imports.len(),
-        1,
+        2,
         "{:?}",
         s.public_api.deep_imports
     );
-    assert_eq!(s.public_api.deep_imports[0].to, "src/other.ts");
+    assert!(s
+        .public_api
+        .deep_imports
+        .iter()
+        .any(|v| v.to == zzop_core::REDACTED));
 
     assert_eq!(
         s.sibling_cross.violations.len(),
@@ -365,8 +391,17 @@ fn an_edge_row_drops_when_either_endpoint_is_excluded() {
     );
     assert_eq!(s.sibling_cross.violations[0].from, KEEP);
 
-    assert_eq!(s.diamond.pairs.len(), 1, "{:?}", s.diamond.pairs);
-    assert_eq!(s.diamond.pairs[0].through, vec!["src/mid.ts".to_string()]);
+    // `through` is support for a scored root, so an excluded hop is masked rather than deleting the pair.
+    assert_eq!(s.diamond.pairs.len(), 2, "{:?}", s.diamond.pairs);
+    assert!(
+        s.diamond
+            .pairs
+            .iter()
+            .any(|p| p.through.iter().any(|t| t == zzop_core::REDACTED)
+                || p.leaf == zzop_core::REDACTED),
+        "an excluded hop or leaf must be redacted, not drop the pair: {:?}",
+        s.diamond.pairs
+    );
 }
 
 /// Slice- and module-keyed rows are whole-directory rollups, not files the user excluded — the same reason

@@ -73,6 +73,7 @@ fn projection(path: &str, loc: u32) -> FileProjection {
         io: IoFacts::default(),
         degraded: false,
         is_entry: false,
+        overrides: Default::default(),
         attributes: Vec::new(),
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
@@ -123,7 +124,7 @@ fn envelope_produces_ir_dep_and_native_analyses_deterministically() {
 
     let envelope = NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "jsp-lexical/1".to_string(),
         source: "legacy-jsp".to_string(),
         files: vec![controller, util],
@@ -186,7 +187,7 @@ fn envelope_be_joins_cross_layer_with_a_ts_parsed_fe() {
     });
     let be_envelope = NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "jsp-lexical/1".to_string(),
         source: "be".to_string(),
         files: vec![controller],
@@ -314,7 +315,7 @@ fn envelope_disabled_rules_drops_one_rule_and_leaves_its_sibling_pack_mate_intac
 
     let envelope = NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "jsp-lexical/1".to_string(),
         source: "legacy-jsp".to_string(),
         files: vec![handler],
@@ -386,7 +387,7 @@ fn envelope_composes_router_mount_fragments_split_across_two_files() {
 
     let envelope = NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "jsp-lexical/1".to_string(),
         source: "legacy-jsp".to_string(),
         files: vec![mount, sub],

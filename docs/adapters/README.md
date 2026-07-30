@@ -19,8 +19,10 @@ tool and `zzop analyze-envelope <envelope.json>` CLI subcommand run the same fac
 there is none to require either — every OTHER analysis lane refuses a tree without one).
 `zzop-mcp`'s `validate_envelope` tool (and `zzop validate-envelope <file>` subcommand) is a
 separate, structural-validation-only story, distinct from actually running one. To RUN a Mode A
-envelope, use the `zzop-mcp` binary (`zzop analyze-envelope <file>`, or its `analyze_envelope` MCP
-tool) or embed `zzop-facade` directly — there is no other runner. (The historical JS implementation
+envelope, use the `analyze_envelope` MCP tool on `zzop-mcp`, the `zzop analyze-envelope <file>`
+subcommand on the **`zzop` CLI binary**, or embed `zzop-facade` directly — there is no other runner.
+The subcommand is on `zzop`, not on `zzop-mcp`: that binary accepts only `mcp`, `version` and `help`,
+and exits 2 on anything else. (The historical JS implementation
 of the npm CLI, retired 2026-07-20, never ran Mode A either: its only envelope-shaped subcommands
 were `zzop adapter validate <path>`, structural validation only, and `zzop init adapter --mode a|b`,
 which scaffolded starter FILES rather than running an analysis. Today's `@zzop/cli` npm package ships
@@ -100,13 +102,13 @@ verbatim-preservation behavior itself is pinned instead by `crates/core/src/io.r
 
 ## Envelope schema & versioning policy
 
-[`envelope.schema.json`](envelope.schema.json) is a draft-07 JSON Schema for the v1
+[`envelope.schema.json`](envelope.schema.json) is a draft-07 JSON Schema for the
 `NormalizedEnvelope`/`FileProjection` contract, derived field-for-field from the real Rust serde
 types (`crates/core/src/normalized.rs`, `io.rs`, `ir.rs`, `fragments.rs`, `attributes.rs`) — field names,
 required-ness, and nullability all trace back to whether the Rust field carries `#[serde(default)]`.
 
-The versioning policy is the same tolerance philosophy zzop's config surface already uses: this is
-**v1**, and both the engine and any well-behaved consumer **silently ignore unknown fields — no
+The versioning policy is the same tolerance philosophy zzop's config surface already uses: both the
+engine and any well-behaved consumer **silently ignore unknown fields — no
 warning, never a hard fail**. Verified against the engine, not just asserted: none of
 `crates/core/src/{normalized,io,ir,fragments}.rs` sets `#[serde(deny_unknown_fields)]` on any
 envelope-related type, and there is no warning code anywhere in `zzop-engine`/`zzop-core` for an
@@ -121,9 +123,17 @@ in the [Self-disclosure section below](#self-disclosure-coverage-source-and-synt
 unknown fields.
 `additionalProperties: true` at every level in the schema reflects the "ignored" half of that
 tolerance, not a warning. A producer emitting a field ahead of the schema, or omitting any field
-marked optional, still produces a valid envelope. Only a **breaking** change — removing, renaming, or
-re-typing a *required* field — needs a new envelope `version`; additive fields never do. See the
-schema's own `$comment` for the same statement in machine-readable form.
+marked optional, still produces a valid envelope.
+
+What moves `version` is NOT "breaking changes only" — that sentence used to stand here and in the
+schema's `$comment`, and the shipped contract falsifies it. `version` is a zzop RELEASE number
+(`MAJOR.MINOR.PATCH`, the same units `zzop version` prints) and it moves whenever the SHAPE moves,
+ADDITIVE included, if an engine that silently drops the new field would produce a different analysis
+than one that honours it. `overrides` is exactly that case: purely additive, and it carries a version
+floor of `0.27.0` for the reason spelled out in [NORMALIZED_AST.md](../NORMALIZED_AST.md)'s "The
+`overrides` version floor". An additive field an older engine can safely ignore — a hint, an extra
+provenance tag — does not move it, and is what `additionalProperties: true` is for. See the schema's
+own `$comment` for the same statement in machine-readable form.
 
 ## Self-disclosure: coverage, source, and synthetic entries
 

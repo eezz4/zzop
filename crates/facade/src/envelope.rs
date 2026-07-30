@@ -10,7 +10,7 @@ use crate::output::SingleTreeOutputView;
 use crate::request::{EnvelopeAnalyzeRequest, PacksDir};
 
 /// `analyzeEnvelope(envelopeJson, configJson)` (`docs/NORMALIZED_AST.md`'s protocol receiver): validates
-/// `envelopeJson` against the v1 Normalized AST contract (`zzop_core::validate_envelope` — a wrong
+/// `envelopeJson` against the Normalized AST contract (`zzop_core::validate_envelope` — a wrong
 /// `format`/too-new `version`/empty or duplicate `path`/inverted `body_start`..`body_end` all fail here
 /// with a structured, joined message, never a panic), deserializes `configJson` into an
 /// `EnvelopeAnalyzeRequest`, and runs `zzop_engine::analyze_envelope`. Same JSON-string-in/JSON-string-out,

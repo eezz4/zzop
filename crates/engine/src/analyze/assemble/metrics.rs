@@ -87,6 +87,15 @@ pub(super) fn compute(
             Default::default()
         };
 
+        // The top-level `exclude` says "do not judge these paths". It reaches the SCORE computation as a
+        // per-file subject gate rather than as a graph edit: the excluded file stays a node with all its
+        // edges, so every OTHER file's coupling, fan-out and blast radius are unchanged, and only the
+        // excluded file's own standing as a judged subject is removed — from the violation list and the
+        // denominator alike (`ScoresInput::is_scored`). Dropping it from the graph instead would not
+        // filter the report, it would state that a real dependency does not exist.
+        let is_scored =
+            |path: &str| !zzop_metrics::path_excluded(&config.rule_config.global_excludes, path);
+
         let computed_scores = (scores_on || health_on).then(|| {
             let t0 = profile.then(Instant::now);
             let scores = compute_scores(
@@ -99,6 +108,7 @@ pub(super) fn compute(
                     type_safety_counts: &HashMap::new(),
                     lod_by_file: &HashMap::new(),
                     is_source: &is_source,
+                    is_scored: &is_scored,
                 },
                 &config.scores_config,
             );

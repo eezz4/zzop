@@ -378,6 +378,7 @@ fn envelope_projection(path: &str, provide_key: &str, attrs: Vec<Attribute>) -> 
         },
         degraded: false,
         is_entry: false,
+        overrides: Default::default(),
         attributes: attrs,
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
@@ -388,7 +389,7 @@ fn envelope_projection(path: &str, provide_key: &str, attrs: Vec<Attribute>) -> 
 fn envelope_mode_attr_absent_honors_injected_attribute_and_ignores_the_inert_suppress_marker() {
     let envelope = NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "io-scan-e2e-adapter/1".to_string(),
         source: "test".to_string(),
         files: vec![

@@ -34,7 +34,7 @@ fn consume(kind: &str, key: Option<&str>, file: &str, line: u32) -> IoConsume {
 fn envelope(files: Vec<FileProjection>) -> NormalizedEnvelope {
     NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: SUPPORTED_NORMALIZED_AST_VERSION,
+        version: SUPPORTED_NORMALIZED_AST_VERSION.to_string(),
         parser: "hint-fixture/1".to_string(),
         source: "s".to_string(),
         files,
@@ -242,7 +242,7 @@ fn provides_differing_in_any_identity_component_draw_no_hint() {
 // --- the contract: hints never decide validity ---------------------------------------------------
 
 /// THE PIN for this feature: an envelope that trips all four hints is still VALID. Hints ride beside
-/// the verdict; promoting one to a rejection would break the frozen v1 contract (and the CLI exit
+/// the verdict; promoting one to a rejection would reject a conforming envelope (and flip the CLI exit
 /// code) for an envelope that conforms to it.
 #[test]
 fn an_envelope_tripping_every_hint_is_still_valid() {
@@ -276,7 +276,7 @@ fn an_envelope_tripping_every_hint_is_still_valid() {
 #[test]
 fn hints_ride_alongside_issues_but_not_past_a_parse_failure() {
     let mut bad = envelope(vec![file("/abs/a.ts", IoFacts::default())]);
-    bad.version = SUPPORTED_NORMALIZED_AST_VERSION + 1;
+    bad.version = super::one_past_supported_version();
     let verdict = validate_envelope_verdict(&serde_json::to_string(&bad).unwrap());
     assert!(verdict.result.is_err());
     assert_eq!(verdict.hints.len(), 1, "{:?}", verdict.hints);

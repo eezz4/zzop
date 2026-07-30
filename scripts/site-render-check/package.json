@@ -1,0 +1,9 @@
+{
+  "name": "site-render-check",
+  "private": true,
+  "description": "Headless render verification for site/ — see check.mjs for what it seals and why",
+  "type": "module",
+  "dependencies": {
+    "playwright": "1.54.1"
+  }
+}

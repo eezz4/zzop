@@ -7,8 +7,8 @@
 use zzop_core::{merge_findings, CommonIr, IoFacts, MinimalIr};
 
 use crate::analyze::diagnostics::{
-    compute_dsl_scope, minified_files_warning, pack_scope_warnings, rule_overrides_applied,
-    run_diagnostics, uncompilable_rule_warnings, unmatched_global_exclude_warnings,
+    compute_dsl_scope, global_exclude_diagnostics, minified_files_warning, pack_scope_warnings,
+    rule_overrides_applied, run_diagnostics, uncompilable_rule_warnings,
     unmatched_suppression_warnings, unparsed_extension_warning,
 };
 use crate::{pipeline::FileArtifact, AnalyzeOutput, EngineConfig};
@@ -176,7 +176,7 @@ pub(crate) fn assemble(
     }
     warnings.extend(unparsed_extension_warning(&unparsed_extensions));
     warnings.extend(unmatched_suppression_warnings(config, &rels));
-    warnings.extend(unmatched_global_exclude_warnings(config, &rels));
+    warnings.extend(global_exclude_diagnostics(config, &rels));
     warnings.extend(pack_scope_warnings(config, &dsl_scope));
     warnings.extend(uncompilable_rule_warnings(&config.packs)); // dead rule != quiet rule
     helpers::sort_io_provides(&mut io_provides);

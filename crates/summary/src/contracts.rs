@@ -128,7 +128,7 @@ impl IntoIterator for ContractDocs {
 static EMBEDDED_DOCS: &[ContractDoc] = &[
     ContractDoc {
         name: "envelope-schema",
-        description: "JSON Schema (draft-07) for the Normalized AST envelope v1 — machine-validate a custom parser's output.",
+        description: "JSON Schema (draft-07) for the Normalized AST envelope contract — machine-validate a custom parser's output.",
         mime: "application/json",
         content: include_str!("../../../docs/adapters/envelope.schema.json"),
     },

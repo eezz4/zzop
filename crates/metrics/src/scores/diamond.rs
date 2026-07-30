@@ -14,7 +14,11 @@ const MIN_THROUGH: usize = 2;
 /// Detail list is capped like every other scores/* violation list.
 const MAX_DETAIL_ITEMS: usize = 50;
 
-pub fn compute_diamond(dep: &DepGraph, cfg: &ScoresConfig) -> DiamondScore {
+pub fn compute_diamond(
+    dep: &DepGraph,
+    cfg: &ScoresConfig,
+    is_scored: &dyn Fn(&str) -> bool,
+) -> DiamondScore {
     let adj = build_adj(dep);
     let mut pairs: Vec<DiamondPair> = Vec::new();
     let mut seen: HashSet<(String, String)> = HashSet::new();
@@ -22,6 +26,11 @@ pub fn compute_diamond(dep: &DepGraph, cfg: &ScoresConfig) -> DiamondScore {
     // sort — only leaf order matters, and that is deterministic per-root via `collect_two_hop_reach`'s
     // BTreeMap.
     for (root, first_hops) in &adj {
+        // The subject of a diamond is its ROOT. Intermediates and leaves stay in the walk even when
+        // excluded — they are real hops on a scored root's path (see `ScoresInput::is_scored`).
+        if !is_scored(root) {
+            continue;
+        }
         let reach = collect_two_hop_reach(root, first_hops, &adj);
         for (leaf, through) in reach {
             if through.len() < MIN_THROUGH {
@@ -99,7 +108,7 @@ mod tests {
 
     #[test]
     fn empty_graph_score_100_no_pairs() {
-        let r = compute_diamond(&DepGraph::new(), &ScoresConfig::default());
+        let r = compute_diamond(&DepGraph::new(), &ScoresConfig::default(), &|_| true);
         assert_eq!(r.score, 100.0);
         assert_eq!(r.pairs, vec![]);
     }
@@ -112,7 +121,7 @@ mod tests {
             ("b/b.ts", &["leaf/l.ts"]),
             ("leaf/l.ts", &[]),
         ]);
-        let r = compute_diamond(&d, &ScoresConfig::default());
+        let r = compute_diamond(&d, &ScoresConfig::default(), &|_| true);
         assert_eq!(r.pairs.len(), 1);
         assert_eq!(r.pairs[0].root, "r/r.ts");
         assert_eq!(r.pairs[0].leaf, "leaf/l.ts");
@@ -130,7 +139,7 @@ mod tests {
             ("b/b.ts", &[]),
             ("leaf/l.ts", &[]),
         ]);
-        let r = compute_diamond(&d, &ScoresConfig::default());
+        let r = compute_diamond(&d, &ScoresConfig::default(), &|_| true);
         assert_eq!(r.pairs, vec![]);
         assert_eq!(r.score, 100.0);
     }
@@ -142,7 +151,7 @@ mod tests {
             ("a/a.ts", &["react"]),
             ("b/b.ts", &["react"]),
         ]);
-        let r = compute_diamond(&d, &ScoresConfig::default());
+        let r = compute_diamond(&d, &ScoresConfig::default(), &|_| true);
         assert_eq!(r.pairs, vec![]);
         assert_eq!(r.score, 100.0);
     }
@@ -155,7 +164,7 @@ mod tests {
             ("a/a.ts", &["b/b.ts"]),
             ("b/b.ts", &[]),
         ]);
-        let r = compute_diamond(&d, &ScoresConfig::default());
+        let r = compute_diamond(&d, &ScoresConfig::default(), &|_| true);
         assert_eq!(r.pairs, vec![]);
         assert_eq!(r.score, 100.0);
     }

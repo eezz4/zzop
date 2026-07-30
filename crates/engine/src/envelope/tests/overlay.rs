@@ -71,3 +71,101 @@ fn a_rejected_overlay_does_not_suppress_an_accepted_siblings_entry_path() {
         vec!["src/good-entry.ts"]
     );
 }
+
+fn binding(specifier: &str) -> zzop_core::ImportBinding {
+    zzop_core::ImportBinding {
+        specifier: specifier.to_string(),
+        original: "default".to_string(),
+        deferred: false,
+        type_only: false,
+    }
+}
+
+/// A projection carrying dep-graph facts on all three channels.
+fn dep_graph_projection(
+    path: &str,
+    imports: &[(&str, &str)],
+    re_export: Option<&str>,
+    dynamic: Option<&str>,
+) -> zzop_core::FileProjection {
+    let mut p = projection(path, 10);
+    for (local_name, specifier) in imports {
+        p.imports
+            .insert((*local_name).to_string(), binding(specifier));
+    }
+    if let Some(specifier) = re_export {
+        p.re_exports.push(zzop_core::ReExport {
+            specifier: specifier.to_string(),
+            original: "X".to_string(),
+            local_alias: "X".to_string(),
+            type_only: false,
+        });
+    }
+    if let Some(specifier) = dynamic {
+        p.dynamic_imports.push(specifier.to_string());
+    }
+    p
+}
+
+/// THE SEAL for the dep-graph channels' all-or-nothing rule: a native artifact that bound even ONE
+/// import used to discard the overlay's ENTIRE dep-graph contribution for that file, so an adapter's
+/// worth was a function of what the native parser happened to leave empty rather than of what the
+/// adapter knows (`examples/adapters/java-imports-adapter` became a total no-op the day the native Java
+/// parser started emitting imports). Merging is now additive under a per-KEY native-first rule.
+///
+/// Run against the pre-change `merge_projection_onto_artifact` every assertion below except the first
+/// fails — the first (native binding preserved) is what pins that additivity did not cost authority.
+#[test]
+fn an_overlay_adds_dep_graph_facts_a_native_artifact_lacks_without_overriding_the_ones_it_has() {
+    // Stands in for a file the native pass really parsed: one bound local name, nothing else.
+    let mut artifacts = vec![crate::envelope::merge::synthetic_artifact_from_projection(
+        &dep_graph_projection("src/app.ts", &[("alreadyBound", "./native")], None, None),
+    )];
+    let overlays = vec![envelope(vec![dep_graph_projection(
+        "src/app.ts",
+        // `alreadyBound` collides with the native binding and must lose; `addedByAdapter` is new.
+        &[
+            ("alreadyBound", "./adapter-disagrees"),
+            ("addedByAdapter", "./adapter"),
+        ],
+        Some("./re-exported"),
+        Some("./dynamic"),
+    )])];
+    let mut warnings = Vec::new();
+    apply_adapter_overlays(&mut artifacts, &overlays, "test", &mut warnings);
+
+    let imports = artifacts[0].imports.as_ref().expect("dep-graph channel");
+    assert_eq!(
+        imports["alreadyBound"].specifier, "./native",
+        "a native binding stays authoritative — the overlay never overrides a parsed fact"
+    );
+    assert_eq!(
+        imports["addedByAdapter"].specifier, "./adapter",
+        "a local name the native pass never bound is contributed by the overlay"
+    );
+    assert_eq!(artifacts[0].re_exports.len(), 1);
+    assert_eq!(artifacts[0].dynamic_imports, vec!["./dynamic".to_string()]);
+}
+
+/// Additive merging must not duplicate: re-exports and dynamic specifiers have no key, so an overlay
+/// restating a fact the native artifact already holds appends nothing. (`imports` cannot duplicate — the
+/// map's own key handles it, pinned by the collision case above.)
+#[test]
+fn an_overlay_restating_a_native_dep_graph_fact_adds_no_duplicate() {
+    let native = dep_graph_projection(
+        "src/app.ts",
+        &[("bound", "./native")],
+        Some("./re-exported"),
+        Some("./dynamic"),
+    );
+    let mut artifacts = vec![crate::envelope::merge::synthetic_artifact_from_projection(
+        &native,
+    )];
+    let overlays = vec![envelope(vec![native.clone()])];
+    let mut warnings = Vec::new();
+    apply_adapter_overlays(&mut artifacts, &overlays, "test", &mut warnings);
+
+    assert_eq!(artifacts[0].re_exports.len(), 1);
+    assert_eq!(artifacts[0].dynamic_imports.len(), 1);
+    assert_eq!(artifacts[0].imports.as_ref().unwrap().len(), 1);
+}

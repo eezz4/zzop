@@ -54,7 +54,7 @@ impl<'a> SingleTreeOutputView<'a> {
 /// struct-level `rename_all` only governs that struct's own fields, not nested types — each nested type
 /// needs its own attribute.
 ///
-/// `zzop_core::SourceSymbol` doubles as the deserialize target for `docs/NORMALIZED_AST.md`'s frozen v1
+/// `zzop_core::SourceSymbol` doubles as the deserialize target for `docs/NORMALIZED_AST.md`'s
 /// external-parser envelope input contract (`FileProjection.symbols`): output is camelCase like
 /// everything else, while per-field `#[serde(alias = ...)]` attributes keep accepting the frozen
 /// contract's snake_case names on the way in (zzop only ever receives an envelope, never emits one).

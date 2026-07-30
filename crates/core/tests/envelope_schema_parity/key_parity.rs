@@ -28,6 +28,20 @@ fn envelope_schema_matches_normalized_envelope_field_for_field() {
         props(def(&schema, "fileProjection")),
     );
 
+    // $.files[0].overrides -> the inline `overrides` object under fileProjection. Inline rather than a
+    // `$ref` definition, so the schema node is reached through the parent's `properties` rather than
+    // `def()`. Walked here because it was NOT walked before: `overrides` shipped with a schema entry and
+    // no parity assertion, which is exactly the position where a future sub-field can diverge from
+    // `ProjectionOverrides` with every test still green.
+    let overrides = field(file0, "overrides", "$.files[0]");
+    let overrides_schema = &props(def(&schema, "fileProjection"))["overrides"];
+    assert_parity(
+        "$.files[0].overrides",
+        "fileProjection.properties.overrides",
+        overrides,
+        props(overrides_schema),
+    );
+
     // $.files[0].symbols[0] -> definitions.sourceSymbol
     let symbol0 = idx(
         field(file0, "symbols", "$.files[0]"),

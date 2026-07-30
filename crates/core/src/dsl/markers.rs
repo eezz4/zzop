@@ -38,7 +38,8 @@ pub(super) fn is_sql_file(rel: &str) -> bool {
 
 /// How far above a finding a `// <marker>-ok` comment still suppresses it, one uniform window across every
 /// rule. Set to 1: a wider window risks a marker aimed at one call silently suppressing unrelated sibling
-/// findings a few lines below it. Bump `zzop-engine`'s `DSL_INTERPRETER_FINGERPRINT` when changing this.
+/// findings a few lines below it. No fingerprint to bump: `zzop-engine`'s build script hashes this
+/// crate into `DSL_INTERPRETER_FINGERPRINT`, so editing this file moves the cache key by itself.
 const MARKER_LOOKBACK_LINES: usize = 1;
 
 /// Whether the marker comment appears on the finding's own line or within `MARKER_LOOKBACK_LINES` above it.

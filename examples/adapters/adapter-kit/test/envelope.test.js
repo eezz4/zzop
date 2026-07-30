@@ -4,7 +4,7 @@ import {
   EnvelopeBuilder,
   validateEnvelope,
   NORMALIZED_AST_FORMAT,
-  SUPPORTED_NORMALIZED_AST_VERSION,
+  NORMALIZED_AST_CONTRACT_VERSION,
 } from '../lib/envelope.js';
 
 test('EnvelopeBuilder produces a schema-shaped minimal envelope', () => {
@@ -13,7 +13,9 @@ test('EnvelopeBuilder produces a schema-shaped minimal envelope', () => {
   const envelope = b.toEnvelope();
 
   assert.equal(envelope.format, NORMALIZED_AST_FORMAT);
-  assert.equal(envelope.version, SUPPORTED_NORMALIZED_AST_VERSION);
+  // A zzop RELEASE number, not a counter — the builder emits the contract version it writes against,
+  // unconditionally (there is no older engine that reads a semver-declaring envelope at all).
+  assert.equal(envelope.version, NORMALIZED_AST_CONTRACT_VERSION);
   assert.equal(envelope.parser, 'test-adapter/1');
   assert.equal(envelope.source, 'web');
   assert.equal(envelope.files.length, 1);
@@ -78,7 +80,7 @@ test('addProvide rejects a missing/empty key or non-positive line', () => {
 test('validateEnvelope flags duplicate paths and body_end < body_start', () => {
   const envelope = {
     format: NORMALIZED_AST_FORMAT,
-    version: 1,
+    version: NORMALIZED_AST_CONTRACT_VERSION,
     parser: 'x/1',
     source: 'web',
     files: [
@@ -92,9 +94,14 @@ test('validateEnvelope flags duplicate paths and body_end < body_start', () => {
 });
 
 test('validateEnvelope reads the canonical camelCase bodyStart/bodyEnd spelling too', () => {
-  // Wire-canonical names are camelCase (envelope.schema.json); snake_case is a frozen-v1 input
+  // Wire-canonical names are camelCase (envelope.schema.json); snake_case is the long-standing input
   // alias. Both spellings must trip the same body-range check, matching zzop_core's serde aliases.
-  const base = { format: NORMALIZED_AST_FORMAT, version: 1, parser: 'x/1', source: 'web' };
+  const base = {
+    format: NORMALIZED_AST_FORMAT,
+    version: NORMALIZED_AST_CONTRACT_VERSION,
+    parser: 'x/1',
+    source: 'web',
+  };
   const camel = validateEnvelope({
     ...base,
     files: [{ path: 'a.ts', loc: 1, symbols: [{ name: 'f', bodyStart: 10, bodyEnd: 5 }] }],
@@ -107,10 +114,20 @@ test('validateEnvelope reads the canonical camelCase bodyStart/bodyEnd spelling 
   assert.deepEqual(valid, []);
 });
 
-test('validateEnvelope flags unknown format and unsupported version', () => {
-  const errors = validateEnvelope({ format: 'bogus', version: 99, parser: 'x', source: 's', files: [] });
+test('validateEnvelope flags unknown format, a future version, and a malformed one', () => {
+  const errors = validateEnvelope({
+    format: 'bogus',
+    version: '99.0.0',
+    parser: 'x',
+    source: 's',
+    files: [],
+  });
   assert.ok(errors.some((e) => e.includes('unknown format')));
   assert.ok(errors.some((e) => e.includes('unsupported version')));
+  // A bare integer is exactly what a pre-0.27 adapter emitted, so it must fail as MALFORMED rather
+  // than compare as a number — the one shape most likely to reach this kit by accident.
+  const legacy = validateEnvelope({ format: NORMALIZED_AST_FORMAT, version: 1, parser: 'x', source: 's', files: [] });
+  assert.ok(legacy.some((e) => e.includes('malformed version')));
 });
 
 test('toEnvelope throws (not silently emits) an invalid envelope', () => {

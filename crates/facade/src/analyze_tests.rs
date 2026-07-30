@@ -423,7 +423,7 @@ fn analyze_json_defaults_an_empty_source_id_to_the_root_dir_name() {
     // A mismatched-source overlay WITH io facts is exactly the shape that makes the engine name the
     // tree's source_id in a warning (the blind-field-test D14 confusion this defaults away).
     let config = format!(
-        r#"{{"root": {:?}, "adapterOverlays": [{{"format": "zzop-normalized-ast", "version": 1, "parser": "adapter-x/1", "source": "not-this-tree", "files": [{{"path": "external/x.jsp", "loc": 1, "io": {{"provides": [{{"kind": "http", "key": "GET /x", "file": "external/x.jsp", "line": 1}}], "consumes": []}}}}]}}]}}"#,
+        r#"{{"root": {:?}, "adapterOverlays": [{{"format": "zzop-normalized-ast", "version": "0.27.0", "parser": "adapter-x/1", "source": "not-this-tree", "files": [{{"path": "external/x.jsp", "loc": 1, "io": {{"provides": [{{"kind": "http", "key": "GET /x", "file": "external/x.jsp", "line": 1}}], "consumes": []}}}}]}}]}}"#,
         dir.path().display()
     );
     let out = analyze_json(&config).expect("analyze_json should succeed");

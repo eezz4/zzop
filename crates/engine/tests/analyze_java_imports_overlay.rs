@@ -11,8 +11,9 @@
 //!    the REAL `zzop_core::validate_envelope`;
 //! 2. the closed gap itself — the native Java parser yields real dep edges with no overlay at all,
 //!    including edges the imports-only adapter could never see (leaf targets);
-//! 3. merge precedence — an overlay's `imports` are adopted only when the native artifact has none,
-//!    so on today's Java trees this overlay is a no-op: parsed facts are never overridden.
+//! 3. merge precedence — an overlay's `imports` merge additively but NATIVE-FIRST per local name, and
+//!    this adapter's recall is a strict subset of the native parser's, so on today's Java trees it has
+//!    nothing to add: parsed facts are never overridden.
 //!
 //! The example stays as the minimal Mode B "one channel" teaching exhibit — the recipe applies to
 //! any extension without native import extraction (see its README).
@@ -131,11 +132,14 @@ fn native_java_tree_now_has_full_dep_edges() {
 
 #[test]
 fn overlay_imports_never_override_native_imports() {
-    // Merge precedence, pinned from the overlay side: `merge_projection_onto_artifact` adopts an
-    // overlay's `imports` exactly when the native artifact has none. The native Java parser now
-    // populates them, so attaching the example overlay changes NOTHING — the dep graph is
-    // byte-identical to the bare-tree baseline (parsed facts are never overridden, even where the
-    // overlay's recall is a strict subset of the native parser's).
+    // Merge precedence, pinned from the overlay side: `merge_projection_onto_artifact` merges an
+    // overlay's `imports` additively but NATIVE-FIRST per local name. This example's recall is a
+    // strict SUBSET of the native Java parser's, so every local name it offers is already bound
+    // natively and it has nothing to add — the dep graph stays byte-identical to the bare-tree
+    // baseline. Note what this does and does not prove after the 2026-07-30 additive change: it pins
+    // that additivity did not cost native authority, NOT that overlay imports are discarded (they are
+    // not — `envelope::tests::overlay` pins the added-vs-overridden split directly, on a projection
+    // that offers a local name the native side never bound).
     let dir = write_fixture_tree();
     let baseline = analyze_tree(dir.path(), &EngineConfig::default());
     let cfg = EngineConfig {

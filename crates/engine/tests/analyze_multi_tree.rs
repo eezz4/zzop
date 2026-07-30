@@ -97,6 +97,7 @@ fn projection(path: &str, loc: u32) -> FileProjection {
         io: IoFacts::default(),
         degraded: false,
         is_entry: false,
+        overrides: Default::default(),
         attributes: Vec::new(),
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
@@ -106,7 +107,7 @@ fn projection(path: &str, loc: u32) -> FileProjection {
 fn overlay(parser: &str, files: Vec<FileProjection>) -> NormalizedEnvelope {
     NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: parser.to_string(),
         source: "adapter".to_string(),
         files,
@@ -399,7 +400,7 @@ fn user_injected_route_resolves_a_dropped_non_literal_be_route_across_trees() {
     let mut be_cfg = config("be");
     be_cfg.adapter_overlays = vec![NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "user-route-injection/1".to_string(),
         source: "be".to_string(),
         files: vec![injected],

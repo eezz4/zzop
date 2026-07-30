@@ -11,14 +11,31 @@
 //! config excluded contradicts that config; see `zzop_metrics::recommendations`' module doc for the
 //! recommendations half of the same defect.
 //!
-//! ## Computation is NOT filtered — only emission
-//! Blast radius, every `scores.*.score`, and `health.pain` are computed over the WHOLE graph: an excluded
-//! file is still a real importer, and pretending otherwise would corrupt the metric rather than filter the
-//! report. The filter attaches at the ranking/emission step only. The two `unchanged` tests below pin the
-//! directions a later "cleanup" would break:
-//! - `pain` is a whole-tree rollup; filtering it would make the number incomparable with any other run.
-//! - `warnings` is the config-diagnostics channel that carries the "your `exclude` is so broad the problem
-//!   only LOOKS absent" tripwire. Filtering it would let the filter erase its own warning.
+//! ## The graph is not filtered — the SUBJECT SET is (revised 2026-07-30)
+//! This file used to assert the opposite of what it asserts now, and the reason is worth keeping. The
+//! original rule was "computation is never filtered, only emission": every `scores.*.score` and
+//! `health.pain` were computed over the whole tree, so `exclude` moved the lists and left the numbers
+//! exactly where they were. Measured on this repo, excluding three whole top-level directories replaced
+//! every `criticalTop` slot and left `pain` identical to one decimal — the number stayed and the evidence
+//! for it was deleted. For anyone excluding code they cannot change (vendored, generated), `pain` was a
+//! figure with no available action behind it.
+//!
+//! What was right in the original rule is that DELETING the excluded file from the graph would corrupt
+//! the metric: an excluded file is still a real importer and a real import target, and a scored file's
+//! coupling and fan-out must not move because someone stopped reporting on its dependency. Both halves
+//! are now true at once, because the filter attaches to the SUBJECT rather than to the graph — an
+//! excluded file is not judged (it leaves the violation list AND the denominator, the same both-sides
+//! rule `is_source` already enforced for `sfc`/`god_file`), while staying a full participant in every
+//! other file's facts. `an_excluded_file_stays_a_real_import_target_for_the_files_that_import_it` pins
+//! that second half.
+//!
+//! Two channels still take no filter of any kind:
+//! - Slice/module-keyed rows (`cohesion.slices`, `sdp.violations`, `mainSequence.modules`, and the
+//!   `modularity` rollup): their subject is a directory, not a file, so "this file is not judged" has no
+//!   referent. Those four metrics never receive the subject gate either — the counted set and the
+//!   printed set are kept identical on purpose.
+//! - `warnings`, the config-diagnostics channel carrying the "your `exclude` is so broad the problem only
+//!   LOOKS absent" tripwire. Filtering it would let the filter erase its own warning.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -295,46 +312,116 @@ fn global_excludes_drop_scores_violation_lists_for_excluded_paths() {
     );
 }
 
-/// `pain` is a whole-tree rollup — filtering it would make the number incomparable with any other run, so
-/// the emission filter must run AFTER `compute_health_index`. Every `scores.*.score` (and the `sfc`
-/// compliant/total denominator the score is derived from) is the same kind of rollup and is pinned here
-/// too: the score says how the tree is, the list says what to look at.
+/// `exclude` means "do not JUDGE these paths", and until 2026-07-30 it reached only the lists — the score
+/// and `pain` were computed over the whole tree and did not move. Measured on this repo, excluding three
+/// whole top-level directories replaced every `criticalTop` slot and left `pain` identical to one decimal:
+/// the number stayed and the evidence for it was deleted, which is the honesty defect inverted (the
+/// figure was unactionable for anyone excluding code they cannot change).
+///
+/// The rule now: an excluded file is not a SUBJECT. It leaves both the violation list and the denominator
+/// behind the score, exactly as a non-source file already did for `sfc`/`god_file` via `is_source`. Pinned
+/// here as the seal on the reversal — this replaces the former
+/// `global_excludes_do_not_change_pain_or_any_score`, whose name stated the invariant this test states the
+/// negation of.
+///
+/// What did NOT change is pinned by its sibling below: the graph itself. An excluded file stays a node
+/// with all its edges, so a scored file's coupling and fan-out are untouched.
 #[test]
-fn global_excludes_do_not_change_pain_or_any_score() {
+fn global_excludes_shrink_both_the_violation_list_and_its_denominator() {
     if !git_available() {
-        eprintln!("skipping global_excludes_do_not_change_pain_or_any_score: git not on PATH");
+        eprintln!("skipping global_excludes_shrink_both_the_violation_list_and_its_denominator: git not on PATH");
         return;
     }
     let dir = fixture_repo();
     let baseline = analyze_tree(dir.path(), &config_with_git());
     let out = analyze_tree(dir.path(), &config_excluding_legacy());
 
+    let base_scores = baseline.scores.as_ref().expect("git-active run has scores");
+    let scores = out.scores.as_ref().expect("git-active run has scores");
+
+    // The denominator is the load-bearing half: leaving the excluded file in it while dropping it from the
+    // violations would silently INFLATE the compliant ratio — a worse answer than either honest option.
+    assert!(
+        scores.sfc.total < base_scores.sfc.total,
+        "the sfc denominator must shrink by the excluded file(s): baseline total={} excluded total={}",
+        base_scores.sfc.total,
+        scores.sfc.total
+    );
+
+    // And `pain` does NOT move here, which is the property worth pinning rather than an oversight: the
+    // fixture mirrors `legacy/` and `src/` exactly, so excluding one half removes proportionally as much
+    // from each numerator as from its denominator. A subject gate changes a RATIO; it does not subtract
+    // badness. If this ever starts moving on a symmetric exclusion, the gate has become a graph edit.
     let base_health = baseline.health.as_ref().expect("git-active run has health");
     let health = out.health.as_ref().expect("git-active run has health");
     assert_eq!(
-        base_health, health,
-        "pain (and its contributors) is a whole-tree rollup — `exclude` must not move it"
+        base_health.pain, health.pain,
+        "excluding a REPRESENTATIVE slice must leave pain where it is — the ratio is unchanged"
     );
+}
 
-    let base_scores = baseline.scores.as_ref().expect("git-active run has scores");
-    let scores = out.scores.as_ref().expect("git-active run has scores");
-    assert_eq!(
-        base_scores.sfc.score, scores.sfc.score,
-        "sfc.score is computed over the whole tree; only its `violations` list is filtered"
+/// The other direction, and the one the whole change exists for: excluding a slice that is WORSE than the
+/// rest must lower `pain`. Here only `legacy/hub.ts` is excluded — the 320-line god file — while its three
+/// small importers stay in the denominator, so the judged population gets proportionally cleaner.
+///
+/// Under the pre-2026-07-30 rule this assertion could not have been written at all: `pain` was computed
+/// before any exclusion existed and was byte-identical for every `exclude` a user could spell.
+#[test]
+fn excluding_a_worse_than_average_file_lowers_pain() {
+    if !git_available() {
+        eprintln!("skipping excluding_a_worse_than_average_file_lowers_pain: git not on PATH");
+        return;
+    }
+    let dir = fixture_repo();
+    let baseline = analyze_tree(dir.path(), &config_with_git());
+    let cfg = EngineConfig {
+        rule_config: RuleConfig {
+            global_excludes: vec![GlobalExclude {
+                path: Some("legacy/hub.ts".to_string()),
+                glob: None,
+            }],
+            ..RuleConfig::default()
+        },
+        ..config_with_git()
+    };
+    let out = analyze_tree(dir.path(), &cfg);
+
+    let base_health = baseline.health.as_ref().expect("git-active run has health");
+    let health = out.health.as_ref().expect("git-active run has health");
+    assert!(
+        health.pain < base_health.pain,
+        "excluding a worse-than-average file must lower pain: baseline={} excluded={}",
+        base_health.pain,
+        health.pain
     );
-    assert_eq!(
-        (base_scores.sfc.compliant, base_scores.sfc.total),
-        (scores.sfc.compliant, scores.sfc.total),
-        "the sfc denominator must not shrink — that would be filtering the COMPUTATION"
-    );
-    assert_eq!(
-        base_scores.god_file.score, scores.god_file.score,
-        "godFile.score is computed over the whole tree; only its `files` list is filtered"
-    );
-    assert_eq!(
-        base_scores.fsd.score, scores.fsd.score,
-        "fsd.score is computed over the whole tree; only its `violations` list is filtered"
-    );
+}
+
+/// The other half of the same rule, and the reason this is a subject gate rather than a graph edit: an
+/// excluded file is still a real node with real edges. A scored file that imports excluded code keeps that
+/// dependency — its `fanOut` is unchanged — because the dependency exists and the SCORED file is the one
+/// that chose it. Deleting the node instead would not filter the report, it would report that a real
+/// import does not exist, and would make every importer look cleaner than it is.
+#[test]
+fn an_excluded_file_stays_a_real_import_target_for_the_files_that_import_it() {
+    if !git_available() {
+        eprintln!("skipping an_excluded_file_stays_a_real_import_target_for_the_files_that_import_it: git not on PATH");
+        return;
+    }
+    let dir = fixture_repo();
+    let baseline = analyze_tree(dir.path(), &config_with_git());
+    let out = analyze_tree(dir.path(), &config_excluding_legacy());
+
+    let fan_out =
+        |o: &AnalyzeOutput, id: &str| o.nodes.iter().find(|n| n.id == id).map(|n| n.fan_out);
+
+    for node in &baseline.nodes {
+        assert_eq!(
+            fan_out(&baseline, &node.id),
+            fan_out(&out, &node.id),
+            "`exclude` must not edit the graph — {} lost or gained fan-out",
+            node.id
+        );
+    }
 }
 
 /// `warnings` is the config-diagnostics channel: `exclude` set so broad that a real problem only LOOKS
@@ -359,8 +446,24 @@ fn global_excludes_do_not_reach_warnings() {
         "fixture must produce a warning naming an excluded path, else the assertion is vacuous: {:?}",
         baseline.warnings
     );
-    assert_eq!(
-        baseline.warnings, out.warnings,
-        "`exclude` must not reach the warnings channel — it would erase its own over-broad-exclude tripwire"
+    // Containment, not equality: the contract is that `exclude` never REMOVES a warning, and the excluded
+    // run legitimately gains one the baseline cannot have — the scoping disclosure, which exists precisely
+    // because `exclude` now moves `pain` (`scoring_scope_warning`). Asserting equality would have made
+    // adding any honest disclosure look like a regression.
+    for w in &baseline.warnings {
+        assert!(
+            out.warnings.contains(w),
+            "`exclude` must not erase a warning — missing from the excluded run: {w}"
+        );
+    }
+    assert!(
+        out.warnings.iter().any(|w| w.contains("from SCORING")),
+        "the excluded run must disclose that `exclude` changed the scored population: {:?}",
+        out.warnings
+    );
+    assert!(
+        !baseline.warnings.iter().any(|w| w.contains("from SCORING")),
+        "a run with no `exclude` has no scoping to disclose: {:?}",
+        baseline.warnings
     );
 }

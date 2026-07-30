@@ -17,7 +17,7 @@ fn analyze_request_adapter_overlays_flow_into_engine_config() {
         "adapterOverlays": [
             {
                 "format": "zzop-normalized-ast",
-                "version": 1,
+                "version": "0.27.0",
                 "parser": "test-adapter/1",
                 "source": "legacy",
                 "files": [

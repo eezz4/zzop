@@ -40,7 +40,7 @@
     <ul>
       <li><strong>All analysis is local.</strong> The <code>zzop</code> CLI, the <code>zzop-mcp</code> MCP server, and the npm packages run entirely on your machine and read only the repository paths you point them at.</li>
       <li><strong>No network access.</strong> The analysis binaries make no network requests of any kind — by design, they carry zero HTTP dependencies. This is verifiable from the source and the dependency tree.</li>
-      <li><strong>No telemetry.</strong> There is no usage tracking, no crash reporting, no analytics, no phone-home of any kind — not in the binaries, not in the MCP server, not in the Claude Code plugin.</li>
+      <li><strong>No telemetry.</strong> There is no usage tracking, no crash reporting, no analytics, and nothing about you or your code is ever sent anywhere — not by the binaries, not by the MCP server, not by the Claude Code plugin. One network call is not covered by that sentence and is named here rather than buried: the plugin's <code>SessionStart</code> hook asks <code>api.github.com</code> for the latest release tag, on every session, so it can <em>report</em> that a newer version exists (it never installs one). That request carries your IP and reveals that a session started; it carries nothing else. The analysis binaries themselves make no network requests at all.</li>
       <li><strong>No accounts, no keys.</strong> zzop requires no sign-up, no API key, and no credentials.</li>
       <li><strong>MCP communication stays local.</strong> The MCP server speaks JSON-RPC over stdio with your MCP client (e.g. Claude Code / Claude Desktop) on your machine. What that client then does with analysis results is governed by that client's own privacy policy, not this one.</li>
     </ul>

@@ -161,7 +161,7 @@ The surfaces SemVer will cover:
 |---|---|
 | SDK / CLI JSON output (`analyze` / `analyzeTrees` / `analyzeEnvelope`) | Field names and types. New fields are added (minor); existing fields are not removed or repurposed without a major bump. |
 | CLI flags & config keys | Removing or repurposing a flag/key is a major bump; adding one is minor. Unknown keys are ignored with a warning, never a hard error. |
-| Normalized AST envelope input ([`docs/NORMALIZED_AST.md`](docs/NORMALIZED_AST.md)) | The frozen `v1` contract external parser adapters emit. A new contract version would be additive, never a silent change to `v1`. |
+| Normalized AST envelope input ([`docs/NORMALIZED_AST.md`](docs/NORMALIZED_AST.md)) | The envelope shape external parser adapters emit. Its `version` field is a RELEASE number in these same units, and moves only when the shape moves — so an adapter emitting a given version keeps being accepted through every later release that did not change the shape. A shape change is never silent: a consumer rejects a version above its own, and a field whose absence would change the analysis carries an explicit floor. |
 | Rule ids | The `disabledRules` / `severityOverrides` ids you configure against. A rename is a major bump. |
 
 ## Explicitly NOT part of the compatibility surface

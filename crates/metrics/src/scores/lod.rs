@@ -28,6 +28,7 @@ pub fn compute_lod(
     nodes: &[FileNode],
     lod_by_file: &HashMap<String, Vec<LodChain>>,
     cfg: &ScoresConfig,
+    is_scored: &dyn Fn(&str) -> bool,
 ) -> LodScore {
     let loc_by_path: HashMap<&str, u32> = nodes.iter().map(|n| (n.path.as_str(), n.loc)).collect();
 
@@ -35,6 +36,9 @@ pub fn compute_lod(
     let mut summaries: Vec<LodFileSummary> = Vec::new();
 
     for (path, chains) in lod_by_file {
+        if !is_scored(path) {
+            continue;
+        }
         let count = chains.len() as u32;
         let max_depth = chains.iter().map(|c| c.depth).max().unwrap_or(0);
         let loc = loc_by_path.get(path.as_str()).copied().unwrap_or(1);
@@ -56,7 +60,10 @@ pub fn compute_lod(
             .then_with(|| a.path.cmp(&b.path))
     });
 
-    let file_count = nodes.iter().filter(|n| n.loc > 0).count();
+    let file_count = nodes
+        .iter()
+        .filter(|n| n.loc > 0 && is_scored(&n.id))
+        .count();
     let avg_count = if file_count > 0 {
         f64::from(total_violations) / file_count as f64
     } else {
@@ -117,6 +124,7 @@ mod tests {
             &[node("a.ts", 10), node("b.ts", 20)],
             &HashMap::new(),
             &cfg(),
+            &|_| true,
         );
         assert_eq!(r.score, 100.0);
         assert_eq!(r.total_violations, 0);
@@ -130,7 +138,12 @@ mod tests {
         // score = round((1 - 1.5/10) * 100) = round(85) = 85
         let lod_by_file: HashMap<String, Vec<LodChain>> =
             HashMap::from([("a.ts".to_string(), vec![chain(3), chain(5), chain(4)])]);
-        let r = compute_lod(&[node("a.ts", 10), node("b.ts", 20)], &lod_by_file, &cfg());
+        let r = compute_lod(
+            &[node("a.ts", 10), node("b.ts", 20)],
+            &lod_by_file,
+            &cfg(),
+            &|_| true,
+        );
         assert_eq!(r.score, 85.0);
         assert_eq!(r.total_violations, 3);
         assert_eq!(r.violations.len(), 1);
@@ -146,14 +159,14 @@ mod tests {
         // 1 file with loc > 0, 10 chains -> avgCount = 10/1 = 10 -> (1 - 1) * 100 = 0
         let at_10: HashMap<String, Vec<LodChain>> =
             HashMap::from([("a.ts".to_string(), (0..10).map(|_| chain(3)).collect())]);
-        let r = compute_lod(&[node("a.ts", 5)], &at_10, &cfg());
+        let r = compute_lod(&[node("a.ts", 5)], &at_10, &cfg(), &|_| true);
         assert_eq!(r.score, 0.0);
         assert_eq!(r.total_violations, 10);
 
         // 20 chains -> avgCount = 20 -> (1 - 2) * 100 = -100 -> clamped to 0
         let above: HashMap<String, Vec<LodChain>> =
             HashMap::from([("a.ts".to_string(), (0..20).map(|_| chain(3)).collect())]);
-        let r = compute_lod(&[node("a.ts", 5)], &above, &cfg());
+        let r = compute_lod(&[node("a.ts", 5)], &above, &cfg(), &|_| true);
         assert_eq!(r.score, 0.0);
         assert_eq!(r.total_violations, 20);
     }
@@ -165,7 +178,12 @@ mod tests {
             ("a.ts".to_string(), vec![chain(3), chain(3)]),
             ("b.ts".to_string(), vec![chain(3), chain(3), chain(3)]),
         ]);
-        let r = compute_lod(&[node("a.ts", 100), node("b.ts", 10)], &lod_by_file, &cfg());
+        let r = compute_lod(
+            &[node("a.ts", 100), node("b.ts", 10)],
+            &lod_by_file,
+            &cfg(),
+            &|_| true,
+        );
         let paths: Vec<&str> = r.violations.iter().map(|v| v.path.as_str()).collect();
         assert_eq!(paths, vec!["b.ts", "a.ts"]);
         assert!((r.violations[0].density - 0.3).abs() < 1e-10);
@@ -181,7 +199,12 @@ mod tests {
         // avgCount = totalViolations(2) / 1 = 2 -> round((1 - 0.2) * 100) = 80
         let lod_by_file: HashMap<String, Vec<LodChain>> =
             HashMap::from([("ghost.ts".to_string(), vec![chain(3), chain(3)])]);
-        let r = compute_lod(&[node("a.ts", 10), node("z.ts", 0)], &lod_by_file, &cfg());
+        let r = compute_lod(
+            &[node("a.ts", 10), node("z.ts", 0)],
+            &lod_by_file,
+            &cfg(),
+            &|_| true,
+        );
         assert_eq!(r.violations[0].path, "ghost.ts");
         assert_eq!(r.violations[0].count, 2);
         assert_eq!(r.violations[0].loc, 1);

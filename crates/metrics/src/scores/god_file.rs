@@ -21,6 +21,7 @@ pub fn compute_god_file<F>(
     target: Option<&str>,
     cfg: &ScoresConfig,
     is_source: F,
+    is_scored: &dyn Fn(&str) -> bool,
 ) -> GodFileScore
 where
     F: Fn(&str) -> bool,
@@ -29,7 +30,7 @@ where
     let limit = (sfc_limit as f64 * cfg.thresholds.god_file.loc_multiplier).round() as u32;
     let live: Vec<&FileNode> = nodes
         .iter()
-        .filter(|n| n.loc > 0 && is_source(&n.id))
+        .filter(|n| n.loc > 0 && is_source(&n.id) && is_scored(&n.id))
         .collect();
     let mut gods: Vec<GodFile> = live
         .iter()
@@ -81,7 +82,7 @@ mod tests {
     #[test]
     fn no_live_files_score_100_default_limit_300() {
         // no target -> sfcLimit 150 -> limit 300
-        let r = compute_god_file(&[], None, &ScoresConfig::default(), |_| true);
+        let r = compute_god_file(&[], None, &ScoresConfig::default(), |_| true, &|_| true);
         assert_eq!(r.score, 100.0);
         assert_eq!(r.limit, 300);
         assert_eq!(r.files, vec![]);
@@ -91,7 +92,7 @@ mod tests {
     fn all_files_under_limit_score_100() {
         // default limit 300; both <= 300
         let nodes = [node("a", 100), node("b", 300)];
-        let r = compute_god_file(&nodes, None, &ScoresConfig::default(), |_| true);
+        let r = compute_god_file(&nodes, None, &ScoresConfig::default(), |_| true, &|_| true);
         assert_eq!(r.score, 100.0);
         assert_eq!(r.files, vec![]);
     }
@@ -105,7 +106,7 @@ mod tests {
             node("b", 100),
             node("c", 100),
         ];
-        let r = compute_god_file(&nodes, None, &ScoresConfig::default(), |_| true);
+        let r = compute_god_file(&nodes, None, &ScoresConfig::default(), |_| true, &|_| true);
         assert_eq!(r.score, 50.0);
         assert_eq!(
             r.files,
@@ -120,7 +121,7 @@ mod tests {
     fn half_of_files_are_god_files_score_floors_at_0() {
         // gods=1, live=2 -> 100 - (1/2)*200 = 0
         let nodes = [node("god", 700), node("ok", 50)];
-        let r = compute_god_file(&nodes, None, &ScoresConfig::default(), |_| true);
+        let r = compute_god_file(&nodes, None, &ScoresConfig::default(), |_| true, &|_| true);
         assert_eq!(r.score, 0.0);
     }
 
@@ -128,7 +129,13 @@ mod tests {
     fn target_fe_lowers_the_limit_100_to_200() {
         // target fe -> sfcLimit 100 -> limit 200; loc 250 > 200 is a god file
         let nodes = [node("big", 250)];
-        let r = compute_god_file(&nodes, Some("fe"), &ScoresConfig::default(), |_| true);
+        let r = compute_god_file(
+            &nodes,
+            Some("fe"),
+            &ScoresConfig::default(),
+            |_| true,
+            &|_| true,
+        );
         assert_eq!(r.limit, 200);
         assert_eq!(
             r.files,
@@ -147,9 +154,13 @@ mod tests {
         // live/limit denominator — it is treated as absent from the metric entirely, so a lone compliant
         // source file still scores a perfect 100.
         let nodes = [node("pnpm-lock.yaml", 5174), node("src/app.ts", 100)];
-        let r = compute_god_file(&nodes, None, &ScoresConfig::default(), |id| {
-            id == "src/app.ts"
-        });
+        let r = compute_god_file(
+            &nodes,
+            None,
+            &ScoresConfig::default(),
+            |id| id == "src/app.ts",
+            &|_| true,
+        );
         assert_eq!(r.files, vec![]);
         assert_eq!(r.score, 100.0);
     }
@@ -159,7 +170,7 @@ mod tests {
         // Same 5174 LOC, but now source: the gate is about source-ness, not about magically raising the
         // limit, so a source file of that size still lands in `files` as a god file.
         let nodes = [node("src/huge.ts", 5174)];
-        let r = compute_god_file(&nodes, None, &ScoresConfig::default(), |_| true);
+        let r = compute_god_file(&nodes, None, &ScoresConfig::default(), |_| true, &|_| true);
         assert_eq!(
             r.files,
             vec![GodFile {

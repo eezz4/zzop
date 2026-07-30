@@ -19,7 +19,7 @@ mod unparsed_extension_tests;
 pub(super) use capability::{git_not_requested_warning, unparsed_extension_warning};
 pub(crate) use capability::{uncompilable_rule_warnings, zero_packs_warning};
 pub(crate) use config_filters::{
-    unmatched_global_exclude_warnings, unmatched_suppression_warnings,
+    global_exclude_diagnostics, unmatched_global_exclude_warnings, unmatched_suppression_warnings,
 };
 pub(crate) use coverage_report::{rule_overrides_applied, run_diagnostics};
 pub(super) use git_collect::collect_git;

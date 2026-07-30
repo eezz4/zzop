@@ -319,7 +319,7 @@ fn declares_reports_vocabulary_presence_independently_of_truthiness() {
 fn overlay_with_attrs(attrs: Vec<Attribute>) -> crate::NormalizedEnvelope {
     crate::NormalizedEnvelope {
         format: crate::NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: crate::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "test-overlay/1".to_string(),
         source: "test".to_string(),
         files: vec![crate::FileProjection {
@@ -337,6 +337,7 @@ fn overlay_with_attrs(attrs: Vec<Attribute>) -> crate::NormalizedEnvelope {
             io: crate::IoFacts::default(),
             degraded: false,
             is_entry: false,
+            overrides: Default::default(),
             attributes: attrs,
             loop_spans: Vec::new(),
             function_spans: Vec::new(),

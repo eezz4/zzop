@@ -95,6 +95,7 @@ fn projection(path: &str, loc: u32) -> FileProjection {
         io: IoFacts::default(),
         degraded: false,
         is_entry: false,
+        overrides: Default::default(),
         attributes: Vec::new(),
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
@@ -113,7 +114,7 @@ fn projection_with_attrs(path: &str, loc: u32, attrs: Vec<Attribute>) -> FilePro
 fn overlay(parser: &str, files: Vec<FileProjection>) -> NormalizedEnvelope {
     NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: parser.to_string(),
         source: "adapter".to_string(),
         files,

@@ -164,7 +164,7 @@ pub(crate) fn symbol_scan_pack_json(pack_id: &str, rule_id: &str, name_pattern: 
     )
 }
 
-/// A valid v1 envelope whose single file carries the given top-level symbol names — the envelope-mode
+/// A valid envelope whose single file carries the given top-level symbol names — the envelope-mode
 /// counterpart of `cycle_fixture` + a marker file, for `symbol_scan_pack_json` rules to fire against.
 pub(crate) fn envelope_with_symbols(names: &[&str]) -> String {
     let symbols = names
@@ -181,7 +181,7 @@ pub(crate) fn envelope_with_symbols(names: &[&str]) -> String {
     format!(
         r#"{{
             "format": "zzop-normalized-ast",
-            "version": 1,
+            "version": "0.27.0",
             "parser": "test/1",
             "source": "legacy",
             "files": [
@@ -194,7 +194,7 @@ pub(crate) fn envelope_with_symbols(names: &[&str]) -> String {
 pub(crate) fn tiny_envelope_json() -> String {
     r#"{
         "format": "zzop-normalized-ast",
-        "version": 1,
+        "version": "0.27.0",
         "parser": "jsp-lexical/1",
         "source": "legacy",
         "files": [

@@ -10,10 +10,14 @@ const PERCENT: f64 = 100.0;
 
 /// `ratio = fix / total` across all tag counts on all nodes; `score = clamp(round((1 - ratio/cap) * 100), 0, 100)`.
 /// `ratio` is 0 when there are no tagged commits at all.
-pub fn compute_fix_ratio(nodes: &[FileNode], cfg: &ScoresConfig) -> FixRatioScore {
+pub fn compute_fix_ratio(
+    nodes: &[FileNode],
+    cfg: &ScoresConfig,
+    is_scored: &dyn Fn(&str) -> bool,
+) -> FixRatioScore {
     let mut fix: u32 = 0;
     let mut total: u32 = 0;
-    for n in nodes {
+    for n in nodes.iter().filter(|n| is_scored(&n.id)) {
         for (tag, count) in &n.tag_counts {
             total += count;
             if tag == "FIX" {
@@ -72,7 +76,7 @@ mod tests {
 
     #[test]
     fn fix_count_0_score_100() {
-        let r = compute_fix_ratio(&[node(&[("ADD", 10), ("UPDATE", 5)])], &cfg());
+        let r = compute_fix_ratio(&[node(&[("ADD", 10), ("UPDATE", 5)])], &cfg(), &|_| true);
         assert_eq!(r.score, 100.0);
         assert_eq!(r.fix, 0);
         assert_eq!(r.ratio, 0.0);
@@ -80,7 +84,7 @@ mod tests {
 
     #[test]
     fn fix_at_least_30_percent_score_0_capped() {
-        let r = compute_fix_ratio(&[node(&[("FIX", 5), ("ADD", 5)])], &cfg());
+        let r = compute_fix_ratio(&[node(&[("FIX", 5), ("ADD", 5)])], &cfg(), &|_| true);
         assert_eq!(r.score, 0.0);
         assert_eq!(r.ratio, 0.5);
     }
@@ -88,14 +92,17 @@ mod tests {
     #[test]
     fn fix_10_percent_approx_67() {
         // (1 - 0.1/0.3) * 100
-        let r = compute_fix_ratio(&[node(&[("FIX", 1), ("ADD", 9)])], &cfg());
+        let r = compute_fix_ratio(&[node(&[("FIX", 1), ("ADD", 9)])], &cfg(), &|_| true);
         assert_eq!(r.score, 67.0);
     }
 
     #[test]
     fn no_nodes_or_no_tags_score_100() {
-        assert_eq!(compute_fix_ratio(&[], &cfg()).score, 100.0);
-        assert_eq!(compute_fix_ratio(&[node(&[])], &cfg()).score, 100.0);
+        assert_eq!(compute_fix_ratio(&[], &cfg(), &|_| true).score, 100.0);
+        assert_eq!(
+            compute_fix_ratio(&[node(&[])], &cfg(), &|_| true).score,
+            100.0
+        );
     }
 
     #[test]
@@ -106,6 +113,7 @@ mod tests {
                 node(&[("FIX", 1), ("ADD", 4)]),
             ],
             &cfg(),
+            &|_| true,
         );
         assert_eq!(r.fix, 3);
         assert_eq!(r.total, 10);

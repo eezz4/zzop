@@ -304,7 +304,7 @@ fn check_endpoint_rejects_non_string_pattern_path_and_config_path() {
 }
 
 /// `docs/NORMALIZED_AST.md`'s worked example (also served as the `example-envelope` MCP contract
-/// resource, `zzop_summary::contracts`) — a minimal, valid, one-file v1 envelope.
+/// resource, `zzop_summary::contracts`) — a minimal, valid, one-file envelope.
 const EXAMPLE_ENVELOPE: &str = include_str!("../../../../docs/contracts/example-envelope.json");
 
 #[test]

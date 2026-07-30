@@ -13,7 +13,7 @@ fn overlay_happy_path_attaches_parsed_json_to_adapter_overlays() {
     let dir = TempDir::new("zzop-config-overlay-happy");
     dir.write(
         "overlay.json",
-        r#"{"format": "zzop-normalized-ast", "version": 1}"#,
+        r#"{"format": "zzop-normalized-ast", "version": "0.27.0"}"#,
     );
     let mapped = config_to_request(
         &json!({"roots": ["."], "overlays": ["overlay.json"]}),
@@ -24,7 +24,7 @@ fn overlay_happy_path_attaches_parsed_json_to_adapter_overlays() {
     let overlays = req["adapterOverlays"].as_array().unwrap();
     assert_eq!(overlays.len(), 1);
     assert_eq!(overlays[0]["format"], "zzop-normalized-ast");
-    assert_eq!(overlays[0]["version"], 1);
+    assert_eq!(overlays[0]["version"], "0.27.0");
     assert!(mapped.warnings.iter().all(|w| !w.contains("overlay")));
 }
 

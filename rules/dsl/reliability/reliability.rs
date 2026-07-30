@@ -135,7 +135,7 @@ fn deny_env_config_for_file(overlay: &mut zzop_core::NormalizedEnvelope, path: &
 fn overlay_with_attributes(attributes: Vec<zzop_core::Attribute>) -> zzop_core::NormalizedEnvelope {
     zzop_core::NormalizedEnvelope {
         format: zzop_core::NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "reliability-fixture-declarations/1".to_string(),
         source: String::new(),
         files: vec![zzop_core::FileProjection {

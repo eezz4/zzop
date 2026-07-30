@@ -267,3 +267,31 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Detection benchmark
         run: bash scripts/measure/detection-gate.sh
+
+  site-render-check:
+    # The one lane that looks at the PICTURE. Every other site lane checks data — staleness (the
+    # cli-shim-test step above proves site/ regenerates from the tree it claims to draw), links,
+    # prose guards — and all of them were green while a release shipped graph.html with the whole
+    # 1,137-node graph rendered into a 300x150 corner of a 1272x720 stage (a <canvas> is a replaced
+    # element: absolutely positioned with `inset: 0` but no width/height, it keeps its intrinsic
+    # size). The finder was the user. Two checks, targeting exactly that accident class (2026-07-30
+    # user ruling; pixel-ratio and golden-image lanes considered and not built — a threshold becomes
+    # a policy value, a golden image breaks on font rendering): zero console/page errors on every
+    # page, and #depgraph's bounding rect must fill .graph-stage. Both axes red-verified against
+    # planted violations before this job existed.
+    #
+    # Its own job, not a scripts/check-*.sh: the browser download is not a pre-commit hook's budget
+    # (check-guards-wired.sh would force it into .githooks/pre-commit).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install playwright (pinned) + chromium
+        run: |
+          set -euo pipefail
+          npm ci --prefix scripts/site-render-check
+          npx --prefix scripts/site-render-check playwright install --with-deps chromium
+      - name: Pages render clean and the graph canvas fills its stage
+        run: node scripts/site-render-check/check.mjs site

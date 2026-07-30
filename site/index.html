@@ -59,10 +59,11 @@ zzop cross ./web ./api     # join two repos: which calls reach which routes
       <div class="code-panel">
         <div class="code-panel__tab">Result (abridged)</div>
         <pre class="code-block"><code>{
-  "findings":           [ /* DSL rules + native analyses */ ],
-  "scores":             { /* structural subscores, 0-100 */ },
-  "health":             { "pain": 12.4, "contributors": [ /* highest-impact metrics first */ ] },
-  "recommendations":    [ /* refactor-first candidates, ROI-ordered */ ],
+  "fileCount":          1234,
+  "findings":           { /* DSL rules + native analyses, capped with the remainder disclosed */ },
+  "architecture":       { "pain": 12.4, /* + the highest-ROI refactor candidate and the files driving it */ },
+  "coverage":           { /* what this run could actually read */ },
+  "disclosure":         { /* blind spots this run knows it has */ },
   "warnings":           [ /* anything this run could not provide */ ]
 }
 

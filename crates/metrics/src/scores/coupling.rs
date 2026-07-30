@@ -11,10 +11,14 @@ pub fn compute_coupling(
     nodes: &[FileNode],
     circular_count: usize,
     cfg: &ScoresConfig,
+    is_scored: &dyn Fn(&str) -> bool,
 ) -> CouplingScore {
+    // An excluded file's own fan-out is not averaged in, but it stays a real import TARGET, so every
+    // scored file's fan_out still counts its edges into excluded code — that dependency is real, and the
+    // importing file is the one that chose it (see `ScoresInput::is_scored`).
     let live: Vec<&FileNode> = nodes
         .iter()
-        .filter(|n| n.loc > 0 && n.fan_out > 0)
+        .filter(|n| n.loc > 0 && n.fan_out > 0 && is_scored(&n.id))
         .collect();
     if live.is_empty() {
         return CouplingScore {
@@ -66,7 +70,7 @@ mod tests {
 
     #[test]
     fn no_files_with_fan_out_gt_0_score_100() {
-        let r = compute_coupling(&[node(0)], 0, &ScoresConfig::default());
+        let r = compute_coupling(&[node(0)], 0, &ScoresConfig::default(), &|_| true);
         assert_eq!(r.score, 100.0);
         assert_eq!(r.avg_fan_out, 0.0);
         assert_eq!(r.max_fan_out, 0.0);
@@ -76,7 +80,7 @@ mod tests {
     #[test]
     fn empty_input_score_100() {
         assert_eq!(
-            compute_coupling(&[], 0, &ScoresConfig::default()).score,
+            compute_coupling(&[], 0, &ScoresConfig::default(), &|_| true).score,
             100.0
         );
     }
@@ -85,7 +89,7 @@ mod tests {
     fn avg_fan_out_le_5_no_penalty_score_100() {
         // live fanOuts [4, 6] avg 5 -> fanOutScore = 100 - max(0, 5-5)*10 = 100, no circular
         let nodes = [node(4), node(6)];
-        let r = compute_coupling(&nodes, 0, &ScoresConfig::default());
+        let r = compute_coupling(&nodes, 0, &ScoresConfig::default(), &|_| true);
         assert_eq!(r.avg_fan_out, 5.0);
         assert_eq!(r.max_fan_out, 6.0);
         assert_eq!(r.score, 100.0);
@@ -95,7 +99,7 @@ mod tests {
     fn avg_fan_out_8_fan_out_score_70() {
         // fanOuts [6, 10] avg 8 -> 100 - (8-5)*10 = 70, no circular
         let nodes = [node(6), node(10)];
-        let r = compute_coupling(&nodes, 0, &ScoresConfig::default());
+        let r = compute_coupling(&nodes, 0, &ScoresConfig::default(), &|_| true);
         assert_eq!(r.avg_fan_out, 8.0);
         assert_eq!(r.max_fan_out, 10.0);
         assert_eq!(r.score, 70.0);
@@ -105,7 +109,7 @@ mod tests {
     fn circular_penalty_applied_and_capped_at_30() {
         // avg 8 -> fanOutScore 70; circular 10 -> penalty min(30, 50) = 30 -> 70 - 30 = 40
         let nodes = [node(6), node(10)];
-        let r = compute_coupling(&nodes, 10, &ScoresConfig::default());
+        let r = compute_coupling(&nodes, 10, &ScoresConfig::default(), &|_| true);
         assert_eq!(r.score, 40.0);
         assert_eq!(r.circular_count, 10);
     }
@@ -113,7 +117,7 @@ mod tests {
     #[test]
     fn score_floors_at_0() {
         // fanOuts [20] avg 20 -> 100 - (20-5)*10 = 100 - 150 = -50 -> max(0,..) = 0
-        let r = compute_coupling(&[node(20)], 0, &ScoresConfig::default());
+        let r = compute_coupling(&[node(20)], 0, &ScoresConfig::default(), &|_| true);
         assert_eq!(r.score, 0.0);
     }
 }

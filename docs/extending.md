@@ -148,7 +148,10 @@ them:
 - **Mode A** (`zzop analyze-envelope`) — a full envelope standing in for a whole tree. Your parser,
   zzop's analysis.
 - **Mode B** (`trees[].overlays`) — a partial envelope merged on top of native parsing. Fill one
-  missing channel and leave the rest alone; this is almost always the cheaper answer.
+  missing channel and leave the rest alone; this is almost always the cheaper answer. The channel need
+  not be wholly missing: facts merge additively, so an adapter can supply just the imports or io the
+  native parser could not resolve on a file it otherwise parsed fine. Where both sides speak about the
+  same thing the native fact wins — an overlay adds, it never overrides.
 
 Contract: [NORMALIZED_AST.md](NORMALIZED_AST.md), schema
 [`adapters/envelope.schema.json`](adapters/envelope.schema.json), minimal example

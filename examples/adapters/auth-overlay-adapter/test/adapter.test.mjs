@@ -16,7 +16,7 @@ const ADAPTER = path.join(__dirname, '..', 'adapter.mjs');
 
 // Every file entry goes through adapter-kit's EnvelopeBuilder, which always emits the full
 // FileProjection shape (symbols/re_exports/dynamic_imports/used_names/const_map_fragment/
-// procedure_router_fragments/router_mount_fragments/io/degraded/is_entry) at their zero values on top of
+// procedure_router_fragments/router_mount_fragments/io/overrides/degraded/is_entry) at their zero values on top of
 // whatever this adapter itself sets (`loc`, `attributes`) — mirrors the shared adapter-kit test helper.
 function fileProjection({ path: p, loc, attributes }) {
   return {
@@ -31,6 +31,7 @@ function fileProjection({ path: p, loc, attributes }) {
     procedure_router_fragments: [],
     router_mount_fragments: [],
     io: { provides: [], consumes: [] },
+    overrides: { imports: [] },
     degraded: false,
     is_entry: false,
     attributes,
@@ -54,7 +55,7 @@ test('auth-overlay-adapter: envelope matches committed snapshot', () => {
     const envelope = JSON.parse(stdout);
     assert.deepEqual(envelope, {
       format: 'zzop-normalized-ast',
-      version: 1,
+      version: '0.27.0',
       parser: 'auth-overlay-adapter/1',
       source: 'backend',
       files: [

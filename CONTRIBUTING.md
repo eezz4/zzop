@@ -121,6 +121,17 @@ they gate how a change must be SHAPED rather than merely whether it compiles:
   fragment in a DSL rule pack — is censused by `cargo test` instead, in
   `crates/core/src/dsl/tests_fragments/name_census.rs`, because reading it needs a real JSON parser
   rather than a line scan.
+- **Release-version propagation** (`check-release-version-propagation.sh`) — `Cargo.toml`'s
+  `[workspace.package] version` is the version SSOT, and every committed version on the release surface
+  must equal it in the SAME commit: `.claude-plugin/plugin.json`, `server.json`'s top-level `version`
+  and each `packages[].version`, and the `releases/download/v<version>/` URL in each
+  `packages[].identifier`. The subject set is derived from every semver string in tracked `*.json`
+  rather than hand-listed, with two exemptions — the `0.0.0` placeholder that the release workflow
+  rewrites at publish time (`packages/cli/**`, `packages/mcpb/manifest.json`), and `examples/`, whose
+  sample packages carry their own versions. This runs on every commit rather than only on release
+  commits, because a manifest that disagrees with the SSOT is wrong whatever the commit is about — and
+  because the workflow jobs that ask the same question run *after* the push that creates the tag, which
+  is too late for a tag that must never move.
 - **Convention-vocabulary declarability** (`check-convention-vocab-declarable.sh`) — a name vocabulary the
   census marks `convention` is a name the *project* picks (guard functions, secret parameters, money
   fields, ignored directories), so the engine must not hold it as a built-in guess: it needs a key in

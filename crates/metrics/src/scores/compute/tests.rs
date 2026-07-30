@@ -51,6 +51,7 @@ fn compute(
             type_safety_counts: &HashMap::new(),
             lod_by_file: &HashMap::new(),
             is_source: &|_| true,
+            is_scored: &|_| true,
         },
         cfg,
     )
@@ -235,6 +236,7 @@ fn routes_type_safety_counts_into_type_safety_scoring() {
             type_safety_counts: &counts,
             lod_by_file: &HashMap::new(),
             is_source: &|_| true,
+            is_scored: &|_| true,
         },
         &cfg,
     );
@@ -266,6 +268,7 @@ fn file_kinds_routes_into_main_sequence_without_panicking_and_stays_in_range() {
             type_safety_counts: &HashMap::new(),
             lod_by_file: &HashMap::new(),
             is_source: &|_| true,
+            is_scored: &|_| true,
         },
         &ScoresConfig::default(),
     );

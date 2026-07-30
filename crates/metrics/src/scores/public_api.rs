@@ -12,13 +12,21 @@ const MAX_VIOLATIONS_LISTED: usize = 100;
 /// `"src/".len()`.
 const SRC_PREFIX_LEN: usize = 4;
 
-pub fn compute_public_api(dep: &DepGraph, cfg: &ScoresConfig) -> PublicApiScore {
+pub fn compute_public_api(
+    dep: &DepGraph,
+    cfg: &ScoresConfig,
+    is_scored: &dyn Fn(&str) -> bool,
+) -> PublicApiScore {
     let mut deep: Vec<DeepImport> = Vec::new();
     let mut total: u32 = 0;
 
     // Deterministic traversal: HashMap iteration order is unspecified, so sorting by the importer path
     // gives a stable, reproducible order.
-    let mut froms: Vec<&String> = dep.keys().collect();
+    // Judged per IMPORTER: an excluded file is not a subject here, so it contributes neither a
+    // violation nor a denominator slot. Its edges are still real for everyone else — a scored file
+    // importing excluded code keeps that edge and any violation the edge commits, because the scored
+    // file is the one that chose it (see `ScoresInput::is_scored`).
+    let mut froms: Vec<&String> = dep.keys().filter(|from| is_scored(from)).collect();
     froms.sort();
 
     for from in froms {
@@ -103,7 +111,7 @@ mod tests {
 
     #[test]
     fn empty_graph_score_100() {
-        let r = compute_public_api(&DepGraph::new(), &cfg());
+        let r = compute_public_api(&DepGraph::new(), &cfg(), &|_| true);
         assert_eq!(r.score, 100.0);
         assert_eq!(r.total_cross_module_imports, 0);
         assert!(r.deep_imports.is_empty());
@@ -115,7 +123,7 @@ mod tests {
             ("features/auth/login.ts", &["features/auth/util.ts"]),
             ("features/auth/util.ts", &[]),
         ]);
-        let r = compute_public_api(&d, &cfg());
+        let r = compute_public_api(&d, &cfg(), &|_| true);
         assert_eq!(r.total_cross_module_imports, 0);
         assert_eq!(r.score, 100.0);
     }
@@ -127,7 +135,7 @@ mod tests {
             "features/cart/cart.ts",
             &["features/auth/index.ts", "features/auth/login.ts"],
         )]);
-        let r = compute_public_api(&d, &cfg());
+        let r = compute_public_api(&d, &cfg(), &|_| true);
         assert_eq!(r.total_cross_module_imports, 2);
         assert!(r.deep_imports.is_empty());
         assert_eq!(r.score, 100.0);
@@ -137,7 +145,7 @@ mod tests {
     fn deep_cross_module_import_bypasses_barrel_is_flagged() {
         // afterRoot = "ui/Btn.ts" -> has slash, not a barrel -> deep
         let d = dep(&[("features/cart/cart.ts", &["features/auth/ui/Btn.ts"])]);
-        let r = compute_public_api(&d, &cfg());
+        let r = compute_public_api(&d, &cfg(), &|_| true);
         assert_eq!(r.total_cross_module_imports, 1);
         assert_eq!(r.deep_imports.len(), 1);
         assert_eq!(r.deep_imports[0].from, "features/cart/cart.ts");
@@ -157,7 +165,7 @@ mod tests {
                 "react",                   // external, skipped
             ],
         )]);
-        let r = compute_public_api(&d, &cfg());
+        let r = compute_public_api(&d, &cfg(), &|_| true);
         assert_eq!(r.total_cross_module_imports, 3);
         assert_eq!(r.deep_imports.len(), 1);
         // 100 - (1/3)*100 = 66.67 -> 67

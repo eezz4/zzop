@@ -134,6 +134,7 @@ fn projection(path: &str, loc: u32) -> FileProjection {
         io: IoFacts::default(),
         degraded: false,
         is_entry: false,
+        overrides: Default::default(),
         attributes: Vec::new(),
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
@@ -143,7 +144,7 @@ fn projection(path: &str, loc: u32) -> FileProjection {
 fn overlay(parser: &str, files: Vec<FileProjection>) -> NormalizedEnvelope {
     NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: parser.to_string(),
         source: "adapter".to_string(),
         files,
@@ -262,7 +263,7 @@ fn invalid_overlay_produces_a_warning_and_never_crashes_the_native_run() {
 
     let bad = NormalizedEnvelope {
         format: "not-the-right-format".to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "test-bad-adapter/1".to_string(),
         source: "adapter".to_string(),
         files: Vec::new(),
@@ -637,7 +638,7 @@ fn mismatched_overlay_source_warns_about_the_intra_source_join() {
     });
     cfg.adapter_overlays = vec![NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "dbx-adapter/1".to_string(),
         source: "dbx".to_string(),
         files: vec![proj],
@@ -681,7 +682,7 @@ fn overlay_source_equal_to_the_tree_source_id_warns_nothing() {
     });
     cfg.adapter_overlays = vec![NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "spring-adapter/1".to_string(),
         source: "spring".to_string(),
         files: vec![proj],
@@ -717,7 +718,7 @@ fn overlay_with_empty_source_warns_nothing() {
     });
     cfg.adapter_overlays = vec![NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "no-source-adapter/1".to_string(),
         source: String::new(),
         files: vec![proj],
@@ -851,7 +852,7 @@ fn overlay_warnings_are_byte_for_byte_identical_across_two_runs() {
     cfg.adapter_overlays = vec![
         NormalizedEnvelope {
             format: NORMALIZED_AST_FORMAT.to_string(),
-            version: 1,
+            version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
             parser: "dbx-adapter/1".to_string(),
             source: "dbx".to_string(),
             files: vec![mismatched],
@@ -937,7 +938,7 @@ fn io_less_overlay_with_mismatched_source_does_not_warn_source_mismatch() {
     };
     cfg.adapter_overlays = vec![NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "auth-overlay/1".to_string(),
         source: "web".to_string(),
         files: vec![proj],

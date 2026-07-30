@@ -8,7 +8,7 @@ use crate::output::FindingFilters;
 use super::analyze_envelope_summary;
 
 /// `docs/NORMALIZED_AST.md`'s worked example (also embedded as the `example-envelope` MCP contract
-/// resource, `crate::contracts`) — a minimal, valid, one-file v1 envelope.
+/// resource, `crate::contracts`) — a minimal, valid, one-file envelope.
 const EXAMPLE_ENVELOPE: &str = include_str!("../../../../docs/contracts/example-envelope.json");
 
 fn no_filters() -> FindingFilters {

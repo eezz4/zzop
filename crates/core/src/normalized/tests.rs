@@ -19,7 +19,7 @@ fn symbol(name: &str, body_start: Option<u32>, body_end: Option<u32>) -> SourceS
 fn valid_envelope_json() -> String {
     r#"{
             "format": "zzop-normalized-ast",
-            "version": 1,
+            "version": "0.27.0",
             "parser": "jsp-lexical/1",
             "source": "legacy",
             "files": [
@@ -42,7 +42,7 @@ fn valid_envelope_json() -> String {
 fn valid_envelope_round_trips() {
     let envelope = validate_envelope(&valid_envelope_json()).expect("should validate");
     assert_eq!(envelope.format, NORMALIZED_AST_FORMAT);
-    assert_eq!(envelope.version, 1);
+    assert_eq!(envelope.version, NORMALIZED_AST_CONTRACT_VERSION);
     assert_eq!(envelope.files.len(), 1);
     assert_eq!(envelope.files[0].path, "legacy/user.jsp");
 }
@@ -52,7 +52,7 @@ fn minimal_envelope_with_defaulted_fields_round_trips() {
     // A minimal/degraded producer omits every optional field.
     let json = r#"{
             "format": "zzop-normalized-ast",
-            "version": 1,
+            "version": "0.27.0",
             "parser": "min/1",
             "source": "s",
             "files": [ { "path": "a.ext", "loc": 1 } ]
@@ -88,7 +88,7 @@ fn fragment_channels_round_trip_when_present() {
 
     let envelope = NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "custom-router/1".to_string(),
         source: "s".to_string(),
         files: vec![FileProjection {
@@ -122,6 +122,7 @@ fn fragment_channels_round_trip_when_present() {
             io: IoFacts::default(),
             degraded: false,
             is_entry: false,
+            overrides: Default::default(),
             attributes: Vec::new(),
             loop_spans: vec![],
             function_spans: vec![],
@@ -162,9 +163,26 @@ fn rejects_unknown_format() {
 
 #[test]
 fn rejects_version_greater_than_supported() {
-    let json = valid_envelope_json().replace("\"version\": 1", "\"version\": 2");
+    let json = valid_envelope_json().replace(
+        NORMALIZED_AST_CONTRACT_VERSION,
+        &one_past_supported_version(),
+    );
     let errors = validate_envelope(&json).unwrap_err();
     assert!(errors.iter().any(|e| e.contains("unsupported version")));
+}
+
+/// The shape a pre-0.27 producer emits: `version` as a bare integer. It must fail rather than be
+/// coerced — a number is not a release, and reading `1` as `0.0.1` would silently accept bytes written
+/// against a contract this engine cannot actually reason about.
+#[test]
+fn rejects_a_bare_integer_version() {
+    let json =
+        valid_envelope_json().replace(&format!("\"{NORMALIZED_AST_CONTRACT_VERSION}\""), "1");
+    let errors = validate_envelope(&json).unwrap_err();
+    assert!(
+        errors.iter().any(|e| e.contains("invalid JSON")),
+        "an integer cannot deserialize into the `String` field at all: {errors:?}"
+    );
 }
 
 #[test]
@@ -183,7 +201,7 @@ fn rejects_empty_path() {
 fn rejects_duplicate_paths() {
     let envelope = NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
-        version: 1,
+        version: NORMALIZED_AST_CONTRACT_VERSION.to_string(),
         parser: "p/1".to_string(),
         source: "s".to_string(),
         files: vec![
@@ -202,6 +220,7 @@ fn rejects_duplicate_paths() {
                 io: IoFacts::default(),
                 degraded: false,
                 is_entry: false,
+                overrides: Default::default(),
                 attributes: Vec::new(),
                 loop_spans: vec![],
                 function_spans: vec![],
@@ -221,6 +240,7 @@ fn rejects_duplicate_paths() {
                 io: IoFacts::default(),
                 degraded: false,
                 is_entry: false,
+                overrides: Default::default(),
                 attributes: Vec::new(),
                 loop_spans: vec![],
                 function_spans: vec![],
@@ -287,9 +307,12 @@ fn jsp_contract_example_validates() {
 fn collects_multiple_errors_at_once() {
     let json = valid_envelope_json()
         .replace("zzop-normalized-ast", "bogus")
-        .replace("\"version\": 1", "\"version\": 99");
+        .replace(
+            NORMALIZED_AST_CONTRACT_VERSION,
+            &one_past_supported_version(),
+        );
     let errors = validate_envelope(&json).unwrap_err();
-    assert_eq!(errors.len(), 2);
+    assert_eq!(errors.len(), 2, "{errors:?}");
 }
 
 #[test]
@@ -315,5 +338,94 @@ fn non_array_non_object_roots_keep_their_already_clear_serde_message() {
             errors[0].contains("expected struct NormalizedEnvelope"),
             "expected the original clear serde message for {json}, got: {errors:?}"
         );
+    }
+}
+
+/// The `overrides` contract (introduced in `MIN_VERSION_FOR_OVERRIDES`) — three rules, one per way a
+/// declaration could be believed without being honoured. Built as raw JSON rather than through
+/// `FileProjection` so these exercise the same path a real adapter's bytes take.
+mod overrides {
+    use super::*;
+
+    fn envelope_json(version: &str, imports: &str, overrides: &str) -> String {
+        format!(
+            r#"{{
+              "format": "{NORMALIZED_AST_FORMAT}",
+              "version": "{version}",
+              "parser": "t/1",
+              "source": "s",
+              "files": [{{
+                "path": "src/app.py",
+                "loc": 4,
+                "imports": {imports},
+                "overrides": {{ "imports": {overrides} }}
+              }}]
+            }}"#
+        )
+    }
+
+    const BINDS_UTIL: &str =
+        r#"{ "util.config": { "specifier": "src.util.config", "original": "*" } }"#;
+
+    #[test]
+    fn a_declared_override_with_its_replacement_is_valid_at_the_floor() {
+        let json = envelope_json(MIN_VERSION_FOR_OVERRIDES, BINDS_UTIL, r#"["util.config"]"#);
+        assert!(
+            validate_envelope(&json).is_ok(),
+            "the whole point of the field: {:?}",
+            validate_envelope(&json).unwrap_err()
+        );
+    }
+
+    /// RULE 1 — the version floor. Without it, `FileProjection` has no `deny_unknown_fields`, so this
+    /// exact envelope handed to an engine built before `overrides` existed would deserialize, be
+    /// ignored, and produce a run where the adapter believes it displaced a native fact and the engine
+    /// quietly did not. Rejecting it here is what makes the same bytes mean the same thing everywhere.
+    ///
+    /// Note this is NOT subsumed by the "reject newer than me" comparison: the envelope below declares
+    /// an OLDER version, which that comparison accepts. Only the floor catches a mislabel.
+    #[test]
+    fn an_override_declared_below_the_floor_is_rejected_rather_than_silently_ignored() {
+        let json = envelope_json("0.20.0", BINDS_UTIL, r#"["util.config"]"#);
+        let errors = validate_envelope(&json).unwrap_err();
+        assert!(
+            errors.iter().any(|e| e.contains("requires version >=")),
+            "{errors:?}"
+        );
+    }
+
+    /// RULE 2 — deletion is not on offer. A name declared with nothing to put in its place asks the
+    /// engine to forget a fact it extracted, which has no honest output form (there is no replacement
+    /// to disclose) and would let an adapter blind the engine without leaving a trace.
+    #[test]
+    fn an_override_without_a_replacement_binding_is_a_deletion_and_is_refused() {
+        let json = envelope_json(MIN_VERSION_FOR_OVERRIDES, "{}", r#"["util.config"]"#);
+        let errors = validate_envelope(&json).unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("deletion")), "{errors:?}");
+    }
+
+    /// RULE 3 — a repeated name would make the displacement disclosure (one line per declaration)
+    /// disagree with the declaration it reports on.
+    #[test]
+    fn a_duplicate_override_name_is_rejected() {
+        let json = envelope_json(
+            MIN_VERSION_FOR_OVERRIDES,
+            BINDS_UTIL,
+            r#"["util.config", "util.config"]"#,
+        );
+        let errors = validate_envelope(&json).unwrap_err();
+        assert!(
+            errors.iter().any(|e| e.contains("more than once")),
+            "{errors:?}"
+        );
+    }
+
+    /// The default is the contract for everyone else: an envelope that declares no override keeps
+    /// working below the floor. The floor is per-feature precisely so that gap-filling adapters pay
+    /// nothing for a feature they do not use.
+    #[test]
+    fn an_envelope_declaring_no_overrides_stays_valid_below_the_floor() {
+        let json = envelope_json("0.20.0", BINDS_UTIL, "[]");
+        assert!(validate_envelope(&json).is_ok());
     }
 }

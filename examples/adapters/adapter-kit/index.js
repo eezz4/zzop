@@ -14,7 +14,9 @@ export {
   EnvelopeBuilder,
   validateEnvelope,
   NORMALIZED_AST_FORMAT,
-  SUPPORTED_NORMALIZED_AST_VERSION,
+  NORMALIZED_AST_CONTRACT_VERSION,
+  MIN_VERSION_FOR_OVERRIDES,
+  parseContractVersion,
 } from './lib/envelope.js';
 
 export { walk } from './lib/walk.js';

@@ -23,6 +23,12 @@
 #     committed value is deliberately not a version and must not be made to track one.
 #   * `examples/` — sample packages a user copies into their own tree (`adapter-kit` is at 0.1.0). Their
 #     version is their own artifact's, unrelated to zzop's release.
+#   * npm lockfiles (`package-lock.json`, any depth) — every `"version"` in one is a THIRD PARTY's
+#     version (playwright's, its transitive deps'), pinned on purpose and never meant to track this
+#     repo's release. First hit: scripts/site-render-check/ (2026-07-30). The *manifests* beside them
+#     stay in scope — a `package.json` whose `version` field is ours must still propagate — but a
+#     dependency pin like `"playwright": "1.54.1"` never matches the extraction anyway (the key is not
+#     `version`), so manifests carrying only pins are naturally invisible.
 # Integer `"version": 1` fields (the adapter envelope's schema version) are not semver strings and never
 # match the extraction — a different fact with a different lifecycle, correctly invisible here.
 #
@@ -68,6 +74,7 @@ violations=0
 json_lines="$(git ls-files -z -- '*.json' \
   | xargs -0 -r grep -Hn '"version"[[:space:]]*:[[:space:]]*"[0-9][0-9.]*[0-9A-Za-z.+-]*"' -- 2>/dev/null \
   | grep -v '^examples/' \
+  | grep -v 'package-lock\.json:' \
   || true)"
 
 a_count="$(printf '%s\n' "$json_lines" | grep -c . || true)"

@@ -32,6 +32,15 @@
   // under the very exclusion two paragraphs up. The config was right and the wiring was missing; that a
   // committed self-analysis is what surfaced it is the argument for committing one.
   //
+  // Since 2026-07-30 it also covers SCORING: an excluded file is no longer a judged subject, so it leaves
+  // the denominator behind every per-file score and the pain index moves with it. The graph is still
+  // untouched (that is what the paragraph above is about) — an excluded file remains a real import
+  // target, so no other file's coupling or fan-out changes. Measured on this repo, adding `parser/**`,
+  // `rules/**` and `packages/**` here took pain from 62.5 UP to 64.3: those directories are cleaner than
+  // average, and the figure describes the population this config judges. That is why these numbers are
+  // only comparable against runs using the same exclusions, and why a run that excluded anything says so
+  // in `warnings`.
+  //
   // `corpus/**` and `target/**` used to be here and were REMOVED 2026-07-28, because this run told us
   // they were dead: `exclude "corpus/**" matched no files` / `exclude "target/**" matched no files` in
   // its own warnings, every run. Neither path ever reaches the finding filter — `target` is in

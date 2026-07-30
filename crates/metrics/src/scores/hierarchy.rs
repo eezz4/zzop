@@ -11,13 +11,21 @@ use zzop_core::DepGraph;
 /// truncation).
 const MAX_VIOLATIONS_LISTED: usize = 100;
 
-pub fn compute_hierarchy(dep: &DepGraph, cfg: &ScoresConfig) -> HierarchyScore {
+pub fn compute_hierarchy(
+    dep: &DepGraph,
+    cfg: &ScoresConfig,
+    is_scored: &dyn Fn(&str) -> bool,
+) -> HierarchyScore {
     let mut violations: Vec<HierarchyViolation> = Vec::new();
     let mut intra: u32 = 0;
 
     // Deterministic traversal: HashMap iteration order is unspecified, so sorting by the importer path
     // gives a stable, reproducible order.
-    let mut froms: Vec<&String> = dep.keys().collect();
+    // Judged per IMPORTER: an excluded file is not a subject here, so it contributes neither a
+    // violation nor a denominator slot. Its edges are still real for everyone else — a scored file
+    // importing excluded code keeps that edge and any violation the edge commits, because the scored
+    // file is the one that chose it (see `ScoresInput::is_scored`).
+    let mut froms: Vec<&String> = dep.keys().filter(|from| is_scored(from)).collect();
     froms.sort();
 
     for from in froms {
@@ -80,7 +88,7 @@ mod tests {
 
     #[test]
     fn empty_graph_score_100() {
-        let r = compute_hierarchy(&DepGraph::new(), &cfg());
+        let r = compute_hierarchy(&DepGraph::new(), &cfg(), &|_| true);
         assert_eq!(r.score, 100.0);
         assert_eq!(r.total_intra_module_edges, 0);
         assert!(r.violations.is_empty());
@@ -93,7 +101,7 @@ mod tests {
             ("orders/a/parent.ts", &["orders/a/b/child.ts"]),
             ("orders/a/b/child.ts", &[]),
         ]);
-        let r = compute_hierarchy(&d, &cfg());
+        let r = compute_hierarchy(&d, &cfg(), &|_| true);
         assert_eq!(r.total_intra_module_edges, 1);
         assert!(r.violations.is_empty());
         assert_eq!(r.score, 100.0);
@@ -102,7 +110,7 @@ mod tests {
     #[test]
     fn upward_import_child_to_ancestor_dir_is_a_violation() {
         let d = dep(&[("orders/a/b/child.ts", &["orders/a/parent.ts"])]);
-        let r = compute_hierarchy(&d, &cfg());
+        let r = compute_hierarchy(&d, &cfg(), &|_| true);
         assert_eq!(r.total_intra_module_edges, 1);
         assert_eq!(r.violations.len(), 1);
         assert_eq!(r.violations[0].from, "orders/a/b/child.ts");
@@ -117,7 +125,7 @@ mod tests {
             ("orders/a/b/child.ts", &["orders/a/parent.ts"]), // upward -> violation
             ("orders/a/c/leaf.ts", &["orders/a/index.ts"]),   // upward but barrel -> exempt
         ]);
-        let r = compute_hierarchy(&d, &cfg());
+        let r = compute_hierarchy(&d, &cfg(), &|_| true);
         assert_eq!(r.total_intra_module_edges, 2);
         assert_eq!(r.violations.len(), 1);
         // 100 - (1/2)*100 = 50
@@ -130,7 +138,7 @@ mod tests {
             "orders/a/b/child.ts",
             &["billing/y.ts", "react", "orders/a/parent.ts"],
         )]);
-        let r = compute_hierarchy(&d, &cfg());
+        let r = compute_hierarchy(&d, &cfg(), &|_| true);
         // only the same-module orders edge counts
         assert_eq!(r.total_intra_module_edges, 1);
         assert_eq!(r.violations.len(), 1);

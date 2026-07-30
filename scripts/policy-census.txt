@@ -36,8 +36,11 @@ crates/core/src/node.rs:DEFAULT_RECENT_THRESHOLD_DAYS cap
 crates/core/src/node.rs:DEFAULT_WEIGHTS cap # numeric risk-score weights, not a name
 crates/core/src/node.rs:MS_PER_DAY internal # unit arithmetic, not a name at all
 crates/core/src/node.rs:NOW test
+crates/core/src/normalized.rs:MIN_VERSION_FOR_OVERRIDES internal # contract version gate, not a tunable: it must equal the version in which `overrides` shipped, or an older engine ignores the declaration silently
+crates/core/src/normalized.rs:NORMALIZED_AST_CONTRACT_VERSION internal # the release in which the envelope shape last changed, not a tunable: it is a fact about this repo's own history and a wrong value makes conforming envelopes unreadable
 crates/core/src/normalized.rs:NORMALIZED_AST_FORMAT internal
 crates/core/src/normalized.rs:SUPPORTED_NORMALIZED_AST_VERSION internal
+crates/core/src/normalized/tests.rs:BINDS_UTIL test # fixture JSON body for the overrides contract tests
 crates/core/src/pack_loader.rs:SUPPORTED_DSL_SCHEMA_VERSION internal
 crates/core/src/registry/redact.rs:REDACTED internal # the marker an excluded evidence path is replaced with; zzop's own output vocabulary, not a tunable
 crates/engine/build.rs:FNV_OFFSET internal # FNV-1a basis; changing it re-addresses every derived fingerprint (= one cache wipe)
