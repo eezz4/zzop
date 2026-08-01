@@ -3,12 +3,10 @@
 //! should talk through a shared/public surface rather than directly.
 
 use super::config::ScoresConfig;
+use super::detail_cap::{cap_and_count_dropped, MAX_EDGE_ROWS_LISTED};
 use super::shared::{is_external, module_of, round, top_subdir};
 use super::types::{SiblingCross, SiblingCrossScore};
 use zzop_core::DepGraph;
-
-/// Caps the returned violation list (not the score).
-const MAX_VIOLATIONS_LISTED: usize = 100;
 
 pub fn compute_sibling_cross(
     dep: &DepGraph,
@@ -72,12 +70,13 @@ pub fn compute_sibling_cross(
         (100.0 - (violations.len() as f64 / intra as f64) * 100.0).max(0.0)
     };
 
-    violations.truncate(MAX_VIOLATIONS_LISTED);
+    let violations_truncated = cap_and_count_dropped(&mut violations, MAX_EDGE_ROWS_LISTED);
 
     SiblingCrossScore {
         score: round(score),
         total_intra_module_edges: intra,
         violations,
+        violations_truncated,
     }
 }
 

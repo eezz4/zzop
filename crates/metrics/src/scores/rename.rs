@@ -2,11 +2,10 @@
 //! that keeps getting renamed/moved has an unstable location, which is a mild structural smell (import churn,
 //! broken links, review noise).
 
+use crate::scores::detail_cap::{cap_and_count_dropped, MAX_FILE_ROWS_LISTED};
 use crate::scores::types::{RenameScore, RenamedFile};
 use zzop_core::FileNode;
 
-/// Max detail rows returned.
-const MAX_DETAIL_ITEMS: usize = 50;
 /// The 0-100 score scale.
 const PERCENT: f64 = 100.0;
 
@@ -36,13 +35,14 @@ pub fn compute_rename(nodes: &[FileNode], is_scored: &dyn Fn(&str) -> bool) -> R
         (PERCENT - (f64::from(renamed) / f64::from(total)) * PERCENT).max(0.0)
     };
 
-    files.truncate(MAX_DETAIL_ITEMS);
+    let files_truncated = cap_and_count_dropped(&mut files, MAX_FILE_ROWS_LISTED);
 
     RenameScore {
         score: score.round(),
         renamed,
         total,
         files,
+        files_truncated,
     }
 }
 

@@ -33,6 +33,14 @@ pub const NORMALIZED_AST_FORMAT: &str = "zzop-normalized-ast";
 /// release would be the defect this replaces — a number that appears to describe the shape while
 /// actually describing the calendar, leaving a reader unable to tell which bump mattered.
 ///
+/// ⚠ That is exactly what happened during the v0.28.0 bump and it was caught in the pre-tag audit: this
+/// constant AND `docs/contracts/example-envelope.json` were moved to `0.28.0` for a release whose only
+/// envelope diff was a prose `description` rewrite, while the schema and `NORMALIZED_AST.md` still (and
+/// correctly) said `0.27.0`. An adapter author copying the shipped example would have emitted an
+/// envelope every 0.27.x engine rejects, for a shape identical to the one they already had. The example
+/// file is now excluded from `scripts/check-release-version-propagation.sh` for this reason — a
+/// release-propagation guard must not reach a constant whose contract is "do not track the release".
+///
 /// ## What acceptance means
 /// A consumer accepts an envelope whose declared version is `<=` its own package version, and rejects
 /// anything newer ("reject newer, never guess" — the same policy `pack_loader`'s DSL schema version
@@ -95,8 +103,15 @@ pub struct NormalizedEnvelope {
     pub format: String,
     /// The release whose envelope shape these bytes conform to — see [`NORMALIZED_AST_CONTRACT_VERSION`].
     pub version: String,
-    /// `"<parser id>/<impl version>"` — doubles as the cache fingerprint segment (bump the impl
-    /// version whenever the projection changes for identical input).
+    /// `"<parser id>/<impl version>"` — the producer's self-identification. Quoted by every warning
+    /// that attributes an overlay action to its adapter (displacement/overruled disclosures, source
+    /// mismatch, zero-fact census) and used as the deterministic ordering key when several overlays
+    /// merge, so a reader can tell WHICH adapter build did what. It is NOT a cache ingredient and
+    /// bumping it invalidates nothing — measured 2026-07-31: Mode A creates no cache at all, Mode B
+    /// overlays apply after the cached pass (`apply_adapter_overlays` runs post-`run_file_pass`), so
+    /// a changed projection is always reflected with or without a bump. This doc used to instruct
+    /// producers to bump it "so the cache notices" — an instruction with no reader, the same class as
+    /// the manual native-fingerprint bump retired 2026-07-29.
     pub parser: String,
     /// Tree/source id — the cross-layer join's per-tree tag (see `crate::io`'s module doc).
     pub source: String,

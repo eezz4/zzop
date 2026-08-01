@@ -72,6 +72,7 @@ if [ "$cargo_scanned" -eq 0 ] || [ "$rs_scanned" -eq 0 ]; then
   echo "clean tree."
   exit 1
 fi
+assert_workspace_members_scanned "tree-sitter isolation guard" "${RS_GLOBS[@]}"
 
 echo "tree-sitter isolation guard: checking Cargo.toml dependency declarations..."
 # `(-[a-z0-9]+)*` (not `?`): grammar crate names can be multi-segment (`tree-sitter-c-sharp`) — a

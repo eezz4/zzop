@@ -36,7 +36,7 @@ fn engine_output() -> serde_json::Value {
                             "consumes": []
                         }
                     },
-                    "coverage": { "files": 2, "sourceFiles": 2, "joinContributionZero": false },
+                    "coverage": { "files": 2, "parserDispatched": 2, "joinContributionZero": false },
                     "warnings": ["a framework-silence self-report"],
                     "configWarnings": ["unknown rule id in overrides"]
                 }
@@ -49,7 +49,7 @@ fn engine_output() -> serde_json::Value {
                         "source": "web", "parser": "engine",
                         "dep": {}, "symbols": [], "loc": {}
                     },
-                    "coverage": { "files": 1, "sourceFiles": 1, "joinContributionZero": true },
+                    "coverage": { "files": 1, "parserDispatched": 1, "joinContributionZero": true },
                     "warnings": [],
                     "configWarnings": []
                 }

@@ -16,7 +16,7 @@
 // (real-world delta, not labeled recall).
 //
 // WHAT IT PRODUCES — <runs>/<label>/ :
-//   cross.json            axis 2: cross_repo (buckets, bucketKeys, edges, crossLayerFindings, sources)
+//   cross.json            axis 2: cross_repo (buckets, distinctBucketKeys, edges, crossLayerFindings, sources)
 //   tree-<sourceId>.json  axis 1: analyze_repo, one file per tree (findings.byRule + FULL anchor list)
 //   meta.json             what was measured with (binary identity, config, limit, axes, timings)
 //
@@ -52,7 +52,7 @@
 //   5. TRUNCATION IS NEVER "IDENTICAL". Any capped list (findings.truncated, shown.length != total,
 //      edgesTruncated, crossLayerFindings.truncated) aborts the run. A capped anchor list silently
 //      shrinks the set difference, and a shrunken set difference reads as "no change". Every cap left
-//      on this list is one a --limit CAN raise; `bucketKeys` used to be the exception (capped by the
+//      on this list is one a --limit CAN raise; `distinctBucketKeys` used to be the exception (capped by the
 //      product, tolerated via --tolerate-bucket-key-cap) and that cap was deleted on 2026-07-29, so the
 //      exception and its flag are both gone.
 //
@@ -231,7 +231,7 @@ const meta = {
 console.error(`[${label}] axis 2  cross_repo ...`);
 const cross = callTool("cross_repo", { configPath, limit }, "cross_repo");
 const c = cross.payload;
-for (const k of ["sources", "buckets", "bucketKeys", "edges", "crossLayerFindings"]) {
+for (const k of ["sources", "buckets", "distinctBucketKeys", "edges", "crossLayerFindings"]) {
   if (c[k] === undefined) fail(`cross_repo payload is missing key '${k}' — wrong tool surface or a changed contract.`);
 }
 if (!Array.isArray(c.sources) || c.sources.length === 0) fail("cross_repo returned 0 sources — nothing was measured.");
@@ -245,10 +245,10 @@ if (c.crossLayerFindings.truncated) {
       `\n  Raise --limit (currently ${limit}).`
   );
 }
-// `bucketKeys` had a branch here until 2026-07-29: the product capped it at 20 distinct keys, this
+// `distinctBucketKeys` had a branch here until 2026-07-29: the product capped it at 20 distinct keys, this
 // script aborted on the resulting `bucketKeysTruncated`, and `--tolerate-bucket-key-cap` was the opt-in
 // that recorded the cap instead. The product cap is GONE (crates/summary/src/output/bucket_keys.rs) —
-// `bucketKeys` is now complete by construction, so there is no truncation to detect, tolerate or record.
+// `distinctBucketKeys` is now complete by construction, so there is no truncation to detect, tolerate or record.
 // This corpus is what removed it: it sat at exactly 20 keys and a batch adding trees scored zero lines.
 
 fs.writeFileSync(path.join(outDir, "cross.json"), JSON.stringify(c, null, 2));

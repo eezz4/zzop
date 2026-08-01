@@ -5,11 +5,10 @@
 use std::collections::HashMap;
 
 use crate::scores::config::ScoresConfig;
+use crate::scores::detail_cap::{cap_and_count_dropped, MAX_FILE_ROWS_LISTED};
 use crate::scores::types::{LodFileSummary, LodScore};
 use zzop_core::FileNode;
 
-/// Max detail rows returned.
-const MAX_DETAIL_ITEMS: usize = 50;
 /// The 0-100 score scale.
 const PERCENT: f64 = 100.0;
 
@@ -72,12 +71,13 @@ pub fn compute_lod(
     let count_cap = cfg.thresholds.lod.count_cap;
     let score = ((1.0 - avg_count / count_cap) * PERCENT).round().max(0.0);
 
-    summaries.truncate(MAX_DETAIL_ITEMS);
+    let violations_truncated = cap_and_count_dropped(&mut summaries, MAX_FILE_ROWS_LISTED);
 
     LodScore {
         score,
         total_violations,
         violations: summaries,
+        violations_truncated,
     }
 }
 

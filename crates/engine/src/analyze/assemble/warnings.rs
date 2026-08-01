@@ -1,15 +1,17 @@
-//! Phase 5: BE-framework coverage self-report (`crate::framework_silence`'s seven tripwires,
-//! S1-S7) — flags a tree that LOOKS like it carries a framework surface zzop cannot see. Split out of
-//! `super::assemble` as its own phase since all seven tripwires share the same `io_provides`/
+//! Phase 5: BE-framework coverage self-report (`crate::framework_silence`'s tripwire family) —
+//! flags a tree that LOOKS like it carries a framework surface zzop cannot see. Split out of
+//! `super::assemble` as its own phase since the tripwires share the same `io_provides`/
 //! `io_consumes`/`ts_paths`/`java_rels`/`package_import_files` inputs and are otherwise independent of
 //! every other `assemble` phase.
 
 use std::collections::BTreeMap;
 
-/// Runs all eight framework-silence tripwires (S1-S8) and returns every warning that fired, in push
-/// order S1/S2/S4/S6/S8/S3/S5/S7 (S6 slotted after S4 at introduction; S8 after S6, before the S3/S5/S7
-/// precheck block, since it needs no precheck; S3/S5 keep their pre-split tail
-/// positions; S7 slotted after S5 at introduction, sharing S5's precheck block) — order matters for
+/// Runs every framework-silence tripwire and returns each warning that fired, in the push order the
+/// calls below appear in (S6 slotted after S4 at introduction; S8 after S6, before the S3/S5/S7
+/// precheck block, since it needs no precheck; S3/S5 keep their pre-split tail positions; S7 slotted
+/// after S5, sharing S5's precheck block; S9-S13 appended in id order). The count is deliberately not
+/// written here — this doc said "seven, S1-S7" in one sentence and "eight, S1-S8" in the next while
+/// thirteen ran, and `crate::framework_silence`'s module doc owns the roster. Order matters for
 /// `AnalyzeOutput::warnings`' documented stability, not correctness (each tripwire is independent). S5
 /// and S7 are now per-app censuses: each may contribute MULTIPLE entries (one per below-floor app-root,
 /// in sorted `app_roots` order) plus an optional tree-wide fallback, all of S5's before all of S7's.
@@ -20,6 +22,7 @@ pub(super) fn framework_silence_warnings(
     io_consumes: &[zzop_core::IoConsume],
     ts_paths: &std::collections::HashSet<String>,
     java_rels: &[String],
+    csharp_rels: &[String],
     package_import_files: &BTreeMap<String, std::collections::BTreeSet<String>>,
     loc_by_path: &std::collections::HashMap<String, u32>,
     // The run's declared `vocabulary.fetchWrapperExportNames` — S7's wrapper-module recognizer.
@@ -98,6 +101,30 @@ pub(super) fn framework_silence_warnings(
     // the one auth idiom this engine cannot see (a tower layer) start costing false positives. Also a
     // pure pass over `io_provides`, so also unconditional.
     if let Some(w) = crate::framework_silence::rust_router_layer_warning(io_provides) {
+        warnings.push(w);
+    }
+
+    // S11 — unread io KIND self-report. The others are about what could not be EXTRACTED; this one is
+    // about facts that were extracted fine and that nothing in this build reads. `IoKind` is an open
+    // String, so a Mode B adapter can emit `"queue"` today and get facts in, zero findings out, with the
+    // kind-agnostic coverage census confirming the channel filled. Pure pass over both io slices.
+    if let Some(w) = crate::framework_silence::unread_io_kind_warning(io_provides, io_consumes) {
+        warnings.push(w);
+    }
+
+    // S12 — unread gateway-declaration self-report. The one gap here whose symptom is a PLAUSIBLE
+    // FINDING rather than a silence: a rewrite zzop never read keys the provide side pre-rewrite while
+    // the consume side calls the post-rewrite path, so the join reports an unprovided consume for a
+    // route that is actually served. Content-gated and route-gated (see its module doc), and it touches
+    // disk, so it is gated on the tree having http provides at all.
+    let http_provides = io_provides.iter().filter(|p| p.kind == "http").count();
+    if let Some(w) = crate::framework_silence::gateway_declaration_warning(root, http_provides) {
+        warnings.push(w);
+    }
+
+    // S13 — inherited C# route prefix. Same WRONG-KEY family as S12 rather than the silence family:
+    // a controller deriving its prefix from a project base class is keyed without it.
+    if let Some(w) = crate::framework_silence::csharp_base_route_warning(root, csharp_rels) {
         warnings.push(w);
     }
 

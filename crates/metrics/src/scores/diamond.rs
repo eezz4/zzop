@@ -5,14 +5,13 @@
 use std::collections::{BTreeMap, HashSet};
 
 use super::config::ScoresConfig;
+use super::detail_cap::{cap_and_count_dropped, MAX_FILE_ROWS_LISTED};
 use super::shared::is_external;
 use super::types::{DiamondPair, DiamondScore};
 use zzop_core::DepGraph;
 
 /// A pair only counts as a diamond when at least two distinct first-hop nodes reach the same leaf.
 const MIN_THROUGH: usize = 2;
-/// Detail list is capped like every other scores/* violation list.
-const MAX_DETAIL_ITEMS: usize = 50;
 
 pub fn compute_diamond(
     dep: &DepGraph,
@@ -51,10 +50,11 @@ pub fn compute_diamond(
     pairs.sort_by_key(|p| std::cmp::Reverse(p.through.len()));
     let penalty_weight = cfg.thresholds.diamond.penalty_weight;
     let score = (100.0 - pairs.len() as f64 * penalty_weight).max(0.0);
-    pairs.truncate(MAX_DETAIL_ITEMS);
+    let pairs_truncated = cap_and_count_dropped(&mut pairs, MAX_FILE_ROWS_LISTED);
     DiamondScore {
         score: score.round(),
         pairs,
+        pairs_truncated,
     }
 }
 

@@ -123,7 +123,9 @@ cross-layer bucket's distinct-key list at 20, and `snapshot.mjs` aborted on trun
 outgrew the cap produced NO score rather than a degraded one. This corpus hit it: a 2026-07-29 batch
 adding trees pushed `unconsumedProvides` past 20 and scored zero lines. The cap, its `bucketKeysTruncated`
 disclosure and the `--tolerate-bucket-key-cap` hatch were all deleted that day (user decision — see
-`bucket_keys.rs`' module doc); bucket key lists are complete now and a corpus may grow freely.
+`bucket_keys.rs`' module doc); bucket key lists are complete now and a corpus may grow freely. (The field
+itself was `bucketKeys` at the time; it is `distinctBucketKeys` since 2026-07-31, when the name was made
+to state that it DEDUPES the rows `buckets` counts.)
 
 The workaround that batch used is still worth keeping, on its own merits rather than as ceiling relief:
 both backends added below are genuinely consumed (each front end has a `server/loader.ts` reaching the

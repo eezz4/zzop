@@ -183,3 +183,29 @@ mod tests {
         assert_eq!(count_loc(""), 1);
     }
 }
+
+use zzop_core::recognizer::{channel, FrameworkRecognizer};
+
+/// Frameworks this parser recognizes — see [`zzop_core::recognizer`]. Verified against return types.
+pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
+    FrameworkRecognizer {
+        framework: "gin",
+        extensions: &["go"],
+        emits: &[channel::PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "net/http",
+        extensions: &["go"],
+        emits: &[channel::PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "gorm",
+        extensions: &["go"],
+        emits: &[channel::DB],
+    },
+    FrameworkRecognizer {
+        framework: "net/http",
+        extensions: &["go"],
+        emits: &[channel::CONSUMES],
+    },
+];

@@ -105,6 +105,13 @@ jobs:
         # creates the tag — v0.26.0 shipped with server.json at 0.25.0 for exactly that reason. This one
         # runs on every commit, in pre-commit as well, so the bump and its propagation cannot separate.
         run: bash scripts/check-release-version-propagation.sh
+      - name: embedded contract docs guard
+        # The docs `crates/summary/src/contracts.rs` bakes with include_str! reach a reader only through
+        # a RELEASE — a prebuilt binary serves the bytes of the release it was built from. So "docs-only
+        # change, no release needed" is false for exactly that set, and VERSIONING.md must list exactly
+        # it. Both directions: an unlisted baked doc hides a release requirement, a listed unbaked one
+        # invents one.
+        run: bash scripts/check-embedded-contract-docs.sh
       - name: license shipping guard
         # Every distribution root must carry the root LICENSE, every workspace Cargo.toml must declare a
         # license, and THIRD-PARTY-NOTICES.md must still be the file its generator would produce. MIT

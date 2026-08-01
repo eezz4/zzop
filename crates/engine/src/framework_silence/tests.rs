@@ -35,10 +35,10 @@ fn the_near_zero_floor_diverges_from_the_census_exact_zero_assertion_deliberatel
     );
 }
 
-struct TempDir(std::path::PathBuf);
+pub(super) struct TempDir(std::path::PathBuf);
 
 impl TempDir {
-    fn new(prefix: &str) -> Self {
+    pub(super) fn new(prefix: &str) -> Self {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let nanos = std::time::SystemTime::now()
@@ -50,11 +50,11 @@ impl TempDir {
         TempDir(dir)
     }
 
-    fn path(&self) -> &Path {
+    pub(super) fn path(&self) -> &Path {
         &self.0
     }
 
-    fn write(&self, rel: &str, content: &str) {
+    pub(super) fn write(&self, rel: &str, content: &str) {
         let full = self.0.join(rel);
         if let Some(parent) = full.parent() {
             fs::create_dir_all(parent).unwrap();

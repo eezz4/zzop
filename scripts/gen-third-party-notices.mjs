@@ -332,6 +332,65 @@ const FILENAME_HINTS = {
 const LICENSE_FILE_RE = /^(licen[cs]e|copying|unlicense)/i;
 const GENERIC_LICENSE_FILE_RE = /^(licen[cs]e|copying|unlicense)(\.(md|txt))?$/i;
 
+/* Basename of a relative path from licenseFilesOf(). Root-level files are bare names; files found
+ * one directory down are `subdir/name`. Hints match the BASENAME (a directory named, say, `limits/`
+ * must not satisfy the MIT hint), while GENERIC_LICENSE_FILE_RE stays anchored on the full relative
+ * path — a bare LICENSE in a subdirectory is exactly the vendored-third-party shape whose license
+ * may not be the crate's own, so the generic pass never descends. */
+const baseName = (rel) => rel.slice(rel.lastIndexOf('/') + 1);
+
+/* The two predicates `derive()` picks WITH. They live here, named and exported, rather than inline
+ * at their call sites, because scripts/test-notices-harvest.mjs must drive THESE — a fixture that
+ * reconstructs them locally tests its own copy, which is what it did until 2026-08-01: mutating
+ * either call site left the fixture green while it printed a line claiming both were covered.
+ *
+ * `hintPredicate` matches on the BASENAME so a directory named after a license cannot satisfy a
+ * hint meant for a file. `genericPredicate` matches on the FULL relative path, which is what keeps
+ * the generic pass from descending — a subdirectory candidate always carries a `/`. Neither is a
+ * style choice; both are the behavior a mutation test pins. */
+const hintPredicate = (hint) => (name) => {
+  const base = baseName(name);
+  return hint.allow.test(base) && !(hint.deny && hint.deny.test(base));
+};
+const genericPredicate = (name) => GENERIC_LICENSE_FILE_RE.test(name);
+
+/* Subdirectories the one-level descent must NOT enter. The hazard: a crate that vendors another
+ * project ships that project's OWN license under vendor/ or third_party/ (a vendored LICENSE-MIT,
+ * say), and the descent would hand it to the hint pass as a candidate for the CRATE's own license —
+ * a confident, wrong notice reproducing somebody else's license text under this crate's heading.
+ * The witnessed legitimate case stays covered: unicode_names2-1.3.0/data/LICENSE-UNICODE lives
+ * under data/, which is not in this list. */
+const SKIPPED_SUBDIRS = new Set(['vendor', 'vendored', 'third party', 'deps', 'testdata', 'tests']);
+
+/* Membership is tested on a NORMALIZED name: lowercased, with `-` and `_` both folded to a space.
+ * The list held only `third_party` until 2026-08-01, so `third-party/` — at least as common in
+ * published crates — walked straight past it and its vendored LICENSE-MIT reached the hint pass.
+ * Folding the separator means a future entry cannot be defeated by the other spelling. */
+const skippedSubdir = (name) => SKIPPED_SUBDIRS.has(name.toLowerCase().replace(/[-_]/g, ' '));
+
+/* A SUBDIRECTORY candidate must additionally not look like SOURCE. The thing being excluded is
+ * src/license_mit.rs, which qualifies by name prefix and whose basename satisfies the MIT hint.
+ *
+ * This was an ALLOW-list (extensionless | .md | .txt) until 2026-08-01, and it silently dropped the
+ * spellings the comment beside it already knew about: LICENSE-APACHE-2.0 and LICENSE-BSD-3.0 read
+ * their VERSION as a suffix, and COPYING.LESSER / LICENSE.rst are ordinary license-text names. All
+ * four were measured lost. The failure is invisible — an identifier whose only carrier keeps its
+ * text at licenses/LICENSE-APACHE-2.0 degrades to NO LOCAL LICENSE TEXT FOUND, and check() steps
+ * past that marker rather than failing on it.
+ *
+ * A deny-list is the correct shape here because the population being excluded is finite and known
+ * (source and binary files) while license spellings are open. Root candidates stay unconstrained. */
+const SOURCE_LIKE_EXT =
+  /\.(rs|js|mjs|cjs|ts|tsx|jsx|py|go|java|cs|c|h|cc|cpp|hpp|rb|php|sh|bat|ps1|toml|json|yaml|yml|lock|so|dll|dylib|a|o|exe|wasm|png|jpe?g|gif|svg|ico|zip|gz|tar)$/i;
+const plausibleSubdirLicenseFile = (name) => !SOURCE_LIKE_EXT.test(name);
+
+/* License-named files in the crate root, plus ONE level of subdirectories. The descent exists
+ * because published packages really do ship a license only there: unicode_names2 1.3.0 carries its
+ * Unicode-DFS-2016 text solely at data/LICENSE-UNICODE (found 2026-07-31, after this file shipped a
+ * NO LOCAL LICENSE TEXT FOUND block for an identifier whose text was sitting one directory down).
+ * Root files sort first, so WITHIN ONE CRATE a root-level match beats a subdirectory one — only
+ * within one crate: pick() is crate-major, so a text found in ANY earlier-ranked crate (root or
+ * subdirectory) still wins over a later crate's root file. */
 function licenseFilesOf(pkg) {
   const dir = path.dirname(pkg.manifest_path);
   let entries;
@@ -344,7 +403,24 @@ function licenseFilesOf(pkg) {
     .filter((e) => e.isFile() && LICENSE_FILE_RE.test(e.name))
     .map((e) => e.name)
     .sort();
-  return { dir, files, readable: true };
+  const subFiles = [];
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    if (skippedSubdir(e.name.toLowerCase())) continue; /* vendored code's license is not the crate's */
+    let sub;
+    try {
+      sub = fs.readdirSync(path.join(dir, e.name), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const s of sub) {
+      if (s.isFile() && LICENSE_FILE_RE.test(s.name) && plausibleSubdirLicenseFile(s.name)) {
+        subFiles.push(`${e.name}/${s.name}`);
+      }
+    }
+  }
+  subFiles.sort();
+  return { dir, files: [...files, ...subFiles], readable: true };
 }
 
 function readText(dir, name) {
@@ -411,14 +487,14 @@ function derive() {
     let chosen = null;
 
     if (hint) {
-      chosen = pick(crates, perCrateFiles, (name) => hint.allow.test(name) && !(hint.deny && hint.deny.test(name)));
+      chosen = pick(crates, perCrateFiles, hintPredicate(hint));
     }
     if (!chosen) {
       /* A crate licensed under exactly one identifier can only mean THAT identifier by its
        * unqualified LICENSE/COPYING file. A multi-license crate's bare LICENSE is ambiguous and is
        * deliberately never used here. */
       const single = crates.filter((p) => licenseIds(p.license).length === 1);
-      chosen = pick(single, perCrateFiles, (name) => GENERIC_LICENSE_FILE_RE.test(name));
+      chosen = pick(single, perCrateFiles, genericPredicate);
     }
 
     if (chosen && chosen.text.length < MIN_TEXT_CHARS) {
@@ -860,8 +936,39 @@ function check() {
   );
 }
 
-const args = process.argv.slice(2);
-const unknown = args.filter((a) => a !== '--check');
-if (unknown.length > 0) die(`unknown argument(s): ${unknown.join(' ')}. Usage: node scripts/gen-third-party-notices.mjs [--check]`);
-if (args.includes('--check')) check();
-else write();
+/* Named exports so scripts/test-notices-harvest.mjs can exercise the REAL harvest logic against a
+ * synthetic crate tree — not a copy of it, which would test the copy. Exporting changes nothing
+ * about CLI behavior; the main-guard below does the same job `require.main === module` does in CJS. */
+export {
+  licenseFilesOf,
+  pick,
+  baseName,
+  hintPredicate,
+  genericPredicate,
+  skippedSubdir,
+  plausibleSubdirLicenseFile,
+  FILENAME_HINTS,
+  GENERIC_LICENSE_FILE_RE,
+  LICENSE_FILE_RE,
+};
+
+/* Run the CLI only when this file IS the entry point. When imported (by the harvest unit test),
+ * nothing below executes — an import that regenerated THIRD-PARTY-NOTICES.md as a side effect would
+ * be the bug. A wrong guard here cannot fail silent: check-license-shipping.sh refuses exit 0
+ * without the "OK, offline (" token, so a --check that no-ops goes red, not green. */
+const invokedAsCli = (() => {
+  if (!process.argv[1]) return false;
+  const argPath = path.resolve(process.argv[1]);
+  const selfPath = fileURLToPath(import.meta.url);
+  return process.platform === 'win32'
+    ? argPath.toLowerCase() === selfPath.toLowerCase()
+    : argPath === selfPath;
+})();
+
+if (invokedAsCli) {
+  const args = process.argv.slice(2);
+  const unknown = args.filter((a) => a !== '--check');
+  if (unknown.length > 0) die(`unknown argument(s): ${unknown.join(' ')}. Usage: node scripts/gen-third-party-notices.mjs [--check]`);
+  if (args.includes('--check')) check();
+  else write();
+}

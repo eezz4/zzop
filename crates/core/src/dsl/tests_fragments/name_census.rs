@@ -11,7 +11,7 @@
 //! It was added to `scripts/check-policy-census.sh` first, as a line-oriented `awk` extractor over
 //! `rules/dsl/**/*.json`, whose header asserted the line orientation "fails LOUD, never silent". That is
 //! false. Measured against the shipped extractor, with inputs that are all VALID JSON and with no JSON
-//! formatter guard anywhere in this repo to prevent them (18 guards, 0 of them format JSON):
+//! formatter guard anywhere in this repo to prevent them (no guard in `scripts/` formats JSON):
 //!
 //! | pack shape | expected | extractor produced |
 //! |---|---|---|
@@ -24,8 +24,9 @@
 //! at zero cost — which is the exact "structural evasion route" the JSON axis was introduced to close.
 //!
 //! ## Rejected: fix the `awk`
-//! A correct extractor has to know where JSON strings begin and end (fragment VALUES are regexes: 4 of
-//! the 9 shipped values already contain a `"`, and 4 contain `{`/`}`), track brace depth, and tell a key
+//! A correct extractor has to know where JSON strings begin and end (fragment VALUES are regexes, and
+//! shipped ones already contain both `"` and `{`/`}` — see the values behind [`CENSUSED_FRAGMENTS`],
+//! which is where that count lives so it cannot rot here), track brace depth, and tell a key
 //! position from a value position — i.e. a hand-rolled JSON tokenizer, in `awk`, untested, ~30 lines
 //! away from a real parser that this crate already runs over the very same files (`raw_packs`,
 //! `fragments::shared_fragments`). Reading JSON with a better regex is still reading JSON with a regex;
@@ -37,8 +38,10 @@
 //! rewrite does not.
 //!
 //! ## Rejected: a committed snapshot file with its own `--update` mode
-//! The Rust half of the census earns its snapshot file: 127 rows, regenerated mechanically. This axis is
-//! 9 rows of deliberately-bounded shared vocabulary. An inline list needs no second update command and
+//! The Rust half of the census earns its snapshot file: two orders of magnitude more rows, regenerated
+//! mechanically (`scripts/policy-census.txt` is its own count). This axis is [`CENSUSED_FRAGMENTS`]
+//! below — deliberately-bounded shared vocabulary you can read in one screen. An inline list needs no
+//! second update command and
 //! shows up in the diff of the change that adds the fragment, which is where the triage decision is
 //! being made.
 
@@ -54,8 +57,12 @@ const SHARED_BUNDLE: &str = "crates/core/src/dsl/shared_fragments.json";
 /// Every `${NAME}` fragment that ships today, as `<path>:<name>`, sorted.
 ///
 /// Adding a row here is the triage moment: decide the tier (T1 shared / T2 / T3 / not-policy) and record
-/// it in the policy-value inventory FIRST, then add the row. Removing one is equally deliberate — a
-/// fragment that disappears was referenced by name from somewhere.
+/// that verdict where it can be checked — a T1/T2 gets a pin in `zzop-engine`'s
+/// `tests/rule_contracts/policy_pins.rs`, a T3 gets a "why these need not stay equal" line at the
+/// declaration. (It used to say "record it in the policy-value inventory FIRST"; that table was folded
+/// on 2026-07-26 in favour of code + mechanical cross-check, so the instruction named a dead structure.)
+/// Removing a row is equally deliberate — a fragment that disappears was referenced by name from
+/// somewhere.
 const CENSUSED_FRAGMENTS: &[&str] = &[
     "crates/core/src/dsl/shared_fragments.json:test-paths",
     "crates/core/src/dsl/shared_fragments.json:test-paths-stories",

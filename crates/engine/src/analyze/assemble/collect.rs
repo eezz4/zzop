@@ -51,7 +51,7 @@ pub(super) fn collect(
     let mut ts_paths: HashSet<String> = HashSet::new();
     let mut degraded: Vec<String> = Vec::new();
     let mut minified: Vec<String> = Vec::new();
-    let mut source_files: usize = 0;
+    let mut parser_dispatched: usize = 0;
     let mut io_provides: Vec<IoProvide> = Vec::new();
     let mut io_consumes: Vec<IoConsume> = Vec::new();
     let mut dead_export_names_by_file: HashMap<String, crate::dead_exports::DeadExportNames> =
@@ -114,11 +114,11 @@ pub(super) fn collect(
         // match, so caching it in a local is a free correctness-neutral simplification, not a behavior
         // change.
         let dispatch_lang = crate::dispatch::dispatch(&artifact.rel, &config.dispatch);
-        // `CoverageCensus::source_files` — the parser-claimed subset of the walked total, so a consumer
+        // `CoverageCensus::parser_dispatched` — the parser-claimed subset of the walked total, so a consumer
         // can size the CODE without mistaking docs/data/assets for it. Free here: `dispatch_lang` is
         // already in hand, and an overlay-covered file is parsed source too (by its adapter).
         if dispatch_lang.is_some() || overlay_covered_paths.contains(&artifact.rel) {
-            source_files += 1;
+            parser_dispatched += 1;
         }
         if artifact.degraded {
             degraded.push(artifact.rel.clone());
@@ -260,7 +260,7 @@ pub(super) fn collect(
 
     Collected {
         file_count,
-        source_files,
+        parser_dispatched,
         per_file_findings,
         all_symbols,
         loc_by_path,

@@ -9,11 +9,10 @@
 //!    or `req` (covers untyped JS). Checked once per function signature; a function with neither
 //!    contributes nothing at all (cheaper than gating each path test individually, and matches
 //!    the false-positive corpus: `location.pathname`/`new URL(window.location.href)` sites live
-//!    in client code that never takes a `request`/`req` param). Known residual FP of the
-//!    name-based half: a service-worker fetch HELPER (`function onFetch(request) { const url =
-//!    new URL(request.url); ... }`) passes both gates and emits its offline/cache routes as
-//!    provides even though a service worker is not a server — accepted v1 tradeoff; revisit if
-//!    a PWA corpus pulls (a `self.addEventListener` file-level veto is the likely fix).
+//!    in client code that never takes a `request`/`req` param). The residual FP of the name-based
+//!    half — a service-worker fetch HELPER (`function onFetch(request) { const url = new
+//!    URL(request.url); ... }`) passing both gates and emitting its offline/cache routes as
+//!    provides — is closed by the service-worker veto below (2026-08-01).
 //! 2. **URL provenance** for the pathname receiver actually compared: `<u>.pathname` where `<u>`
 //!    is a `URL`-typed param or a local `const/let/var <u> = new URL(...)`, or a local alias
 //!    (`const { pathname } = <u>`, incl. rename, or `const p = <u>.pathname`). A receiver that is
@@ -24,6 +23,14 @@
 //! The real-world anchor: a dispatch function commonly receives `url: URL` as a typed parameter
 //! injected by a cross-file wrapper rather than constructing it locally — gate 2 accepts a
 //! `URL`-typed PARAM for exactly this reason, not just a same-function `new URL(...)`.
+//!
+//! ## Browser service-worker veto (2026-08-01)
+//! A whole FILE is skipped when it carries a service-worker LIFECYCLE marker
+//! (`SERVICE_WORKER_LIFECYCLE_MARKERS`). The naive veto this doc used to propose — keying on
+//! `self.addEventListener` — would have been wrong in the most expensive direction: a legacy-syntax
+//! Cloudflare Worker, one of this adapter's PRIMARY targets, registers its entry point exactly that
+//! way, so the veto would have silenced real servers to remove a false one. The lifecycle markers
+//! discriminate because a Worker has no registration to skip and no clients to claim.
 //!
 //! ## Durable Object veto
 //! An entire class body is skipped (no methods analyzed, DO or not) when the class has DO
@@ -170,6 +177,9 @@ pub fn extract_pathname_dispatch_provides(rel: &str, text: &str) -> Vec<IoProvid
     if !text.contains("pathname") {
         return Vec::new();
     }
+    if is_browser_service_worker(text) {
+        return Vec::new();
+    }
     let Some((cm, module)) = crate::parse_with_cm(rel, text) else {
         return Vec::new();
     };
@@ -182,6 +192,41 @@ pub fn extract_pathname_dispatch_provides(rel: &str, text: &str) -> Vec<IoProvid
     };
     module.visit_with(&mut collector);
     dedup_provides(collector.out)
+}
+
+/// SERVICE-WORKER LIFECYCLE MARKERS — the only signals that separate a browser service worker from
+/// the raw Cloudflare Worker this recognizer exists to see. Both spell their entry point
+/// `addEventListener("fetch", …)`, so the obvious veto the module doc used to propose (`a
+/// self.addEventListener file-level veto`) would have silenced the very target of this adapter.
+///
+/// These four are lifecycle APIs that exist ONLY in the browser service-worker global scope. A
+/// Cloudflare Worker has no registration lifecycle to skip or clients to claim, and it never handles
+/// `install`/`activate`, so none of them can appear in one.
+///
+/// Deliberately NOT here: `caches` (Cloudflare has `caches.default`), `self` alone (a Worker's global
+/// is also `self`), and `addEventListener("fetch")` (shared, as above). Each of those would veto a
+/// real server.
+const SERVICE_WORKER_LIFECYCLE_MARKERS: &[&str] =
+    &["skipWaiting", "clients.claim", "\"install\"", "'install'"];
+
+/// Whether this file is a BROWSER service worker, whose `url.pathname` comparisons route cache and
+/// offline strategies rather than serving a public HTTP surface.
+///
+/// Why it is worth a veto at all: a service-worker fetch helper (`function onFetch(request) { const
+/// url = new URL(request.url); … }`) passes both per-function evidence gates and emits its offline
+/// routes as `provides`, which then enter the cross-layer join as endpoints nobody serves. The
+/// recognizer's gates are working exactly as specified — the file simply is not a server.
+///
+/// Text-level, not AST-level, on purpose: a lifecycle marker anywhere in the file settles what KIND
+/// of file this is, and the per-function gates below are what still decide which functions inside a
+/// non-vetoed file count. An AST walk would buy no precision here and would cost a second parse of a
+/// file this function is deciding whether to parse at all.
+fn is_browser_service_worker(text: &str) -> bool {
+    // `install`/`activate` are quoted-string checks so an ordinary identifier named `install` (a
+    // package-installer helper, say) cannot veto a real server file.
+    SERVICE_WORKER_LIFECYCLE_MARKERS
+        .iter()
+        .any(|m| text.contains(m))
 }
 
 fn dedup_provides(provides: Vec<IoProvide>) -> Vec<IoProvide> {

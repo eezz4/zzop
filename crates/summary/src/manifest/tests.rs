@@ -86,7 +86,7 @@ fn the_manifest_carries_deduped_identity_and_never_a_path_or_a_line() {
             { "bucket": "unconsumedProvides", "kind": "http", "key": "GET /api/legacy", "source": "be" },
             { "bucket": "unprovidedConsumes", "kind": "http", "key": "GET /api/gone", "source": "fe" },
             // An unresolved consume has no key — its `raw` source text IS its identity (same
-            // fallback `output::bucket_keys` uses), never a guess and never dropped silently.
+            // fallback `output::distinct_bucket_keys` uses), never a guess and never dropped silently.
             { "bucket": "unresolvedConsumes", "kind": "http", "key": "url(x)", "source": "fe" },
         ]),
         "every non-edge bucket membership, sorted by the row's own serialized text (bucket first) — \

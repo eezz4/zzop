@@ -87,6 +87,38 @@ fn retry_sightline() -> String {
     )
 }
 
+/// Extensions whose files the TypeScript parser — the ONE producer of `IoConsume::retry_configured`
+/// (see [`retry_sightline_claim`]) — is dispatched for. The prose claim deliberately names the
+/// producer instead of a list; the machine-readable declaration below cannot (a coverage consumer
+/// crosses extensions, not producer names), so this is that producer's dispatch arm spelled out once.
+///
+/// POLICY VALUE, T2: duplicates `zzop_engine`'s TypeScript dispatch arm (this crate depends on
+/// `zzop_core` only, so it cannot import the predicate) — pinned both directions by
+/// `zzop_engine::sightlines`' `ts_witness_extension_lists_match_the_dispatch_table`, the same
+/// arrangement as `zzop_rules_http::http_scan::WRITE_SITE_COVERED_EXTENSIONS`.
+pub const RETRY_WITNESS_EXTENSIONS: &[&str] =
+    &["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"];
+
+/// This rule's machine-readable sightline declaration (`zzop_core::RuleSightline` — see that module's
+/// doc for the mechanism and the direction of the claim): the structured form of [`retry_sightline`],
+/// built FROM the same pinned claim so the two halves cannot drift. The upper-bound direction matters
+/// MOST for this rule — even inside these extensions the tag stays unset on the hono-client, tRPC and
+/// fetch-wrapper consume paths (the increment-2 gap), and the sentence keeps saying so.
+pub(crate) fn sightlines() -> Vec<zzop_core::RuleSightline> {
+    vec![zzop_core::RuleSightline {
+        rule_id: "cross-layer/retrying-write-no-idempotency",
+        trigger_extensions: RETRY_WITNESS_EXTENSIONS,
+        outside_meaning: format!(
+            "{claim}, and that tag is this rule's only trigger — ZERO findings on a tree whose \
+             callers live outside these extensions means the retry side was NOT ANALYZED, never \
+             \"no replayed write\" (and even inside them, the hono-client, tRPC and fetch-wrapper \
+             consume paths leave the tag unset)",
+            claim = retry_sightline_claim()
+        ),
+        assert_when_blind: false,
+    }]
+}
+
 /// Flags every `http` edge whose consumer side is a retry-configured write (`retry_sites` membership) AND
 /// whose provider side carries no witnessed [`IDEMPOTENCY_GUARDED_ATTR`] veto. The verb is re-derived from
 /// the edge key defensively; `retry_configured` is only ever set on writes, so a non-write here would be a

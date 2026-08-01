@@ -47,8 +47,18 @@ pub fn register_native_analyses(registry: &mut RuleRegistry) {
     }
 }
 
+/// This crate's machine-readable sightline declarations (`zzop_core::RuleSightline`) — currently the
+/// one rule whose trigger has a single-producer fact, `cross_layer::retrying_write_no_idempotency`
+/// (the declaration lives there, WITH the rule); composed with the other crates' own by
+/// `zzop_engine::rule_sightlines`, the same aggregator shape as [`register_native_analyses`].
+pub fn rule_sightlines() -> Vec<zzop_core::RuleSightline> {
+    cross_layer::retrying_write_no_idempotency::sightlines()
+}
+
 pub use cross_layer::external_secret_in_url::SECRET_PARAM_NAMES;
-pub use cross_layer::retrying_write_no_idempotency::IDEMPOTENCY_GUARDED_ATTR;
+pub use cross_layer::retrying_write_no_idempotency::{
+    IDEMPOTENCY_GUARDED_ATTR, RETRY_WITNESS_EXTENSIONS,
+};
 pub use cross_layer::unconsumed_endpoint::EXTERNALLY_FETCHED_PATHS;
 pub use cross_layer::CROSS_LAYER_WRITE_METHODS;
 pub use cross_layer::VERSION_SEGMENT_PATTERN;

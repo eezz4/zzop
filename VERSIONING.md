@@ -185,6 +185,33 @@ These change freely at any time, by design — do not build on them:
   Claude Code plugin / Claude Desktop `.mcpb` bundle built from the latter, and the Normalized AST
   protocol.
 
+## Documents that are compiled INTO the binary — changing one requires a release
+
+These files are not read from disk at run time. They are `include_str!`-baked into the binary by
+`crates/summary/src/contracts.rs` and served as the `zzop contract` / `zzop://contract/*` resources,
+so **a reader on a prebuilt binary sees the bytes from the release they installed**, never the ones
+in this repository.
+
+The consequence is a rule, not a nuance: *"only documentation changed, so no release is needed"* is
+**false for every file in this list**. A pack author on the previous release cannot see a knob, a
+schema field, or a rule row added here until a new binary ships.
+
+<!-- EMBEDDED-CONTRACT-DOCS: this list is machine-checked against the `include_str!` calls in
+     crates/summary/src/contracts.rs by scripts/check-embedded-contract-docs.sh. Adding a baked
+     document without listing it here (or the reverse) fails that guard. -->
+
+- `docs/adapters/envelope.schema.json`
+- `docs/NORMALIZED_AST.md`
+- `docs/adapters/key-normalization.fixture.json`
+- `docs/adapters/README.md`
+- `docs/rules/dsl-reference.md`
+- `docs/rules/authoring-guide.md`
+- `docs/contracts/rule-pack.schema.json`
+- `docs/contracts/example-envelope.json`
+- `docs/rules/catalog.md`
+
+Every other file under `docs/` is read from the repository or the website and needs no release to
+reach a reader — the distinction is exactly "is it in the list above".
 ## How versions are produced
 
 The version SSOT is the workspace `Cargo.toml`'s `[workspace.package] version` (2026-07-22 reform).

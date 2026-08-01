@@ -50,6 +50,7 @@ if [ "$cargo_scanned" -eq 0 ] || [ "$rs_scanned" -eq 0 ]; then
   echo "about where syn is used. An empty subject set is a broken guard, never a clean tree."
   exit 1
 fi
+assert_workspace_members_scanned "syn isolation guard" "${RS_GLOBS[@]}"
 
 echo "syn isolation guard: checking Cargo.toml dependency declarations..."
 DEP_PATTERN='^\s*(syn|proc-macro2)\s*='

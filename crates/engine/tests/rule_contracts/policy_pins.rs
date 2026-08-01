@@ -222,7 +222,7 @@ const ORDER_GATE_RESIDUAL: &str = "A trigger line that sits inside NO parser-pro
 /// wider than the matcher proves, and a reader holding one finding cannot falsify it. Nothing else would
 /// catch the drift: a rule's own fixtures assert findings, never the sentence describing them.
 ///
-/// Why a byte-identical sentence spliced eight times instead of one shared symbol: a rule `message` is not
+/// Why a byte-identical sentence spliced across every such rule instead of one shared symbol: a rule `message` is not
 /// a pattern-bearing field, so the fragment mechanism structurally cannot reach it
 /// (`docs/contracts/rule-pack.schema.json` — a fragment reference resolves only in fields whose
 /// description ends "fragment reference supported"), and the rules live in five separate packs that share
@@ -230,7 +230,9 @@ const ORDER_GATE_RESIDUAL: &str = "A trigger line that sits inside NO parser-pro
 /// straddles, same remedy: spell it out on each side and pin the RELATIONSHIP here.
 ///
 /// Two-sided by construction: the subject set is DISCOVERED from the shipped matchers, never listed here,
-/// so a ninth rule that switches the gate on and keeps a silent message fails on its first run.
+/// so the NEXT rule that switches the gate on and keeps a silent message fails on its first run.
+/// (This said "a ninth rule" while eight were spliced; the ninth has since arrived, which is exactly
+/// why the sentence now names no number — the set is discovered, so no count belongs in the prose.)
 #[test]
 fn every_after_in_same_function_rule_publishes_the_order_gate_residual() {
     let packs = load_all_packs();

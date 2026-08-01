@@ -184,7 +184,7 @@ fn all_placeholder_consume_key_misses_into_unresolved_not_unprovided() {
         .map(|c| c.consume.key.as_deref())
         .collect();
     assert_eq!(unresolved, vec![Some("GET /{}"), Some("POST /{}/{}")]);
-    // The demoted records keep their key (locatable in `bucketKeys`), unlike a `key: None` entry.
+    // The demoted records keep their key (locatable in `distinctBucketKeys`), unlike a `key: None` entry.
     assert!(r.unresolved_consumes.iter().all(|c| c.source == "fe"));
 
     let unprovided: Vec<&str> = r

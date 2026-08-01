@@ -356,14 +356,24 @@ fn check_endpoint_carries_the_config_honesty_channels_like_every_sibling_tool() 
     }
 }
 
-/// `bucketKeys` is UNCAPPED (2026-07-29 — the cap, its `bucketKeysTruncated` disclosure, and
-/// `snapshot.mjs`'s abort-on-truncation path were all deleted together). 25 keys is deliberately the size
-/// that used to truncate: it was 5 over the old 20-key cap, so this test fails the moment a cap returns.
+/// `distinctBucketKeys` is UNCAPPED (2026-07-29 — the cap, its `bucketKeysTruncated` disclosure, and
+/// the measurement harness's abort-on-truncation path were all deleted together). 25 keys is deliberately
+/// the size that used to truncate: it was 5 over the old 20-key cap, so this test fails the moment a cap
+/// returns.
+///
+/// It also pins the RENAME and the arithmetic the rename exists for (2026-07-31). The fixture calls one
+/// route TWICE, so `buckets.unprovidedConsumes` (26 rows) and `distinctBucketKeys.unprovidedConsumes`
+/// (25 keys) are different numbers on the same reply — which is exactly the state a reader used to meet
+/// with nothing on the wire to explain it. Both the new key names and the `bucketMeaning` sentence that
+/// answers the subtraction are asserted here, because a name that states the rule and a sentence that
+/// states the arithmetic are one repair, not two.
 #[test]
-fn cross_repo_summary_lists_every_bucket_key_uncapped() {
+fn cross_repo_summary_lists_every_distinct_bucket_key_uncapped_and_explains_the_row_count() {
     let fe = TempDir::new("zzop-summary-bucket-keys-fe");
     let over = 25;
-    let paths: Vec<String> = (0..over).map(|i| format!("/api/things/{i}")).collect();
+    let mut paths: Vec<String> = (0..over).map(|i| format!("/api/things/{i}")).collect();
+    // The SECOND call site for one key: one extra ROW, zero extra distinct keys.
+    paths.push("/api/things/0".to_string());
     write_fetch_tree(&fe, &paths);
     let be = TempDir::new("zzop-summary-bucket-keys-be");
     be.write("b.ts", "export const b = 2;\n");
@@ -373,9 +383,9 @@ fn cross_repo_summary_lists_every_bucket_key_uncapped() {
     ];
     let out = cross_repo(&roots, None).expect("cross_repo should succeed");
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-    let keys = v["bucketKeys"]["unprovidedConsumes"]
+    let keys = v["distinctBucketKeys"]["unprovidedConsumes"]
         .as_array()
-        .expect("bucketKeys array");
+        .expect("distinctBucketKeys array");
     assert_eq!(keys.len(), over, "every distinct key, no cap");
     assert_eq!(keys[0], "GET /api/things/0", "engine order preserved");
     assert!(
@@ -383,19 +393,74 @@ fn cross_repo_summary_lists_every_bucket_key_uncapped() {
         "the truncation field is gone entirely, not merely empty: {}",
         v["bucketKeysTruncated"]
     );
+    // The old spellings must be GONE, not merely joined by the new ones — a rename that leaves the
+    // ambiguous name on the wire has fixed nothing for a reader who reaches for the one they know.
+    assert!(
+        v.get("bucketKeys").is_none() && v.get("bucketKeySites").is_none(),
+        "the pre-rename field names must not still ship: {v}"
+    );
+    // ROWS vs DISTINCT, on one reply: the count is one HIGHER than the key list is long, because the
+    // fixture calls one route from two sites.
+    assert_eq!(
+        v["buckets"]["unprovidedConsumes"],
+        over + 1,
+        "buckets counts raw rows (one per call site), not distinct keys"
+    );
+    // ... and the reply says so ITSELF, so the subtraction is answered on the wire.
+    let meaning = v["bucketMeaning"].as_str().expect("bucketMeaning sentence");
+    // `CALL SITES` is pinned in the PLURAL-and-scoped form deliberately. The sentence used to read
+    // "one per recorded call site, for all six buckets", which is false for two of them:
+    // `unconsumedProvides` rows are route/handler DECLARATION sites and `edges` rows are matched
+    // consume->provide PAIRS. Pinning the unqualified "call site" is what let that survive, so the
+    // three row-unit words are pinned together — a future edit cannot drop the qualification and
+    // still pass.
+    for token in [
+        "buckets",
+        "ROWS",
+        "CALL SITES",
+        "DECLARATION",
+        "PAIRS",
+        "distinctBucketKeys",
+        "DISTINCT",
+    ] {
+        assert!(
+            meaning.contains(token),
+            "bucketMeaning must state the rows-vs-distinct relationship in words AND say what a ROW \
+             is in each bucket, missing {token:?}: {meaning:?}"
+        );
+    }
+    assert!(
+        meaning.contains("distinctBucketKeyFirstSites") && meaning.contains("first"),
+        "bucketMeaning must also say the sites list is ONE site per key, the first: {meaning:?}"
+    );
     // An empty bucket still appears, with its (empty) key list.
-    assert_eq!(v["bucketKeys"]["unconsumedProvides"], serde_json::json!([]));
-    // `bucketKeySites` mirrors `bucketKeys` shape with a locatable
-    // "file:line" for the first site behind each key — a key is no longer a bare string with no
-    // call site to go look at.
-    let sites = v["bucketKeySites"]["unprovidedConsumes"]
+    assert_eq!(
+        v["distinctBucketKeys"]["unconsumedProvides"],
+        serde_json::json!([])
+    );
+    // `distinctBucketKeyFirstSites` mirrors the key map's shape with a locatable "file:line" for the
+    // FIRST site behind each key — a key is no longer a bare string with no call site to go look at,
+    // and the name no longer promises every site.
+    let sites = v["distinctBucketKeyFirstSites"]["unprovidedConsumes"]
         .as_array()
-        .expect("bucketKeySites array");
+        .expect("distinctBucketKeyFirstSites array");
     assert_eq!(sites.len(), keys.len(), "sites must be parallel to keys");
     let site0 = sites[0].as_str().unwrap_or_default();
     assert!(
         site0.contains("api.ts:") && site0.rsplit(':').next().unwrap().parse::<u32>().is_ok(),
         "expected a locatable \"file:line\" site, got: {site0:?}"
+    );
+    // RUN-LEVEL `warnings` is ALWAYS present, empty array included (2026-07-31). It used to be written
+    // only when non-empty, which made "this run self-reported nothing" and "this build has no run-level
+    // warning channel" the same bytes. This fixture fires no run-level tripwire, so it is exactly the
+    // case that used to omit the key — which is what makes it the one worth pinning. Distinct from
+    // `sources[].warnings`, the per-tree channel, which never had the defect.
+    let run_warnings = v
+        .get("warnings")
+        .unwrap_or_else(|| panic!("run-level `warnings` must be present even when empty: {v}"));
+    assert!(
+        run_warnings.is_array(),
+        "run-level `warnings` must be an array, never null: {run_warnings}"
     );
 }
 

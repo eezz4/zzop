@@ -48,6 +48,7 @@ if [ "$cargo_scanned" -eq 0 ] || [ "$rs_scanned" -eq 0 ]; then
   echo "about where ruff is used. An empty subject set is a broken guard, never a clean tree."
   exit 1
 fi
+assert_workspace_members_scanned "ruff isolation guard" "${RS_GLOBS[@]}"
 
 echo "ruff isolation guard: checking Cargo.toml dependency declarations..."
 DEP_PATTERN='^\s*ruff[_-][A-Za-z0-9_-]*\s*='

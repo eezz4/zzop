@@ -20,7 +20,7 @@
     "parser": {
       "type": "string",
       "minLength": 1,
-      "description": "\"<parser id>/<impl version>\" — doubles as the cache fingerprint segment; bump the impl version whenever the projection changes for identical input."
+      "description": "\"<parser id>/<impl version>\" — the producer's self-identification. Quoted by every warning that attributes an overlay action to its adapter (displacement/overruled disclosures, source mismatch, zero-fact census) and used as the deterministic ordering key when several overlays merge. NOT a cache ingredient: envelopes are never served from cache (Mode A analysis is uncached; Mode B overlays apply after the cached pass), so a changed projection is always honored with no version bump."
     },
     "source": {
       "type": "string",

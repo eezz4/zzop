@@ -34,7 +34,7 @@ fn depth_2_aggregates_by_top_2_path_segments() {
     ];
     let agg = aggregate_by_folder(&nodes, 2);
     assert_eq!(agg[0].folder, "features/alpha");
-    assert_eq!(agg[0].file_count, 2);
+    assert_eq!(agg[0].node_count, 2);
     assert_eq!(agg[0].total_risk, 30.0);
     assert_eq!(agg[0].avg_risk, 15.0);
     assert_eq!(agg[0].max_risk, 20.0);

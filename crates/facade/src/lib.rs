@@ -41,6 +41,7 @@ mod envelope;
 mod explain;
 mod output;
 mod query;
+mod query_coverage;
 mod query_file;
 mod request;
 mod route_injection;
@@ -69,6 +70,7 @@ pub use analyze::{analyze_json, analyze_trees_json};
 pub use envelope::{analyze_envelope_json, validate_envelope_only_json};
 pub use explain::explain;
 pub use query::query_io_json;
+pub use query_coverage::query_coverage_json;
 pub use query_file::{query_file_json, FILE_VERDICTS};
 pub use request::{
     AnalyzeRequest, AnalyzeTreesRequest, CommitSubjectPatternRequest, CommitTypePatternRequest,
@@ -76,6 +78,13 @@ pub use request::{
 };
 pub use rule_pack::validate_rule_pack_json;
 pub use version::{version, version_string};
+/// The dep graph's membership rule, in one sentence with ONE owner (`zzop_core::ir`). Re-exported for
+/// the same layering reason as the disclosure views below: `zzop-summary` publishes dep-graph-derived
+/// numbers (`fanIn`/`fanOut`/`degree` on the cosmograph points table) and must be able to disclose what
+/// graph they describe without skipping a layer to reach `zzop-core`, which is deliberately not a
+/// shipped dependency of that crate. Re-exported, never restated — a second copy of this sentence is a
+/// second thing that can drift.
+pub use zzop_core::DEP_GRAPH_RESOLVED_ONLY;
 /// The silent-failure-class registry's two DERIVED views — its full text as a contract document, and
 /// its per-status tallies. Re-exported rather than wrapped, and re-exported HERE rather than reached
 /// for directly, because this is the analysis-MEANING layer (the same reason `explain` and `version`

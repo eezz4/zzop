@@ -100,6 +100,26 @@ pub struct PackageImportSummary {
     pub example_file: String,
 }
 
+impl PackageImportSummary {
+    /// Collapses a per-tree import census (`specifier -> importing files`) into one summary per
+    /// specifier. Lives here rather than at either call site because BOTH assembly paths — the source
+    /// pass (`analyze::assemble`) and the envelope pass (`envelope::ingest`) — end with this identical
+    /// fold, and two copies of a determinism argument is one copy too many.
+    ///
+    /// Determinism: `BTreeSet` iteration is sorted, so `example_file` is the lexicographically first
+    /// importing file, not an arbitrary one.
+    pub(crate) fn census(census: BTreeMap<String, BTreeSet<String>>) -> Vec<Self> {
+        census
+            .into_iter()
+            .map(|(specifier, files)| Self {
+                file_count: files.len(),
+                example_file: files.into_iter().next().unwrap_or_default(),
+                specifier,
+            })
+            .collect()
+    }
+}
+
 pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
     let mut outputs = Vec::with_capacity(trees.len());
     let mut source_ios = Vec::with_capacity(trees.len());

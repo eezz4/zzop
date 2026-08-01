@@ -26,9 +26,9 @@ in one way only:
   `--severity`/`--rule`/`--limit`, parsed into the same shared filter, so neither surface can filter
   differently. Counts by severity and rule cover everything on both surfaces regardless; the cap only
   truncates the listed findings, and truncation is always disclosed.
-- **Some lanes are CLI-only, with no MCP tool twin:** `manifest`, `diff`, `facts`, `graph`, `explain`
+- **Some lanes are CLI-only, with no MCP tool twin:** `manifest`, `diff`, `facts`, `coverage`, `graph`, `explain`
   and `init`. Which lanes those are, and why each one is unpaired, is answered in one place —
-  [CLI-only lanes](modules/mcp.md#cli-only-lanes-manifest--diff--explain--facts--graph--init) — not by
+  [CLI-only lanes](modules/mcp.md#cli-only-lanes-manifest--diff--explain--facts--coverage--graph--init) — not by
   this sentence. (The lanes that project an analysis are recorded as a machine-readable contract in
   [surface-parity.json](contracts/surface-parity.json)'s `_cliOnlyLanes`, whose keys are that list;
   `explain` and `init` are deliberately outside that registry — neither projects an analysis — so the

@@ -26,7 +26,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod retired_fields;
 mod rule_issues;
+pub use retired_fields::pack_retired_field_issues;
 pub use rule_issues::pack_regex_issues;
 
 use crate::dsl::{Matcher, RulePackDef};

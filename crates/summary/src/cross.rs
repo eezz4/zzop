@@ -86,9 +86,9 @@ pub fn cross_summary(
     // WHICH keys sit in each non-edge bucket, not just how many — UNCAPPED since 2026-07-29, so unlike
     // `edges` below there is no truncation field to pair with it (nothing is dropped, so nothing needs
     // disclosing; see `output::bucket_keys`' own doc for why the cap and its disclosure both went).
-    // `bucket_key_sites` locates the FIRST site (`file:line`) backing each listed key, so e.g. an
-    // `unresolvedConsumes` key is no longer a bare string with no call site to go look at.
-    let (bucket_keys, bucket_key_sites) = output::bucket_keys(cl);
+    // `distinct_bucket_key_first_sites` locates the FIRST site (`file:line`) backing each listed key, so
+    // e.g. an `unresolvedConsumes` key is no longer a bare string with no call site to go look at.
+    let (distinct_bucket_keys, distinct_bucket_key_first_sites) = output::distinct_bucket_keys(cl);
 
     let mut summary = serde_json::json!({
         "config": loaded.config_path.as_deref().map(|p| p.display().to_string()),
@@ -101,8 +101,24 @@ pub fn cross_summary(
             "externalConsumes": bucket_len("externalConsumes"),
             "ambiguousConsumes": bucket_len("ambiguousConsumes"),
         },
-        "bucketKeys": bucket_keys,
-        "bucketKeySites": bucket_key_sites,
+        // The arithmetic between the two bucket views, ANSWERED ON THE WIRE rather than in a name alone.
+        // `buckets.X` counts raw rows and `distinctBucketKeys.X` dedupes them, so a reader checking
+        // `buckets.X == len(distinctBucketKeys.X)` legitimately gets a mismatch (measured on this repo's
+        // own corpus: 23 `unprovidedConsumes` rows over 14 distinct keys). A run-invariant sentence, not
+        // a computed one — the relationship is a contract, and computing per-bucket deltas here would
+        // publish the same numbers a reader can already subtract. Same repair the graph census made when
+        // its `--top` cap described rows the picture did not draw ("60 rows are 4 relations").
+        "bucketMeaning": "buckets counts ROWS for all six buckets, but a ROW is not the same thing in \
+            each: the four consume-side buckets count recorded CALL SITES, unconsumedProvides counts \
+            route/handler DECLARATION sites, and edges counts matched consume->provide PAIRS. \
+            distinctBucketKeys covers the five non-edge buckets and lists the DISTINCT keys those rows \
+            collapse into, so buckets.X is always >= the length of distinctBucketKeys.X and equality \
+            only means no key repeated. buckets.edges has no key list beside it — the edges array \
+            itself is the per-row view, capped, with edgesTruncated when the cap bit. \
+            distinctBucketKeyFirstSites carries ONE site per distinct key: the first recorded one, \
+            never every site behind it.",
+        "distinctBucketKeys": distinct_bucket_keys,
+        "distinctBucketKeyFirstSites": distinct_bucket_key_first_sites,
         "edges": edges_shown,
         "crossLayerFindings": output::shape_findings(&cl_findings, filters),
         "configWarnings": config_warnings,
@@ -115,13 +131,18 @@ pub fn cross_summary(
         summary["edgesTruncated"] = truncated;
     }
     // Run-level warnings (distinct from sources[].warnings) — e.g. the parallel-implementation
-    // tripwire ("0 cross-source edges but N duplicate/ambiguous findings"). `.get()`-defensive:
-    // the field is new on MultiAnalyzeOutputView; forwarded only when present and non-empty so
-    // older/edge outputs don't grow a null field.
-    if let Some(run_warnings) = v.get("warnings").and_then(|w| w.as_array()) {
-        if !run_warnings.is_empty() {
-            summary["warnings"] = serde_json::Value::Array(run_warnings.clone());
-        }
-    }
+    // tripwire ("0 cross-source edges but N duplicate/ambiguous findings"). ALWAYS PRESENT, empty
+    // array included: this key used to be written only when non-empty, which made "this run
+    // self-reported nothing" and "this build has no run-level warning channel" the same bytes —
+    // the silence this repo's always-present-key rule exists to abolish, and the same defect the
+    // sibling `sources[].warnings` never had. `.get()` stays defensive about the SOURCE field
+    // (it is newer than some outputs); the absence of a source is what yields `[]`, not a
+    // judgment that there was nothing to say.
+    summary["warnings"] = serde_json::Value::Array(
+        v.get("warnings")
+            .and_then(|w| w.as_array())
+            .cloned()
+            .unwrap_or_default(),
+    );
     serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())
 }

@@ -41,6 +41,10 @@ zzop file ./frontend/src/api.ts --config ./zzop.config.jsonc
 zzop endpoint users ./frontend ./backend
 zzop manifest ./frontend ./backend > contracts.json   # structural contract manifest: identity only, no file/line
 zzop diff ./contracts.json ./contracts.new.json       # what MOVED between two runs (bucket transitions first)
+zzop coverage ./frontend ./backend                    # how much of each tree zzop can actually SEE: the
+                              # per-extension dispatch table, blind spots crossed against each rule's
+                              # declared sightline, and the axes this run did NOT measure. The surface
+                              # that answers "is 0 findings clean, or blind?". CLI-only.
 zzop facts ./frontend ./backend > facts.json          # post-assembly facts (per-tree CommonIr + the whole
                               # join, uncapped) for your own out-of-process rule program. CLI-only: no MCP
                               # twin, because the output is uncapped and grows with the tree.

@@ -53,6 +53,37 @@ fn one_tree_with_git() -> Value {
     v
 }
 
+/// The same git-collecting tree, now with a `git.since` bound — the run whose history columns are
+/// WINDOWED. Everything else is identical, so a test comparing this census against
+/// `one_tree_with_git`'s is comparing exactly the fact under test.
+fn one_tree_with_windowed_git() -> Value {
+    let mut v = one_tree_with_git();
+    v["trees"][0]["output"]["gitWindow"]["since"] = serde_json::json!("2026-01-01");
+    v
+}
+
+/// Two trees whose windows DISAGREE — one full history, one bounded. Reachable for real:
+/// `analyzeTrees` takes one `EngineConfig` per tree, and `dep::collect` merges both trees' files into
+/// one node table.
+fn two_trees_with_different_windows() -> Value {
+    let mut v = one_tree_with_git();
+    let mut second = v["trees"][0].clone();
+    second["sourceId"] = serde_json::json!("api");
+    second["output"]["gitWindow"]["since"] = serde_json::json!("2026-01-01");
+    v["trees"]
+        .as_array_mut()
+        .expect("trees is an array")
+        .push(second);
+    v
+}
+
+/// The stderr census for one analysis, as the CLI prints it for the NODES table.
+fn census_line(tree: &Value) -> String {
+    nodes_ndjson(&super::super::dep::collect(tree), None)
+        .1
+        .render()
+}
+
 /// The history axes a git-collecting run supplies, read off `one_tree_with_git`'s own `nodes[]` entry:
 /// every field of it except `path`, which is the join key rather than an axis.
 ///
@@ -101,6 +132,21 @@ fn the_lane_is_uncapped_and_says_so() {
     assert_eq!(census.nodes_emitted, 4);
     assert_eq!(census.total_nodes, 4);
     assert!(census.render().contains("UNCAPPED"), "{}", census.render());
+}
+
+/// The points table publishes `fanIn`/`fanOut`/`degree` — graph-theoretic names that are correct ABOUT
+/// the graph they measure, which is exactly why they were NOT renamed when the census's
+/// `resolvedImportEdges` was (2026-07-31). What a reader cannot see from a column name is WHICH graph,
+/// so the stderr census says it, verbatim from the one owner. A paraphrase here would be a second owner.
+#[test]
+fn the_census_discloses_that_the_graph_is_resolved_in_tree_only() {
+    let u = super::super::dep::collect(&one_tree());
+    let (_, census) = nodes_ndjson(&u, None);
+    let line = census.render();
+    assert!(
+        line.contains(zzop_facade::DEP_GRAPH_RESOLVED_ONLY),
+        "the shared sentence must ride the census verbatim: {line}"
+    );
 }
 
 #[test]
@@ -263,6 +309,70 @@ fn the_census_says_which_measured_axes_actually_rode() {
     assert!(!links.render().contains("loc on"), "{}", links.render());
 }
 
+/// Coverage is not the same question as WINDOW. `changeCount`/`churn`/`authorCount`/`lastModified` are
+/// sums over the commits `git log` walked, and `git.since` bounds that walk — so a row can carry all
+/// four and still mean "90 days" where an unbounded run would mean "since the repo began". The analyze
+/// reply echoes `gitWindow` for exactly this reason; this lane's rows cannot hold prose, so the census
+/// carries it. Default is full history and honest, which is what makes silence the wrong answer: the
+/// three cases have to be TOLD APART from the census alone.
+#[test]
+fn the_census_says_which_git_window_the_history_columns_cover() {
+    let full = census_line(&one_tree_with_git());
+    assert!(
+        full.contains("covers FULL history"),
+        "an unbounded run must say so — 'no note' is indistinguishable from a windowed run: {full}"
+    );
+
+    let windowed = census_line(&one_tree_with_windowed_git());
+    assert!(
+        windowed.contains("covers ONLY commits since 2026-01-01"),
+        "the bound that scoped these numbers must be NAMED, not merely implied: {windowed}"
+    );
+    assert!(
+        !windowed.contains("FULL history"),
+        "a windowed run must not also claim full history: {windowed}"
+    );
+
+    // The third fact: no window at all, because nothing was collected. `git history on 0 of 4` alone
+    // cannot say this — a run that DID collect but matched no file reports the same zero.
+    let absent = census_line(&one_tree_with_loc());
+    assert!(
+        absent.contains("was NOT COLLECTED on this run"),
+        "git-did-not-run is a third case, not the full-history one: {absent}"
+    );
+    assert!(
+        !absent.contains("FULL history") && !absent.contains("commits since"),
+        "a run that collected nothing has no window to describe: {absent}"
+    );
+}
+
+/// `analyzeTrees` takes one `EngineConfig` per tree, so the windows can genuinely differ while the
+/// files land in ONE table. Naming either window would describe half the rows wrongly, so the census
+/// reports the disagreement itself.
+#[test]
+fn disagreeing_per_tree_windows_are_reported_as_disagreement() {
+    let line = census_line(&two_trees_with_different_windows());
+    assert!(
+        line.contains("DIFFERENT windows per tree (full history, since 2026-01-01)"),
+        "both windows must be named and the comparison warned against: {line}"
+    );
+    assert!(
+        !line.contains("covers FULL history") && !line.contains("covers ONLY commits"),
+        "no single window may be published as THE window of this table: {line}"
+    );
+}
+
+/// The links table carries `source`/`target`/`endpointsInCycle` — all read off the graph, none of them
+/// a history number. A window caveat there would be describing a table its reader is not looking at,
+/// the same rule `measured` already follows.
+#[test]
+fn the_links_census_carries_no_git_window() {
+    let u = super::super::dep::collect(&one_tree_with_windowed_git());
+    let line = links_ndjson(&u, None).1.render();
+    assert!(!line.contains("Git history"), "{line}");
+    assert!(!line.contains("2026-01-01"), "{line}");
+}
+
 /// Cycle membership is the highest-severity structural fact this domain carries. The mermaid lane draws
 /// it as a thick arrow; a viewer has no arrow styles, so it has to survive as a COLUMN or it is lost.
 #[test]
@@ -277,9 +387,75 @@ fn cycle_membership_survives_into_both_tables() {
 
     let (links, _) = links_ndjson(&u, None);
     assert!(
-        rows(&links).iter().all(|r| r["inCycle"] == true),
+        rows(&links).iter().all(|r| r["endpointsInCycle"] == true),
         "all three edges are inside the 3-file cycle: {links}"
     );
+    assert!(
+        rows(&links).iter().all(|r| r["inCycle"].is_null()),
+        "the links column is `endpointsInCycle`; the old edge-claiming name must not survive: {links}"
+    );
+}
+
+/// The links column is named for what it COMPUTES, and this is the shape that separates the two
+/// readings. `dep::collect` flattens every reported cycle's members into ONE set, so an edge between two
+/// members of that set is tagged whether or not it lies on a cycle. Both counterexamples live here:
+///
+/// - a CHORD (`a -> c`) inside the 3-file cycle `a -> b -> c -> a`. It lies on the 2-cycle `a -> c -> a`
+///   — in a DIRECTED graph a chord always does, since the arc it short-circuits closes behind it — but
+///   that 2-cycle is not among the REPORTED ones, and the reported set is the only thing this column is
+///   computed from. So the row is true about a cycle nobody was told about.
+/// - a BRIDGE (`c -> x`) from one cycle into a SECOND, disjoint cycle `x -> y -> x`. Both ends are
+///   cycle members and nothing returns from the second cycle to the first, so this edge lies on no
+///   cycle at all, reported or otherwise.
+///
+/// Under the old name `inCycle` both rows read as "this edge lies on a REPORTED cycle", which is false
+/// for both. `endpointsInCycle` is true for both and says only what was checked.
+///
+/// ⚠ The chord bullet used to claim "no cycle traverses it", which is structurally impossible for a
+/// chord of a directed cycle — and the very next clause named `c -> a`, the return edge that makes the
+/// 2-cycle. The assertion never depended on it; only the reasoning was wrong.
+#[test]
+fn a_chord_and_a_bridge_are_endpoint_true_though_neither_lies_on_a_reported_cycle() {
+    let tree = serde_json::json!({
+        "trees": [{
+            "sourceId": "web",
+            "output": {
+                "ir": { "dep": {
+                    "src/a.ts": ["src/b.ts", "src/c.ts"],
+                    "src/b.ts": ["src/c.ts"],
+                    "src/c.ts": ["src/a.ts", "src/x.ts"],
+                    "src/x.ts": ["src/y.ts"],
+                    "src/y.ts": ["src/x.ts"]
+                }},
+                "findings": [
+                    {
+                        "ruleId": "circular", "severity": "warning", "file": "src/a.ts", "line": 1,
+                        "message": "m",
+                        "data": { "members": ["src/a.ts", "src/b.ts", "src/c.ts"] }
+                    },
+                    {
+                        "ruleId": "circular", "severity": "warning", "file": "src/x.ts", "line": 1,
+                        "message": "m",
+                        "data": { "members": ["src/x.ts", "src/y.ts"] }
+                    }
+                ]
+            }
+        }]
+    });
+    let u = super::super::dep::collect(&tree);
+    let (links, _) = links_ndjson(&u, None);
+    let flag = |from: &str, to: &str| -> Value {
+        rows(&links)
+            .into_iter()
+            .find(|r| r["source"] == from && r["target"] == to)
+            .unwrap_or_else(|| panic!("{from} -> {to} is an emitted edge: {links}"))
+            ["endpointsInCycle"]
+            .clone()
+    };
+    assert_eq!(flag("src/a.ts", "src/c.ts"), true, "chord: {links}");
+    assert_eq!(flag("src/c.ts", "src/x.ts"), true, "bridge: {links}");
+    // The honest edges score the same, which is exactly why the column cannot claim to separate them.
+    assert_eq!(flag("src/c.ts", "src/a.ts"), true, "cycle edge: {links}");
 }
 
 /// An edge pointing at a node the table does not contain is a dangling reference in the viewer. The

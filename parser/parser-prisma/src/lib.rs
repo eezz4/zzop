@@ -39,3 +39,17 @@ pub use parse::{parse_schema, parse_schema_enums};
 mod orchestrator_tests;
 #[cfg(test)]
 mod tests;
+
+use zzop_core::recognizer::{channel, FrameworkRecognizer};
+
+/// Frameworks this parser recognizes — see [`zzop_core::recognizer`].
+///
+/// A DECLARATION FORMAT has no framework tier: `.prisma` IS the schema, so there is no middleware
+/// layer to recognize and the layer-2 population (`parser-expansion.md` §0) is empty BY CONSTRUCTION,
+/// not by omission. The single row names the format itself so a reader scanning for "what does zzop
+/// know" finds it, and so an empty list is never mistaken for an undeclared parser.
+pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[FrameworkRecognizer {
+    framework: "prisma schema",
+    extensions: &["prisma"],
+    emits: &[channel::DB],
+}];

@@ -89,13 +89,13 @@ fn folders_present_and_deterministic_on_a_small_tree_without_git() {
         .iter()
         .find(|s| s.folder == "aaa")
         .expect("expected an \"aaa\" folder summary");
-    assert_eq!(aaa.file_count, 2);
+    assert_eq!(aaa.node_count, 2);
     let bbb = folders
         .summaries
         .iter()
         .find(|s| s.folder == "bbb")
         .expect("expected a \"bbb\" folder summary");
-    assert_eq!(bbb.file_count, 1);
+    assert_eq!(bbb.node_count, 1);
 
     assert_eq!(folders.edges.len(), 1);
     assert_eq!(folders.edges[0].source, "aaa");

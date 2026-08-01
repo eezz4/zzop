@@ -4,11 +4,10 @@
 use std::collections::HashMap;
 
 use crate::scores::config::ScoresConfig;
+use crate::scores::detail_cap::{cap_and_count_dropped, MAX_FILE_ROWS_LISTED};
 use crate::scores::types::{TypeSafetyScore, TypeSafetyViolation};
 use zzop_core::FileNode;
 
-/// Max detail rows returned.
-const MAX_DETAIL_ITEMS: usize = 50;
 /// The 0-100 score scale.
 const PERCENT: f64 = 100.0;
 
@@ -70,13 +69,14 @@ pub fn compute_type_safety(
         .round()
         .max(0.0);
 
-    violations.truncate(MAX_DETAIL_ITEMS);
+    let violations_truncated = cap_and_count_dropped(&mut violations, MAX_FILE_ROWS_LISTED);
 
     TypeSafetyScore {
         score,
         total_as_cast,
         total_any_type,
         violations,
+        violations_truncated,
     }
 }
 

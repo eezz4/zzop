@@ -16,7 +16,7 @@ use zzop_core::CommonIr;
 pub struct CoverageCensus {
     /// Files the walk visited (== `AnalyzeOutput::file_count`). The walk applies no extension filter, so
     /// this counts EVERY file under the root that survived gitignore/skip-dir pruning — docs, data,
-    /// lockfiles and binary assets included. Use [`source_files`](Self::source_files) to size the code.
+    /// lockfiles and binary assets included. Use [`parser_dispatched`](Self::parser_dispatched) to size the code.
     pub files: usize,
     /// The subset of `files` a parser actually claims: a native frontend dispatched on it
     /// (`dispatch::dispatch` returned a language) or an APPLIED adapter overlay covers it. This is the
@@ -28,15 +28,40 @@ pub struct CoverageCensus {
     /// is honest at that job (renaming or narrowing it would silently change a published output field, and
     /// several internal gates key off it, e.g. `join_contribution_zero`'s `files > 0`). The fix is the
     /// breakdown, not a redefinition: keep the walked total, publish the source subset beside it, and let
-    /// `files - source_files` name the docs/data/asset remainder.
+    /// `files - parser_dispatched` name the docs/data/asset remainder.
+    ///
+    /// RENAMED from `source_files` (wire: `sourceFiles`) on 2026-07-31, user ruling. The old name
+    /// read as "files that are source code", and `.sql` IS source code — yet it sat outside the
+    /// extension table's `structural` column (parser-sql projects io facts only, no symbols/imports
+    /// by design), so a reader summing the table could never reproduce this number and had no way to
+    /// tell why. The new name states the membership rule instead of a judgment: a PARSER DISPATCHED
+    /// on the file. What the file's projection then contains is the extension table's axis, not this
+    /// one's.
     ///
     /// Mode A/B envelope ingest sets this equal to `files`: an envelope carries only files its adapter
     /// declared, so every one of them is parsed source by construction.
-    pub source_files: usize,
+    pub parser_dispatched: usize,
     /// Symbols extracted across the tree.
     pub symbols: usize,
-    /// Resolved dep-graph edges (sum of out-degrees).
-    pub import_edges: usize,
+    /// Sum of the dep graph's out-degrees over RESOLVED IN-TREE edges: one count per
+    /// `(importing file, imported file)` pair the resolver mapped to a file this walk visited. An import
+    /// of a published package and a specifier no resolver could map are both EXCLUDED — they never enter
+    /// `ir.dep`, so they cannot be summed here. Edge count, not importing-file count.
+    ///
+    /// RENAMED from `import_edges` (wire: `importEdges`) on 2026-07-31, user ruling — the same standard
+    /// [`parser_dispatched`](Self::parser_dispatched) was renamed under: a wire field's NAME must state
+    /// its membership RULE, not a judgment the computation does not make. The old name claimed the
+    /// tree's imports; the number is the tree's RESOLVED imports, and nothing on the wire said so. The
+    /// founding misread: a 91-file Python tree reported `importEdges: 3` and was read as "this repo
+    /// barely imports anything" when what it said was "3 of its imports landed on files in this tree" —
+    /// the rest were `import requests`-shaped package imports, dropped during dep resolution. The
+    /// channel was NOT widened to fix the misread (package imports are a different fact with a
+    /// different key space, and they already ride `AnalyzeOutput::package_imports`); the name was
+    /// narrowed to match what the channel has always carried. See
+    /// [`zzop_core::DEP_GRAPH_RESOLVED_ONLY`] — the one owner of that rule's sentence, which the
+    /// graph-derived metrics (`fanIn`/`fanOut`/`degree`/`blastRadius`) disclose instead of renaming,
+    /// since those terms are correct ABOUT the graph they describe.
+    pub resolved_import_edges: usize,
     /// io provides (all kinds).
     pub io_provides: usize,
     /// io consumes with a resolved `key` (all kinds).
@@ -66,15 +91,15 @@ pub struct CoverageCensus {
 
 impl CoverageCensus {
     /// Compute the census from the assembled `ir`, the visited `file_count`, the parser-claimed
-    /// `source_file_count` (see [`source_files`](Self::source_files)), and the degraded-file count.
-    /// Reads only `ir.ir.{dep, symbols, io}` — no re-parse, no vocabulary.
+    /// `parser_dispatched_count` (see [`parser_dispatched`](Self::parser_dispatched)), and the
+    /// degraded-file count. Reads only `ir.ir.{dep, symbols, io}` — no re-parse, no vocabulary.
     pub fn compute(
         file_count: usize,
-        source_file_count: usize,
+        parser_dispatched_count: usize,
         ir: &CommonIr,
         degraded: usize,
     ) -> CoverageCensus {
-        let import_edges = ir.ir.dep.values().map(|targets| targets.len()).sum();
+        let resolved_import_edges = ir.ir.dep.values().map(|targets| targets.len()).sum();
         let symbols = ir.ir.symbols.len();
 
         let (io_provides, io_consumes_keyed, io_consumes_unresolved) = match ir.ir.io.as_ref() {
@@ -94,9 +119,9 @@ impl CoverageCensus {
 
         CoverageCensus {
             files: file_count,
-            source_files: source_file_count,
+            parser_dispatched: parser_dispatched_count,
             symbols,
-            import_edges,
+            resolved_import_edges,
             io_provides,
             io_consumes_keyed,
             io_consumes_unresolved,

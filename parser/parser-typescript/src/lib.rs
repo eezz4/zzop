@@ -140,3 +140,92 @@ pub const ARRAY_ITERATION_METHODS: &[&str] = &[
     "find",
     "findIndex",
 ];
+
+use zzop_core::recognizer::{channel, FrameworkRecognizer};
+
+/// Frameworks this parser recognizes — see [`zzop_core::recognizer`] for what a declaration does and
+/// does not claim.
+///
+/// This is the longest list in the workspace, and the reason is worth stating so it is not read as a
+/// coverage target: roughly half of these have NO counterpart in another ecosystem (tRPC, Next.js
+/// route files, Hono, Nest decorators are TypeScript-shaped). "Recognizer parity with TypeScript" is
+/// therefore not a goal for any other parser — the goal is layer-2 population coverage per ecosystem
+/// (`parser-expansion.md` §0), and the populations differ.
+///
+/// Several adapter MODULES are deliberately absent here because they are mechanisms rather than
+/// frameworks — `class_shapes`, `wrapper_calls`, `pathname_dispatch`, `global_prefix` and the
+/// `client_base` pair refine or resolve what the framework rows above already found, and declaring
+/// them would answer "does zzop know my stack" with our own module names.
+pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
+    FrameworkRecognizer {
+        framework: "express",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "nestjs",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "next.js",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "hono",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::CONSUMES],
+    },
+    FrameworkRecognizer {
+        framework: "trpc",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "trpc",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::CONSUMES],
+    },
+    FrameworkRecognizer {
+        framework: "typeorm",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::DB],
+    },
+    FrameworkRecognizer {
+        framework: "prisma client",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::DB],
+    },
+    FrameworkRecognizer {
+        framework: "raw sql",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::DB],
+    },
+    FrameworkRecognizer {
+        framework: "axios",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::CONSUMES],
+    },
+    FrameworkRecognizer {
+        framework: "fetch",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::CONSUMES],
+    },
+    // `ky` and `$fetch` were MISSING from this list until 2026-08-01, which made the disclosure
+    // understate what this build knows — the opposite drift direction from the one
+    // `rule_contracts::recognizer_drift` catches, and invisible to it: that guard binds MODULES to
+    // rows, and both of these live inside the already-declared `egress` module. The residual is
+    // therefore known and stated rather than guessed at: a module's row set is guarded, the client
+    // VOCABULARY inside one is not, so widening `egress/matchers.rs` needs a row added here by hand.
+    FrameworkRecognizer {
+        framework: "ky",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::CONSUMES],
+    },
+    FrameworkRecognizer {
+        framework: "$fetch",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::CONSUMES],
+    },
+];

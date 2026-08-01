@@ -23,6 +23,13 @@
 #     committed value is deliberately not a version and must not be made to track one.
 #   * `examples/` — sample packages a user copies into their own tree (`adapter-kit` is at 0.1.0). Their
 #     version is their own artifact's, unrelated to zzop's release.
+#   * `docs/contracts/example-envelope.json` — the Normalized-AST ENVELOPE contract version, whose
+#     documented rule (`zzop_core::NORMALIZED_AST_CONTRACT_VERSION`, 2026-07-31 user ruling) is that it
+#     moves only when the envelope SHAPE moves, explicitly NOT every release: "bumping it every release
+#     would be the defect this replaces — a number that appears to describe the shape while actually
+#     describing the calendar." This guard bumped it to 0.28.0 anyway (caught in that release's pre-tag
+#     audit), which would have had adapter authors copying an example that every 0.27.x engine rejects
+#     for an unchanged shape. Semver-shaped is not the same fact as release-tracking.
 #   * npm lockfiles (`package-lock.json`, any depth) — every `"version"` in one is a THIRD PARTY's
 #     version (playwright's, its transitive deps'), pinned on purpose and never meant to track this
 #     repo's release. First hit: scripts/site-render-check/ (2026-07-30). The *manifests* beside them
@@ -74,6 +81,7 @@ violations=0
 json_lines="$(git ls-files -z -- '*.json' \
   | xargs -0 -r grep -Hn '"version"[[:space:]]*:[[:space:]]*"[0-9][0-9.]*[0-9A-Za-z.+-]*"' -- 2>/dev/null \
   | grep -v '^examples/' \
+  | grep -v '^docs/contracts/example-envelope\.json:' \
   | grep -v 'package-lock\.json:' \
   || true)"
 

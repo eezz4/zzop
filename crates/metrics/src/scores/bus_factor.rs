@@ -3,11 +3,10 @@
 //! author leaving is a real bus-factor-1 hazard.
 
 use crate::scores::config::ScoresConfig;
+use crate::scores::detail_cap::{cap_and_count_dropped, MAX_FILE_ROWS_LISTED};
 use crate::scores::types::{BusFactorFile, BusFactorScore};
 use zzop_core::FileNode;
 
-/// Max detail rows returned.
-const MAX_DETAIL_ITEMS: usize = 50;
 /// The 0-100 score scale.
 const PERCENT: f64 = 100.0;
 
@@ -52,12 +51,13 @@ pub fn compute_bus_factor(
         (PERCENT - (f64::from(risky) / f64::from(total)) * PERCENT).max(0.0)
     };
 
-    files.truncate(MAX_DETAIL_ITEMS);
+    let files_truncated = cap_and_count_dropped(&mut files, MAX_FILE_ROWS_LISTED);
 
     BusFactorScore {
         score: score.round(),
         risky,
         files,
+        files_truncated,
     }
 }
 

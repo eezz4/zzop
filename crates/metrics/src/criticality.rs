@@ -25,7 +25,9 @@ use crate::report_excludes::path_excluded;
 pub const CRITICALITY_MIN_BLAST_RADIUS: usize = 3;
 /// changeCount at/below which a high-blast file is "silent".
 pub const CRITICALITY_SILENT_CHANGE_MAX: u32 = 2;
-/// Max rows returned (highest blast first).
+/// Max rows returned, highest WEIGHT first — `blast_radius * ln(loc+2)`, not blast radius alone (see
+/// `compute_criticality`). Naming this "highest blast" was the exact misread the 2026-07-31 wire-name
+/// sweep repaired on six external surfaces while leaving it here, at the producer.
 pub const CRITICALITY_LIMIT: usize = 20;
 /// `log(loc + OFFSET)` smoothing so a tiny re-export hub doesn't tie a large core's danger weight.
 const LOG_LOC_OFFSET: f64 = 2.0;

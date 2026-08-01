@@ -45,6 +45,25 @@ pub(super) fn io_of(tree: &Value, rel: &str) -> Value {
     json!({ "provides": pick("provides"), "consumes": pick("consumes") })
 }
 
+/// What `dependencies` MEANS, shipped beside it as `dependenciesMeaning` — this surface's own norm
+/// (`verdictMeaning`) applied to the one other field here whose silence is ambiguous. The rule itself is
+/// not restated: it is [`zzop_core::DEP_GRAPH_RESOLVED_ONLY`], the single owner, plus the consequence
+/// that only a per-FILE query makes visible — an empty `imports` is a statement about resolution, not
+/// about the file's source text.
+///
+/// Added 2026-07-31 with the `resolvedImportEdges` rename. The key NAMES stay `imports`/`importedBy`:
+/// unlike the census field, they are not counts that get quoted out of context, and the caller reading
+/// them is looking at one named file with the answer's meaning in the same object.
+pub(super) fn dependencies_meaning() -> String {
+    format!(
+        "{} An EMPTY `imports` list therefore does NOT mean this file imports nothing — a file whose \
+         every import is a package (`import requests`, `import React from \"react\"`) or an \
+         unresolvable specifier has no edges here at all. Read it as \"no in-tree import of this file \
+         was resolved\", and read `importedBy` the same way.",
+        zzop_core::DEP_GRAPH_RESOLVED_ONLY
+    )
+}
+
 /// The file's position in the dependency graph, both directions. `importedBy` is the half a caller
 /// cannot compute from the file's own text, and is usually the one that answers "is this safe to change".
 pub(super) fn deps_of(tree: &Value, rel: &str) -> Value {

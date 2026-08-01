@@ -11,11 +11,9 @@
 //! of truth, passed in.
 
 use super::config::ScoresConfig;
+use super::detail_cap::{cap_and_count_dropped, MAX_FILE_ROWS_LISTED};
 use super::types::{SfcScore, SfcViolation};
 use zzop_core::FileNode;
-
-/// Detail list cap.
-const MAX_DETAIL_ITEMS: usize = 50;
 
 pub fn compute_sfc<F>(
     nodes: &[FileNode],
@@ -51,13 +49,14 @@ where
     } else {
         (compliant as f64 / live.len() as f64) * 100.0
     };
-    violations.truncate(MAX_DETAIL_ITEMS);
+    let violations_truncated = cap_and_count_dropped(&mut violations, MAX_FILE_ROWS_LISTED);
     SfcScore {
         score: score.round(),
         limit,
         compliant,
         total: live.len() as u32,
         violations,
+        violations_truncated,
     }
 }
 

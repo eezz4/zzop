@@ -85,14 +85,17 @@ mod call_graph_language;
 mod client_library_import;
 mod committed_spec_io_silence;
 mod controller_silence;
+mod csharp_base_route;
 mod egress_intent;
 mod fetch_wrapper;
+mod gateway_declaration;
 mod orm_schema_silence;
 mod rust_router_layer;
 mod server_framework_import;
 #[cfg(test)]
 mod tests;
 mod unknown_verb_range;
+mod unread_io_kind;
 
 pub(crate) use app_buckets::{app_roots, keyed_http_by_root};
 // `builtin_fetch_lexical_warning`/`fetch_wrapper_call_site_warning` are NOT re-exported here: their
@@ -107,9 +110,12 @@ pub use committed_spec_io_silence::committed_spec_io_silence_warning;
 pub(crate) use committed_spec_io_silence::IO_NEAR_ZERO_FLOOR;
 pub use controller_silence::controller_silence_warning;
 pub(crate) use controller_silence::MIN_PROVIDES_FLOOR;
+pub use csharp_base_route::csharp_base_route_warning;
 pub use fetch_wrapper::fetch_wrapper_census;
 pub(crate) use fetch_wrapper::WRAPPER_EXPORT_NAMES;
+pub use gateway_declaration::gateway_declaration_warning;
 pub use orm_schema_silence::orm_schema_silence_warning;
 pub use rust_router_layer::rust_router_layer_warning;
 pub use server_framework_import::{provide_blind_sources, server_framework_import_warning};
 pub use unknown_verb_range::unknown_verb_range_warning;
+pub use unread_io_kind::unread_io_kind_warning;

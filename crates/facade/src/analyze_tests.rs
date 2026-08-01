@@ -80,9 +80,17 @@ fn analyze_json_emits_a_camelcase_coverage_census() {
     assert_eq!(cov["ioConsumesKeyed"], 0);
     assert_eq!(cov["ioConsumesUnresolved"], 0);
     assert_eq!(cov["joinContributionZero"], true);
-    // Symbols and import edges are populated (a <-> b cycle over two exported functions).
+    // Symbols and resolved import edges are populated (a <-> b cycle over two exported functions —
+    // both ends in-tree, which is the only kind of edge this count has ever held).
     assert!(cov["symbols"].as_u64().expect("symbols number") >= 2);
-    assert!(cov["importEdges"].as_u64().expect("importEdges number") >= 2);
+    assert!(
+        cov["resolvedImportEdges"]
+            .as_u64()
+            .expect("resolvedImportEdges number")
+            >= 2
+    );
+    // The old spelling is GONE from the wire, not aliased — the rename is a pre-1.0 breaking change.
+    assert!(cov.get("importEdges").is_none(), "{cov:?}");
     assert_eq!(cov["degraded"], 0);
 }
 

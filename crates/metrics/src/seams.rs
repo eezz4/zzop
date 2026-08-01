@@ -30,6 +30,12 @@ pub const SEAMS_LIMIT: usize = 15;
 #[serde(rename_all = "camelCase")]
 pub struct SeamCandidate {
     pub folder: String,
+    /// Files of this folder that are DEP-GRAPH KEYS — not files walked, and not the folder's contents on
+    /// disk. `compute_seams`'s input is the dep graph, so a file the walk saw but no import edge names
+    /// (a doc, a fixture, an asset, anything a parser produced no resolvable import for) is absent from
+    /// this count, and so is every file under a folder [`is_noise_folder`] rejects. The number is the
+    /// eligibility basis for [`SEAMS_MIN_FILES`] and the denominator a reader is likely to sanity-check
+    /// against `fileCount`, which it will not match.
     pub files: usize,
     /// Import edges fully inside the folder.
     pub internal_edges: u32,
@@ -40,6 +46,15 @@ pub struct SeamCandidate {
     /// Co-change links crossing the folder boundary — temporal coupling the static graph misses. A folder that is
     /// statically clean but always changes WITH other folders is not a cheap extraction (the coupling is real, just
     /// hidden). Counts toward the boundary in the score.
+    ///
+    /// A FILTERED count, twice over, because its substrate is [`crate::coupling::build_coupling`]:
+    /// commits outside [`crate::coupling::MIN_FILES_PER_COMMIT`]..=[`crate::coupling::MAX_FILES_PER_COMMIT`]
+    /// (2..=25) never form a pair at all, and each file then keeps only its top
+    /// [`crate::coupling::COUPLING_TOP_PER_FILE`] (10) partners. So a folder whose files each couple
+    /// weakly to dozens of others outside it can score a LOWER temporal boundary than one with a few
+    /// strong ties — the tail is not summed, it is dropped. Read this as "the strongest measured
+    /// cross-folder co-change", never as the folder's total temporal coupling. Zero here means "none
+    /// survived those filters", which on a git-less run means "nothing was measured".
     pub temporal_boundary: u32,
     /// internal / (internal + boundary) — 1.0 = fully self-contained.
     pub cohesion: f64,

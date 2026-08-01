@@ -14,6 +14,31 @@ use serde::{Deserialize, Serialize};
 /// never camelCased to `"dbTable"`.
 pub type IoKind = String;
 
+/// The io kinds this build's RULES actually read — the kinds some rule compares against a literal.
+///
+/// ⚠ Not "the kinds that get joined", which is what an earlier name (`JOINED_IO_KINDS`) claimed and the
+/// code has never computed. [`crate::link_cross_layer_io`] is **kind-agnostic**: it indexes providers by
+/// the composite `format!("{kind} {key}")` and never compares a kind to a literal, so a `"queue"` provide
+/// in one tree and a `"queue"` consume in another DO join and DO produce a cross-layer edge. The name
+/// stated a membership rule the computation did not have — the same defect this list exists to disclose.
+///
+/// [`IoKind`]'s openness is a real capability — a Mode B adapter may emit `"queue"` today and the facts
+/// will ride the envelope, land in `IoFacts`, be counted by the kind-agnostic coverage census, and join
+/// across trees. What they will NOT do is produce a single FINDING, because every rule filters on a kind
+/// literal and none of them names `"queue"`. So the author gets facts in, edges maybe, zero findings out,
+/// and nothing anywhere says why — the open type reads as an extension point that works.
+///
+/// This constant is the one owner of "which kinds a rule reads", so a run can SAY when it carried facts
+/// of a kind no rule reads (`zzop_engine`'s unread-io-kind self-report). Adding a kind here without
+/// wiring a reader would make that disclosure lie, which is why the contract test that scans the
+/// workspace's `kind == "..."` comparisons binds this list to the literals actually compared — and note
+/// that scan can only ever prove the RULES half, because the linker performs no such comparison.
+///
+/// Deliberately NOT listed: `"client-base-prefix"` and `"nest-global-prefix"`. Those are compose-phase
+/// SENTINELS — `analyze::compose` strips every one of them before assembly finishes, so a surviving
+/// sentinel is a bug rather than an unread kind, and listing them would silence the report that finds it.
+pub const RULE_READ_IO_KINDS: &[&str] = &["http", "db-table", "trpc"];
+
 /// The statically witnessed shape of a request-body object literal at an HTTP consume site.
 /// Extraction is evidence-only: keys are recorded exactly as written (dotted paths, depth <= 2 —
 /// one level under each top-level key, which is all the DTO comparison needs), and NOTHING is
@@ -215,6 +240,14 @@ pub struct CrossLayerResult {
     /// used to land in [`unprovided_consumes`](Self::unprovided_consumes), where it asserted a missing
     /// internal route that was never claimed — see [`key_carries_route_identity`](crate::io::key_carries_route_identity).
     /// Both shapes count toward `cross-layer/unresolved-consume-ratio`'s disclosed blindness ratio.
+    ///
+    /// **A SUPERSET of the per-tree census's `coverage.ioConsumesUnresolved`, and the two are not
+    /// interchangeable despite the shared word.** The census counts the FIRST shape only (`key: None` —
+    /// `zzop_engine::CoverageCensus`); this bucket counts both, so it also holds every placeholder-only
+    /// key (`GET /{}`). The difference is exactly the head-dropped-interpolation population: zero on a
+    /// tree that has none — which is why the two figures agree on the cases corpus today — and positive
+    /// the moment one appears. A reader diffing bucket length against the census must not read the gap
+    /// as a join defect; it is the second shape being counted where it is known.
     pub unresolved_consumes: Vec<TaggedConsume>,
     /// A consume whose key carries a host (`"://"` present, e.g. `GET https://vendor.com/api/users`) —
     /// third-party egress. Never cross-tree joined and never counted as `unprovidedConsumes`, since an

@@ -104,11 +104,13 @@ impl<'a> From<&'a GitWindow> for GitWindowView<'a> {
 #[serde(rename_all = "camelCase")]
 pub(super) struct CoverageCensusView {
     files: usize,
-    /// The parser-claimed subset of `files` — see `zzop_engine::CoverageCensus::source_files`. `files`
+    /// The parser-claimed subset of `files` — see `zzop_engine::CoverageCensus::parser_dispatched`. `files`
     /// counts every file walked (docs/data/assets included) and was being misread as the repo's code size.
-    source_files: usize,
+    parser_dispatched: usize,
     symbols: usize,
-    import_edges: usize,
+    /// RENAMED from `import_edges`/`importEdges` on 2026-07-31 — the name now states the membership
+    /// rule (resolved in-tree edges only). See `zzop_engine::CoverageCensus::resolved_import_edges`.
+    resolved_import_edges: usize,
     io_provides: usize,
     io_consumes_keyed: usize,
     io_consumes_unresolved: usize,
@@ -120,9 +122,9 @@ impl From<&zzop_engine::CoverageCensus> for CoverageCensusView {
     fn from(c: &zzop_engine::CoverageCensus) -> Self {
         CoverageCensusView {
             files: c.files,
-            source_files: c.source_files,
+            parser_dispatched: c.parser_dispatched,
             symbols: c.symbols,
-            import_edges: c.import_edges,
+            resolved_import_edges: c.resolved_import_edges,
             io_provides: c.io_provides,
             io_consumes_keyed: c.io_consumes_keyed,
             io_consumes_unresolved: c.io_consumes_unresolved,

@@ -69,7 +69,7 @@ fn the_document_is_a_mermaid_flowchart_with_one_subgraph_per_analyzed_source() {
 }
 
 /// Every non-edge bucket the ENGINE ships has a declared role in this projection. Derived from
-/// `crate::output::KEY_BUCKETS` — the same five-bucket vocabulary `bucket_keys`/`manifest` walk — so a
+/// `crate::output::KEY_BUCKETS` — the same five-bucket vocabulary `distinct_bucket_keys`/`manifest` walk — so a
 /// sixth bucket cannot reach the engine and skip the picture. Before `bucket_role` existed,
 /// `collect_bucket`'s `_ => (CONSUME, "ambiguous")` wildcard absorbed exactly that case: a new bucket
 /// was drawn under a role the test below already expected, and both stayed green.

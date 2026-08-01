@@ -110,7 +110,7 @@ pub use join::{
     enum_string_drift_issues, orderby_unindexed_issues, soft_delete_bypass_issues, JoinIssue,
     QueryCallSite,
 };
-pub use message::{join_issue_message, schema_issue_message};
+pub use message::{join_issue_message, rule_sightlines, schema_issue_message};
 pub use structural::{
     analyze_schema, apply_schema_rules, SchemaAnalysis, SchemaIssue, MONEY_TOKENS,
     STRUCTURAL_RULES_VERSION,

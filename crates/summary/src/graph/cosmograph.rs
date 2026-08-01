@@ -46,12 +46,20 @@
 //! stdout here is a DATA TABLE that a viewer parses; a `%%` census line like mermaid's would be a corrupt
 //! row. The census is therefore returned separately for the CLI to print on stderr, which keeps the
 //! honesty channel intact without putting prose in a column. There is no truncation to disclose — the
-//! lane is uncapped — so what it reports is the scope filter and the totals.
+//! lane is uncapped — so what it reports is the scope filter, the totals, which measured axes actually
+//! rode, and WHICH GIT WINDOW the history columns were summed over (`super::dep::window` — a churn is a
+//! different number over 90 days than over a repo's whole life, and a row cannot say so itself).
+//!
+//! It also reports WHICH graph the `fanIn`/`fanOut`/`degree` columns describe. Those names are
+//! graph-theoretic and correct about the graph they measure, so they were not renamed when the census's
+//! `resolvedImportEdges` was (2026-07-31); the missing fact was that this graph holds resolved in-tree
+//! edges only. That sentence has one owner (`zzop_core::DEP_GRAPH_RESOLVED_ONLY`, re-exported through
+//! `zzop-facade`) and rides the census here rather than being copied into every column's description.
 
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::dep::{node_in_scope, DepUniverse};
+use super::dep::{node_in_scope, DepUniverse, GitWindows};
 
 /// What the CLI prints on stderr. Computed, never asserted — the same rule the mermaid census follows.
 pub(super) struct CosmographCensus {
@@ -64,6 +72,10 @@ pub(super) struct CosmographCensus {
     /// How many emitted rows actually carried each measured axis — `None` for the LINKS table, which
     /// has no node axes and would be describing a table its reader is not looking at.
     pub(super) measured: Option<MeasuredAxes>,
+    /// Which git window the history COLUMNS were measured over — `None` for the LINKS table for the
+    /// same reason `measured` is: it carries no git column, so it has no window to caveat. See
+    /// [`super::dep::GitWindows`].
+    pub(super) window: Option<GitWindows>,
 }
 
 /// Emitted-row counts for the axes that can be absent. Omitting an unmeasured axis is honest but
@@ -94,11 +106,27 @@ impl CosmographCensus {
                 m.loc, self.nodes_emitted, m.git, self.nodes_emitted
             ),
         };
+        // COVERAGE (`axes_note`) and WINDOW are two different questions about the same columns: how
+        // many rows got them, and what the numbers on those rows are sums over. A row can have all
+        // four git columns and still mean 90 days rather than a lifetime.
+        let window_note = match &self.window {
+            None => String::new(),
+            Some(w) => format!(" {}", w.note()),
+        };
         format!(
             "zzop graph --domain dep --format cosmograph: {} of {} files, {} of {} import edges, \
              {} circular finding(s){scope_note}. UNCAPPED — --top does not apply to this format.\
-             {axes_note}",
-            self.nodes_emitted, self.total_nodes, self.links_emitted, self.total_edges, self.cycles
+             {axes_note}{window_note} {}",
+            self.nodes_emitted,
+            self.total_nodes,
+            self.links_emitted,
+            self.total_edges,
+            self.cycles,
+            // The `fanIn`/`fanOut`/`degree` columns this lane emits are graph-theoretic terms and are
+            // correct ABOUT the graph they describe — so they are NOT renamed. What needed saying is
+            // WHICH graph that is, and it is said once, from one owner (2026-07-31). See
+            // `zzop_core::DEP_GRAPH_RESOLVED_ONLY`.
+            zzop_facade::DEP_GRAPH_RESOLVED_ONLY
         )
     }
 }
@@ -192,6 +220,7 @@ pub(super) fn nodes_ndjson(u: &DepUniverse, scope: Option<&str>) -> (String, Cos
         cycles: u.cycles,
         scoped: scope.is_some(),
         measured: Some(measured),
+        window: Some(u.git_windows.clone()),
     };
     (out, census)
 }
@@ -219,9 +248,16 @@ pub(super) fn links_ndjson(u: &DepUniverse, scope: Option<&str>) -> (String, Cos
         let row = json!({
             "source": a,
             "target": b,
-            // Both ends in a cycle is the edge-level fact the mermaid lane draws as a thick arrow. Kept
-            // as a column so the same distinction survives into a viewer that has no arrow styles.
-            "inCycle": u.cycle_files.contains(a) && u.cycle_files.contains(b),
+            // The ENDPOINT fact the mermaid lane draws as a thick arrow, kept as a column so the same
+            // distinction survives into a viewer that has no arrow styles.
+            //
+            // RENAMED from `inCycle` (2026-07-31, user ruling) because the old name claimed an EDGE fact
+            // this lane does not compute. `cycle_files` is the UNION of every reported cycle's members,
+            // flattened at `dep::collect` time, so "both ends are cycle members" is true for a chord
+            // between two members of one cycle and for an edge BRIDGING two different cycles — neither of
+            // which lies on a cycle. The new name states the membership rule the code actually applies.
+            // The NODE-level `inCycle` is untouched: there the claim and the computation agree.
+            "endpointsInCycle": u.cycle_files.contains(a) && u.cycle_files.contains(b),
         });
         out.push_str(&row.to_string());
         out.push('\n');
@@ -236,6 +272,9 @@ pub(super) fn links_ndjson(u: &DepUniverse, scope: Option<&str>) -> (String, Cos
         scoped: scope.is_some(),
         // The links table carries no node axes, so it has no coverage to report — see `measured`'s doc.
         measured: None,
+        // ... and for the same reason no git window: `source`/`target`/`endpointsInCycle` are read off
+        // the graph, and none of them is a history number a window could have scoped.
+        window: None,
     };
     (out, census)
 }

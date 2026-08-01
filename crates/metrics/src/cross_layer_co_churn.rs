@@ -4,6 +4,18 @@
 //! `layer_of` is injected (path -> layer classification is the caller's responsibility); it always returns a layer
 //! string (an unlayered file gets whatever sentinel the caller chooses, e.g. "(root)" — it is not "skipped", it
 //! just forms its own layer, so pairs *within* that sentinel layer are naturally excluded by the same-layer check).
+//!
+//! ## The counts are over a FILTERED commit set
+//! Every number this module emits — `pairs`, `co_changes`, each example's `count` — is counted over the
+//! commits that survive [`crate::coupling::MIN_FILES_PER_COMMIT`]..=`max_files_per_commit` (2..=25 by
+//! default, the same window [`crate::coupling`] uses so the two co-change substrates cannot disagree
+//! about which commits are real). A 1-file commit couples nothing, and a 200-file mass rename would
+//! couple everything with everything; both are dropped, so what is left is *deliberate* co-change. That
+//! makes these SUBSET totals: the honest reading of `coChanges: 40` is "40 filtered co-changes", never
+//! "these two layers changed together 40 times". Pairs below `min_co_changes` (2) are dropped again at
+//! the end, and only the top `top_pairs` (20) rows are returned. `docs/modules/facade.md`'s
+//! `layerCoChurn` row carries the same sentence for the consumer, since this field reaches no shaped
+//! CLI/MCP reply and the raw facade contract is where its reader looks.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -62,7 +74,10 @@ pub struct CrossLayerCoChurn {
     pub layer_b: String,
     /// Distinct file pairs co-changed in this layer pair.
     pub pairs: u32,
-    /// Total co-change count (commit-weighted).
+    /// Commit-weighted co-change count over the commits this metric JUDGES, which is not every commit
+    /// in the window — see [`build_cross_layer_co_churn`] for the filter. A subset total, never a
+    /// repository total, and it was documented as "Total co-change count" until 2026-07-31, which is
+    /// the completeness the word "total" implied and the number never had.
     pub co_changes: u32,
     /// Representative file pairs, sorted by co_changes desc.
     pub examples: Vec<CrossLayerExample>,

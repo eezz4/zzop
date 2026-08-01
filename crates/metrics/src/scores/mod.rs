@@ -4,6 +4,7 @@ pub mod cohesion;
 pub mod compute;
 pub mod config;
 pub mod coupling;
+mod detail_cap;
 pub mod diamond;
 pub mod fix_ratio;
 pub mod fsd;

@@ -18,9 +18,11 @@ pub mod node;
 pub mod normalized;
 pub mod pack_loader;
 pub mod paths;
+pub mod recognizer;
 pub mod registry;
 pub mod schema;
 pub mod serde_util;
+pub mod sightline;
 
 pub use attributes::{attr_is_truthy, Attribute, AttributeStore, EntityRef};
 pub use coupling::CommitFileSet;
@@ -46,11 +48,11 @@ pub use io::{
     key_carries_route_identity, link_cross_layer_io, normalize_http_path, unknown_verb_route_path,
     AmbiguousConsume, ConsumeBodyShape, ConsumeJoin, CrossLayerEdge, CrossLayerResult, IoConsume,
     IoFacts, IoKind, IoProvide, LinkOptions, ProvideBodyField, ProvideBodyShape, SourceIo,
-    HTTP_KEY_VERBS, UNKNOWN_VERB,
+    HTTP_KEY_VERBS, RULE_READ_IO_KINDS, UNKNOWN_VERB,
 };
 pub use ir::{
     ApiEndpoint, CommonIr, DepGraph, ImportBinding, ImportMap, MinimalIr, NonIdempotentKind,
-    QueryCallSite, ReExport, SourceSymbol, SourceSymbolKind, WriteSite,
+    QueryCallSite, ReExport, SourceSymbol, SourceSymbolKind, WriteSite, DEP_GRAPH_RESOLVED_ONLY,
 };
 pub use node::{
     calc_risk_score, classify_lifecycle, compute_median_churn, FileNode, Lifecycle, RiskInput,
@@ -63,15 +65,17 @@ pub use normalized::{
     SUPPORTED_NORMALIZED_AST_VERSION,
 };
 pub use pack_loader::{
-    applies_to, check_dsl_schema_version, load_dsl_packs, pack_regex_issues, parse_dsl_pack,
-    LoadResult, PackLoadError,
+    applies_to, check_dsl_schema_version, load_dsl_packs, pack_regex_issues,
+    pack_retired_field_issues, parse_dsl_pack, LoadResult, PackLoadError,
 };
 pub use paths::is_test_file;
+pub use recognizer::FrameworkRecognizer;
 pub use registry::{
     apply_severity_override, global_exclude_matches_path, is_enabled, is_suppressed,
     merge_findings, register_native_analysis_stub, suppression_matches_path, GlobalExclude,
     RuleConfig, RuleRegistry, Suppression, REDACTED,
 };
+pub use sightline::RuleSightline;
 
 pub use file_nodes::{
     build_file_nodes, hotspot_score, DepStats, GitPathStats, GitStats, HOTSPOT_MIN_CHANGES,

@@ -2,9 +2,11 @@
 # Mechanical census of every policy-shaped constant under the crates that hold rule/extraction logic
 # (crates/engine/src, crates/core/src, parser/*/src, rules/native/*/src). This is the "continuous
 # drift review" mechanism (A5): the census tracks EXISTENCE (path:NAME), never values — values change
-# legitimately and are not what this guard is for. Its job is to force a triage moment (tier
-# T1/T2/T3, or "not policy") every time a *new* policy-shaped name is introduced, by failing CI until
-# the committed snapshot (scripts/policy-census.txt) is regenerated to include it.
+# legitimately and are not what this guard is for. Its job is to force a triage moment — assigning
+# one axis from the vocabulary below ($axes: fact/convention/cap/internal/test) — every time a *new*
+# policy-shaped name is introduced, by failing CI until the committed snapshot
+# (scripts/policy-census.txt) is regenerated to include it. (The T1/T2/T3 TIERS are the policy-value
+# inventory's own axis, documented where a constant is declared — this census does not record them.)
 #
 # ## Sibling axis: DSL pack `${NAME}` fragments — censused in Rust, not here
 # A Rust-const-only census has a structural evasion hole, not just a gap: policy vocabulary MOVED out
@@ -20,8 +22,8 @@
 # (census output unchanged -> guard green -> triage moment bypassed, i.e. the evasion route reopened),
 # a key sharing the opening-brace line was dropped, and a minified map yielded a PHANTOM name from the
 # surrounding object rather than the promised `removed:`. Fixing the `awk` would mean a hand-rolled,
-# string-aware, brace-depth-tracking JSON tokenizer in `awk` — fragment values are regexes, and 4 of
-# the 9 shipped ones already contain a `"` — one crate away from a real parser this repo already runs
+# string-aware, brace-depth-tracking JSON tokenizer in `awk` — fragment values are regexes, and
+# shipped ones already contain a `"` (that module owns the count) — one crate away from a real parser this repo already runs
 # over those exact files. The subtraction was to delete the second parser, not improve it. See that
 # module's header for the full table and the rejected alternatives.
 #
@@ -172,7 +174,7 @@ census_file="scripts/policy-census.txt"
 #   &[u8]   — a byte-string literal (`b"..."`) is a string vocabulary written in bytes. Reading it is
 #            the fail-closed direction the header's doubt rule asks for; the one present instance is a
 #            test fixture and censuses as `test`.
-type_alternation='&str|&\[&str\]|&\[u8\]|&\[\(&str,[[:space:]]*&str\)\]|\[&str;[[:space:]]*[0-9]+\]|\[\(&str,[[:space:]]*&str\);[[:space:]]*[0-9]+\]|&\[\(&str,[[:space:]]*&\[&str\]\)\]|&\[\(&str,[[:space:]]*SeverityValue\)\]|&\[BlindnessClass\]|RiskWeights|usize|u32|u64|i32|i64|f64'
+type_alternation='&str|&\[&str\]|&\[u8\]|&\[\(&str,[[:space:]]*&str\)\]|\[&str;[[:space:]]*[0-9]+\]|\[\(&str,[[:space:]]*&str\);[[:space:]]*[0-9]+\]|&\[\(&str,[[:space:]]*&\[&str\]\)\]|&\[\(&str,[[:space:]]*&\[&str\],[[:space:]]*&str\)\]|&\[\(&str,[[:space:]]*SeverityValue\)\]|&\[BlindnessClass\]|&\[FrameworkRecognizer\]|RiskWeights|usize|u32|u64|i32|i64|f64'
 pattern="^[[:space:]]*(pub(\\((crate|super|in [^)]+)\\))? )?const [A-Z_][A-Z0-9_]*: ($type_alternation)"
 
 # Const types the census DELIBERATELY does not read, one line per type with its reason. Nothing is
@@ -491,7 +493,7 @@ if [ "$current" != "$committed" ]; then
     printf '    %s\n' $removed >&2
   fi
   echo >&2
-  echo "new policy-shaped constant — triage it against the policy-value inventory (tier T1/T2/T3 or not-policy) and regenerate: bash scripts/check-policy-census.sh --update" >&2
+  echo "new policy-shaped constant — triage it by assigning one axis ($axes) on its census line and regenerate: bash scripts/check-policy-census.sh --update" >&2
   exit 1
 fi
 

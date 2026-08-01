@@ -21,8 +21,8 @@
      real body or an explicit "NO LOCAL LICENSE TEXT FOUND" marker, the textless list being a
      subset of the table) so the common hand edits fail by name, not merely as moved bytes.
 
-     fingerprint inventory-inputs = 6952c13a86bb1bf67ce7381d4e6e61c9edf36fc0e24bf47cc9dead88ee27cb06
-     fingerprint generated-body = 73a9d972bfe7d6c4eaaa35b011445944a3b9023e34422d1f62637def056bc7b4
+     fingerprint inventory-inputs = ca4d2d617d984da2ad33cb4b1973adc64e6a42a0ae662ac005599d9e031e9690
+     fingerprint generated-body = d8a8efcc8928b8c0c027b0ac6bd89ada38578c4b3265e94e8a7fa43d2130054a
 -->
 
 The `zzop` binaries are statically linked. The crates listed here are compiled into every
@@ -1181,12 +1181,47 @@ authorization of the copyright holder.
 
 Applies to 1 crate(s): `unicode_names2`
 
-> **NO LOCAL LICENSE TEXT FOUND** for `Unicode-DFS-2016`: no crate carrying this identifier ships a matching LICENSE/COPYING file in its published package, so no verbatim text could be sourced locally.
->
-> The obligation is not waived by this. Obtain the text from the crates listed above (their
-> repositories are in the dependency table) or from https://spdx.org/licenses/ and add it
-> before distributing. This block is emitted rather than the section being omitted, because
-> a silently missing license is indistinguishable from a license that was never owed.
+Reproduced verbatim from `unicode_names2-1.3.0/data/LICENSE-UNICODE`.
+
+```
+COPYRIGHT AND PERMISSION NOTICE
+
+Copyright © 1991-2023 Unicode, Inc.
+
+NOTICE TO USER: Carefully read the following legal agreement. BY
+DOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR
+SOFTWARE, YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE
+TERMS AND CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT
+DOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of data files and any associated documentation (the "Data Files") or
+software and any associated documentation (the "Software") to deal in the
+Data Files or Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, and/or sell
+copies of the Data Files or Software, and to permit persons to whom the
+Data Files or Software are furnished to do so, provided that either (a)
+this copyright and permission notice appear with all copies of the Data
+Files or Software, or (b) this copyright and permission notice appear in
+associated Documentation.
+
+THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF
+THIRD PARTY RIGHTS.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE
+BE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES,
+OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA
+FILES OR SOFTWARE.
+
+Except as contained in this notice, the name of a copyright holder shall
+not be used in advertising or otherwise to promote the sale, use or other
+dealings in these Data Files or Software without prior written
+authorization of the copyright holder.
+```
 
 ### Unlicense
 

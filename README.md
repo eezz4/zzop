@@ -149,7 +149,7 @@ DSL cannot express your rule, zzop emits everything it knows after assembly and 
 each tree's whole `CommonIr` plus every join bucket, verbatim — and your own program decides what counts
 as a problem. zzop neither runs your program nor reads its findings back; see
 [docs/modules/facade.md](docs/modules/facade.md#custom-rules-consumer-side-zzop-facts) for the shape.
-`manifest`, `diff`, `facts`, `graph`, `explain` and `init` are CLI-only lanes with no MCP tool twin.
+`manifest`, `diff`, `facts`, `coverage`, `graph`, `explain` and `init` are CLI-only lanes with no MCP tool twin.
 
 The rest of the surface: `analyze-envelope`, `validate-envelope`, `validate-rule-pack`, `endpoint`,
 `file` (everything zzop knows about ONE file — its tree, symbols, io facts, dependency edges both

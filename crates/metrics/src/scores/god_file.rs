@@ -10,11 +10,9 @@
 //! language/extension knowledge; the engine's dispatch table is the single source of truth, passed in.
 
 use super::config::ScoresConfig;
+use super::detail_cap::{cap_and_count_dropped, MAX_FILE_ROWS_LISTED};
 use super::types::{GodFile, GodFileScore};
 use zzop_core::FileNode;
-
-/// Detail list cap.
-const MAX_DETAIL_ITEMS: usize = 50;
 
 pub fn compute_god_file<F>(
     nodes: &[FileNode],
@@ -47,11 +45,12 @@ where
         (100.0 - (gods.len() as f64 / live.len() as f64) * cfg.thresholds.god_file.penalty_slope)
             .max(0.0)
     };
-    gods.truncate(MAX_DETAIL_ITEMS);
+    let files_truncated = cap_and_count_dropped(&mut gods, MAX_FILE_ROWS_LISTED);
     GodFileScore {
         score: score.round(),
         limit,
         files: gods,
+        files_truncated,
     }
 }
 
@@ -178,5 +177,43 @@ mod tests {
                 loc: 5174
             }]
         );
+    }
+
+    /// The `files` list is CAPPED, and until 2026-07-31 the cap was silent: 50 rows came back and
+    /// nothing on the wire said whether the 51st existed. `filesTruncated` is that missing number, and
+    /// this test constructs input OVER the cap so a regression to a bare `truncate` turns it red.
+    ///
+    /// `GodFileScore` publishes no other count of god files, so `files.len() + filesTruncated` is the
+    /// ONLY route back to the total — which is exactly why a bool would not have been enough here.
+    #[test]
+    fn a_god_file_list_over_the_cap_discloses_how_many_rows_it_dropped() {
+        let over = MAX_FILE_ROWS_LISTED + 11;
+        let nodes: Vec<FileNode> = (0..over)
+            // Descending LOC so the kept rows are the WORST ones and the order is pinned alongside.
+            .map(|i| node(&format!("src/god{i}.ts"), 5000 - i as u32))
+            .collect();
+        let r = compute_god_file(&nodes, None, &ScoresConfig::default(), |_| true, &|_| true);
+        assert_eq!(r.files.len(), MAX_FILE_ROWS_LISTED, "the list is capped");
+        assert_eq!(r.files_truncated, 11, "and it says how many it dropped");
+        assert_eq!(
+            r.files.len() + r.files_truncated as usize,
+            over,
+            "list length plus the dropped count must reconstruct the honest total"
+        );
+        assert_eq!(
+            r.files[0].path, "src/god0.ts",
+            "worst-first survives the cap"
+        );
+    }
+
+    /// The other half of the disclosure: a list that fits must report ZERO, not merely omit the field.
+    /// A `filesTruncated` that only appears when it bites would make "complete" and "this build has no
+    /// disclosure" the same bytes again — the exact silence being repaired.
+    #[test]
+    fn a_god_file_list_under_the_cap_reports_zero_dropped() {
+        let nodes = [node("src/god.ts", 5000), node("src/ok.ts", 10)];
+        let r = compute_god_file(&nodes, None, &ScoresConfig::default(), |_| true, &|_| true);
+        assert_eq!(r.files.len(), 1);
+        assert_eq!(r.files_truncated, 0);
     }
 }

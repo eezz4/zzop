@@ -141,3 +141,47 @@ fn no_dsl_pack_message_hand_writes_the_engine_appended_disable_hint() {
          `zzop-<id>-ok` marker (docs/rules/authoring-guide.md): {offenders:#?}"
     );
 }
+
+/// A rule that can never reach its own goal must SAY where its ceiling is, in the finding itself.
+///
+/// `hardcoded-secret` is the case with the most to lose: it matches on VALUE SHAPE, so a passphrase
+/// built from dictionary words is always silent and a random base64url token is silent whenever it
+/// draws no digits. Neither is fixable by tuning the rule — closing the first needs entropy (not
+/// computable in a line scan) and the second needs a string-literal-with-binding-name IR node the
+/// matcher does not have. That is why `2.backlog/waiting.md` keeps the row: the door does not open
+/// from inside this rule.
+///
+/// The message already carries all of it, including measured false-negative rates. This pins it,
+/// because a message that long is exactly the kind an editor trims for brevity — and the sentences most
+/// likely to look trimmable are the ones admitting the ceiling, which are the reason a reader can trust
+/// the rest.
+#[test]
+fn hardcoded_secret_states_the_ceiling_it_cannot_pass() {
+    let mut messages = Vec::new();
+    for path in dsl_pack_files() {
+        let text = fs::read_to_string(&path).expect("pack readable");
+        let value: serde_json::Value = serde_json::from_str(&text).expect("pack parses");
+        collect_messages(&value, None, &mut messages);
+    }
+    let (_, message) = messages
+        .iter()
+        .find(|(id, _)| id == "hardcoded-secret")
+        .expect("hardcoded-secret must still exist and carry a message");
+
+    for token in [
+        // the two ceilings, each named as what it IS rather than as a vague limitation
+        "SHAPE test, not entropy",
+        "string-literal-with-binding-name",
+        // and the honesty that makes the ceiling actionable rather than decorative: what is silenced,
+        // and how often
+        "ALWAYS silenced",
+        "200k samples",
+    ] {
+        assert!(
+            message.contains(token),
+            "hardcoded-secret's message must keep stating its own ceiling, missing {token:?}.\n\
+             Trimming these sentences leaves a rule that looks complete and is not — the exact \
+             silence this repo's disclosure discipline exists to abolish."
+        );
+    }
+}

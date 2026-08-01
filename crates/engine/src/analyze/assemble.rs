@@ -11,7 +11,7 @@ use crate::analyze::diagnostics::{
     rule_overrides_applied, run_diagnostics, uncompilable_rule_warnings,
     unmatched_suppression_warnings, unparsed_extension_warning,
 };
-use crate::{pipeline::FileArtifact, AnalyzeOutput, EngineConfig};
+use crate::{pipeline::FileArtifact, AnalyzeOutput, CoverageCensus, EngineConfig};
 
 mod collect;
 mod dep_graph;
@@ -37,7 +37,7 @@ pub(crate) fn assemble(
 ) -> AnalyzeOutput {
     let collect::Collected {
         file_count,
-        source_files,
+        parser_dispatched,
         mut per_file_findings,
         all_symbols,
         loc_by_path,
@@ -188,6 +188,7 @@ pub(crate) fn assemble(
         &io_consumes,
         &ts_paths,
         &java_rels,
+        &csharp_rels,
         &package_import_files,
         &loc_by_path,
         &config.vocabulary.resolve().fetch_wrapper_export_names,
@@ -250,7 +251,7 @@ pub(crate) fn assemble(
         },
     };
 
-    let coverage = crate::CoverageCensus::compute(file_count, source_files, &ir, degraded.len());
+    let coverage = CoverageCensus::compute(file_count, parser_dispatched, &ir, degraded.len());
 
     // Gated like `scores`/`health`/`critical`/`seams`: `Some` only when git collection actually ran, so no
     // consumer sees a window echoed for numbers that stayed empty.
@@ -262,15 +263,7 @@ pub(crate) fn assemble(
             since: g.since.clone(),
         });
 
-    let package_imports = package_import_files
-        .into_iter()
-        .map(|(specifier, files)| crate::PackageImportSummary {
-            file_count: files.len(),
-            // BTreeSet iteration is sorted -> the lexicographically first importing file, deterministic.
-            example_file: files.into_iter().next().unwrap_or_default(),
-            specifier,
-        })
-        .collect();
+    let package_imports = crate::PackageImportSummary::census(package_import_files);
 
     AnalyzeOutput {
         ir,

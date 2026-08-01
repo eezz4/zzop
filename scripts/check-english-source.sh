@@ -28,7 +28,12 @@ FOREIGN='[\x{AC00}-\x{D7A3}\x{1100}-\x{11FF}\x{3130}-\x{318F}\x{3040}-\x{30FF}\x
 # scans the same tracked+untracked surface for a different purpose (line counts, not a grep match)
 # and is independently hardened via its own wc-based PIPESTATUS capture — it does not call this
 # helper. This script keeps only its own glob list, patterns, and messages.
-SOURCE_GLOBS=('*.rs' '*.md' '*.toml' '*.json' '*.jsonc' '*.js' '*.mjs' '*.cjs' '*.ts' '*.tsx' '*.jsx' '*.py' '*.html' '*.yml' '*.yaml' '*.sh')
+# '*.txt' and '.githooks/*' were added 2026-08-01: scripts/policy-census.txt is TRACKED and
+# published, and two Korean rationale tails landed in it while this guard scanned green — the only
+# tracked .txt in the repo containing Hangul. The hook is extensionless, so the same hole covered it
+# (contrast check-shell-pipe-sigpipe.sh:69, which already lists '.githooks/*'). A guard whose subject
+# set is an extension allow-list cannot see a file type the repo actually ships.
+SOURCE_GLOBS=('*.rs' '*.md' '*.toml' '*.json' '*.jsonc' '*.js' '*.mjs' '*.cjs' '*.ts' '*.tsx' '*.jsx' '*.py' '*.html' '*.yml' '*.yaml' '*.sh' '*.txt' '.githooks/*')
 
 # ## Subject-set floor (2026-07-29)
 # Both scans below enumerate through SOURCE_GLOBS, and a helper that matched nothing returns exactly

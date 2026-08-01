@@ -46,8 +46,10 @@ fn decorator_leads_line(line: &str, re: &Regex) -> bool {
 const MIN_FILES: usize = 3;
 const MAX_SAMPLES: usize = 3;
 
-/// Near-zero (not exact-zero) floor shared by S1's `http_provides_count` gate, S2's `http_provides_count`
-/// gate, S3's `io_provides`/`io_consumes_keyed` gates, and S4's `http_consumes_count` gate. Round 9's blind
+/// Near-zero (not exact-zero) floor shared across the provide/consume-count gates of this tripwire
+/// family. It is deliberately NOT enumerated here — `rg MIN_PROVIDES_FLOOR crates/engine/src` is the
+/// list, and the enumeration that used to sit on this line named four sharers when there were more,
+/// which is the failure mode a person raising this floor most needs it not to have. Round 9's blind
 /// be-express tree still had 1 extracted `http` provide — an exact-zero gate misses it entirely — and
 /// round 14's blind Spring-BE tree (17/19 routes lost to a parser limit) still had 2 lexically-extracted
 /// provides tree-wide, silencing S1's own original exact-zero gate the identical way. A near-zero floor

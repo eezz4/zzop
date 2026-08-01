@@ -1116,3 +1116,36 @@ fn injected_pathscope_auth_guarded_exempts_every_route_under_the_prefix() {
     assert_eq!(out.len(), 1, "{:?}", out);
     assert_eq!(out[0].data.as_ref().unwrap()["path"], "/public/signup-lite");
 }
+
+/// The message may not claim an UNBOUNDED search. `anywhere in its call graph` is literal only for the
+/// JS/TS extensions; for `.java` the specifier resolves to itself (no whole-corpus type index is
+/// threaded in) and for a Python module-attribute receiver the walk stops one hop out, so in those
+/// cases a finding means "no guard within one hop".
+///
+/// Pinned because the phrase read as an unbounded claim for the whole of 2026-07 while the bound was
+/// stated only in `callgraph::run_callgraph_rules`' doc comment — visible to maintainers, invisible to
+/// the person holding the finding. That is the name-vs-computation class this rule's own prose is
+/// otherwise careful about, and a future edit that trims the qualification must fail here.
+#[test]
+fn the_message_never_claims_an_unbounded_walk_without_naming_the_hop_bound() {
+    let msg = super::message::missing_auth_hint("POST", "/api/x", "handler", Some("requireAuth"));
+    assert!(
+        msg.contains("anywhere in its call graph"),
+        "the phrase this test qualifies must still be there, or the pin is checking nothing: {msg}"
+    );
+    // Every token here must be UNIQUE to the hop-bound clause. `per-language` was in this list until
+    // an invalidation probe showed it was already satisfied by an unrelated sentence about test-path
+    // conventions — a token that matches elsewhere pins nothing, which is the shape a probe exists to
+    // find.
+    for token in [
+        "resolves to ITSELF",
+        "one hop",
+        "module-attribute",
+        "within one hop",
+    ] {
+        assert!(
+            msg.contains(token),
+            "an unbounded-sounding claim must ship WITH its hop bound, missing {token:?}: {msg}"
+        );
+    }
+}

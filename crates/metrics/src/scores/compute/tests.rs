@@ -166,9 +166,9 @@ fn realistic_input_all_sub_scores_within_0_100_and_arrays_well_formed() {
         assert!((0.0..=100.0).contains(&score), "{k}.score range");
     }
 
-    // fix_ratio.ratio is a documented 0..1 fraction (not 0..100).
-    assert!(s.fix_ratio.ratio >= 0.0);
-    assert!(s.fix_ratio.ratio <= 1.0);
+    // fix_ratio.fixShareOfTaggedTouches is a documented 0..1 fraction (not 0..100).
+    assert!(s.fix_ratio.fix_share_of_tagged_touches >= 0.0);
+    assert!(s.fix_ratio.fix_share_of_tagged_touches <= 1.0);
 
     // Orchestrator wired the right structural fields through.
     assert_eq!(s.coupling.circular_count, 1); // circular.len() passed through

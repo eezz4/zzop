@@ -161,3 +161,36 @@ mod tests {
         assert_eq!(count_loc(""), 1);
     }
 }
+
+use zzop_core::recognizer::{channel, FrameworkRecognizer};
+
+/// Frameworks this parser recognizes — see [`zzop_core::recognizer`] for what a declaration does and
+/// does not claim. Verified against each adapter's RETURN TYPE, not a token scan: `RouterMountFragment`
+/// composes into the provide side, `IoConsume` is the consume side, and the db-table adapters emit both.
+pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
+    FrameworkRecognizer {
+        framework: "django",
+        extensions: &["py"],
+        emits: &[channel::DB],
+    },
+    FrameworkRecognizer {
+        framework: "django",
+        extensions: &["py"],
+        emits: &[channel::PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "fastapi",
+        extensions: &["py"],
+        emits: &[channel::PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "sqlalchemy",
+        extensions: &["py"],
+        emits: &[channel::DB],
+    },
+    FrameworkRecognizer {
+        framework: "httpx",
+        extensions: &["py"],
+        emits: &[channel::CONSUMES],
+    },
+];

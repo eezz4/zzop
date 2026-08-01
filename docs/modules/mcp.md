@@ -15,10 +15,10 @@ matters, because the re-exported four have no `crates/summary` wrapper to look f
 - **`zzop`** — the **CLI** (`zzop analyze <path>` / `zzop analyze-envelope <envelope.json>` / `zzop cross
   <path>...` / `zzop file <path> <tree>...` / `zzop endpoint <pattern> <path>...` / `zzop manifest
   <path>...` / `zzop diff <a.json>
-  <b.json>` / `zzop facts <path>...` / `zzop graph <path>...` / `zzop init` / `zzop contract` / `zzop
-  explain <rule-id>` / `zzop validate-…`). For direct terminal/CI use, no MCP client required. Six of
-  those (`manifest`, `diff`, `explain`, `facts`, `graph`, `init`) are CLI-ONLY lanes with no MCP tool
-  twin — see [CLI-only lanes](#cli-only-lanes-manifest--diff--explain--facts--graph--init) below for
+  <b.json>` / `zzop facts <path>...` / `zzop coverage <path>...` / `zzop graph <path>...` / `zzop init` /
+  `zzop contract` / `zzop explain <rule-id>` / `zzop validate-…`). For direct terminal/CI use, no MCP
+  client required. Seven of those (`manifest`, `diff`, `explain`, `facts`, `coverage`, `graph`, `init`)
+  are CLI-ONLY lanes with no MCP tool twin — see [CLI-only lanes](#cli-only-lanes-manifest--diff--explain--facts--coverage--graph--init) below for
   why each has none.
 
 Each is a Cargo package building exactly one thin argv-dispatch binary — `zzop` is package
@@ -156,13 +156,13 @@ than a path. Work around it either by quoting AND setting `MSYS_NO_PATHCONV=1` f
 (`MSYS_NO_PATHCONV=1 zzop endpoint "/articles" <path>`), or by running the command from PowerShell/
 cmd instead, neither of which path-converts arguments.
 
-### CLI-only lanes: `manifest` / `diff` / `explain` / `facts` / `graph` / `init`
+### CLI-only lanes: `manifest` / `diff` / `explain` / `facts` / `coverage` / `graph` / `init`
 
-Six subcommands have no MCP tool twin. `explain` has none because MCP already reaches the same
+Seven subcommands have no MCP tool twin. `explain` has none because MCP already reaches the same
 compiled-in rule data through the `rule-catalog` resource below. `init` has none for the same reason
 plus a stronger one: its document is already on the wire as the `config-template` resource, and the
 only thing the subcommand adds is a WRITE into the caller's tree — which is precisely what a stdio
-server should not be doing on a client's behalf. `manifest`/`diff`/`facts`/`graph` have none for
+server should not be doing on a client's behalf. `manifest`/`diff`/`facts`/`coverage`/`graph` have none for
 reasons recorded as a contract in [contracts/surface-parity.json](../contracts/surface-parity.json)'s
 `_cliOnlyLanes` — the manifest is deliberately UNCAPPED while every MCP reply here is cap-governed (the
 token-bomb guard in [Output contract](#output-contract) below), so putting it on that wire would force a
@@ -177,6 +177,15 @@ top), its consumer is a PROGRAM rather than a conversation (`zzop facts ./api ./
 ./my-rule facts.json`), and an agent already has the shaped answers it usually wants through the join
 buckets and `check_endpoint`. See [facade.md](facade.md#custom-rules-consumer-side-zzop-facts) for the
 full field table, the always-present-key rule, and what the surface deliberately does not carry.
+
+`coverage` is the aggregate-visibility lane — "how much of this tree does zzop actually see", as a
+per-extension dispatch table (structural / lexical-only / degraded), the per-tree census with its
+join-visibility spelled as a sentence, and the axes zzop has NEVER measured on your tree (recall)
+carried as a schema FIELD rather than a caveat sentence — by ruling there is no single score, so the
+unmeasured part cannot be dropped in transit. Its MCP absence is the mild kind: the per-file half is
+already on the wire as `check_file`, and every analyze reply carries the same census under
+`coverage`; the aggregate is an authoring/ops view. The core is host-neutral
+(`zzop_facade::query_coverage_json`), so a twin is one dispatch entry away if agent demand arrives.
 
 `graph` is CLI-only for two of the same reasons: a diagram is a terminal/file act (`zzop graph ./api
 ./web > join.mmd`, then a renderer), and the shaped answers a PROGRAM reasons over — the same buckets as
@@ -248,7 +257,7 @@ published version by construction (see [`version()`](facade.md#the-zzop-facade-j
 |---|---|
 | `analyze_repo` | Analyze ONE repo/tree path. |
 | `cross_repo` | Analyze 2+ repos/trees and join them across the cross-layer (kind, key) boundary — zzop's headline capability (e.g. a frontend `fetch` call matched against a backend route, a shared DB table, route drift). |
-| `check_file` | DEFINITIVE answer to "what does zzop know about THIS FILE?" — the targeting twin of `check_endpoint`, with a file PATH as the target instead of an io key, for a caller working IN a file rather than asking about a whole tree. Takes `target` (tree-relative or absolute, either separator style — an absolute path matches by its tail) plus exactly ONE of `path` / `paths` / `configPath`, resolved exactly as the tools above resolve theirs, and an optional `sourceId` pinning the answer to one tree. Returns which tree the file was found in (`sourceId`, plus `otherTrees` when the same relative path exists in more than one — never a silent pick), a `verdict` from a sealed four-token vocabulary with a `verdictMeaning` field spelling out THAT token's meaning in the reply itself (same self-describing discipline `check_endpoint` uses, and the same reason: no tool description or help text is a second owner of the vocabulary), the file's `loc`, `symbols` (count + exported names), `io` provides/consumes, `dependencies` in BOTH directions (`imports` and `importedBy`), and every finding anchored in the file — the tree's own and the cross-layer join's merged into one list with counts by severity and rule. **Nothing is capped**: a single file's facts are bounded by the file, so this reply drops nothing and therefore never has to disclose a truncation (the one exception is a `not-found` reply's `suggestions` list, which ranks over every walked path rather than describing the target). The verdict answers whether the file was ANALYZED, not whether it is healthy — an empty findings list means "clean" only for a file the verdict says was analyzed. Runs `analyzeTrees` even for a single `path`, because the reply names the tree a file belongs to and a single-tree `analyze` output has no tree identity (see [File queries: `queryFile`](facade.md#file-queries-queryfile) for the full output contract). |
+| `check_file` | DEFINITIVE answer to "what does zzop know about THIS FILE?" — the targeting twin of `check_endpoint`, with a file PATH as the target instead of an io key, for a caller working IN a file rather than asking about a whole tree. Takes `target` (tree-relative or absolute, either separator style — an absolute path matches by its tail) plus exactly ONE of `path` / `paths` / `configPath`, resolved exactly as the tools above resolve theirs, and an optional `sourceId` pinning the answer to one tree. Returns which tree the file was found in (`sourceId`, plus `otherTrees` when the same relative path exists in more than one — never a silent pick), a `verdict` from a sealed four-token vocabulary with a `verdictMeaning` field spelling out THAT token's meaning in the reply itself (same self-describing discipline `check_endpoint` uses, and the same reason: no tool description or help text is a second owner of the vocabulary), the file's `loc`, `symbols` (count + exported names), `io` provides/consumes, `dependencies` in BOTH directions (`imports` and `importedBy`) with a `dependenciesMeaning` field beside them (same self-describing discipline `verdictMeaning` uses, for the same reason: an empty `imports` list is ambiguous on its own — see [File queries: `queryFile`](facade.md#file-queries-queryfile)), and every finding anchored in the file — the tree's own and the cross-layer join's merged into one list with counts by severity and rule. **Nothing is capped**: a single file's facts are bounded by the file, so this reply drops nothing and therefore never has to disclose a truncation (the one exception is a `not-found` reply's `suggestions` list, which ranks over every walked path rather than describing the target). The verdict answers whether the file was ANALYZED, not whether it is healthy — an empty findings list means "clean" only for a file the verdict says was analyzed. Runs `analyzeTrees` even for a single `path`, because the reply names the tree a file belongs to and a single-tree `analyze` output has no tree identity (see [File queries: `queryFile`](facade.md#file-queries-queryfile) for the full output contract). |
 | `check_endpoint` | DEFINITIVE answer to "is io key X provided/consumed/joined?" — matches a pattern against ANY cross-layer io key (http routes, env keys, DB tables, topics) as a case-insensitive substring and returns ONE verdict from the sealed vocabulary `linked` / `provided-only` / `consumed-unprovided` / `external` / `unresolved-only` / `ambiguous` / `mixed` / `not-found`, plus a `verdictMeaning` field spelling out THAT token's meaning in the reply itself (the definitions live with the verdict computation and ride every reply on every host, so no help text or tool description is a second owner of the vocabulary), full counts, capped match lists, related findings, and key suggestions on `not-found`. Runs the shared facade query core directly — the same core any embedder driving `zzop-facade`/`zzop-summary` gets identical answers from (see [Endpoint queries: `queryIo`](facade.md#endpoint-queries-queryio) for the full output contract). |
 | `analyze_envelope` | **Mode A**: a full Normalized AST envelope (a custom parser's output) REPLACES native parsing entirely for this run — contrast `validate_envelope` below, which only checks the envelope's shape and runs no analysis, and Mode B overlay/mount requests (`docs/NORMALIZED_AST.md`), which merge external symbols ON TOP of a natively-parsed tree instead of replacing it. Only symbol-scan/io-scan rules can fire (no source text ships in an envelope). The one lane that takes NO config — an envelope carries no filesystem location, so there is none to auto-discover and none to require, and the reply has no `config`/`path`/`architecture` fields (`gitWindow` IS present, always `null` — the facade always serializes it and `null` is the "git did not run" signal); otherwise the SAME shaped summary `analyze_repo` returns (findings, `packsLoaded`, `coverage`, warnings). Same `analyzeEnvelope` facade call path documented in [Defaults (zero-config = full analysis)](facade.md#defaults-a-config-is-required-what-it-does-not-have-to-say). |
 | `validate_envelope` | Validate a Normalized AST envelope against its contract WITHOUT running an analysis — the authoring feedback loop. Returns `{valid, issues[], hints[]}`; never fails on bad input (same contract as the facade's `validateEnvelopeOnly` — see [Validation-only: `validateEnvelopeOnly`](facade.md#validation-only-validateenvelopeonly)). The two lists are DIFFERENT AXES: `issues` reject the envelope and alone decide `valid` (and so the `zzop validate-envelope` exit code, which this field does not change), while `hints` are accepted shapes that are almost certainly not what the producer meant. What each hint COSTS differs by shape and the prose here does not flatten that: some make the cross-layer join find nothing at all (a non-normalized `http` key; a provide key carrying a host), while others still join and instead change what the run produces (an absolute `files[].path` becomes a synthetic entry under a Mode B overlay instead of merging onto the file it names; a duplicate provide is joined once per copy, so a consume of that key gets a duplicate edge). Every hint states its own consequence and its fix, so the checks are the list, not any sentence about them — `crates/core/src/normalized/hints.rs` (`zzop_core::envelope_hints`) is where a new one is added and where the wording lives. A non-empty `hints` on a valid envelope is the more urgent signal. `hints` is always present, empty array included, so "found nothing" is never confused with a build that has no hint pass. |
@@ -478,18 +487,46 @@ built to never lie by omission.
   thousands of degraded files. `coverage.degraded` (below) already carries the full, uncapped COUNT, so
   this list is supplementary detail (which files, not just how many) and is never the only source of
   the number.
-- **`bucketKeys`** (`cross_repo`) — alongside the numeric `buckets` counts, each of the five non-edge
-  join buckets (`unconsumedProvides`, `unprovidedConsumes`, `unresolvedConsumes`, `externalConsumes`,
-  `ambiguousConsumes`) lists EVERY DISTINCT key (deduped, engine order preserved; an unresolved
-  consume contributes its `raw` expression when recorded), so an agent sees WHICH keys sit in a bucket
-  instead of only how many. The list is uncapped since 2026-07-29, so there is no truncation field to
-  check — on a large repo one of these lists can be long. A parallel `bucketKeySites` object mirrors
-  `bucketKeys` with each key's first recorded site as `"file:line"` (`null` when the fact carries no
-  location — never guessed), so a listed key is locatable without a follow-up call. These keys are the
-  RAW join residue: no rule vocabulary filters them (see the bucket contract in
+- **`distinctBucketKeys`** (`cross_repo`) — alongside the numeric `buckets` counts, each of the five
+  non-edge join buckets (`unconsumedProvides`, `unprovidedConsumes`, `unresolvedConsumes`,
+  `externalConsumes`, `ambiguousConsumes`) lists EVERY DISTINCT key (deduped, engine order preserved; an
+  unresolved consume contributes its `raw` expression when recorded), so an agent sees WHICH keys sit in
+  a bucket instead of only how many. The list is uncapped since 2026-07-29, so there is no truncation
+  field to check — on a large repo one of these lists can be long. A parallel
+  `distinctBucketKeyFirstSites` object mirrors it with each key's FIRST recorded site as `"file:line"`
+  (`null` when the fact carries no location — never guessed), so a listed key is locatable without a
+  follow-up call.
+
+  **`buckets.X` and `distinctBucketKeys.X` are two counts of one bucket, and they legitimately differ.**
+  `buckets.X` counts RAW ROWS while the key list DEDUPES; measured on this repo's `cases/` corpus,
+  `unprovidedConsumes` is 23 rows over 14 distinct keys. So `buckets.X >= len(distinctBucketKeys.X)`
+  for the FIVE non-edge buckets, and equality only means no key repeated. `edges` is not one of them —
+  it carries no key list beside it, so no such comparison exists for it, and a row there is a matched
+  consume->provide PAIR rather than a call site.
+  The reply says this itself in a **`bucketMeaning`** sentence rather than leaving the arithmetic to a
+  reader — the same repair the graph lane's `%%` census already carries for the identical confusion
+  ("60 rows are 4 relations"). Both fields were renamed on 2026-07-31 (`bucketKeys` →
+  `distinctBucketKeys`, `bucketKeySites` → `distinctBucketKeyFirstSites`) so the NAME states the
+  membership rule: the second one was plural but has only ever carried the FIRST site per key, which the
+  tool description said and the CLI twin's bare field name did not.
+
+  These keys are the RAW join residue: no rule vocabulary filters them (see the bucket contract in
   [facade.md](facade.md#output-data-shapes) and the `join-bucket-unfiltered` disclosure class), so a key
   listed here may have no corresponding finding — `crossLayerFindings` is the filtered view of the same
   facts, and is legitimately smaller.
+- **`scores.*` detail lists** — the structural-health reports (in the raw `zzop-facade` output, and
+  summarized into `architecture` on this wire) each carry a capped list of the rows behind the number:
+  `sfc.violations`, `godFile.files`, `diamond.pairs`, `renameInstability.files`, `busFactor.files`,
+  `typeSafety.violations`, `lod.violations` cap at 50 (per-FILE / per-PAIR rows), and
+  `hierarchy.violations`, `publicApi.deepImports`, `siblingCross.violations` cap at 100 (per-EDGE rows,
+  which run longer over the same tree). Each ships a sibling count of what the cap dropped —
+  `violationsTruncated`, `filesTruncated`, `pairsTruncated`, `deepImportsTruncated` — so
+  `list.length + <list>Truncated` is the full total. Unlike the fields above it is **always present,
+  `0` included**: these are fixed-shape report structs, and a disclosure that vanishes when it does not
+  bite would make "complete list" and "no disclosure" the same bytes. This matters most where the SCORE
+  is computed over the full row count before the cap (every list here), so counting the returned rows
+  never reproduced the score and nothing said why. The cap values live in one place
+  (`crates/metrics/src/scores/detail_cap.rs`), not per module.
 - **`warnings` (engine) and `configWarnings` (config front-end + engine-side config diagnostics,
   e.g. unknown-rule-id overrides) are never capped** — the honest
   self-report channels outrank brevity, on the theory that a truncated warning list is worse than a long
@@ -513,8 +550,9 @@ built to never lie by omission.
   `cross_repo`'s `sources[]` entries, same as `packsLoaded`, but omitted (not `null`) whenever the
   engine itself omits it (no `disabledRules`/`severityOverrides` requested) — see the
   [`AnalyzeOutputView` table](facade.md#the-zzop-facade-json-contract) for the field shape.
-- **`coverage`** — the engine's per-tree structural coverage census (`files`, `sourceFiles`, `symbols`,
-  `importEdges`, `ioProvides`, `ioConsumesKeyed`, `ioConsumesUnresolved`, `degraded`, `joinContributionZero` — see the
+- **`coverage`** — the engine's per-tree structural coverage census (`files`, `parserDispatched` — renamed from `sourceFiles`, `symbols`,
+  `resolvedImportEdges` — renamed from `importEdges` and counting RESOLVED in-tree edges only,
+  `ioProvides`, `ioConsumesKeyed`, `ioConsumesUnresolved`, `degraded`, `joinContributionZero` — see the
   [`AnalyzeOutputView` table](facade.md#the-zzop-facade-json-contract) for field semantics) rides through whole on every
   `analyze_repo` reply and per-source on `cross_repo`'s `sources[]` entries — a handful of scalars, no
   cap needed. `joinContributionZero` is the engine's own blindness ASSERTION (this tree extracted no
@@ -545,8 +583,11 @@ built to never lie by omission.
   `{pain, topRecommendation, criticalTop}` — `pain` is `health.pain` (the composite structural-debt
   scalar); `topRecommendation` is `null`-safe `{id, severity, topItem}` built from
   `recommendations[0]` (`topItem` is that recommendation's top-ROI item's `path`, `null` when there is
-  none); `criticalTop` is up to 3 file paths off the front of the engine's own blast-radius-ranked
-  `critical` list. The full arrays are never in this summary — only the raw `zzop-facade` JSON output,
+  none); `criticalTop` is up to 3 file paths off the front of the engine's own **size-weighted
+  blast-radius** ranking of `critical` (`blastRadius * ln(loc + 2)`, with `blastRadius` as the
+  tie-break — `crates/metrics/src/criticality.rs`). The weighting is why a 400-line core outranks a
+  5-line re-export barrel of equal blast, and it is also why re-sorting the raw `critical` array by
+  `blastRadius` alone does not reproduce these three paths; `critical` already arrives in this order. The full arrays are never in this summary — only the raw `zzop-facade` JSON output,
   reachable by embedding the engine (Rust crate) directly, carries the complete per-file
   `recommendations`/`critical` detail; no shipped CLI/MCP surface emits it.
 - **`gitWindow`** (every analysis reply, `null` when git did not run) — the engine's own `{recentDays, since}` echo of which git

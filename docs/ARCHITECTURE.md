@@ -8,15 +8,15 @@ what's actually happening underneath so the output makes sense.
 direct `zzop-facade` embedding receives verbatim. What the two shipped binaries print is one layer
 above: `zzop-summary` (`crates/summary`) owns every bit of shaping between the facade output and a
 product's answer — the caps and their truncation disclosures, the findings filters, the warning merge,
-and the `facts`/`graph`/`manifest` projections. Both `zzop` and `zzop-mcp` call it and neither
+and the `facts`/`graph`/`manifest`/`coverage` projections. Both `zzop` and `zzop-mcp` call it and neither
 reimplements any of it, so for the lanes both surfaces expose — `analyze`/`cross`/`endpoint`/`file`/
 `analyze-envelope` and the two offline validators — a CLI run and an MCP tool call against the same path
 give the identical answer. The findings-list knobs (`severity`, `rule`, `limit`) are declared on the MCP
 tools (`packages/mcp/src/tools/definitions.rs`) AND on their CLI twins as `--severity`/`--rule`/`--limit`
 (`packages/cli-bin/src/cli/args.rs`), both parsed into the one shared `FindingFilters` — so an MCP call
 passing `limit: 5` and `zzop analyze --limit 5` return the same shorter list over the same tree, with the
-full counts unaffected either way. The three projections named
-above are further not paired at all: `facts`, `graph` and `manifest` (with `diff`) are CLI-only lanes
+full counts unaffected either way. The projections named
+above are further not paired at all: `facts`, `graph`, `coverage` and `manifest` (with `diff`) are CLI-only lanes
 with **no MCP tool twin**, and `docs/contracts/surface-parity.json`'s `_cliOnlyLanes` records the reason
 for each lane it declares — that registry's own keys are the list, never this sentence. `explain` has no
 MCP twin either, and as of 2026-07-27 it IS declared there: it is a lookup over compiled-in rule data
@@ -29,7 +29,9 @@ Where either surface differs from the raw facade output, that same registry name
 ## The IR your `ir` field contains
 
 Every analyzed file is parsed and projected into a language-neutral intermediate representation
-(`CommonIr`): symbols (functions/classes/consts/types/interfaces), import edges, line counts, and
+(`CommonIr`): symbols (functions/classes/consts/types/interfaces), RESOLVED IN-TREE import edges
+(an import whose target zzop did not resolve inside the tree contributes no edge, so a low edge count
+can mean "unresolved", not "uncoupled" — see [the facade module doc](modules/facade.md)), line counts, and
 optional `IoFacts` (HTTP/DB/tRPC provide-consume facts used for cross-layer joins). This — never a raw
 language AST — is what the `ir` field in the output actually contains. A custom/external parser can
 feed the exact same shape in through the Normalized AST protocol; see

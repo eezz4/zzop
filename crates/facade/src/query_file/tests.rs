@@ -118,6 +118,29 @@ fn dependencies_answer_both_directions() {
     assert_eq!(v["dependencies"]["importedBy"], json!(["src/api.ts"]));
 }
 
+/// The sibling of `verdictMeaning`, and the reason it exists: `src/other.ts` above reports an EMPTY
+/// `imports` list, which a caller reads as "this file imports nothing" unless the reply says otherwise.
+/// The dep graph carries resolved in-tree edges only, so the honest reading is "no in-tree import of it
+/// resolved" — a package import or an unresolvable specifier never reaches this list at all.
+#[test]
+fn dependencies_meaning_says_the_graph_is_resolved_in_tree_only_and_empty_is_not_no_imports() {
+    let v = q("src/other.ts");
+    let meaning = v["dependenciesMeaning"]
+        .as_str()
+        .expect("dependenciesMeaning ships on every found-file reply");
+    // The rule itself, from its one owner — not a second copy of the sentence.
+    assert!(
+        meaning.contains(zzop_core::DEP_GRAPH_RESOLVED_ONLY),
+        "the meaning must carry the shared rule verbatim, not a paraphrase: {meaning}"
+    );
+    assert!(meaning.contains("resolved in-tree edges"), "{meaning}");
+    // ...and the consequence only a per-file query makes visible.
+    assert!(
+        meaning.contains("does NOT mean this file imports nothing"),
+        "an empty list must be disambiguated in the reply itself: {meaning}"
+    );
+}
+
 #[test]
 fn io_facts_are_scoped_to_the_target_file() {
     let v = q("src/api.ts");

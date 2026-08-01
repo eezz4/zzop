@@ -47,7 +47,7 @@ fn sample_scores() -> Scores {
         },
         coupling: CouplingScore {
             score: 70.0,
-            avg_fan_out: 1.0,
+            avg_fan_out_among_importers: 1.0,
             max_fan_out: 2.0,
             circular_count: 1,
         },
@@ -77,6 +77,7 @@ fn sample_scores() -> Scores {
                     module: "core".to_string(),
                 },
             ],
+            violations_truncated: 0,
         },
         public_api: PublicApiScore {
             score: 73.0,
@@ -93,6 +94,7 @@ fn sample_scores() -> Scores {
                     to_module: "core".to_string(),
                 },
             ],
+            deep_imports_truncated: 0,
         },
         sfc: SfcScore {
             score: 74.0,
@@ -111,6 +113,7 @@ fn sample_scores() -> Scores {
                     limit: 150,
                 },
             ],
+            violations_truncated: 0,
         },
         main_sequence: MainSequenceScore {
             score: 75.0,
@@ -142,6 +145,7 @@ fn sample_scores() -> Scores {
                     loc: 400,
                 },
             ],
+            files_truncated: 0,
         },
         sibling_cross: SiblingCrossScore {
             score: 78.0,
@@ -162,6 +166,7 @@ fn sample_scores() -> Scores {
                     to_subdir: "b".to_string(),
                 },
             ],
+            violations_truncated: 0,
         },
         diamond: DiamondScore {
             score: 79.0,
@@ -179,6 +184,7 @@ fn sample_scores() -> Scores {
                     through: vec!["src/mid.ts".to_string()],
                 },
             ],
+            pairs_truncated: 0,
         },
         rename_instability: RenameScore {
             score: 80.0,
@@ -194,6 +200,7 @@ fn sample_scores() -> Scores {
                     rename_count: 2,
                 },
             ],
+            files_truncated: 0,
         },
         bus_factor: BusFactorScore {
             score: 81.0,
@@ -210,12 +217,13 @@ fn sample_scores() -> Scores {
                     authors: 1,
                 },
             ],
+            files_truncated: 0,
         },
         fix_ratio: FixRatioScore {
             score: 82.0,
-            fix: 1,
-            total: 4,
-            ratio: 0.25,
+            fix_file_touches: 1,
+            tagged_file_touches: 4,
+            fix_share_of_tagged_touches: 0.25,
         },
         type_safety: TypeSafetyScore {
             score: 83.0,
@@ -237,6 +245,7 @@ fn sample_scores() -> Scores {
                     density: 0.005,
                 },
             ],
+            violations_truncated: 0,
         },
         lod: LodScore {
             score: 84.0,
@@ -257,6 +266,7 @@ fn sample_scores() -> Scores {
                     density: 0.0025,
                 },
             ],
+            violations_truncated: 0,
         },
     }
 }

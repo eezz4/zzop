@@ -3,12 +3,11 @@
 //! implementation details that are free to change.
 
 use super::config::ScoresConfig;
+use super::detail_cap::{cap_and_count_dropped, MAX_EDGE_ROWS_LISTED};
 use super::shared::{is_external, is_index_barrel, module_root, round};
 use super::types::{DeepImport, PublicApiScore};
 use zzop_core::DepGraph;
 
-/// Caps the returned deep-import list (not the score).
-const MAX_VIOLATIONS_LISTED: usize = 100;
 /// `"src/".len()`.
 const SRC_PREFIX_LEN: usize = 4;
 
@@ -61,12 +60,13 @@ pub fn compute_public_api(
         (100.0 - (deep.len() as f64 / total as f64) * 100.0).max(0.0)
     };
 
-    deep.truncate(MAX_VIOLATIONS_LISTED);
+    let deep_imports_truncated = cap_and_count_dropped(&mut deep, MAX_EDGE_ROWS_LISTED);
 
     PublicApiScore {
         score: round(score),
         total_cross_module_imports: total,
         deep_imports: deep,
+        deep_imports_truncated,
     }
 }
 

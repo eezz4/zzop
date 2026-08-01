@@ -17,9 +17,15 @@ fn symbol(name: &str, body_start: Option<u32>, body_end: Option<u32>) -> SourceS
 }
 
 fn valid_envelope_json() -> String {
+    // The version comes FROM the constant, never from a literal. A fixture that hardcodes it turns
+    // every release bump into unrelated test failures — measured on the 0.27.0 -> 0.28.0 bump, which
+    // broke four tests here that had nothing to do with the release.
+    //
+    // Placeholder substitution rather than `format!`: this body is JSON, so `format!` would need every
+    // brace in it doubled, and one missed pair is a silently different fixture.
     r#"{
             "format": "zzop-normalized-ast",
-            "version": "0.27.0",
+            "version": "__CONTRACT_VERSION__",
             "parser": "jsp-lexical/1",
             "source": "legacy",
             "files": [
@@ -35,7 +41,7 @@ fn valid_envelope_json() -> String {
                 }
             ]
         }"#
-    .to_string()
+    .replace("__CONTRACT_VERSION__", NORMALIZED_AST_CONTRACT_VERSION)
 }
 
 #[test]
@@ -52,12 +58,13 @@ fn minimal_envelope_with_defaulted_fields_round_trips() {
     // A minimal/degraded producer omits every optional field.
     let json = r#"{
             "format": "zzop-normalized-ast",
-            "version": "0.27.0",
+            "version": "__CONTRACT_VERSION__",
             "parser": "min/1",
             "source": "s",
             "files": [ { "path": "a.ext", "loc": 1 } ]
-        }"#;
-    let envelope = validate_envelope(json).expect("should validate");
+        }"#
+    .replace("__CONTRACT_VERSION__", NORMALIZED_AST_CONTRACT_VERSION);
+    let envelope = validate_envelope(&json).expect("should validate");
     let file = &envelope.files[0];
     assert!(file.symbols.is_empty());
     assert!(file.imports.is_empty());

@@ -12,10 +12,10 @@ use crate::pipeline::{CSharpIndex, GoModuleMap, JavaIndex, RustWorkspaceMap};
 /// consumes it.
 pub(in crate::analyze::assemble) struct Collected {
     pub(in crate::analyze::assemble) file_count: usize,
-    /// `CoverageCensus::source_files` — the subset of `file_count` a native frontend dispatched on, or an
+    /// `CoverageCensus::parser_dispatched` — the subset of `file_count` a native frontend dispatched on, or an
     /// applied adapter overlay covers. The walk has no extension filter, so `file_count` alone reads as a
     /// repo-size number it is not (see that field's own doc for the field report).
-    pub(in crate::analyze::assemble) source_files: usize,
+    pub(in crate::analyze::assemble) parser_dispatched: usize,
     pub(in crate::analyze::assemble) per_file_findings: Vec<Finding>,
     pub(in crate::analyze::assemble) all_symbols: Vec<zzop_core::ir::SourceSymbol>,
     pub(in crate::analyze::assemble) loc_by_path: HashMap<String, u32>,

@@ -24,7 +24,8 @@
 //! A node is a `(sourceId, side, kind, key)` tuple — side being `provide` or `consume` — NOT a call
 //! site. Twelve fetch calls to the same route in one tree collapse into ONE consume node. That is the
 //! whole point of a picture, but it means **file and line are not in this output at all**; a reader who
-//! needs them uses `zzop facts` (uncapped, per-site) or `zzop cross`'s `bucketKeySites`.
+//! needs them uses `zzop facts` (uncapped, per-site) or `zzop cross`'s `distinctBucketKeyFirstSites`
+//! (one site per distinct key — the first, which is what that name now says out loud).
 //!
 //! ## What this CANNOT render, disclosed in the output itself
 //! The graph carries the six *graph-shaped* join buckets and nothing else. Four things are structurally

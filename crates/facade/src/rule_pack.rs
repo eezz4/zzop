@@ -8,7 +8,11 @@
 //!   gate, both via `zzop_core::parse_dsl_pack` — the exact per-file verdict `load_dsl_packs`
 //!   applies to every `rules/dsl/*.json` (one path, no forked logic);
 //! - `zzop_core::pack_regex_issues` — every regex-typed matcher field that fails to compile, the
-//!   judgment the DSL interpreter applies at eval time by silently no-oping the affected rule.
+//!   judgment the DSL interpreter applies at eval time by silently no-oping the affected rule;
+//! - `zzop_core::pack_retired_field_issues` — every field zzop once accepted on a rule and no longer
+//!   reads. Same defect shape as the regex one (the pack LOADS, and something the author wrote does
+//!   nothing), and the only one that needs the RAW text: `RuleDef` has no `deny_unknown_fields` by
+//!   design, so serde has already dropped the evidence by the time a typed pack exists.
 //!
 //! It NEVER judges rule quality or semantics ("is this a good rule", "will this pattern over-match")
 //! — a structurally valid pack with a useless rule reports `valid: true`.
@@ -24,10 +28,14 @@ use crate::envelope::ValidateReport;
 /// `{"valid": false, ...}` report, not an `Err`, since a validity CHECK cannot itself be "wrong"
 /// the way a malformed analyze request can.
 pub fn validate_rule_pack_json(pack_json: &str) -> String {
-    let issues = match zzop_core::parse_dsl_pack(pack_json) {
+    let mut issues = match zzop_core::parse_dsl_pack(pack_json) {
         Ok(pack) => zzop_core::pack_regex_issues(&pack),
         Err(message) => vec![message],
     };
+    // Read from the RAW text, and do it on BOTH arms: a pack that fails to parse for some other
+    // reason still has its retired fields worth naming, and by this point the parsed value (when there
+    // is one) has already dropped them — `RuleDef` carries no `deny_unknown_fields`, deliberately.
+    issues.extend(zzop_core::pack_retired_field_issues(pack_json));
     let report = ValidateReport {
         valid: issues.is_empty(),
         issues,

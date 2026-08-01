@@ -60,6 +60,7 @@ mod analyze;
 pub mod args;
 mod config_warnings;
 pub mod contracts;
+mod coverage;
 mod cross;
 #[cfg(test)]
 mod cross_test;
@@ -73,6 +74,7 @@ mod siblings;
 mod suggest;
 
 pub use analyze::{analyze_envelope_summary, analyze_summary};
+pub use coverage::coverage_summary;
 pub use cross::cross_summary;
 pub use endpoint::endpoint_summary;
 pub use facts::facts_json;

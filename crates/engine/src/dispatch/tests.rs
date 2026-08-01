@@ -59,6 +59,23 @@ fn dispatches_sql_extension() {
     );
 }
 
+/// Pin for [`declaration_only_extension`], both directions: exactly the `Prisma`/`Sql` arms are
+/// declaration-only, and every code-hosting arm (plus unknown/lexical extensions) is not. The
+/// predicate is derived from the dispatch table, so what this pins is the CLASSIFICATION — a new
+/// dispatch arm, or a Prisma/Sql arm growing symbols/imports, must re-justify its row here.
+#[test]
+fn declaration_only_extensions_are_exactly_the_prisma_and_sql_arms() {
+    for ext in ["prisma", "sql", "PRISMA"] {
+        assert!(declaration_only_extension(ext), "{ext}");
+    }
+    for ext in [
+        "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "java", "py", "pyi", "rs", "go",
+        "cs", "md", "html", "unknown",
+    ] {
+        assert!(!declaration_only_extension(ext), "{ext}");
+    }
+}
+
 #[test]
 fn dispatches_csharp_extension() {
     assert_eq!(

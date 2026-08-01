@@ -23,7 +23,7 @@ mod disclosure;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use bucket_keys::{bucket_keys, KEY_BUCKETS};
+pub(crate) use bucket_keys::{distinct_bucket_keys, KEY_BUCKETS};
 pub(crate) use disclosure::fold as fold_disclosure;
 
 /// Caller-facing filters for a findings list. Two constructors, one validation vocabulary:

@@ -1,5 +1,5 @@
 //! Unit tests for the tool-output shaping helpers (`shape_findings`/`shape_list`/`FindingFilters`).
-//! `bucket_keys`'s own tests live beside it in `bucket_keys.rs`.
+//! `distinct_bucket_keys`' own tests live beside it in `bucket_keys.rs`.
 
 use super::*;
 

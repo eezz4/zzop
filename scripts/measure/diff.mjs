@@ -186,25 +186,47 @@ for (const k of [...new Set([...Object.keys(A.cross.buckets || {}), ...Object.ke
 }
 hr();
 
-// This diff IS identity, unconditionally. `bucketKeys` was capped by the product at 20 distinct keys
+// This diff IS identity, unconditionally. `distinctBucketKeys` was capped by the product at 20 distinct keys
 // until 2026-07-29, so this block used to read `meta.bucketKeysTruncated` from both runs and mark the
 // affected buckets as "not identity" (and push an `untrustworthy` entry). The cap is deleted, the meta
-// field no longer exists on any new snapshot, and a complete list needs no caveat. An OLD snapshot that
-// still carries the field is not silently mis-read either: `diff.mjs` already refuses to compare two
-// different zzop builds unless forced, and the field only ever appeared on builds that had the cap.
-line(`\n## AXIS 2 — bucketKeys IDENTITY (which keys, not how many)`);
-for (const k of [...new Set([...Object.keys(A.cross.bucketKeys || {}), ...Object.keys(B.cross.bucketKeys || {})])].sort()) {
-  const sa = new Set((A.cross.bucketKeys[k] || []).map(String));
-  const sb = new Set((B.cross.bucketKeys[k] || []).map(String));
-  const gone = [...sa].filter((x) => !sb.has(x));
-  const born = [...sb].filter((x) => !sa.has(x));
-  if (!gone.length && !born.length) {
-    line(`  ${k}: identical (${sa.size} keys)`);
-    continue;
+// field no longer exists on any new snapshot, and a complete list needs no caveat.
+//
+// ⚠ That removal was justified here by "diff.mjs already refuses to compare two different zzop builds
+// unless forced". THAT DEFENSE DOES NOT EXIST and never did — the build check above only NOTES when the
+// two sha256s are IDENTICAL; differing builds are never flagged, and there is no `--force` anywhere in
+// this file. Corrected 2026-08-01. What actually protects the reader is the guard immediately below: a
+// snapshot predating the 2026-07-31 rename carries `bucketKeys`, and it is now reported as
+// untrustworthy rather than crashing mid-report, which is what the unguarded member access did
+// (TypeError, reproduced).
+const dbkA = A.cross.distinctBucketKeys;
+const dbkB = B.cross.distinctBucketKeys;
+if (!dbkA || !dbkB) {
+  // Naming the SIDE matters: it tells the operator which snapshot to re-take. And a SKIPPED axis must
+  // never read as a passing one — this is the whole contract of this file's header ("everything that
+  // makes a comparison UNTRUSTWORTHY is printed on the SAME SCREEN").
+  const which = [!dbkA && 'A', !dbkB && 'B'].filter(Boolean).join(' and ');
+  const legacy = (!dbkA && A.cross.bucketKeys) || (!dbkB && B.cross.bucketKeys);
+  untrustworthy.push(
+    `snapshot ${which} carries no \`distinctBucketKeys\`` +
+      (legacy ? ` (it has the pre-2026-07-31 \`bucketKeys\`)` : '') +
+      ` — AXIS 2 key identity was SKIPPED, not proven identical. Re-take that snapshot with a current build.`
+  );
+  line(`\n## AXIS 2 — distinctBucketKeys IDENTITY: SKIPPED (snapshot ${which} predates the field)`);
+} else {
+  line(`\n## AXIS 2 — distinctBucketKeys IDENTITY (which keys, not how many)`);
+  for (const k of [...new Set([...Object.keys(dbkA), ...Object.keys(dbkB)])].sort()) {
+    const sa = new Set((dbkA[k] || []).map(String));
+    const sb = new Set((dbkB[k] || []).map(String));
+    const gone = [...sa].filter((x) => !sb.has(x));
+    const born = [...sb].filter((x) => !sa.has(x));
+    if (!gone.length && !born.length) {
+      line(`  ${k}: identical (${sa.size} keys)`);
+      continue;
+    }
+    line(`  ${k}: ${sa.size} -> ${sb.size}`);
+    for (const g of gone) line(`      - GONE  ${g}`);
+    for (const n of born) line(`      + NEW   ${n}`);
   }
-  line(`  ${k}: ${sa.size} -> ${sb.size}`);
-  for (const g of gone) line(`      - GONE  ${g}`);
-  for (const n of born) line(`      + NEW   ${n}`);
 }
 
 // ---- axis 2: edge identity -------------------------------------------------------------------------

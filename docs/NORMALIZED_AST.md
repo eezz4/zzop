@@ -38,8 +38,15 @@ the linker is an exact join on normalized keys, never AST matching).
   malformed rather than coerced. This is a one-time break, taken deliberately under the `0.x` no-
   backward-compatibility promise in [`VERSIONING.md`](../VERSIONING.md) — the fix is a one-line edit to
   the adapter, and it buys a reader one version system instead of two.
-- `parser` doubles as the cache fingerprint segment: bump the impl version whenever the projection
-  changes for identical input.
+- `parser` is the producer's self-identification. Every warning that attributes an overlay action to
+  its adapter quotes it (the displacement and overruled-binding disclosures, the source-mismatch and
+  zero-fact self-reports), and it is the deterministic ordering key when several overlays merge — so
+  keep it stable and distinguishable, and move the `/<impl version>` half when your extraction logic
+  changes so a reader can tell which adapter build produced an envelope. It is NOT a cache
+  ingredient, and bumping it invalidates nothing: envelopes are never served from cache (measured
+  2026-07-31 — Mode A analysis is uncached end to end, and a Mode B overlay applies after the cached
+  per-file pass), so a changed projection is always honored with or without a bump. This bullet used
+  to instruct the opposite; the instruction had no reader.
 
 ## FileProjection
 

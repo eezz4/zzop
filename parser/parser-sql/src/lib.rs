@@ -47,3 +47,13 @@ mod extract;
 
 pub use consume::extract_statement_table_refs;
 pub use extract::extract_db_table_provides;
+
+use zzop_core::recognizer::{channel, FrameworkRecognizer};
+
+/// Frameworks this parser recognizes — see [`zzop_core::recognizer`]. Like `parser-prisma`, a
+/// declaration format: DDL/DML is the schema, so there is no middleware tier to be missing.
+pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[FrameworkRecognizer {
+    framework: "sql ddl",
+    extensions: &["sql"],
+    emits: &[channel::DB],
+}];

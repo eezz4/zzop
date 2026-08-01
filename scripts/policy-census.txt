@@ -29,8 +29,10 @@ crates/core/src/dsl/tests_http_conventions.rs:HTTP_CONVENTIONS_JSON test
 crates/core/src/dsl/tests_markers/near_miss_tests.rs:BASE_MESSAGE test
 crates/core/src/dsl/tests_method_scan_same_fn.rs:SIBLING_CLOSURES test
 crates/core/src/file_nodes.rs:HOTSPOT_MIN_CHANGES cap
+crates/core/src/io/facts.rs:RULE_READ_IO_KINDS internal # the io kinds this build's RULES read — the set the S11 unread-io-kind self-report subtracts against. Renamed from JOINED_IO_KINDS on 2026-08-01: the old name claimed a join-membership rule the code never computed (link_cross_layer_io joins on the composite (kind,key) and compares the kind to nothing, so an unread kind DOES join), and the S11 message inherited that false claim. Not `convention` (a project cannot declare a kind into being read) and not `fact` (no external spec fixes them): it is a description of OUR own wiring, and rule_contracts::io_kind_readers binds it to the kind literals production source compares, both directions — a scan that can only ever prove the rules half
 crates/core/src/io/key.rs:HTTP_KEY_VERBS fact # HTTP method tokens, fixed by RFC
 crates/core/src/io/key.rs:UNKNOWN_VERB internal
+crates/core/src/ir.rs:DEP_GRAPH_RESOLVED_ONLY internal # one owner for a disclosure sentence several surfaces quote verbatim: the dep channel carries only RESOLVED in-tree edges. Not a tunable but a description of what that channel is, and changing the sentence turns every quoting site red by verbatim comparison
 crates/core/src/node.rs:DAY_MS test
 crates/core/src/node.rs:DEFAULT_RECENT_THRESHOLD_DAYS cap
 crates/core/src/node.rs:DEFAULT_WEIGHTS cap # numeric risk-score weights, not a name
@@ -42,6 +44,10 @@ crates/core/src/normalized.rs:NORMALIZED_AST_FORMAT internal
 crates/core/src/normalized.rs:SUPPORTED_NORMALIZED_AST_VERSION internal
 crates/core/src/normalized/tests.rs:BINDS_UTIL test # fixture JSON body for the overrides contract tests
 crates/core/src/pack_loader.rs:SUPPORTED_DSL_SCHEMA_VERSION internal
+crates/core/src/pack_loader/retired_fields.rs:RETIRED_RULE_FIELDS internal # fields zzop ITSELF once accepted on a rule and retired, each with its remedy. Not `convention` (a pack author cannot rename them into existence) and not `fact` (no external framework fixed them) — it is our own retired surface, and the list only ever grows when WE retire something
+crates/core/src/recognizer.rs:CONSUMES internal # wire spelling of one cross-layer channel, the closed vocabulary a FrameworkRecognizer declaration may name. NOT `convention`: a convention is a name the PROJECT picks and declares in config, while this one is fixed by our own producer/consumer channel and no user may rename it
+crates/core/src/recognizer.rs:DB internal # wire spelling of one cross-layer channel, the closed vocabulary a FrameworkRecognizer declaration may name. NOT `convention`: a convention is a name the PROJECT picks and declares in config, while this one is fixed by our own producer/consumer channel and no user may rename it
+crates/core/src/recognizer.rs:PROVIDES internal # wire spelling of one cross-layer channel, the closed vocabulary a FrameworkRecognizer declaration may name. NOT `convention`: a convention is a name the PROJECT picks and declares in config, while this one is fixed by our own producer/consumer channel and no user may rename it
 crates/core/src/registry/redact.rs:REDACTED internal # the marker an excluded evidence path is replaced with; zzop's own output vocabulary, not a tunable
 crates/engine/build.rs:FNV_OFFSET internal # FNV-1a basis; changing it re-addresses every derived fingerprint (= one cache wipe)
 crates/engine/build.rs:FNV_PRIME internal # FNV-1a prime; same consequence as the basis above
@@ -82,10 +88,14 @@ crates/engine/src/framework_silence/committed_spec_io_silence.rs:MAX_SPEC_PROBES
 crates/engine/src/framework_silence/controller_silence.rs:MAX_SAMPLES cap
 crates/engine/src/framework_silence/controller_silence.rs:MIN_FILES cap
 crates/engine/src/framework_silence/controller_silence.rs:MIN_PROVIDES_FLOOR cap
+crates/engine/src/framework_silence/csharp_base_route.rs:BASE_LIST_LOOKAHEAD cap # lines below a class name that S13 will scan for a wrapped base-list `:`. A bound, not a judgement about C#: two covers every wrapped spelling seen, and it keeps the scan off a minified file
+crates/engine/src/framework_silence/csharp_base_route.rs:FRAMEWORK_BASES fact # ASP.NET Core base controller types, named by Microsoft. Deriving from one of these says nothing about an inherited [Route] — the S13 warning fires only on a base OUTSIDE this list, because every ASP.NET controller derives from one of them and warning on all of them would name no hazard
+crates/engine/src/framework_silence/csharp_base_route.rs:MAX_EXAMPLES cap # controller classes named per S13 warning. The COUNT is always exact; only the example list is capped
 crates/engine/src/framework_silence/egress_intent.rs:ARG_SCAN_CAP cap
 crates/engine/src/framework_silence/fetch_wrapper.rs:MAX_EXAMPLES cap
 crates/engine/src/framework_silence/fetch_wrapper.rs:WRAPPER_EXPORT_NAMES convention -> vocabulary.fetchWrapperExportNames # binding names a project's own hand-rolled http wrapper module exports (api, http, client, del)
 crates/engine/src/framework_silence/fetch_wrapper.rs:WRAPPER_FUNNEL_TAIL internal # warning prose zzop emits
+crates/engine/src/framework_silence/gateway_declaration.rs:GATEWAY_DECLARATIONS fact # deployment-declaration filenames and the constructs inside them that can move a route path (Vercel rewrites, Next basePath, nginx proxy_pass) — spelled by those tools, not by us. The markers are what keep the S12 report from being a filename census: the file must actually declare a rewrite, because warning on mere presence would train the reader to skip the line
 crates/engine/src/framework_silence/orm_schema_silence.rs:MAX_EXAMPLES cap
 crates/engine/src/framework_silence/orm_schema_silence.rs:ORM_SCHEMA_SPECIFIERS fact # published package names
 crates/engine/src/framework_silence/rust_router_layer.rs:AFFECTED_RULE_ID internal # zzop rule id
@@ -93,6 +103,7 @@ crates/engine/src/framework_silence/rust_router_layer.rs:MAX_EXAMPLES cap
 crates/engine/src/framework_silence/server_framework_import.rs:SERVER_FRAMEWORK_SPECIFIERS fact # published package names
 crates/engine/src/framework_silence/unknown_verb_range.rs:MAX_EXAMPLES cap
 crates/engine/src/framework_silence/unknown_verb_range.rs:SILENCED_RULE_ID internal # zzop rule id
+crates/engine/src/framework_silence/unread_io_kind.rs:MAX_EXAMPLES cap # example files named per unread kind in the S11 warning — enough to go look, bounded so one adapter's thousand rows cannot crowd out the run's other warnings. The COUNT is always exact; only the example list is capped
 crates/engine/src/generated_banner.rs:MARKERS convention -> vocabulary.generatedFileMarkers # generated-file banner text; a codegen tool or a team can word its banner any way
 crates/engine/src/io.rs:DEFAULT_ROUTER_NAMES convention -> vocabulary.routerNames # the identifier a project gives its own router value; its own doc called it an escape hatch while nothing could reach it
 crates/engine/src/lib.rs:DEFAULT_SIZE_CAP cap
@@ -121,6 +132,7 @@ crates/summary/src/contracts.rs:DISCLOSURE_CONTRACT_NAME internal # zzop's own c
 crates/summary/src/contracts.rs:URI_PREFIX internal # zzop's own resource URI space (zzop://contract/), not a name a project picks; T1 - moved here from packages/mcp/src/resources.rs, which now imports it, so the MCP resources lane and the reply pointer spell one prefix
 crates/summary/src/graph/cosmograph/tests.rs:EMITTER test # workspace-relative path of this lane's emitter, used test-only to locate its owning _cliOnlyLanes entry in surface-parity.json by `sources` rather than by lane name; not a name any project spells
 crates/summary/src/graph/dep.rs:DEFAULT_DEP_TOP cap # node cap for the dep diagram; readability threshold, overridable with --top
+crates/summary/src/graph/dep/window.rs:HISTORY_COLUMNS internal # the git-derived column names this lane actually emits. Not a tunable but a description of what is emitted, and a column added without adding it here makes the disclosure sentence understate what the window governs
 crates/summary/src/graph/mermaid.rs:CLASS_DEFS internal # mermaid classDef names and colours zzop emits
 crates/summary/src/graph/mod.rs:DEFAULT_GRAPH_TOP cap
 crates/summary/src/graph/mod.rs:WIRE_NAMES internal # zzop's own --domain spellings, not names a project picks
@@ -144,6 +156,7 @@ parser/parser-csharp/src/adapters/http_clients/tests.rs:IMPORT test
 parser/parser-csharp/src/adapters/provides/attribute_controller.rs:METHOD_ATTRIBUTES fact # ASP.NET Core attribute names
 parser/parser-csharp/src/adapters/provides/minimal_api.rs:MAP_METHODS fact # ASP.NET Minimal API MapGet/MapPost builder methods
 parser/parser-csharp/src/lang/used_names.rs:DECLARES_NAME_FIELD fact # tree-sitter node kinds
+parser/parser-csharp/src/lib.rs:FRAMEWORK_RECOGNIZERS fact # which frameworks this parser recognizes, named as their OWN ecosystems spell them and keyed by the extensions those ecosystems use — fixed externally, not a knob. The row set is bound to the adapter modules on disk by rule_contracts::recognizer_drift, so it cannot drift into a claim about a recognizer that does not ship
 parser/parser-csharp/src/lib.rs:PARSER_FINGERPRINT internal
 parser/parser-csharp/src/lib.rs:TOP_LEVEL_DECLARATION_KINDS fact # tree-sitter node kinds
 parser/parser-csharp/src/node_kinds.rs:PINNED_ANONYMOUS_KEYWORDS fact # C# keywords
@@ -156,10 +169,12 @@ parser/parser-go/src/adapters/http_clients.rs:VERB_METHODS fact # net/http clien
 parser/parser-go/src/adapters/net_http.rs:VERB_METHODS fact # HandleFunc/Handle are net/http's own registration functions
 parser/parser-go/src/lang/resolve/tests.rs:MODULE test
 parser/parser-go/src/lang/used_names.rs:DECLARES_NAME_FIELD fact # tree-sitter node kinds
+parser/parser-go/src/lib.rs:FRAMEWORK_RECOGNIZERS fact # which frameworks this parser recognizes, named as their OWN ecosystems spell them and keyed by the extensions those ecosystems use — fixed externally, not a knob. The row set is bound to the adapter modules on disk by rule_contracts::recognizer_drift, so it cannot drift into a claim about a recognizer that does not ship
 parser/parser-go/src/lib.rs:PARSER_FINGERPRINT internal
 parser/parser-go/src/lib.rs:TOP_LEVEL_DECLARATION_KINDS fact # tree-sitter node kinds
 parser/parser-go/src/node_kinds.rs:PINNED_NODE_KINDS fact # tree-sitter node kinds
 parser/parser-java-21/src/lang/used_names.rs:DECLARES_NAME_FIELD fact # tree-sitter node kinds
+parser/parser-java-21/src/lib.rs:FRAMEWORK_RECOGNIZERS fact # which frameworks this parser recognizes, named as their OWN ecosystems spell them and keyed by the extensions those ecosystems use — fixed externally, not a knob. The row set is bound to the adapter modules on disk by rule_contracts::recognizer_drift, so it cannot drift into a claim about a recognizer that does not ship
 parser/parser-java-21/src/lib.rs:PARSER_FINGERPRINT internal
 parser/parser-java-21/src/lib.rs:TOP_LEVEL_DECLARATION_KINDS fact # tree-sitter node kinds
 parser/parser-java-21/src/node_kinds.rs:PINNED_ANONYMOUS_KEYWORDS fact # Java keywords
@@ -172,6 +187,7 @@ parser/parser-java-21/src/spring_security.rs:CLOSED_TERMINALS fact # Spring Secu
 parser/parser-java-21/src/spring_security.rs:MATCHER_METHODS fact # Spring Security DSL method names
 parser/parser-java-21/src/spring_security/tests.rs:BE_SPRING test
 parser/parser-prisma/src/analysis.rs:DEFAULT_PRISMA_CLIENT_GETTER_FN convention -> vocabulary.prismaClientGetter # getPrisma is a name each project invents for its client accessor; the DEFAULT_ prefix already concedes it
+parser/parser-prisma/src/lib.rs:FRAMEWORK_RECOGNIZERS fact # which frameworks this parser recognizes, named as their OWN ecosystems spell them and keyed by the extensions those ecosystems use — fixed externally, not a knob. The row set is bound to the adapter modules on disk by rule_contracts::recognizer_drift, so it cannot drift into a claim about a recognizer that does not ship
 parser/parser-prisma/src/lib.rs:PARSER_FINGERPRINT internal
 parser/parser-prisma/src/tests.rs:ENUM_SAMPLE test
 parser/parser-prisma/src/tests.rs:SAMPLE test
@@ -188,12 +204,15 @@ parser/parser-python-3/src/adapters/http_clients/instances.rs:CLIENT_CTORS fact 
 parser/parser-python-3/src/adapters/sqlalchemy.rs:FIRST_ARG_VERBS fact # SQLAlchemy API function names
 parser/parser-python-3/src/adapters/sqlalchemy.rs:MULTI_MODEL_VERBS fact # SQLAlchemy API function names
 parser/parser-python-3/src/adapters/sqlalchemy/tests.rs:IMPORT test
+parser/parser-python-3/src/lib.rs:FRAMEWORK_RECOGNIZERS fact # which frameworks this parser recognizes, named as their OWN ecosystems spell them and keyed by the extensions those ecosystems use — fixed externally, not a knob. The row set is bound to the adapter modules on disk by rule_contracts::recognizer_drift, so it cannot drift into a claim about a recognizer that does not ship
 parser/parser-python-3/src/lib.rs:PARSER_FINGERPRINT internal
 parser/parser-rust/src/adapters/axum.rs:VERB_METHODS fact # axum::routing's own get/post handler constructors
 parser/parser-rust/src/adapters/http_clients.rs:VERB_METHODS fact # reqwest Client's own verb methods
 parser/parser-rust/src/lang/extractor_guards.rs:RUST_OPTIONAL_EXTRACTOR_PREFIXES convention -> vocabulary.rustOptionalExtractorPrefixes # how a project spells its own OPTIONAL request extractor (MaybeAuthUser, OptionalUser) - the Rust twin of pythonGuardAnonymousVetoSubstrings
+parser/parser-rust/src/lib.rs:FRAMEWORK_RECOGNIZERS fact # which frameworks this parser recognizes, named as their OWN ecosystems spell them and keyed by the extensions those ecosystems use — fixed externally, not a knob. The row set is bound to the adapter modules on disk by rule_contracts::recognizer_drift, so it cannot drift into a claim about a recognizer that does not ship
 parser/parser-rust/src/lib.rs:PARSER_FINGERPRINT internal
 parser/parser-sql/src/extract.rs:SEGMENT fact # SQL identifier-quoting syntax fixed by the dialects
+parser/parser-sql/src/lib.rs:FRAMEWORK_RECOGNIZERS fact # which frameworks this parser recognizes, named as their OWN ecosystems spell them and keyed by the extensions those ecosystems use — fixed externally, not a knob. The row set is bound to the adapter modules on disk by rule_contracts::recognizer_drift, so it cannot drift into a claim about a recognizer that does not ship
 parser/parser-sql/src/lib.rs:PARSER_FINGERPRINT internal
 parser/parser-typescript/src/adapters/client_base.rs:CLIENT_BASE_PREFIX_KIND internal # zzop sentinel kind
 parser/parser-typescript/src/adapters/controller_decorators/context.rs:CONTROLLER_CLASS_GATES fact # @Controller/@RestController decorator names fixed by Nest/Spring
@@ -208,6 +227,7 @@ parser/parser-typescript/src/adapters/egress/retry.rs:RETRY_WRAPPER_PACKAGES fac
 parser/parser-typescript/src/adapters/egress/retry.rs:RETRY_WRITE_VERBS fact # HTTP method TOKENS fixed by RFC, not names a project picks. T2 - pinned equal to rules-http WRITE_HTTP_METHODS in engine policy_pins.rs (parsers may not depend on rule crates)
 parser/parser-typescript/src/adapters/global_prefix.rs:NEST_GLOBAL_PREFIX_KIND internal # zzop sentinel kind
 parser/parser-typescript/src/adapters/nest_middleware/tests.rs:BE_NEST_SHAPE test
+parser/parser-typescript/src/adapters/pathname_dispatch.rs:SERVICE_WORKER_LIFECYCLE_MARKERS fact # browser service-worker lifecycle APIs, fixed by the ServiceWorker spec — the only markers that separate a service worker from a legacy-syntax Cloudflare Worker, which shares the addEventListener("fetch") entry point this adapter targets. Widening this list vetoes real servers, so it is spec vocabulary rather than a tunable
 parser/parser-typescript/src/adapters/raw_sql.rs:PLACEHOLDER internal # zzop's own template-hole token
 parser/parser-typescript/src/adapters/router_mounts/guard.rs:AUTH_GUARDED_ATTR_KEY internal # zzop producer/consumer attribute key
 parser/parser-typescript/src/adapters/router_mounts/guard.rs:ENV_AXIS_VETO_SUBSTRINGS convention -> vocabulary.envAxisVetoSubstrings # substrings of project-authored middleware names
@@ -226,6 +246,7 @@ parser/parser-typescript/src/lang/write_site.rs:DEFAULT_WRITE_METHODS convention
 parser/parser-typescript/src/lang/write_site.rs:UPDATE_METHODS fact # Prisma/TypeORM API method names
 parser/parser-typescript/src/lang/write_site.rs:WRITE_LABEL_TOKEN_COUNT cap
 parser/parser-typescript/src/lib.rs:ARRAY_ITERATION_METHODS fact # ECMAScript Array.prototype method names
+parser/parser-typescript/src/lib.rs:FRAMEWORK_RECOGNIZERS fact # which frameworks this parser recognizes, named as their OWN ecosystems spell them and keyed by the extensions those ecosystems use — fixed externally, not a knob. The row set is bound to the adapter modules on disk by rule_contracts::recognizer_drift, so it cannot drift into a claim about a recognizer that does not ship
 parser/parser-typescript/src/lib.rs:PARSER_FINGERPRINT internal
 parser/parser-typescript/src/lib.rs:PROMISE_CONTINUATION_METHODS fact # ECMAScript Promise method names
 rules/native/rules-cross-layer/src/cross_layer/all_consumes_unjoined.rs:MAX_SAMPLE_KEYS cap
@@ -238,6 +259,7 @@ rules/native/rules-cross-layer/src/cross_layer/external_secret_in_url.rs:SECRET_
 rules/native/rules-cross-layer/src/cross_layer/mod.rs:VERSION_SEGMENT_PATTERN convention -> vocabulary.apiVersionSegmentPattern # AMBIGUOUS - /v1/ is a widespread URL convention, not a standard; date-versioned APIs (/2024-01/) are invisible to it
 rules/native/rules-cross-layer/src/cross_layer/prefix_drift.rs:MIN_PREFIX_DRIFT_GROUP cap
 rules/native/rules-cross-layer/src/cross_layer/retrying_write_no_idempotency.rs:IDEMPOTENCY_GUARDED_ATTR internal # zzop producer/consumer attribute key
+rules/native/rules-cross-layer/src/cross_layer/retrying_write_no_idempotency.rs:RETRY_WITNESS_EXTENSIONS fact # file extensions fixed by the languages - the TS dispatch arm spelled in the rule crate for the sightline declaration, pinned both directions by zzop_engine::sightlines' ts_witness_extension_lists_match_the_dispatch_table
 rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs:MIN_OPAQUE_CLIENT_IMPORTING_FILES cap
 rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs:MIN_SDK_IMPORTING_FILES cap
 rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs:OPAQUE_HTTP_CLIENT_PATTERN fact # published npm package names
@@ -275,6 +297,7 @@ rules/native/rules-http/src/unprovided_consume/vocab.rs:API_SEGMENT_PATTERN conv
 rules/native/rules-schema/src/lib.rs:SCHEMA_ISSUE_NAMESPACE internal # zzop rule-id namespace
 rules/native/rules-schema/src/lib.rs:SCHEMA_STRUCTURAL_ISSUE_LABELS internal # zzop issue labels
 rules/native/rules-schema/src/lib.rs:SCHEMA_USAGE_ISSUE_LABELS internal # zzop issue labels
+rules/native/rules-schema/src/message/sightline.rs:QUERY_CALL_SITE_EXTENSIONS fact # file extensions fixed by the languages - the TS dispatch arm spelled in the rule crate for the sightline declaration, pinned both directions by zzop_engine::sightlines' ts_witness_extension_lists_match_the_dispatch_table
 rules/native/rules-schema/src/message/tests.rs:SIGHTLINE_PROSE_PAGES test
 rules/native/rules-schema/src/structural.rs:GOD_THRESHOLD cap
 rules/native/rules-schema/src/structural.rs:LOOKUP_FIELD_MAX cap

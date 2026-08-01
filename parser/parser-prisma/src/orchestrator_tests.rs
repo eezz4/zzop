@@ -30,6 +30,39 @@ fn build_common_ir_projects_models_as_symbols() {
     assert!(ir.ir.loc["db/schema.prisma"] > 0);
 }
 
+/// `loc` means PHYSICAL LINES here, the same as in every other frontend — see
+/// `zzop_core::MinimalIr::loc`. This crate counted non-blank/non-comment lines until 2026-07-31, which
+/// made `loc` two different measurements under one field name whenever a reply carried a Prisma tree
+/// beside any other. The schema below is built so the two rules cannot agree: it has a leading blank
+/// line, a `//` comment, a blank separator, and a trailing newline, so the old rule answered 6 (the six
+/// declaration lines) and the physical rule answers 10.
+#[test]
+fn loc_counts_physical_lines_including_blanks_and_comments() {
+    let schema =
+        "\n// user table\nmodel User {\n  id String @id\n}\n\nmodel Post {\n  id String @id\n}\n";
+    let ir = build_common_ir(
+        "svc",
+        &[("db/schema.prisma".to_string(), schema.to_string())],
+    );
+    // Independently stated rather than recomputed from the emitter, so the assertion can fail.
+    assert_eq!(ir.ir.loc["db/schema.prisma"], 10);
+    // The rule is `split('\n')`, not `lines()`: the trailing newline is what makes 9 into 10, and it is
+    // the piece a hand-rolled reimplementation drops.
+    assert_eq!(
+        ir.ir.loc["db/schema.prisma"],
+        schema.split('\n').count() as u32
+    );
+    // The old meaningful-lines rule would have said 6 — pinned so an "optimization" back to it is a
+    // failing test rather than a silent return of the two-definitions bug.
+    let meaningful = schema
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with("//"))
+        .count() as u32;
+    assert_eq!(meaningful, 6);
+    assert_ne!(ir.ir.loc["db/schema.prisma"], meaningful);
+}
+
 // --- build_common_ir: db-table PROVIDES ---
 
 #[test]

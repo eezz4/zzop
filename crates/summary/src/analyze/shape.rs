@@ -121,7 +121,7 @@ pub(super) fn shape_analyze_output(
 /// entirely rather than growing a null `architecture` field on every git-less run. Deliberately
 /// capped to ~10 lines of JSON: `pain` (the health scalar), the top-ROI `recommendations[0]`
 /// (`{id, severity, topItem}`, null-safe when there are no recommendations or the top one has no
-/// items), and up to 3 paths off the engine's own blast-radius-ranked `critical` list — named
+/// items), and up to 3 paths off the engine's own SIZE-WEIGHTED `critical` list (`blast_radius * ln(loc+2)`, NOT blast radius alone — re-sorting by `blastRadius` does not reproduce these three) — named
 /// `criticalTop`, NOT "hotspot": the engine's `hotspotScore` is a DIFFERENT metric (churn
 /// `changeCount x loc`, `nodes[].hotspotScore`), and reusing that word here would invite joining two
 /// non-matching rankings. The full arrays never

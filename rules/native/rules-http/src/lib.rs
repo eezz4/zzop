@@ -37,8 +37,8 @@ pub fn register_native_analyses(registry: &mut RuleRegistry) {
 
 pub use duplicate_route::duplicate_route_findings;
 pub use http_scan::{
-    scan_non_idempotent_write, scan_unsafe_read_endpoint, ScanNonIdempotentWriteInput,
-    ScanUnsafeReadEndpointInput, WRITE_HTTP_METHODS,
+    rule_sightlines, scan_non_idempotent_write, scan_unsafe_read_endpoint,
+    ScanNonIdempotentWriteInput, ScanUnsafeReadEndpointInput, WRITE_HTTP_METHODS,
 };
 // The convention-vocabulary constants are exported so the ONE crate that assembles declarable defaults
 // (`zzop_engine::VocabularyConfig::built_in`) references these symbols instead of copying their values —

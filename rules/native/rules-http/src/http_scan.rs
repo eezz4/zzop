@@ -21,9 +21,11 @@ use regex::Regex;
 use zzop_core::SourceSymbol;
 
 mod non_idempotent;
+mod sightlines;
 mod unsafe_read;
 
 pub use non_idempotent::{scan_non_idempotent_write, ScanNonIdempotentWriteInput};
+pub use sightlines::rule_sightlines;
 pub use unsafe_read::{scan_unsafe_read_endpoint, ScanUnsafeReadEndpointInput};
 
 /// SIZE of the `idempotent-ok` marker window, in lines, shared by both scanners. The window ENDS at the
@@ -89,7 +91,7 @@ pub const WRITE_SITE_COVERED_EXTENSIONS: &[&str] =
 /// escaped copy is no longer byte-comparable — the pin would then be unenforceable exactly where the
 /// drift is easiest. The extension list inside it comes from [`WRITE_SITE_COVERED_EXTENSIONS`], so the
 /// one thing most likely to go stale is the one thing that cannot.
-fn write_site_sightline_claim() -> String {
+pub(crate) fn write_site_sightline_claim() -> String {
     format!(
         "needs store-write evidence that only the TypeScript parser produces ({})",
         WRITE_SITE_COVERED_EXTENSIONS.join("/")

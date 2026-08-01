@@ -183,6 +183,19 @@ fn related_findings_come_from_tree_and_cross_layer_arrays_and_match_keys_too() {
     assert_eq!(related[0]["ruleId"], "a");
     assert_eq!(related[1]["ruleId"], "cross-layer/route-near-miss");
     assert!(v.get("truncatedFindings").is_none());
+    // `relatedFindingsBasis` ships on EVERY reply, empty array or not — it is what stops an empty
+    // `relatedFindings` from being read as "no finding concerns this key". The selection is a
+    // case-insensitive SUBSTRING match on the rendered message, so it UNDER-matches: a finding about
+    // this very key whose message spells it differently is absent. A reply that carried the array
+    // without the caveat would be the silence this field exists to abolish, so presence is pinned
+    // here rather than left to the tool description.
+    let basis = v["relatedFindingsBasis"]
+        .as_str()
+        .unwrap_or_else(|| panic!("relatedFindingsBasis must ship beside the array: {v}"));
+    assert!(
+        basis.contains("substring") && basis.contains("not evidence"),
+        "the basis must name the match rule AND say an empty array is not evidence: {basis:?}"
+    );
 }
 
 #[test]

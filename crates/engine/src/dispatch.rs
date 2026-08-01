@@ -233,6 +233,21 @@ pub(crate) fn dispatch_by_extension(rel_path: &str) -> Option<Language> {
     }
 }
 
+/// True exactly for extensions dispatching to a DECLARATION-ONLY language (`Language::Prisma`,
+/// `Language::Sql`) — the frontends whose files never join the shared dep graph and project no
+/// symbols/imports (see this module's doc, and each arm's note above). A declaration-only language
+/// cannot host client/handler code, so a silent-when-blind rule's evidence (call sites, write
+/// sites, retry tags — all read off code that CALLS things) can never be witnessed there and its
+/// absence in such files is not a blind spot. Derived from [`dispatch_by_extension`] itself, never
+/// a second list, so a new dispatch arm cannot leave this predicate stale; the facade's coverage
+/// cross reads it here rather than keeping a facade-side shadow table.
+pub fn declaration_only_extension(ext: &str) -> bool {
+    matches!(
+        dispatch_by_extension(&format!("x.{ext}")),
+        Some(Language::Prisma | Language::Sql)
+    )
+}
+
 /// True if `name` (a single path component — a directory's own name, not a full path) is one of
 /// `config.skip_dirs`. Exact match against the directory's own name (not a glob).
 pub fn is_skip_dir(name: &str, config: &DispatchConfig) -> bool {

@@ -10,6 +10,25 @@ use crate::io::IoFacts;
 /// madge-compatible dep graph: `{ sourcePath: [importedPath, ...] }`.
 pub type DepGraph = HashMap<String, Vec<String>>;
 
+/// The ONE sentence every surface that publishes a `DepGraph`-derived number must show, and its only
+/// owner. Reference this const (or link to it from a doc); never restate the rule — it was already
+/// implied in five places under five different spellings, which is how the misread below survived.
+///
+/// # Why it has to be said at all
+/// `dep` is built by RESOLUTION, not transcription: the assemble phase keeps an edge only when the
+/// import specifier resolved to a file the walk actually visited, so an import of a published package
+/// and a specifier no resolver could map are BOTH dropped (`AnalyzeOutput::package_imports` is the one
+/// place package imports survive, and only as a per-package importing-file set). Every number derived
+/// from this graph therefore counts in-tree edges only — the census's `resolvedImportEdges`, a node's
+/// `fanIn`/`fanOut`/`degree`, a critical file's `blastRadius`, `queryFile`'s `dependencies`. The
+/// founding misread: a 91-file Python tree reported 3 import edges and was read as "this repo barely
+/// imports anything", when what it actually said was "3 of its imports resolved to files in this tree".
+pub const DEP_GRAPH_RESOLVED_ONLY: &str =
+    "zzop's dependency graph holds ONLY resolved in-tree edges: an import of a published package \
+     (npm/Maven/pip/...) and a specifier the resolver could not map to a walked file are both dropped, \
+     so every number derived from this graph counts in-tree edges only and a low one can mean \
+     unresolved imports rather than few imports.";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SourceSymbolKind {
@@ -179,9 +198,20 @@ pub struct ApiEndpoint {
 /// count (`text.split('\n').count()`, matching `zzop_parser_typescript::count_loc`) — blank lines,
 /// comment-only lines, and lines inside a block comment/multi-line string all count. It is NOT a
 /// "meaningful code lines" count the name might suggest; nothing here excludes blank/comment lines.
-/// ONE shipped parser deviates and it is not a bug to "fix" silently: `parser-prisma` fills this from its
-/// own `count_schema_loc`, which DOES drop blank and `//`-comment lines. Read a Prisma tree's `loc` as
-/// meaningful-lines; every other parser's as raw physical lines.
+/// EVERY shipped frontend applies that one rule — typescript, python-3, java-21, csharp, rust, go and
+/// (since 2026-07-31) prisma.
+///
+/// `parser-prisma` was the lone deviation until then: its `count_schema_loc` dropped blank and
+/// `//`-comment lines, and this doc recorded the split rather than closing it ("read a Prisma tree's
+/// `loc` as meaningful-lines"). That was not enough, and the reason is the wire, not the arithmetic:
+/// `loc` is ONE field name, a multi-tree reply can carry a Prisma tree beside a TypeScript one, and
+/// nothing in the reply marks which definition a given row used. A reader summing or comparing `loc`
+/// across trees was adding two different measurements. Prisma was aligned to the majority rule (user
+/// ruling) — a schema's `loc` rose by its blank and comment lines — because one definition per field
+/// name is the property that makes the number comparable at all.
+///
+/// So `loc` is PHYSICAL LINES, everywhere, with no per-parser exception. A frontend that wants a
+/// meaningful-lines measure must publish it under its OWN name, not this one.
 /// `io` (optional) = the parser projects its framework boundaries to normalized contract keys (cross-layer join input).
 /// `#[serde(rename_all = "camelCase")]` is a no-op today (every field is one word) — kept for
 /// consistency with every other output-facing type in this crate.

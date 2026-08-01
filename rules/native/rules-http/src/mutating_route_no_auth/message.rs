@@ -55,7 +55,7 @@ pub(super) fn missing_auth_hint(
          SIGHTLINE, the third pre-BFS exemption and the one easiest to misread as a verdict: only a route \
          whose registration file carries a call-graph-covered extension ({covered_exts}) is checked at \
          all, because the symbol graph this BFS walks is built from those alone — a mutating route in \
-         any OTHER language (Go, Rust, C#) never enters the BFS, since there \"never reaches a guard\" \
+         any OTHER language (Go or C#) never enters the BFS, since there \"never reaches a guard\" \
          would be guaranteed by the empty graph rather than evidence about the route. So ZERO findings \
          of this rule in a repo outside those extensions means NOT ANALYZED, never \"no missing auth\" — \
          and a run that saw such routes says so out loud in its own `warnings` (the call-graph coverage \
@@ -64,8 +64,16 @@ pub(super) fn missing_auth_hint(
          `apiRoutes.post(\"{path}\", requireAuth, {handler_ref})`, or a router-wide `.use(authMiddleware)`) \
          never appears as a call FROM the handler itself, so it is invisible to this check and WILL \
          false-positive on a route guarded only that way — this finding starts at Info severity until \
-         this check becomes middleware-aware. {} if your auth happens at the middleware layer (this rule \
-         has no inline suppression marker).",
+         this check becomes middleware-aware. Second precision limit, and the one \"anywhere in its \
+         call graph\" above would otherwise overstate: how FAR the walk reaches is per-language. For \
+         the JS/TS extensions a call is resolved across files, so the phrase is literal. For `.java` \
+         it is not — a Java import specifier is a dotted package/class name and no whole-corpus type \
+         index is threaded into this graph, so a specifier resolves to ITSELF and the walk stops one \
+         hop out; a guard reached as handler -> helper in another file -> guard is NOT found. The \
+         same one-hop bound applies to a Python module-attribute receiver (`from pkg import mod; \
+         mod.f()`). In those two cases a finding means \"no guard within one hop\", never \"no guard \
+         anywhere\". {} if your auth happens at the middleware layer or beyond that hop bound (this \
+         rule has no inline suppression marker).",
         disable_hint("mutating-route-no-auth")
     )
 }

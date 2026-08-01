@@ -167,3 +167,19 @@ mod tests {
         assert_eq!(count_loc(""), 1);
     }
 }
+
+use zzop_core::recognizer::{channel, FrameworkRecognizer};
+
+/// Frameworks this parser recognizes — see [`zzop_core::recognizer`]. Verified against return types.
+pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
+    FrameworkRecognizer {
+        framework: "asp.net core",
+        extensions: &["cs"],
+        emits: &[channel::PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "httpclient",
+        extensions: &["cs"],
+        emits: &[channel::CONSUMES],
+    },
+];

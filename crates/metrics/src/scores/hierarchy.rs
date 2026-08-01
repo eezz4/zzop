@@ -3,13 +3,10 @@
 //! ancestor's private files is a hidden coupling that makes the ancestor hard to move or refactor independently.
 
 use super::config::ScoresConfig;
+use super::detail_cap::{cap_and_count_dropped, MAX_EDGE_ROWS_LISTED};
 use super::shared::{is_external, is_upward_import, module_of, round};
 use super::types::{HierarchyScore, HierarchyViolation};
 use zzop_core::DepGraph;
-
-/// Caps the returned violation list (not the score, which is computed over the full violation count before
-/// truncation).
-const MAX_VIOLATIONS_LISTED: usize = 100;
 
 pub fn compute_hierarchy(
     dep: &DepGraph,
@@ -59,12 +56,13 @@ pub fn compute_hierarchy(
         (100.0 - (violations.len() as f64 / intra as f64) * 100.0).max(0.0)
     };
 
-    violations.truncate(MAX_VIOLATIONS_LISTED);
+    let violations_truncated = cap_and_count_dropped(&mut violations, MAX_EDGE_ROWS_LISTED);
 
     HierarchyScore {
         score: round(score),
         total_intra_module_edges: intra,
         violations,
+        violations_truncated,
     }
 }
 
@@ -143,5 +141,51 @@ mod tests {
         assert_eq!(r.total_intra_module_edges, 1);
         assert_eq!(r.violations.len(), 1);
         assert_eq!(r.score, 0.0);
+    }
+
+    /// The EDGE-shaped half of the same repair (`MAX_EDGE_ROWS_LISTED`, double the per-file cap). Until
+    /// 2026-07-31 this list truncated silently, and the silence bit harder here than anywhere: the score
+    /// is computed from the FULL violation count BEFORE the cap, so a reader who counted the rows to
+    /// check the arithmetic got a number that could not reproduce the score, with nothing saying why.
+    /// `violationsTruncated` closes exactly that gap.
+    #[test]
+    fn a_violation_list_over_the_cap_discloses_how_many_rows_it_dropped() {
+        let over = MAX_EDGE_ROWS_LISTED + 5;
+        // Each child reaches UP into its own ancestor — one intra-module upward edge apiece.
+        let owned: Vec<(String, Vec<String>)> = (0..over)
+            .map(|i| {
+                (
+                    format!("orders/a/b/child{i}.ts"),
+                    vec!["orders/a/parent.ts".to_string()],
+                )
+            })
+            .collect();
+        let d: DepGraph = owned.into_iter().collect();
+        let r = compute_hierarchy(&d, &cfg(), &|_| true);
+        assert_eq!(
+            r.total_intra_module_edges, over as u32,
+            "every edge counts toward the denominator, capped list or not"
+        );
+        assert_eq!(
+            r.violations.len(),
+            MAX_EDGE_ROWS_LISTED,
+            "the list is capped"
+        );
+        assert_eq!(r.violations_truncated, 5, "and it says how many it dropped");
+        assert_eq!(
+            r.violations.len() + r.violations_truncated as usize,
+            over,
+            "list length plus the dropped count must reconstruct the count the SCORE was computed from"
+        );
+        // The score really was computed over all of them: every edge is a violation, so it floors at 0.
+        assert_eq!(r.score, 0.0);
+    }
+
+    #[test]
+    fn a_violation_list_under_the_cap_reports_zero_dropped() {
+        let d = dep(&[("orders/a/b/child.ts", &["orders/a/parent.ts"])]);
+        let r = compute_hierarchy(&d, &cfg(), &|_| true);
+        assert_eq!(r.violations.len(), 1);
+        assert_eq!(r.violations_truncated, 0);
     }
 }

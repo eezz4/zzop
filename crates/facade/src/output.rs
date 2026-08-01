@@ -69,10 +69,18 @@ pub(crate) struct AnalyzeOutputView<'a> {
     findings: &'a [Finding],
     degraded: &'a [String],
     file_count: usize,
+    /// Per-file graph/git metrics. Its `fanIn`/`fanOut`/`totalConnections` are graph-theoretic terms and
+    /// are correct ABOUT the graph they describe, so they are deliberately NOT renamed the way the
+    /// census's `resolvedImportEdges` was (2026-07-31) — what needed stating is WHICH graph, and that
+    /// sentence has exactly one owner: [`zzop_core::DEP_GRAPH_RESOLVED_ONLY`]. Read every degree here
+    /// under it.
     nodes: &'a [FileNode],
     scores: &'a Option<Scores>,
     health: &'a Option<HealthIndex>,
     recommendations: &'a [Recommendation],
+    /// Files ranked by `blastRadius` (transitive dependents). Same treatment as `nodes` above: the term
+    /// is correct about the graph it is measured over, and that graph's membership rule is disclosed
+    /// once, from [`zzop_core::DEP_GRAPH_RESOLVED_ONLY`] — a blast radius counts in-tree dependents.
     critical: &'a [CriticalFile],
     seams: &'a [SeamCandidate],
     folders: &'a Option<FolderAggregates>,

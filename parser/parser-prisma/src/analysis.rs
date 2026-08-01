@@ -20,9 +20,10 @@ pub const DEFAULT_PRISMA_CLIENT_GETTER_FN: &str = "getPrisma";
 /// entities join the same symbol space the engine and cross-layer passes consume, AND one or two
 /// `kind="db-table"` io PROVIDEs at the model's declaration line — see [`db_table_provide_keys`] for
 /// which keys and why (`accessor_casing`'s doc covers why the primary key is NOT the model's own
-/// PascalCase name). PSL has no imports, so `dep` stays empty; `loc` counts non-blank/non-comment
-/// lines per schema file. This bridge is a deliberate addition beyond schema analysis alone, so schema
-/// entities can participate in cross-layer joins that key off Common IR symbols.
+/// PascalCase name). PSL has no imports, so `dep` stays empty; `loc` is the RAW physical line count per
+/// schema file, the same rule every other frontend applies — see [`count_schema_loc`]. This bridge is a
+/// deliberate addition beyond schema analysis alone, so schema entities can participate in cross-layer
+/// joins that key off Common IR symbols.
 pub fn build_common_ir(source_id: &str, files: &[(String, String)]) -> zzop_core::CommonIr {
     let mut symbols = Vec::new();
     let mut provides = Vec::new();
@@ -158,10 +159,17 @@ pub fn model_decl_line(text: &str, name: &str) -> u32 {
     1
 }
 
-/// Non-blank, non-`//`-comment schema lines.
+/// Raw physical line count — mirrors every other parser crate's `count_loc` exactly. The file is never
+/// parsed for this, just counted; a trailing newline adds 1 (`"a\nb\n".split('\n')` -> 3), which is why
+/// this is `split('\n')` and not `lines()`.
+///
+/// CHANGED 2026-07-31 (user ruling). This used to count non-blank, non-`//`-comment lines — the only
+/// deviation among the eight shipped frontends, all seven others being `text.split('\n').count()`. The
+/// deviation was documented (in `zzop_core::MinimalIr::loc`) rather than fixed, and documenting it was
+/// not enough: `loc` is ONE field name on the wire, so a multi-tree reply could hand a reader two
+/// different definitions under it, with no per-tree marker saying which row was which. Aligning to the
+/// majority rule is what makes `loc` comparable across the trees of a single reply. Consequence, and it
+/// is the intended one: a schema's `loc` now RISES by however many blank and comment lines it has.
 fn count_schema_loc(text: &str) -> u32 {
-    text.lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with("//"))
-        .count() as u32
+    text.split('\n').count() as u32
 }

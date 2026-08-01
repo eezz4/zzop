@@ -156,9 +156,9 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
     BlindnessClass {
         id: "channel-empty-family-dark",
         group: ANALYSIS_DARK,
-        summary: "The census reports channel-fill counts (`importEdges`, io), so a zero-fill channel is \
-                  visible; but zzop does not yet ASSERT that graph findings (cycles, dead code) are \
-                  meaningless for a tree whose import edges are zero.",
+        summary: "The census reports channel-fill counts (`resolvedImportEdges`, io), so a zero-fill \
+                  channel is visible; but zzop does not yet ASSERT that graph findings (cycles, dead \
+                  code) are meaningless for a tree whose resolved import edges are zero.",
         status: DisclosureStatus::Partial,
     },
     BlindnessClass {
@@ -178,17 +178,22 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
                   unknown HTTP method are filtered out by every write-gated rule before evaluation, so \
                   they are out of range rather than clean, and a per-run warning names their count, the \
                   file extensions carrying them, and the two ways to bring them in range \
-                  (`trees[].routes`, or a Mode B overlay). Every OTHER fact/rule pair is still unmeasured: no output field lists which \
-                  rules had an empty evidence channel for the languages actually present in a tree. Those \
-                  rules instead publish a language sightline in their own finding message and catalog \
-                  entry — which by construction the silent case never renders, since a message ships only \
-                  ON a finding. Read a native rule's zero as a claim about its evidence channel, not \
-                  about the code: the per-fact producer matrix is in `crates/cache/src/ir_slice.rs`'s \
-                  module doc and each rule's row in `docs/rules/catalog.md`.",
-        // `Partial`, not `Asserted`: TWO fact/rule pairs are measured per run (the call graph's language
-        // coverage, and the route method field) out of many uneven facts. Two is not coverage — promoting
-        // would promise a per-run signal for every other uneven fact, which does not exist, and
-        // `zzop explain` prints this token verbatim.
+                  (`trees[].routes`, or a Mode B overlay). For the rules with a compiled-in sightline \
+                  declaration, the CLI-only `zzop coverage` lane lists exactly this (it has no MCP tool twin; an \
+                  MCP host reads the same declarations out of this document): its `trees[].blindSpots` crosses \
+                  each declaration with the tree's structural extension mix and names, per tree, which \
+                  declared rules lack their evidence channel there. The analyze reply itself still \
+                  carries no such field — the sightlined rules publish their language sightline in their \
+                  own finding message and catalog entry, which by construction the silent case never \
+                  renders, since a message ships only ON a finding. Read a native rule's zero as a claim \
+                  about its evidence channel, not about the code: the per-fact producer matrix is in \
+                  `crates/cache/src/ir_slice.rs`'s module doc and each rule's row in \
+                  `docs/rules/catalog.md`.",
+        // `Partial`, not `Asserted`: the per-run warnings cover two fact/rule pairs and the coverage
+        // query's blindSpots cross covers only the DECLARED sightline rules, on one opt-in CLI lane —
+        // a subset of rules on a subset of surfaces is not coverage. Promoting would promise a signal
+        // for every uneven fact everywhere, which does not exist, and `zzop explain` prints this token
+        // verbatim.
         status: DisclosureStatus::Partial,
     },
     BlindnessClass {
@@ -255,7 +260,8 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
         id: "join-bucket-unfiltered",
         group: TRUST_CALIBRATION,
         summary: "A cross-layer join bucket (`crossLayer.unprovidedConsumes` and its siblings, plus the \
-                  `bucketKeys`/`bucketKeySites` lists derived from them) is the STRUCTURAL residue of the \
+                  `distinctBucketKeys`/`distinctBucketKeyFirstSites` lists derived from them) is the \
+                  STRUCTURAL residue of the \
                   (kind, key) join, not a findings list. The only filters applied at that layer are ones \
                   readable from the key or the file itself — an unresolvable key, an absolute-URL \
                   (external-egress) key, a test-classified file, provider absence or ambiguity. No \

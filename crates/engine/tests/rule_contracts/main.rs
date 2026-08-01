@@ -32,8 +32,12 @@
 //! 4. **Id hygiene** (`dsl_pack_ids_are_unique_across_packs`, `dsl_rule_ids_are_unique_within_each_pack`,
 //!    `no_dsl_id_collides_with_a_native_analysis_id`).
 //! 5. **Catalog sync** (`catalog_totals_match_loaded_rule_and_analysis_counts`,
-//!    `catalog_mentions_every_native_analysis_id`, `catalog_mentions_every_dsl_pack_id`) —
-//!    `docs/rules/catalog.md`'s stated totals and id lists match the loaded reality.
+//!    `catalog_mentions_every_native_analysis_id`, `catalog_mentions_every_dsl_pack_id`,
+//!    `catalog_sightline_rows_and_declared_rule_sightlines_are_the_same_set`) —
+//!    `docs/rules/catalog.md`'s stated totals and id lists match the loaded reality, and the set of
+//!    catalog rows carrying a sightline paragraph equals the set of `RuleSightline` declarations
+//!    (both directions; exemptions are explicit in the test) — the reverse of
+//!    `crates/engine/src/sightlines.rs`'s declared→registered pin.
 //! 6. **Determinism guard** (`loading_the_same_packs_dir_twice_yields_identical_pack_lists`) — loading
 //!    `rules/dsl` twice yields byte-identical `RulePackDef` data in the same order (cheap regression net
 //!    for map/directory-iteration-order bugs in pack parsing).
@@ -125,13 +129,16 @@ mod capability_matrix;
 mod catalog_sync;
 mod config_surface;
 mod dsl_messages;
+mod envelope_contract_version;
 mod host_vocabulary;
 mod id_hygiene;
+mod io_kind_readers;
 mod kernel_vocabulary;
 mod markers;
 mod native_messages;
 mod pack_loading;
 mod policy_pins;
+mod recognizer_drift;
 mod reference_unit_tests;
 mod reference_validation;
 mod surface_parity;

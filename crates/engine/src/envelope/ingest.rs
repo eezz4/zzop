@@ -233,17 +233,10 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         },
     };
 
-    // `source_files == file_count`: every envelope file is adapter-declared source (see that field's doc).
+    // `parser_dispatched == file_count`: every envelope file is adapter-declared source (see that field's doc).
     let coverage = crate::CoverageCensus::compute(file_count, file_count, &ir, degraded.len());
 
-    let package_imports = package_import_files
-        .into_iter()
-        .map(|(specifier, files)| crate::PackageImportSummary {
-            file_count: files.len(),
-            example_file: files.into_iter().next().unwrap_or_default(),
-            specifier,
-        })
-        .collect();
+    let package_imports = crate::PackageImportSummary::census(package_import_files);
 
     AnalyzeOutput {
         ir,

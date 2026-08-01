@@ -3,7 +3,8 @@
 //
 // They are reached with full literal paths by trees/fe-axios/server/loader.ts, so they JOIN and none of
 // them reports `cross-layer/unconsumed-endpoint` — see that file for why the fixture is built that way
-// (the product's 20-key bucketKeys cap, which this corpus is one dead route away from).
+// (the product's 20-key distinct-bucket-key cap, deleted 2026-07-29, which this corpus was one dead
+// route away from at the time).
 declare const apiRoutes: { get(p: string, h: unknown): void; post(p: string, h: unknown): void };
 declare const handler: unknown;
 

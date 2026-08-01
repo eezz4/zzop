@@ -1,5 +1,20 @@
-//! `cross_repo`'s `bucketKeys`/`bucketKeySites` shaping — UNCAPPED.
+//! The cross-layer join summary's `distinctBucketKeys`/`distinctBucketKeyFirstSites` shaping — UNCAPPED.
 //!
+//! ## Why the names say `distinct` and `first` (2026-07-31)
+//! These two fields sit beside a `buckets` object that counts something ELSE. `buckets.X` is a count of
+//! RAW ROWS — one per recorded call site — while this module DEDUPES, so `buckets.X` and the length of
+//! the key list here are legitimately different numbers (measured on the `cases/` corpus:
+//! `unprovidedConsumes` is 23 rows over 14 distinct keys, `edges` 18 over 11). Under the old names
+//! (`bucketKeys`/`bucketKeySites`) a reader checking `buckets.X == len(bucketKeys.X)` got a mismatch with
+//! nothing on the wire to explain it. The names now state the membership RULE, and `bucketMeaning` (see
+//! `crate::cross`) states the arithmetic in words — the same repair the graph census already shipped for
+//! the identical confusion ("60 rows are 4 relations", `crate::graph::collect`).
+//!
+//! `distinctBucketKeyFirstSites` carries a second correction in its name: it is one site per key, the
+//! FIRST recorded one, not every site backing that key. The MCP tool description said so; the plural
+//! `bucketKeySites` did not, and the CLI twin shipped the bare name with no description to read.
+//!
+//! ## Uncapped, still
 //! There was a `DEFAULT_BUCKET_KEYS_LIMIT = 20` here until 2026-07-29, with the usual
 //! `bucketKeysTruncated` remainder disclosure beside it. The cap is gone, by user decision, and with it
 //! the truncation branch, the disclosure field, `snapshot.mjs`'s abort-on-truncation path and its
@@ -22,6 +37,8 @@
 /// The five non-edge cross-layer buckets, in engine (`CrossLayerResult`) field order. Shared
 /// (`pub(crate)`) with `crate::manifest`, which walks the same five buckets to record bucket
 /// MEMBERSHIP: one vocabulary, so a sixth bucket cannot reach one surface and not the other.
+/// `crate::cross`'s `bucketMeaning` sentence names this same set, so the prose and the walk cannot
+/// disagree about which buckets the rows-vs-distinct arithmetic applies to.
 pub(crate) const KEY_BUCKETS: [&str; 5] = [
     "unconsumedProvides",
     "unprovidedConsumes",
@@ -30,18 +47,21 @@ pub(crate) const KEY_BUCKETS: [&str; 5] = [
     "ambiguousConsumes",
 ];
 
-/// `cross_repo`'s `bucketKeys`: per non-edge bucket, EVERY distinct key (deduped, engine order preserved)
-/// so an agent can see WHICH keys sit in a bucket instead of only how many. An unresolved consume
+/// `distinctBucketKeys`: per non-edge bucket, EVERY distinct key (deduped, engine order preserved) so an
+/// agent can see WHICH keys sit in a bucket instead of only how many. An unresolved consume
 /// (`key: null`) contributes its `raw` expression when recorded — nothing otherwise (never guessed).
 ///
-/// Returns `(bucketKeys, bucketKeySites)`. There is no truncation value: the list is complete by
-/// construction, which is the strongest form of the never-silent stance — nothing is dropped, so nothing
-/// needs disclosing. `bucketKeySites` mirrors `bucketKeys`' shape exactly (same buckets, same order, same
-/// length) but each entry is the FIRST call site backing that distinct key, as `"file:line"` — every bucket
-/// item already carries `file`/`line` (the engine's `IoProvide`/`IoConsume` facts, flattened onto the
-/// bucket entry), so this is a same-layer read, never a facade change; `null` only if an item is missing
-/// one of the two (never guessed).
-pub(crate) fn bucket_keys(
+/// Returns `(distinctBucketKeys, distinctBucketKeyFirstSites)`. There is no truncation value: the list is
+/// complete by construction, which is the strongest form of the never-silent stance — nothing is dropped,
+/// so nothing needs disclosing. `distinctBucketKeyFirstSites` mirrors the key map's shape exactly (same
+/// buckets, same order, same length) but each entry is the FIRST call site backing that distinct key, as
+/// `"file:line"` — every bucket item already carries `file`/`line` (the engine's `IoProvide`/`IoConsume`
+/// facts, flattened onto the bucket entry), so this is a same-layer read, never a facade change; `null`
+/// only if an item is missing one of the two (never guessed).
+///
+/// The DEDUP here is the whole reason the sibling `buckets` counts differ from these lengths — see the
+/// module doc, and `crate::cross`'s `bucketMeaning`, which puts that relationship on the wire.
+pub(crate) fn distinct_bucket_keys(
     cross_layer: &serde_json::Value,
 ) -> (serde_json::Value, serde_json::Value) {
     let mut keys_out = serde_json::Map::new();
@@ -119,7 +139,7 @@ mod tests {
             )))
             .collect();
         cross_layer["unprovidedConsumes"] = serde_json::json!(items);
-        let (keys, sites) = bucket_keys(&cross_layer);
+        let (keys, sites) = distinct_bucket_keys(&cross_layer);
         let shown = keys["unprovidedConsumes"].as_array().unwrap();
         assert_eq!(shown.len(), 23, "every distinct key, no cap");
         let site_list = sites["unprovidedConsumes"].as_array().unwrap();
@@ -138,7 +158,7 @@ mod tests {
         });
         cross_layer["unresolvedConsumes"] =
             serde_json::json!([consume(None, Some("usersUrl(x)"), "src/api.ts", 7)]);
-        let (keys, sites) = bucket_keys(&cross_layer);
+        let (keys, sites) = distinct_bucket_keys(&cross_layer);
         assert_eq!(keys["unresolvedConsumes"][0], "usersUrl(x)");
         assert_eq!(sites["unresolvedConsumes"][0], "src/api.ts:7");
     }
@@ -150,7 +170,7 @@ mod tests {
             "externalConsumes": [], "ambiguousConsumes": [],
         });
         cross_layer["unprovidedConsumes"] = serde_json::json!([{ "key": "GET /x", "raw": null }]);
-        let (_, sites) = bucket_keys(&cross_layer);
+        let (_, sites) = distinct_bucket_keys(&cross_layer);
         assert!(sites["unprovidedConsumes"][0].is_null());
     }
 }

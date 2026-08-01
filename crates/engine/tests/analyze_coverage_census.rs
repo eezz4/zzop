@@ -3,8 +3,8 @@
 //! scaffolding (real TypeScript files written to disk, parsed for real via `zzop_engine::analyze_trees`) —
 //! not hand-built `AnalyzeOutput`s. Exercises the census as a PURE post-aggregate over already-assembled
 //! data: a provide-only tree, a consume-only tree, and a tree with no io at all (the active-blindness
-//! `join_contribution_zero` fact), plus `import_edges`/`symbols` on a tree with a real import and a
-//! real symbol.
+//! `join_contribution_zero` fact), plus `resolved_import_edges`/`symbols` on a tree with a real import
+//! and a real symbol.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -167,14 +167,50 @@ joinable contribution: {coverage:?}"
 }
 
 #[test]
-fn import_edges_and_symbols_are_nonzero_for_a_tree_with_an_import_and_a_symbol() {
+fn resolved_import_edges_and_symbols_are_nonzero_for_a_tree_with_an_import_and_a_symbol() {
     let dark = dark_tree();
     let trees = vec![(dark.path().to_path_buf(), config("dark"))];
     let out = analyze_trees(&trees);
 
     let coverage = &out.trees[0].2.coverage;
-    assert!(coverage.import_edges > 0, "{coverage:?}");
+    assert!(coverage.resolved_import_edges > 0, "{coverage:?}");
     assert!(coverage.symbols > 0, "{coverage:?}");
+}
+
+/// A tree whose imports are ALL package imports — nothing resolves to a walked file. This is the shape
+/// the field's old name (`import_edges`) misdescribed, and the reason it was renamed on 2026-07-31.
+fn package_imports_only_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-cov-pkg-imports");
+    dir.write(
+        "src/app.ts",
+        "import React from \"react\";\n\
+         import axios from \"axios\";\n\
+         import { z } from \"zod\";\n\
+         export function run() { return React; }\n",
+    );
+    dir
+}
+
+/// Pins the MEMBERSHIP RULE the new name states: `resolved_import_edges` sums out-degrees over the dep
+/// graph, and the dep graph holds resolved IN-TREE edges only. A file with three real, syntactically
+/// present package imports contributes ZERO here — they are dropped during dep resolution, so they can
+/// never be summed. The field is named for that rule now precisely because this zero is not "this file
+/// imports nothing": a 91-file Python tree reporting 3 edges was read exactly that way.
+#[test]
+fn resolved_import_edges_excludes_package_imports_that_resolve_to_no_walked_file() {
+    let dir = package_imports_only_tree();
+    let trees = vec![(dir.path().to_path_buf(), config("pkg-imports"))];
+    let out = analyze_trees(&trees);
+    let (_, _, tree) = &out.trees[0];
+
+    assert!(tree.coverage.parser_dispatched > 0, "{:?}", tree.coverage);
+    assert!(tree.coverage.symbols > 0, "{:?}", tree.coverage);
+    assert_eq!(
+        tree.coverage.resolved_import_edges, 0,
+        "three package imports are real imports and none of them resolves in-tree — the count is \
+         RESOLVED edges, which is what the name now says: {:?}",
+        tree.coverage
+    );
 }
 
 #[test]
@@ -187,7 +223,7 @@ fn files_field_matches_file_count() {
     assert_eq!(output.coverage.files, output.file_count);
 }
 
-// --- `source_files`: the parser-claimed subset of the walked total ---
+// --- `parser_dispatched`: the parser-claimed subset of the walked total ---
 
 /// A tree whose walk visits far more files than a parser claims — the shape that made a field run's
 /// `fileCount: 4790` read as "this repo has 4,790 code files" when roughly 3,178 carried code.
@@ -206,7 +242,7 @@ fn mixed_source_and_asset_tree() -> TempDir {
 }
 
 #[test]
-fn source_files_counts_only_what_a_parser_claims_while_files_keeps_counting_the_walk() {
+fn parser_dispatched_counts_only_what_a_parser_claims_while_files_keeps_counting_the_walk() {
     let dir = mixed_source_and_asset_tree();
     let trees = vec![(dir.path().to_path_buf(), config("mixed"))];
     let out = analyze_trees(&trees);
@@ -216,13 +252,13 @@ fn source_files_counts_only_what_a_parser_claims_while_files_keeps_counting_the_
     // included. Narrowing it would silently redefine a published output field.
     assert_eq!(tree.coverage.files, 6, "{:?}", tree.coverage);
     assert_eq!(tree.coverage.files, tree.file_count);
-    // `source_files` is the honest repo-size number: the two `.ts` files, not the md/png/json.
-    assert_eq!(tree.coverage.source_files, 2, "{:?}", tree.coverage);
+    // `parser_dispatched` is the honest repo-size number: the two `.ts` files, not the md/png/json.
+    assert_eq!(tree.coverage.parser_dispatched, 2, "{:?}", tree.coverage);
 }
 
 #[test]
-fn source_files_equals_files_on_an_all_source_tree() {
-    // No breakdown to report when everything walked is code — `files - source_files == 0`.
+fn parser_dispatched_equals_files_on_an_all_source_tree() {
+    // No breakdown to report when everything walked is code — `files - parser_dispatched == 0`.
     let dir = TempDir::new("zzop-engine-cov-all-source");
     dir.write("a.ts", "export const a = 1;\n");
     dir.write("b.ts", "export const b = 2;\n");
@@ -230,11 +266,11 @@ fn source_files_equals_files_on_an_all_source_tree() {
     let out = analyze_trees(&trees);
     let (_, _, tree) = &out.trees[0];
     assert_eq!(tree.coverage.files, 2);
-    assert_eq!(tree.coverage.source_files, 2);
+    assert_eq!(tree.coverage.parser_dispatched, 2);
 }
 
 #[test]
-fn source_files_is_zero_when_the_walk_finds_no_parseable_file_at_all() {
+fn parser_dispatched_is_zero_when_the_walk_finds_no_parseable_file_at_all() {
     // The disclosure that matters most: a tree that looks non-empty (`files > 0`) but where zzop parsed
     // nothing. Reading `files` alone here is exactly the mis-sizing the breakdown exists to prevent.
     let dir = TempDir::new("zzop-engine-cov-no-source");
@@ -244,5 +280,5 @@ fn source_files_is_zero_when_the_walk_finds_no_parseable_file_at_all() {
     let out = analyze_trees(&trees);
     let (_, _, tree) = &out.trees[0];
     assert_eq!(tree.coverage.files, 2);
-    assert_eq!(tree.coverage.source_files, 0);
+    assert_eq!(tree.coverage.parser_dispatched, 0);
 }

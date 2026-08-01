@@ -8,6 +8,7 @@ use zzop_core::disable_hint;
 mod sightline;
 
 use sightline::{field_usage_sightline, query_call_site_sightline};
+pub use sightline::{rule_sightlines, QUERY_CALL_SITE_EXTENSIONS};
 // The two pinned CLAIM fragments are used only by this module's seal tests (`tests.rs` reaches them
 // through its `use super::*`), never by the message bodies — those splice the full sentences above.
 #[cfg(test)]

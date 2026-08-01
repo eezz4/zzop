@@ -64,7 +64,7 @@ const GOOD_TREE = {
 const GOOD_CROSS = {
   sources: [{ sourceId: "alpha", path: "/nonexistent/alpha", findingCount: 1 }],
   buckets: [],
-  bucketKeys: [],
+  distinctBucketKeys: [],
   edges: [],
   crossLayerFindings: {
     total: 1,

@@ -12,11 +12,23 @@ use zzop_core::{DepGraph, FileNode};
 // than depth map to ".".
 // ---------------------------------------------------------------------------------------------
 
+/// One folder row of the rollup.
+///
+/// ## `node_count` is not the run's `fileCount`
+/// Named for its UNIVERSE, not for "files", because the two are different sets and summing this column
+/// never reproduces the reply's top-level `fileCount`. That field counts files WALKED; a `FileNode`
+/// exists only for a path that is a dep-graph key OR was touched in the collected git history
+/// (`zzop_core::build_file_nodes`'s `collect_canonical_ids`), minus the ones with no LOC and no edges.
+/// So with `git` off, every lexical-only file — anything the walk saw but no import edge names — has no
+/// node and is in no folder row at all, and the two numbers diverge by exactly that remainder on a
+/// perfectly healthy run. It was called `file_count` until 2026-07-31; one reply carrying that word at
+/// two levels over two universes read as a rollup that should add up, which it never did.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderSummary {
     pub folder: String,
-    pub file_count: u32,
+    /// `FileNode`s in this folder — see the type doc for why this is not the walked-file count.
+    pub node_count: u32,
     pub total_risk: f64,
     pub avg_risk: f64,
     pub max_risk: f64,
@@ -27,6 +39,8 @@ pub struct FolderSummary {
 
 /// Rolls up `FileNode`s by folder prefix. `depth` controls how many leading path segments form the
 /// folder key (files shallower than `depth` collapse to ".").
+///
+/// The input is the node list, so every count below is over the node universe — see [`FolderSummary`].
 pub fn aggregate_by_folder(nodes: &[FileNode], depth: usize) -> Vec<FolderSummary> {
     // BTreeMap (not a HashMap, which would iterate arbitrarily in Rust) keeps folder insertion
     // order deterministic before the final sort.
@@ -35,7 +49,7 @@ pub fn aggregate_by_folder(nodes: &[FileNode], depth: usize) -> Vec<FolderSummar
         let folder = folder_of(&n.path, depth);
         let cur = map.entry(folder.clone()).or_insert_with(|| FolderSummary {
             folder: folder.clone(),
-            file_count: 0,
+            node_count: 0,
             total_risk: 0.0,
             avg_risk: 0.0,
             max_risk: 0.0,
@@ -43,7 +57,7 @@ pub fn aggregate_by_folder(nodes: &[FileNode], depth: usize) -> Vec<FolderSummar
             total_churn: 0,
             total_loc: 0,
         });
-        cur.file_count += 1;
+        cur.node_count += 1;
         cur.total_risk += n.risk_score;
         cur.max_risk = cur.max_risk.max(n.risk_score);
         cur.total_changes += n.change_count;
@@ -53,7 +67,7 @@ pub fn aggregate_by_folder(nodes: &[FileNode], depth: usize) -> Vec<FolderSummar
     let mut out: Vec<FolderSummary> = map
         .into_values()
         .map(|mut s| {
-            s.avg_risk = s.total_risk / s.file_count as f64;
+            s.avg_risk = s.total_risk / s.node_count as f64;
             s
         })
         .collect();

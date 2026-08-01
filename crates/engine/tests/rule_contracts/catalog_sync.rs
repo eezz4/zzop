@@ -1,5 +1,6 @@
 //! Contract 5: catalog sync — docs/rules/catalog.md must match the loaded reality, not a hand-updated
-//! snapshot.
+//! snapshot. Totals, id mentions, and (since 2026-07-31) the sightline surface: the set of catalog rows
+//! carrying a sightline paragraph must equal the set of `RuleSightline` declarations the build composes.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -113,5 +114,107 @@ fn catalog_mentions_every_dsl_rule_id() {
         "DSL rule ids loaded but absent from docs/rules/catalog.md as `<id>`: {missing:?} — a rule \
          rename must update the catalog in the same commit (it is the MCP rule-catalog resource and \
          check-docs-rule-ids.sh's id universe)"
+    );
+}
+
+/// The rule ids whose catalog row publishes a sightline claim. A row "claims" when it contains the
+/// phrase `language sightline` or `evidence sightline` (case-insensitive) — deliberately the PHRASE,
+/// not only the full `**Language sightline:**` / `**Evidence sightline:**` marker, because half the
+/// claiming rows today claim by back-reference instead (`Same language sightline as
+/// \`soft-delete-bypass\` above`, `the same **language sightline**:`, `Same evidence sightline as the
+/// row above`) and a marker-only parse would read those four rows as claim-free. The claim is
+/// attributed to the row's OWN id (first backticked cell) — never to ids the prose mentions.
+fn catalog_sightline_row_ids(text: &str) -> std::collections::BTreeSet<String> {
+    let phrase = regex::Regex::new(r"(?i)(language|evidence) sightline").expect("static regex");
+    let row_id = regex::Regex::new(r"^\|\s*`([^`]+)`\s*\|").expect("static regex");
+    let mut ids = std::collections::BTreeSet::new();
+    for line in text.lines().filter(|l| phrase.is_match(l)) {
+        let caps = row_id.captures(line).unwrap_or_else(|| {
+            panic!(
+                "docs/rules/catalog.md mentions a sightline outside a `| `<id>` | ...` rule row, so \
+                 this guard cannot attribute the claim to a rule id — move the sentence into the \
+                 owning rule's row, or extend catalog_sightline_row_ids deliberately: {line:?}"
+            )
+        });
+        ids.insert(caps[1].to_string());
+    }
+    ids
+}
+
+/// Rule ids allowed to carry a catalog sightline paragraph WITHOUT a `RuleSightline` declaration —
+/// `(id, reason)`, and an entry must actually exempt something (asserted below) so it cannot go stale.
+///
+/// EMPTY today, on purpose. The two candidates the sightline DECISIONS block records as deliberately
+/// undeclared (`crates/engine/src/sightlines.rs`) need no entry because their catalog rows carry no
+/// sightline paragraph either — both directions already agree — and the red a future marker on either
+/// row would raise is CORRECT, not noise:
+/// - `mutating-route-no-auth`: its trigger IS witnessed in every call-graph-covered extension (`.go`
+///   routes included) — the gap is call-EDGE evidence, route-conditional, owned by the S8
+///   framework-silence warning the coverage reply forwards per tree. A catalog sightline paragraph
+///   would mis-type that per-run conditional disclosure as a build capability: on red, remove the
+///   marker — unless the rule's disclosure has genuinely become extension-conditional, in which case
+///   declare a `RuleSightline` next to the rule instead.
+/// - `route-shadowing`: its language gate is an EXEMPTION on routing semantics (first-match vs
+///   most-specific), not an evidence channel — semantic, not evidential, so an extension cross cannot
+///   express it. Same red-on-marker reasoning.
+const CATALOG_SIGHTLINE_EXEMPT: &[(&str, &str)] = &[];
+
+/// The REVERSE guard of the sightline mechanism. `crates/engine/src/sightlines.rs` pins declared →
+/// registered, but nothing pinned the prose SSOT against the machine half: a rule publishing a
+/// sightline paragraph in docs/rules/catalog.md while declaring no `RuleSightline` failed silently —
+/// exactly how `mutating-route-no-auth`'s (deliberate) absence reached stage-2 review with two owners
+/// disagreeing about whether it was an omission. Set equality, both directions:
+/// (a) every catalog sightline row is declared or exempted — a new rule shipping the paragraph
+///     without the declaration goes red;
+/// (b) every declaration's id has a catalog sightline row — the machine half must never claim more
+///     than the prose SSOT.
+#[test]
+fn catalog_sightline_rows_and_declared_rule_sightlines_are_the_same_set() {
+    let catalog = catalog_sightline_row_ids(&catalog_text());
+    let declared: std::collections::BTreeSet<String> = zzop_engine::rule_sightlines()
+        .iter()
+        .map(|s| s.rule_id.to_string())
+        .collect();
+    assert!(
+        !catalog.is_empty(),
+        "sanity: no catalog sightline rows found at all"
+    );
+    assert!(
+        !declared.is_empty(),
+        "sanity: no RuleSightline declared at all"
+    );
+
+    let exempt: std::collections::BTreeSet<&str> =
+        CATALOG_SIGHTLINE_EXEMPT.iter().map(|(id, _)| *id).collect();
+    for (id, reason) in CATALOG_SIGHTLINE_EXEMPT {
+        assert!(
+            catalog.contains(*id) && !declared.contains(*id),
+            "stale sightline exemption {id:?} ({reason}) — it no longer exempts anything (the row \
+             dropped its sightline paragraph, or the rule now declares); delete the entry"
+        );
+    }
+
+    let undeclared: Vec<&String> = catalog
+        .iter()
+        .filter(|id| !declared.contains(*id) && !exempt.contains(id.as_str()))
+        .collect();
+    assert!(
+        undeclared.is_empty(),
+        "docs/rules/catalog.md publishes a sightline paragraph for {undeclared:?}, but \
+         zzop_engine::rule_sightlines() declares no RuleSightline for them — the coverage query would \
+         stay silent about a blind spot the prose promises. Declare a RuleSightline next to the rule \
+         (see the owning crate's rule_sightlines()), or add a documented exemption to \
+         CATALOG_SIGHTLINE_EXEMPT with its reason"
+    );
+
+    let unpublished: Vec<&String> = declared
+        .iter()
+        .filter(|id| !catalog.contains(*id))
+        .collect();
+    assert!(
+        unpublished.is_empty(),
+        "RuleSightline declared for {unpublished:?}, but their docs/rules/catalog.md rows carry no \
+         sightline paragraph — the machine half must never claim more than the prose SSOT; add the \
+         row's sightline paragraph in the same commit (or drop the declaration)"
     );
 }

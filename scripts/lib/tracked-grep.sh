@@ -180,3 +180,74 @@ tracked_and_untracked_files_matching() {
 
   _tracked_grep_emit "tracked_and_untracked_files_matching" "$producer_failed" "$grep_stderr" "$dir"
 }
+
+# ## Subject-set COVERAGE (2026-07-31) — the axis the per-guard "-eq 0" floors do not reach.
+#
+# Those floors ask "did the pathspec match anything". Measured 2026-07-31 against a scratch tree
+# holding scripts/ and nothing else: check-swc/syn/ruff-isolation and check-max-file-lines all
+# printed "clean" over a repo with NO CRATES AT ALL, because `git ls-files -- '*.rs'` still matched
+# one file — scripts/measure/selftest-stub.rs, which ships inside scripts/ and travelled with the
+# copy. A floor of one is satisfied by any stray file, so a scan collapsing from ~1,300 subjects to
+# 1 stays green. Zero was sealed twice (2026-07-28 max-file-lines, 2026-07-29 the isolation guards);
+# COLLAPSE was not, and collapse is what a redirected glob or a renamed crate root actually produces.
+#
+# The floor here is DERIVED, never written down: Cargo.toml's [workspace] members is already the
+# single declaration of what this workspace contains, so "every declared member contributed at least
+# one file to this scan" needs no baseline to maintain and cannot drift from the tree. Widen the
+# workspace and the assertion widens with it; narrow a guard's glob to one crate and it goes red
+# naming the members that fell out.
+#
+# NOT a replacement for the per-guard "-eq 0" floors: those cover a scan whose subject is not
+# workspace Rust at all (Cargo.toml files, shell scripts, docs). Both axes stay.
+workspace_member_dirs() {
+  # Only the `members = [ ... ]` array — NOT every quoted string between [workspace] and the next
+  # section, which would also swallow `exclude`/`default-members` if either is ever added.
+  awk '
+    /^\[workspace\]/            { in_ws = 1; next }
+    in_ws && /^\[/               { in_ws = 0 }
+    in_ws && /^[[:space:]]*members[[:space:]]*=[[:space:]]*\[/ { in_m = 1; next }
+    in_m && /^[[:space:]]*\]/    { in_m = 0 }
+    in_m                        { print }
+  ' Cargo.toml | sed -E 's/#.*$//' | grep -oE '"[^"]+"' | tr -d '"'
+}
+
+# assert_workspace_members_scanned <guard label> <pathspec>...
+# Fails the caller (exit 1) when any declared workspace member contributed no file to <pathspec>.
+assert_workspace_members_scanned() {
+  local label="$1"; shift
+  local members scanned missing=() member_count=0
+  # `|| true`, and the same inside the function: its trailing `grep -oE` exits 1 on no match, and
+  # under the callers' `set -euo pipefail` that status propagates out of the command substitution
+  # and kills the script HERE — before the diagnosis below can print. Measured 2026-07-31 while
+  # invalidation-testing this very block: renaming the members array made the guard exit 1 with NO
+  # OUTPUT AT ALL, which is the failure shape check-max-file-lines.sh warns about in its own
+  # zero-census comment (right reason, no message, whole diagnosis paid for by the next reader).
+  members="$(workspace_member_dirs || true)"
+  member_count="$(printf '%s\n' "$members" | grep -c . || true)"
+  # The seal's OWN subject set. Without this, a Cargo.toml reshape that makes the awk match nothing
+  # turns this whole assertion into a loop over zero members — green, having proved nothing, which is
+  # precisely the defect it exists to remove, reproduced one level up.
+  if [ "$member_count" -eq 0 ]; then
+    echo "$label: FAILED -- read ZERO [workspace] members out of Cargo.toml. This assertion derives" >&2
+    echo "its floor from that list, so an empty read means the floor is vacuous, not that the tree is" >&2
+    echo "clean. Check the members = [ ... ] array." >&2
+    exit 1
+  fi
+  scanned="$(git ls-files -- "$@" || true)"
+  local m
+  while IFS= read -r m; do
+    [ -n "$m" ] || continue
+    # Herestring, not `| grep -q`: check-shell-pipe-sigpipe.sh caught the pipeline form here on
+    # 2026-07-31 — grep -q exits at its first match and SIGPIPEs the producer, which under pipefail
+    # can flip the pipeline's verdict on a large scan. The tier-1 guard layer catching a tier-1
+    # change is the layering working; the fix is the one that guard's own message prescribes.
+    grep -q "^$m/" <<< "$scanned" || missing+=("$m")
+  done <<< "$members"
+  if [ ${#missing[@]} -gt 0 ]; then
+    echo "$label: FAILED -- ${#missing[@]} of $member_count declared workspace member(s) contributed NO" >&2
+    echo "file to this scan: ${missing[*]}" >&2
+    echo "The pathspec matched something, so the zero-floor passed, but it did not cover the workspace" >&2
+    echo "it is supposed to police. A glob that stopped reaching a crate proves nothing about that crate." >&2
+    exit 1
+  fi
+}

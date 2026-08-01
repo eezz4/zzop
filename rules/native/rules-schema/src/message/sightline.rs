@@ -57,6 +57,69 @@ pub(super) fn query_call_site_sightline_claim() -> &'static str {
     "query call sites are extracted by the TypeScript parser only"
 }
 
+/// Extensions whose files the TypeScript parser — the ONE producer of `zzop_core::QueryCallSite`
+/// (see [`query_call_site_sightline_claim`]) — is dispatched for. The prose claims above deliberately
+/// name the producer instead of a list; the machine-readable declarations below cannot (a coverage
+/// consumer crosses extensions, not producer names), so this is that producer's dispatch arm spelled
+/// out once.
+///
+/// POLICY VALUE, T2: duplicates `zzop_engine`'s TypeScript dispatch arm (this crate depends on
+/// `zzop_core` only, so it cannot import the predicate) — pinned both directions by
+/// `zzop_engine::sightlines`' `ts_witness_extension_lists_match_the_dispatch_table`, the same
+/// arrangement as `zzop_rules_http::http_scan::WRITE_SITE_COVERED_EXTENSIONS`.
+pub const QUERY_CALL_SITE_EXTENSIONS: &[&str] =
+    &["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"];
+
+/// This crate's machine-readable sightline declarations (`zzop_core::RuleSightline` — see that module's
+/// doc for the mechanism and the direction of the claim), the structured form of the two prose
+/// sentences this file already owns, built FROM the same pinned claim functions so the two halves
+/// cannot drift. Two classes, opposite consequences, each entry wording its own:
+/// - the three JOIN rules go SILENT where blind (no call site, no finding — a zero that reads clean);
+/// - the two usage rules ASSERT where blind ("never appears in source" is emitted precisely when the
+///   evidence set is empty — a flood that reads as deadness).
+pub fn rule_sightlines() -> Vec<zzop_core::RuleSightline> {
+    vec![
+        join_sightline("soft-delete-bypass"),
+        join_sightline("orderby-unindexed"),
+        join_sightline("enum-string-drift"),
+        usage_sightline("schema/unreferenced-model-name"),
+        usage_sightline("schema/unreferenced-field-name"),
+    ]
+}
+
+/// One JOIN rule's declaration — the silent-when-blind class.
+fn join_sightline(rule_id: &'static str) -> zzop_core::RuleSightline {
+    zzop_core::RuleSightline {
+        rule_id,
+        trigger_extensions: QUERY_CALL_SITE_EXTENSIONS,
+        outside_meaning: format!(
+            "{claim}, so a Prisma client driven from a file outside these extensions contributes no \
+             call site — ZERO findings of this rule on those files means NOT ANALYZED, never \"no \
+             such call site\"",
+            claim = query_call_site_sightline_claim()
+        ),
+        assert_when_blind: false,
+    }
+}
+
+/// One usage rule's declaration — the assert-when-blind class (`assert_when_blind: true`, the only
+/// two declarations in this build that set it), so its consequence sentence is the inverse of
+/// [`join_sightline`]'s.
+fn usage_sightline(rule_id: &'static str) -> zzop_core::RuleSightline {
+    zzop_core::RuleSightline {
+        rule_id,
+        trigger_extensions: crate::usage::FIELD_USAGE_SCAN_EXTENSIONS,
+        outside_meaning: format!(
+            "\"unreferenced\" here means {claim} — a file outside these extensions is never searched \
+             for the name, so a model or field consumed only from such files still reports here: \
+             findings on a tree whose consumers live outside them are evidence-channel blindness, \
+             not deadness",
+            claim = field_usage_sightline_claim()
+        ),
+        assert_when_blind: true,
+    }
+}
+
 /// The full sightline sentence all three JOIN rules splice in.
 ///
 /// Why: these rules JOIN a Prisma schema against call sites, and the schema half is language-neutral

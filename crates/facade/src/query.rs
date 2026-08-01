@@ -46,6 +46,14 @@ use scan::{all_findings, scan_bucket, single_tree_err, suggestions};
 pub const QUERY_MATCH_LIMIT: usize = 20;
 /// Cap for the `relatedFindings` array (`truncatedFindings` discloses the remainder).
 pub const QUERY_FINDINGS_LIMIT: usize = 20;
+/// What `relatedFindings` was selected BY — shipped in every reply as `relatedFindingsBasis`, one owner,
+/// same self-describing-reply convention as [`verdict_meaning`].
+pub const RELATED_FINDINGS_BASIS: &str =
+    "text match, not a semantic link: a finding is listed when its rendered message contains the \
+     pattern or one of the matched io keys as a case-insensitive substring. No finding carries an io \
+     key to join on, so this both over-matches (a message quoting a longer path) and under-matches (a \
+     finding about this key that spells it differently, or names only the file) — an empty array is \
+     not evidence that no finding concerns this key.";
 /// Cap for the `suggestions` array (`not-found` verdicts only).
 pub const QUERY_SUGGESTIONS_LIMIT: usize = 10;
 
@@ -171,6 +179,14 @@ pub fn query_io_json(analysis_json: &str, query_json: &str) -> Result<String, St
         _ => "mixed",
     };
 
+    // `relatedFindings` is a TEXT heuristic, and the reply says so in `relatedFindingsBasis` rather than
+    // letting the word "related" imply a link the analysis computed. What runs here is a case-insensitive
+    // substring test against a finding's rendered MESSAGE — nothing joins a finding to an io key, because
+    // a `Finding` carries no key field to join ON. So this over-matches (a message that merely quotes a
+    // longer path containing the pattern) and under-matches (a finding about this very key whose message
+    // spells it differently, or names only the file). It earns its place anyway — the rename near-miss a
+    // `consumed-unprovided` verdict cannot explain is usually sitting right here — but a reader must not
+    // read an empty array as "no finding concerns this key".
     let mut related: Vec<Value> = Vec::new();
     let mut related_total = 0usize;
     for finding in all_findings(&analysis) {
@@ -198,6 +214,13 @@ pub fn query_io_json(analysis_json: &str, query_json: &str) -> Result<String, St
         out.insert("truncated".to_string(), Value::Object(truncated));
     }
     out.insert("relatedFindings".to_string(), Value::Array(related));
+    // Ships on EVERY reply, next to the array it qualifies, for the same reason `verdictMeaning` does:
+    // a caveat a reader has to go find in a tool description is a caveat most readers never see, and
+    // this one changes what an empty array means.
+    out.insert(
+        "relatedFindingsBasis".to_string(),
+        json!(RELATED_FINDINGS_BASIS),
+    );
     if related_total > QUERY_FINDINGS_LIMIT {
         out.insert(
             "truncatedFindings".to_string(),

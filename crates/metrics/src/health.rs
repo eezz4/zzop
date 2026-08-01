@@ -175,7 +175,7 @@ mod tests {
             },
             coupling: CouplingScore {
                 score: 100.0,
-                avg_fan_out: 0.0,
+                avg_fan_out_among_importers: 0.0,
                 max_fan_out: 0.0,
                 circular_count: 0,
             },
@@ -188,11 +188,13 @@ mod tests {
                 score: 100.0,
                 total_intra_module_edges: 0,
                 violations: vec![],
+                violations_truncated: 0,
             },
             public_api: PublicApiScore {
                 score: 100.0,
                 total_cross_module_imports: 0,
                 deep_imports: vec![],
+                deep_imports_truncated: 0,
             },
             sfc: SfcScore {
                 score: 100.0,
@@ -200,6 +202,7 @@ mod tests {
                 compliant: 0,
                 total: 0,
                 violations: vec![],
+                violations_truncated: 0,
             },
             main_sequence: MainSequenceScore {
                 score: 100.0,
@@ -216,43 +219,50 @@ mod tests {
                 score: 100.0,
                 limit: 0,
                 files: vec![],
+                files_truncated: 0,
             },
             sibling_cross: SiblingCrossScore {
                 score: 100.0,
                 total_intra_module_edges: 0,
                 violations: vec![],
+                violations_truncated: 0,
             },
             diamond: DiamondScore {
                 score: 100.0,
                 pairs: vec![],
+                pairs_truncated: 0,
             },
             rename_instability: RenameScore {
                 score: 100.0,
                 renamed: 0,
                 total: 0,
                 files: vec![],
+                files_truncated: 0,
             },
             bus_factor: BusFactorScore {
                 score: 100.0,
                 risky: 0,
                 files: vec![],
+                files_truncated: 0,
             },
             fix_ratio: FixRatioScore {
                 score: 100.0,
-                fix: 0,
-                total: 0,
-                ratio: 0.0,
+                fix_file_touches: 0,
+                tagged_file_touches: 0,
+                fix_share_of_tagged_touches: 0.0,
             },
             type_safety: TypeSafetyScore {
                 score: 100.0,
                 total_as_cast: 0,
                 total_any_type: 0,
                 violations: vec![],
+                violations_truncated: 0,
             },
             lod: LodScore {
                 score: 100.0,
                 total_violations: 0,
                 violations: vec![],
+                violations_truncated: 0,
             },
         }
     }

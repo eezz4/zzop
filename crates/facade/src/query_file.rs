@@ -36,6 +36,10 @@
 //! Each token's one-sentence meaning ships in the reply as `verdictMeaning`, the same self-describing
 //! discipline `query_io`'s vocabulary uses — no host's help text is a second owner of what a token means.
 //!
+//! `dependencies` gets the same treatment (`dependenciesMeaning`, 2026-07-31) because it is the other
+//! field here whose SILENCE is ambiguous: the dep graph carries resolved in-tree edges only, so an empty
+//! `imports` says "no in-tree import of this file resolved", never "this file imports nothing".
+//!
 //! `analyzed` deliberately does NOT distinguish native parsing from a Mode-B adapter overlay. The
 //! question this token answers is "does a structural projection exist for this file", and for that
 //! purpose an overlay IS its parser — splitting the token would make callers branch on a distinction
@@ -154,6 +158,13 @@ pub fn query_file_json(analysis_json: &str, query_json: &str) -> Result<String, 
     out.insert("symbols".to_string(), symbols_of(tree, rel));
     out.insert("io".to_string(), io_of(tree, rel));
     out.insert("dependencies".to_string(), deps_of(tree, rel));
+    // The same self-describing discipline `verdictMeaning` established, applied to the one other field
+    // here whose EMPTINESS is ambiguous: an empty `imports` reads as "this file imports nothing" when it
+    // actually says "no in-tree import of it resolved". See `facets::dependencies_meaning`.
+    out.insert(
+        "dependenciesMeaning".to_string(),
+        json!(dependencies_meaning()),
+    );
     out.insert("findings".to_string(), findings_of(&analysis, tree, rel));
     Ok(pretty(Value::Object(out)))
 }
@@ -259,7 +270,7 @@ fn not_found(target: &str, trees: &[Value], normalized: &str) -> Value {
 }
 
 mod facets;
-use facets::{deps_of, findings_of, io_of, loc_of, symbols_of};
+use facets::{dependencies_meaning, deps_of, findings_of, io_of, loc_of, symbols_of};
 
 #[cfg(test)]
 mod tests;

@@ -122,7 +122,7 @@ fn project(
             serde_json::json!({
                 "sourceId": t["sourceId"],
                 // The two honesty channels a fact consumer needs BEFORE trusting a zero: the coverage
-                // census (files/sourceFiles/symbols/io counts + `joinContributionZero`) and this tree's
+                // census (files/parserDispatched/symbols/io counts + `joinContributionZero`) and this tree's
                 // own engine self-reports (framework silence, a topology host with no effect, the tRPC
                 // mount-route suppression note).
                 "coverage": output["coverage"],

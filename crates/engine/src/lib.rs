@@ -48,6 +48,8 @@ mod generated_banner;
 mod io;
 mod output;
 mod pipeline;
+mod recognizers;
+mod sightlines;
 mod trees;
 mod vocabulary;
 
@@ -61,10 +63,12 @@ pub use disclosure::{
     blindness_registry, disclosure_contract_text, disclosure_counts, BlindnessClass,
     DisclosureStatus,
 };
-pub use dispatch::{DispatchConfig, Language};
+pub use dispatch::{declaration_only_extension, DispatchConfig, Language};
 pub use envelope::analyze_envelope;
 pub use io::IoOptions;
 pub use output::{AnalyzeOutput, CacheStats, GitWindow, PackLoaded, RuleOverridesApplied};
+pub use recognizers::framework_recognizers;
+pub use sightlines::rule_sightlines;
 pub use trees::{
     analyze_trees, MultiAnalyzeOutput, PackageImportSummary, MIN_PARALLEL_IMPL_SIGNALS,
 };

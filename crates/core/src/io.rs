@@ -46,7 +46,7 @@ mod link;
 pub use facts::{
     AmbiguousConsume, ConsumeBodyShape, CrossLayerEdge, CrossLayerResult, EdgeFrom, EdgeTo,
     IoConsume, IoFacts, IoKind, IoProvide, ProvideBodyField, ProvideBodyShape, SourceIo,
-    TaggedConsume, TaggedProvide,
+    TaggedConsume, TaggedProvide, RULE_READ_IO_KINDS,
 };
 pub use key::{
     db_table_channel_casing, http_consume_interface_key, http_interface_key,

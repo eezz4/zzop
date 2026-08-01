@@ -118,6 +118,13 @@ if [ "$counted" -eq 0 ]; then
   exit 1
 fi
 
+# The zero above is the FLOOR; this is the COVERAGE axis it does not reach. Measured 2026-07-31: in a
+# scratch tree holding only scripts/, this guard printed "clean (0 grandfathered files remaining)" and
+# exited 0 over a repo with no crates, because scripts/measure/selftest-stub.rs kept  at 1. A
+# floor of one is satisfied by any stray file; the derived member list is what makes a COLLAPSE red.
+. ./scripts/lib/tracked-grep.sh
+assert_workspace_members_scanned "max-file-lines guard" "*.rs"
+
 if [ "${1:-}" = "--update-baseline" ]; then
   refused=0
   {

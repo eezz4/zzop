@@ -241,3 +241,26 @@ mod tests {
         assert_eq!(names, vec!["A", "B", "C"]);
     }
 }
+
+use zzop_core::recognizer::{channel, FrameworkRecognizer};
+
+/// Frameworks this parser recognizes — see [`zzop_core::recognizer`].
+///
+/// ⚠ NOTE THE ASYMMETRY, which is the whole reason `emits` is on this type: there is no
+/// [`channel::CONSUMES`] row here. Feign / RestTemplate / WebClient / HttpClient have no recognizer in
+/// this crate (measured 2026-08-01: zero occurrences in `src/`), so a Java service that CALLS another
+/// service contributes nothing to the consume side of the cross-layer join. By recognizer COUNT this
+/// parser looks comparable to `parser-rust`; by CHANNEL it is half a join. Closing it is an open item
+/// tracked as open work, and until then this declaration is what says so out loud.
+pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
+    FrameworkRecognizer {
+        framework: "spring",
+        extensions: &["java"],
+        emits: &[channel::PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "spring security",
+        extensions: &["java"],
+        emits: &[channel::PROVIDES],
+    },
+];

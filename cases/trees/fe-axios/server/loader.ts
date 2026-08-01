@@ -8,13 +8,15 @@
 //    zzop's capability boundary inside a single tree: it is the spelling of the call, not the endpoint,
 //    that decides whether the join happens.
 //
-// 2. THE PRODUCT'S bucketKeys CAP. `crates/summary/src/output/bucket_keys.rs` caps each cross-layer
-//    bucket's distinct-key list at 20 (`DEFAULT_BUCKET_KEYS_LIMIT`), and snapshot.mjs ABORTS the run
-//    when a bucket truncates unless it is given `--tolerate-bucket-key-cap`, which detection-gate.sh
-//    does not pass. Measured 2026-07-29: this corpus already sits at 19 distinct `unconsumedProvides`
-//    keys, so two new dead backend routes are enough to stop the gate producing any score at all. These
-//    calls keep the four new routes CONSUMED, which is both the honest state of the fixture (the front
-//    end really does call them) and what keeps the corpus under that cap.
+// 2. THE PRODUCT'S DISTINCT-BUCKET-KEY CAP — since DELETED, kept here as the reason this shape exists.
+//    `crates/summary/src/output/bucket_keys.rs` used to cap each cross-layer bucket's distinct-key list
+//    at 20 (`DEFAULT_BUCKET_KEYS_LIMIT`), and snapshot.mjs ABORTED the run when a bucket truncated
+//    unless given `--tolerate-bucket-key-cap`, which detection-gate.sh does not pass. Measured
+//    2026-07-29: this corpus sat at 19 distinct `unconsumedProvides` keys, so two new dead backend
+//    routes were enough to stop the gate producing any score at all. The cap and its hatch went that
+//    same day (see that module's doc; the field is `distinctBucketKeys` since 2026-07-31). These calls
+//    keep the four new routes CONSUMED, which is the honest state of the fixture (the front end really
+//    does call them) and stays worth keeping on that merit alone.
 declare function fetch(u: string, init?: unknown): Promise<unknown>;
 
 export async function loadArticlesPage() {

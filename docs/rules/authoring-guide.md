@@ -201,7 +201,11 @@ What it checks:
   `disabled_rules`/`suppressions` string-match space — see `crates/core/src/registry.rs::is_enabled`).
 - **Catalog sync** — [catalog.md](catalog.md)'s totals sentence (`N DSL packs, N DSL rules, N native
   analysis ids`) matches what `load_dsl_packs`/`register_native_analyses` actually load, and every native
-  analysis id / DSL pack id appears somewhere in the catalog's text.
+  analysis id / DSL pack id appears somewhere in the catalog's text. The sightline surface is pinned as a
+  set equality, both directions: every catalog row carrying a sightline paragraph must have a
+  `RuleSightline` declaration (or an explicit, documented exemption in the test), and every declaration
+  must have a catalog sightline paragraph — a rule may not publish a blind-spot claim the machine half
+  doesn't know, nor declare one the prose doesn't state.
 - **Determinism guard** — loading `rules/dsl` twice yields identical pack data in identical order (a cheap
   regression net for map/directory-iteration-order bugs in pack parsing).
 

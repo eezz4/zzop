@@ -11,7 +11,7 @@
 //! COUNTS while saying nothing about WHICH route left the join. This module is the surface that stays
 //! structurally readable there, and it stays small by carrying IDENTITY ONLY.
 //!
-//! `bucketKeys` was on that list until 2026-07-29 and is now UNCAPPED, which narrows this argument
+//! `distinctBucketKeys` was on that list until 2026-07-29 and is now UNCAPPED, which narrows this argument
 //! without retiring it: bucket MEMBERSHIP is answerable from the reply directly now, but `edges` and the
 //! findings list are still capped, and this lane remains the only one that carries identity for the whole
 //! run at a bounded size.
@@ -123,7 +123,7 @@ fn project(v: &serde_json::Value) -> String {
     let mut buckets: Vec<serde_json::Value> = Vec::new();
     for bucket in crate::output::KEY_BUCKETS {
         for item in cl[bucket].as_array().map(Vec::as_slice).unwrap_or(&[]) {
-            // Same key fallback `bucket_keys` uses: an unresolved consume has no key, so its `raw`
+            // Same key fallback `distinct_bucket_keys` uses: an unresolved consume has no key, so its `raw`
             // source text IS its identity. An item with neither is skipped, never guessed.
             let key = item
                 .get("key")

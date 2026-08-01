@@ -1045,6 +1045,49 @@ fn facts_emits_the_uncapped_post_assembly_substrate_for_one_tree() {
 }
 
 #[test]
+fn coverage_aggregates_dispatch_by_extension_and_declares_recall_unmeasured() {
+    // The aggregate-visibility lane, end to end through the real binary: one tree holding a structural
+    // file (.ts) and a lexical-only one (.md) must land in different dispatch rows, and the reply must
+    // carry the two honesty features the 2026-07-31 ruling is about — the unmeasured axis as a FIELD,
+    // and no single-score key anywhere in the schema.
+    let dir = TempDir::new("zzop-coverage-one");
+    dir.write("src/api.ts", "export function load() { return 1; }\n");
+    dir.write("README.md", "# hello\n");
+    init_config(dir.path());
+    let out = run(&["coverage", dir.path().to_str().unwrap()]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let v: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("coverage must be JSON");
+
+    for key in [
+        "config",
+        "configWarnings",
+        "trees",
+        "dispatchMeaning",
+        "unmeasured",
+    ] {
+        assert!(
+            v.get(key).is_some(),
+            "coverage must always carry `{key}`: {v}"
+        );
+    }
+    let exts = v["trees"][0]["extensions"].as_array().expect("extensions");
+    let row = |ext: &str| {
+        exts.iter()
+            .find(|e| e["ext"] == ext)
+            .unwrap_or_else(|| panic!("no `{ext}` row: {exts:?}"))
+    };
+    assert_eq!(row("ts")["structural"], 1, "{exts:?}");
+    assert_eq!(row("md")["lexicalOnly"], 1, "{exts:?}");
+    // jsonc appears too (the config init_config wrote) — lexical-only, and that is fine; what this
+    // test pins is that the two planted files landed in DIFFERENT dispatch classes.
+    assert_eq!(v["unmeasured"][0]["axis"], "recall", "{v}");
+    assert!(
+        v["trees"][0]["joinVisibility"].as_str().is_some(),
+        "join visibility must be a sentence: {v}"
+    );
+}
+
+#[test]
 fn facts_is_byte_stable_and_carries_the_whole_join_for_multiple_trees() {
     let dir = TempDir::new("zzop-facts-multi");
     let config = manifest_fixture(&dir, None);

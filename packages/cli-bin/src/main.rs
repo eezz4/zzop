@@ -38,7 +38,7 @@ mod cli;
 /// invocation (exit 2), so the two surfaces can never drift apart. Stays in THIS file: the `zzop-mcp`
 /// package's `surface_prose` meta-test reads this literal out of `packages/cli-bin/src/main.rs` by
 /// path, to pin that every MCP tool's CLI twin subcommand is named here.
-const USAGE: &str = "usage: zzop <analyze <path> | analyze --config <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path>... | cross --config <path> | file <path> <tree>... | file <path> --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | manifest <path>... | manifest --config <path> | diff <a.json> <b.json> | facts <path>... | facts --config <path> | graph <path>... | graph --config <path> [--domain <join|dep|risk|posture>] [--format <mermaid|cosmograph-nodes|cosmograph-links>] [--scope <prefix>] [--top <n>] | init [--force] | contract [<name>] | explain <rule-id> | version [--verbose]> (analyze, analyze-envelope and cross also take [--severity <critical|warning|info>] [--rule <id>] [--limit <n>]; every subcommand takes --help)";
+const USAGE: &str = "usage: zzop <analyze <path> | analyze --config <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path>... | cross --config <path> | file <path> <tree>... | file <path> --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | manifest <path>... | manifest --config <path> | diff <a.json> <b.json> | facts <path>... | facts --config <path> | coverage <path>... | coverage --config <path> | graph <path>... | graph --config <path> [--domain <join|dep|risk|posture>] [--format <mermaid|cosmograph-nodes|cosmograph-links>] [--scope <prefix>] [--top <n>] | init [--force] | contract [<name>] | explain <rule-id> | version [--verbose]> (analyze, analyze-envelope and cross also take [--severity <critical|warning|info>] [--rule <id>] [--limit <n>]; every subcommand takes --help)";
 
 /// A one-line pointer at the bare-invocation/unknown-subcommand error path (exit 2): a bare `zzop` gives
 /// no hint that `help` exists, or that MCP is the sibling `zzop-mcp` binary (not a `zzop` subcommand).
@@ -92,6 +92,17 @@ fn main() {
         Some("facts") => {
             let (paths, config_path) = parse_trees_args(&args, "facts", 1);
             print_result(zzop_summary::facts_json(&paths, config_path));
+        }
+        // The aggregate-visibility lane: "how much of this tree does zzop actually see" as an
+        // extension-by-dispatch table plus the census with its meaning attached — and, by ruling
+        // (2026-07-31), NO single score: the unmeasured axis (recall) is a schema field instead, so
+        // it cannot be dropped in transit the way a caveat sentence is. Same one-path split as
+        // `facts`. CLI-only — no MCP tool twin (recorded in `docs/contracts/surface-parity.json`'s
+        // `_cliOnlyLanes`; the aggregate is an authoring/ops view, and the MCP agent surface already
+        // has the per-file half via `check_file`).
+        Some("coverage") => {
+            let (paths, config_path) = parse_trees_args(&args, "coverage", 1);
+            print_result(zzop_summary::coverage_summary(&paths, config_path));
         }
         // The one lane whose product is not JSON: the same analysis, serialized as MERMAID text for an
         // external renderer to draw (zzop renders no pixels). Takes ONE path too, like `facts`.

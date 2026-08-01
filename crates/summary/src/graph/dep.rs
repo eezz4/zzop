@@ -44,8 +44,10 @@ use serde_json::Value;
 pub const DEFAULT_DEP_TOP: usize = 40;
 
 mod node;
+mod window;
 
 pub(super) use node::DepNode;
+pub(super) use window::GitWindows;
 
 /// One file node, keyed by its display id so two trees' identical relative paths cannot collide.
 #[derive(Default)]
@@ -77,6 +79,9 @@ pub(super) struct DepUniverse {
     pub(super) edges: BTreeSet<(String, String)>,
     pub(super) cycle_files: BTreeSet<String>,
     pub(super) cycles: usize,
+    /// The git window(s) the nodes' history axes were measured over — a property of the RUN, not of a
+    /// file, so it rides here rather than on every [`DepNode`]. See [`window`].
+    pub(super) git_windows: GitWindows,
 }
 
 /// Does one node survive `--scope`? One rule, shared by both formats for the same reason `in_scope` is
@@ -99,6 +104,7 @@ pub(super) fn collect(v: &Value) -> DepUniverse {
     let mut all_edges: BTreeSet<(String, String)> = BTreeSet::new();
     let mut cycle_files: BTreeSet<String> = BTreeSet::new();
     let mut cycles = 0usize;
+    let mut git_windows = GitWindows::default();
     for t in trees {
         let source = t["sourceId"].as_str().unwrap_or("");
         let id = |rel: &str| -> String {
@@ -111,6 +117,9 @@ pub(super) fn collect(v: &Value) -> DepUniverse {
         // The measured axes (`ir.loc`, and the git history when this tree collected any) — read once
         // per tree, then asked per file. See `node`'s module doc for why an unmeasured one stays `None`.
         let axes = node::TreeAxes::of(t);
+        // ... and WHICH window those history axes cover. Same per-tree gate the axes themselves use,
+        // asked separately because the answer describes the run rather than a file.
+        git_windows.observe(t);
         if let Some(dep) = t["output"]["ir"]["dep"].as_object() {
             for (from, tos) in dep {
                 all_nodes.insert(id(from), axes.node(source, from));
@@ -143,6 +152,7 @@ pub(super) fn collect(v: &Value) -> DepUniverse {
         edges: all_edges,
         cycle_files,
         cycles,
+        git_windows,
     }
 }
 
@@ -153,6 +163,9 @@ pub(super) fn project(v: &Value, scope: Option<&str>, top: usize) -> String {
         edges: all_edges,
         cycle_files,
         cycles,
+        // The cosmograph census's business: the mermaid lane draws topology and emits no history
+        // column, so it has nothing here to caveat.
+        git_windows: _,
     } = collect(v);
 
     // Pass 2 — scope, then rank by degree and cap NODES. Ranking is (degree desc, id asc): a total

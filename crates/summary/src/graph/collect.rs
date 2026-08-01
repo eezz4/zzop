@@ -130,7 +130,7 @@ pub(super) fn collect_edges(
 /// (see `collect_bucket`), and `tests::every_join_bucket_has_an_explicit_graph_role` turns it red.
 ///
 /// A compile-time-exhaustive version (an enum instead of the wire strings) was considered and rejected:
-/// these names are the engine's JSON keys, shared verbatim with `bucket_keys`/`manifest`, so an enum
+/// these names are the engine's JSON keys, shared verbatim with `distinct_bucket_keys`/`manifest`, so an enum
 /// would add a conversion at three call sites to buy what the two derived pins below already give.
 pub(super) fn bucket_role(bucket: &str) -> Option<(&'static str, &'static str)> {
     match bucket {
@@ -162,7 +162,7 @@ pub(super) fn collect_bucket(
         return d.count(bucket, items.len(), top).1;
     };
     for item in items {
-        // Same key fallback `bucket_keys`/`manifest` use: an unresolved consume has no key, so its
+        // Same key fallback `distinct_bucket_keys`/`manifest` use: an unresolved consume has no key, so its
         // `raw` source text IS its label. An item with neither is counted and dropped, never guessed.
         let label = item["key"]
             .as_str()
