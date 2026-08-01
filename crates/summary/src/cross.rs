@@ -4,8 +4,11 @@
 use crate::output::{self, FindingFilters};
 
 /// Cross-repo analysis — zzop's headline. Config-first mode (`config_path`) runs the config's `trees`;
-/// paths mode builds zero-config trees tagged by directory name (bundled packs + git defaults still
-/// injected) and DISCLOSES any per-tree zzop.config.jsonc it deliberately did not load.
+/// paths mode tags each root by directory name and LOADS that root's own zzop.config.jsonc (bundled
+/// packs + git defaults still injected), disclosing the honored files in `configWarnings` while the
+/// reply's `config` stays null — no single config governs a multi-root run. (This said the reverse
+/// until 2026-08-01: it described the pre-2026-07-27 behaviour, where paths mode deliberately did NOT
+/// load them. The honesty need did not change, only the answer.)
 pub fn cross_summary(
     paths: &[String],
     config_path: Option<&str>,

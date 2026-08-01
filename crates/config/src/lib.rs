@@ -27,7 +27,7 @@
 //! A fourth layer sits on top of those three, for the same "one implementation, no per-host drift"
 //! reason: REQUEST ASSEMBLY (`trees`) — which source mode a call is in (`path` XOR `paths` XOR
 //! `configPath`), whether a single-tree config is refused or wrapped into a one-entry `analyzeTrees`
-//! request, and the zero-config paths-mode tree list. "What is a valid config" and "what request does
+//! request, and the paths-mode tree list. "What is a valid config" and "what request does
 //! that config become" answer to the same owner.
 //!
 //! One consequence worth stating plainly, because it is the only place this crate causes a WRITE: with
@@ -35,7 +35,7 @@
 //! analyzed tree on its first run. `"cacheDir": null` opts out (see `mapper::options`); any other
 //! directory can be named instead. One `base_dir` means one cache directory, so a config file's trees
 //! (`trees: "auto"` included) all share ONE — but a caller that maps a bare `{}` per path
-//! (`zzop-summary`'s config-free paths mode) has a base per path and therefore one `.zzop/` per path.
+//! (`zzop-summary`'s multi-root paths mode) has a base per path and therefore one `.zzop/` per path.
 //! Ignore it with `**/.zzop/`, which covers both — never a `zzop*` glob, which would also swallow the
 //! user-authored `zzop/` one character away.
 //!
@@ -132,7 +132,8 @@ pub struct LoadedRequest {
     pub method: Method,
     pub request: serde_json::Value,
     pub warnings: Vec<String>,
-    /// The config file actually loaded, if any — `None` means the zero-config default request.
+    /// The config file actually loaded, if any — `None` means no single file governs this request
+    /// (paths mode loads one per root; an envelope has no filesystem location at all).
     pub config_path: Option<PathBuf>,
 }
 

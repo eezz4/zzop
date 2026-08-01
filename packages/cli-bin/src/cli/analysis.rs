@@ -74,7 +74,8 @@ pub fn run_analyze_envelope(args: &[String]) -> ! {
 }
 
 /// `cross <path>... | cross --config <path>` plus the findings knobs. `--config` = config-first mode (the
-/// config's trees define the join); trailing paths = config-free paths mode. Mirrors the `cross_repo`
+/// config's trees define the join); trailing paths = paths mode, where each root loads its own
+/// config. Mirrors the `cross_repo`
 /// tool's two modes, and inherits every silent-narrowing guard from the shared [`parse_trees_args`].
 pub fn run_cross(args: &[String]) -> ! {
     const USAGE: &str = "usage: zzop cross <path> <path>... (2+ paths) | cross --config <zzop.config.jsonc> [--severity <critical|warning|info>] [--rule <id>] [--limit <n>]";
@@ -84,7 +85,8 @@ pub fn run_cross(args: &[String]) -> ! {
 }
 
 /// `endpoint <pattern> <path>... | endpoint <pattern> --config <path>`: one path = single-tree mode (the
-/// `check_endpoint` tool's `path` argument), 2+ = config-free paths mode (`paths`), `--config` =
+/// `check_endpoint` tool's `path` argument), 2+ = paths mode (`paths`, each root loading its own
+/// config), `--config` =
 /// config-first mode (`configPath`), parsed exactly like `cross --config`. Same handler as the MCP tool,
 /// so a CLI query and a tool call give the identical answer. No findings knobs: the query's own caps are
 /// fixed and its MCP twin exposes no `severity`/`rule`/`limit` either — the two surfaces match.

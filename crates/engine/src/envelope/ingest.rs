@@ -79,13 +79,20 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     // reads this store TODAY — but the field is part of `AnalyzeOutput`'s plumbing contract now
     // (the cross-layer idempotency veto reads it for filesystem trees), and silently dropping an
     // envelope's injected attributes here would make this mode's output lie about them.
+    let mut warnings: Vec<String> = Vec::new();
     let mut native_attrs: Vec<zzop_core::Attribute> = Vec::new();
+    // Merged BEFORE `const_fragment_pairs` moves into `late_resolve_cross_file_consumes` below —
+    // `MountRef` prefixes resolve against the same map an envelope's consumes do, so a Mode A producer
+    // gets identical semantics to the native path rather than a second, quieter one.
+    let merged_consts = crate::analyze::merge_const_map_fragments(&const_fragment_pairs);
     if !router_mount_pairs.is_empty() {
         let (composed, attrs) = crate::analyze::compose_router_mount_provides(
             router_mount_pairs,
             |specifier, from_file, _ident| {
                 resolve_envelope_specifier(specifier, from_file, &all_paths)
             },
+            &merged_consts,
+            &mut warnings,
         );
         io_provides.extend(composed);
         native_attrs = attrs;
@@ -138,7 +145,6 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         zzop_metrics::DEFAULT_FOLDER_DEPTH,
     ));
 
-    let mut warnings = Vec::new();
     if let Some(w) = reserved_drop_warning("envelope", &envelope.parser, reserved_dropped) {
         warnings.push(w);
     }

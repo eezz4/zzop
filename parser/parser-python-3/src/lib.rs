@@ -24,6 +24,7 @@
 pub mod adapters;
 pub mod lang;
 
+pub use adapters::const_map::const_map_fragment;
 pub use adapters::django::{extract_django_db_table_consumes, extract_django_db_table_provides};
 pub use adapters::django_routes::extract_django_route_fragments;
 pub use adapters::django_routes::guard::{
@@ -128,6 +129,39 @@ pub fn parse_python(
     Some((symbols, imports, loc, used_names))
 }
 
+use zzop_core::recognizer::{channel, FrameworkRecognizer};
+
+/// Frameworks this parser recognizes — see [`zzop_core::recognizer`] for what a declaration does and
+/// does not claim. Verified against each adapter's RETURN TYPE, not a token scan: `RouterMountFragment`
+/// composes into the provide side, `IoConsume` is the consume side, and the db-table adapters emit both.
+pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
+    FrameworkRecognizer {
+        framework: "django",
+        extensions: &["py"],
+        emits: &[channel::DB],
+    },
+    FrameworkRecognizer {
+        framework: "django",
+        extensions: &["py"],
+        emits: &[channel::PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "fastapi",
+        extensions: &["py"],
+        emits: &[channel::PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "sqlalchemy",
+        extensions: &["py"],
+        emits: &[channel::DB],
+    },
+    FrameworkRecognizer {
+        framework: "httpx",
+        extensions: &["py"],
+        emits: &[channel::CONSUMES],
+    },
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,36 +195,3 @@ mod tests {
         assert_eq!(count_loc(""), 1);
     }
 }
-
-use zzop_core::recognizer::{channel, FrameworkRecognizer};
-
-/// Frameworks this parser recognizes — see [`zzop_core::recognizer`] for what a declaration does and
-/// does not claim. Verified against each adapter's RETURN TYPE, not a token scan: `RouterMountFragment`
-/// composes into the provide side, `IoConsume` is the consume side, and the db-table adapters emit both.
-pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
-    FrameworkRecognizer {
-        framework: "django",
-        extensions: &["py"],
-        emits: &[channel::DB],
-    },
-    FrameworkRecognizer {
-        framework: "django",
-        extensions: &["py"],
-        emits: &[channel::PROVIDES],
-    },
-    FrameworkRecognizer {
-        framework: "fastapi",
-        extensions: &["py"],
-        emits: &[channel::PROVIDES],
-    },
-    FrameworkRecognizer {
-        framework: "sqlalchemy",
-        extensions: &["py"],
-        emits: &[channel::DB],
-    },
-    FrameworkRecognizer {
-        framework: "httpx",
-        extensions: &["py"],
-        emits: &[channel::CONSUMES],
-    },
-];

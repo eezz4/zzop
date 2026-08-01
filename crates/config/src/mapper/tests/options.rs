@@ -154,7 +154,7 @@ fn cache_dir_resolves_against_base_dir() {
 }
 
 /// The zero-config write contract: a config that never mentions `cacheDir` still gets one, so a
-/// zero-config run warms instead of being cold forever. Seals the DEFAULT ITSELF (an accidental revert
+/// run whose config omits it warms instead of being cold forever. Seals the DEFAULT ITSELF (an accidental revert
 /// to "no key" is exactly the silent regression this default was introduced to remove) and that it is
 /// `base_dir`-relative like every other path this mapper emits — an unresolved `.zzop/cache` would
 /// land wherever the host process happened to be launched from.

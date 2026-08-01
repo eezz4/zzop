@@ -59,7 +59,7 @@ The route was there the whole time. This is the single most common way to misrea
 
 ## Step 1 — Attach the other tree, then ask
 
-Once the backend is on disk, put both roots in one request — `paths` (config-free, each tree tagged
+Once the backend is on disk, put both roots in one request — `paths` (each root loads its own config, each tree tagged
 by its directory name) or `configPath` (a `zzop.config.jsonc` whose `trees` define the join). The
 exact argument rules, including "exactly one source form", are in
 [modules/mcp.md](../modules/mcp.md#mcp-surface).

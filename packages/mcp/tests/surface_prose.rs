@@ -114,7 +114,7 @@ fn check_endpoint_mode_vocabulary_agrees_between_schema_and_cli_usage() {
     );
     assert!(
         props.get("paths").is_some(),
-        "check_endpoint schema must keep its config-free `paths` mode"
+        "check_endpoint schema must keep its multi-root `paths` mode"
     );
     assert!(
         props.get("configPath").is_some(),

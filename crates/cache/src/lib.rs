@@ -24,7 +24,7 @@ pub use store::AnalysisCache;
 ///
 /// **This is the T1 single definition of that name.** Two crates need it and neither may spell it as a
 /// literal of its own:
-/// - `zzop-config` derives [`DEFAULT_CACHE_DIR`] from it (the default a config-file/zero-config run
+/// - `zzop-config` derives [`DEFAULT_CACHE_DIR`] from it (the default a run whose config omits the key
 ///   resolves against its base directory).
 /// - `zzop-engine`'s `dispatch::DEFAULT_SKIP_DIRS` lists it, alongside the removed JS CLI's
 ///   `.zzop-cache`, so a walk that never had a cache directory named to it still does not walk zzop's own

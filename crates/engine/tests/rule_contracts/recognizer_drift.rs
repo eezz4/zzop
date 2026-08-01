@@ -23,6 +23,11 @@ fn repo() -> PathBuf {
 /// missing declaration hides. Keyed `parser/module`.
 const NOT_A_FRAMEWORK: &[(&str, &str)] = &[
     (
+        "parser-python-3/const_map",
+        "reads project constants into the language-neutral const map; recognizes no framework and \
+         emits no io channel — the map is what OTHER adapters' unresolved references resolve against",
+    ),
+    (
         "parser-typescript/class_shapes",
         "shape refinement over rows other adapters produced",
     ),

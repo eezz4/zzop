@@ -78,7 +78,11 @@ fn main() {
             .flat_map(|frag| &frag.entries)
             .fold(acc, |(v, m), entry| match entry {
                 RouterMountEntry::Verb { .. } => (v + 1, m),
-                RouterMountEntry::Mount { .. } => (v, m + 1),
+                // Both mounting variants count as mounts. A `MountRef` is a mount whose prefix this
+                // adapter could see but not read (`prefix=settings.X`); the engine resolves it against
+                // the project-wide const map, so counting it separately here would tell the reader
+                // about zzop's internals rather than about their own tree.
+                RouterMountEntry::Mount { .. } | RouterMountEntry::MountRef { .. } => (v, m + 1),
                 // This adapter never emits a producer-judged attribute (`ScopedAttr` —
                 // `express-middleware-v1`, a native-TypeScript-recognizer concern) — not counted
                 // in either tally.

@@ -100,13 +100,15 @@ pub(super) fn compute_fresh_artifact(
     let io = super::io_projection::project_file_io(
         language, rel, text, degraded, config, vocab, prisma_io,
     );
-    // The next projections are all TypeScript-only, reusing `text` already in hand (no second file read): const-map fragment (feeds
+    // The next projections reuse `text` already in hand (no second file read). Most are TypeScript-only;
+    // the const-map fragment is NOT — see its arm below. They are: const-map fragment (feeds
     // `analyze::assemble`'s merge + late consume re-resolution), tRPC router fragment (`analyze::compose_trpc_provides`), router-mount
     // fragment (Hono builders/cross-file mounts, for `analyze::compose_router_mount_provides`), wrapper def/call fragments (assemble-time wrapper-consume join, defs indexed by `(file, name)`), controller-prefix route fragment (assemble-time controller-prefix composer, against the same const map), and query-call-site facts (`run_schema_join_rules` substrate).
     let const_map_fragment = match language {
         Some(Language::TypeScript) if !degraded => {
             zzop_parser_typescript::const_map_fragment(rel, text)
         }
+        Some(Language::Python) if !degraded => zzop_parser_python_3::const_map_fragment(text),
         _ => std::collections::HashMap::new(),
     };
     let procedure_router_fragments = match language {

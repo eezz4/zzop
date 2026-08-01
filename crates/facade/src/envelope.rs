@@ -19,7 +19,7 @@ use crate::request::{EnvelopeAnalyzeRequest, PacksDir};
 /// ## Bundled-pack default (the one facade-level default in this crate)
 /// The tree entry points (`analyze`/`analyzeTrees`) get their bundled-pack default from `zzop-config`'s
 /// mapper (inline `packDefs`). The envelope path has no host config front-end on the Rust side at all,
-/// so the same "zero-config = full analysis" default is applied HERE, once, for every host: the bundled
+/// so the same "an empty config still means full analysis" default is applied HERE, once, for every host: the bundled
 /// packs (`zzop_config::BUNDLED_PACK_SOURCES`) are seeded as inline `packDefs` BEFORE any
 /// caller-supplied `packDefs`/`packsDir`, so the existing collision rules are untouched — a caller pack
 /// with a bundled id wins the collision whole (later inline def wins; a directory pack always wins).

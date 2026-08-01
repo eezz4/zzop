@@ -1,6 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use zzop_core::{normalize_http_path, IoProvide};
+use zzop_core::IoProvide;
+
+mod walk;
+use walk::walk;
 
 /// Compose whole-tree `http` PROVIDEs from per-file router-mount fragments
 /// (`zzop_parser_typescript::router_mounts` — Hono-style chained builders and cross-file
@@ -36,6 +39,8 @@ use zzop_core::{normalize_http_path, IoProvide};
 pub(crate) fn compose_router_mount_provides(
     fragments: Vec<(String, Vec<zzop_core::RouterMountFragment>)>,
     resolve: impl Fn(&str, &str, &str) -> Option<String>,
+    consts: &HashMap<String, String>,
+    warnings: &mut Vec<String>,
 ) -> (Vec<IoProvide>, Vec<zzop_core::Attribute>) {
     use zzop_core::{RouterMountEntry, RouterMountFragment};
 
@@ -77,10 +82,22 @@ pub(crate) fn compose_router_mount_provides(
     let mut mounted_nodes: HashSet<usize> = HashSet::new();
     for (file, frag) in &nodes {
         for entry in &frag.entries {
-            if let RouterMountEntry::Mount {
-                ident, specifier, ..
-            } = entry
-            {
+            // BOTH mounting variants exclude their child from being a root. A `MountRef` whose prefix
+            // does not resolve still means "this router is mounted somewhere" — treating it as a root
+            // would emit its routes at their own paths, i.e. at the very prefix-less key the ref exists
+            // to prevent. Written as an exhaustive `match` rather than the `if let` that was here: this
+            // is the one place the compiler could NOT force an update when `MountRef` was added, and it
+            // silently skipped it, so the whole feature measured as a no-op until the miss was found.
+            let mounting = match entry {
+                RouterMountEntry::Mount {
+                    ident, specifier, ..
+                }
+                | RouterMountEntry::MountRef {
+                    ident, specifier, ..
+                } => Some((ident, specifier)),
+                RouterMountEntry::Verb { .. } | RouterMountEntry::ScopedAttr { .. } => None,
+            };
+            if let Some((ident, specifier)) = mounting {
                 mounted_names.insert(ident.as_str());
                 if let Some(child) = find_child(file, ident, specifier.as_deref()) {
                     mounted_nodes.insert(child);
@@ -89,130 +106,12 @@ pub(crate) fn compose_router_mount_provides(
         }
     }
 
-    fn join_prefix(prefix: &str, seg: &str) -> String {
-        if seg == "/" || seg.is_empty() {
-            return prefix.to_string();
-        }
-        let base = prefix.trim_end_matches('/');
-        if seg.starts_with('/') {
-            format!("{base}{seg}")
-        } else {
-            format!("{base}/{seg}")
-        }
-    }
-
-    /// `(from_file, ident, specifier)` → node index of the mounted child fragment, if resolvable.
-    type FindChild<'a> = dyn Fn(&str, &str, Option<&str>) -> Option<usize> + 'a;
-
-    #[allow(clippy::too_many_arguments)]
-    fn walk(
-        idx: usize,
-        prefix: &str,
-        nodes: &[(&str, &zzop_core::RouterMountFragment)],
-        find_child: &FindChild,
-        ancestry: &mut Vec<usize>,
-        out: &mut Vec<IoProvide>,
-        attrs: &mut Vec<zzop_core::Attribute>,
-    ) {
-        if ancestry.contains(&idx) {
-            return; // cycle guard — mirrors compose_trpc_provides' ancestry stack
-        }
-        ancestry.push(idx);
-        let (file, frag) = nodes[idx];
-        for entry in &frag.entries {
-            match entry {
-                zzop_core::RouterMountEntry::Verb {
-                    method,
-                    path,
-                    handler,
-                    line,
-                    attr_keys,
-                } => {
-                    let full = join_prefix(prefix, path);
-                    let key = zzop_core::http_interface_key(method, &full);
-                    for attr_key in attr_keys {
-                        attrs.push(zzop_core::Attribute {
-                            target: zzop_core::EntityRef::IoKey {
-                                kind: "http".to_string(),
-                                key: key.clone(),
-                            },
-                            key: attr_key.clone(),
-                            value: serde_json::Value::Bool(true),
-                        });
-                    }
-                    out.push(IoProvide {
-                        body: None,
-                        kind: "http".to_string(),
-                        key,
-                        file: file.to_string(),
-                        line: *line,
-                        symbol: handler.clone(),
-                    });
-                }
-                zzop_core::RouterMountEntry::Mount {
-                    prefix: mount_prefix,
-                    ident,
-                    specifier,
-                    attr_keys,
-                } => {
-                    match find_child(file, ident, specifier.as_deref()) {
-                        Some(child) => {
-                            walk(
-                                child,
-                                &join_prefix(prefix, mount_prefix),
-                                nodes,
-                                find_child,
-                                ancestry,
-                                out,
-                                attrs,
-                            );
-                        }
-                        None => {
-                            // Unresolvable/ambiguous mount — the ident could not be disambiguated
-                            // between a sub-router and a middleware guard. Producer-judged attr keys
-                            // resolve here as a PathScope, since no child fragment exists to recurse
-                            // into. Normalized (`:param`/`{param}` -> `{}`) via the same
-                            // `http_interface_key`-shared helper the Verb arm's `key` above uses, so
-                            // a `:param`-carrying mount chain's PathScope prefix covers the
-                            // normalized route keys it's meant to scope, not their raw pre-normalized
-                            // spelling (which a route key never carries).
-                            let scoped_prefix =
-                                normalize_http_path(&join_prefix(prefix, mount_prefix));
-                            for attr_key in attr_keys {
-                                attrs.push(zzop_core::Attribute {
-                                    target: zzop_core::EntityRef::PathScope {
-                                        prefix: scoped_prefix.clone(),
-                                    },
-                                    key: attr_key.clone(),
-                                    value: serde_json::Value::Bool(true),
-                                });
-                            }
-                        }
-                    }
-                }
-                zzop_core::RouterMountEntry::ScopedAttr {
-                    prefix: attr_prefix,
-                    key,
-                    line: _,
-                } => {
-                    // Normalized for the same reason as the unresolved-Mount arm above: a
-                    // `:param`-carrying `.use` prefix chain must scope the NORMALIZED route path,
-                    // not its raw `:param` spelling.
-                    attrs.push(zzop_core::Attribute {
-                        target: zzop_core::EntityRef::PathScope {
-                            prefix: normalize_http_path(&join_prefix(prefix, attr_prefix)),
-                        },
-                        key: key.clone(),
-                        value: serde_json::Value::Bool(true),
-                    });
-                }
-            }
-        }
-        ancestry.pop();
-    }
-
     let mut out: Vec<IoProvide> = Vec::new();
     let mut attrs: Vec<zzop_core::Attribute> = Vec::new();
+    // `(file, prefix_ref) -> dropped mounts` — one aggregated line per distinct pair, the same shape
+    // `compose_controller_prefix_provides` uses, so a router mounted twice from one file with the same
+    // unreadable constant produces one honest sentence rather than two identical ones.
+    let mut unresolved: BTreeMap<(String, String), u32> = BTreeMap::new();
     for idx in 0..nodes.len() {
         if mounted_nodes.contains(&idx) || mounted_names.contains(nodes[idx].1.name.as_str()) {
             continue;
@@ -226,7 +125,18 @@ pub(crate) fn compose_router_mount_provides(
             &mut ancestry,
             &mut out,
             &mut attrs,
+            consts,
+            &mut unresolved,
         );
+    }
+
+    for ((file, prefix_ref), count) in unresolved {
+        let mount_word = if count == 1 { "mount" } else { "mounts" };
+        warnings.push(format!(
+            "could not resolve router mount prefix `{prefix_ref}` ({file}) to a literal — its {count} \
+             {mount_word} and every route beneath them are not projected, rather than being projected at \
+             the wrong key; the prefix constant may live in an unanalyzed file"
+        ));
     }
 
     out.sort_by(|a, b| {

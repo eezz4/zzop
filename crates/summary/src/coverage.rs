@@ -6,7 +6,7 @@
 //! `zzop_config::trees` front end, run the SAME `analyzeTrees` engine path, hand the output to the
 //! pure facade core, then stamp the two host-layer honesty channels on top — `config` and
 //! `configWarnings`. The core stays pure and never sees the config front end. Argv split is
-//! `facts_json`'s: one path = single-tree mode, 2+ = config-free paths mode.
+//! `facts_json`'s: one path = single-tree mode, 2+ = paths mode (each root loads its own config).
 
 /// Answers "how much of this tree does zzop actually see?" — see
 /// [`zzop_facade::query_coverage_json`] for the three-value cell rule and why there is no score.

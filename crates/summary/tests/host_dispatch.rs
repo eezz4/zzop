@@ -1,4 +1,4 @@
-//! End-to-end HOST-DISPATCH tests over real temp trees (no config file -> zero-config defaults, which
+//! End-to-end HOST-DISPATCH tests over real temp trees (a starter config -> the empty-config defaults, which
 //! inject the build.rs-embedded bundled packs as inline `packDefs` — so `packsLoaded` here reports
 //! `source: "inline"` for every bundled pack). These call this crate's entry points EXACTLY as the two
 //! host products do — the `zzop` CLI's subcommands and the `zzop-mcp` server's `tools/call` handlers

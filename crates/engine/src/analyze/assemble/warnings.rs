@@ -128,6 +128,23 @@ pub(super) fn framework_silence_warnings(
         warnings.push(w);
     }
 
+    // S14 — unread Python router-mount prefix. Third language in the WRONG-KEY family, and the one
+    // with a measured cost: on the 17-tree corpus join, 22 of 24 unprovided consumes were one skipped
+    // `prefix=settings.API_V1_STR`. Reads `.py` paths off `loc_by_path` rather than taking a new
+    // parameter — every walked file is already there, and a fourth per-language rel list threaded
+    // through `collect` for one lexical scan is plumbing nobody would keep in sync.
+    let mut py_rels: Vec<String> = loc_by_path
+        .keys()
+        .filter(|p| p.ends_with(".py"))
+        .cloned()
+        .collect();
+    py_rels.sort(); // HashMap iteration order is not stable; the message names examples.
+    if let Some(w) =
+        crate::framework_silence::python_mount_prefix_warning(root, &py_rels, http_provides)
+    {
+        warnings.push(w);
+    }
+
     // S3/S5/S7 prechecks. S3 mirrors its own function's internal gate (io near-zero in BOTH
     // directions). S5/S7 now run a PER-APP census: the sorted walked-rel list must be built FIRST so the
     // app-root set (`app_roots`) and the per-app keyed-http counts (`keyed_by_root`) agree on the same

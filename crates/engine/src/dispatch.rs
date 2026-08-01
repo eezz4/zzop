@@ -68,7 +68,7 @@ pub enum Language {
 /// run, observed live in a blind field test).
 /// - [`zzop_cache::TOOL_DIR`] (`.zzop`) — the CURRENT one, and the one that actually fires: the config
 ///   front-end defaults `cacheDir` to `zzop_cache::DEFAULT_CACHE_DIR` (`.zzop/cache`), so a
-///   zero-config run writes there on its very first execution. Referenced as a symbol, not spelled as a
+///   run whose config omits `cacheDir` writes there on its very first execution. Referenced as a symbol, not spelled as a
 ///   literal — the T1 single definition lives in `zzop-cache` next to the store that writes there.
 /// - `zzop-reports` / `.zzop-cache` — the removed JS CLI's report dir and `cacheDir` template value.
 ///   Kept as legacy defense: those directories still sit in trees analyzed before v0.20.0.

@@ -383,3 +383,70 @@ fn in_tree_dotted_python_import_is_not_censused_as_a_package_import() {
         "genuinely external specifier fastapi must still be censused, got: {specifiers:?}"
     );
 }
+
+/// A `prefix=` the parser can SEE but not READ (`settings.API_V1_STR`, whose value lives in another
+/// file) now rides as a `RouterMountEntry::MountRef` and is resolved at assemble time against the same
+/// project-wide const map a `@Controller(RouteKey.X)` prefix uses.
+///
+/// Before this, `match_include_router` returned `None` for a non-literal prefix, which did NOT drop the
+/// routes — it dropped the MOUNT, leaving the child router an un-mounted root whose routes were emitted
+/// at their own paths. `GET /users/me` where the app serves `GET /api/v1/users/me`: a WRONG key, which
+/// the cross-layer join then reports as an unprovided consume for a route that is in fact served.
+#[test]
+fn a_non_literal_include_router_prefix_resolves_through_the_const_map() {
+    let dir = TempDir::new("zzop-engine-py-mount-ref");
+    dir.write(
+        "app/core/config.py",
+        concat!(
+            "class Settings:\n",
+            "    API_V1_STR: str = \"/api/v1\"\n",
+            "\n",
+            "settings = Settings()\n",
+        ),
+    );
+    dir.write(
+        "app/routers.py",
+        concat!(
+            "from fastapi import APIRouter\n",
+            "\n",
+            "router = APIRouter()\n",
+            "\n",
+            "@router.get(\"/users/me\")\n",
+            "def me():\n",
+            "    return {}\n",
+        ),
+    );
+    dir.write(
+        "app/main.py",
+        concat!(
+            "from fastapi import FastAPI\n",
+            "from .routers import router\n",
+            "from .core.config import settings\n",
+            "\n",
+            "app = FastAPI()\n",
+            "app.include_router(router, prefix=settings.API_V1_STR)\n",
+        ),
+    );
+
+    let out = zzop_engine::analyze_tree(dir.path(), &config("be-python"));
+    let io = out.ir.ir.io.clone().unwrap_or_default();
+    let keys: Vec<&str> = io
+        .provides
+        .iter()
+        .filter(|p| p.kind == "http")
+        .map(|p| p.key.as_str())
+        .collect();
+    assert_eq!(
+        keys,
+        vec!["GET /api/v1/users/me"],
+        "the reference must resolve and prefix the route, not be dropped or emitted bare"
+    );
+
+    // And S14 must stay quiet: the composer resolved it, so telling the reader their routes may be
+    // mis-keyed would be crying wolf on a tree that is now correct.
+    assert!(
+        !out.warnings.iter().any(|w| w.contains("mount prefix")),
+        "a resolved prefix must produce no unread-prefix warning: {:?}",
+        out.warnings
+    );
+}

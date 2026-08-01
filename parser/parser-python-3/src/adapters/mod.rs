@@ -5,6 +5,7 @@
 //! framework-neutral `auth-guarded` channel — both judging names through the ONE shared vocabulary in
 //! `guard_vocab`.
 
+pub mod const_map;
 pub mod django;
 pub mod django_routes;
 pub mod fastapi;

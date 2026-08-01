@@ -98,6 +98,8 @@ crates/engine/src/framework_silence/fetch_wrapper.rs:WRAPPER_FUNNEL_TAIL interna
 crates/engine/src/framework_silence/gateway_declaration.rs:GATEWAY_DECLARATIONS fact # deployment-declaration filenames and the constructs inside them that can move a route path (Vercel rewrites, Next basePath, nginx proxy_pass) — spelled by those tools, not by us. The markers are what keep the S12 report from being a filename census: the file must actually declare a rewrite, because warning on mere presence would train the reader to skip the line
 crates/engine/src/framework_silence/orm_schema_silence.rs:MAX_EXAMPLES cap
 crates/engine/src/framework_silence/orm_schema_silence.rs:ORM_SCHEMA_SPECIFIERS fact # published package names
+crates/engine/src/framework_silence/python_mount_prefix.rs:MAX_CALL_SPAN cap # bytes S14 will scan forward for an include_router call closing paren. Not a judgement about Python: a mount call is a few lines, and the bound keeps one unbalanced paren in a generated file from becoming a whole-file scan
+crates/engine/src/framework_silence/python_mount_prefix.rs:MAX_EXAMPLES cap # mount sites named per S14 warning. The COUNT stays exact; only the example list is bounded
 crates/engine/src/framework_silence/rust_router_layer.rs:AFFECTED_RULE_ID internal # zzop rule id
 crates/engine/src/framework_silence/rust_router_layer.rs:MAX_EXAMPLES cap
 crates/engine/src/framework_silence/server_framework_import.rs:SERVER_FRAMEWORK_SPECIFIERS fact # published package names

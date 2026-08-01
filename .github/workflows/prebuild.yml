@@ -46,6 +46,15 @@ jobs:
   # run to build-only (release=false) — every release job silently skips. "Re-run failed jobs"
   # reuses this job's cached release=true/version outputs and retries just the failed jobs.
   meta:
+    # `needs: [gate]` is LOAD-BEARING, not tidiness. This job pushes an IMMUTABLE tag, and a published
+    # tag can never be moved or reused — so it must not run until the full CI has gone green. Without
+    # this line `meta` and `gate` were siblings with no ordering, and an autotag on a main push whose
+    # gate then failed would leave a permanent release tag on a red commit, fixable only by burning the
+    # next version number. Measured 2026-08-01: v0.28.0's own tag run went red (a clippy lint the local
+    # sweep had not run with `-D warnings`, plus a stale site/ artifact), and the tag was already
+    # published. No cycle: `gate` is a reusable-workflow call with no `needs:` of its own, and `build`
+    # reads none of this job's outputs, so it still starts immediately — only the TAG waits.
+    needs: [gate]
     runs-on: ubuntu-latest
     permissions:
       contents: write

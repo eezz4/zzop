@@ -35,12 +35,11 @@
  * writing a squashed picture back into the page.
  *
  * WHY DEGREE-0 FILES ARE PLACED RATHER THAN SIMULATED
- * This graph is not connected — measured on this repository, 1,176 files fall into 149 components, and
- * 119 files import nothing and are imported by nothing. Those two counts drift with every batch, so do
- * not trust them here: the SECOND one is written into the page by this script (search the emitted
- * "There are N of them here"), and that copy is the one that cannot go stale. This paragraph is an
- * order-of-magnitude illustration, and it has already been wrong once — it said 109 in this sentence
- * and 107 three sentences below, for the same set. A force layout has no
+ * This graph is not connected: it holds well over a hundred components, most of them a SINGLE file that
+ * imports nothing and is imported by nothing. No count is written here — every one that was drifted
+ * within a batch or two (this paragraph once said 109 and 107 for the same set, three sentences apart),
+ * and the live number is emitted into the page by this script anyway ("There are N of them here"), which
+ * is the copy that cannot go stale. A force layout has no
  * signal for such a node: repulsion is cut off at CUTOFF (it must be, or every tick is O(n^2)), so once
  * an isolated node is further than that from anything it feels only the weak CENTRE pull, drifts in
  * until the core's outer shell repels it, and settles. The result was a halo at roughly twice the core's

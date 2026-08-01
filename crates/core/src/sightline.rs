@@ -46,6 +46,7 @@ pub struct RuleSightline {
     ///   evidence channel are evidence-channel blindness, not deadness. A consumer reports blindness
     ///   only when the whole channel is unfed (no witnessed extension present at all), because a fed
     ///   channel means the rule's evidence IS being gathered no matter what other files sit nearby.
+    ///
     /// ONE flag rather than per-consumer heuristics, because the direction is a property of the
     /// rule's CLAIM — single-owner with the declaration, next to the pinned prose that words it.
     pub assert_when_blind: bool,

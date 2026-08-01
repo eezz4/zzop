@@ -142,7 +142,7 @@ fn default_skip_dirs_cover_common_build_and_vcs_output() {
 /// (regression pin for the self-scan-pollution fix, blind field test round 3).
 ///
 /// `.zzop` is the LIVE one: the config front-end defaults `cacheDir` to `zzop_cache::DEFAULT_CACHE_DIR`,
-/// so every zero-config run writes there. It is asserted through the shared constant rather than as a
+/// so every run whose config omits `cacheDir` writes there. It is asserted through the shared constant rather than as a
 /// literal, so moving the default cache directory can never leave the skip list behind.
 /// `zzop-reports`/`.zzop-cache` are the removed JS CLI's names, kept as legacy defense.
 #[test]

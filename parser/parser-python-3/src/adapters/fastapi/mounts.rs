@@ -9,8 +9,30 @@ use zzop_core::{ImportMap, RouterMountEntry};
 
 use super::ReceiverInfo;
 
-/// `<receiver>.include_router(<child>, prefix="...")` -> `Mount`, or `None` for any non-qualifying shape
-/// (see the parent module doc's "Mounts" bullet for the exact skip rules).
+/// A dotted attribute access spelled back out (`settings.API_V1_STR`), or `None` for any other shape.
+///
+/// Only dotted accesses are carried, matching the const map's own dotted-keys-only rule: a BARE name
+/// (`prefix=API_PREFIX`) is deliberately not emitted as a ref, because the map never holds bare names —
+/// a project-wide scope-insensitive lookup on `prefix` or `base` would resolve someone else's local.
+/// A bare-name prefix therefore stays unread, and S14 keeps reporting it.
+fn dotted_ref(expr: &Expr) -> Option<String> {
+    // The TOP node must be an attribute access — a bare `Expr::Name` is rejected here even though the
+    // recursion below accepts one as the BASE of a dotted chain (`settings` in `settings.API_V1_STR`).
+    let Expr::Attribute(_) = expr else {
+        return None;
+    };
+    fn walk(expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Attribute(attr) => Some(format!("{}.{}", walk(&attr.value)?, attr.attr)),
+            Expr::Name(name) => Some(name.id.to_string()),
+            _ => None,
+        }
+    }
+    walk(expr)
+}
+
+/// `<receiver>.include_router(<child>, prefix="...")` -> `Mount`, a dotted non-literal prefix ->
+/// `MountRef`, or `None` for any non-qualifying shape (see the parent module doc's "Mounts" bullet).
 pub(super) fn match_include_router(
     stmt: &StmtExpr,
     receivers: &HashMap<String, ReceiverInfo>,
@@ -63,20 +85,32 @@ pub(super) fn match_include_router(
         }
         _ => return None, // any other first-argument shape — never guessed
     };
-    let prefix = match call.arguments.find_keyword("prefix") {
+    // A non-literal prefix is not skipped any more: it rides as a `MountRef` whose `prefix_ref` the
+    // engine resolves against the project-wide const map, exactly as a `@Controller(RouteKey.X)`
+    // prefix already did. Dropping it here used to be silent AND lossy — the child router's routes
+    // were still emitted, just without the prefix, which is a WRONG key rather than a missing one.
+    // Unresolvable refs are dropped and disclosed by the composer, never defaulted to `/`.
+    let entry = match call.arguments.find_keyword("prefix") {
         Some(kw) => match &kw.value {
-            Expr::StringLiteral(s) => s.value.to_str().to_string(),
-            _ => return None, // non-literal prefix — skip the mount entirely
+            Expr::StringLiteral(s) => RouterMountEntry::Mount {
+                prefix: s.value.to_str().to_string(),
+                ident,
+                specifier,
+                attr_keys: Vec::new(),
+            },
+            other => RouterMountEntry::MountRef {
+                prefix_ref: dotted_ref(other)?,
+                ident,
+                specifier,
+                attr_keys: Vec::new(),
+            },
         },
-        None => "/".to_string(),
-    };
-    Some((
-        receiver_name.to_string(),
-        RouterMountEntry::Mount {
-            prefix,
+        None => RouterMountEntry::Mount {
+            prefix: "/".to_string(),
             ident,
             specifier,
             attr_keys: Vec::new(),
         },
-    ))
+    };
+    Some((receiver_name.to_string(), entry))
 }

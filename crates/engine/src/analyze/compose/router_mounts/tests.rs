@@ -6,6 +6,13 @@
 use super::*;
 use zzop_core::{RouterMountEntry, RouterMountFragment};
 
+/// The two arguments every pre-`MountRef` test is indifferent to: an empty const map (no test here
+/// carries a reference) and a throwaway warnings sink. Named rather than inlined so a test that DOES
+/// care about resolution reads as obviously different from the ones that do not.
+fn no_consts() -> std::collections::HashMap<String, String> {
+    std::collections::HashMap::new()
+}
+
 fn verb(method: &str, path: &str, handler: &str, line: u32) -> RouterMountEntry {
     RouterMountEntry::Verb {
         method: method.to_string(),
@@ -106,6 +113,8 @@ fn same_file_mount_joins_prefix() {
             ],
         )],
         no_resolver(),
+        &no_consts(),
+        &mut Vec::new(),
     );
     let keys: Vec<&str> = out.iter().map(|p| p.key.as_str()).collect();
     assert_eq!(keys, vec!["GET /health", "POST /admin/users"]);
@@ -165,6 +174,8 @@ fn three_hop_mount_chain_composes_full_url() {
             ),
             ("@example/auth-server", "server/router.ts", "auth/index.ts"),
         ]),
+        &no_consts(),
+        &mut Vec::new(),
     );
     let keys: Vec<&str> = out.iter().map(|p| p.key.as_str()).collect();
     assert_eq!(
@@ -197,7 +208,8 @@ fn mounted_child_is_never_emitted_unprefixed_even_when_unresolvable() {
             vec![frag("admin", vec![verb("GET", "/users", "h", 3)])],
         ),
     ];
-    let (out, _attrs) = compose_router_mount_provides(fragments, no_resolver());
+    let (out, _attrs) =
+        compose_router_mount_provides(fragments, no_resolver(), &no_consts(), &mut Vec::new());
     assert!(out.is_empty());
 }
 
@@ -224,6 +236,8 @@ fn sole_fragment_fallback_covers_default_import_alias() {
     let (out, _attrs) = compose_router_mount_provides(
         fragments,
         resolver(&[("./routes/pdf", "server/files.ts", "server/routes/pdf.ts")]),
+        &no_consts(),
+        &mut Vec::new(),
     );
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].key, "GET /envelope/{}/item.pdf");
@@ -238,7 +252,8 @@ fn mount_cycle_is_guarded() {
             frag("b", vec![mount("/a", "a", None)]),
         ],
     )];
-    let (out, _attrs) = compose_router_mount_provides(fragments, no_resolver());
+    let (out, _attrs) =
+        compose_router_mount_provides(fragments, no_resolver(), &no_consts(), &mut Vec::new());
     // `a` and `b` mount each other, so neither is a root — conservative empty output rather
     // than an infinite walk or a truncated-prefix guess.
     assert!(out.is_empty());
@@ -265,8 +280,10 @@ fn output_is_deterministic_across_input_order() {
         }
         v
     };
-    let (a, _) = compose_router_mount_provides(build(false), no_resolver());
-    let (b, _) = compose_router_mount_provides(build(true), no_resolver());
+    let (a, _) =
+        compose_router_mount_provides(build(false), no_resolver(), &no_consts(), &mut Vec::new());
+    let (b, _) =
+        compose_router_mount_provides(build(true), no_resolver(), &no_consts(), &mut Vec::new());
     let view = |v: &[IoProvide]| -> Vec<(String, String, u32)> {
         v.iter()
             .map(|p| (p.key.clone(), p.file.clone(), p.line))
@@ -295,7 +312,8 @@ fn verb_attr_key_composes_to_an_iokey_attribute_matching_the_provide_key() {
             ),
         ],
     )];
-    let (out, attrs) = compose_router_mount_provides(fragments, no_resolver());
+    let (out, attrs) =
+        compose_router_mount_provides(fragments, no_resolver(), &no_consts(), &mut Vec::new());
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].key, "POST /admin/widgets");
     assert_eq!(attrs.len(), 1);
@@ -329,7 +347,8 @@ fn resolved_mount_with_attr_keys_emits_no_attribute() {
             frag("adminRouter", vec![verb("GET", "/x", "h", 1)]),
         ],
     )];
-    let (out, attrs) = compose_router_mount_provides(fragments, no_resolver());
+    let (out, attrs) =
+        compose_router_mount_provides(fragments, no_resolver(), &no_consts(), &mut Vec::new());
     assert_eq!(out.len(), 1);
     assert!(attrs.is_empty(), "{attrs:?}");
 }
@@ -352,7 +371,8 @@ fn unresolved_mount_with_attr_keys_emits_a_pathscope_at_the_composed_prefix() {
             )],
         )],
     )];
-    let (out, attrs) = compose_router_mount_provides(fragments, no_resolver());
+    let (out, attrs) =
+        compose_router_mount_provides(fragments, no_resolver(), &no_consts(), &mut Vec::new());
     assert!(out.is_empty());
     assert_eq!(attrs.len(), 1);
     assert_eq!(
@@ -379,7 +399,8 @@ fn scoped_attr_on_a_sub_router_mounted_at_prefix_composes_the_full_pathscope() {
             ),
         ],
     )];
-    let (out, attrs) = compose_router_mount_provides(fragments, no_resolver());
+    let (out, attrs) =
+        compose_router_mount_provides(fragments, no_resolver(), &no_consts(), &mut Vec::new());
     assert_eq!(out.len(), 1);
     assert_eq!(attrs.len(), 1);
     assert_eq!(
@@ -407,7 +428,8 @@ fn scoped_attr_under_a_param_prefix_normalizes_to_curly_braces_and_covers_the_ro
             ],
         )],
     )];
-    let (out, attrs) = compose_router_mount_provides(fragments, no_resolver());
+    let (out, attrs) =
+        compose_router_mount_provides(fragments, no_resolver(), &no_consts(), &mut Vec::new());
     assert_eq!(out[0].key, "POST /users/{}/admin/ban");
     assert_eq!(attrs.len(), 1);
     assert_eq!(
@@ -442,7 +464,8 @@ fn unresolved_mount_with_param_prefix_normalizes_to_curly_braces() {
             )],
         )],
     )];
-    let (out, attrs) = compose_router_mount_provides(fragments, no_resolver());
+    let (out, attrs) =
+        compose_router_mount_provides(fragments, no_resolver(), &no_consts(), &mut Vec::new());
     assert!(out.is_empty());
     assert_eq!(attrs.len(), 1);
     assert_eq!(
@@ -477,7 +500,8 @@ fn root_excluded_fragment_emits_no_attribute() {
             )],
         ),
     ];
-    let (out, attrs) = compose_router_mount_provides(fragments, no_resolver());
+    let (out, attrs) =
+        compose_router_mount_provides(fragments, no_resolver(), &no_consts(), &mut Vec::new());
     assert!(out.is_empty());
     assert!(attrs.is_empty(), "{attrs:?}");
 }
@@ -497,8 +521,14 @@ fn attribute_composition_is_deterministic_across_repeated_calls() {
             ),
         ],
     )];
-    let (_out_a, attrs_a) = compose_router_mount_provides(fragments.clone(), no_resolver());
-    let (_out_b, attrs_b) = compose_router_mount_provides(fragments, no_resolver());
+    let (_out_a, attrs_a) = compose_router_mount_provides(
+        fragments.clone(),
+        no_resolver(),
+        &no_consts(),
+        &mut Vec::new(),
+    );
+    let (_out_b, attrs_b) =
+        compose_router_mount_provides(fragments, no_resolver(), &no_consts(), &mut Vec::new());
     assert_eq!(attrs_a, attrs_b);
     assert_eq!(attrs_a.len(), 2, "{attrs_a:?}");
 }
@@ -537,7 +567,8 @@ fn go_mount_resolves_via_specifier_and_ident_together() {
             None
         }
     };
-    let (out, _attrs) = compose_router_mount_provides(fragments, go_resolver);
+    let (out, _attrs) =
+        compose_router_mount_provides(fragments, go_resolver, &no_consts(), &mut Vec::new());
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].key, "GET /users/list");
     assert_eq!(out[0].file, "users/routers.go");
@@ -557,6 +588,7 @@ fn go_mount_with_unresolvable_specifier_stays_conservative() {
             vec![mount("/users", "UsersRegister", Some("app/unknown"))],
         )],
     )];
-    let (out, _attrs) = compose_router_mount_provides(fragments, no_resolver());
+    let (out, _attrs) =
+        compose_router_mount_provides(fragments, no_resolver(), &no_consts(), &mut Vec::new());
     assert!(out.is_empty());
 }

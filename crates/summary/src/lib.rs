@@ -52,7 +52,7 @@
 //!   suggestion fallback).
 //!
 //! Request ASSEMBLY is not a module here — which trees a call is about (`path` XOR `paths` XOR
-//! `configPath`, the single-tree-vs-join judgment, zero-config paths mode) lives in `zzop_config::trees`,
+//! `configPath`, the single-tree-vs-join judgment, multi-root paths mode) lives in `zzop_config::trees`,
 //! next to the config vocabulary that decides what a valid tree declaration is; host-boundary path
 //! absolutization lives beside it in `zzop_config::paths`.
 

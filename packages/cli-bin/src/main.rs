@@ -81,7 +81,7 @@ fn main() {
             zzop_summary::validate_rule_pack_json,
         ),
         // `cross --config <path>` = config-first mode (the config's trees define the join);
-        // `cross <path>...` = config-free paths mode. Mirrors the cross_repo tool's two modes.
+        // `cross <path>...` = paths mode (each root loads its own config). Mirrors cross_repo's two modes.
         Some("cross") => run_cross(&args),
         // The custom-rule extension point's EMIT half: the same analysis as `cross`, projected as the
         // uncapped post-assembly fact substrate for a user's own rule program instead of a capped

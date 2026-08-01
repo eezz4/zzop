@@ -27,7 +27,7 @@ pub(crate) use assemble::assemble;
 // topology declaration must apply regardless of which assembler produced `io_provides`/`io_consumes`.
 pub(crate) use compose::{
     apply_config_client_base, apply_config_mounts, compose_router_mount_provides,
-    compose_trpc_provides, late_resolve_cross_file_consumes,
+    compose_trpc_provides, late_resolve_cross_file_consumes, merge_const_map_fragments,
 };
 // `envelope::analyze_envelope` also reaches the config-diagnostics quartet by this path (config-
 // diagnostics parity with `assemble` — a `disabled_rules` typo / dead exclude filter self-reports on

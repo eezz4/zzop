@@ -160,8 +160,9 @@ pub(super) fn compose(
         // a resolved package directory, and `router_mount_pairs` is the only substrate that has them
         // (see `go_fragment_dirs`'s own doc for why this can't instead live inside the composer).
         let go_dirs = go_fragment_dirs(&router_mount_pairs);
-        let (composed, attrs) =
-            compose_router_mount_provides(router_mount_pairs, |specifier, from_file, ident| {
+        let (composed, attrs) = compose_router_mount_provides(
+            router_mount_pairs,
+            |specifier, from_file, ident| {
                 if loc_by_path.contains_key(specifier) {
                     return Some(specifier.to_string());
                 }
@@ -207,7 +208,12 @@ pub(super) fn compose(
                     &pkg_scan.workspace_pkgs,
                     &tsconfigs,
                 )
-            });
+            },
+            // The SAME merged map the controller-prefix composer resolves against, so one constant
+            // means one thing whether it prefixes a controller or mounts a router.
+            &merged_consts,
+            &mut warnings,
+        );
         io_provides.extend(composed);
         native_attrs = attrs;
     }

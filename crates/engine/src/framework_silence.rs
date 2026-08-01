@@ -90,6 +90,7 @@ mod egress_intent;
 mod fetch_wrapper;
 mod gateway_declaration;
 mod orm_schema_silence;
+mod python_mount_prefix;
 mod rust_router_layer;
 mod server_framework_import;
 #[cfg(test)]
@@ -115,6 +116,7 @@ pub use fetch_wrapper::fetch_wrapper_census;
 pub(crate) use fetch_wrapper::WRAPPER_EXPORT_NAMES;
 pub use gateway_declaration::gateway_declaration_warning;
 pub use orm_schema_silence::orm_schema_silence_warning;
+pub use python_mount_prefix::python_mount_prefix_warning;
 pub use rust_router_layer::rust_router_layer_warning;
 pub use server_framework_import::{provide_blind_sources, server_framework_import_warning};
 pub use unknown_verb_range::unknown_verb_range_warning;

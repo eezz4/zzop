@@ -13,7 +13,7 @@ use shape::shape_analyze_output;
 
 /// Analyze ONE tree, from EITHER source mode — exactly one of:
 /// - `path` — a tree root, with `<path>/zzop.config.jsonc` auto-discovered when present
-///   (`zzop_config::load_for_root`), zero-config defaults otherwise.
+///   (`zzop_config::load_for_root`), the empty-config defaults otherwise.
 /// - `config_path` — an explicit config file (or a directory holding one) at ANY location
 ///   (`zzop_config::load_config_file`), so a config that does not sit at the tree root is reachable.
 ///   Resolved exactly like the multi-tree siblings' own config mode, absolutization included.
@@ -146,7 +146,7 @@ pub fn analyze_envelope_summary(
     }
     // Envelope mode has no filesystem root/config file to auto-discover (unlike `analyze_summary`'s
     // `zzop_config::load_for_root`) — an envelope carries no location the engine can re-read
-    // (`docs/NORMALIZED_AST.md`). `"{}"` is the SAME "zero-config = full analysis" default
+    // (`docs/NORMALIZED_AST.md`). `"{}"` is the SAME "an empty config still means full analysis" default
     // `analyze_envelope_json` itself documents at the facade layer (bundled packs injected as inline
     // seeds, no disabledRules/severityOverrides/suppressions/mounts) — the MCP surface takes
     // `envelopeJson` only, so this is the minimal valid `EnvelopeAnalyzeRequest` construction, not a

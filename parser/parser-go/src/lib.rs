@@ -48,6 +48,32 @@ pub mod lang;
 // Test-only: `node_kinds::PINNED_NODE_KINDS` has no runtime purpose outside its own pin test (crate
 // root doc's "node-kind vocabulary is pinned" section) — `cfg(test)`-gating the whole module (rather
 // than `#[allow(dead_code)]`-ing the const) keeps a real "unused" finding from ever being silenced here.
+use zzop_core::recognizer::{channel, FrameworkRecognizer};
+
+/// Frameworks this parser recognizes — see [`zzop_core::recognizer`]. Verified against return types.
+pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
+    FrameworkRecognizer {
+        framework: "gin",
+        extensions: &["go"],
+        emits: &[channel::PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "net/http",
+        extensions: &["go"],
+        emits: &[channel::PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "gorm",
+        extensions: &["go"],
+        emits: &[channel::DB],
+    },
+    FrameworkRecognizer {
+        framework: "net/http",
+        extensions: &["go"],
+        emits: &[channel::CONSUMES],
+    },
+];
+
 #[cfg(test)]
 mod node_kinds;
 mod util;
@@ -183,29 +209,3 @@ mod tests {
         assert_eq!(count_loc(""), 1);
     }
 }
-
-use zzop_core::recognizer::{channel, FrameworkRecognizer};
-
-/// Frameworks this parser recognizes — see [`zzop_core::recognizer`]. Verified against return types.
-pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
-    FrameworkRecognizer {
-        framework: "gin",
-        extensions: &["go"],
-        emits: &[channel::PROVIDES],
-    },
-    FrameworkRecognizer {
-        framework: "net/http",
-        extensions: &["go"],
-        emits: &[channel::PROVIDES],
-    },
-    FrameworkRecognizer {
-        framework: "gorm",
-        extensions: &["go"],
-        emits: &[channel::DB],
-    },
-    FrameworkRecognizer {
-        framework: "net/http",
-        extensions: &["go"],
-        emits: &[channel::CONSUMES],
-    },
-];

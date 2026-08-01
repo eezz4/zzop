@@ -83,6 +83,28 @@ pub enum RouterMountEntry {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attr_keys: Vec<String>,
     },
+    /// A sub-router mount whose prefix the producer could SEE but not READ — `include_router(r,
+    /// prefix=settings.API_V1_STR)`, where the value lives in another file. Identical to [`Self::Mount`]
+    /// except the prefix is a REFERENCE resolved at assemble time against the same project-wide merged
+    /// const map [`crate::ControllerPrefixRouteFragment`]'s `prefix_ref` uses.
+    ///
+    /// A separate variant rather than an `Option` field on `Mount`, for two reasons that both matter:
+    /// a producer must not be able to express "literal AND reference" (the composer would have to pick,
+    /// and picking is guessing), and match exhaustiveness then forces every existing consumer to state
+    /// what it does with an unresolved prefix instead of silently treating it as a root mount.
+    ///
+    /// **Never-guess on failure**: a `prefix_ref` absent from the merged map does NOT fall back to `/`.
+    /// The mount is dropped and disclosed, exactly as the controller-prefix composer already does — a
+    /// route emitted at the wrong key is worse than a route not emitted, because only the second one
+    /// looks like the absence it is.
+    MountRef {
+        /// The prefix argument's verbatim text, e.g. `"settings.API_V1_STR"` — looked up as-is.
+        prefix_ref: String,
+        ident: String,
+        specifier: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attr_keys: Vec<String>,
+    },
     /// A producer-judged cross-cutting attribute scoped to this router's local `prefix` — e.g. an
     /// Express `app.use('/admin', requireAuth())` middleware guard. Resolved to a final `PathScope`
     /// attribute once the router's mount chain is composed; the value is implicitly `true` (a

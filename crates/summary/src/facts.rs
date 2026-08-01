@@ -58,7 +58,7 @@ mod tests;
 /// config ("I scanned a repo and it executed code", worse over MCP). A WASM sandbox waits for a
 /// demand of that shape, which has not arrived.
 pub fn facts_json(paths: &[String], config_path: Option<&str>) -> Result<String, String> {
-    // One path is the single-tree mode (`resolve_trees_request`'s `path`), 2+ is config-free paths
+    // One path is the single-tree mode (`resolve_trees_request`'s `path`), 2+ is multi-root paths
     // mode — the same split `zzop endpoint`'s argv already makes, so a rule author can dump facts for
     // one repo without inventing a second tree.
     let (path, rest) = match paths {

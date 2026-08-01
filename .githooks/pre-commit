@@ -34,6 +34,8 @@ GUARDS=(
   check-docs-link-graph
   check-io-key-vocab
   check-policy-census
+  check-retired-config-vocabulary
+  check-ci-local-mirrors-ci
   check-convention-vocab-declarable
   check-example-config-vocabulary
   check-shell-pipe-sigpipe

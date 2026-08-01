@@ -67,6 +67,14 @@ jobs:
         run: bash scripts/check-io-key-vocab.sh
       - name: policy-value census guard
         run: bash scripts/check-policy-census.sh
+      - name: ci-local mirror guard
+        # `scripts/ci-local.sh` answers "will this break CI?" in one command. A mirror that silently
+        # stops mirroring is worse than none — it reports green while omitting the failing step.
+        run: bash scripts/check-ci-local-mirrors-ci.sh
+      - name: retired config-vocabulary guard
+        # A config file has been mandatory since 2026-07-27; the sentences saying otherwise outlived the
+        # behaviour by four months and one of them shipped the exact inverse on the MCP wire.
+        run: bash scripts/check-retired-config-vocabulary.sh
       - name: convention-vocabulary declarability ratchet
         # Reads the census's `convention` axis: a name the PROJECT picks must be declarable in config,
         # not held as a built-in guess. scripts/convention-vocab-baseline.txt freezes pre-existing debt
